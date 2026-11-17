@@ -55,6 +55,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let response = setting::extrude_view_return(app, ui);
                         crate::scenario::publish_target("prefs:extrude_view_return", response.rect);
                     });
+                    extrude_start(app, ui);
                 });
                 // Found by the name of every feature that has the marker, as well as by the label.
                 let placed = PLACED_FEATURES.iter().map(|key| app.tr(key)).collect::<Vec<_>>().join(" ");
@@ -275,4 +276,33 @@ fn create_row(ui: &mut egui::Ui, label: &str, hint: Option<&str>, icons: &[&str]
     if let Some(gate) = &gate {
         crate::ui_kit::settings_search::block_finish(ui, gate, true, before);
     }
+}
+
+/// Where a new Extrude starts its distance (`extrude_start`), with the length for Custom beside it.
+fn extrude_start(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = Tokens::get();
+    let help = app.tr("prefs.extrude_start_note");
+    ui.horizontal_wrapped(|ui| {
+        ui_kit::text(ui, app.tr("prefs.extrude_start"), ui_kit::Text::Inline);
+        if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+            ui_kit::help_icon(ui, help);
+        }
+    });
+    ui.horizontal(|ui| {
+        ui_kit::settings_control_width(ui, t.space_24 * 6.0, |ui| {
+            let mut selected = ExtrudeStart::ALL.iter().position(|v| *v == app.preferences.extrude_start).unwrap_or(0);
+            let options = ExtrudeStart::ALL.map(|choice| app.tr(choice.label_id()));
+            let response = ui_kit::dropdown(ui, "pref_extrude_start", &mut selected, &options).backing_on_hover_text(help);
+            crate::scenario::publish_target("prefs:extrude_start", response.rect);
+            if let Some(choice) = ExtrudeStart::ALL.get(selected) {
+                app.preferences.extrude_start = *choice;
+            }
+        });
+        ui.add_enabled_ui(app.preferences.extrude_start == ExtrudeStart::Custom, |ui| {
+            ui_kit::settings_control_width(ui, t.space_24 * 5.0, |ui| {
+                let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.extrude_custom_distance, "10 mm", 0.0);
+                crate::scenario::publish_target("prefs:extrude_custom_distance", response.rect);
+            });
+        });
+    });
 }

@@ -1326,3 +1326,231 @@ impl UnitDiff for Runner {
         rust(&case.parse()?)
     }
 }
+
+
+/// WR-455 (#17404): certificates for the `TrimCurve` goldens that moving point contacts to
+/// curve-interval ends changed. Each test replays its case through the library and bounds
+/// the new pieces; labels (PROVEN asserted here, ARGUED, MEASURED) are in each test's doc.
+#[cfg(test)]
+mod wr455 {
+    use super::*;
+    use solidcore::math::Point2;
+    use solidcore::nurbs::math::gamma;
+
+    /// The case's inputs and the library's pieces for them.
+    fn replay(name: &str) -> (Kernel, Plane, [f64; 4], Curve, f64, Vec<Curve>) {
+        let case = crate::case::regression_case(&Runner, name);
+        let Inputs::TrimCurve {
+            a,
+            dom,
+            curve,
+            tol,
+        } = case.parse().unwrap()
+        else {
+            panic!("{name}: not a trim_curve case");
+        };
+        let k = Kernel::default();
+        let (Ok(plane), Ok(c)) = (rust_plane(&a), rust_curve(&k, &curve)) else {
+            panic!("{name}: inputs");
+        };
+        assert!(!plane.is_out_of_bounds_enabled());
+        let pieces = plane
+            .trim_curve_to_plane_domain(&k, &ext(dom), &c, tol)
+            .unwrap();
+        (k, plane, dom, c, tol, pieces)
+    }
+
+    /// A certified upper bound on the distance from `q` to the trimmed region: the plane
+    /// over `dom` clamped to its own domain, which is where `trim_curve_to_plane_domain`'s
+    /// boundary corners are (`Plane::evaluate_point` clamps them). The bound is the distance
+    /// to one point of the region (the clamped least-squares parameters of `q`, evaluated
+    /// by the library, which clamps again into the same intersection), plus the rounding of
+    /// that evaluation (`o + u s_x X + v s_y Y`: two products and two sums per coordinate,
+    /// `gamma(4)` of the absolute terms; `gamma(8)` taken) and of the distance (as
+    /// `certify::nearest`). Any point of the region bounds the distance from above, so the
+    /// projection's own rounding does not matter. NaN gives NaN, which every `<=` refuses.
+    fn region_gap_above(plane: &Plane, dom: [f64; 4], q: Vec3) -> f64 {
+        let pos = plane.position();
+        let (o, x, y) = (pos.origin(), pos.x_axis(), pos.y_axis());
+        let s = plane.uv_scale();
+        let (ex, ey) = (x * s.x, y * s.y);
+        let d = q - o;
+        let (g11, g12, g22) = (ex.dot(ex), ex.dot(ey), ey.dot(ey));
+        let (r1, r2) = (d.dot(ex), d.dot(ey));
+        let det = g11 * g22 - g12 * g12;
+        let u = ((r1 * g22 - r2 * g12) / det).clamp(dom[0], dom[2]);
+        let v = ((r2 * g11 - r1 * g12) / det).clamp(dom[1], dom[3]);
+        let p = plane.evaluate_point(Point2::new(u, v));
+        let reach = o.max_dimension()
+            + dom[0].abs().max(dom[2].abs()) * s.x.abs() * x.max_dimension()
+            + dom[1].abs().max(dom[3].abs()) * s.y.abs() * y.max_dimension();
+        q.distance(p)
+            + gamma(8) * reach * 3.0_f64.sqrt()
+            + gamma(8) * q.max_dimension().max(p.max_dimension()) * 3.0_f64.sqrt()
+    }
+
+    /// A certified upper bound on the distance from every point of a piece to the region.
+    /// A non-rational degree-1 B-spline is the polyline of its control points and the
+    /// distance to a convex set is convex along a segment, so the control points' bounds
+    /// cover it (PROVEN). An ellipse piece is its analytic arc over its STEP interval
+    /// (degrees), `o + r_x cos t X + r_y sin t Y`: its speed is at most
+    /// `(|r_x| |X| + |r_y| |Y|) pi / 180` per degree, so on a step `h` between nodes with
+    /// bounds `f_a`, `f_b` the distance is at most `(f_a + f_b) / 2 + L h / 2` (Lipschitz;
+    /// PROVEN). The nodes' points are evaluated here, with `gamma(16)` of the terms for
+    /// the products, sums and the degree-to-radian conversion; `cos` and `sin` within an
+    /// ulp (ARGUED: the platform libm's documented accuracy).
+    fn piece_gap_above(plane: &Plane, dom: [f64; 4], c: &Curve) -> f64 {
+        match c.kind() {
+            CurveKind::BSpline(bs) => {
+                let nurb = bs.gw_nurb().expect("a NURB");
+                assert_eq!(nurb.degree(), 1, "a degree-1 piece");
+                let mut worst = 0.0_f64;
+                for p in nurb.cpts() {
+                    assert!(p.w == NOW, "a non-rational piece");
+                    let g = region_gap_above(plane, dom, Vec3::new(p.x, p.y, p.z));
+                    assert!(!g.is_nan());
+                    worst = worst.max(g);
+                }
+                worst
+            }
+            CurveKind::Ellipse(e) => {
+                let pos = e.position();
+                let (o, x, y) = (pos.origin(), pos.x_axis(), pos.y_axis());
+                let (rx, ry) = (e.x_radius(), e.y_radius());
+                let ivl = e.step_interval();
+                let (lo, hi) = (ivl.min(), ivl.max());
+                let speed = (rx.abs() * x.length() + ry.abs() * y.length())
+                    * (core::f64::consts::PI / 180.0)
+                    * (1.0 + gamma(8));
+                let terms = o.max_dimension()
+                    + (rx.abs() * x.max_dimension() + ry.abs() * y.max_dimension())
+                        * (1.0 + lo.abs().max(hi.abs()).to_radians());
+                let slack = gamma(16) * terms * 3.0_f64.sqrt();
+                let at = |t: f64| {
+                    let r = t.to_radians();
+                    region_gap_above(plane, dom, o + x * (rx * r.cos()) + y * (ry * r.sin()))
+                        + slack
+                };
+                // steps of at most 1e-4 in 3D: the Lipschitz term stays below 5e-5
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                let n = (((hi - lo) * speed / 1e-4).ceil() as usize).max(1);
+                #[allow(clippy::cast_precision_loss)]
+                let node = |i: usize| {
+                    if i == n {
+                        hi
+                    } else {
+                        lo + (hi - lo) * (i as f64 / n as f64)
+                    }
+                };
+                let mut worst = 0.0_f64;
+                let (mut ta, mut fa) = (lo, at(lo));
+                for i in 1..=n {
+                    let (tb, fb) = (node(i), at(node(i)));
+                    // the computed step, widened by its own rounding
+                    let g = (fa + fb) / 2.0 + speed * (tb - ta) * (1.0 + gamma(4)) / 2.0;
+                    assert!(!g.is_nan());
+                    worst = worst.max(g);
+                    (ta, fa) = (tb, fb);
+                }
+                worst
+            }
+            _ => panic!("an unexpected piece kind"),
+        }
+    }
+
+    /// Every piece lies within `tol` of the trimmed region (PROVEN, whole pieces).
+    fn assert_pieces_within(name: &str, plane: &Plane, dom: [f64; 4], pieces: &[Curve], tol: f64) {
+        for (i, c) in pieces.iter().enumerate() {
+            let g = piece_gap_above(plane, dom, c);
+            eprintln!("{name} piece {i}: gap <= {g:e} (tol {tol})");
+            assert!(g <= tol, "{name} piece {i}: {g} > {tol}");
+        }
+    }
+
+    fn natural(c: &Curve) -> [f64; 2] {
+        let ivl = c.natural_interval();
+        [ivl.min(), ivl.max()]
+    }
+
+    /// gen0599: the old split at `t = 0.0347` (an interior contact) is gone; the first two old
+    /// pieces `[0.02789, 0.03471]` and `[0.03471, 0.140625]` are one new piece over their
+    /// union, the same input segment (`[0.02789, 0.140625]` lies in the knot span
+    /// `[0, 1/3]`). PROVEN: every new piece is within tol of the trimmed region; the new
+    /// first piece's ends are the input curve's points at the old pieces' outer ends (up to
+    /// rounding), so the reported point set is unchanged.
+    #[test]
+    fn wr455_plane_trim_gen0599_merged_split() {
+        let (k, plane, dom, c, tol, pieces) = replay("gen0599");
+        assert_eq!(pieces.len(), 5);
+        let first = pieces.first().unwrap();
+        // main's first piece's start and second piece's end
+        assert_eq!(natural(first), [0.027_890_099_454_133_75, 0.140_625]);
+        let CurveKind::BSpline(bs) = first.kind() else {
+            panic!("a B-spline piece");
+        };
+        let cpts = bs.gw_nurb().unwrap().cpts();
+        assert_eq!(cpts.len(), 2, "one segment");
+        for (p, t) in cpts.iter().zip([0.027_890_099_454_133_75, 0.140_625]) {
+            let q = c.evaluate_point(&k, t).unwrap();
+            let d = Vec3::new(p.x, p.y, p.z).distance(q);
+            assert!(d <= gamma(16) * 40.0 * 3.0_f64.sqrt(), "{d}");
+        }
+        assert_pieces_within("gen0599", &plane, dom, &pieces, tol);
+    }
+
+    /// gen0702: the new first piece `t in [0, 0.17347]` was missing from main's answer (one
+    /// piece, `[0.51380, 0.70497]`). PROVEN: its segment lies within `1e-12` of the
+    /// trimmed region (both control points do, and the region is convex), so main omitted
+    /// a stretch of curve, about 5.94 long, that lies in the domain. The second piece's end
+    /// moved from `0.70497` to `0.70550` (to `x = 0.97875`, 0.0176 past `u` max); every
+    /// piece is within tol of the region (PROVEN).
+    #[test]
+    fn wr455_plane_trim_gen0702_omitted_inside_stretch() {
+        let (_k, plane, dom, _c, tol, pieces) = replay("gen0702");
+        assert_eq!(pieces.len(), 2);
+        let first = pieces.first().unwrap();
+        assert_eq!(natural(first), [0.0, 0.173_474_631_078_549_16]);
+        let gap = piece_gap_above(&plane, dom, first);
+        assert!(gap <= 1e-12, "{gap}");
+        let CurveKind::BSpline(bs) = first.kind() else {
+            panic!("a B-spline piece");
+        };
+        let cpts = bs.gw_nurb().unwrap().cpts();
+        let (a, b) = (cpts.first().unwrap(), cpts.last().unwrap());
+        let length = Vec3::new(a.x, a.y, a.z).distance(Vec3::new(b.x, b.y, b.z));
+        assert!(length > 5.9, "{length}");
+        // main's answer starts at 0.5138: the stretch [0, 0.1735] is not covered by it
+        assert_eq!(natural(pieces.last().unwrap()), [0.513_804_330_930_588_1, 0.705_498_652_624_027_7]);
+        assert_pieces_within("gen0702", &plane, dom, &pieces, tol);
+    }
+
+    /// gen0907: the first arc's start moved from 77.356 to 79.531 degrees (the contact moved
+    /// to the boundary line's end, the domain corner). PROVEN: every new arc is within tol
+    /// of the trimmed region, and every point of the dropped arc `[77.356, 79.531]` is within
+    /// tol of the new start point (its length is at most the speed bound times 2.175
+    /// degrees), so the reported set moved by less than tol.
+    #[test]
+    fn wr455_plane_trim_gen0907_start_to_corner() {
+        let (_k, plane, dom, c, tol, pieces) = replay("gen0907");
+        assert_eq!(pieces.len(), 3);
+        let CurveKind::Ellipse(e) = pieces.first().unwrap().kind() else {
+            panic!("an ellipse piece");
+        };
+        let ivl = e.step_interval();
+        assert_eq!([ivl.min(), ivl.max()], [79.531_029_611_791_27, 90.0]);
+        let CurveKind::Ellipse(input) = c.kind() else {
+            panic!("an ellipse");
+        };
+        assert!(e.x_radius() == input.x_radius() && e.y_radius() == input.y_radius());
+        // main's start
+        let old = 77.356_069_585_822_72;
+        let speed = (e.x_radius().abs() * e.position().x_axis().length()
+            + e.y_radius().abs() * e.position().y_axis().length())
+            * (core::f64::consts::PI / 180.0)
+            * (1.0 + gamma(8));
+        let moved = speed * (ivl.min() - old) * (1.0 + gamma(4));
+        eprintln!("gen0907 dropped arc within {moved:e} of the new start");
+        assert!(moved <= tol, "{moved}");
+        assert_pieces_within("gen0907", &plane, dom, &pieces, tol);
+    }
+}

@@ -74,7 +74,7 @@ Dry-run description is the package review path; there is no separate review comm
 
 A zip holds one plugin, with `plugin.json` and its component at the top or inside one top-level folder.
 The existing `solidcraft_io::safe_zip` reader refuses absolute paths, `..`, symlinks and device entries.
-The installer limits the archive to 256 entries, each file to 16 MiB, and input and unpacked content to
+The installer limits the archive to 256 entries, each file to 16 MiB (an importer component may be up to 64 MiB), and input and unpacked content to
 64 MiB. The manifest has a separate 16 KiB cap. Before publication, the host parses the manifest and
 refuses unknown or newer capabilities. It unpacks into a hidden `.install-…` folder beside the installed
 plugins, then renames it to `plugins/<id>/`. The entries resolve immediately, with no restart.
@@ -92,7 +92,7 @@ The command surface exposes management without opening dialogs:
 
 | Command | Parameters | Result |
 |---|---|---|
-| `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?}}` | Package description and installation status, including declared `entry_points` |
+| `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
 
@@ -104,8 +104,8 @@ Direct requests use a worker to keep the window responsive.
 
 ## Menu and ribbon entries
 
-The **Plugins** menu in the app bar lists every installed plugin entry, including entries without
-slots. Disabled entries remain listed but cannot be selected. Discovery examines at most 1,024
+The **Plugins** group on the Model tab lists every installed plugin entry, including entries without
+slots; its label opens the **Plugins** menu. Manage plugins in **Preferences › Plugins** (File › Plugins… opens it): install, turn on or off, and remove. Disabled entries remain listed but cannot be selected. Discovery examines at most 1,024
 package folders and 8,192 host slot items. Only enabled plugins contribute host menu and ribbon
 items. The host draws each slot item with the plugin's name,
 a plugin badge and the entry name. Plugins declare placement in their manifests and supply no
@@ -126,8 +126,9 @@ For example, `{"kind":"menu","name":"File"}` places an entry in File;
 Clicking a File, Help or ribbon item opens the same input-schema dialog as the Plugins menu.
 The host finds the entry by its namespaced `<plugin-id>.<entry>` command. The dialog uses the same
 enabled state and grant checks from every placement. Missing command-group grants leave Run off
-with an explanation. Opening the dialog executes no plugin code; Run submits the existing
-`plugin.run` transaction.
+with an explanation. Opening the dialog executes no plugin code; for a command entry, Run submits the
+existing `plugin.run` transaction. An importer entry is not a command: its dialog shows the options,
+then its button chooses the file and opens it as a new design with `file.import`, as File > Open does.
 
 ## Integration APIs
 
@@ -159,6 +160,103 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
 ]}
 ```
 
+### Selection fields
+
+A field can take geometry picked in the viewport, with the same pick control as Extrude's
+Profiles and Chamfer's Edges. Mark an array property with `x-solidcraft-selection`; the property's
+key is the argument the plugin receives. The design follows the
+[native selection proposal](https://github.com/tangency-labs/solidcraft/pull/16281)
+([#16274](https://github.com/tangency-labs/solidcraft/issues/16274)).
+
+```json
+"edges": {"type": "array", "title": "Edges", "description": "The rims to seat", "minItems": 1,
+          "x-solidcraft-selection": {"version": 1, "accept": ["edge"]}},
+"body":  {"type": "array", "title": "Body to modify", "maxItems": 1,
+          "x-solidcraft-selection": {"version": 1, "accept": ["body"]}}
+```
+
+- **What it takes.** `accept` lists one or more of `profile`, `edge`, `face`, `body`,
+  `sketch_point` and `sketch_curve`. Sketch points and curves are picked with their sketch, because
+  ids repeat from one sketch to the next. A profile field takes profiles from any number of
+  sketches; the plugin decides what it accepts. The annotation has exactly `version` (1) and `accept`.
+  An unknown version or category, or any other keyword on the property (`uniqueItems`, a detailed
+  `items` schema), leaves Run off with the note to run the entry from the agent or the CLI.
+- **How many.** `minItems` and `maxItems` are the counts Run checks. With `maxItems: 1` a pick
+  replaces the last one; otherwise a click adds an item, and clicking it again takes it out.
+  `required` with `minItems` of 1 or more needs a pick; required with no minimum sends `[]`;
+  an optional field with nothing picked is left out.
+- **What the plugin receives.** Each item is the app's selection reference, as `select.set`
+  takes it: `{"type": "edge", "body": "Body1", "index": 3, "point": [x, y, z]}`,
+  `{"type": "face", ...}`, `{"type": "body", "name": "Body1"}`,
+  `{"type": "profile", "sketch": 2, "index": 0}`,
+  `{"type": "external_sketch_point", "sketch": 2, "id": "p3"}` and
+  `{"type": "external_sketch_curve", "sketch": 2, "id": "c1"}`, in pick order. `items`, if given,
+  is only `{"type": "object"}`.
+- **Reserved lists.** Without the annotation, `bodies` and `body_ids` take bodies and send their
+  names (`items` may be `{"type": "string"}`), and `selection`, `target` and `targets` take edges,
+  faces and bodies as references. Any other array still leaves Run off.
+- **Picking.** The first selection field takes the viewport's picks when the dialog opens, and
+  starts with what is selected that it takes. The other fields start empty, so one selection never
+  fills two fields. Clicking a field makes it the one that picks; its clear button, its list of
+  picks and the hover highlight work as in the native tools. One tool picks at a time: while a
+  native tool is open, clicking a plugin field says to finish or cancel it first (a sketch tool too).
+  Escape and Cancel close the dialog and stop the picking.
+- **References stay true.** The picks belong to the design they were made on. Any change to the
+  design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
+  the view or changing the selection does not. Picking runs no plugin code; Run sends the picks
+  through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
+  themselves; nothing fills them from the selection.
+
+### Icons and pictures
+
+A plugin can ship vector images in its package and name them with `x-solidcraft-icon`, a
+relative path to an `.svg` file inside the package:
+
+```json
+"input_schema": {"type": "object", "x-solidcraft-icon": "icons/seat.svg", "properties": {
+  "series": {"type": "string", "title": "Type", "default": "standard", "oneOf": [
+    {"const": "standard", "title": "Standard", "x-solidcraft-icon": "icons/standard.svg"},
+    {"const": "short", "title": "Short", "x-solidcraft-icon": "icons/short.svg"}
+  ]}}}
+```
+
+- At the top of the schema it is the command's icon: its ribbon button, its rows in the Plugins,
+  File and Help menus, and its dialog's header. Without one the command has the generic plugin icon.
+- On a `oneOf` option it is that option's picture in the dropdown. Pictures show when every option
+  of the choice names one that passed the check below; otherwise the dropdown shows the titles alone.
+- The image is drawn like the app's own icons, and must be one: SolidCraft's icon SVG subset
+  (the check the built-in icons pass, see `crates/look/icons/design/tools/lint_icons.py`).
+  `viewBox="0 0 64 64"`; absolute `M L C Q A Z` paths, circles, groups with a clip or opacity,
+  masks and clip paths. Every colour is one of the icon palette's role colours
+  (`crates/look/icons/design/palette.toml`, the `source` values) or `currentColor`, so the image
+  follows the light and dark themes, the accent and the colour-vision setting as the app's icons do.
+  Text, raster images, `<use>`, links, scripts, styles and any other element or colour are refused.
+- The path uses forward slashes and plain names (letters, digits, `.`, `_`, `-`), ends in `.svg`
+  and stays inside the package: no `..`, no absolute path, no link. A file is at most 64 KiB and a
+  package names at most 64 images. Images are read from the installed package when the plugins are
+  listed; nothing is fetched from the network. A refused or missing image is logged and left out,
+  and the command works as before.
+- Images are not part of the `approval` hash: changing one changes only what is drawn.
+
+### Preview
+
+A command entry that edits the design is previewed the way native tools are: while its dialog's
+fields make parameters, the host runs the entry on a scratch copy of the design and draws what
+it would change in the viewport (new material tinted, removed material as a see-through ghost).
+The dialog has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+
+- The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged and declares
+  nothing new. It runs on a scratch session that is thrown away, so the design, the undo history
+  and the selection never change. The run has none of the plugin's folder or command-group grants,
+  so it reads and writes no file and reaches nothing past the design; a plugin that needs them
+  shows "Preview:" with the refusal under its fields, and Run still runs it with its grants.
+- It runs again only when the parameters or the design change, under the plugin's own fuel,
+  memory and deadline limits, off the window's thread. A run left behind by newer inputs is
+  dropped.
+- The most recently opened dialog on the design is previewed (the one picking in the viewport,
+  when one is). While a native tool is open, its own preview is the one shown. Read entries and
+  importers are not previewed.
+
 ## Versions
 
 The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:
@@ -166,8 +264,8 @@ running app commands, logging, progress and cancellation, named files, a clock, 
 entry. A plugin's `plugin.json` lists what it needs, for example
 `"capabilities": ["commands@0.1"]`; the host refuses an unknown or newer capability when it reads
 the manifest, with a plain message such as "needs commands 0.2; update SolidCraft or the plugin".
-`ui`, `viewport`, `formats` and `storage` arrive later as their own versioned interfaces. While a
-version is 0.x, a minor version may break the one before it.
+`formats@0.1` adds importers (below). `ui`, `viewport` and `storage` arrive later as their own
+versioned interfaces. While a version is 0.x, a minor version may break the one before it.
 
 ## Commands and permissions
 
@@ -176,9 +274,67 @@ past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused un
 manifest asks for the group in `permissions.command_groups` and the user grants it.
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
-and invalid manifest fields return structured errors. Later phases add
-import/export, author tooling and browser execution after the
-phase 1 design review.
+and invalid manifest fields return structured errors. Phase 2 adds importers (below);
+exporters, author tooling and browser execution follow.
+
+## Importers
+
+An importer turns a file of another format into a SolidCraft design. Its manifest says
+`"capabilities": ["formats@0.1"]`, and each of its entries has `"kind": "importer"` and the
+extensions it claims, lowercase without the dot:
+
+```json
+{"id": "sample", "name": "Sample", "version": "1.0.0", "capabilities": ["formats@0.1"],
+ "runtime": {"module": "sample.wasm", "commands": [],
+   "entries": [{"name": "convert", "kind": "importer", "extensions": ["smp"],
+                "input_schema": {"type": "object", "properties": {"units": {"type": "string", "enum": ["mm", "in"], "default": "mm"}}}}],
+   "limits": {"fuel": 100000000000, "memory_mib": 1024, "deadline_ms": 300000, "stack_kib": 16384},
+   "permissions": {"input_folder": true}}}
+```
+
+- **Opening.** `doc.open` opens a file SolidCraft does not read itself with the installed, enabled
+  importer that claims its extension. `file.import` always uses an importer, and `format`
+  (`plugin_id.entry`, listed in `plugin.list`'s `importers`) picks one for either command, for
+  example for a `.fcstd` file SolidCraft also reads. `options` passes the entry's declared options.
+  Two importers claiming one extension need `format`. File › Open offers the claimed extensions,
+  and the Plugins menu has each importer's entry: its dialog shows the options, then chooses the file.
+- **The world.** The component implements `importer-plugin`: it exports
+  `importer.import-file(entry, file, options)` and imports `source` (the file, read in chunks of at
+  most 1 MiB), `design` (where it writes a SolidCraft design file), `log`, `control` and `clock`.
+  It has no `commands` import: an importer makes a design, it does not edit the open one.
+- **The result.** The design opens as a new design that is not saved anywhere yet, named after
+  the file unless the design names itself. The call returns a loss report,
+  `{"summary": "...", "items": [{"severity": "info|degraded|dropped", "title": "...", "subject": "...", "message": "...", "code": "..."}], "details": {...}}`.
+  `title` names the kind of loss in the user's words, the same for every item of that kind
+  ("Parts of the file kept as they are"); `code` is the importer's stable code for it. Both may be empty.
+  The Import report window shows the summary, then one line per title with how many items it covers,
+  worst first, and folds every item with its code, subject and message under **Details**; programs
+  get the whole report in the reply.
+  Nothing changes unless the whole import succeeds.
+- **Assemblies.** `source.read`, `source.size` and `source.resolve` with path `""` reach the file
+  being imported. Any other path is relative to that file's folder (an assembly's parts) and needs
+  the `input_folder` permission. The install review shows it and Install approves it, stored with
+  the plugin's other grants for that exact package; a plugin copied in by hand, or one whose grant
+  is for another package, reads only the file itself. Hidden names, links and paths
+  outside the folder are refused; an import reads at most 1 GiB and writes a design of at most 256 MiB.
+- **Checking the result** (capability `evaluate@0.1`, beside `formats@0.1`). A converter that
+  rebuilds a design's history can check it the way it would with the app's command line: it stages
+  a design file it made with `evaluate.stage` (1 MiB per call, 256 MiB in all), and `evaluate.run`
+  opens that design in a private session, apart from every open design and every file, and runs one
+  of `document.inspect`, `inspect.measure`, `model.edges`, `model.faces` or `timeline.roll_to` on
+  it, returning the command's JSON reply (or `{"error": "..."}` when the command fails). Staging
+  again starts a new design; `evaluate.reset` discards it, and nothing outlives the import. The
+  session reads no files, not even fonts or linked designs, and runs no command that writes; its
+  time counts against the import's deadline, and Cancel stops the import between commands. A
+  design the app can't open, a command outside the list or a reply over 1 MiB is an error for that
+  call only, so the importer can report its history as unchecked instead of failing.
+- **Failures.** A trap fails that one import ("Sample failed on bracket.smp: ...") and the next
+  one gets a fresh instance. The compiled component stays in memory, so the next file opens
+  without compiling again; nothing compiled is written to disk.
+- **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
+  `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
+  its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
+  `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
 
 ## Plugin data in a design
 

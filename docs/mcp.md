@@ -33,12 +33,14 @@ solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
-Picking geometry with `execute` `view.pick` requires a connection to the running SolidCraft
-app. It is unavailable with `--headless` or when automatic discovery starts a headless session.
-`frame: "model"` chooses the pixels of a rendered model image; it does not enable headless MCP
-picking. The app handles this command outside the engine registry, so `list_commands` and
-`describe_command` do not include it, even when connected. See `ui.pick` in the
-[control protocol](control-protocol.md) for pixel and ray parameters.
+`execute` `view.pick` with `rays: [{origin, dir}…]` answers in every session, headless too:
+for each world ray, the body, face index, world `point`, outward `normal` and `depth` where it
+first meets the design's shown bodies, decided on their exact faces (`null` where it meets
+nothing; `all: true` lists every body it meets, nearest first). With `--headless`, or when
+automatic discovery starts a headless session, the engine answers; connected, the app does.
+Picking screenshot `pixels` requires a connection to the running SolidCraft app; `frame:
+"model"` chooses the pixels of a rendered model image and does not enable headless pixel picks.
+See `ui.pick` in the [control protocol](control-protocol.md) for pixel and ray parameters.
 
 ### The app listens when turned on
 
@@ -65,6 +67,9 @@ launch's token. When the app quits or crashes mid-session, the next call says th
 that was running when it went away says the app did not answer and may have quit or crashed,
 after running the call or not, so inspect the design before sending a change again.
 A `batch` that could not be sent says the app is not running, so it is safe to send again.
+The app serves 16 connections at once, and every bridged server, CLI run or script connected to
+it holds one; a call past that says the app refused it without running it, so it is safe to send
+again once one of them has ended.
 
 stdout carries only protocol messages; errors go to stderr. Bridged screenshots are written to a
 temporary file by the app and read back by the server, so both must run on the same machine.
@@ -501,7 +506,7 @@ cancelled; another client's requests are out of its reach.
 
 ## Camera and close-up recipe
 
-The `camera` of `screenshot` (the object `view.apply`, `view.save` and `solidcraft-cli snapshot --camera` take too) is an orbit camera, `{target, yaw, pitch, distance, fov?}`, in millimetres and **radians**. Unlike the `angle` of `solid.move`, a bare number is not degrees here. The eye is at `target + distance * (-sin(yaw) * cos(pitch), -cos(yaw) * cos(pitch), sin(pitch))`, looking at `target` with Z up on the screen. So `yaw: 0, pitch: 0` is the front view: the eye at -Y, looking along +Y, with +X to the right. A yaw of π/2 looks from -X, π from +Y and -π/2 from +X. The pitch is the elevation angle up from the XY plane, and π/2 looks straight down with +X to the right and +Y up; `view.apply` refuses a pitch past ±π/2. A positive `roll` turns the picture clockwise. The app's View angles readout (`view.angle_readout`) shows the same yaw, pitch and roll in degrees. `fov` is the vertical field of view in radians. `0`, or no `fov`, is an orthographic view whose visible half-height is 0.4 × `distance`; with a perspective `fov` the half-height at the target is `distance * tan(fov / 2)`. `inspect.section` removes what lies on the side its normal points to: it keeps the points `p` with `n · p < d`, where `d = n · origin` (`flip: true` keeps the other side). To look into the cut, put the eye on the removed side.
+The `camera` of `screenshot` (the object `view.apply`, `view.save` and `solidcraft-cli snapshot --camera` take too) is an orbit camera, `{target, yaw, pitch, distance, fov?}`, in millimetres and **radians**. Unlike the `angle` of `solid.move`, a bare number is not degrees here. The eye is at `target + distance * (-sin(yaw) * cos(pitch), -cos(yaw) * cos(pitch), sin(pitch))`, looking at `target` with Z up on the screen. So `yaw: 0, pitch: 0` is the front view: the eye at -Y, looking along +Y, with +X to the right. A yaw of π/2 looks from -X, π from +Y and -π/2 from +X. The pitch is the elevation angle up from the XY plane, and π/2 looks straight down with +X to the right and +Y up; `view.apply` refuses a pitch past ±π/2. A positive `roll` turns the picture clockwise. The app's View angles readout (`view.angle_readout`) shows the same yaw, pitch and roll in degrees. `fov` is the vertical field of view in radians. `0`, or no `fov`, is an orthographic view whose visible half-height is 0.4 × `distance`; with a perspective `fov` the half-height at the target is `distance * tan(fov / 2)`. `inspect.section` removes what lies on the side its normal points to: it keeps the points `p` with `n · p < d`, where `d = n · origin` (`flip: true` keeps the other side, the plane staying put). `offset` moves the cut against the normal you give, so a positive offset cuts more away: from a face's outward normal it goes into the part. To look into the cut, put the eye on the removed side. With `add: true` the plane joins the section's others (up to six): each plane removes what lies beyond it, so the section keeps only what every plane keeps (a quarter for two planes square to each other), and a plane added on a face at offset 0 changes nothing; `replace: <id>` moves that plane to the new `plane` and keeps the others, `remove: <id>` takes one plane out, `hide` and `show` (an id or a list) keep a plane in the section without cutting, `folder: false` hides the browser's Analysis folder (the planes on show stop cutting until `folder: true`; meanwhile `hide` and `show` change only which come back), and the reply's `planes` lists every plane with its id and `hidden`, and `folder` the ids that come back with the hidden folder (null while it is shown). Each change is an undo step (`edit.undo` brings the section back), and none is saved with the design.
 
 To look closely at one part of a large model, such as a STEP assembly, work in a headless session. These steps change only the open design in memory:
 

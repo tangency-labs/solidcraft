@@ -27,6 +27,9 @@
 //! Not upstream (WR-584, fork tangency-labs/smlib@69c5198): the closure test searches
 //! from the face use and its mate at once ([`tr::closure_traversal_from_both_sides`]):
 //! the same answer without marks, where upstream walks the shell from one side.
+//! Not upstream (WR-18287): after the split the inner shell, the side of the closed
+//! boundary that encloses its region, is put first in its region's list; upstream leaves
+//! the old region's list as it was, a void's shell possibly ahead of it.
 //! `MakeFaceTopology`: the caller's [`Marks`] hold the objects' mark values (the
 //! `SmNewMarkAndLock` block claims and releases a new mark, also on error). New objects
 //! get their `SmTopology` record in the [`NotifyEnv`] under its identity, which also
@@ -1651,6 +1654,21 @@ fn split_closed(
         nest_shells(k, brep, &query, &split, rays, &shells)?;
     }
 
+    // Not upstream (WR-18287): the inner shell's region lies inside the split's closed
+    // boundary, so the inner shell encloses that region's other shells and comes first
+    // (`SmBrep::AssertValid` test 12). Upstream leaves the old region's list as it was, where
+    // a shell that stayed in the region, such as a void's, can come first.
+    if let Some(rays) = shells_for_rays {
+        let region = split_link(brep.shell(rays.inner)?.region)?;
+        let list = &mut brep.region_mut(region)?.shells;
+        if let Some(at) = list.iter().position(|&s| s == rays.inner) {
+            // SmRegion::SetList(InnerShell): the circular list now starts at it
+            if let (Some(tail), Some(head)) = (list.get(at..), list.get(..at)) {
+                *list = tail.iter().chain(head).copied().collect();
+            }
+        }
+    }
+
     remove_empty_split_objects(k, brep, env, old_shell, new_shell)
 }
 
@@ -2018,10 +2036,9 @@ fn nest_shells(
 /// `nest_shells` fires), tells whether it lies inside. A candidate inside exactly one
 /// other, itself inside none, has its outside shell moved into that solid's region,
 /// its own region marked void and its faces swapped to point into the cavity.
-/// Deeper nesting is left as built. With `Kernel::fixes.revolve_holed_profile_void`
-/// (WR-529), a B-rep whose infinite region holds one shell, more than two regions and
-/// only closed face-use shells gets its void flags from the nesting instead
-/// ([`super::p1::set_region_is_void_flags_for_nested_solids`]).
+/// Deeper nesting is left as built. A B-rep whose infinite region holds one shell, more
+/// than two regions and only closed face-use shells gets its void flags from the nesting
+/// instead (WR-529, [`super::p1::set_region_is_void_flags_for_nested_solids`]).
 pub(crate) fn nest_closed_shells_as_cavities(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -2030,12 +2047,12 @@ pub(crate) fn nest_closed_shells_as_cavities(
     let Some(infinite) = brep.infinite_region() else {
         return Ok(());
     };
-    // Not upstream (WR-529, opt-in `revolve_holed_profile_void`; the fork's
-    // tangency-labs/smlib@38b4212): the stitch may have nested the shells itself (a hole in
-    // the profile: the ring it turns into lies inside the ring around it, in that ring's
-    // region) and left the region inside the inner shell material. Where every shell is
-    // closed the regions alternate material and void from the infinite region in.
-    if k.fixes.revolve_holed_profile_void && brep.region(infinite)?.shells.len() < 2 {
+    // Not upstream (WR-529; the fork's tangency-labs/smlib@38b4212): the stitch may have
+    // nested the shells itself (a hole in the profile: the ring it turns into lies inside
+    // the ring around it, in that ring's region) and left the region inside the inner shell
+    // material. Where every shell is closed the regions alternate material and void from
+    // the infinite region in.
+    if brep.region(infinite)?.shells.len() < 2 {
         let regions = super::p1::regions(brep, None)?;
         if regions.len() <= 2 {
             return Ok(());

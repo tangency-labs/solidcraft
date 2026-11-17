@@ -19,7 +19,7 @@ use super::profile::{
     check_regions, curve_on_frame, largest_arc_sweep, smallest_arc_sweep, tapered_flange_ends,
     Loop2, ProfileRefusal, Region2, Seg2,
 };
-use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
+use super::read::{arc_before_line, planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use crate::curve::curve::{Curve, CurveKind};
@@ -880,6 +880,109 @@ fn a_moved_input_is_refused() {
     assert!(planar_pieces(&k, &r0, &xy(), 1e-5, &mut 2_000_000, false).is_none());
     // no work left: refused
     assert!(planar_pieces(&k, &run(&k, &quarter, iv, true), &xy(), 1e-5, &mut 0, false).is_none());
+}
+
+/// #17707: a few hundredths of a millimetre of a circle or an ellipse bends off its chord by
+/// about 1e-5. That is under the tolerance a part's edges are read with (1e-6 of its size,
+/// 7.7e-5 for the report's part) but over the 1e-5 an edge may lie off its face; read as a line,
+/// it gave an Extrude To Object prism a flat side off the cylinder it lies on. It is read as an
+/// arc (within the reading tolerance, the ellipse's as its circle of curvature); a rational piece
+/// within the zone tolerance of its chord, or on it, stays a line.
+#[test]
+fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
+    let k = Kernel::default();
+    let tol = 7.7e-5;
+    let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+    // a rational quadratic piece of the ellipse (a cos t, b sin t) from t0 to t0 + 2h
+    let piece = |a: f64, b: f64, t0: f64, h: f64| {
+        let (mid, t1) = (t0 + h, t0 + 2.0 * h);
+        spline(
+            &k,
+            knots.clone(),
+            vec![
+                [a * t0.cos(), b * t0.sin(), 0.0, 1.0],
+                [a * mid.cos(), b * mid.sin(), 0.0, h.cos()],
+                [a * t1.cos(), b * t1.sin(), 0.0, 1.0],
+            ],
+        )
+    };
+    // 0.036 of a circle of radius 15 (its sagitta 1.08e-5), and 0.08 of an ellipse of
+    // semi-axes 30 and 15 about the end of its minor axis, where its radius of curvature is 60
+    // (its sagitta 1.33e-5)
+    let (h, g) = (0.0012, 0.04 / 30.0);
+    let cases = [
+        (piece(15.0, 15.0, 0.0, h), p(15.0 * h.cos(), 15.0 * h.sin())),
+        (piece(30.0, 15.0, FRAC_PI_2 - g, g), p(0.0, 15.0)),
+    ];
+    for ((c, iv), mid) in cases {
+        for forward in [true, false] {
+            let r = read(&k, &c, iv, forward, &xy(), tol).unwrap();
+            let [seg] = r.as_slice() else {
+                panic!("one segment: {r:?}")
+            };
+            assert!(!matches!(seg, Seg2::Line { .. }), "read as a line: {seg:?}");
+            assert!(
+                seg.point_at(0.5).distance(mid) < 1e-9,
+                "{seg:?} misses the curve's middle {mid:?}"
+            );
+        }
+    }
+    // a rational quadratic whose middle control point lies on its chord, or 2e-7 off it (well
+    // within the 1e-5 zone tolerance; as an arc, its radius would be some 190 km), is that line
+    for off in [0.0, 2e-7] {
+        let (line, iv) = spline(
+            &k,
+            knots.clone(),
+            vec![
+                [0.0, 0.0, 0.0, 1.0],
+                [2.5, 0.5 * off, 0.0, 0.5],
+                [10.0, 0.0, 0.0, 1.0],
+            ],
+        );
+        let r = read(&k, &line, iv, true, &xy(), tol).unwrap();
+        assert!(matches!(r[..], [Seg2::Line { .. }]), "{off}: {r:?}");
+    }
+    // 80 of a circle of radius 4e7 is rational though its middle weight is 1 - 5e-13: its middle
+    // control point lies 4e-5 off the chord, the arc 2e-5 (over the zone tolerance); the same
+    // control points with equal weights (a polynomial) are not
+    let (radius, h) = (4e7, 1e-6_f64);
+    let (w, y) = (h.cos(), radius * h.cos() - radius);
+    let (x, top) = (radius * h.sin(), radius / w - radius);
+    let piece = |w: f64, v: f64| {
+        vec![vec![
+            [-x * v, y * v, v],
+            [0.0, top * w, w],
+            [x * v, y * v, v],
+        ]]
+    };
+    assert!(arc_before_line(&piece(w, 1.0), 1e-5));
+    assert!(!arc_before_line(&piece(w, 1.0), 5e-5));
+    assert!(!arc_before_line(&piece(1.0, 1.0), 1e-5));
+    assert!(!arc_before_line(&piece(0.5, 0.5), 1e-5));
+    // a piece of a circle of radius 1e8 (half-angle 6.3e-7, middle weight 1 - 2e-13, bending
+    // 2e-5 off its chord) raised to degree 32: neighbouring weights differ by at most 1.3e-14,
+    // under their rounding, the span's by 1e-13; it is rational
+    let (radius, h) = (1e8, 4e-13_f64.sqrt());
+    let (w, y) = (h.cos(), radius * h.cos() - radius);
+    let x = radius * h.sin();
+    let mut span = vec![
+        [-x, y, 1.0],
+        [0.0, (radius / w - radius) * w, w],
+        [x, y, 1.0],
+    ];
+    for n in 2..32 {
+        let mut up = vec![span[0]];
+        for i in 1..=n {
+            let a = i as f64 / (n + 1) as f64;
+            up.push(std::array::from_fn(|k| {
+                a * span[i - 1][k] + (1.0 - a) * span[i][k]
+            }));
+        }
+        up.push(span[n]);
+        span = up;
+    }
+    assert_eq!(span.len(), 33);
+    assert!(arc_before_line(&[span], 1e-5));
 }
 
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1
@@ -2410,7 +2513,8 @@ mod path_export_regressions {
         // An explicit coarse scalar encoding makes this a geometry refusal test,
         // independent of any file format's decimal spelling.
         let encoding = ScalarEncoding {
-            round_trip: |v| Some(if v.abs() < 1e-12 { 0.0 } else { v }),
+            length: |v| Some(if v.abs() < 1e-12 { 0.0 } else { v }),
+            dimensionless: |v| Some(if v.abs() < 1e-12 { 0.0 } else { v }),
             min_ellipse_ratio: 1e-12,
             turn_snap_radians: 1e-12,
         };
@@ -2503,7 +2607,8 @@ mod path_export_regressions {
 
     fn scalar_encoding(round_trip: fn(f64) -> Option<f64>) -> ScalarEncoding {
         ScalarEncoding {
-            round_trip,
+            length: round_trip,
+            dimensionless: round_trip,
             min_ellipse_ratio: 1e-12,
             turn_snap_radians: 1e-12,
         }
@@ -2532,6 +2637,69 @@ mod path_export_regressions {
     }
 
     #[test]
+    fn polylines_and_centres_are_admitted_only_as_the_encoding_writes_them() {
+        // A caller whose lengths stop at 10, on a 1e-3 grid, with three decimals elsewhere.
+        fn grid(v: f64) -> Option<f64> {
+            (v.abs() <= 10.0).then_some((v * 1e3).round() / 1e3)
+        }
+        let encoding = ScalarEncoding {
+            length: grid,
+            dimensionless: |v| Some((v * 1e3).round() / 1e3),
+            min_ellipse_ratio: 1e-12,
+            turn_snap_radians: 1e-12,
+        };
+        let far = Seg2::Line {
+            a: Vec2::ZERO,
+            b: Vec2::new(11.0, 0.0),
+        };
+        let error =
+            path_shapes(DxfPath::Open(&[far]), DxfPathStyle::Polyline, encoding).unwrap_err();
+        assert_eq!(error.reason, "line endpoint cannot be encoded");
+        let off_grid = Seg2::Arc {
+            center: Vec2::new(11.0, 0.0),
+            radius: 2.0,
+            start: 0.0,
+            sweep: 0.5,
+        };
+        for style in [DxfPathStyle::Exact, DxfPathStyle::Polyline] {
+            let error = path_shapes(DxfPath::Open(&[off_grid]), style, encoding).unwrap_err();
+            assert_eq!(error.reason, "arc centre cannot be encoded");
+        }
+        // A bulge of 0.00025 is written as 0, and two ends 0.0002 apart as one point: neither arc
+        // is packed into a polyline, and each is written exactly instead.
+        let flat = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 1.0,
+            start: 0.0,
+            sweep: 0.001,
+        };
+        let short = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 0.0002,
+            start: 0.0,
+            sweep: 1.0,
+        };
+        let packed = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 1.0,
+            start: 0.0,
+            sweep: 1.0,
+        };
+        assert!(matches!(
+            path_shapes(DxfPath::Open(&[flat]), DxfPathStyle::Polyline, encoding).unwrap()[..],
+            [PathShape::Arc { .. }]
+        ));
+        assert!(matches!(
+            path_shapes(DxfPath::Open(&[packed]), DxfPathStyle::Polyline, encoding).unwrap()[..],
+            [PathShape::BulgedPolyline { .. }]
+        ));
+        assert!(
+            path_shapes(DxfPath::Open(&[short]), DxfPathStyle::Polyline, encoding)
+                .map_or(true, |shapes| matches!(shapes[..], [PathShape::Arc { .. }]))
+        );
+    }
+
+    #[test]
     fn refused_arc_angle_never_certifies_a_one_sided_encoding() {
         let arc = Seg2::Arc {
             center: Vec2::ZERO,
@@ -2539,10 +2707,15 @@ mod path_export_regressions {
             start: 0.0,
             sweep: std::f64::consts::FRAC_PI_2,
         };
-        for encoding in [
-            scalar_encoding(|v| (v != 90.0).then_some(v)),
-            scalar_encoding(|v| (v != 0.0).then_some(v)),
+        // Angles are dimensionless: only that callback refuses them.
+        for dimensionless in [
+            (|v| (v != 90.0).then_some(v)) as fn(f64) -> Option<f64>,
+            |v| (v != 0.0).then_some(v),
         ] {
+            let encoding = ScalarEncoding {
+                dimensionless,
+                ..scalar_encoding(Some)
+            };
             let error = exact_piece(&arc, 2, 4, encoding).unwrap_err();
             assert_eq!(error.piece, Some((2, 4)));
             assert_eq!(error.reason, "arc angle cannot be encoded");

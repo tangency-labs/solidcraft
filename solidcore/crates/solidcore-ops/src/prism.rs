@@ -262,7 +262,7 @@ pub struct PrismSection {
     pub hi: f64,
     /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
     pub region: Region2,
-    /// How far the levels may be off the body's caps.
+    /// How far the levels and section may be off the body's caps, including frame conversion.
     pub tolerance: f64,
     /// An enclosure of its volume.
     pub volume: Interval,
@@ -299,7 +299,7 @@ pub fn prism_equivalent(a: &Body, b: &Body) -> Result<Option<bool>> {
         });
     }
     run_on("prism_equivalent", &[("a", a), ("b", b)], |k| {
-        let (ga, gb) = (a.lock(), b.lock());
+        let (ga, gb) = Body::lock_pair(a, b);
         Ok(measure::equivalent(k, &ga, &gb))
     })
 }
@@ -454,6 +454,15 @@ pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc>
         start: arc.start,
         end: arc.end,
     })
+}
+
+/// Whether a piece of a planar curve within the reading tolerance of its chord is read as the
+/// arc it is proved on before that line ([`read::arc_before_line`]): `spans` its Bézier spans
+/// (`[x w, y w, w]` in the plane), `zone` the model's zone tolerance
+/// ([`crate::sweep::zone_tolerance`]).
+#[must_use]
+pub fn arc_before_line(spans: &[Vec<[f64; 3]>], zone: f64) -> bool {
+    read::arc_before_line(spans, zone)
 }
 
 /// Recognize one directed turn of arcs with the same stored support.
