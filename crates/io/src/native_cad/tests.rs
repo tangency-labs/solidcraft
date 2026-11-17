@@ -174,6 +174,21 @@ fn a_zip_bomb_is_refused() {
     assert!(native_cad_to_step(&bytes, "bomb.FCStd").is_err());
 }
 
+/// Records of which not one body can be made are refused as a file with no solids is, with the
+/// reason, not imported as an Import feature with no bodies; the same records whole import.
+#[test]
+fn records_that_make_no_body_are_refused_with_why() {
+    let (records, _, _) = native_cad_records(BLOCK_FCSTD, "block.FCStd").unwrap();
+    let mut broken = records.clone();
+    for b in &mut broken.bodies {
+        b.face_origin.clear();
+    }
+    let e = crate::records_import_feature((broken, Vec::new(), true), "block.FCStd", crate::StepNames::default()).err().map(|e| e.to_string());
+    assert!(e.as_deref().is_some_and(|e| e.contains("no bodies could be made") && e.contains("face origins")), "{e:?}");
+    let f = crate::records_import_feature((records, Vec::new(), true), "block.FCStd", crate::StepNames::default()).unwrap();
+    assert!(!f.import.bodies.is_empty());
+}
+
 fn types(d: &NativeDesign) -> Vec<&'static str> {
     d.doc.features.iter().map(|f| f.kind.type_name()).collect()
 }

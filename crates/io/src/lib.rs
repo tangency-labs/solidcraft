@@ -414,6 +414,11 @@ fn records_import_feature(read: (solidcraft_kernel::ImportRecords, Vec<String>, 
     let text = solidcraft_kernel::records_text(&records)?;
     design::check_step_importable(&text)?;
     let imp = solidcraft_kernel::records_import_shared(&records)?;
+    // Not one body made of the records: no feature, as a STEP file with no solids is refused.
+    if imp.bodies.is_empty() {
+        let why = imp.warnings.last().map(|w| format!(" ({w})")).unwrap_or_default();
+        return Err(IoError::Invalid(format!("{file}: no bodies could be made of this file{why}")));
+    }
     let stem = std::path::Path::new(file)
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
