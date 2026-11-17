@@ -1972,6 +1972,7 @@ mod tests {
         let (release, held) = std::sync::mpsc::channel::<()>();
         cache.write_after(key.clone(), doc, saved, reply.clone(), move |_| {
             let _ = held.recv();
+            true
         });
         let waiting = |n: usize| {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
