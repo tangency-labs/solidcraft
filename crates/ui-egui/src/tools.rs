@@ -102,9 +102,16 @@ pub struct Tool {
     /// The Line tool's chain, which a rest on its last point switches to tangent arcs and back
     /// (#9489).
     pub chain: crate::sketch_line_arc::LineChain,
-    /// The construction line tools' Construction/Normal switch (#10258): a segment with a length
-    /// becomes a normal sketch line. Each start of a tool begins at Construction.
-    pub normal: bool,
+    /// A construction line tool's line type (#10258, #15066), numbered as the Sketch Palette's
+    /// Line Type icons: 0 normal, 1 construction, 2 centerline, 3 infinite. Infinite draws an
+    /// infinite construction line in one click, or a construction segment once a length is
+    /// typed; the others always draw a segment. A tool starts at the type last chosen, so
+    /// switching between the construction line methods keeps it.
+    pub line_type: u8,
+    /// A construction line tool works as before #15066 (`construction_line_classic`): the
+    /// Construction/Normal switch under the Length box sets `line_type`, and only a typed length
+    /// makes a segment. Kept in step with the preference while the tool runs.
+    pub classic: bool,
 }
 
 impl Tool {
@@ -158,7 +165,8 @@ impl Tool {
             arc_turn: 0.0,
             lined: Vec::new(),
             chain: Default::default(),
-            normal: false,
+            line_type: 3,
+            classic: false,
         })
     }
 }

@@ -1785,6 +1785,10 @@ preference_settings! {
     sketch_state_icons: bool = true, PAGE_SKETCH;
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
     sketch_construction_lines: bool = true, PAGE_SKETCH;
+    /// The construction line tools as before #15066: the Construction/Normal switch under the
+    /// Length box, and the Sketch Palette's Line Type icons leave these tools alone. Off (the
+    /// default): those icons set the tools' line type.
+    construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
@@ -2868,7 +2872,7 @@ fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
 }
 
 /// Read startup settings without replacing unreadable data with defaults during a UI edit.
-fn read_graphics_settings(path: &std::path::Path) -> Result<serde_json::Value, String> {
+pub(crate) fn read_graphics_settings(path: &std::path::Path) -> Result<serde_json::Value, String> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
@@ -3102,7 +3106,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }),
         },
         sidebar_footer: Some((Tokens::get().space_24 * 2.0, crate::settings_profiles::sidebar)),
-        above_page: Some(|ui, app| panel_restore_banner(app, ui, &Tokens::get())),
+        above_page: Some(|ui, app| {
+            crate::policy::note(app, ui, "prefs:managed");
+            panel_restore_banner(app, ui, &Tokens::get());
+        }),
     };
     prefs_window::show(ctx, app, WINDOW_PAGES, &options, |app| {
         // Former page names remain usable as scenario handles.
@@ -3655,9 +3662,12 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         o.insert("stand_up_offer".into(), json!(app.stand_up));
         o.insert("stand_up_note".into(), json!(app.stand_up.is_some() && app.stand_up_note));
         o.insert("dark".into(), json!(app.ui.dark));
-        let locked = app.policy.locked();
-        if !locked.is_empty() {
-            o.insert("policy".into(), json!({ "locked": locked, "check_updates": crate::policy::check_updates(app) }));
+        if app.policy.managed() {
+            let mut policy = json!({ "locked": app.policy.locked(), "check_updates": crate::policy::check_updates(app) });
+            if let (Some(name), Some(p)) = (app.policy.organization(), policy.as_object_mut()) {
+                p.insert("organization".into(), json!(name));
+            }
+            o.insert("policy".into(), policy);
         }
         o.insert("viewport_dark".into(), json!(app.viewport_dark()));
         o.insert("theme_ids".into(), json!(theme_choices(app).into_iter().map(|(id, _)| id).collect::<Vec<_>>()));
@@ -8635,6 +8645,7 @@ mod tests {
                 ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
                 ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
                 ("sketch_construction_lines", "prefs.sketch_construction_lines"),
+                ("construction_line_classic", "prefs.construction_line_classic"),
                 ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
                 ("sketch_auto_locate", "prefs.sketch.auto_locate"),
                 ("shortcut_again_ends_tool", "prefs.sketch.shortcut_again_ends_tool"),
@@ -12571,6 +12582,76 @@ mod ui_scale_regression_tests {
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
+
+    /// Safe graphics mode keeps every optional drawing feature off, whatever the saved settings
+    /// say, and leaves those settings as they were for full graphics.
+    #[test]
+    fn safe_graphics_mode_turns_each_optional_feature_off_and_keeps_the_settings() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.ambient_occlusion = true;
+        h.app.preferences.dark_parts_shading = true;
+        h.app.preferences.viewport_material_finish = true;
+        let full = |app: &SolveApp| {
+            [
+                crate::safe_graphics::ambient_occlusion(app),
+                crate::safe_graphics::dark_parts_shading(app),
+                crate::safe_graphics::material_finish(app),
+                crate::safe_graphics::blur(app),
+                crate::safe_graphics::path_tracer(app),
+            ]
+        };
+        assert_eq!(full(&h.app), [true; 5], "full graphics draws what the settings ask for");
+        let saved = h.app.prefs();
+        h.app.safe_graphics = true;
+        assert_eq!(full(&h.app), [false; 5], "ambient occlusion, dark parts shading, studio finish, blur, path tracer");
+        assert_eq!(h.app.prefs(), saved, "the saved settings are untouched");
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&saved);
+        assert!(restored.preferences.ambient_occlusion && restored.preferences.viewport_material_finish);
+    }
+
+    /// The one line over the view: Try full graphics clears the record's sticky and next flags
+    /// (other settings stay) and offers a restart; Preferences › Graphics › Start in safe
+    /// graphics mode sets the next launch only; working launches show nothing.
+    #[test]
+    fn safe_graphics_line_tries_full_graphics_and_the_preference_asks_for_one_launch() {
+        let dir = std::env::temp_dir().join(format!("sc_safe_graphics_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"backend":"vulkan","safe_graphics":{"failures":2,"sticky":true,"next":false}}"#).unwrap();
+        let saved = || -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default() };
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.services.graphics_path = Some(path.to_string_lossy().to_string());
+        h.frames(2);
+        assert!(crate::scenario::rect_of("toast:safe_graphics").is_none(), "full graphics shows no line");
+        h.app.safe_graphics = true;
+        h.frames(2);
+        assert!(crate::scenario::rect_of("toast:safe_graphics").is_some());
+        assert_eq!(crate::safe_graphics::line(&h.app), Some(crate::safe_graphics::Line::Started));
+        let button = crate::scenario::handle_at("toast:safe_graphics:button").unwrap();
+        h.call("ui.click", json!({"x":button.x,"y":button.y}));
+        assert_eq!(crate::safe_graphics::line(&h.app), Some(crate::safe_graphics::Line::FullNext));
+        let record = &saved()["safe_graphics"];
+        assert_eq!((record["sticky"].as_bool(), record["next"].as_bool(), record["failures"].as_u64()), (Some(false), Some(false), Some(2)));
+        assert_eq!(saved()["backend"], "vulkan");
+        let (_, restart) = crate::safe_graphics::line_text(&h.app, crate::safe_graphics::Line::FullNext);
+        assert_eq!(restart.is_some(), h.app.services.graphics_restart.is_some(), "a restart is offered where the host can restart");
+        h.app.safe_graphics_dismissed = true;
+        assert!(crate::safe_graphics::line(&h.app).is_none(), "closed for this launch");
+
+        crate::safe_graphics::set_next_launch(&mut h.app, true).unwrap();
+        assert_eq!(saved()["safe_graphics"]["next"], true);
+        assert_eq!(saved()["safe_graphics"]["failures"], 2, "the host's fields stay");
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        h.frames(2);
+        super::reveal_preference(&mut h, "prefs:safe_graphics_next");
+        let checkbox = crate::scenario::handle_at("prefs:safe_graphics_next").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(!h.app.safe_graphics_next);
+        assert_eq!(saved()["safe_graphics"]["next"], false);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ambient_occlusion_is_optional_persistent_and_cancelable() {

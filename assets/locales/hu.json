@@ -2721,7 +2721,7 @@
   "render.cpu_body_choose": "Válasszon egy testet",
   "render.cpu_body_filter": "Testek szűrése név szerint",
   "render.cpu_body_filter_more": "Pontosítsa a szűrőt további testek megtekintéséhez.",
-  "render.cpu_body_missing": "Egy tükröződési cél hiányzik, rejtett, nem egyértelmű, vagy a neve hosszabb 128 bájtnál. Válassza ki újra.",
+  "render.cpu_body_missing": "Egy tükröződési cél hiányzik, rejtett, nem egyértelmű, vagy a neve hosszabb 512 bájtnál. Válassza ki újra.",
   "render.cpu_budget": "CPU-erőforrásprofil",
   "render.cpu_budget_bodies": "Testek felső korlátja",
   "render.cpu_budget_compact": "Kompakt (régi korlátok)",

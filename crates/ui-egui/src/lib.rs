@@ -269,6 +269,7 @@ mod round_pick_tests;
 mod rule_editor;
 #[cfg(test)]
 mod rule_editor_tests;
+pub mod safe_graphics;
 pub mod save_job;
 pub mod scenario;
 pub(crate) mod scene_palette;
@@ -858,6 +859,17 @@ pub struct SolveApp {
     /// Build bodies' display meshes on the CPU even where the GPU could (safe mode). Read by
     /// [`SolveApp::set_wgpu`].
     pub cpu_meshing: bool,
+    /// This launch runs in safe graphics mode (set by the desktop host after a launch that failed
+    /// to come up or lost its device): ambient occlusion, blur behind panels, studio shading and
+    /// the GPU path tracer stay off whatever the saved settings say, and the view says so in one
+    /// line with a Try full graphics button ([`safe_graphics`]).
+    pub safe_graphics: bool,
+    /// The safe graphics line was closed for this launch.
+    pub safe_graphics_dismissed: bool,
+    /// Try full graphics was clicked: the next start uses full graphics (the line offers a restart).
+    pub safe_graphics_full_next: bool,
+    /// Preferences › Graphics › Start in safe graphics mode, for the next launch only.
+    pub safe_graphics_next: bool,
     pub frame_ms: f64,
     /// The viewport's frame-rate readout ([`frame_rate`]).
     pub frame_rate: frame_rate::FrameRate,
@@ -1111,6 +1123,10 @@ impl SolveApp {
             native_file_menu: false,
             header: toolbar::HeaderLayout::DESKTOP,
             cpu_meshing: false,
+            safe_graphics: false,
+            safe_graphics_dismissed: false,
+            safe_graphics_full_next: false,
+            safe_graphics_next: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
             operations: operations::Panel::default(),
@@ -1245,7 +1261,10 @@ impl SolveApp {
 
     /// Draw the viewport with pipelines [`Self::build_wgpu_split`] made, perhaps on another thread.
     pub fn adopt_wgpu(&mut self, rs: &egui_wgpu::RenderState, built: WgpuBuilt) {
-        self.blur.install(rs, built.blur);
+        // Safe graphics mode draws no blur behind panels: it never gets a device.
+        if safe_graphics::blur(self) {
+            self.blur.install(rs, built.blur);
+        }
         if built.msaa_fallback {
             self.msaa_compatibility = true;
         }
@@ -1273,7 +1292,10 @@ impl SolveApp {
             // Next to the graphics settings: a setup that stops the app is not run again by itself.
             let marker = self.services.graphics_path.as_deref().map(|p| std::path::Path::new(p).with_file_name(render_workspace::SETUP_MARKER));
             self.render_workspace.watch_setup(marker);
-            self.render_workspace.defer_path_host(key, move || solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
+            // Safe graphics mode never sets up the GPU path tracer.
+            if safe_graphics::path_tracer(self) {
+                self.render_workspace.defer_path_host(key, move || solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
+            }
         }
         render_workspace::sync_backend(self);
         ai_connect::tick(self);
@@ -1616,6 +1638,13 @@ impl SolveApp {
                         tool.hover = None;
                         tool.picks.clear();
                         tool.point_picks.clear();
+                    }
+                }
+                // A drawing inserted with curves kept as drawn that the curve check refuses says so,
+                // as other imports' warnings do (#16190).
+                "sketch.insert_svg" | "sketch.insert_dxf" => {
+                    if let Some(w) = v.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty()) {
+                        self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
                     }
                 }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
@@ -2552,6 +2581,11 @@ impl SolveApp {
             return;
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
+            t.classic = self.preferences.construction_line_classic;
+            if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+                // The classic switch starts at Construction, whatever the palette chose last.
+                t.line_type = 3;
+            }
             let state = crate::open_meshing::session_world(&self.session);
             let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
             if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {
@@ -3875,6 +3909,7 @@ impl SolveApp {
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         plugins::tick(self, ui.ctx(), false);
+        documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());

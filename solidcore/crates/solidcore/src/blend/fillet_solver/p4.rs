@@ -40,8 +40,9 @@
 //!   a snapshot that is written back point by point.
 //! - **Function static.** `ComputePointValues`' `static double sdStaticStep` (set once
 //!   per process by the first finite-difference evaluation) is the
-//!   [`Kernel::fillet_point_step`] latch: per kernel instead of per process. Difftest
-//!   runners seed it from the C++ process's value.
+//!   [`Kernel::fillet_point_step`] latch: per kernel, or per process for kernels that
+//!   share one ([`Kernel::process_fillet_point_step`]). Difftest runners seed it from the
+//!   C++ process's value.
 //! - **Intersector.** `SmFilletIntersector sFI(*pOffsetSrf1, ..)` traces copies of the
 //!   solver's offset surfaces seen as [`Surface`]s (the intersector borrows its
 //!   surfaces while the solver stays mutable). Upstream they are the solver's own

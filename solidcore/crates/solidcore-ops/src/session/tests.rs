@@ -52,7 +52,7 @@ fn the_kernel_after_a_panic_is_configured_as_before() {
             let default_zone = solidcore::Tolerances::default().zone_tol_3d;
             let after = run("after", |k| {
                 Ok(Some((
-                    k.fillet_point_step.get(),
+                    k.latched_fillet_point_step(),
                     k.tolerances.zone_tol_3d,
                     k.upstream_ub_passed.is_empty(),
                     k.fixes == UpstreamFixes::all(),
@@ -651,10 +651,57 @@ fn a_latched_step_reaches_every_kernel() {
             // the latching call's kernel, held; the next call gets another
             let (release, held) = call_held_open("holds the latching kernel");
             let elsewhere =
-                answered(|| run("reads the step", |k| Ok(k.fillet_point_step.get())).unwrap());
+                answered(|| run("reads the step", |k| Ok(k.latched_fillet_point_step())).unwrap());
             release.send(()).unwrap();
             held.join().unwrap().unwrap();
             assert_eq!(elsewhere, Some(latched));
         },
     );
+}
+
+/// Two calls side by side, each on a kernel of its own, settle one step between them (#18164):
+/// both take their kernels before either latches (the barrier); one latches and ends, and only
+/// then does the other latch, with another first step. The later call takes the step the
+/// earlier one settled, as the same two calls run one after the other do.
+#[test]
+fn calls_side_by_side_latch_one_step() {
+    in_own_process("session::tests::calls_side_by_side_latch_one_step", || {
+        use std::sync::Barrier;
+        // the first steps upstream latches: at a crossing, at a tangent point
+        const FIRST: f64 = 1.0e-5;
+        const SECOND: f64 = 1.0e-3;
+        all_fixes();
+        let taken = Arc::new(Barrier::new(2));
+        let (first_ended, wait_first) = std::sync::mpsc::channel::<()>();
+        let first = {
+            let taken = Arc::clone(&taken);
+            std::thread::spawn(move || {
+                let step = run("latches first", |k| {
+                    taken.wait();
+                    Ok(k.latch_fillet_point_step(FIRST))
+                });
+                let _ = first_ended.send(());
+                step
+            })
+        };
+        let second = std::thread::spawn(move || {
+            run("latches second", |k| {
+                taken.wait();
+                // the first call has latched and ended on its kernel; this one was taken
+                // before it latched
+                let _ = wait_first.recv();
+                Ok(k.latch_fillet_point_step(SECOND))
+            })
+        });
+        let side_by_side = (
+            first.join().unwrap().unwrap(),
+            second.join().unwrap().unwrap(),
+        );
+        let serial = (
+            run("latches first", |k| Ok(k.latch_fillet_point_step(FIRST))).unwrap(),
+            run("latches second", |k| Ok(k.latch_fillet_point_step(SECOND))).unwrap(),
+        );
+        assert_eq!(side_by_side, (FIRST, FIRST), "one step for the process");
+        assert_eq!(side_by_side, serial);
+    });
 }

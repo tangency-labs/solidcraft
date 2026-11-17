@@ -694,7 +694,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|name| !name.is_empty()) {
-        Some(name) if name.len() <= 128 => name.to_string(),
+        Some(name) if name.chars().count() <= 128 => name.to_string(),
         Some(_) => return Err(bad(cmd, "`name` must be 1…128 characters")),
         None => format!("Folder{}", s.doc.timeline_groups.len() + 1),
     };
@@ -1533,6 +1533,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         let before = s.model.state_before(id);
         super::component::pin_picked_placements_in(s, &mut nf.kind, nf.component, &before);
     }
+    if !sets_path(set, "extent.from_level") {
+        keep_from_level_on_the_same_face(s, &f, &mut nf);
+    }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
     }
@@ -2112,6 +2115,21 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     keys
 }
 
+/// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
+/// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
+/// build finds it in the model before the feature. A From picked on another plane is a new
+/// choice, so it starts on that face, as a new extrude does. `after`'s face names and picked
+/// placements must already be its own.
+fn keep_from_level_on_the_same_face(s: &Session, before: &Feature, after: &mut Feature) {
+    let FeatureKind::Extrude { extent: was, .. } = &before.kind else {
+        return;
+    };
+    let keep = was.from_level && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
+    if let FeatureKind::Extrude { extent, .. } = &mut after.kind {
+        extent.from_level = keep;
+    }
+}
+
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2290,6 +2308,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         after.to_body_apart = before.to_body_apart;
     }
+    keep_from_level_on_the_same_face(s, &old, &mut new);
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
