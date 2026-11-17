@@ -1035,9 +1035,27 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
             let (na, nb) = (pa.normal(), pb.normal());
             if na.cross(nb).len() < 1e-9 {
-                // Parallel: halfway between, facing as the first.
+                // Parallel: half way between them.
                 let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
-                return Plane::new(pa.origin + half, pa.x, pa.y).ok_or_else(degenerate);
+                let center = pa.origin + half;
+                // Two planes that are parallel to a world plane give a midplane in that world
+                // plane's frame: its origin on the world axis and not at the point the planes
+                // were picked, and its axes the world's. A sketch on it then keeps its world
+                // place when it is moved onto the midplane (#18260).
+                let frame = if na.z.abs() > 1.0 - 1e-6 {
+                    Some(Plane::XY)
+                } else if na.x.abs() > 1.0 - 1e-6 {
+                    Some(Plane::YZ)
+                } else if na.y.abs() > 1.0 - 1e-6 {
+                    Some(Plane::XZ)
+                } else {
+                    None
+                };
+                return match frame {
+                    Some(frame) => Ok(frame.offset(center.dot(frame.normal()))),
+                    // Not parallel to a world plane: the midplane keeps the first plane's axes.
+                    None => Plane::new(center, pa.x, pa.y).ok_or_else(degenerate),
+                };
             }
             // Meeting at an angle: the plane through their line that halves the angle.
             let (o, dir) = plane_plane(&pa, &pb).ok_or_else(degenerate)?;

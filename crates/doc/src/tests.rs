@@ -1328,6 +1328,43 @@ fn self_referencing_construction_planes_are_errors() {
     assert!(m.results.iter().any(|r| r.error.is_some()), "a cyclic perpendicular plane must report an error: {:?}", m.results);
 }
 
+/// #18260: a midplane between two planes that are parallel to a world plane takes that world
+/// plane's frame: half way between them, with its origin on the world axis and not at the point
+/// the planes were picked, so a sketch keeps its world place when it is redefined onto it.
+#[test]
+fn a_midplane_parallel_to_a_world_plane_takes_that_world_planes_frame() {
+    // A box with a top face at z = 20 and a bottom face at z = 0, both picked away from the
+    // world origin.
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(40., 30., 20.)).unwrap();
+    let mut st = ModelState::default();
+    st.bodies.push(ModelBody::new("Box".into(), body, 1));
+    let faces = st.bodies[0].body.faces(0.01).unwrap();
+    let face_at = |z: f64| {
+        faces
+            .iter()
+            .find(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::Z).abs() > 0.99) && (f.centroid.z - z).abs() < 1e-6)
+            .map(|f| f.centroid)
+            .unwrap()
+    };
+    let mut doc = Document::new("midplane");
+    let mid = doc
+        .add_feature(
+            FeatureKind::ConstructionPlane {
+                plane: PlaneRef::Midplane {
+                    a: Box::new(crate::construct::GeoRef::Face { at: face_at(20.), name: None }),
+                    b: Box::new(crate::construct::GeoRef::Face { at: face_at(0.), name: None }),
+                },
+            },
+            Some("Mid"),
+        )
+        .unwrap();
+    let vals = doc.param_values().0;
+    let built = doc.resolve_plane_in(&vals, &PlaneRef::Construction { feature: crate::FeatureId(mid), placement: None }, 0, 0, Some(&st)).unwrap();
+    // Half way between the two faces (z = 10), on the world Z axis, in the world XY frame.
+    assert!(built.origin.dist(Vec3::new(0., 0., 10.)) < 1e-9, "the midplane's origin is on the world axis: {built:?}");
+    assert!(built.x.dist(Vec3::X) < 1e-9 && built.y.dist(Vec3::Y) < 1e-9, "the midplane takes the world XY frame: {built:?}");
+}
+
 /// A rigid translation, the way the evaluation moves an occurrence.
 fn translation(t: Vec3) -> crate::Mat {
     [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [t.x, t.y, t.z, 1.0]]

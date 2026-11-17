@@ -2828,6 +2828,39 @@ mod tests {
         assert!((placed.origin.z + 5.0).abs() < 1e-6, "{placed:?}");
     }
 
+    /// #18260: a sketch redefined onto a plane parallel to the one it is on moves straight along
+    /// the normal: the midplane between the box's two XY-parallel faces takes the world XY frame,
+    /// so the sketch keeps its world XY and only its Z moves to the midplane.
+    #[test]
+    fn redefining_onto_a_parallel_midplane_keeps_the_world_xy() {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::prelude::*;
+
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Box"}));
+        run(&mut s, "construct.plane.midplane", json!({"a": {"face": [20, 15, 20]}, "b": {"face": [20, 15, 0]}, "name": "Mid"}));
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 7], "p1": [12, 13]}));
+        run(&mut s, "sketch.spline.fit_point", json!({"points": [[5, 7], [8, 11], [12, 13]]}));
+        run(&mut s, "sketch.finish", json!({}));
+
+        let world_points = |s: &Session| -> Vec<(String, Vec3)> {
+            let state = s.model.state();
+            let resolved = state.sketch(sk).unwrap();
+            resolved.sketch.points.iter().map(|point| (point.id.clone(), resolved.plane.to_world(point.pos))).collect()
+        };
+
+        let before = world_points(&s);
+        assert!(before.len() > 4, "the sketch has its four lines and its spline: {before:?}");
+        run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "Mid"}));
+        let after = world_points(&s);
+        assert_eq!(before.len(), after.len(), "the redefine keeps the sketch's points: {before:?} {after:?}");
+        for ((id, before), (_, after)) in before.iter().zip(after.iter()) {
+            assert!((after.x - before.x).abs() < 1e-9 && (after.y - before.y).abs() < 1e-9, "{id} keeps its world XY: {before:?} -> {after:?}");
+            assert!((after.z - 10.0).abs() < 1e-9, "{id} moves up to the midplane: {before:?} -> {after:?}");
+        }
+    }
+
     #[test]
     fn design_units_change_without_moving_geometry() {
         let mut s = Session::default();
