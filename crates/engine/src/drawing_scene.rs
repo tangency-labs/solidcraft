@@ -72,7 +72,7 @@ use solidcraft_doc::drawing::balloon::{Balloon, RowRead, balloon_rows};
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::note::{Anchor, Note};
 use solidcraft_doc::drawing::view::{FlatOf, ResolvedView, View, ViewPlace};
-use solidcraft_doc::drawing::{Drawing, FillRegionStatus, ResolvedSketchFill, Sheet, SheetSketch, SketchFill, Updates};
+use solidcraft_doc::drawing::{Drawing, FillRegionStatus, Owner, ResolvedSketchFill, Sheet, SheetSketch, SketchFill, Updates};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, Document, ModelState, ThreadInfo, expr::ParamDef, ids};
 use solidcraft_geom::cell::{Part, Projection};
@@ -610,7 +610,8 @@ struct DrawnSketch {
 /// Solve a read-only copy, then convert exact authored geometry in physical paper mm.
 fn draw_sketch(s: &Session, drawing: &Drawing, record: &SheetSketch) -> DrawnSketch {
     let id = record.id;
-    let line_group = drawing.sheets.iter().find(|sheet| sheet.id == record.sheet).and_then(|sheet| sheet.line_group).unwrap_or(drawing.line_group);
+    let sheet = drawing.sketch_sheet(record);
+    let line_group = drawing.sheets.iter().find(|on| Some(on.id) == sheet).and_then(|on| on.line_group).unwrap_or(drawing.line_group);
     let result = drawing
         .solve_sheet_sketch(&s.doc, id)
         .map_err(|e| bad(CMD, e.to_string()))
@@ -622,7 +623,7 @@ fn draw_sketch(s: &Session, drawing: &Drawing, record: &SheetSketch) -> DrawnSke
             status: SketchStatus::Failed(format!(
                 "drawing {} sheet {} sketch {}: {}",
                 ids::encode(drawing.id),
-                ids::encode(record.sheet),
+                sheet.map(ids::encode).unwrap_or_default(),
                 ids::encode(id),
                 reason(e)
             )),
@@ -1588,14 +1589,15 @@ pub(crate) fn views_on(d: &Drawing, sheet: u64) -> Result<Vec<(u64, ResolvedView
 }
 
 /// `e`'s message without the command's name: a view's reason in a sheet scene.
+/// The sheet's own sketches; a view's sketches go on paper through their view.
 fn sketches_on(d: &Drawing, sheet: u64) -> Vec<&Arc<SheetSketch>> {
-    let mut on: Vec<_> = d.sketches.iter().filter(|record| record.sheet == sheet).collect();
+    let mut on: Vec<_> = d.sketches.iter().filter(|record| record.owner == Owner::Sheet(sheet)).collect();
     on.sort_unstable_by_key(|record| record.id);
     on
 }
 
 fn fills_on(d: &Drawing, sheet: u64) -> Vec<&Arc<SketchFill>> {
-    let on: BTreeSet<_> = d.sketches.iter().filter(|sketch| sketch.sheet == sheet).map(|sketch| sketch.id).collect();
+    let on: BTreeSet<_> = sketches_on(d, sheet).into_iter().map(|sketch| sketch.id).collect();
     let mut fills: Vec<_> = d.fills.iter().filter(|fill| on.contains(&fill.sketch)).collect();
     fills.sort_unstable_by_key(|fill| fill.id);
     fills
