@@ -225,7 +225,7 @@ impl Brep {
         self.region_order.retain(|&x| x != r);
         self.region_order.insert(0, r);
         self.region_mut(r)?.in_brep = true;
-        self.region_list_head = Some(r);
+        *self.region_list_head = Some(r);
         Ok(())
     }
 
@@ -238,7 +238,7 @@ impl Brep {
         self.region_order.push(r);
         self.region_mut(r)?.in_brep = true;
         if empty {
-            self.region_list_head = Some(r);
+            *self.region_list_head = Some(r);
         }
         Ok(())
     }
@@ -247,13 +247,13 @@ impl Brep {
     /// region when it is removed (none when the list empties).
     pub(crate) fn remove_region_from_list(&mut self, r: RegionId) -> Result<()> {
         let order = p1::regions(self, None)?;
-        if self.region_list_head == Some(r) {
+        if *self.region_list_head == Some(r) {
             let pos = order.iter().position(|&x| x == r);
             let next = pos
                 .and_then(|i| order.get(i + 1).or_else(|| order.first()))
                 .copied()
                 .filter(|&x| x != r);
-            self.region_list_head = next;
+            *self.region_list_head = next;
         }
         self.fix_region_order();
         self.region_order.retain(|&x| x != r);
@@ -633,7 +633,7 @@ fn new_brep_in(
     // When asked (should be extremly rare) set SystemTolerance sizes
     b.set_this_model_size_estimate(k, model_size_estimate);
     b.set_this_large_small_size_ratio(k, large_small_size_ratio);
-    b.tolerance = tol::context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+    *b.tolerance = tol::context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
 
     // Create infinite region and put into brep's region list
     let r = b.add_region_record(Region::default())?;
@@ -707,9 +707,9 @@ pub fn copy_brep(
 
     // copy tolerances
     p2::set_tolerance(k, &mut b, src.tolerance(), true, true)?;
-    b.model_size_estimate = src.model_size_estimate;
-    b.large_small_size_ratio = src.large_small_size_ratio;
-    b.tolerance = src.tolerance;
+    *b.model_size_estimate = *src.model_size_estimate;
+    *b.large_small_size_ratio = *src.large_small_size_ratio;
+    *b.tolerance = *src.tolerance;
 
     with_caller_identities(k, &mut b, env, Some((src, source_key)), |k, b, env| {
         // do the actual copying (SE: the status is not acted on)
