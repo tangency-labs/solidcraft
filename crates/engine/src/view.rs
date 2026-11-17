@@ -1351,6 +1351,7 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
         FeatureKind::Extrude { sketch, .. }
         | FeatureKind::Revolve { sketch, .. }
         | FeatureKind::CellGrid { sketch, .. }
+        | FeatureKind::LivingHinge { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
         | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
