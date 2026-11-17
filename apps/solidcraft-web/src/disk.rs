@@ -47,7 +47,8 @@ pub fn route(path: &str) -> WriteTo {
 /// or a file handle that this browser actually remembers. Uploads and other paths are temporary.
 pub fn can_keep_design(path: &str, disk_known: impl FnOnce(&str) -> bool) -> bool {
     match route(path) {
-        WriteTo::Opfs | WriteTo::Download => true,
+        WriteTo::Opfs => path.strip_prefix(OPFS_PREFIX).is_some_and(|name| !name.is_empty() && !name.contains('/')),
+        WriteTo::Download => true,
         WriteTo::Disk => parse(path).is_some_and(|(id, _)| disk_known(id)),
         WriteTo::Memory => false,
     }
