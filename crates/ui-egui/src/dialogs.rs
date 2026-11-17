@@ -4505,6 +4505,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     cancel |= !keep;
+    // A Mirror whose preview has not set its operation yet sets it now (#17377).
+    if ok && !cancel {
+        crate::preview::decide_mirror_operation(app, &mut d);
+    }
     // A window still choosing its operation applies once its check is in (#6901).
     let ok = crate::op_auto::hold_ok(&mut d, ok, &mut apply_again, cancel);
     if ok && !cancel && app.applying.is_none() {
