@@ -989,6 +989,29 @@ fn sub(x: H, y: H) -> H {
     lin(1.0, x, -1.0, y)
 }
 
+/// The smallest product magnitude whose fused remainder ([`exact_leg`]) is a normal number:
+/// below it the remainder may underflow to 0 and read as exact when it is not.
+const EXACT_PRODUCT_FLOOR: f64 = f64::MIN_POSITIVE / (f64::EPSILON * f64::EPSILON);
+
+/// Whether [`lin`]`(a, x, -1, y)`'s coordinate `fl(fl(a x) - y)` is `a x - y` exactly: the
+/// product exact (its fused remainder 0, the product past [`EXACT_PRODUCT_FLOOR`] or `a` or `x`
+/// zero) and the difference exact, by Sterbenz's lemma (`y / 2 <= a x <= 2 y`, of one sign) or
+/// a zero operand. Equal end weights give `a` 1 and a difference of exactly 0.
+fn exact_leg(a: f64, x: f64, y: f64) -> bool {
+    let ax = a * x;
+    let product_exact = if ax == 0.0 {
+        a == 0.0 || x == 0.0
+    } else {
+        ax.is_finite() && ax.abs() >= EXACT_PRODUCT_FLOOR && a.mul_add(x, -ax) == 0.0
+    };
+    product_exact
+        && (ax == 0.0
+            || y == 0.0
+            || (ax.is_sign_negative() == y.is_sign_negative()
+                && ax.abs() <= 2.0 * y.abs()
+                && y.abs() <= 2.0 * ax.abs()))
+}
+
 fn dot4(x: H, y: H) -> f64 {
     x[0] * y[0] + x[1] * y[1] + x[2] * y[2] + x[3] * y[3]
 }
@@ -1691,7 +1714,11 @@ impl Local {
     /// Ruled: each row continued by the homogeneous line `H_n + s D`, `D = (p / h) (rho
     /// H_n - H_(n-1))` with one `rho`, the rows' largest `w_(n-1) / w_n` (module docs),
     /// written by degree elevation over `[b, b + e]`: the points `H_n + (i e / h) (rho H_n -
-    /// H_(n-1))`, all four coordinates. Its bound: the points' rounding.
+    /// H_(n-1))`, all four coordinates. Its bound: the points' rounding, each coordinate's from
+    /// that coordinate's terms (the weight's too, alone), and where a leg coordinate `rho
+    /// H_n - H_(n-1)` is computed exactly ([`exact_leg`]: rows straight in it, or equal end
+    /// weights, make it exactly 0), from that leg as computed: only `t`'s and the point's
+    /// roundings are left (#13714).
     fn ruled(&self, e: f64) -> Result<Self> {
         let b = self.end()?;
         let h = b - self.before_end(0)?;
@@ -1725,13 +1752,25 @@ impl Local {
                     lin(1.0, pn, t, leg)
                 })
                 .collect();
-            // rounding: the leg (a product and a difference), t (two products) and the point
-            // (a product and a sum), gamma_6 of the terms' magnitudes
-            let m = |x: H| x.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-            err = err.max(gamma(6) * (m(pn) + c * pf * (rho.abs() * m(pn) + m(pn1))));
+            // rounding, coordinate by coordinate: the leg (a product and a difference), t (two
+            // products) and the point (a product and a sum), gamma_6 of that coordinate's
+            // terms. A leg coordinate computed exactly carries no rounding of its own, so its
+            // size is the computed one (never more than the sum of its terms'): a coordinate
+            // the rows run straight in, or equal end weights, give exactly 0. Taking every
+            // coordinate's terms at the largest coordinate's size instead made the bound of a
+            // side extended after another the grown net's size times `p e / h`, growing as
+            // the distance squared (#13714)
+            let coordinate = |j: usize| {
+                let leg_size = if exact_leg(rho, pn[j], pn1[j]) {
+                    leg[j].abs()
+                } else {
+                    rho.abs() * pn[j].abs() + pn1[j].abs()
+                };
+                gamma(6) * (pn[j].abs() + c * pf * leg_size)
+            };
+            err = (0..4).fold(err, |m, j| m.max(coordinate(j)));
             // the weight coordinate the same way, of the weights alone
-            err_w = err_w
-                .max(gamma(6) * (pn[3].abs() + c * pf * (rho.abs() * pn[3].abs() + pn1[3].abs())));
+            err_w = err_w.max(coordinate(3));
             ext.push(q);
         }
         let knots = vec![b + e; p + 1];
