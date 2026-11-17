@@ -164,7 +164,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(pending) = app.file_picker.take() {
         // The dialog may have kept a button or modifier release for itself (#16460).
         crate::window_chrome::mark_input_stale(ctx);
-        (pending.complete)(app, path);
+        (pending.complete)(app, paths);
         // Hosts can flush writes or restore native input on the following frame.
         ctx.request_repaint();
     }
