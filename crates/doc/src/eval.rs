@@ -8197,13 +8197,10 @@ fn feature_tools_with_constructor(
             // Each path curve in the sketch it is in, mapped into the feature's frame: the path
             // may join the curves of several sketches (#16168).
             let curves = path_curves(doc, st, path, *path_sketch, f.component)?;
-            let profile;
-            let ss = if curves.iter().any(|c| c.ss.sketch.wire_index(&c.id).is_some()) {
-                profile = profile_in_frame(doc, ss, f.component)?;
-                &profile
-            } else {
-                ss
-            };
+            // The profile joins the path in the feature's frame, whatever sketch each is drawn
+            // in (identity when a sketch shares the feature's component).
+            let profile = profile_in_frame(doc, ss, f.component)?;
+            let ss = &profile;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
             let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
             let tool = |r: &Region2, body: Body| crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None);
@@ -8397,12 +8394,10 @@ fn profile_with_transform(sketch: &SolvedSketch, relative: &Mat) -> Result<Solve
     Ok(mapped)
 }
 
-/// Stored wire coordinates are converted once into the feature consumer frame.
+/// Stored coordinates are converted once into the feature consumer frame: the sketch's plane
+/// (its planar curves are read through it, #16168) and its 3D wires.
 fn path_in_frame<'a>(doc: &Document, sketch: &'a SolvedSketch, consumer: u64) -> Result<std::borrow::Cow<'a, SolvedSketch>> {
     use std::borrow::Cow;
-    if sketch.sketch.wires.is_empty() {
-        return Ok(Cow::Borrowed(sketch));
-    }
     let owner = doc.feature(sketch.feature).map(|f| f.component).unwrap_or(0);
     let inverse =
         crate::mat_inverse(&doc.component_transform(consumer)).ok_or_else(|| DocError::Invalid("path consumer frame is not invertible".into()))?;
@@ -8507,6 +8502,31 @@ fn path_points(curves: &[PathCurve], start: Vec3) -> Result<Option<kernel::Point
         (pts.first().copied().unwrap_or_default(), pts.last().copied().unwrap_or_default())
     };
     let mut rest: Vec<kernel::PathPiece> = pieces;
+    // The chain starts at a free end of the run, the one nearest `start`: a middle pick would
+    // otherwise chain only onward from it and refuse the other side (#16168). A ring has no
+    // free end; its first piece stays first.
+    let near_start = |p: Vec3| if start.is_finite() { p.dist(start) } else { 0.0 };
+    if rest.len() > 1 {
+        let touches = |i: usize, p: Vec3| {
+            rest.iter().enumerate().any(|(j, q)| {
+                j != i && {
+                    let (x, y) = ends(q);
+                    x.dist(p) <= tol || y.dist(p) <= tol
+                }
+            })
+        };
+        let free = |i: usize| {
+            let (a, b) = ends(&rest[i]);
+            (!touches(i, a) || !touches(i, b)).then_some(i)
+        };
+        let end_dist = |i: usize| {
+            let (a, b) = ends(&rest[i]);
+            near_start(a).min(near_start(b))
+        };
+        if let Some(i) = (0..rest.len()).filter_map(free).min_by(|&x, &y| end_dist(x).total_cmp(&end_dist(y))) {
+            rest.swap(0, i);
+        }
+    }
     let Some(first) = rest.first().cloned() else { return Ok(None) };
     rest.remove(0);
     let (a, b) = ends(&first);
@@ -8749,18 +8769,18 @@ pub(crate) fn path_segments_at(curves: &[PathCurve], start: Vec3, profile: Optio
         }
     }
     // Each next curve starts where the previous one ended; the curves are carried onto their
-    // own sketch's plane as they join the chain.
+    // own sketch's plane as they join the chain, and the reversal is kept on the curve so the
+    // closed-path split below reads the run as it is ordered here.
     let mut segs: Vec<kernel::PathSeg> = Vec::new();
-    for (plane, curve) in &curves {
-        let pieces: Vec<kernel::PathSeg> = curve.iter().map(|s| kernel::PathSeg::of_sketch(plane, s)).collect();
-        let (Some(prev_end), Some((a, b))) =
-            (segs.last().map(kernel::PathSeg::end), pieces.first().zip(pieces.last()).map(|(f, l)| (f.start(), l.end())))
-        else {
-            segs.extend(pieces);
-            continue;
-        };
-        let pieces = if b.dist(prev_end) < a.dist(prev_end) { pieces.into_iter().rev().map(|s| s.reversed()).collect() } else { pieces };
-        segs.extend(pieces);
+    for (plane, curve) in &mut curves {
+        let ends = |c: &[solidcore_record::Seg2]| c.first().zip(c.last()).map(|(f, l)| (plane.to_world(f.start()), plane.to_world(l.end())));
+        if let Some(prev_end) = segs.last().map(kernel::PathSeg::end)
+            && let Some((a, b)) = ends(curve)
+            && b.dist(prev_end) < a.dist(prev_end)
+        {
+            *curve = std::mem::take(curve).into_iter().rev().map(|s| s.reversed()).collect();
+        }
+        segs.extend(curve.iter().map(|s| kernel::PathSeg::of_sketch(plane, s)));
     }
     if segs.windows(2).any(|pair| pair[1].start().dist(pair[0].end()) > JOINT) {
         return Err(DocError::Invalid("the path curves are not connected end to end".into()));

@@ -467,10 +467,12 @@ pub struct SweepParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]
     pub path_sketch: Option<SketchRef>,
-    /// The path's curve ids, in order along the path. Not needed when the path is a body's edges.
+    /// The path's curve ids, in order along the path; an entry may be `{"sketch": <sketch>,
+    /// "curve": <id>}` for a curve of another sketch (#16168). Not needed when the path is a
+    /// body's edges.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "StringList")]
-    pub path: Option<StringList>,
+    #[schemars(with = "PathList")]
+    pub path: Option<PathList>,
     /// The name of the body whose edges are the path, instead of a sketch's curves.
     #[serde(default, deserialize_with = "path_body_opt", skip_serializing_if = "Option::is_none")]
     pub path_body: Option<String>,

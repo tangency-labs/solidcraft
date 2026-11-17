@@ -83,10 +83,11 @@ fn scaled_sweep_is_a_frustum() {
 fn sweep_path_across_sketches() {
     let mut s = setup();
     run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "S2"}));
-    // The YZ sketch's y runs along world Z: the line joins `up`'s end at world Z 20.
-    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 40]], "ids": ["seg2"]}));
+    // The YZ sketch's y runs along world Z: the line joins `up`'s end at world Z 40 and runs on
+    // to 60, so the volume needs both sketches' curves.
+    run(&mut s, "sketch.line", json!({"points": [[0, 40], [0, 60]], "ids": ["seg2"]}));
     run(&mut s, "sketch.finish", json!({}));
-    let volume = 40.0 * 100.0 * PI;
+    let volume = 60.0 * 100.0 * PI;
     sweep(&mut s, "C", "Across", json!({"path": [{"sketch": "S2", "curve": "seg2"}, "up"]})).unwrap();
     let m = measure(&s, "Across");
     assert!((m.volume - volume).abs() < 2e-3 * volume, "volume {} vs {volume}", m.volume);
