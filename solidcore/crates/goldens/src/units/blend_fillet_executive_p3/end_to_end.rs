@@ -2735,3 +2735,44 @@ mod wr56_certificates {
         }
     }
 }
+
+/// WR-661 (#14246, `fillet_statuses_pass_on` retired): a fillet of an open sheet keeps its
+/// result. The stitched result has lamina edges, so the closed-solid orientation's "face
+/// uses gathered from both sides" check fires (walking a face use's neighbours crosses
+/// the sheet's boundary to its other side) without the sheet being non-orientable; the
+/// executive keeps the stitched body and `StitchAndOrient` unifies its normals. Both rows
+/// passed with the status ignored; passing it on unconditionally refused them (1005).
+#[cfg(test)]
+mod wr661_open_sheets {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::inputs;
+    use super::*;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// `name`'s sheet is open before and after; the fillet adds one face, and the
+    /// result passes the level-2 check.
+    fn keeps_the_filleted_sheet(name: &str, faces_before: usize) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        assert_eq!(p1::faces(&body, None).unwrap().len(), faces_before, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        assert_eq!(p1::faces(&body, None).unwrap().len(), faces_before + 1, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2).unwrap().lines();
+        assert!(lines.is_empty(), "{name}: {lines:?}");
+    }
+
+    #[test]
+    fn a_degenerate_test5_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-degenerate-test5-e2-r0.5", 4);
+    }
+
+    #[test]
+    fn a_shell_fillet2_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-shell_fillet2-e5-r0.5", 3);
+    }
+}

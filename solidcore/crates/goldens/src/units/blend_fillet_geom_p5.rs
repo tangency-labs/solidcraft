@@ -1188,3 +1188,59 @@ impl UnitDiff for Runner {
         default_cases(self, &ctx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The rail trims whose golden moved from a success to a refusal when
+    /// `fillet_statuses_pass_on` was removed (WR-661; the same 13 rows also move with
+    /// `fillet_rail_trim_at_near_knot`, WR-664). Each end point of the rail drops back
+    /// onto the rail before its start point, so the trim interval `[param1, param2]` has
+    /// `param1 > param2` and is not an interval. `Extent1d::set_min_max` refuses it.
+    /// Upstream ignored that status and trimmed the rail to its previous interval, but set
+    /// the vertex uses at the reversed parameters.
+    #[test]
+    fn wr661_moved_rail_trims_end_before_they_start() {
+        const MOVED: [&str; 13] = [
+            "gen0001", "gen0023", "gen0073", "gen0092", "gen0105", "gen0113", "gen0124",
+            "gen0142", "gen0154", "gen0178", "gen0196", "gen0268", "gen0269",
+        ];
+        for name in MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let Query::TrimRails { g } = &i.query else {
+                panic!("{name}: not a rail trim");
+            };
+            let mut rm = RustModel::build(&i.model).expect("model");
+            let solvers: Vec<FilletSolver> = i
+                .solvers
+                .iter()
+                .map(|s| FilletSolver::new(s.approx, s.ang, s.tang))
+                .collect();
+            for gi in 0..i.model.geoms.len() {
+                if let Ok(si) = u32::try_from(geom_solver(&i, gi)) {
+                    let gid = rm.geom(gi).expect("geometry");
+                    rm.fb.geom_mut(gid).expect("geometry").solver = Some(FilletSolverId(si));
+                }
+            }
+            let k = Kernel::default();
+            let target = rm.target.clone_standing_for_self().expect("target");
+            let gid = rm.geom(*g).expect("geometry");
+            let e = rm
+                .fb
+                .trim_rail_curves(&k, gid, &solvers, &target)
+                .expect_err("the rail trim is refused");
+            assert!(
+                matches!(
+                    e,
+                    SolidError::InvalidInput {
+                        operation: "geom::extent1d::Extent1d::set_min_max",
+                        ..
+                    }
+                ),
+                "{name}: {e:?}"
+            );
+        }
+    }
+}

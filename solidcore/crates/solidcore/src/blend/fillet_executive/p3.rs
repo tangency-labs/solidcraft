@@ -80,6 +80,17 @@ fn invalid(reason: &'static str) -> SolidError {
     }
 }
 
+/// Whether `e` is the closed-solid orientation's "face uses gathered from both sides"
+/// failure ([`crate::topology::brep::p3::GATHERED_BOTH_SIDES`]).
+fn gathered_both_sides(e: &SolidError) -> bool {
+    matches!(
+        e.failure().map(|f| &f.reason),
+        Some(crate::error::Reason::Topology(
+            crate::error::topology::TopologyFailure::Inconsistent(reason)
+        )) if *reason == crate::topology::brep::p3::GATHERED_BOTH_SIDES
+    )
+}
+
 fn ignore<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
@@ -4530,9 +4541,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access.finish_delete_brep(k, fillet)?;
         self.fillet = None;
         let mut tolerance = access.finish_tolerance(k, target)?;
+        let mut lamina = 0;
         for attempt in 0..5 {
             let stitch =
                 access.finish_do_stitching(k, target, tolerance, StitchSettings::default())?;
+            lamina = stitch.lamina;
             if stitch.status.is_none() && stitch.lamina == 0 {
                 break;
             }
@@ -4564,7 +4577,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // fork 873c7c9 passes this on (SER)
         let oriented =
             access.finish_orient_trimmed_surfaces(k, target, true, &mut maybe_not_solid, false);
-        oriented?;
+        match oriented {
+            // (not upstream, which ignores this status for every body; WR-661) A result
+            // left open by the stitch (lamina edges) is not a closed shell: walking a
+            // face use's neighbours crosses its boundary edges to the other side, so the
+            // "both sides gathered" check of the closed-solid orientation fires without
+            // the body being non-orientable. That check fails before any face is
+            // flipped, the body is kept as stitched, and `StitchAndOrient` orients an
+            // open body afterwards by unifying normals (`bJustUnifyNormals` for lamina).
+            Err(e) if lamina > 0 && gathered_both_sides(&e) => {}
+            other => other?,
+        }
         Ok(())
     }
 
