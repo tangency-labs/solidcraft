@@ -190,7 +190,7 @@ fn keys(p: &Value, k: &str, cmd: &str) -> Result<Vec<String>> {
     let v = v.ok_or_else(|| bad(cmd, format!("`{k}` must be a list of item keys")))?;
     // Past the 256-character cap only the datum keys go through, each bounded by its own parser:
     // an item's `o:<ids>/origin/<item>`, a folder's `o:<ids>/origin` - deep placements need them.
-    let past_cap = |x: &String| x.len() > 256 && crate::origins::item(x).is_none() && crate::origins::folder_path(x).is_none();
+    let past_cap = |x: &String| x.chars().count() > 256 && crate::origins::item(x).is_none() && crate::origins::folder_path(x).is_none();
     if v.len() > 10_000 || v.iter().any(|x| x.is_empty() || past_cap(x)) {
         return Err(bad(cmd, format!("`{k}` has bad keys")));
     }
@@ -216,7 +216,7 @@ fn entries(p: &Value, k: &str, cmd: &str) -> Result<Vec<BrowserEntry>> {
         _ => None,
     };
     let list = list.ok_or_else(|| bad(cmd, format!("`{k}` must be a list of item keys (strings) and group ids (numbers)")))?;
-    if list.len() > 10_000 || list.iter().any(|e| e.as_item().is_some_and(|k| k.is_empty() || k.len() > 256)) {
+    if list.len() > 10_000 || list.iter().any(|e| e.as_item().is_some_and(|k| k.is_empty() || k.chars().count() > 256)) {
         return Err(bad(cmd, format!("`{k}` has bad keys")));
     }
     Ok(list)
@@ -301,7 +301,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let d = s.doc_mut();
     let id = d.allocate_id()?;
     let name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
-        Some(n) if n.len() <= 128 => n.to_string(),
+        Some(n) if n.chars().count() <= 128 => n.to_string(),
         Some(_) => return Err(bad(cmd, "`name` is too long")),
         None => format!("Group{}", d.browser_groups.iter().filter(|g| g.folder == folder).count() + 1),
     };
@@ -337,8 +337,10 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
 fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "browser.rename_group";
     let id = group_id(s, p, cmd)?;
-    let name =
-        str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    let name = str_(p, "name")
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && n.chars().count() <= 128)
+        .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if let Some(g) = s.doc_mut().browser_groups.iter_mut().find(|g| g.id == id) {
         g.name = name.to_string();
     }
@@ -1164,7 +1166,7 @@ fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     let mut v = saved_view_form(c).map_err(|e| bad(cmd, e))?;
     let n = s.doc.named_views.len();
     v.name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
-        Some(n) if n.len() <= 128 => n.to_string(),
+        Some(n) if n.chars().count() <= 128 => n.to_string(),
         Some(_) => return Err(bad(cmd, "`name` is too long")),
         None => (n + 1..).map(|k| format!("Named View{k}")).find(|x| !s.doc.named_views.iter().any(|v| v.name == *x)).unwrap_or_default(),
     };
@@ -1215,8 +1217,10 @@ fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
 fn view_rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.rename";
     let i = view_index(s, p, cmd)?;
-    let name =
-        str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    let name = str_(p, "name")
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && n.chars().count() <= 128)
+        .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if s.doc.named_views.iter().enumerate().any(|(j, v)| j != i && v.name == name) {
         return Err(bad(cmd, format!("another view is called `{name}`")));
     }
@@ -1239,7 +1243,7 @@ fn view_list(s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// The keys whose strings name bodies, alone or in a list (`body`, `targets`…), at any depth of a
 /// feature: its own fields and the face, edge and link references inside it.
-const BODY_KEYS: [&str; 5] = ["body", "bodies", "target", "targets", "tools"];
+const BODY_KEYS: [&str; 6] = ["body", "bodies", "target", "target_bodies", "targets", "tools"];
 
 /// Replace the body name `old` with `new` where a string names a body (the value of one of
 /// [`BODY_KEYS`]); other strings equal to it (sketch text, plane and feature names, expressions)
@@ -1356,7 +1360,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     fn new_name<'a>(cmd: &str, p: &'a Value) -> Result<&'a str> {
         str_(p, "name")
             .map(str::trim)
-            .filter(|n| !n.is_empty() && n.len() <= MAX_BODY_NAME)
+            .filter(|n| !n.is_empty() && n.chars().count() <= MAX_BODY_NAME)
             .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))
     }
     let Some(list) = p.get("bodies").filter(|v| !v.is_null()) else {
@@ -1386,7 +1390,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let name = new_name(cmd, p)?;
     let targets = numbered_names(s, &olds, name);
-    if let Some(target) = targets.iter().find(|t| t.len() > MAX_BODY_NAME) {
+    if let Some(target) = targets.iter().find(|t| t.chars().count() > MAX_BODY_NAME) {
         return Err(bad(cmd, format!("`{target}` is longer than {MAX_BODY_NAME} characters; choose a shorter name")));
     }
     // Each rename reads the model (a feature's other bodies, the bodies named after this one),
@@ -1546,6 +1550,9 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
         for b in f.participants.iter_mut().filter(|b| **b == old) {
             *b = name.to_string();
         }
+        // Every typed body reference, those outside `BODY_KEYS` too: a sweep along a body's
+        // edges (`path_body`) or a mutual surface trim (`with`) (#17386).
+        f.kind.remap_bodies(&BTreeMap::from([(old.clone(), name.to_string())]));
         if let FeatureKind::Sketch { plane, .. } = &mut f.kind {
             solidcraft_doc::sheet::rename_plane_sheet_body(plane, &old, name);
         }
@@ -1590,6 +1597,21 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     Ok(BodyRenamed { body: old, name: name.to_string(), renamed: Vec::new(), param_warnings: Vec::new() })
 }
 
+/// Whether sketch `id` fails on its new plane (`trial`) only for projections it lost, so the
+/// plane is no reason to refuse: a lost projection fails a sketch on any plane, and a name is
+/// looked up on its body, not on the plane, so no plane loses one more. On its old plane (`before`,
+/// the design with the old plane up to the sketch) it failed for the same projections or a subset
+/// of them, or it failed before reaching them (its own plane was lost).
+pub(crate) fn only_lost_before(before: &solidcraft_doc::Model, trial: &Session, id: u64) -> bool {
+    let Some(now) = trial.model.result(id).and_then(|r| r.lost_projections.clone()) else { return false };
+    let earlier = match before.result(id) {
+        Some(r) if r.error.is_some() && r.lost_projections.is_none() => true,
+        Some(r) => r.lost_projections.as_ref().is_some_and(|was| now.iter().all(|l| was.iter().any(|w| w.link == l.link))),
+        None => false,
+    };
+    earlier && trial.model.failed_sketch_shown(&trial.doc, id).is_some()
+}
+
 fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.redefine";
     let key = match p.get("sketch") {
@@ -1629,10 +1651,11 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .cloned();
-    let plane = super::sketch::plane_ref(&trial, p, cmd)?;
+    let mut plane = super::sketch::plane_ref_numbers(&trial, p, cmd)?;
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
+    solidcraft_doc::capture_sketch_plane_placement(&trial.design_document(), &mut plane, component, &trial.active_component_frame())?;
     if let Some(anchor) = old_anchor
         && super::sketch::face::anchor(&plane)
             .is_none_or(|next| next.target != anchor.target || next.component != anchor.component || next.path != anchor.path)
@@ -1677,7 +1700,9 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     }
     trial.doc_mut().marker = Some(index + 1);
     trial.refresh();
-    if let Some(error) = trial.model.result(id).and_then(|result| result.error.as_ref()) {
+    if let Some(error) = trial.model.result(id).and_then(|result| result.error.as_ref())
+        && !only_lost_before(&baseline.model, &trial, id)
+    {
         return Err(bad(cmd, error.clone()));
     }
     trial.doc_mut().marker = marker;
@@ -3536,5 +3561,69 @@ mod tests {
         // The components folder takes placements of that component, and nothing else.
         refused(&mut s, "browser.order", json!({"folder": "components", "order": ["424242"]}));
         refused(&mut s, "browser.order", json!({"folder": "components", "order": [outer]}));
+    }
+
+    /// A body's, a named view's and a group's name is 1…128 characters, as the refusal says, not
+    /// 128 bytes of its UTF-8: a hundred `ł` (200 bytes) is taken, 129 characters are not.
+    #[test]
+    fn body_view_and_group_names_count_characters_not_bytes() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "view.save", json!({"name": "Photo", "camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100}}));
+        let group = run(&mut s, "browser.group", json!({"folder": "bodies", "items": ["Block"], "name": "Held"}))["group"].as_u64().unwrap();
+        let long = "ł".repeat(100);
+        run(&mut s, "body.rename", json!({"body": "Block", "name": long}));
+        assert_eq!(names(&s), vec![long.clone()]);
+        run(&mut s, "view.rename", json!({"view": "Photo", "name": long}));
+        assert_eq!(s.doc.named_views[0].name, long);
+        run(&mut s, "browser.rename_group", json!({"group": group, "name": long}));
+        assert_eq!(s.doc.browser_group(group).map(|g| g.name.as_str()), Some(long.as_str()));
+        let too_long = "ł".repeat(129);
+        for (command, params) in [
+            ("body.rename", json!({"body": long, "name": too_long})),
+            ("view.rename", json!({"view": long, "name": too_long})),
+            ("browser.rename_group", json!({"group": group, "name": too_long})),
+        ] {
+            let error = s.execute(command, &params).unwrap_err().to_string();
+            assert!(error.contains("1…128 characters"), "{command}: {error}");
+        }
+        // Several bodies with one name count characters too, the numbered ones included.
+        run(&mut s, "solid.box", json!({"body_name": "Other", "length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+        run(&mut s, "body.rename", json!({"bodies": [long, "Other"], "name": long}));
+        let numbered = format!("{long} (2)");
+        assert_eq!(names(&s), vec![long.clone(), numbered]);
+        // So do the names a new group and a new view are given.
+        let made = run(&mut s, "browser.group", json!({"folder": "bodies", "items": [long], "name": long}))["group"].as_u64().unwrap();
+        assert_eq!(s.doc.browser_group(made).map(|g| g.name.as_str()), Some(long.as_str()));
+        let camera = json!({"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100});
+        let second = "ł".repeat(99);
+        run(&mut s, "view.save", json!({"name": second, "camera": camera}));
+        assert!(s.doc.named_views.iter().any(|v| v.name == second), "{:?}", s.doc.named_views);
+        for (command, params) in
+            [("browser.group", json!({"folder": "bodies", "name": too_long})), ("view.save", json!({"name": too_long, "camera": camera}))]
+        {
+            let error = s.execute(command, &params).unwrap_err().to_string();
+            assert!(error.contains("too long"), "{command}: {error}");
+        }
+    }
+
+    /// An item key is at most 256 characters, not 256 bytes, so a body with any name the rename
+    /// commands take can be grouped, ordered and hidden by it: a hundred CJK characters are 300
+    /// bytes.
+    #[test]
+    fn a_body_with_a_long_multibyte_name_can_be_grouped_ordered_and_hidden() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"body_name": "Block", "length": 10, "width": 10, "height": 10}));
+        let long = "中".repeat(100);
+        run(&mut s, "body.rename", json!({"body": "Block", "name": long}));
+        let group = run(&mut s, "browser.group", json!({"folder": "bodies", "items": [long]}))["group"].as_u64().unwrap();
+        assert_eq!(s.doc.browser_group(group).map(|g| g.items.clone()), Some(vec![BrowserEntry::Item(long.clone())]));
+        run(&mut s, "browser.ungroup", json!({"group": group}));
+        run(&mut s, "browser.order", json!({"folder": "bodies", "order": [long]}));
+        run(&mut s, "browser.visibility", json!({"items": [long], "visible": false}));
+        assert!(s.visibility.hidden_bodies.contains(&long), "{:?}", s.visibility);
+        let too_long = "中".repeat(257);
+        let error = s.execute("browser.order", &json!({"folder": "bodies", "order": [too_long]})).unwrap_err().to_string();
+        assert!(error.contains("bad keys"), "{error}");
     }
 }

@@ -117,6 +117,9 @@ pub fn spec(s: &CellGridSpec) -> k::CellGridSpec {
         angle: s.angle,
         anchor: vec2(s.anchor),
         clip: clip(s.clip),
+        keepout_clip: s.keepout_clip.map(clip),
+        snap_inset: s.snap_inset,
+        margin: s.margin,
     }
 }
 
@@ -132,6 +135,9 @@ pub fn record_spec(s: &k::CellGridSpec) -> CellGridSpec {
         angle: s.angle,
         anchor: record_vec2(s.anchor),
         clip: record_clip(s.clip),
+        keepout_clip: s.keepout_clip.map(record_clip),
+        snap_inset: s.snap_inset,
+        margin: s.margin,
     }
 }
 

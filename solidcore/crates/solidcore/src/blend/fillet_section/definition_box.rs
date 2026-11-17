@@ -7,8 +7,7 @@
 //!
 //! Not in the pinned upstream: the SolidCraft fork's `source/SMLib/src/SmFilletSection.cpp`
 //! (tangency-labs/smlib@c5b6bb7, smlib#101, merged at 852dd8c). A round of one radius
-//! is built on such a face as its definition (WR-714) where
-//! [`crate::kernel::UpstreamFixes::fillet_round_as_definition`] builds the inner one.
+//! is built on such a face as its definition (WR-714), the inner one too.
 //!
 //! | Rust                                  | Fork (`SmFilletSection.cpp`)                     |
 //! |---------------------------------------|--------------------------------------------------|
@@ -697,7 +696,6 @@ mod tests {
         use crate::query::api_queries::{edge_closest_point, get_edges};
         use crate::topology::face;
         let mut k = Kernel::default();
-        k.fixes.fillet_round_as_definition = true;
         let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
         let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
         let phi = 4.0_f64.to_radians();

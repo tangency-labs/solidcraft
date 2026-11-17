@@ -62,6 +62,8 @@ request that names it. Check all three, and build on the existing work rather th
   faces and tangent contacts.
 - [docs/offset-and-shell.md](docs/offset-and-shell.md): offsets of the definition, folds and the
   largest wall, the offset construction, shell and thicken.
+- [docs/failure-codes-and-reproduction.md](docs/failure-codes-and-reproduction.md): a failure's
+  stable code, a failed call as a rig entry, single-entry replay and the case reducer (design).
 - [docs/coordinating.md](docs/coordinating.md): if you lead other agents: how to understand the
   problem, search for related work, split it into briefs and inspect what comes back.
 
@@ -247,8 +249,6 @@ own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #101
   render's view from the case's geometry so it shows the issue (the corner, the seam, the spot
   refused or fixed), framed close on it, with an inset of the whole part where it helps; never a
   fixed angle.
-- **Don't extend code that is going away.** Improve the construction that replaces it; an old
-  path is deleted when its replacement lands, never kept as a fallback.
 - **Crash, UB, hang and nondeterminism fixes are unconditional**, e.g. the fix for UB-87.
 - **Check that the issue is still open work before you claim it.** Many issues were
   fixed by a PR that did not close them (see #1206). Search merged PRs for the issue

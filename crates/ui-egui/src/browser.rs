@@ -215,8 +215,6 @@ pub struct TreeState {
     found: Option<Found>,
     /// A native feature to reveal in its placed component's Features folder (Find in Timeline).
     pub(super) reveal_feature: Option<features::Reveal>,
-    /// The Move/Copy panel of an occurrence.
-    pub occurrence_move: Option<OccMove>,
     /// The Redefine Sketch Plane panel (sketch id).
     pub redefine: Option<u64>,
     pub redefine_draft: Option<crate::sketch_attachment_ui::Draft>,
@@ -385,56 +383,6 @@ impl TreeState {
     fn remember(&mut self, key: &str) {
         self.content.current_mut().remember(key);
         self.node_keys.entry(node_id(key)).or_insert_with(|| key.to_owned());
-    }
-}
-
-/// Moving an occurrence: the offsets typed so far (pending until Capture Position).
-#[derive(Clone, Debug)]
-pub struct OccMove {
-    pub occurrence: u64,
-    /// Exact assembly placement used for world-space movement and the pivot.
-    pub path: Vec<u64>,
-    /// Effective local placement at dialog opening, including its pre-existing pending move.
-    pub baseline: Option<solidcraft_engine::doc::Mat>,
-    pub had_pending: bool,
-    /// Distances along X, Y, Z (mm) and turns about X, Y, Z (degrees) from where it was.
-    pub translate: [f64; 3],
-    pub angles: [f64; 3],
-    /// The occurrence's centre when the move began: what it turns about.
-    pub pivot: Option<solidcore_record::Vec3>,
-    /// The order the angles apply in (`gizmo::turn_of`), so each stays what was dragged.
-    order: [usize; 3],
-    /// The placement the values start from, when not the baseline: a turn no sum of angles can
-    /// make starts the values over from where the occurrence stands.
-    base: Option<solidcraft_engine::doc::Mat>,
-    /// The values when the current triad drag began, and whether its ring has settled its angle.
-    drag0: Option<([f64; 3], [f64; 3])>,
-    ring_set: bool,
-}
-
-impl OccMove {
-    pub fn new(occurrence: u64) -> Self {
-        OccMove {
-            occurrence,
-            path: Vec::new(),
-            baseline: None,
-            had_pending: false,
-            translate: [0.0; 3],
-            angles: [0.0; 3],
-            pivot: None,
-            order: crate::gizmo::ANGLE_ORDER,
-            base: None,
-            drag0: None,
-            ring_set: false,
-        }
-    }
-
-    /// The values go back to zero where the occurrence stands, which keeps its pending move.
-    fn bake(&mut self, app: &SolveApp) {
-        let t = self.translate;
-        self.pivot = self.pivot.map(|p| p + solidcore_record::Vec3::new(t[0], t[1], t[2]));
-        self.base = app.session.pending_moves.get(&self.occurrence).copied().or(self.base);
-        (self.translate, self.angles, self.order) = ([0.0; 3], [0.0; 3], crate::gizmo::ANGLE_ORDER);
     }
 }
 
@@ -806,9 +754,6 @@ pub fn group_action(app: &mut SolveApp, action: &str, p: &Value) {
                 let _ = app.run("browser.ungroup", json!({ "group": g }));
             }
         }
-        "ui.renameGroup" => {
-            let _ = app.run("browser.rename_group", p.clone());
-        }
         _ => {}
     }
 }
@@ -1013,6 +958,8 @@ pub(crate) fn present(
         .scroll(scroll)
         .shrink(shrink)
         .events_per_row(true)
+        // Not while the app's own name editor is open: it needs Enter, F2 and the arrows itself.
+        .keyboard(app.preferences.browser_arrow_keys && app.menu.rename.is_none())
         .show(ui, |rows| draw(app, rows, acts));
     app.tree.content.current_mut().browser = state;
     crate::semantic_content::record_drawn(ui, &output);
@@ -1187,6 +1134,8 @@ pub(crate) struct Actions {
     pub(crate) hovered: bool,
     /// The plane whose row is under the pointer, lit in the view (#6975).
     pub(crate) hover_plane: Option<String>,
+    /// The Origin item whose row is under the pointer, shown in the view (#15658).
+    pub(crate) hover_origin: Option<String>,
     /// The feature or sketch whose row is under the pointer (#14263).
     pub(crate) hover_feature: Option<u64>,
     pub(crate) hover_joint: Option<u64>,
@@ -1251,7 +1200,7 @@ impl Lit {
         *self.from_view.get_or_insert_with(|| {
             #[cfg(test)]
             FROM_VIEW_WORKED_OUT.with(|n| n.set(n.get() + 1));
-            [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)]
+            [crate::timeline::hovered_feature(app).or(app.viewport.hover_feature), crate::timeline::picked_feature(app)]
         })
     }
 
@@ -1303,7 +1252,15 @@ impl Lit {
             Some(Hit::Plane { name, .. }) => Some(Thing::Plane(name.clone())),
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
-            None => None,
+            None => app.viewport.hover_feature.and_then(|id| {
+                app.session.doc.feature(id).and_then(|f| match &f.kind {
+                    FeatureKind::Sketch { .. } => Some(Thing::Sketch(id)),
+                    FeatureKind::ConstructionPlane { .. } => Some(Thing::Plane(f.name.clone())),
+                    FeatureKind::ConstructionAxis { .. } => Some(Thing::Axis(f.name.clone())),
+                    FeatureKind::ConstructionPoint { .. } => Some(Thing::Point(f.name.clone())),
+                    _ => None,
+                })
+            }),
         };
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in
@@ -1571,7 +1528,6 @@ pub(crate) fn cancel_content_drag(ctx: &egui::Context, session: u64) {
 
 /// App-owned editor lifecycle; these windows do not depend on any tree being presented.
 pub(crate) fn editors(app: &mut SolveApp, ui: &mut egui::Ui) {
-    crate::browser_prompts::occurrence_panel(app, ui);
     crate::browser_prompts::capture_prompt(app, ui.ctx());
     crate::browser_canvas::panel(app, ui.ctx());
     point_clouds::panel(app, ui.ctx());
@@ -1817,7 +1773,9 @@ fn occurrence_rows_inner(
         || (app.session.active_occurrence_path.is_none() && app.session.active_component == placement.component && placement.first);
     let visible = !on_screen || app.session.occurrence_visible(path);
     let own_visible = !on_screen || !app.session.occurrence_hidden(path);
-    let selected = on_screen && app.session.selection.iter().any(|s| matches!(s, Sel::Occurrence { path: selected } if selected == path));
+    let selected = on_screen
+        && (app.session.selection.iter().any(|s| matches!(s, Sel::Occurrence { path: selected } if selected == path))
+            || crate::dialogs_move::picked(app, &Sel::Occurrence { path: path.to_vec() }));
     let faded = app.session.active_occurrence_path.as_ref().is_some_and(|p| !path.starts_with(p) && !p.starts_with(path));
     // A cut component has a dashed outline until Paste moves it.
     let cut = app.cut.placements.iter().any(|p| p.as_slice() == path);
@@ -2182,8 +2140,14 @@ fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &
                 acts.menu = Some((p, target));
             }
         }
+        // A plane row lights its plane. With the preference on, any Origin row also names its
+        // item as an Origin row's, so the view shows it, hidden or not, even where a feature has
+        // the same name (#15658). The view draws it; nothing here changes visibility.
         if r.hovered && icon == "plane" {
-            acts.hover_plane = Some(name);
+            acts.hover_plane = Some(name.clone());
+        }
+        if r.hovered && app.preferences.browser_hover_shows_origin {
+            acts.hover_origin = Some(name);
         }
         if r.clicked
             && let Some(x) = sel
@@ -2748,9 +2712,12 @@ impl Entry {
     }
 
     fn is_selected(&self, app: &SolveApp) -> bool {
-        self.sel
-            .as_ref()
-            .is_some_and(|s| app.session.selection.contains(s) || matches!(s, Sel::Feature { id } if app.session.active_sketch == Some(*id)))
+        // What Move/Copy moves shows selected too: a click on it takes it out of the move.
+        self.sel.as_ref().is_some_and(|s| {
+            app.session.selection.contains(s)
+                || matches!(s, Sel::Feature { id } if app.session.active_sketch == Some(*id))
+                || crate::dialogs_move::picked(app, s)
+        })
     }
 }
 
@@ -3189,7 +3156,9 @@ pub(crate) fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: NameAt, 
     if escape {
         // Dropping the state cancels the edit.
     } else if commit {
+        // A refused name keeps the editor open, focused with the name selected.
         if crate::context_menu::commit_rename(app, &rename).is_err() {
+            rename.focused = false;
             app.menu.rename = Some(rename);
         }
     } else {
@@ -3357,14 +3326,16 @@ fn entry_row(
         }
         // A double-click or a slower second click renames the row (sketch double-clicks edit
         // instead), like F2.
-        if (r.double || r.slow_rename) && !dialog_pick {
-            crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default());
-            if let Some(rename) = app.menu.rename.as_mut()
-                && let Some(row_id) = r.row_id
-            {
-                rename.inline = true;
-                rename.inline_id = Some(row_id);
-            }
+        // Only a rename this click started is edited in the row: a refused one still open belongs
+        // to its own row.
+        if (r.double || r.slow_rename)
+            && !dialog_pick
+            && crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default())
+            && let Some(rename) = app.menu.rename.as_mut()
+            && let Some(row_id) = r.row_id
+        {
+            rename.inline = true;
+            rename.inline_id = Some(row_id);
         }
     }
     inline_rename(app, rows.ui(), r.name_at(), &e.label);
@@ -3545,113 +3516,20 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
 // Panels opened from the menus
 // ---------------------------------------------------------------------------------------------
 
-pub(crate) fn revert_occurrence_dialog(app: &mut SolveApp, m: &OccMove) {
-    if m.had_pending {
-        let _ = app.run("occurrence.move", json!({"occurrence":m.occurrence,"base_transform":m.baseline,"capture":false}));
-    } else {
-        let _ = app.run("component.revert_position", json!({"occurrences":[m.occurrence]}));
-    }
-}
-
-/// The middle of what a moved occurrence places, in the world, where its triad sits and it turns.
-/// Its component's origin can be anywhere, far from the part. `None` when it places nothing.
-pub(crate) fn occurrence_centre(app: &SolveApp, m: &OccMove) -> Option<solidcore_record::Vec3> {
-    let bounds = if m.path.is_empty() {
-        crate::dialogs_assembly::occurrence_bounds(&app.session, &[m.occurrence])
-    } else {
-        let names = app.session.occurrence_bodies_shared(&m.path, true).ok()?;
-        let world = crate::open_meshing::session_world(&app.session);
-        names.iter().filter_map(|n| world.body(n)).fold(solidcraft_engine::geom::Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds()))
-    };
-    (!bounds.is_empty()).then(|| bounds.center())
-}
-
-/// The pending move: turned by the angles in the order they were dragged (about X, then Y, then
-/// Z at first) through the occurrence's centre, then moved.
-pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
-    use crate::gizmo;
-    use solidcore_record::Vec3;
-    let (axis, angle) = gizmo::axis_angle(&gizmo::turn_of(m.angles.map(f64::to_radians), m.order));
-    let o = m.pivot.unwrap_or(Vec3::ZERO);
-    let baseline = m.base.or(m.baseline).or_else(|| app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.transform));
-    let _ = app.run(
-        "occurrence.move",
-        if m.path.is_empty() {
-            json!({ "occurrence": m.occurrence, "base_transform": baseline, "translate": m.translate, "axis": [axis.x, axis.y, axis.z], "angle": angle, "origin": [o.x, o.y, o.z], "capture": false })
-        } else {
-            json!({ "occurrence": m.occurrence, "path": m.path, "space": "world", "base_transform": baseline, "translate": m.translate, "axis": [axis.x, axis.y, axis.z], "angle": angle, "origin": [o.x, o.y, o.z], "capture": false })
-        },
-    );
-}
-
-/// The shared move triad at the occurrence's centre: arrows and squares move it, rings turn it.
-pub(crate) fn occurrence_triad_model(app: &SolveApp) -> Option<crate::gizmo::Triad> {
-    let movement = app.tree.occurrence_move.as_ref()?;
-    let center = movement.pivot? + solidcore_record::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);
-    Some(crate::gizmo::Triad { center, translate: true, rotate: true })
-}
-
-/// Occurrence handles belong to the viewport, not the clipped Move panel's child UI.
-pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &crate::viewport::Proj) {
-    use crate::gizmo::{self, Change};
-    let Some(mut m) = app.tree.occurrence_move.clone() else { return };
-    let before = (m.translate, m.angles);
-    let Some(t) = occurrence_triad_model(app) else { return };
-    let step = crate::canvas::snap_step(app.cam.half_height());
-    let Some(g) = gizmo::show(ui, painter, proj, egui::Id::unique("sc_occ_triad"), &t, step) else { return };
-    if g.started || m.drag0.is_none() {
-        m.drag0 = Some((m.translate, m.angles));
-        m.ring_set = false;
-    }
-    match g.change {
-        Change::Translate(v) => {
-            let (t0, _) = m.drag0.unwrap_or((m.translate, m.angles));
-            m.translate = [t0[0] + v.x, t0[1] + v.y, t0[2] + v.z];
-        }
-        // Not on the press: a click on a ring changes nothing. Once the ring has turned, a drag
-        // back to where it started is a real zero.
-        Change::Rotate { axis, angle } if angle != 0.0 || m.ring_set => {
-            let i = axis.min(2);
-            // The ring's first turn: let its angle add, or start over on the turns so far.
-            if !m.ring_set {
-                m.ring_set = true;
-                match gizmo::ring_order(m.angles.map(f64::to_radians), m.order, i) {
-                    Some(order) => m.order = order,
-                    None => {
-                        m.bake(app);
-                        m.drag0 = Some((m.translate, m.angles));
-                    }
-                }
-            }
-            let (_, a0) = m.drag0.unwrap_or((m.translate, m.angles));
-            m.angles[i] = gizmo::within_turn((a0[i] + angle.to_degrees()).to_radians()).to_degrees();
-        }
-        Change::Rotate { .. } => {}
-    }
-    if g.done {
-        m.drag0 = None;
-    }
-    if (m.translate, m.angles) != before {
-        apply_occurrence_move(app, &m);
-    }
-    app.tree.occurrence_move = Some(m);
-}
-
-/// Dimensions of finished sketches whose dimensions are shown (Show Dimensions), drawn over the
-/// viewport like the sketch being edited draws its own (`crate::dim_view`). A double-click on a
-/// value edits it in place without editing the sketch (`crate::dim_view::model_double_click`).
-pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
+/// Dimensions of finished sketches whose dimensions are shown (Show Dimensions), drawn with the
+/// viewport's own `painter` like the sketch being edited draws its own (`crate::dim_view`), so
+/// panels and the ribbon over the viewport cover them (#16846). A double-click on a value edits
+/// it in place without editing the sketch (`crate::dim_view::model_double_click`).
+pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj) {
     use solidcore_record::Vec2;
     use solidcraft_engine::sketch::{DimFrame, chain_centres, default_text, dim_layout_reaching, dim_reach};
     crate::dim_view::set_model_drawn(Vec::new());
-    let Some(rect) = app.viewport.rect else { return };
     if app.session.visibility.shown_dimensions.is_empty() {
         return;
     }
+    let rect = painter.clip_rect();
     let mut drawn = Vec::new();
     let tk = Tokens::get();
-    let proj = crate::viewport::projection(app, rect);
-    let painter = ctx.layer_painter(egui::LayerId::background()).with_clip_rect(rect);
     let st = crate::open_meshing::session_world(&app.session);
     for id in app
         .session
@@ -3682,7 +3560,15 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
                 crate::prefs::dimension_colour(&app.preferences, c.driven)
             };
             let galley = painter.layout_no_wrap(
-                crate::dim_view::frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
+                crate::dim_view::frame_label(
+                    &frame,
+                    &c.kind,
+                    expr,
+                    c.driven,
+                    &app.session.doc.units,
+                    app.preferences.length_decimals,
+                    app.preferences.angle_decimals,
+                ),
                 FontId::proportional(tk.font_caption * crate::prefs::dimension_text_scale(&app.preferences)),
                 col,
             );
@@ -3694,7 +3580,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             }
             for (tip, dir) in &lay.arrows {
                 if let (Some(t), Some(back)) = (to(*tip), to(*tip - *dir * px)) {
-                    crate::icons::markers::dimension_arrow(&painter, t, back, col);
+                    crate::icons::markers::dimension_arrow(painter, t, back, col);
                 }
             }
             let Some(tc) = to(lay.text) else { continue };
@@ -3758,7 +3644,6 @@ pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
         other => return Err(format!("unknown answer `{other}` (capture, revert, cancel)")),
     }
     app.tree.capture_prompt = None;
-    app.tree.occurrence_move = None;
     if what == SAVE {
         crate::toolbar::save(app);
     } else if let Some((extension, name)) = what.strip_prefix(SAVE_AS).and_then(|rest| rest.split_once(':')) {
@@ -3774,14 +3659,6 @@ pub fn answer_capture(app: &mut SolveApp, action: &str) -> Result<(), String> {
         crate::documents::saved_for_close(app);
     }
     Ok(())
-}
-
-/// Where an occurrence's origin is now (with its pending move).
-pub(crate) fn occurrence_origin(app: &SolveApp, occurrence: u64) -> Option<solidcore_record::Vec3> {
-    let o = app.session.doc.occurrences.iter().find(|o| o.id == occurrence)?;
-    let parent = app.session.doc.component_transform(o.parent);
-    let own = app.session.pending_moves.get(&occurrence).copied().unwrap_or(o.transform);
-    Some(solidcraft_engine::doc::apply_point(&solidcraft_engine::doc::mat_mul(&parent, &own), solidcore_record::Vec3::ZERO))
 }
 
 /// The names the Bodies folder lists at the top level, for tests.

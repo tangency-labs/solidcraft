@@ -10,7 +10,8 @@
 //!   the rounds' definitions on.
 //! - A box, and the same box with its material outside (every face's material side
 //!   swapped), decide positive and negative with enclosures holding +120 and -120; a
-//!   sphere (seam and poles) holds `4/3 pi r^3`.
+//!   sphere (seam and poles) holds `4/3 pi r^3`. Their area, centroid, inertia and
+//!   products enclosures hold the closed forms too.
 //! - The same box with one side's surface moved out by 1e-3 and its trims kept: the faces
 //!   no longer meet, and the closed surface the enclosure bounds (the faces and the strips
 //!   across their gaps) holds 120 + 30e-3, which the faces alone do not.
@@ -36,7 +37,8 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
-    enclose_volume, volume_sign, VolumeEnclosure, VolumeSign, CELL_BUDGET,
+    enclose_face_area, enclose_mass_properties, enclose_volume, volume_sign, Bounds,
+    VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box, create_sphere};
@@ -201,6 +203,98 @@ fn a_sphere_is_enclosed_across_its_seam_and_poles() {
     assert!(holds(&e, v) && e.width() <= 1e-6, "{e:?} misses {v}");
 }
 
+/// `enclose_mass_properties` holds the closed forms of a box off the origin (area 148,
+/// centroid (3, 4.5, 6), every axial inertia and product about the origin from
+/// `int x^i = (b^(i+1) - a^(i+1)) / (i+1)` per side) and of a sphere r 2 at the origin (area
+/// `16 pi`, centroid 0, inertia `2/5 m r^2`, products 0: its seam and poles, where the
+/// area's root is not analytic). The box's enclosures reach their widths, each at most
+/// `1e-5` of its scale wide; the sphere's area spends its cell budget near the poles
+/// (MEASURED: 1.8e-3 wide, 3.7e-5 of the area), so its bands are asked to hold the closed
+/// forms at most `1e-4` of their scales wide.
+#[test]
+fn mass_properties_are_enclosed_around_their_closed_forms() {
+    let check = |b: &mut Brep,
+                 wide: f64,
+                 area: f64,
+                 centroid: [f64; 3],
+                 inertia: [f64; 3],
+                 products: [f64; 3]| {
+        let k = Kernel::default();
+        let e = enclose_mass_properties(&k, b, 1e-6).unwrap();
+        if wide <= 1e-5 {
+            assert_eq!(e.short, None, "{e:?}");
+        }
+        let near = |x: &Bounds, v: f64, scale: f64| {
+            assert!(x.contains(v), "{x:?} misses {v} ({e:?})");
+            assert!(
+                x.width() <= wide * scale,
+                "{x:?} wider than {wide:e} of {scale:e}"
+            );
+        };
+        near(&e.area, area, area);
+        let scale = |v: [f64; 3]| v.iter().fold(1.0_f64, |m, x| m.max(x.abs()));
+        for (x, v) in e.centroid.iter().zip(centroid) {
+            near(x, v, scale(centroid));
+        }
+        for (x, v) in e.inertia.iter().zip(inertia) {
+            near(x, v, scale(inertia));
+        }
+        for (x, v) in e.products.iter().zip(products) {
+            near(x, v, scale(inertia));
+        }
+    };
+    let mut k = Kernel::default();
+    // the box [1, 5] x [2, 7] x [3, 9]
+    let mut b = create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
+    let (lo, hi): ([f64; 3], [f64; 3]) = ([1.0, 2.0, 3.0], [5.0, 7.0, 9.0]);
+    let int = |i: usize, p: i32| (hi[i].powi(p + 1) - lo[i].powi(p + 1)) / f64::from(p + 1);
+    // int x_i^pi x_j^pj over the box (the third side's length)
+    let m = |p: [i32; 3]| int(0, p[0]) * int(1, p[1]) * int(2, p[2]);
+    let (xx, yy, zz) = (m([2, 0, 0]), m([0, 2, 0]), m([0, 0, 2]));
+    check(
+        &mut b,
+        1e-5,
+        148.0,
+        [3.0, 4.5, 6.0],
+        [yy + zz, zz + xx, xx + yy],
+        [m([0, 1, 1]), m([1, 0, 1]), m([1, 1, 0])],
+    );
+    let mut s = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
+    let i = 0.4 * (4.0 / 3.0 * PI * 8.0) * 4.0;
+    check(&mut s, 1e-4, 16.0 * PI, [0.0; 3], [i; 3], [0.0; 3]);
+}
+
+/// `enclose_face_area` on some of a box's faces: each face's enclosure holds its exact area
+/// (`4 x 5`, `4 x 6` or `5 x 6`) and is at most 1e-9 of it wide; the faces together hold
+/// their sum, a face listed twice counts twice, and no faces is refused.
+#[test]
+fn face_areas_are_enclosed_one_face_at_a_time() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::new(1.0, 2.0, 3.0), 4.0, 5.0, 6.0).unwrap();
+    let all = faces(&b, None).unwrap();
+    assert_eq!(all.len(), 6);
+    let mut total = 0.0;
+    for &f in &all {
+        let e = enclose_face_area(&k, &mut b, &[f], 1e-9).unwrap();
+        let exact = [20.0, 24.0, 30.0]
+            .into_iter()
+            .find(|a| e.lo <= *a && *a <= e.hi)
+            .unwrap_or_else(|| panic!("{f:?}: {e:?} holds no face area of the box"));
+        assert!(e.width() <= 1e-9 * exact, "{f:?}: {e:?}");
+        total += exact;
+    }
+    assert_eq!(total, 148.0);
+    let e = enclose_face_area(&k, &mut b, &all, 1e-9).unwrap();
+    assert!(e.lo <= 148.0 && 148.0 <= e.hi, "{e:?}");
+    let twice = enclose_face_area(&k, &mut b, &[all[0], all[0]], 1e-9).unwrap();
+    let once = enclose_face_area(&k, &mut b, &[all[0]], 1e-9).unwrap();
+    assert!(
+        twice.lo <= 2.0 * once.hi && 2.0 * once.lo <= twice.hi,
+        "{twice:?} {once:?}"
+    );
+    assert!(enclose_face_area(&k, &mut b, &[], 1.0).is_err());
+}
+
 #[test]
 fn a_gap_between_faces_is_closed_by_its_strips() {
     let mut k = Kernel::default();
@@ -238,13 +332,11 @@ fn a_gap_between_faces_is_closed_by_its_strips() {
 /// `upstream/TestFiles/pt_TestFiles/Solids/nurb_fillet.smb`, read and healed; `None` where
 /// the upstream test files are not present.
 fn nurb_fillet(k: &mut Kernel) -> Option<Brep> {
-    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-    use solidcore::geom::object::ObjectRef;
+    use solidcore::geom::attribute::AttributeStore;
     use solidcore::topology::brep::p10::TopologyEnv;
     use solidcore::topology::brep::p7::read_from_file;
     use solidcore::topology::database_io::FileType;
     use solidcore::topology::topology::NotifyRecords;
-    use solidcore::EntityRef;
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../upstream/TestFiles/pt_TestFiles/Solids/nurb_fillet.smb");
     let Ok(bytes) = std::fs::read(&path) else {
@@ -258,10 +350,7 @@ fn nurb_fillet(k: &mut Kernel) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -296,16 +385,14 @@ fn solids_touching_along_an_edge_pair_their_sides() {
 
 #[test]
 fn a_g2_round_decides_around_its_volume() {
-    // the default kernel: the round a bare net
-    let bare = Kernel::default();
+    // the default kernel and every fix: on both the round is a procedural blend (its
+    // definition) whose net is certified within a bound above 0, and it is read on its net
     let v = 24000.0 - 40.0 * 9.0 * (1.0 - PI / 4.0);
-    for (name, mut k, certified) in [
-        ("bare net", bare, false),
-        ("definition", definitions_kernel(), true),
+    for (name, mut k) in [
+        ("default", Kernel::default()),
+        ("definition", definitions_kernel()),
     ] {
         let mut b = rounded_box_by(&mut k, 2, 2, GN_THUMBWEIGHT_EQUAL_AREA);
-        // with the definitions on, the round is a procedural blend whose net is certified
-        // within a bound above 0: it is read on its net
         let bounds: Vec<f64> = faces(&b, None)
             .unwrap()
             .into_iter()
@@ -314,11 +401,7 @@ fn a_g2_round_decides_around_its_volume() {
                 s.procedural_blend().map(|d| d.bound())
             })
             .collect();
-        if certified {
-            assert!(bounds.iter().any(|&e| e > 0.0), "{name}: {bounds:?}");
-        } else {
-            assert!(bounds.is_empty(), "{name}: {bounds:?}");
-        }
+        assert!(bounds.iter().any(|&e| e > 0.0), "{name}: {bounds:?}");
         let e = enclose_volume(&k, &mut b, 1e-3 * v).unwrap();
         assert!(
             holds(&e, v) && e.width() <= 1e-3 * v,
@@ -366,7 +449,7 @@ fn a_face_without_a_nurbs_form_is_an_error_not_a_sign() {
 
 /// The solid test names the test a body fails (#15035), the first in the order the tests run:
 /// a sheet is not manifold (and not closed solids, for the touching test); a box with a vertex
-/// tolerance 1000 times the body's, and a box with every face flipped, fail the pointer check;
+/// tolerance below the body's, and a box with every face flipped, fail the pointer check;
 /// the quarter horn torus of #1954, its internal pole read as upstream reads it, fails
 /// `AssertValid`; the box with its material outside is proved inside out; the quarter
 /// shell R 10, t 1e-6 leaves its sign undecided. A box passes every test.
@@ -400,7 +483,7 @@ fn the_solid_test_names_the_test_a_body_fails() {
 
     let mut loose = boxed(&mut k);
     let v = loose.vertex_list()[0];
-    let tolerance = loose.tolerance() * 1000.0;
+    let tolerance = loose.tolerance() * 0.5;
     loose.vertex_mut(v).unwrap().tolerance = tolerance;
     assert!(is_manifold_solid(&loose).unwrap());
     assert_eq!(
@@ -417,39 +500,46 @@ fn the_solid_test_names_the_test_a_body_fails() {
         Some(SolidTest::PointersInvalid)
     );
 
-    // the quarter horn torus of #1954 (a circle of radius 5 revolved a quarter turn about
-    // an axis through its seam vertex, capped): with `internal_pole_row_through_knot` off,
-    // `AssertValid` reports an internal pole (B-spline surface test 2) after a clean
-    // pointer check
+    // a box whose first face's plane is given again with its UV scales and domain negated:
+    // the same points (`origin + u * s * X` is unchanged by `u -> -u`, `s -> -s`), so the
+    // pointer check is clean, but `SmPlane::AssertValid` requires positive scales (tests 3
+    // and 4)
     {
-        use solidcore::curve::curve::Curve;
-        use solidcore::curve::ellipse::Ellipse;
-        use solidcore::geom::extent1d::Extent1d;
-        use solidcore::sweep::api_brep::create_rotational_sweep;
+        use solidcore::geom::extent2d::Extent2d;
+        use solidcore::geom::vector2d::Vec2;
+        use solidcore::surface::plane::Plane;
+        use solidcore::surface::surface::SurfaceKind;
+        use solidcore::topology::face::p1::set_surface;
+        use solidcore::topology::face::p2::surface;
+        use solidcore::EntityRef;
         let mut k = Kernel::default();
-        k.fixes.internal_pole_row_through_knot = false;
-        let frame = Axis2Placement::new(Point3::new(0.0, 0.0, 20.0), Vec3::X, Vec3::Y);
-        let circle = Curve::from(
-            Ellipse::create_canonical_circle(
-                &k,
-                &frame,
-                5.0,
-                Some(&Extent1d::from_min_max(0.0, 360.0)),
-                None,
-            )
-            .unwrap(),
+        let mut scaled = boxed(&mut k);
+        let f = scaled.face_list()[0];
+        let SurfaceKind::Plane(p) = surface(&scaled, f).unwrap().unwrap().kind() else {
+            panic!("a box face is a plane");
+        };
+        let (position, d, s) = (*p.position(), p.step_uv_domain(), p.uv_scale());
+        let negated = Plane::new(
+            position.origin(),
+            position.x_axis(),
+            position.y_axis(),
+            Vec2::new(-s.x, -s.y),
+            &Extent2d::from_bounds(-d.u_max(), -d.v_max(), -d.u_min(), -d.v_min()),
         );
-        let mut horn = create_rotational_sweep(
-            &mut k,
-            &[Some(&circle)],
-            Point3::new(5.0, 0.0, 20.0),
-            Vec3::Y,
-            90.0,
-            true,
-        )
-        .unwrap();
+        let owner = scaled.owner_identity(EntityRef::Face(f));
+        set_surface(&k, &mut scaled, f, owner, Surface::from(negated), true).unwrap();
+        let check = check_brep(&mut k, &mut scaled, CheckLevel::Level0).unwrap();
+        assert!(check.pointer_reports.reports().iter().all(|r| r.ok));
+        let failed: Vec<_> = check
+            .reports
+            .reports()
+            .iter()
+            .filter(|r| !r.ok)
+            .map(|r| (r.reporting_type, r.test_index))
+            .collect();
+        assert_eq!(failed, [(Plane::TYPE, 3), (Plane::TYPE, 4)]);
         assert_eq!(
-            outward_solid_failure(&mut k, &mut horn).unwrap(),
+            outward_solid_failure(&mut k, &mut scaled).unwrap(),
             Some(SolidTest::Invalid)
         );
     }

@@ -145,9 +145,10 @@ fn every_primitive_is_valid_at_every_level() {
 fn a_failed_check_reports_its_lines() {
     all_fixes();
     let b = make_box([0.0; 3], [1.0; 3]).unwrap();
-    with_body("loosen", &b, |_, br| {
+    with_body("shrink", &b, |_, br| {
         let v = br.vertex_list()[0];
-        br.vertex_mut(v)?.tolerance = 0.5;
+        let tolerance = br.tolerance() * 0.5;
+        br.vertex_mut(v)?.tolerance = tolerance;
         Ok(())
     })
     .unwrap();

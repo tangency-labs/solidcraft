@@ -81,8 +81,25 @@ pub struct StepNode {
     /// Indices into [`StepImport::bodies`] of this product's own bodies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bodies: Vec<usize>,
+    /// The STEP item (solid entity id) each of `bodies` was read from: which solid of the file
+    /// a body is, whatever number a reader gives it. Empty in designs saved before it was kept.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<u64>,
+    /// This product's solids that were not imported (the reader could not read them), each at
+    /// its place among the product's solids in file order: a body index is never reused for
+    /// the solid after one that failed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<LeftOut>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<StepNode>,
+}
+
+/// A solid of a product that was not imported: its place among the product's solids in file
+/// order (the imported ones are `bodies`, in that order, around it), and its STEP item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeftOut {
+    pub at: usize,
+    pub item: u64,
 }
 
 /// Result of [`step_import`].
@@ -494,14 +511,20 @@ impl Reader {
                 _ => {}
             }
         }
-        // An INVISIBILITY record names styled items or representations; a representation hides
-        // every item it lists, including the representations it is linked to.
+        // An INVISIBILITY record names styled items, representations or layers; a representation
+        // hides every item it lists, including the representations it is linked to, and a layer
+        // (PRESENTATION_LAYER_ASSIGNMENT) every item assigned to it.
         let mut invisible = HashSet::new();
         for target in std::mem::take(&mut self.invisible_targets) {
             let mut queue = vec![self.styled_items.get(&target).copied().unwrap_or(target)];
             let mut seen = HashSet::new();
             while let Some(target) = queue.pop() {
                 if !seen.insert(target) {
+                    continue;
+                }
+                if let Some(layer) = self.ex.get(target).filter(|e| e.name() == "PRESENTATION_LAYER_ASSIGNMENT") {
+                    let assigned = layer.params().get(2).and_then(Param::as_list).unwrap_or(&[]);
+                    queue.extend(assigned.iter().filter_map(Param::as_ref_id).map(|i| self.styled_items.get(&i).copied().unwrap_or(i)));
                     continue;
                 }
                 if let Some((items, _)) = self.reps.get(&target) {
@@ -1058,14 +1081,25 @@ impl Reader {
         ImportReport { parts, solids, issues }
     }
 
-    /// Planned-solid indices (a node's `bodies` after the walk) as body indices, leaving out
-    /// the ones that failed.
-    fn remap(&self, planned: &[usize]) -> Vec<usize> {
-        planned.iter().filter_map(|i| self.made.get(*i).copied().flatten()).collect()
+    /// Planned-solid indices (a node's `bodies` after the walk) as body indices and the STEP
+    /// item of each, and the planned solids that failed, at their place among `planned`.
+    fn remap(&self, planned: &[usize]) -> (Vec<usize>, Vec<u64>, Vec<LeftOut>) {
+        let (mut bodies, mut items, mut left_out) = (Vec::new(), Vec::new(), Vec::new());
+        for (at, i) in planned.iter().enumerate() {
+            let Some(p) = self.plan.get(*i) else { continue };
+            match self.made.get(*i).copied().flatten() {
+                Some(b) => {
+                    bodies.push(b);
+                    items.push(self.bodies.get(b).map_or(p.item, |b| b.source_item));
+                }
+                None => left_out.push(LeftOut { at, item: p.item }),
+            }
+        }
+        (bodies, items, left_out)
     }
 
     fn remap_node(&self, n: &mut StepNode) {
-        n.bodies = self.remap(&n.bodies);
+        (n.bodies, n.items, n.left_out) = self.remap(&n.bodies);
         for c in &mut n.children {
             self.remap_node(c);
         }
@@ -1131,7 +1165,8 @@ impl Reader {
 
     fn node(&mut self, pd: u64, local: M4, world: M4, path: &[String], instance: Option<&str>, depth: usize, stack: &mut Vec<u64>) -> StepNode {
         let name = self.product_name(pd);
-        let mut node = StepNode { name: name.clone(), transform: local, bodies: Vec::new(), children: Vec::new() };
+        let mut node =
+            StepNode { name: name.clone(), transform: local, bodies: Vec::new(), items: Vec::new(), left_out: Vec::new(), children: Vec::new() };
         if self.stop() {
             return node;
         }
@@ -1389,7 +1424,7 @@ impl StepReading {
             for r in loose {
                 rd.rep_bodies(r, &identity, &[], "Import", None, &mut bodies, 0);
             }
-            tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
+            tree.push(StepNode { name: "Import".into(), transform: identity, bodies, items: Vec::new(), left_out: Vec::new(), children: Vec::new() });
         }
         // Topology outside every representation (bare geometry files, or ones whose topology no
         // representation lists): its unlisted solids, shells and faces, read in the file's one
@@ -1407,7 +1442,14 @@ impl StepReading {
                 rd.node_items = rd.used_items.clone();
                 rd.visits = 0;
                 rd.rep_bodies(UNLISTED, &identity, &[], "Import", None, &mut bodies, 0);
-                tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
+                tree.push(StepNode {
+                    name: "Import".into(),
+                    transform: identity,
+                    bodies,
+                    items: Vec::new(),
+                    left_out: Vec::new(),
+                    children: Vec::new(),
+                });
             }
         }
         let single = workers <= 1;
@@ -1439,10 +1481,14 @@ impl StepReading {
         for n in &mut tree {
             rd.remap_node(n);
         }
-        tree.retain(|n| !n.bodies.is_empty() || !n.children.is_empty());
+        // A product whose only solid failed stays, so the tree still says where that solid was.
+        tree.retain(|n| !n.bodies.is_empty() || !n.left_out.is_empty() || !n.children.is_empty());
         let ex = rd.ex.clone();
         if let Some(first) = ex.duplicates.first() {
             rd.warn(format!("{} entity ids are defined twice (first #{first}); the first definitions were used", ex.duplicates.len()));
+        }
+        if let Some(warning) = solidcore_record::step::protocol::declared(&ex.schemas).warning {
+            rd.warn(warning);
         }
         let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
         let report = rd.report(&warnings);
