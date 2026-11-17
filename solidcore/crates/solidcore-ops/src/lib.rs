@@ -50,6 +50,7 @@ pub mod curve_gap;
 pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
+pub mod edge_profile;
 pub mod error;
 pub mod export_geometry;
 pub mod extend;

@@ -32,6 +32,8 @@ pub mod control_job;
 mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
+pub mod cutlist_panel;
+pub mod cutting_plan_panel;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
@@ -61,6 +63,8 @@ pub mod dialogs_surface;
 pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_view_dxf;
+mod dialogs_wood_edge_profile;
+pub mod dialogs_wood_grain;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -80,6 +84,7 @@ pub use solidcraft_ui_kit::frame;
 pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
+mod grain_guides;
 pub mod help;
 pub use solidcraft_ui_kit::history_bar;
 mod history_folds;
@@ -414,6 +419,7 @@ pub struct UiState {
     pub show_browser: bool,
     pub show_timeline: bool,
     pub show_grid: bool,
+    pub show_grain: bool,
     pub show_navigation_bar: bool,
     pub perspective: bool,
     /// Perspective while orbiting, orthographic when the camera faces a standard axis view
@@ -478,6 +484,7 @@ impl Default for UiState {
             show_browser: true,
             show_timeline: true,
             show_grid: true,
+            show_grain: false,
             show_navigation_bar: true,
             perspective: false,
             auto_ortho_faces: false,
@@ -689,6 +696,9 @@ pub struct SolveApp {
     pub kicad_import: Option<kicad_import_dialog::Dialog>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    pub cutlist: Option<cutlist_panel::CutListPanel>,
+    /// The Cutting Plan panel, when open.
+    pub cutting_plan: Option<cutting_plan_panel::CuttingPlanPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -1047,6 +1057,8 @@ impl SolveApp {
             sketch_report: None,
             kicad_import: None,
             bom: None,
+            cutlist: None,
+            cutting_plan: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -1710,6 +1722,7 @@ impl SolveApp {
                 }
                 // The command and the preference are one setting.
                 "diagnostics.validation" => self.preferences.validation = self.session.validation(),
+                "view.grain" => self.ui.show_grain = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grain),
                 "view.grid" => self.ui.show_grid = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grid),
                 "view.ground_shadow" => self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow),
                 "view.navigation_bar" => {
@@ -1907,6 +1920,8 @@ impl SolveApp {
                     render_workspace::reset_document(self);
                     dim_view::cancel();
                     self.bom = None;
+                    self.cutlist = None;
+                    self.cutting_plan = None;
                     design_properties::close_object(self);
                     timeline::stop_playback(self);
                     self.menu.props = None;
@@ -2296,6 +2311,7 @@ impl SolveApp {
                 | "view.home"
                 | "view.tool.zoom"
                 | "view.spin"
+                | "view.grain"
                 | "view.grid"
                 | "view.ground_shadow"
                 | "view.navigation_bar"
@@ -2546,6 +2562,26 @@ impl SolveApp {
         }
         if id == "sketch.inspect" {
             sketch_report::open(self);
+            return;
+        }
+        if id == "wood.estimate" {
+            cutting_plan_panel::open_estimate(self);
+            return;
+        }
+        if id == "cutlist.layout" {
+            if cutting_plan_panel::available(self) {
+                cutting_plan_panel::set_focus_pending(self, true);
+            } else {
+                cutting_plan_panel::open(self);
+            }
+            return;
+        }
+        if id == "cutlist.parts" {
+            if cutlist_panel::available(self) {
+                cutlist_panel::set_focus_pending(self, true);
+            } else {
+                cutlist_panel::open(self);
+            }
             return;
         }
         if id == "assembly.bom" {

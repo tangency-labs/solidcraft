@@ -1,0 +1,73 @@
+[
+  {
+    "note": "Wood grain is set in a dialog and shown with an opt-in guide"
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.box",
+      "params": {
+        "length": 100,
+        "width": 30,
+        "height": 10,
+        "corner": [
+          0,
+          0,
+          0
+        ],
+        "body_name": "Board"
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "wood.grain",
+      "params": {
+        "body": "Board",
+        "direction": "length"
+      }
+    }
+  },
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "select.set",
+      "params": {
+        "items": [
+          {
+            "type": "body",
+            "name": "Board"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "start": "view.fit"
+  },
+  {
+    "shot": "wood-grain-off"
+  },
+  {
+    "start": "wood.grain"
+  },
+  {
+    "widget": "Picked edge"
+  },
+  {
+    "widget": "Stock length"
+  },
+  {
+    "widget": "Cancel"
+  },
+  {
+    "start": "view.grain"
+  },
+  {
+    "shot": "wood-grain-guides"
+  },
+  {
+    "start": "view.grain"
+  }
+]

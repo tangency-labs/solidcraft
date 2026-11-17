@@ -37,6 +37,8 @@ mod component_clone;
 mod component_clone_assembly;
 mod construct;
 mod construct_auto;
+mod cutlist;
+mod cutting_plan;
 mod delete;
 pub(crate) mod diagnostics;
 mod edit;
@@ -167,6 +169,9 @@ mod tab_views;
 mod view_dxf;
 mod view_navigation;
 mod view_pick;
+mod wood_edge_profile;
+mod wood_estimate;
+mod wood_grain;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -384,6 +389,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
+    v.extend(wood_edge_profile::COMMANDS.iter());
+    v.extend(wood_estimate::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
@@ -396,6 +403,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(bom::COMMANDS.iter());
+    v.extend(cutlist::COMMANDS.iter());
+    v.extend(cutting_plan::COMMANDS.iter());
     v.extend(mass_properties::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
     v.extend(notes::COMMANDS.iter());
@@ -411,6 +420,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(file_library::COMMANDS.iter());
     v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
+    v.extend(wood_grain::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());

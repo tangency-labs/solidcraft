@@ -248,5 +248,7 @@ import
 mesh_convert
   remap_bodies: body
 mesh_import
+wood_edge_profile
+  remap_bodies: body
 repair
   remap_bodies: body

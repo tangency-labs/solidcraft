@@ -1,0 +1,6 @@
+{
+  "saw_cut_minutes": 0.5,
+  "router_minutes_per_metre": 2.0,
+  "glue_up_minutes": 15.0,
+  "labour_per_hour": null
+}

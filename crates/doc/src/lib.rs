@@ -73,6 +73,7 @@ pub use thread_catalog::{
     DRILL_ALLOWANCE, TaperDrill, TappedThread, TappedThreadFamily, metric_tap_drill, parse_tapped_thread, tapped_thread_sizes, untabulated_taper_tap,
 };
 mod walk;
+pub mod wood_edge_profile;
 pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
 pub mod plastic;
 mod print_face;
@@ -92,6 +93,7 @@ pub mod sketch_equation;
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
+pub mod wood;
 
 pub use assembly::{
     BomType, ExpressedAt, ExpressedMove, ExpressedShift, IDENTITY, MAX_EXPRESSED_MOVES, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence,

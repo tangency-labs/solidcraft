@@ -19,6 +19,7 @@ robust = "1.2"
 craft-plugin = { path = "crates/craft-plugin" }
 craft-plugin-wasm = { path = "crates/craft-plugin-wasm" }
 solidcraft-geom = { path = "crates/geom" }
+solidcraft-nest = { path = "crates/nest" }
 solidcraft-profile = { path = "crates/profile" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }

@@ -191,7 +191,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
             },
         ],
         ("MODEL", "MODIFY") => &[
-            CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer"] },
+            CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer", "wood.edge_profile"] },
             CommandGroup {
                 label: "Faces",
                 ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
@@ -364,7 +364,15 @@ pub const SECTIONS: &[Section] = &[
         tab: "MANAGE",
         panel: "MATERIALS",
         promoted: 2,
-        ids: &["material.assign", "appearance.assign", "material.properties.validate", "library.inspect", "library.export", "library.apply"],
+        ids: &[
+            "material.assign",
+            "appearance.assign",
+            "wood.grain",
+            "material.properties.validate",
+            "library.inspect",
+            "library.export",
+            "library.apply",
+        ],
     },
     Section { tab: "MANAGE", panel: "RULES", promoted: 3, ids: &["sheet.manage_rules", "plastic.manage_rules", "plastic.assign_rule"] },
     Section {
@@ -389,6 +397,7 @@ pub const SECTIONS: &[Section] = &[
             "view.tool",
             "view.spin",
             "view.visual_style",
+            "view.grain",
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
@@ -722,6 +731,7 @@ pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
         FeatureKind::SheetUnfold { refold: false, .. } => "unfold",
         FeatureKind::SheetUnfold { .. } => "refold",
         FeatureKind::SheetConvert { .. } => "convert_sheet",
+        FeatureKind::WoodEdgeProfile { .. } => "chamfer",
         FeatureKind::Boss { .. } => "boss",
         FeatureKind::Lip { .. } => "lip",
         FeatureKind::SnapFit { .. } => "snap_fit",
@@ -1047,6 +1057,7 @@ mod tests {
             [
                 "solid.fillet",
                 "solid.chamfer",
+                "wood.edge_profile",
                 "solid.press_pull",
                 "solid.draft",
                 "solid.offset_face",

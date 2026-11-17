@@ -244,6 +244,7 @@ impl Writer {
         let names = self.names(b);
         let mut r = json!({
             "name": b.name, "feature": b.feature, "component": b.component, "key": hex(b.key), "names": names,
+            "grain_frame": b.grain_frame.clone().unwrap_or_default(),
         });
         if let Some(depth) = b.names.depth() {
             r["depth"] = json!(depth);
@@ -371,7 +372,7 @@ impl Writer {
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
         let sheets = st.sheets.iter().map(|s| self.sheet(s)).collect::<Option<Vec<_>>>()?;
         let threads = self.threads(st)?;
-        let r = json!({
+        let mut r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
             "sheets": sheets, "construct": serde_json::to_value(&st.construct).ok()?,
@@ -382,6 +383,9 @@ impl Writer {
             "tapered": serde_json::to_value(&st.tapered).ok()?,
             "pattern_left_out": serde_json::to_value(&st.pattern_left_out).ok()?,
         });
+        if !st.routed_lengths.is_empty() {
+            r["routed_lengths"] = json!(st.routed_lengths);
+        }
         self.states.push(r);
         self.state_index.insert(id, self.states.len() - 1);
         Some(self.states.len() - 1)
@@ -519,6 +523,20 @@ impl SavedModel {
                 depth,
             );
             b.source_name = r.get("source_name").map(|s| text(Some(s))).transpose()?;
+            // Caches written before grain frames existed have none: such a body is read without a
+            // frame, and `Model::adopt` refuses the cache only where a frame member needs its axis.
+            if let Some(saved) = r.get("grain_frame") {
+                let grain: crate::wood::GrainFrame = serde_json::from_value(saved.clone()).map_err(|_| bad("saved model: grain frame"))?;
+                if grain.matrix.iter().flatten().any(|v| !v.is_finite())
+                    || crate::mat_inverse(&grain.matrix).is_none()
+                    || grain.sources.len() > MAX_ITEMS
+                    || grain.sources.iter().any(|s| s.len() > MAX_TEXT)
+                    || grain.member_axis.is_some_and(|d| crate::wood::unit(d).is_err())
+                {
+                    return Err(bad("saved model: grain frame"));
+                }
+                b.grain_frame = Some(grain.into());
+            }
             if let Some(m) = r.get("source_transform") {
                 let m: crate::Mat = serde_json::from_value(m.clone()).map_err(|_| bad("saved model: transform"))?;
                 if m.iter().flatten().any(|x| !x.is_finite()) {
@@ -643,6 +661,11 @@ impl SavedModel {
                     held = held.saturating_add(weight.0.saturating_sub(*weight.1));
                 }
             }
+            if let Some(lengths) = s.get("routed_lengths") {
+                for edges in lengths.as_object().ok_or_else(|| bad("saved model: router lengths"))?.values() {
+                    held = held.saturating_add(1).saturating_add(edges.as_array().ok_or_else(|| bad("saved model: router lengths"))?.len());
+                }
+            }
             held = held.saturating_add(s.get("sheets").and_then(Json::as_array).map_or(0, Vec::len));
             held = held.saturating_add(key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).map_or(0, BTreeMap::len));
             if held > MAX_HELD {
@@ -676,7 +699,13 @@ impl SavedModel {
                 }
                 named_faces.insert(*feature, points.clone());
             }
+            let routed_lengths: BTreeMap<u64, Vec<f64>> =
+                s.get("routed_lengths").cloned().map(serde_json::from_value).transpose().map_err(invalid)?.unwrap_or_default();
+            if routed_lengths.values().flatten().any(|v| !v.is_finite() || *v <= 0.0) {
+                return Err(bad("saved model: router length"));
+            }
             Ok(ModelState {
+                routed_lengths,
                 frame_bodies: Default::default(),
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
@@ -983,6 +1012,13 @@ impl Model {
     /// `doc` gives it now, and every record is well formed.
     pub fn adopt(doc: &Document, saved: &SavedModel) -> Result<Model> {
         let mut states = saved.states()?;
+        // A frame member's grain follows its axis, which only evaluation knows, and copies, joins and
+        // splits carry it to bodies of other features: a cache from before grain frames is evaluated
+        // again for any design with a member, and read as it is otherwise.
+        let has_members = doc.features.iter().any(|f| matches!(f.kind, FeatureKind::FrameMember { .. }));
+        if has_members && states.iter().flat_map(|s| &s.bodies).any(|b| b.grain_frame.is_none()) {
+            return Err(bad("saved model: a frame member has no grain frame"));
+        }
         let frame_bodies = Arc::new(std::sync::Mutex::new(FrameBodies::default()));
         for state in &mut states {
             Arc::make_mut(state).frame_bodies = Arc::downgrade(&frame_bodies);

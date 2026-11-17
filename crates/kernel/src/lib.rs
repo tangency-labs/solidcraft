@@ -36,6 +36,7 @@ mod curvature_comb;
 mod delete_face;
 mod distance;
 mod draft_corners;
+mod edge_profile;
 mod emboss;
 #[cfg(test)]
 mod face_source_tests;
@@ -191,6 +192,7 @@ pub use curvature_comb::{CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH, comb_edge_ne
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, Members, body_distance, edges_closest, point_closest};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};
+pub use edge_profile::{CornerProfile, CornerSizes, RouterEdgePick, edge_profile, routed_edge_lengths, routed_edge_picks, routed_edge_point};
 pub use emboss::{cylinder_emboss_anchor, emboss_cylinder, emboss_cylinder_at, has_cylinder_emboss_wall, infer_cylinder_emboss};
 pub use fair::{
     FairCurve, FairNet, FairOptions, FairReport, MAX_FAIR_ITERATIONS, MAX_FAIR_POINTS, fair_bspline_curve, fair_bspline_surface, fair_curve,
@@ -205,7 +207,7 @@ pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
 pub use lip::{LipRefusal, raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
-pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
+pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass, stock_box};
 pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::{MAX_TRIANGLES, mesh_body, mesh_body_with_normals};
 pub use native::{body_from_smlib, smlib_body};
@@ -302,6 +304,15 @@ impl Cause for solidcraft_smlib::Error {
     fn panic(&self) -> Option<&str> {
         match self {
             solidcraft_smlib::Error::Internal(m) => Some(m),
+            _ => None,
+        }
+    }
+}
+
+impl Cause for solidcore_ops::Error {
+    fn panic(&self) -> Option<&str> {
+        match self {
+            solidcore_ops::Error::Internal(m) => Some(m),
             _ => None,
         }
     }
