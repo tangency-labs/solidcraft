@@ -1413,6 +1413,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         to_body_apart: false,
         from_level: false,
         picked_placements: Vec::new(),
+        one_sided_direction: None,
     })
 }
 
