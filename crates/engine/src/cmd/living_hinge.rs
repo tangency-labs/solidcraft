@@ -33,7 +33,7 @@ const HELP_TAIL: &str =
 const HELP: &str = help_with_cap!(HELP_HEAD, MAX_CUT_SLOTS, HELP_TAIL);
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.living_hinge", "Living Hinge", crate::checked!("solid.living_hinge", living_hinge))
-    .icon("perforate")
+    .icon("living_hinge")
     .contract(&LIVING_HINGE_CONTRACT)
     .output(output_schema_for::<LivingHingeResult>)
     .params(HELP)];
