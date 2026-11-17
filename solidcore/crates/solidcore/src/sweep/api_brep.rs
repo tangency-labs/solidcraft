@@ -1135,10 +1135,25 @@ mod tests {
         // line is open (its ends differ) and lies inside the circle, so its swept wall is a
         // fin with a free edge inside the cylinder that no cap closes off. Main returned the
         // two uncapped walls (2, 7, 6) as a success.
+        // (both centred on the origin: the circle's radius is its start's distance from it)
+        let tolerance = crate::topology::brep::p3::new_brep(
+            &mut k,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .expect("brep")
+        .tolerance();
+        let radius = c
+            .evaluate_point(&k, c.natural_interval().min())
+            .expect("circle start")
+            .length();
         let ends = l.natural_interval();
         let start = l.evaluate_point(&k, ends.min()).expect("start");
         let end = l.evaluate_point(&k, ends.max()).expect("end");
-        assert!((end - start).length() > 0.0 && start.length() < 2.0 && end.length() < 2.0);
+        assert!((end - start).length() > tolerance, "an open line");
+        for p in [start, end] {
+            assert!(p.length() < radius - tolerance, "{p:?} inside the circle");
+        }
         let e = create_linear_sweep(&mut k, &ok, z, 10.0, true).expect_err("no cap");
         assert_eq!(e.sm_status(), Some(1001), "{e:?}");
         // no profile curves and caps: no cap can be made either; upstream returned a

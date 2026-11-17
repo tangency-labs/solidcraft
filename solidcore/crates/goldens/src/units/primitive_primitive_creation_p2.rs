@@ -528,12 +528,35 @@ mod moved_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
 
+    /// Why no requested body exists for the row.
     #[derive(Debug, Clone, Copy, PartialEq)]
     enum Reason {
+        /// Every size of the cone, sphere or pipe is within the B-rep's tolerance of zero.
         Small,
+        /// The taper profile is closed and its signed area is exactly zero with no two
+        /// lines crossing: its lines run back over each other, so it encloses nothing.
         NoArea,
+        /// Two lines of the taper profile that do not share an end cross at a point
+        /// inside both: the loop is not simple, so no cap face has it as its boundary,
+        /// and its two lobes meet at that one point, so no closed capped solid exists.
+        SelfCrossing,
+        /// The taper profile does not close.
         Open,
+        /// Main refused the row too; only the status differs.
         WasRefused,
+    }
+
+    /// The parameters along `a` and `b` (2D segments `[x0, y0, x1, y1]`) where they cross,
+    /// if they are not parallel.
+    fn crossing(a: [f64; 4], b: [f64; 4]) -> Option<(f64, f64)> {
+        let (dx, dy) = (a[2] - a[0], a[3] - a[1]);
+        let (ex, ey) = (b[2] - b[0], b[3] - b[1]);
+        let det = dx * ey - dy * ex;
+        if det == 0.0 {
+            return None;
+        }
+        let (fx, fy) = (b[0] - a[0], b[1] - a[1]);
+        Some(((fx * ey - fy * ex) / det, (fx * dy - fy * dx) / det))
     }
 
     /// The row's primitive call as [`entry`] makes it, with its typed result and the
@@ -631,6 +654,19 @@ mod moved_rows {
                 if !closed {
                     return Reason::Open;
                 }
+                let n = lines.len();
+                for (x, &a) in lines.iter().enumerate() {
+                    for (y, &b) in lines.iter().enumerate().skip(x + 2) {
+                        if x == 0 && y == n - 1 {
+                            continue; // the closing pair shares the loop's start
+                        }
+                        if let Some((t, u)) = crossing(a, b) {
+                            if t > 0.0 && t < 1.0 && u > 0.0 && u < 1.0 {
+                                return Reason::SelfCrossing;
+                            }
+                        }
+                    }
+                }
                 let area: f64 = lines.iter().map(|l| l[0] * l[3] - l[2] * l[1]).sum();
                 assert_eq!(area, 0.0, "a profile with area");
                 Reason::NoArea
@@ -657,7 +693,7 @@ mod moved_rows {
         ("gen0230", Reason::Small),
         ("gen0235", Reason::NoArea),
         ("line_back_2_5e-5_off_the_last_mid_start_cap", Reason::NoArea),
-        ("review3_start_cap_bowtie", Reason::NoArea),
+        ("review3_start_cap_bowtie", Reason::SelfCrossing),
         ("ub50_taper_end_cap_offsets_of_a_loop_enclosing_nothing", Reason::NoArea),
         ("ub50_taper_line_and_its_reverse", Reason::NoArea),
         ("ub50_taper_line_back_through_the_last_mid", Reason::NoArea),
@@ -674,8 +710,9 @@ mod moved_rows {
                 let found = reason(&i, tolerance);
                 assert_eq!(found, expected, "{name}: reason");
             }
-            // Main built nothing for every row but the bowtie, where it left one open
-            // face on the self-crossing profile: no valid cap. The refusal leaves none.
+            // Main built nothing for every row but the bowtie. There it returned one face
+            // (10 edges, level-2 clean, not a manifold solid): not the capped solid asked
+            // for, which cannot exist on a self-crossing loop. The refusal leaves no face.
             assert_eq!(faces, 0, "{name}: the refusal leaves no face");
         }
     }

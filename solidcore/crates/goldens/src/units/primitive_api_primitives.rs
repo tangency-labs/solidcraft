@@ -1394,10 +1394,21 @@ mod moved_rows {
         /// The shortest side is within the new B-rep's tolerance of zero, so the two
         /// vertices of each edge along it are one vertex.
         BelowTolerance,
-        /// The shortest side is within the tolerance scaled to the box's largest
-        /// coordinate (the B-rep's tolerance times it): the side is lost against the
-        /// coordinates it is measured from.
-        BelowScaledTolerance,
+        /// The f64 spacing (one ulp) at the largest coordinate the body reaches exceeds
+        /// the B-rep's tolerance, so a point there cannot be placed within the tolerance
+        /// of where it belongs: no vertex or edge out there can meet the tolerance it is
+        /// checked against.
+        SpacingAboveTolerance,
+        /// No closed form: a kernel limit. The box is refused although a larger one at
+        /// the same place builds (asserted by
+        /// [`a_box_at_1e6_builds_from_3e_3`]); main returned the empty body, no box.
+        KernelLimit,
+    }
+
+    /// The distance from `x` to the next f64 away from zero.
+    fn ulp(x: f64) -> f64 {
+        let x = x.abs();
+        f64::from_bits(x.to_bits() + 1) - x
     }
 
     /// A box row: the inputs' origin and the sides (a cylindrical box: its length and
@@ -1412,24 +1423,27 @@ mod moved_rows {
         (i.point(0).unwrap(), sides)
     }
 
-    fn reason(i: &Inputs, tolerance: f64) -> Option<Reason> {
+    /// The closed-form reason the row cannot be made, or [`Reason::KernelLimit`] when
+    /// there is none.
+    fn reason(i: &Inputs, tolerance: f64) -> Reason {
         let (origin, sides) = dims(i);
         let o = [origin.x, origin.y, origin.z];
         if i.op == OpName::Box && (0..3).any(|n| o[n] + sides[n] == o[n]) {
-            return Some(Reason::Collapses);
+            return Reason::Collapses;
         }
         let shortest = sides.iter().copied().fold(f64::INFINITY, f64::min);
-        let largest = o
-            .iter()
-            .map(|c| c.abs())
-            .chain(sides.iter().copied())
-            .fold(1.0, f64::max);
+        // every coordinate the body reaches is at most this far out: the origin's, the
+        // far corner's, and (a cylindrical box) its length and radii
+        let largest = (0..6)
+            .map(|n| i.arg(n).unwrap().abs())
+            .chain((0..3).filter(|_| i.op == OpName::Box).map(|n| (o[n] + sides[n]).abs()))
+            .fold(0.0, f64::max);
         if shortest <= tolerance {
-            Some(Reason::BelowTolerance)
-        } else if shortest <= tolerance * largest {
-            Some(Reason::BelowScaledTolerance)
+            Reason::BelowTolerance
+        } else if ulp(largest) > tolerance {
+            Reason::SpacingAboveTolerance
         } else {
-            None
+            Reason::KernelLimit
         }
     }
 
@@ -1458,18 +1472,18 @@ mod moved_rows {
     /// (row, refusal site, reason)
     const BOXES: [(&str, &str, Reason); 25] = [
         ("box_1e6_size_1e_6_refused", P8, Reason::BelowTolerance),
-        ("box_at_1e6_size_1e_3_refused", P8, Reason::BelowScaledTolerance),
+        ("box_at_1e6_size_1e_3_refused", P8, Reason::KernelLimit),
         ("box_l_above_effzero", P8, Reason::BelowTolerance),
-        ("box_l_huge", P8, Reason::BelowScaledTolerance),
-        ("box_origin_1e12_size_0p5_control", P8, Reason::BelowScaledTolerance),
+        ("box_l_huge", P8, Reason::SpacingAboveTolerance),
+        ("box_origin_1e12_size_0p5_control", P8, Reason::SpacingAboveTolerance),
         ("box_origin_1e200_size_0p5", SEGMENT, Reason::Collapses),
         ("box_origin_1e294_size_1em3", SEGMENT, Reason::Collapses),
         ("box_origin_1e95_size_0p5", SEGMENT, Reason::Collapses),
         ("box_origin_x_1e294_size_0p5", SEGMENT, Reason::Collapses),
         ("box_origin_x_1e95_size_0p5", SEGMENT, Reason::Collapses),
         ("cyl_box_len_above_effzero", P8, Reason::BelowTolerance),
-        ("cyl_box_len_huge", P7, Reason::BelowScaledTolerance),
-        ("cyl_box_outside_huge", P7, Reason::BelowScaledTolerance),
+        ("cyl_box_len_huge", P7, Reason::SpacingAboveTolerance),
+        ("cyl_box_outside_huge", P7, Reason::SpacingAboveTolerance),
         ("gen0025", P8, Reason::BelowTolerance),
         ("gen0165", P8, Reason::BelowTolerance),
         ("gen0179", P9, Reason::BelowTolerance),
@@ -1479,7 +1493,7 @@ mod moved_rows {
         ("gen0627", P8, Reason::BelowTolerance),
         ("gen0711", P8, Reason::Collapses),
         ("gen0756", P9, Reason::BelowTolerance),
-        ("gen0939", P8, Reason::BelowScaledTolerance),
+        ("gen0939", P8, Reason::SpacingAboveTolerance),
         ("gen1014", P8, Reason::BelowTolerance),
         ("wr596_box_smaller_than_tolerance", P8, Reason::BelowTolerance),
     ];
@@ -1496,10 +1510,29 @@ mod moved_rows {
         .tolerance();
         for (name, site, expected) in BOXES {
             let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
-            assert_eq!(reason(&i, tolerance), Some(expected), "{name}: reason");
+            assert_eq!(reason(&i, tolerance), expected, "{name}: reason");
             let error = made(&mut Kernel::default(), &i).expect_err(name);
             assert_eq!(error.operation(), site, "{name}: {error:?}");
         }
+    }
+
+    /// The kernel limit `box_at_1e6_size_1e_3_refused` stands on: at (1e6, 1e6, 1e6) the
+    /// 1e-3 cube is refused, and the 3e-3 cube builds a closed six-face box that passes
+    /// the level-2 check. The f64 spacing there (1.2e-10) is far below the tolerance, so
+    /// the refusal has no closed form; main's answer for the 1e-3 cube was the empty
+    /// body, which is no box either.
+    #[test]
+    fn a_box_at_1e6_builds_from_3e_3() {
+        let at = Point3::new(1e6, 1e6, 1e6);
+        let k = &mut Kernel::default();
+        assert!(ulp(1e6) < 1e-9);
+        assert_eq!(
+            api::create_box(k, at, 1e-3, 1e-3, 1e-3).unwrap_err().operation(),
+            P8
+        );
+        let mut b = api::create_box(k, at, 3e-3, 3e-3, 3e-3).unwrap();
+        assert_eq!(p1::faces(&b, None).unwrap().len(), 6);
+        assert!(check_brep(k, &mut b, CheckLevel::Level2).unwrap().is_valid());
     }
 
     /// (row, refusal site)
@@ -1534,6 +1567,7 @@ mod moved_rows {
             let mut brep = api::create_box(k, i.point(0).unwrap(), a(3), a(4), a(5)).unwrap();
             let edges = p1::edges(&brep, None).unwrap();
             let faces = p1::faces(&brep, None).unwrap();
+            let vertices = p1::vertices(&brep, None).unwrap();
             let edge1 = pick(&i, 6, &edges, "edge1").unwrap();
             let face1 = pick(&i, 7, &faces, "face1").unwrap();
             let edge2 = pick(&i, 8, &edges, "edge2").unwrap();
@@ -1542,7 +1576,10 @@ mod moved_rows {
                 api::create_blend_primitive(k, &mut brep, edge1, face1, edge2, face2, a(10) == 1.0)
                     .expect_err(name);
             assert_eq!(error.operation(), site, "{name}: {error:?}");
-            assert_eq!(p1::faces(&brep, None).unwrap().len(), 6, "{name}: the box is kept");
+            assert_eq!(faces.len(), 6, "{name}");
+            assert_eq!(p1::faces(&brep, None).unwrap(), faces, "{name}: the faces are kept");
+            assert_eq!(p1::edges(&brep, None).unwrap(), edges, "{name}: the edges are kept");
+            assert_eq!(p1::vertices(&brep, None).unwrap(), vertices, "{name}: the vertices are kept");
             assert!(
                 check_brep(k, &mut brep, CheckLevel::Level2).unwrap().is_valid(),
                 "{name}: the kept box is level-2 clean"
