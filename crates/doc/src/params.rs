@@ -4,7 +4,10 @@
 //! parameter can be referenced by name from any expression; the dependency graph and cycles
 //! come from the expression references.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
+
+#[path = "params_import_order.rs"]
+mod import_order;
 
 use serde::{Deserialize, Serialize};
 
@@ -543,43 +546,50 @@ impl Document {
             return Err(DocError::Invalid("too many parameters".into()));
         }
         let mut row_by_name: BTreeMap<&str, usize> = BTreeMap::new();
-        for (index, (name, _, _, _)) in rows.iter().enumerate() {
-            row_by_name.insert(name, index);
-        }
-        let mut dependents = vec![Vec::new(); rows.len()];
-        let mut dependency_count = vec![0; rows.len()];
-        for (index, (_, expression, _, _)) in rows.iter().enumerate() {
-            let dependencies: BTreeSet<usize> =
-                expr::references(expression).iter().filter_map(|name| row_by_name.get(name.as_str()).copied()).collect();
-            dependency_count[index] = dependencies.len();
-            for dependency in dependencies {
-                dependents[dependency].push(index);
+        let mut previous_row = vec![None; rows.len()];
+        let mut text_rows = vec![false; rows.len()];
+        for (index, (name, expression, unit, _)) in rows.iter().enumerate() {
+            // Validate before reference extraction, which caches expressions independently
+            // of the document transaction.
+            if expression.len() > 4096 {
+                return Err(DocError::Expr("expression too long".into()));
             }
+            previous_row[index] = row_by_name.insert(name, index);
+            let was_text = previous_row[index].map_or(self.text_param(name).is_some(), |previous| text_rows[previous]);
+            text_rows[index] = unit.as_deref().map_or(was_text, crate::text_params::is_text_unit);
         }
-        let mut ready: VecDeque<usize> = dependency_count.iter().enumerate().filter_map(|(index, count)| (*count == 0).then_some(index)).collect();
-        let mut ordered_rows = Vec::with_capacity(rows.len());
-        while let Some(index) = ready.pop_front() {
-            ordered_rows.push(rows[index].clone());
-            for dependent in &dependents[index] {
-                dependency_count[*dependent] -= 1;
-                if dependency_count[*dependent] == 0 {
-                    ready.push_back(*dependent);
-                }
-            }
-        }
-        if ordered_rows.len() != rows.len() {
-            return Err(DocError::Expr("circular parameter references in import".into()));
-        }
+        let graph: Vec<_> =
+            rows.iter().zip(&text_rows).map(|((name, expression, ..), is_text)| (name.as_str(), expression.as_str(), *is_text)).collect();
+        let ordered_rows =
+            import_order::order(&graph, expr::references).ok_or_else(|| DocError::Expr("circular parameter references in import".into()))?;
 
-        // Apply rows in dependency order while keeping the fast incremental evaluation for large
-        // imports. This also lets unit inference use rows that appeared later in the input.
+        // Evaluate in dependency order, but keep the Parameters table and reply in input
+        // order. Existing parameters retain their positions; new ones follow first appearance.
         let mut next = self.clone();
         let (mut vals, _) = next.param_values();
-        let mut names = Vec::new();
-        for (n, e, u, c) in ordered_rows {
-            next.import_row(&n, &e, u.as_deref(), c.as_deref(), &mut vals)?;
-            names.push(n);
+        for index in ordered_rows {
+            let (n, e, u, c) = &rows[index];
+            next.import_row(n, e, u.as_deref(), c.as_deref(), &mut vals)?;
         }
+        let numeric_order: BTreeMap<String, usize> =
+            self.params.iter().map(|p| p.name.clone()).chain(rows.iter().map(|(n, ..)| n.clone())).enumerate().fold(
+                BTreeMap::new(),
+                |mut order, (index, name)| {
+                    order.entry(name).or_insert(index);
+                    order
+                },
+            );
+        next.params.sort_by_key(|p| numeric_order.get(&p.name).copied().unwrap_or(usize::MAX));
+        let text_order: BTreeMap<String, usize> =
+            self.text_params.iter().map(|p| p.name.clone()).chain(rows.iter().map(|(n, ..)| n.clone())).enumerate().fold(
+                BTreeMap::new(),
+                |mut order, (index, name)| {
+                    order.entry(name).or_insert(index);
+                    order
+                },
+            );
+        next.text_params.sort_by_key(|p| text_order.get(&p.name).copied().unwrap_or(usize::MAX));
+        let names = rows.iter().map(|(name, ..)| name.clone()).collect();
         let (_, errors) = next.param_values();
         if let Some(e) = rows.iter().find_map(|(n, ..)| errors.get(n)) {
             return Err(DocError::Expr(e.clone()));
