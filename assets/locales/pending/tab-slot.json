@@ -1,29 +1,146 @@
 {
   "en": {
-    "cmd.solid_tab_slot": "Tab and Slot"
+    "cmd.solid_tab_slot": "Tab and Slot",
+    "ui.tab_slot_title": "TAB AND SLOT",
+    "ui.tab_slot.tab_plates": "Tab plates",
+    "ui.tab_slot.slot_plates": "Slot plates",
+    "ui.tab_slot.layout": "Layout",
+    "ui.tab_slot.by_count": "By count",
+    "ui.tab_slot.by_spacing": "By spacing",
+    "ui.tab_slot.count": "Tabs per stretch",
+    "ui.tab_slot.spacing": "Spacing",
+    "ui.tab_slot.tab_width": "Tab width",
+    "ui.tab_slot.end_distance": "End distance",
+    "ui.tab_slot.clearance": "Clearance",
+    "ui.tab_slot.protrusion": "Protrusion",
+    "error.tab_slot_plates": "Pick the plates that get tabs and the plates that get slots"
   },
   "ar": {
-    "cmd.solid_tab_slot": "لسان وشق"
+    "cmd.solid_tab_slot": "لسان وشق",
+    "ui.tab_slot_title": "لسان وشق",
+    "ui.tab_slot.tab_plates": "ألواح الألسنة",
+    "ui.tab_slot.slot_plates": "ألواح الشقوق",
+    "ui.tab_slot.layout": "التوزيع",
+    "ui.tab_slot.by_count": "حسب العدد",
+    "ui.tab_slot.by_spacing": "حسب التباعد",
+    "ui.tab_slot.count": "الألسنة لكل امتداد",
+    "ui.tab_slot.spacing": "التباعد",
+    "ui.tab_slot.tab_width": "عرض اللسان",
+    "ui.tab_slot.end_distance": "المسافة من الطرف",
+    "ui.tab_slot.clearance": "الخلوص",
+    "ui.tab_slot.protrusion": "البروز",
+    "error.tab_slot_plates": "اختر الألواح التي تأخذ الألسنة والألواح التي تأخذ الشقوق"
   },
   "de": {
-    "cmd.solid_tab_slot": "Lasche und Schlitz"
+    "cmd.solid_tab_slot": "Lasche und Schlitz",
+    "ui.tab_slot_title": "LASCHE UND SCHLITZ",
+    "ui.tab_slot.tab_plates": "Laschenplatten",
+    "ui.tab_slot.slot_plates": "Schlitzplatten",
+    "ui.tab_slot.layout": "Anordnung",
+    "ui.tab_slot.by_count": "Nach Anzahl",
+    "ui.tab_slot.by_spacing": "Nach Abstand",
+    "ui.tab_slot.count": "Laschen pro Abschnitt",
+    "ui.tab_slot.spacing": "Abstand",
+    "ui.tab_slot.tab_width": "Laschenbreite",
+    "ui.tab_slot.end_distance": "Endabstand",
+    "ui.tab_slot.clearance": "Spiel",
+    "ui.tab_slot.protrusion": "Überstand",
+    "error.tab_slot_plates": "Wählen Sie die Platten mit Laschen und die Platten mit Schlitzen"
   },
   "he": {
-    "cmd.solid_tab_slot": "לשונית וחריץ"
+    "cmd.solid_tab_slot": "לשונית וחריץ",
+    "ui.tab_slot_title": "לשונית וחריץ",
+    "ui.tab_slot.tab_plates": "לוחות לשוניות",
+    "ui.tab_slot.slot_plates": "לוחות חריצים",
+    "ui.tab_slot.layout": "פריסה",
+    "ui.tab_slot.by_count": "לפי כמות",
+    "ui.tab_slot.by_spacing": "לפי מרווח",
+    "ui.tab_slot.count": "לשוניות לכל קטע",
+    "ui.tab_slot.spacing": "מרווח",
+    "ui.tab_slot.tab_width": "רוחב לשונית",
+    "ui.tab_slot.end_distance": "מרחק מהקצה",
+    "ui.tab_slot.clearance": "מרווח חופשי",
+    "ui.tab_slot.protrusion": "בליטה",
+    "error.tab_slot_plates": "בחר את הלוחות שמקבלים לשוניות ואת הלוחות שמקבלים חריצים"
   },
   "ja": {
-    "cmd.solid_tab_slot": "タブとスロット"
+    "cmd.solid_tab_slot": "タブとスロット",
+    "ui.tab_slot_title": "タブとスロット",
+    "ui.tab_slot.tab_plates": "タブ側プレート",
+    "ui.tab_slot.slot_plates": "スロット側プレート",
+    "ui.tab_slot.layout": "配置",
+    "ui.tab_slot.by_count": "個数で",
+    "ui.tab_slot.by_spacing": "間隔で",
+    "ui.tab_slot.count": "区間あたりのタブ数",
+    "ui.tab_slot.spacing": "間隔",
+    "ui.tab_slot.tab_width": "タブ幅",
+    "ui.tab_slot.end_distance": "端からの距離",
+    "ui.tab_slot.clearance": "クリアランス",
+    "ui.tab_slot.protrusion": "突き出し",
+    "error.tab_slot_plates": "タブを付けるプレートとスロットを付けるプレートを選択してください"
   },
   "ko": {
-    "cmd.solid_tab_slot": "탭과 슬롯"
+    "cmd.solid_tab_slot": "탭과 슬롯",
+    "ui.tab_slot_title": "탭과 슬롯",
+    "ui.tab_slot.tab_plates": "탭 판",
+    "ui.tab_slot.slot_plates": "슬롯 판",
+    "ui.tab_slot.layout": "배치",
+    "ui.tab_slot.by_count": "개수로",
+    "ui.tab_slot.by_spacing": "간격으로",
+    "ui.tab_slot.count": "구간당 탭 수",
+    "ui.tab_slot.spacing": "간격",
+    "ui.tab_slot.tab_width": "탭 너비",
+    "ui.tab_slot.end_distance": "끝 거리",
+    "ui.tab_slot.clearance": "여유",
+    "ui.tab_slot.protrusion": "돌출",
+    "error.tab_slot_plates": "탭을 받을 판과 슬롯을 받을 판을 선택하세요"
   },
   "nb": {
-    "cmd.solid_tab_slot": "Tapp og spor"
+    "cmd.solid_tab_slot": "Tapp og spor",
+    "ui.tab_slot_title": "TAPP OG SPOR",
+    "ui.tab_slot.tab_plates": "Tapplater",
+    "ui.tab_slot.slot_plates": "Sporplater",
+    "ui.tab_slot.layout": "Oppsett",
+    "ui.tab_slot.by_count": "Etter antall",
+    "ui.tab_slot.by_spacing": "Etter avstand",
+    "ui.tab_slot.count": "Tapper per strekning",
+    "ui.tab_slot.spacing": "Avstand",
+    "ui.tab_slot.tab_width": "Tappbredde",
+    "ui.tab_slot.end_distance": "Endeavstand",
+    "ui.tab_slot.clearance": "Klaring",
+    "ui.tab_slot.protrusion": "Utstikk",
+    "error.tab_slot_plates": "Velg platene som får tapper og platene som får spor"
   },
   "vi": {
-    "cmd.solid_tab_slot": "Mộng và rãnh"
+    "cmd.solid_tab_slot": "Mộng và rãnh",
+    "ui.tab_slot_title": "MỘNG VÀ RÃNH",
+    "ui.tab_slot.tab_plates": "Tấm có mộng",
+    "ui.tab_slot.slot_plates": "Tấm có rãnh",
+    "ui.tab_slot.layout": "Bố trí",
+    "ui.tab_slot.by_count": "Theo số lượng",
+    "ui.tab_slot.by_spacing": "Theo khoảng cách",
+    "ui.tab_slot.count": "Số mộng mỗi đoạn",
+    "ui.tab_slot.spacing": "Khoảng cách",
+    "ui.tab_slot.tab_width": "Chiều rộng mộng",
+    "ui.tab_slot.end_distance": "Khoảng cách đầu mút",
+    "ui.tab_slot.clearance": "Khe hở",
+    "ui.tab_slot.protrusion": "Phần nhô",
+    "error.tab_slot_plates": "Chọn các tấm có mộng và các tấm có rãnh"
   },
   "zh": {
-    "cmd.solid_tab_slot": "凸舌与槽"
+    "cmd.solid_tab_slot": "凸舌与槽",
+    "ui.tab_slot_title": "凸舌与槽",
+    "ui.tab_slot.tab_plates": "凸舌板",
+    "ui.tab_slot.slot_plates": "开槽板",
+    "ui.tab_slot.layout": "布局",
+    "ui.tab_slot.by_count": "按数量",
+    "ui.tab_slot.by_spacing": "按间距",
+    "ui.tab_slot.count": "每段凸舌数",
+    "ui.tab_slot.spacing": "间距",
+    "ui.tab_slot.tab_width": "凸舌宽度",
+    "ui.tab_slot.end_distance": "端部距离",
+    "ui.tab_slot.clearance": "间隙",
+    "ui.tab_slot.protrusion": "伸出量",
+    "error.tab_slot_plates": "选择要做凸舌的板和要开槽的板"
   }
 }
