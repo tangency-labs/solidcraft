@@ -48,7 +48,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.join_touching_loops = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;

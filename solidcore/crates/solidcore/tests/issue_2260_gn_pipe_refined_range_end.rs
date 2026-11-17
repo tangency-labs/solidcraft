@@ -79,7 +79,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "offset_extension_as_itself",
     "offset_extension_from_base",
     "point_class_gap_3d_propagates_no_drop_error",
-    "proto_edge_splits_at_captured_vertices",
     "proto_vertex_miss_is_false",
     "revolve_analytic_profile_faces",
     "shell_edges_on_analytics_exact",

@@ -15,10 +15,14 @@
 
 use solidcore_ops::stitch::{open_edges, sew};
 use solidcore_ops::surface_cvs::{
-    face_net, move_face_cvs, move_face_net, tied_points, FacePoint, Net, Picks, SeamMismatch,
+    face_net, falloff_weight, move_face_cvs, move_face_net, tied_points, FacePoint, Falloff, Net,
+    Picks, SeamMismatch, Shape,
 };
 use solidcore_ops::sweep::{loft, Curve as Curve3};
-use solidcore_ops::{make_box, make_cone, make_cylinder, Body, CheckLevel, Error};
+use solidcore_ops::{
+    blend_ordered, make_box, make_cone, make_cylinder, Blend, BlendOptions, Body, CheckLevel,
+    Corners, Error,
+};
 use solidcore_record::brep::{Brep, Curve, Edge, Loop, Surface};
 
 /// The record of `body`.
@@ -277,6 +281,88 @@ fn a_box_corner_raised_takes_its_vertical_edge_along() {
     assert!((v - (24.0 + 1.5)).abs() < 1e-6, "{v}");
 }
 
+/// Whether `p` is within `tol` of `q` in each coordinate.
+fn near(p: [f64; 3], q: [f64; 3], tol: f64) -> bool {
+    (0..3).all(|k| (p[k] - q[k]).abs() <= tol)
+}
+
+/// A box with its top front edge rounded: the top's corner at the round raised along the box's
+/// left wall. The round's end arc on that wall ends at the moved vertex, but it is not a line
+/// between planar faces (it bounds the round's cylinder), so it cannot run on to the vertex: the
+/// edit is refused naming that arc.
+#[test]
+fn a_corner_raised_where_a_round_ends_is_refused_naming_the_round_s_arc() {
+    let b = make_box([0.0, 0.0, 0.0], [2.0, 3.0, 4.0]).unwrap();
+    let r = 0.5;
+    // the top front edge: the line at y = 0, z = 4, by its record index
+    let (before, order) = b.to_record().unwrap();
+    let front = before
+        .edges
+        .iter()
+        .position(|e| {
+            e.vertices.iter().all(|&v| {
+                let p = before.vertices[v as usize].point;
+                p[1] == 0.0 && p[2] == 4.0
+            })
+        })
+        .expect("the top front edge");
+    blend_ordered(
+        &b,
+        &order,
+        Blend::Round,
+        &[front],
+        &[r],
+        &[],
+        Corners::Filled,
+        BlendOptions::default(),
+    )
+    .unwrap();
+    let before = record(&b);
+    let tol = before.tolerance;
+    // the top: the planar face whose vertices are all at z = 4
+    let top = before
+        .faces
+        .iter()
+        .enumerate()
+        .position(|(n, f)| {
+            matches!(
+                f.surface,
+                Surface::Plane { .. } | Surface::PlaneThrough { .. }
+            ) && before
+                .edges
+                .iter()
+                .filter(|e| e.uses.iter().any(|u| u.face as usize == n))
+                .all(|e| {
+                    e.vertices
+                        .iter()
+                        .all(|&v| (before.vertices[v as usize].point[2] - 4.0).abs() <= tol)
+                })
+        })
+        .expect("the top");
+    // the round's arc on the left wall x = 0: from the top's corner (0, r, 4) down to (0, 0, 4 - r)
+    let corner_at = [0.0, r, 4.0];
+    let arc = before
+        .edges
+        .iter()
+        .position(|e| {
+            !matches!(e.curve, Curve::Line { .. })
+                && e.vertices
+                    .iter()
+                    .any(|&v| near(before.vertices[v as usize].point, corner_at, tol))
+        })
+        .expect("the round's arc at the corner");
+    let net = face_net(&before, top).unwrap();
+    let corner = (0..net.points.len())
+        .find(|&n| near(net.points[n], corner_at, tol))
+        .map(|n| (n / net.cols, n % net.cols))
+        .expect("the top's corner point");
+    let refused = move_face_cvs(&before, top, &[(corner, [0.0, r, 5.0])]);
+    assert!(
+        matches!(refused, Err(Error::EdgeLeftBehind { edge }) if edge == arc),
+        "{refused:?}, the arc is edge {arc}"
+    );
+}
+
 /// A cubic along x at height `y`, through four control points (their heights `z`), as a Bezier.
 fn cubic(y: f64, z: [f64; 4]) -> Curve3 {
     Curve3::Nurbs {
@@ -466,4 +552,67 @@ fn panels_whose_seam_rows_have_other_knots_are_refused_naming_the_seam() {
         matches!(refused, Err(Error::SeamMismatch { edge, .. }) if edge == seam),
         "{refused:?}"
     );
+}
+
+/// A soft move of panel `a`'s point next to the seam, its falloff reaching the seam row: the
+/// seam row moves by its weight, the other panel's twins move with it so the seam stays shut,
+/// and the other panel's points off the seam stay where they were (the falloff does not cross
+/// the seam yet, so the seam is not kept tangent).
+#[test]
+fn a_falloff_edit_by_a_seam_keeps_it_shut_and_stops_there() {
+    let (before, open, seam) = sewn_panels(seam_curve());
+    let tied = tied_points(&before).unwrap();
+    let pairs = tied[0].ties.as_ref().unwrap();
+    let [fa, fb] = tied[0].faces;
+    let (net_a, net_b) = (
+        face_net(&before, fa).unwrap(),
+        face_net(&before, fb).unwrap(),
+    );
+    // a's seam row: one row index or one column index; the pick its inner neighbour of the
+    // second seam point, one index step from it
+    let [p, _] = pairs[1];
+    let along_rows = pairs.iter().all(|[a, _]| a.row == p.row);
+    let inward = |i: usize| if i == 0 { 1 } else { i - 1 };
+    let pick = if along_rows {
+        (inward(p.row), p.column)
+    } else {
+        (p.row, inward(p.column))
+    };
+    let falloff = Some(Falloff {
+        radius: 1,
+        shape: Shape::Linear,
+    });
+    let delta = [0.0, 0.0, 0.5];
+    let after = move_face_net(&before, fa, &Picks::Cvs(vec![pick]), delta, falloff).unwrap();
+    let (moved_a, moved_b) = (face_net(&after, fa).unwrap(), face_net(&after, fb).unwrap());
+    // the seam point one step from the pick moved by that step's weight, and its twin with it
+    let w = falloff_weight(falloff, 1);
+    assert!(w > 0.0 && w < 1.0, "{w}");
+    let was = at(&net_a, (p.row, p.column));
+    let want: [f64; 3] = std::array::from_fn(|k| was[k] + w * delta[k]);
+    assert!(near(
+        at(&moved_a, (p.row, p.column)),
+        want,
+        before.tolerance
+    ));
+    // every seam point and its twin are still one
+    for [x, y] in pairs {
+        let (q, t) = (
+            at(&moved_a, (x.row, x.column)),
+            at(&moved_b, (y.row, y.column)),
+        );
+        assert!(near(q, t, before.tolerance), "{q:?} {t:?}");
+    }
+    let (body, _) = Body::from_record(&after, false).unwrap();
+    assert_eq!(open_edges(&body).unwrap(), open);
+    assert!(!open.contains(&seam));
+    // b's points off the seam (its inner row and its far row) did not move
+    let on_seam: Vec<(usize, usize)> = pairs.iter().map(|[_, y]| (y.row, y.column)).collect();
+    for i in 0..net_b.rows {
+        for j in 0..net_b.cols {
+            if !on_seam.contains(&(i, j)) {
+                assert_eq!(at(&moved_b, (i, j)), at(&net_b, (i, j)), "({i}, {j})");
+            }
+        }
+    }
 }
