@@ -359,7 +359,7 @@ pub fn stretches(band: (f64, f64), defects: &[Defect], tol: f64) -> Result<Vec<(
     if !ordered(band) {
         return Err(invalid("the strip's extent is not finite and ordered"));
     }
-    let mut cuts = Vec::with_capacity(defects.len());
+    let mut cuts = Vec::new();
     for d in defects {
         if !(ordered(d.along) && d.across.is_finite() && d.across >= 0.0) {
             return Err(invalid("a defect's extent is not finite and ordered"));
@@ -594,7 +594,14 @@ pub fn footprint_across(
                 }
                 return Err(refused("a section that does not close"));
             };
-            let run = runs.swap_remove(i);
+            // `swap_remove(i)` without a panic path: the last run takes the place of run i
+            let Some(last) = runs.pop() else {
+                return Err(refused("a section that does not close"));
+            };
+            let run = match runs.get_mut(i) {
+                Some(slot) => std::mem::replace(slot, last),
+                None => last,
+            };
             if start(run.as_slice()).is_some_and(|p| near(p, at)) {
                 segs.extend(run);
             } else {
