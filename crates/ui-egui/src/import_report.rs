@@ -100,8 +100,14 @@ fn fields(map: &serde_json::Map<String, Value>, depth: usize, bounds: Bounds, bu
 }
 
 fn elements(list: &[Value], depth: usize, bounds: Bounds, budget: &mut usize) -> Vec<Node> {
-    let mut out: Vec<Node> =
-        list.iter().take(bounds.list).enumerate().filter_map(|(i, value)| node(element_label(value, i), value, depth, bounds, budget)).collect();
+    // A list's elements start folded: the list shows their names and statuses at a glance.
+    let folded = |node: Node| Node { open: false, ..node };
+    let mut out: Vec<Node> = list
+        .iter()
+        .take(bounds.list)
+        .enumerate()
+        .filter_map(|(i, value)| node(element_label(value, i), value, depth, bounds, budget).map(folded))
+        .collect();
     if list.len() > bounds.list {
         out.push(Node::leaf(format("import_report.more", &[("count", &(list.len() - bounds.list).to_string())]), String::new()));
     }
@@ -253,7 +259,7 @@ fn draw_outline(ui: &mut egui::Ui, nodes: &[Node]) {
                 } else {
                     std::format!("{}: {}", node.label, node.value)
                 };
-                ui_kit::text(ui, &line, ui_kit::Text::Note("import_report_field"));
+                ui_kit::text(ui, &line, ui_kit::Text::Report("import_report_field", false));
             } else {
                 ui_kit::section(ui, "import_report_group", &node.label, node.open, |ui| {
                     ui.indent("import_report_group_lines", |ui| draw_outline(ui, &node.children));
@@ -441,6 +447,7 @@ mod tests {
         assert!(!features.open, "a list starts folded");
         let named: Vec<&str> = features.children.iter().map(|n| n.label.as_str()).collect();
         assert_eq!(named, ["Sketch 1 · mapped", "Extrude 1 · blocked"], "an element is called by its name and status");
+        assert!(features.children.iter().all(|n| !n.open), "a list's elements start folded");
         assert!(features.children[1].children.contains(&Node::leaf("Final body".into(), "false".into())));
         assert_eq!(nodes[3], Node::leaf("Tags".into(), "a, b".into()), "a list of plain values is one line");
 
