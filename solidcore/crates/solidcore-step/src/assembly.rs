@@ -535,6 +535,8 @@ impl<'t> Assembly<'t> {
         if outsides > 0 {
             notes.push(format!("{outsides} faces on a torus that are the outside of their loops given the torus's seams"));
         }
+        // A torus face's seams where its torus starts, so its (u, v) box is read whole.
+        self.seat_torus_seams()?;
         let slits = self.drop_inner_slits();
         if slits > 0 {
             notes.push(format!("{slits} slits of no area left out of the faces they lie in"));

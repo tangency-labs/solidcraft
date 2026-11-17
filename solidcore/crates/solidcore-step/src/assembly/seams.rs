@@ -1014,6 +1014,79 @@ impl Assembly<'_> {
         Ok(completed)
     }
 
+    /// Turn each torus face whose bounds hold a seam round the axis (a full circle about it,
+    /// used both ways) off its tube start so the tube starts there, and one whose bounds hold a
+    /// seam round the tube off its frame's x axis so the frame starts there: a face's (u, v) box
+    /// on its form is read from its seams, and a seam away from where the torus starts in that
+    /// direction gave a box short of the whole torus, so a torus written whole round a hole
+    /// read back with part of it missing. STEP's torus starts its tube at the outer equator, so
+    /// a file's seam round the axis elsewhere is common. Returns how many faces were turned.
+    pub(crate) fn seat_torus_seams(&mut self) -> R<usize> {
+        let mut seated = 0;
+        for fi in 0..self.faces.len() {
+            let Some(face) = self.faces.get(fi) else { continue };
+            let BSurface::Torus { frame, major_radius, tube_start, .. } = &face.surface else { continue };
+            let (major_radius, tube_start) = (*major_radius, *tube_start);
+            let o = Vec3::from(frame.origin);
+            let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+            let z = x.cross(y);
+            let mut ways: std::collections::HashMap<u32, [bool; 2]> = std::collections::HashMap::new();
+            for l in &face.loops {
+                if let Bound::Edges(es) = l {
+                    for (e, forward) in es {
+                        if let Some(w) = ways.entry(*e).or_default().get_mut(usize::from(*forward)) {
+                            *w = true;
+                        }
+                    }
+                }
+            }
+            let (mut u_at, mut w_at) = (None, None);
+            for (e, used) in &ways {
+                if *used != [true, true] {
+                    continue;
+                }
+                let Some(edge) = self.edges.get(*e as usize) else { continue };
+                let BCurve::Circle { frame: cf, radius } = &edge.curve else { continue };
+                if !((edge.interval[1] - edge.interval[0]) >= TAU * (1.0 - 1e-9)) {
+                    continue;
+                }
+                let (c, cx) = (Vec3::from(cf.origin), Vec3::from(cf.x_axis));
+                let n = cx.cross(Vec3::from(cf.y_axis));
+                let p = c + cx * *radius;
+                let d = p - o;
+                if n.cross(z).len() <= 1e-9 {
+                    // Round the axis: its tube angle.
+                    let h = d.dot(z);
+                    w_at = Some(h.atan2((d - z * h).len() - major_radius));
+                } else if n.dot(z).abs() <= 1e-9 {
+                    // Round the tube: its longitude.
+                    let dc = c - o;
+                    u_at = Some(dc.dot(y).atan2(dc.dot(x)));
+                }
+            }
+            let mut surface = face.surface.clone();
+            let mut turned = false;
+            if let Some(u) = u_at.filter(|u| wrap(*u).abs() > 1e-12)
+                && let Some(s) = crate::kernel::form::turned(&surface, u)
+            {
+                surface = s;
+                turned = true;
+            }
+            if let Some(w) = w_at.filter(|w| wrap(*w - tube_start).abs() > 1e-12)
+                && let Some(s) = crate::kernel::form::tube_turned(&surface, wrap(w - tube_start))
+            {
+                surface = s;
+                turned = true;
+            }
+            if turned && let Some(f) = self.faces.get_mut(fi) {
+                f.surface = surface;
+                f.extent = None;
+                seated += 1;
+            }
+        }
+        Ok(seated)
+    }
+
     /// A face sharing an edge with one of `loops` (of face `fi`) lies on the torus about `o`
     /// and `z` of radii `major` and `minor`, and faces the same way as face `fi`.
     fn patch_beside(&self, fi: usize, loops: &[Vec<(u32, bool)>], o: Vec3, z: Vec3, major: f64, minor: f64) -> R<bool> {
