@@ -341,6 +341,121 @@ fn wr_647_a_parabola_leaving_a_line_at_their_start_meets_it_at_one_point() {
     }
 }
 
+/// The quadratic B-spline on the knots 0, 1, 2, 3, 4 (end multiplicities 3) with the
+/// control points (-2, 0.5), (-1.25, `y1`), (-0.5, `y2`), (0.5, `y2`), (1.25, `y1`), (2, 0.5):
+/// it runs along the x axis from x = -0.875 (the midpoint of its second and third control
+/// points, the knot 1) to x = 0.875 (the knot 3), at heights between `y2` and the mean of
+/// `y1` and `y2` (convex combinations of its control heights there), and leaves the axis
+/// steeply on the same side beyond, inside the line from (-3, 0) to (3, 0) below.
+fn flat_quadratic(y1: f64, y2: f64) -> Curve {
+    let control = [
+        Point3::new(-2.0, 0.5, 0.0),
+        Point3::new(-1.25, y1, 0.0),
+        Point3::new(-0.5, y2, 0.0),
+        Point3::new(0.5, y2, 0.0),
+        Point3::new(1.25, y1, 0.0),
+        Point3::new(2.0, 0.5, 0.0),
+    ];
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[3, 1, 1, 1, 3],
+            knots: &[0.0, 1.0, 2.0, 3.0, 4.0],
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+fn axis_line() -> Curve {
+    bezier(&[Point3::new(-3.0, 0.0, 0.0), Point3::new(3.0, 0.0, 0.0)])
+}
+
+/// The flat quadratic 2e-6 to 3e-6 above the x axis over -0.875 <= x <= 0.875 (closed
+/// form: its control heights there are 2e-6 and 4e-6), and the line along the axis: within
+/// the tolerance (1e-5) of each other over a length of 1.75, and they never meet, so they
+/// leave each other on one side inside both curves. That is a coincidence at the tolerance
+/// over that part of both (an edge against a fitted copy of part of it), not a touch: the
+/// answer is one range covering it, as upstream gives. (The touch rule without the
+/// condition that the curves meet took the range for one point, at x = -0.0085.)
+#[test]
+fn wr_647_a_curve_lying_within_tolerance_on_part_of_a_line_stays_a_range() {
+    let k = Kernel::default();
+    let (line, curve) = (axis_line(), flat_quadratic(4e-6, 2e-6));
+    let all = intersect(&line, &curve);
+    assert_eq!(all.len(), 1, "{all:?}");
+    let s = &all[0];
+    assert_eq!(s.solution_type, SolutionType::RangeOfValues, "{s:?}");
+    // the range covers -0.875 <= x <= 0.875 on the line (x = 6 t - 3)
+    let (lo, hi) = (
+        s.start.parameters[0].min(s.end.parameters[0]),
+        s.start.parameters[0].max(s.end.parameters[0]),
+    );
+    assert!(
+        lo <= (3.0 - 0.875) / 6.0 && hi >= (3.0 + 0.875) / 6.0,
+        "{s:?}"
+    );
+    // and pairs points of the two curves within the tolerance at its ends
+    for (t, u) in [
+        (s.start.parameters[0], s.start.parameters[1]),
+        (s.end.parameters[0], s.end.parameters[1]),
+    ] {
+        let gap = line
+            .evaluate_point(&k, t)
+            .unwrap()
+            .distance(curve.evaluate_point(&k, u).unwrap());
+        assert!(gap <= TOL, "{gap}");
+    }
+}
+
+/// The flat quadratic lying ON the x axis over -0.875 <= x <= 0.875 (control heights 0
+/// there: those spans are the axis itself) and leaving it on one side beyond: the two
+/// curves lie on each other over that part, an exact overlap, and the answer is one range
+/// covering it, not one point of it.
+#[test]
+fn wr_647_a_curve_lying_on_part_of_a_line_stays_a_range() {
+    let (line, curve) = (axis_line(), flat_quadratic(0.0, 0.0));
+    let all = intersect(&line, &curve);
+    assert_eq!(all.len(), 1, "{all:?}");
+    let s = &all[0];
+    assert_eq!(s.solution_type, SolutionType::RangeOfValues, "{s:?}");
+    let (lo, hi) = (
+        s.start.parameters[0].min(s.end.parameters[0]),
+        s.start.parameters[0].max(s.end.parameters[0]),
+    );
+    assert!(
+        lo <= (3.0 - 0.875) / 6.0 && hi >= (3.0 + 0.875) / 6.0,
+        "{s:?}"
+    );
+}
+
+/// The flat quadratic touching the x axis at the origin only (control heights 4e-6, 0, 0,
+/// 4e-6: on the knot 2 its point is the midpoint of (-0.5, 0) and (0.5, 0), the origin, with
+/// the tangent along the axis; on either side its height is the positive multiple t² of 2e-6
+/// of the local span parameter t, closed form). Within the tolerance of the axis over about
+/// -0.9 <= x <= 0.9, they meet at the origin and nowhere else: one touch point there.
+#[test]
+fn wr_647_a_flat_curve_touching_a_line_meets_it_at_one_point() {
+    let k = Kernel::default();
+    let (line, curve) = (axis_line(), flat_quadratic(4e-6, 0.0));
+    let all = intersect(&line, &curve);
+    assert_eq!(all.len(), 1, "{all:?}");
+    let s = &all[0];
+    assert_eq!(s.solution_type, SolutionType::SingleValue, "{s:?}");
+    let p = line.evaluate_point(&k, s.start.parameters[0]).unwrap();
+    let q = curve.evaluate_point(&k, s.start.parameters[1]).unwrap();
+    let origin = Point3::new(0.0, 0.0, 0.0);
+    assert!(
+        p.distance(origin) <= TOL && q.distance(origin) <= TOL,
+        "{p:?} {q:?}"
+    );
+}
+
 const ZA: [f64; 5] = [
     -0.00010781025415934847,
     -0.00012670256036516824,

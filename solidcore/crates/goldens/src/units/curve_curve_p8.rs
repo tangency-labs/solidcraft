@@ -1066,6 +1066,104 @@ mod tests {
         }
     }
 
+    /// WR-647 (#18392): the rows that moved from a coincidence range (or two that meet)
+    /// to one point. Each entry is the base stretch's two outer ends `(t, u)` and a bound
+    /// on the new point's gap. For each row: the curves' separations at the two base ends
+    /// point to opposite sides of the first curve's tangent (they pass each other inside
+    /// the stretch), the answer has exactly one point inside the base stretch and no
+    /// range there, the curves evaluated at that point are within the bound, nearer
+    /// than at either base end, and no nearer anywhere on a small stencil round it (a
+    /// local least distance).
+    const MOVED_TO_A_CROSSING: &[(&str, [[f64; 2]; 2], f64)] = &[
+        ("gen0288", [[0.5889163102251564, 0.3125], [0.5971703850480781, 0.34375]], 7.2e-9),
+        (
+            "gen0940",
+            [[1.2005275935429998, 2.843463402260655], [1.201446010152373, 2.8694399443792538]],
+            9.3e-10,
+        ),
+        (
+            "gen1137",
+            [[-3.9949193356312236, 0.7461964362806278], [-3.9597630856312236, 0.765625]],
+            9.1e-11,
+        ),
+        (
+            "gen1319",
+            [[4.9665625915241085, 4.966576820201514], [4.966576820201514, 4.966591054255356]],
+            3.2e-14,
+        ),
+        (
+            "gen2141",
+            [[0.45762273379679974, 0.46875], [0.47290908128538817, 0.484375]],
+            5.7236e-4,
+        ),
+        (
+            "gen2160",
+            [[5.415269021279051, 0.2949661473355207], [6.344696713196761, 0.5053108900962493]],
+            4e-15,
+        ),
+        (
+            "gen2904",
+            [[0.47615857544818196, -1.079724867827329], [0.859375, 0.2142854442943709]],
+            7.1e-16,
+        ),
+    ];
+
+    #[test]
+    fn moved_contacts_lie_in_their_base_ranges() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let cases = Runner.cases(&ctx).unwrap();
+        let k = Kernel::default();
+        for &(name, base, bound) in MOVED_TO_A_CROSSING {
+            let case = cases.iter().find(|c| c.name == name).unwrap();
+            let op: OpIn = case.parse().unwrap();
+            let OpIn::Gci { c1, c2, .. } = &op;
+            let a = build(c1).unwrap();
+            let b = build(c2.as_ref().unwrap()).unwrap();
+            let at = |[t, u]: [f64; 2]| {
+                (
+                    a.evaluate_point(&k, t).unwrap(),
+                    b.evaluate_point(&k, u).unwrap(),
+                )
+            };
+            let gap = |p: [f64; 2]| {
+                let (x, y) = at(p);
+                x.distance(y)
+            };
+            let across = |p: [f64; 2]| {
+                let (x, y) = at(p);
+                let tangent = a.evaluate(&k, p[0], 1, false, true).unwrap()[1];
+                let unit = tangent * (1.0 / tangent.length());
+                let s = y - x;
+                s - unit * s.dot(unit)
+            };
+            assert!(across(base[0]).dot(across(base[1])) < 0.0, "{name}");
+            let out = rust(&op).unwrap();
+            assert_eq!(out.ints["status"], vec![0], "{name}");
+            let lo = [base[0][0].min(base[1][0]), base[0][1].min(base[1][1])];
+            let hi = [base[0][0].max(base[1][0]), base[0][1].max(base[1][1])];
+            let within = |p: [f64; 2]| (0..2).all(|i| lo[i] <= p[i] && p[i] <= hi[i]);
+            let sols = solutions(&out.values["out"]);
+            let inside: Vec<_> = sols.iter().filter(|s| within(s.2)).collect();
+            assert_eq!(inside.len(), 1, "{name}: {sols:?}");
+            assert!(inside[0].3.is_none(), "{name}: {sols:?}");
+            let p = inside[0].2;
+            let g = gap(p);
+            assert!(g <= bound, "{name}: {g:e}");
+            assert!(g < gap(base[0]) && g < gap(base[1]), "{name}");
+            for (dt, du) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+                let h = 1e-7;
+                let q = [
+                    p[0] + dt * h * (hi[0] - lo[0]),
+                    p[1] + du * h * (hi[1] - lo[1]),
+                ];
+                assert!(gap(q) >= g, "{name}: {q:?} {:e} < {g:e}", gap(q));
+            }
+        }
+    }
+
     /// A solution record: type, objects, start parameters, end parameters (ranges).
     type Sol = (f64, [f64; 2], [f64; 2], Option<[f64; 2]>);
 

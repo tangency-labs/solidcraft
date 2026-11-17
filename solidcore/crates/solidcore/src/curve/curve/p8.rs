@@ -87,10 +87,16 @@
 //!   stretch and nearer than every range end; otherwise, when the stretch is all the
 //!   solutions, the touch: the least distance over it ([`Curve::local_curve_solve`],
 //!   `Minimize`, from the range end where the curves are nearest, or that end, or a
-//!   minimum found from another range end nearer by more than the scaled zero), inside
-//!   the stretch or where the curves
-//!   meet, nearer than where they part, and for a curve against itself not on a fold.
-//!   Curves that come
+//!   minimum found from another range end nearer by more than the scaled zero), nearer
+//!   than where they part, placed where the separation across the curves is least
+//!   (`SignedDirectedMinimize`), where the curves MEET (within the scaled zero, evaluated),
+//!   the stretch's only contact (it reaches no farther from the touch than a single
+//!   tangency of the curves' relative curvature there stays within the tolerance, and
+//!   that curvature lifts them apart by more than the scaled zero over it), and for a
+//!   curve against itself not on a fold. Curves within the tolerance of each other that
+//!   never meet (an edge against a fitted copy of a part of it, leaving it on one side),
+//!   and curves lying on each other over a part of the stretch, keep their ranges as
+//!   upstream. Curves that come
 //!   back within the tolerance elsewhere are one coincidence whose fit error passes the
 //!   tolerance here and there (#1036), or several touches, kept as upstream; so is a
 //!   stretch whose crossing the solver does not find. Upstream keeps such a stretch,
@@ -98,8 +104,7 @@
 //!   lying on each other ends where one of them stops, so a fitted copy of a curve, whose
 //!   tolerance-scale separation can change sides, stays a range (#1036). The fork decided
 //!   this per span pair (tangency-labs/smlib@c2e3d9d, 04b42b4), where the two cannot be
-//!   told apart. A coincidence that goes on into a tangential departure inside both
-//!   curves is taken for the touch.
+//!   told apart.
 
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve, CurveKind};
@@ -1266,6 +1271,7 @@ impl Curve {
                         interval,
                         other_interval,
                         dist_tol,
+                        same_curve,
                     )?;
                     return Ok(sols);
                 }
@@ -1611,6 +1617,7 @@ impl Curve {
             interval,
             other_interval,
             dist_tol,
+            same_curve,
         )?;
 
         // check each coincident interval solution: very short or diverging intervals
@@ -2387,19 +2394,36 @@ impl Curve {
     ///   finds one nearer than that end, else that end; or, started at another range end
     ///   of the stretch, a minimum found nearer than that end and nearer than this one by
     ///   more than the scaled zero (the curves' nearer approach, which the first solve,
-    ///   local, may miss). Nearest at an end of the stretch,
-    ///   the curves draw nearer beyond it and the stretch holds no touch, unless they meet
-    ///   there within the scaled zero (a round leaving a line it is tangent to at their
-    ///   shared end touches it there). The curves
+    ///   local, may miss). The curves
     ///   part at an end, so their separation is not constant and they touch where it is
     ///   least: a stretch whose parting ends are not farther apart than its touch (by
     ///   more than the scaled zero) keeps its ranges, a constant separation (concentric
-    ///   arcs), and so does a curve against itself whose nearest point is where it folds
-    ///   back onto itself. Curves that come back within the tolerance
-    ///   elsewhere without changing sides
+    ///   arcs). It is a touch only where the curves MEET: from that minimum the separation
+    ///   across the curves is solved for where it is least
+    ///   ([`SolverOperation::SignedDirectedMinimize`], along its own direction, in the plane
+    ///   of it and the tangent: it grows as the square of the distance from a touch, where
+    ///   the distance's square grows as the fourth power and the `Minimize` solve stops
+    ///   short), and the two points found must lie within the scaled zero of each other,
+    ///   evaluated. Curves that come no nearer than that stay within the tolerance of each
+    ///   other along the stretch without meeting, a coincidence at the tolerance (an edge
+    ///   against a fitted copy of a part of it that leaves it on one side), and keep their
+    ///   ranges as upstream. Nearest at an end of the stretch, they meet there (a round
+    ///   leaving a line it is tangent to at their shared end touches it there). And the
+    ///   touch must be the stretch's only contact: the curves' curvatures across the
+    ///   tangent there differ by `kappa`, so a single tangency keeps them within `tol` of
+    ///   each other for at most `sqrt(2 tol / kappa)` along the tangent either side; a
+    ///   stretch reaching farther from the touch on either side (`kappa x² / 2 > tol`), or
+    ///   one over which that curvature lifts them apart by no more than the scaled zero
+    ///   (an exact overlap, whose curvatures agree), keeps its ranges. So does a curve
+    ///   against itself whose touch is where it folds back onto itself. Curves that come
+    ///   back within the tolerance elsewhere without changing sides
     ///   are one coincidence whose separation passes the tolerance here and there (a fitted
     ///   copy of a closed section, #1036), and keep their ranges; so do two separate touches
     ///   of the same two curves, as upstream.
+    ///
+    /// `itself` says that `other` is this curve (its parameters are folded on the
+    /// diagonal); a caller that hands in copies (the projected curves of
+    /// `GlobalCurveSolve`) says so here.
     ///
     /// A NaN fails these tests, and a crossing the solver does not find, keep the ranges.
     ///
@@ -2415,6 +2439,7 @@ impl Curve {
         interval: &Extent1d,
         other_interval: &Extent1d,
         dist_tol: f64,
+        itself: bool,
     ) -> Result<()> {
         let ranges: Vec<usize> = (0..sols.len())
             .filter(|&i| {
@@ -2506,7 +2531,7 @@ impl Curve {
             // curve between its two parameters within the tolerance, is a fold of the
             // curve back onto itself, not a parting
             let fold = |end: [f64; 2], p: Vec3| -> Result<bool> {
-                Ok(core::ptr::eq(self, other)
+                Ok(itself
                     && self.evaluate_point(k, (end[0] + end[1]) * 0.5)?.distance(p) <= dist_tol)
             };
             let parts_a =
@@ -2645,15 +2670,102 @@ impl Curve {
                 if !(apart(parts_a, gap_a) && apart(parts_b, gap_b)) {
                     continue;
                 }
-                // nearest at an end of the stretch, the curves draw nearer still beyond it:
-                // the stretch holds no touch unless they meet there (a shared end)
-                let interior = ivl1.min() < touch[0] && touch[0] < ivl1.max();
-                if !(interior || touch[2] <= scaled_zero) {
+                // a touch is where the curves meet: their points there, evaluated, within
+                // the scaled zero of each other. Curves that come no nearer than that over
+                // the stretch only stay within the tolerance of each other there, a
+                // coincidence at the tolerance (an edge against a fitted copy of a part of
+                // it, which leaves it on one side), and keep their ranges as upstream. This
+                // also places the touch: nearest at an end of the stretch, the curves meet
+                // there (a shared end). The distance's minimum is flat where the curves are
+                // tangent (it grows as the square of the distance from the touch, its square
+                // as the fourth power), so the solver stops short of it; the separation
+                // across the curves, taken along its own direction, grows as the square and
+                // is solved for where it is least
+                // ([`SolverOperation::SignedDirectedMinimize`], in the plane of the tangent
+                // and that direction), from there
+                let q1 = self.evaluate_point(k, touch[0])?;
+                let q2 = other.evaluate_point(k, touch[1])?;
+                let zero_here = EFF_ZERO * (1.0 + max2(q1.max_dimension(), q2.max_dimension()));
+                if !(q1.distance(q2) <= zero_here) {
+                    let across = self.across_tangent(k, touch[0], q2 - q1)?;
+                    let tangent = at(&self.evaluate(k, touch[0], 1, false, true)?, 1);
+                    let side = across.length();
+                    let plane = tangent.cross(across);
+                    let plane_length = plane.length();
+                    // (no direction across, a NaN included: no touch is placed)
+                    if !(side > zero_here && plane_length > 0.0) {
+                        continue;
+                    }
+                    let vectors = [plane * (1.0 / plane_length), across * (1.0 / side)];
+                    let (found, met) = self.local_curve_solve(
+                        k,
+                        &ivl1,
+                        other,
+                        &ivl2,
+                        SolverOperation::SignedDirectedMinimize,
+                        dist_tol,
+                        None,
+                        Some(&vectors),
+                        [touch[0], touch[1]],
+                        [sol.objects[0], sol.objects[1]],
+                    )?;
+                    if !found {
+                        continue;
+                    }
+                    let (t, u) = (met.start.parameters[0], met.start.parameters[1]);
+                    let value = self
+                        .evaluate_point(k, t)?
+                        .distance(other.evaluate_point(k, u)?);
+                    touch = [t, u, value];
+                }
+                let d1 = self.evaluate(k, touch[0], 2, false, true)?;
+                let d2 = other.evaluate(k, touch[1], 2, false, true)?;
+                let (Some(&p1), Some(&t1), Some(&a1), Some(&p2), Some(&t2), Some(&a2)) =
+                    (d1.first(), d1.get(1), d1.get(2), d2.first(), d2.get(1), d2.get(2))
+                else {
+                    continue;
+                };
+                let meet_zero = EFF_ZERO * (1.0 + max2(p1.max_dimension(), p2.max_dimension()));
+                if !(p1.distance(p2) <= meet_zero) {
                     continue;
                 }
                 // a curve against itself nearest where it folds back onto itself (the
                 // diagonal) does not touch itself there
-                if fold([touch[0], touch[1]], self.evaluate_point(k, touch[0])?)? {
+                if fold([touch[0], touch[1]], p1)? {
+                    continue;
+                }
+                // the touch is the only place in the stretch where the curves meet: they
+                // part from it at second order, with the curvature of each across the
+                // tangent there (`(a - (a.u) u) / |t|²`) differing by `kappa`, so that
+                // within the tolerance of each other they reach `sqrt(2 tol / kappa)` along
+                // the tangent either side of it, and the stretch reaches no farther. A
+                // longer stretch holds more than that one contact: the curves lie on each
+                // other over a part of it (an exact overlap, whose curvatures agree, or a
+                // fitted copy touching its edge where the fit is exact) and it keeps its
+                // ranges. A difference of curvatures that lifts the curves apart by no
+                // more than the scaled zero over the stretch is no parting either.
+                let curvature = |t: Vec3, a: Vec3| -> Option<Vec3> {
+                    let speed2 = t.dot(t);
+                    if !(speed2 > EFF_ZERO) {
+                        return None;
+                    }
+                    let u = t * (1.0 / speed2.sqrt());
+                    Some((a - u * a.dot(u)) * (1.0 / speed2))
+                };
+                let (Some(k1), Some(k2)) = (curvature(t1, a1), curvature(t2, a2)) else {
+                    continue;
+                };
+                let unit = t1 * (1.0 / t1.length());
+                let dk = k1 - k2;
+                let kappa = (dk - unit * dk.dot(unit)).length();
+                let reach_a = (this_a - p1).dot(unit).abs();
+                let reach_b = (this_b - p1).dot(unit).abs();
+                let lift = |x: f64| 0.5 * kappa * x * x;
+                let farthest = max2(reach_a, reach_b);
+                if !(lift(reach_a) <= dist_tol
+                    && lift(reach_b) <= dist_tol
+                    && lift(farthest) > meet_zero)
+                {
                     continue;
                 }
                 sol.start.parameters[0] = touch[0];

@@ -1522,43 +1522,35 @@ impl Curve {
             // Not upstream (WR-647): a merged range is a crossing or touch seen through
             // the tolerance when it ends where the projected curves part, inside both, as
             // in `GlobalCurveIntersect`; decided on the curves as projected, which the
-            // solver compared
-            let vecs = opts.opt_vectors.unwrap_or(&[]);
-            let vector = |i: usize| {
-                vecs.get(i).copied().ok_or(SolidError::invalid_input(
-                    OP_GCS,
-                    "projected intersection without its projection vectors",
-                ))
-            };
-            let (point, unit, aux) = match projection_type {
-                ProjectionType::Parallel => (
-                    Vec3::new(0.0, 0.0, 0.0),
-                    vector(0)?,
-                    Vec3::new(0.0, 0.0, 0.0),
-                ),
-                _ => (vector(0)?, vector(1)?, vector(2)?),
-            };
-            let project = |c: &Curve| {
-                ProjectedCurve::new(
-                    c.clone(),
-                    Some(point),
-                    Some(unit),
-                    Some(aux),
-                    projection_type,
-                    OwnsCurve::No,
-                )
-                .map(Curve::from)
-            };
-            // (parallel projections only: the projected derivatives of a perspective or
-            // rotation projection are upstream's secant approximations, on which the
-            // solvers stop short of the contact, so a point found there may be farther
-            // than the range it replaces: those keep their ranges)
+            // solver compared. Parallel projections only: the projected derivatives of a
+            // perspective or rotation projection are upstream's secant approximations, on
+            // which the solvers stop short of the contact, so a point found there may be
+            // farther than the range it replaces: those keep their ranges. The projected
+            // curves are new curves, so a curve against itself is said so (`same_curve`).
             if projection_type == ProjectionType::Parallel
                 && sols
                     .as_slice()
                     .iter()
                     .any(|s| s.solution_type == SolutionType::RangeOfValues)
             {
+                let direction = opts.opt_vectors.unwrap_or(&[]).first().copied().ok_or(
+                    SolidError::invalid_input(
+                        OP_GCS,
+                        "projected intersection without its projection vectors",
+                    ),
+                )?;
+                let origin = Vec3::new(0.0, 0.0, 0.0);
+                let project = |c: &Curve| {
+                    ProjectedCurve::new(
+                        c.clone(),
+                        Some(origin),
+                        Some(direction),
+                        Some(origin),
+                        projection_type,
+                        OwnsCurve::No,
+                    )
+                    .map(Curve::from)
+                };
                 let (p1, p2) = (project(self)?, project(other)?);
                 p1.contacts_seen_through_tolerance(
                     k,
@@ -1567,6 +1559,7 @@ impl Curve {
                     interval,
                     other_interval,
                     dist_tol,
+                    same_curve,
                 )?;
             }
             // all done
