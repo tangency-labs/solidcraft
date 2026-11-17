@@ -39,6 +39,13 @@
 //!   resets before reuse), instead of failing on the index. This copies an upstream defect
 //!   on purpose (UB-256,
 //!   `plan/upstream-issues/UB-256--insert-point-class-stale-interval-reference.md`).
+//! - **3D-distinct snaps (solidcore-native).** `FindInterval` snaps a parameter within
+//!   `SM_EFF_ZERO_PARAM` of an interval end to that end only when it is not strictly
+//!   inside the interval at a 3D distance of at least the pair intersection tolerance
+//!   from the end's point; such a parameter goes on to the 3D tests (an interior point).
+//!   Upstream snaps on the parameter alone, which on a fast-parametrised curve (a loop
+//!   bisector over an infinite cylinder's ±1234567 axial range) merged two edge
+//!   crossings 3.5e-3 apart and lost a loop crossing (#18342).
 //! - **Out-params.** `FindInterval` returns a [`FoundInterval`]; `InsertPointClass` returns
 //!   `rbInsertionMade`; `sm_ChangeEdgePointClassToNearVertex` returns
 //!   `rbChangedToVertexFlag`; `MergePointClass`'s optional output arrays are
@@ -601,14 +608,34 @@ impl<O: ClassObject> CurveClassification<O> {
             }
 
             // done - when parameter is effectively equal to interval max - SM_IP_END
-            if param > ivl.max() - eff_zero_param {
+            // (unless it is strictly inside and a distinct point in 3D: see below)
+            if param > ivl.max() - eff_zero_param
+                && !self.distinct_from_end(
+                    k,
+                    geometry,
+                    test,
+                    param,
+                    param_obj_zone_tol_3d,
+                    IntervalPosition::End,
+                )?
+            {
                 out.index = i;
                 out.position = IntervalPosition::End;
                 return Ok(());
             }
 
             // done - when parameter is effectively equal to interval min - SM_IP_START
-            if param >= ivl.min() - eff_zero_param && param < ivl.min() + eff_zero_param {
+            if param >= ivl.min() - eff_zero_param
+                && param < ivl.min() + eff_zero_param
+                && !self.distinct_from_end(
+                    k,
+                    geometry,
+                    test,
+                    param,
+                    param_obj_zone_tol_3d,
+                    IntervalPosition::Start,
+                )?
+            {
                 out.index = i;
                 out.position = IntervalPosition::Start;
                 return Ok(());
@@ -712,6 +739,54 @@ impl<O: ClassObject> CurveClassification<O> {
             OP_FIND,
             "no interval holds the parameter",
         ))
+    }
+
+    /// Whether `param`, which `FindInterval` would snap to the `end` (start or end) of
+    /// interval `test` because it is within `SM_EFF_ZERO_PARAM` of it in parameter, is
+    /// strictly inside the interval and yet a distinct point in 3D: the curve point at
+    /// `param` is at least the pair intersection tolerance (`XSectTol3d` of the
+    /// parameter's object and the end's object, mapped to working space) away from the
+    /// curve point at the interval end. Such a point is classified by the 3D tests that
+    /// follow instead of being snapped.
+    ///
+    /// A parameter tolerance alone cannot tell points apart on a fast-parametrised
+    /// curve: a loop bisector across an infinite cylinder spans the ±1234567 sentinel
+    /// axial range over [0, 1], so 1.2e-8 in parameter is 0.03 in 3D. There two
+    /// circle edges 3.5e-3 apart (a 3.5e-3 tall face at scale 1e-3) were snapped to
+    /// one boundary and merged, dropping a loop crossing.
+    fn distinct_from_end(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        test: &CurveInterval<O>,
+        param: f64,
+        param_obj_zone_tol_3d: f64,
+        end: IntervalPosition,
+    ) -> Result<bool> {
+        let ivl = test.interval;
+        // only a parameter strictly inside the interval can become an interior point
+        if !(param > ivl.min() && param < ivl.max()) {
+            return Ok(false);
+        }
+        let (end_param, end_pc) = if end == IntervalPosition::Start {
+            (ivl.min(), &test.start)
+        } else {
+            (ivl.max(), &test.end)
+        };
+        let tol = pair_tol(
+            k,
+            geometry,
+            self,
+            OP_FIND,
+            param,
+            param_obj_zone_tol_3d,
+            end_param,
+            end_pc.obj_zone_tol_3d(k, geometry)?,
+        )?;
+        let curve = cc_curve(self, geometry, OP_FIND)?;
+        let end_pt = curve.evaluate_point(k, end_param)?;
+        let classify_pt = curve.evaluate_point(k, param)?;
+        Ok(classify_pt.distance(end_pt) >= tol)
     }
 
     /// The point classification at curve parameter `param`
@@ -2600,6 +2675,47 @@ mod tests {
             .find_interval(&k, &geo, 1.5, BIG_DOUBLE, tol)
             .expect("inside");
         assert_eq!((r.index, r.position), (1, IntervalPosition::Inside));
+    }
+
+    /// #18342: on a line 2 469 134 long over [0, 1] (a loop bisector across an
+    /// infinite cylinder's ±1234567 axial sentinel range), a parameter 1.43e-9 inside
+    /// an interval end is within `SM_EFF_ZERO_PARAM` of it yet 3.5e-3 away in 3D: it is
+    /// an interior point, not that end. Within the 3D tolerance it still snaps.
+    #[test]
+    fn find_interval_does_not_snap_a_3d_distinct_point_on_a_fast_curve() {
+        let k = Kernel::default();
+        let line = Line::from_points(
+            Point3::new(0.0, 0.0, 1_234_567.0),
+            Point3::new(0.0, 0.0, -1_234_567.0),
+            3,
+        );
+        let geo = Geo(vec![Curve::from(line)]);
+        let mut cc = CurveClassification::<H>::new(&k);
+        cc.set_curve(Some(H(0, ClassObjectKind::Curve)), false);
+        cc.set_size(&k, 2).expect("size");
+        for (i, w) in [0.0, 0.5, 1.0].windows(2).enumerate() {
+            cc.at_mut(i).expect("interval").interval = Extent1d::from_min_max(w[0], w[1]);
+        }
+        let tol = 1e-7;
+        // 3.538e-3 above the end at 0.5 (z = 0): a distinct point inside interval 0
+        let far = 0.5 - 3.538e-3 / 2_469_134.0;
+        assert!(0.5 - far < crate::math::EFF_ZERO_PARAM);
+        let r = cc
+            .find_interval(&k, &geo, far, BIG_DOUBLE, tol)
+            .expect("far");
+        assert_eq!((r.index, r.position), (0, IntervalPosition::Inside));
+        // the same distance past the end, at the start of interval 1
+        let far = 0.5 + 3.538e-3 / 2_469_134.0;
+        let r = cc
+            .find_interval(&k, &geo, far, BIG_DOUBLE, tol)
+            .expect("far");
+        assert_eq!((r.index, r.position), (1, IntervalPosition::Inside));
+        // 1e-9 in 3D: the same point, snapped as before
+        let near = 0.5 - 1e-9 / 2_469_134.0;
+        let r = cc
+            .find_interval(&k, &geo, near, BIG_DOUBLE, tol)
+            .expect("near");
+        assert_eq!((r.index, r.position), (0, IntervalPosition::End));
     }
 
     #[test]

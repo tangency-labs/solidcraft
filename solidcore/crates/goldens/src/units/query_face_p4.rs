@@ -1355,6 +1355,39 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// #18342: the loops of a natural cylinder face 3.5e-3 tall (scale 1e-3) classify.
+    /// Its complete seams send ClassifyLoops through the bisector, an axial line over
+    /// the ±1234567 sentinel range; its two circle crossings, 1.43e-9 apart in the
+    /// bisector's parameter, were merged into one boundary, so the touches were only
+    /// [In, Out] and the loop tree had no root (`classifiable` 3, NoLoopTreeRoot).
+    #[test]
+    fn short_natural_cylinder_classifies_through_both_circle_crossings() {
+        let i = Inputs {
+            brep: BrepIn::Natural {
+                surface: AnySrf::Cylinder {
+                    scale: 1e-3,
+                    a: 0.6278941237582317,
+                    c: 3.538075172749348,
+                    swap: false,
+                },
+            },
+            validate_only: false,
+            init_gaps: true,
+            face: 32,
+            props: 1,
+            loops: 2,
+        };
+        let out = rust(&i).unwrap();
+        assert_eq!(out.error, None);
+        assert_eq!(out.ints.get("classifiable"), Some(&vec![0]));
+        assert_eq!(
+            out.ints.get("looptree").and_then(|t| t.first()),
+            Some(&1),
+            "{:?}",
+            out.ints.get("looptree")
+        );
+    }
+
     /// A circular UV trim spans both axes and winds in the requested direction.
     #[test]
     fn circular_trims_keep_their_uv_bounds_and_orientation() {
