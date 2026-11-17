@@ -3651,4 +3651,68 @@ mod tests {
             }
         }
     }
+
+    /// A UV trim's corner is a kink only where its image on the surface turns. The
+    /// surface is a plane patch that is only `C0` in u across `u = 1`: the point
+    /// `(x(u) + v / 2, v, 0)` with `x = u` up to `u = 1` and `x = 1 + 3 (u - 1)` past it.
+    /// The straight line `(1.6 + 0.05 t, 0.2 + 0.5 t, 0)` crosses that knot line at
+    /// `t = 2.5`, and its exact trim is two straight pieces from `(7/6, 0.2)` through
+    /// `(1, 1.45)` to `(0.9, 1.7)`: a corner of 14 degrees in (u, v), on a straight line.
+    /// It was refused by test 7. The same corner moved off the knot line (the trim shifted
+    /// 0.3 in u) is a corner of the image too, and is still reported.
+    #[test]
+    fn a_trims_corner_on_its_surfaces_c0_knot_line_is_a_kink_only_if_its_image_turns() {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let k = Kernel::default();
+        let net: Vec<Vec<CPoint>> = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 2.0, 3.0, 4.0]
+            .iter()
+            .map(|&x| {
+                vec![
+                    CPoint::new(x, 0.0, 0.0, NOW),
+                    CPoint::new(x + 1.0, 2.0, 0.0, NOW),
+                ]
+            })
+            .collect();
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+        let v = [0.0, 0.0, 2.0, 2.0];
+        let surface =
+            Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &net, &u, &v).unwrap());
+        let trim = |shift: f64| {
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 2,
+                degree: 1,
+                control_points: &[
+                    Vec3::new(7.0 / 6.0 + shift, 0.2, 0.0),
+                    Vec3::new(1.0 + shift, 1.45, 0.0),
+                    Vec3::new(0.9 + shift, 1.7, 0.0),
+                ],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[2, 1, 2],
+                knots: &[0.0, 2.5, 3.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap()
+        };
+
+        // the corner on the knot line: the image is the straight line
+        let on_line = trim(0.0);
+        for t in [0.0, 1.0, 2.5, 2.75, 3.0] {
+            let uv = on_line.evaluate_point(t).unwrap();
+            let image = surface.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+            let line = Vec3::new(1.6 + 0.05 * t, 0.2 + 0.5 * t, 0.0);
+            assert!((image - line).length() < 1e-12, "{t}: {image:?}");
+        }
+        assert_eq!(
+            failed_tests(&k, &on_line, Some(&surface)),
+            Vec::<u64>::new()
+        );
+        // read without its surface it is a corner
+        assert_eq!(failed_tests(&k, &on_line, None), vec![7]);
+
+        // the same corner off the knot line: the image turns with it
+        assert_eq!(failed_tests(&k, &trim(0.3), Some(&surface)), vec![7]);
+    }
 }

@@ -2125,4 +2125,128 @@ mod tests {
             )
         );
     }
+
+    /// A plane patch over `[0, 2]^2` that is only `C0` in u across `u = 1`: the point
+    /// `(x(u) + v / 2, v, 0)` with `x = u` up to `u = 1` and `x = 1 + 3 (u - 1)` past it
+    /// (cubic in u, the knot 1 three times; linear in v). `Su` is `(1, 0, 0)` before the
+    /// line and `(3, 0, 0)` past it, and `Sv = (1/2, 1, 0)` is not perpendicular to it.
+    fn sheared_plane_with_a_c0_knot_line() -> Surface {
+        let net: Vec<Vec<CPoint>> = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 2.0, 3.0, 4.0]
+            .iter()
+            .map(|&x| {
+                vec![
+                    CPoint::new(x, 0.0, 0.0, NOW),
+                    CPoint::new(x + 1.0, 2.0, 0.0, NOW),
+                ]
+            })
+            .collect();
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0];
+        let v = [0.0, 0.0, 2.0, 2.0];
+        Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &net, &u, &v).unwrap())
+    }
+
+    /// The straight line `(1.6 + 0.05 t, 0.2 + 0.5 t, 1e-7)`, `t` in `[0, 3]`, 1e-7 above
+    /// [`sheared_plane_with_a_c0_knot_line`], and its exact UV curve there: `v = 0.2 +
+    /// 0.5 t` and `x - v / 2 = 1.5 - 0.2 t`, which is `1` at `t = 2.5`. Before that the
+    /// line is past `u = 1`, `u = 1 + (0.5 - 0.2 t) / 3`; after it `u = 1.5 - 0.2 t`.
+    /// So the UV curve is two straight pieces that meet on the knot line at a corner:
+    /// its tangent is `(-0.2 / 3, 0.5)` before `t = 2.5` and `(-0.2, 0.5)` after.
+    fn line_across_the_knot_line(t: f64) -> (Point3, Point2) {
+        let w = 1.5 - 0.2 * t;
+        let u = if w > 1.0 { 1.0 + (w - 1.0) / 3.0 } else { w };
+        (
+            Point3::new(1.6 + 0.05 * t, 0.2 + 0.5 * t, 1e-7),
+            Point2::new(u, 0.2 + 0.5 * t),
+        )
+    }
+
+    /// WR-753 in the drop: where the dropped curve crosses a `C0` knot line of the
+    /// surface its UV curve turns a corner, so the pieces end on the line, the one that
+    /// arrives with the tangent of the side it came from and the one that leaves with
+    /// that of the side it runs to. The line of [`line_across_the_knot_line`] is dropped
+    /// as one span (the crossing is found inside it) and as two spans that meet at the
+    /// crossing (its drop point there is a rounding error off the line). Either way the
+    /// UV curve is the exact one: two straight pieces, their joint on `u = 1` at `t =
+    /// 2.5`, with the two closed-form tangents there. The line is off the surface (by a
+    /// tenth of the tolerance), so each tangent is dropped onto an offset of the surface,
+    /// which has to answer from the side asked; and `Su . C'` is positive where the line
+    /// runs to smaller u, so the side cannot be read from its sign.
+    ///
+    /// Upstream's pieces share one tangent at every joint. Dropped as one span, the
+    /// line was halved towards the crossing and left a piece 1.8e-4 long across it;
+    /// dropped as two, the second span started with the first one's tangent, and was
+    /// halved the same way.
+    #[test]
+    fn a_dropped_curve_turns_its_corner_on_the_surfaces_c0_knot_line() {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let k = Kernel::default();
+        let surface = sheared_plane_with_a_c0_knot_line();
+        let domain = Extent2d::from_bounds(0.0, 0.0, 2.0, 2.0);
+        let interval = Extent1d::from_min_max(0.0, 3.0);
+        let polyline = |knots: &[f64]| {
+            let points: Vec<Point3> = knots
+                .iter()
+                .map(|&t| line_across_the_knot_line(t).0)
+                .collect();
+            let mut multiplicities = vec![1; knots.len()];
+            multiplicities[0] = 2;
+            multiplicities[knots.len() - 1] = 2;
+            Curve::from(
+                BSplineCurve::create_canonical(&CanonicalData {
+                    dim: 3,
+                    degree: 1,
+                    control_points: &points,
+                    form: BSplineCurveForm::Unspecified,
+                    knot_multiplicities: &multiplicities,
+                    knots,
+                    knot_type: KnotType::Unspecified,
+                    weights: None,
+                    trim: None,
+                })
+                .unwrap(),
+            )
+        };
+        for (what, curve) in [
+            ("one span", polyline(&[0.0, 3.0])),
+            ("two spans", polyline(&[0.0, 2.5, 3.0])),
+        ] {
+            let dropped = surface
+                .drop_curve::<NoObject>(&k, &domain, &curve, &interval, 1e-6, true, None, true)
+                .unwrap();
+            assert_eq!(dropped.uv_curves.len(), 1, "{what}");
+            assert!(dropped.max_approx_dev < 1e-6, "{what}: {dropped:?}");
+            let uv = &dropped.uv_curves[0];
+
+            // two pieces, their joint at the crossing and on the knot line
+            let (knots, _) = uv.knots(&k, None).unwrap();
+            assert_eq!(knots.len(), 3, "{what}: {knots:?}");
+            let joint = knots[1];
+            assert!((joint - 2.5).abs() < 1e-6, "{what}: {joint}");
+            assert_eq!(uv.evaluate_point(&k, joint).unwrap().x, 1.0, "{what}");
+
+            // the tangent of each side, in closed form
+            let arriving = uv.evaluate(&k, joint, 1, false, true).unwrap()[1];
+            let leaving = uv.evaluate(&k, joint, 1, true, true).unwrap()[1];
+            for (side, got, want) in [
+                ("arriving", arriving, [-0.2 / 3.0, 0.5]),
+                ("leaving", leaving, [-0.2, 0.5]),
+            ] {
+                assert!(
+                    (got.x - want[0]).abs() < 1e-9 && (got.y - want[1]).abs() < 1e-9,
+                    "{what}, {side}: {got:?}"
+                );
+            }
+
+            // the exact UV curve, to the parameter zero the joint is placed within
+            for i in 0..=3000 {
+                let t = f64::from(i) * 1e-3;
+                let got = uv.evaluate_point(&k, t).unwrap();
+                let want = line_across_the_knot_line(t).1;
+                assert!(
+                    (got.x - want.x).abs() < 1e-7 && (got.y - want.y).abs() < 1e-7,
+                    "{what} at {t}: {got:?}, exact {want:?}"
+                );
+            }
+        }
+    }
 }
