@@ -5,6 +5,96 @@ fn fixed_request_metadata_bytes() -> u64 {
     request().retained_resource_metadata_bytes()
 }
 
+#[test]
+fn oidn_cooperative_host_refuses_native_work_before_reserving_but_keeps_disabled_intent() {
+    struct OptionsExecutor;
+    impl ImageExecutor for OptionsExecutor {
+        fn supports_denoise_controls(&self) -> bool {
+            true
+        }
+        fn descriptor(&self) -> Result<ExecutorDescriptor> {
+            CpuExecutor.descriptor()
+        }
+        fn admit(&self, scene: &ProductScene, request: &ImageRequest, _: JobOptions) -> Result<Admission> {
+            admit(scene, request)
+        }
+        fn begin(&self, scene: ProductScene, request: ImageRequest, _: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>> {
+            CpuExecutor.begin(scene, request, JobOptions::default(), cancel)
+        }
+    }
+    let host = ImageHost::cooperative_with(Arc::new(OptionsExecutor));
+    let options = JobOptions {
+        denoise: true,
+        denoise_settings: super::super::DenoiseSettings { method: super::super::DenoiseMethod::Oidn, ..Default::default() },
+        ..Default::default()
+    };
+    let failure = host.submit_with_options(id(7971, 1), 1, empty(), request(), options).err().unwrap();
+    assert_eq!(failure.code, ErrorCode::HostUnavailable);
+    assert!(failure.message.contains("native background"));
+    assert_eq!(host.admitted_bytes(), 0);
+    let handle = host.submit_with_options(id(7971, 2), 1, empty(), request(), JobOptions { denoise: false, ..options }).unwrap();
+    assert_eq!(handle.status().unwrap().options.denoise_settings.method, super::super::DenoiseMethod::Oidn);
+    handle.cancel().unwrap();
+    assert!(!host.pump(1).unwrap());
+    assert!(handle.work_released());
+}
+
+#[cfg(all(feature = "raytrace-cpu", feature = "denoise-oidn", not(target_arch = "wasm32")))]
+#[test]
+fn oidn_cancelled_worker_retires_before_host_work_lease_is_released() {
+    let host = ImageHost(Arc::new(Owner {
+        executor: None,
+        shared: CpuHost::shared(super::super::NATIVE_CPU_POOL_BYTES),
+        kind: HostKind::NativeWorker,
+        running: Mutex::new(None),
+        _worker: None,
+    }));
+    let request = ImageRequest {
+        integrator: Integrator::Raytrace,
+        raytrace: Some(super::super::RaytraceOptions {
+            threads: 1,
+            denoise: true,
+            denoise_settings: super::super::DenoiseSettings { method: super::super::DenoiseMethod::Oidn, ..Default::default() },
+            budget: super::super::CpuBudget::Studio,
+            lights: Some(Vec::new()),
+            ..Default::default()
+        }),
+        width: 32,
+        height: 32,
+        ..request()
+    };
+    let handle = host.submit(id(7972, 1), 1, empty(), request).unwrap();
+    let work = host.0.shared.queue.lock().unwrap().pop_front().unwrap();
+    let mut running = Running::begin(work).unwrap();
+    for _ in 0..100_000 {
+        let at_oidn = match running.task.as_ref().unwrap() {
+            WorkTask::Raytrace(task) => task.0.first().unwrap().output_stage_for_test() == Some("oidn"),
+            _ => false,
+        };
+        if at_oidn {
+            break;
+        }
+        assert!(running.guarded_step(1));
+    }
+    let at_oidn = match running.task.as_ref().unwrap() {
+        WorkTask::Raytrace(task) => task.0.first().unwrap().output_stage_for_test() == Some("oidn"),
+        _ => false,
+    };
+    assert!(at_oidn, "fixture must reach native output before cancelling");
+    let admitted = host.admitted_bytes();
+    assert!(admitted > 512 * 1024 * 1024);
+    handle.cancel().unwrap();
+    assert!(!running.guarded_step(1));
+    assert!(!handle.work_released(), "terminal phase cannot release an unjoined worker's lease");
+    assert_eq!(host.admitted_bytes(), admitted);
+    assert!(handle.frame().unwrap().is_none());
+    drop(running);
+    assert!(handle.work_released(), "retirement joins worker before marking work released");
+    assert!(host.admitted_bytes() < admitted);
+    drop(handle);
+    assert_eq!(host.admitted_bytes(), 0);
+}
+
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 mod progressive_checkpoints {
     use super::*;
@@ -3120,7 +3210,7 @@ mod native_memory_admission {
                 }),
                 supersampling: 2,
                 denoise: true,
-                denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+                denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true, ..Default::default() },
                 denoise_diagnostics: true,
                 output: Some(Box::new(OutputOptions {
                     linear_exr: true,

@@ -7732,7 +7732,13 @@ fn workstation_admits_combined_maximum_quality_and_optional_pilots_photons_witho
                     }),
                     supersampling: 2,
                     denoise: true,
-                    denoise_settings: job::DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+                    denoise_settings: job::DenoiseSettings {
+                        passes: 3,
+                        strength: 1.0,
+                        firefly_suppression: true,
+                        optical_filter: true,
+                        ..Default::default()
+                    },
                     denoise_diagnostics: true,
                     output: Some(Box::new(job::OutputOptions {
                         linear_exr: true,

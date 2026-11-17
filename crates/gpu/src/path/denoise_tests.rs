@@ -661,7 +661,7 @@ fn gpu_denoise_controls_match_f64_keep_alpha_and_leave_raw_unchanged() {
     for (passes, strength, firefly_suppression) in [(1, 0.0, true), (1, 1.0, false), (1, 1.0, true), (2, 0.4, true), (3, 0.6, false)] {
         let mut enabled = Vec::new();
         for optical_filter in [true, false] {
-            task.options.denoise_settings = DenoiseSettings { passes, strength, firefly_suppression, optical_filter };
+            task.options.denoise_settings = DenoiseSettings { passes, strength, firefly_suppression, optical_filter, ..Default::default() };
             filter.run_filter(&task, false).unwrap();
             let actual = task.read_linear_buffer(filter.output(passes)).unwrap();
             let mut expected = input.clone();
@@ -817,7 +817,13 @@ fn gpu_filter_windows_keep_three_pass_halos_firefly_support_and_actual_frame_edg
     let dummy = make("unused filter geometry", &[0; 64]);
     let options = JobOptions {
         denoise: true,
-        denoise_settings: solidcraft_render::job::DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+        denoise_settings: solidcraft_render::job::DenoiseSettings {
+            passes: 3,
+            strength: 1.0,
+            firefly_suppression: true,
+            optical_filter: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let mut task = Task::new(context.clone(), plane(), request(40), JobOptions { denoise: false, ..options }, CancelToken::default()).unwrap();
@@ -954,7 +960,7 @@ fn gpu_paged_film_matches_raw_finished_png_diagnostic_masks_and_complete_adaptiv
             seed: 91,
             supersampling: 2,
             denoise: true,
-            denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+            denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true, ..Default::default() },
             denoise_diagnostics: true,
             linear_exr: true,
             adaptive: adaptive.then_some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),

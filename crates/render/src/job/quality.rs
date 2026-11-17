@@ -10,20 +10,70 @@ pub const MAX_OUTPUT_PIXELS: u64 = 33_554_432;
 pub const MAX_TRACE_DIMENSION: u32 = MAX_OUTPUT_DIMENSION * 2;
 pub const MAX_TRACE_PIXELS: u64 = MAX_OUTPUT_PIXELS * 4;
 
-/// Conservative display filtering. Raw radiance and alpha never change.
+/// Which filter a denoised render runs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DenoiseMethod {
+    /// The built-in incremental a-trous filter; the parameters below apply to it alone.
+    #[default]
+    Spatial,
+    /// Open Image Denoise over the raw colour, one pass on the CPU. Refused in a build
+    /// without the `denoise-oidn` feature, so a saved design still opens everywhere.
+    Oidn,
+}
+
+impl DenoiseMethod {
+    fn is_spatial(&self) -> bool {
+        *self == Self::Spatial
+    }
+}
+
+/// The Open Image Denoise quality preset, as its filter takes it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OidnQuality {
+    Fast,
+    Balanced,
+    #[default]
+    High,
+}
+
+impl OidnQuality {
+    fn is_high(&self) -> bool {
+        *self == Self::High
+    }
+}
+
+/// Output-filter intent, kept independently of build capabilities. Raw radiance and alpha never change.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DenoiseSettings {
+    /// Spatial filter passes; retained when another method is selected.
     pub passes: u32,
+    /// Spatial filter strength; retained when another method is selected.
     pub strength: f64,
+    /// Spatial filter firefly control.
     pub firefly_suppression: bool,
-    /// Filter supported mirror and glass guides; false retains legacy opaque-only denoising.
+    /// Spatial filter mirror and glass guides; false retains legacy opaque-only denoising.
     pub optical_filter: bool,
+    /// Which filter `denoise: true` runs. Omission keeps legacy Spatial reply shapes.
+    #[serde(skip_serializing_if = "DenoiseMethod::is_spatial")]
+    pub method: DenoiseMethod,
+    /// The Open Image Denoise quality preset; omitted High still reopens as High.
+    #[serde(skip_serializing_if = "OidnQuality::is_high")]
+    pub oidn_quality: OidnQuality,
 }
 
 impl Default for DenoiseSettings {
     fn default() -> Self {
-        Self { passes: 3, strength: 1.0, firefly_suppression: false, optical_filter: true }
+        Self {
+            passes: 3,
+            strength: 1.0,
+            firefly_suppression: false,
+            optical_filter: true,
+            method: DenoiseMethod::default(),
+            oidn_quality: OidnQuality::default(),
+        }
     }
 }
 

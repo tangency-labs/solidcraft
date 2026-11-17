@@ -14,6 +14,7 @@ plugins = ["dep:craft-plugin-wasm"]
 # Optional authored texture/HDR bytes; the command registry and metadata remain available.
 bundled-render-library = []
 raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
+denoise-oidn = ["solidcraft-render/denoise-oidn"]
 # Turns on the parameter-contract audit recorder (`SOLIDCRAFT_PARAM_AUDIT`, see
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []

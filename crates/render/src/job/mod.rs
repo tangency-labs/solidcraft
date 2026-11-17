@@ -23,6 +23,7 @@ mod cpu_sky;
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) mod denoise;
 mod denoise_diagnostics;
+pub mod denoise_oidn;
 pub(crate) mod encoding;
 pub mod finishing;
 mod host;
@@ -73,8 +74,8 @@ pub use png::PngTask;
 pub use presentation::OutputOptions;
 pub use punctual::{MAX_PUNCTUAL_LIGHTS, MIN_GPU_SPOT_COSINE_GAP, PunctualDiagnostics, PunctualLightOptions, PunctualLights, SpotConeOptions};
 pub use quality::{
-    DenoiseSettings, MAX_CPU_THREADS, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS, MAX_UI_SAMPLES,
-    resolve_supersampling, single_supersample, supersampled_dimensions,
+    DenoiseMethod, DenoiseSettings, MAX_CPU_THREADS, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS, MAX_UI_SAMPLES,
+    OidnQuality, resolve_supersampling, single_supersample, supersampled_dimensions,
 };
 
 /// Native path-tracing ceilings, further restricted by the actual device.

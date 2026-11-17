@@ -1,0 +1,2 @@
+| assets/locales/pending/render-denoise-method.json | SolidCraft contributors | Original denoiser selection, quality labels, help text and translations | MIT OR Apache-2.0 |
+| crates/render/src/job/denoise_oidn.rs | SolidCraft contributors | Original optional integration with Intel Open Image Denoise (https://www.openimagedenoise.org, Apache-2.0) through the oidn Rust crate (https://github.com/Twinklebear/oidn-rs, MIT); no third-party source or model data copied | MIT OR Apache-2.0 |

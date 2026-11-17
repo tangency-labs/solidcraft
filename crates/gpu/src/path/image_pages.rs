@@ -1,7 +1,7 @@
 //! Row-aligned GPU storage pages and filter windows. Page boundaries change
 //! resource residency only; camera/sample identities remain full-image indices.
 use super::{FAILURE_BYTES, JobError, JobOptions, Result};
-use solidcraft_render::job::{ErrorCode, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS};
+use solidcraft_render::job::{DenoiseMethod, ErrorCode, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS};
 
 // A working-set target, not an image-size limit: larger images use more pages.
 // Actual adapter binding/allocation limits can make pages smaller.
@@ -44,8 +44,9 @@ impl Layout {
         options.denoise_settings.validate()?;
         let adaptive = options.adaptive.is_some();
         let planes = if adaptive { 3 } else { 1 };
-        let filter = options.denoise || options.denoise_diagnostics;
-        let halo = if options.denoise { 2 * ((1 << options.denoise_settings.passes) - 1) } else { 0 };
+        let spatial = options.denoise && options.denoise_settings.method == DenoiseMethod::Spatial;
+        let filter = spatial || options.denoise_diagnostics;
+        let halo = if spatial { 2 * ((1 << options.denoise_settings.passes) - 1) } else { 0 };
         let storage = limits.max_storage_buffer_binding_size.min(limits.max_buffer_size).min(TARGET_BUFFER_BYTES);
         let film_row = u64::from(width) * 16 * u64::from(planes);
         let storage_rows = storage.checked_sub(optical_bytes).ok_or_else(|| limit("GPU storage cannot fit optical dispatch scratch"))? / film_row;

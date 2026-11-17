@@ -11,6 +11,7 @@ workspace = true
 [features]
 default = []
 raytrace-cpu = ["dep:rayon"]
+denoise-oidn = ["dep:oidn"]
 
 [dependencies]
 solidcore-record = { workspace = true }
@@ -31,6 +32,9 @@ weezl = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = { workspace = true, optional = true }
 sysinfo = { workspace = true }
+# System Open Image Denoise through pkg-config (its own default); `bundled` only ships
+# linux-x64/macos-x64+arm64/windows-x64 and downloads at build time (#16902).
+oidn = { version = "=2.5.1", optional = true }
 
 [dev-dependencies]
 flate2 = "1"

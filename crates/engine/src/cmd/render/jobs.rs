@@ -413,7 +413,16 @@ pub(crate) fn prepare_with_metadata(
             solidcraft_render::job::supersampled_dimensions(dimensions.0, dimensions.1, options.supersampling).map_err(job_error)?
         };
         options.budget.validate_image(trace_dimensions.0, trace_dimensions.1, options.camera_sampling().map_err(job_error)?).map_err(job_error)?;
-        if options.denoise || options.denoise_diagnostics {
+        if options.denoise && options.denoise_settings.method == solidcraft_render::job::DenoiseMethod::Oidn {
+            solidcraft_render::job::denoise_oidn::validate_request(
+                trace_dimensions.0,
+                trace_dimensions.1,
+                input.transparent_background,
+                options.denoise_diagnostics,
+            )
+            .map_err(job_error)?;
+        }
+        if (options.denoise && options.denoise_settings.method == solidcraft_render::job::DenoiseMethod::Spatial) || options.denoise_diagnostics {
             solidcraft_render::job::validate_cpu_denoise_image(trace_dimensions.0, trace_dimensions.1).map_err(job_error)?;
         }
         if let Some(lens) = options.lens {
@@ -816,7 +825,12 @@ fn prepare_progressive(
     options.adaptive = input.adaptive;
     options.transmission_samples = input.transmission_samples.unwrap_or(1);
     options.validate().map_err(job_error)?;
-    solidcraft_render::job::supersampled_dimensions(settings.width, settings.height, options.supersampling).map_err(job_error)?;
+    let (trace_width, trace_height) =
+        solidcraft_render::job::supersampled_dimensions(settings.width, settings.height, options.supersampling).map_err(job_error)?;
+    if options.denoise && options.denoise_settings.method == solidcraft_render::job::DenoiseMethod::Oidn {
+        solidcraft_render::job::denoise_oidn::validate_request(trace_width, trace_height, input.transparent_background, options.denoise_diagnostics)
+            .map_err(job_error)?;
+    }
     if let Some(super::environment::Input::BuiltinHdr { id, .. }) = &input.environment
         && options.lighting.as_ref().is_some_and(|lighting| lighting.sun.is_some())
         && super::library::owns_sun(id, command)?
@@ -967,7 +981,27 @@ fn ignored_controls(settings: &RenderSetup) -> Vec<&'static str> {
 }
 
 /// How the denoising filter of a CPU ray tracing or GPU request works, for its preflight reply.
-fn denoising_reply(command: &str, settings: &solidcraft_render::job::DenoiseSettings, diagnostics: bool, cpu: bool) -> Result<Denoising> {
+pub(super) fn denoising_reply(command: &str, settings: &solidcraft_render::job::DenoiseSettings, diagnostics: bool, cpu: bool) -> Result<Denoising> {
+    if settings.method == solidcraft_render::job::DenoiseMethod::Oidn {
+        return Ok(Denoising {
+            method: "open_image_denoise",
+            backend: Some("native_cpu"),
+            passes: 1,
+            steps: Vec::new(),
+            settings: retyped(command, settings)?,
+            diagnostics_requested: diagnostics,
+            outlier_policy: "disabled",
+            optical_policy: "color-only RT model; no optical correspondence guides",
+            guides: "none",
+            bypass: "original coverage is preserved; transparent output is unsupported",
+            limitation: "experimental color-only spatial neural filter; native cancellation and workspace controls are not yet qualified",
+            raw_linear_accumulator_preserved: true,
+            raw_linear_exr_preserved: Some(true),
+            output_stage: "linear_before_tone_map",
+            work_units: Some("one trace-grid pixel visit plus native inference on a background worker; workspace is estimated separately"),
+            checkpoints: Some("every complete published pass uses Open Image Denoise; live-preview qualification is pending"),
+        });
+    }
     Ok(Denoising {
         method: "edge_aware_atrous",
         backend: cpu.then_some("native_cpu"),

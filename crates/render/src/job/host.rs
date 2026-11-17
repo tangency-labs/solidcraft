@@ -2271,6 +2271,15 @@ impl ImageHost {
             credit.check_request(self, &request, &cancel, retained)?;
         }
         cancel.check()?;
+        let oidn = (request.integrator == Integrator::Raytrace
+            && request.raytrace.as_ref().is_some_and(|options| options.denoise && options.denoise_settings.method == super::DenoiseMethod::Oidn))
+            || (self.0.executor.is_some() && options.denoise && options.denoise_settings.method == super::DenoiseMethod::Oidn);
+        if oidn && self.0.kind != HostKind::NativeWorker {
+            return Err(JobError::new(
+                ErrorCode::HostUnavailable,
+                "Open Image Denoise requires a native background image host; use the spatial filter",
+            ));
+        }
         if retained.is_some_and(|lease| !Arc::ptr_eq(&lease.0.budget, &self.0.shared.budget)) {
             return Err(JobError::new(ErrorCode::WrongOwner, "retained metadata belongs to a different host pool"));
         }
