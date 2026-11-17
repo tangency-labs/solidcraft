@@ -3726,8 +3726,9 @@ fn colour_names_come_in_with_their_colours_and_go_out_again() {
     assert_eq!(back_paint.faces.iter().map(|f| f.name.as_deref()).collect::<Vec<_>>(), [Some("Accent")]);
 }
 
-/// A body an `INVISIBILITY` record names, through its styled item or its representation, is
-/// read hidden; the body is still there, so it can be shown again.
+/// A body an `INVISIBILITY` record names, through its styled item, its representation or a
+/// presentation layer it is assigned to, is read hidden; the body is still there, so it can be
+/// shown again.
 #[test]
 fn an_invisibility_record_hides_its_styled_item_and_representation() {
     let import = |extra: &str| {
@@ -3748,6 +3749,16 @@ fn an_invisibility_record_hides_its_styled_item_and_representation() {
     let represented = import("#459=INVISIBILITY((#60));\n");
     assert_eq!(represented.bodies.len(), 1, "{:?}", represented.warnings);
     assert!(represented.bodies[0].hidden);
+    // A layer: every item assigned to it is hidden, whether the layer lists the solid or its
+    // representation.
+    let layered = import("#80=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#101));\n#459=INVISIBILITY((#80));\n");
+    assert_eq!(layered.bodies.len(), 1, "{:?}", layered.warnings);
+    assert!(layered.bodies[0].hidden, "a body on a hidden layer");
+    let layered = import("#80=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#60));\n#459=INVISIBILITY((#80));\n");
+    assert!(layered.bodies[0].hidden, "a representation on a hidden layer");
+    // A layer no INVISIBILITY record names leaves its items shown.
+    let shown_layer = import("#80=PRESENTATION_LAYER_ASSIGNMENT('Parts','',(#101));\n");
+    assert!(!shown_layer.bodies[0].hidden);
     // A file with no INVISIBILITY record leaves the body shown.
     let shown = import("");
     assert_eq!(shown.bodies.len(), 1, "{:?}", shown.warnings);
