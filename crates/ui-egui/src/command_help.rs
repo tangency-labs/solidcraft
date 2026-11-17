@@ -288,6 +288,7 @@ pub const DOCUMENTED: &[&str] = &[
     "solid.split_body",
     "solid.split_face",
     "solid.sweep",
+    "solid.tab_slot",
     "solid.thread",
     "solid.torus",
     "solid.web",

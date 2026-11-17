@@ -13,7 +13,8 @@
     "ui.tab_slot.end_distance": "End distance",
     "ui.tab_slot.clearance": "Clearance",
     "ui.tab_slot.protrusion": "Protrusion",
-    "error.tab_slot_plates": "Pick the plates that get tabs and the plates that get slots"
+    "error.tab_slot_plates": "Pick the plates that get tabs and the plates that get slots",
+    "help.solid.tab_slot": "Cuts tabs on the edge of one plate and matching slots in the plate it meets at a right angle. Use it to make flat parts that slot together for laser cutting or CNC."
   },
   "ar": {
     "cmd.solid_tab_slot": "لسان وشق",
@@ -29,7 +30,8 @@
     "ui.tab_slot.end_distance": "المسافة من الطرف",
     "ui.tab_slot.clearance": "الخلوص",
     "ui.tab_slot.protrusion": "البروز",
-    "error.tab_slot_plates": "اختر الألواح التي تأخذ الألسنة والألواح التي تأخذ الشقوق"
+    "error.tab_slot_plates": "اختر الألواح التي تأخذ الألسنة والألواح التي تأخذ الشقوق",
+    "help.solid.tab_slot": "يقطع ألسنة على حافة لوح وفتحات مطابقة لها في اللوح الذي يلتقي به بزاوية قائمة. استخدمه لصنع أجزاء مسطحة تتعشق معًا للقطع بالليزر أو بالتحكم الرقمي."
   },
   "de": {
     "cmd.solid_tab_slot": "Lasche und Schlitz",
@@ -45,7 +47,8 @@
     "ui.tab_slot.end_distance": "Endabstand",
     "ui.tab_slot.clearance": "Spiel",
     "ui.tab_slot.protrusion": "Überstand",
-    "error.tab_slot_plates": "Wählen Sie die Platten mit Laschen und die Platten mit Schlitzen"
+    "error.tab_slot_plates": "Wählen Sie die Platten mit Laschen und die Platten mit Schlitzen",
+    "help.solid.tab_slot": "Schneidet Laschen an die Kante einer Platte und passende Schlitze in die Platte, auf die sie rechtwinklig trifft. Damit bauen Sie flache Teile, die sich für Laserschneiden oder CNC ineinanderstecken lassen."
   },
   "he": {
     "cmd.solid_tab_slot": "לשונית וחריץ",
@@ -61,7 +64,8 @@
     "ui.tab_slot.end_distance": "מרחק מהקצה",
     "ui.tab_slot.clearance": "מרווח חופשי",
     "ui.tab_slot.protrusion": "בליטה",
-    "error.tab_slot_plates": "בחר את הלוחות שמקבלים לשוניות ואת הלוחות שמקבלים חריצים"
+    "error.tab_slot_plates": "בחר את הלוחות שמקבלים לשוניות ואת הלוחות שמקבלים חריצים",
+    "help.solid.tab_slot": "חותך לשוניות בקצה של לוח וחריצים תואמים בלוח שהוא פוגש בזווית ישרה. השתמשו בו כדי ליצור חלקים שטוחים שמשתלבים זה בזה לחיתוך בלייזר או ב-CNC."
   },
   "ja": {
     "cmd.solid_tab_slot": "タブとスロット",
@@ -77,7 +81,8 @@
     "ui.tab_slot.end_distance": "端からの距離",
     "ui.tab_slot.clearance": "クリアランス",
     "ui.tab_slot.protrusion": "突き出し",
-    "error.tab_slot_plates": "タブを付けるプレートとスロットを付けるプレートを選択してください"
+    "error.tab_slot_plates": "タブを付けるプレートとスロットを付けるプレートを選択してください",
+    "help.solid.tab_slot": "板の縁にタブを、直角に接する板に合うスロットを切ります。レーザー加工やCNCで差し込んで組み立てる平らな部品を作るときに使います。"
   },
   "ko": {
     "cmd.solid_tab_slot": "탭과 슬롯",
@@ -93,7 +98,8 @@
     "ui.tab_slot.end_distance": "끝 거리",
     "ui.tab_slot.clearance": "여유",
     "ui.tab_slot.protrusion": "돌출",
-    "error.tab_slot_plates": "탭을 받을 판과 슬롯을 받을 판을 선택하세요"
+    "error.tab_slot_plates": "탭을 받을 판과 슬롯을 받을 판을 선택하세요",
+    "help.solid.tab_slot": "한 판의 가장자리에 탭을, 직각으로 만나는 판에 맞는 슬롯을 만듭니다. 레이저 절단이나 CNC로 끼워 맞추는 평평한 부품을 만들 때 사용하세요."
   },
   "nb": {
     "cmd.solid_tab_slot": "Tapp og spor",
@@ -109,7 +115,8 @@
     "ui.tab_slot.end_distance": "Endeavstand",
     "ui.tab_slot.clearance": "Klaring",
     "ui.tab_slot.protrusion": "Utstikk",
-    "error.tab_slot_plates": "Velg platene som får tapper og platene som får spor"
+    "error.tab_slot_plates": "Velg platene som får tapper og platene som får spor",
+    "help.solid.tab_slot": "Skjærer tapper i kanten av én plate og tilsvarende spor i platen den møter i rett vinkel. Bruk det til å lage flate deler som stikkes sammen, for laserskjæring eller CNC."
   },
   "vi": {
     "cmd.solid_tab_slot": "Mộng và rãnh",
@@ -125,7 +132,8 @@
     "ui.tab_slot.end_distance": "Khoảng cách đầu mút",
     "ui.tab_slot.clearance": "Khe hở",
     "ui.tab_slot.protrusion": "Phần nhô",
-    "error.tab_slot_plates": "Chọn các tấm có mộng và các tấm có rãnh"
+    "error.tab_slot_plates": "Chọn các tấm có mộng và các tấm có rãnh",
+    "help.solid.tab_slot": "Cắt các mộng trên cạnh một tấm và các rãnh khớp trong tấm gặp nó theo góc vuông. Dùng để làm các chi tiết phẳng lắp khớp vào nhau khi cắt laser hoặc CNC."
   },
   "zh": {
     "cmd.solid_tab_slot": "凸舌与槽",
@@ -141,6 +149,7 @@
     "ui.tab_slot.end_distance": "端部距离",
     "ui.tab_slot.clearance": "间隙",
     "ui.tab_slot.protrusion": "伸出量",
-    "error.tab_slot_plates": "选择要做凸舌的板和要开槽的板"
+    "error.tab_slot_plates": "选择要做凸舌的板和要开槽的板",
+    "help.solid.tab_slot": "在一块板的边缘切出凸榫，并在与其成直角相接的板上切出匹配的槽。用于制作可插接组装、用于激光切割或 CNC 的平板零件。"
   }
 }
