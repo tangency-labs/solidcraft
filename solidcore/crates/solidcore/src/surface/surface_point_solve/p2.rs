@@ -1627,7 +1627,8 @@ impl SurfPtSolveStepper<'_> {
     /// (a step of 5% of the domain). Near a singularity the point is inverted there.
     /// Returns [`TerminationReason::StillIterating`] (a step was taken),
     /// [`TerminationReason::FoundAnswerConverged`] (inverted at a singularity) or
-    /// [`TerminationReason::UnableToConverge`] (no step).
+    /// [`TerminationReason::UnableToConverge`] (no step, or, not upstream, a maximize
+    /// whose singular inversion kept its guess).
     ///
     /// # Errors
     ///
@@ -1671,7 +1672,8 @@ impl SurfPtSolveStepper<'_> {
             let surface = self.base.surface();
             let srf_domain = surface.natural_uv_domain_with_nurb(k)?;
 
-            // (not upstream: a maximize keeps the farthest drop, WR-57)
+            // (not upstream: a maximize keeps the farthest drop, or its guess reported
+            // unconverged, WR-57)
             match surface.invert_point_near_singularity_for(
                 k,
                 self.base.test_point(),
@@ -1682,7 +1684,8 @@ impl SurfPtSolveStepper<'_> {
             ) {
                 Ok(inverted) => {
                     self.set_uv(inverted.uv);
-                    return Ok(TerminationReason::FoundAnswerConverged); // end iteration.
+                    // end iteration (upstream: always `FoundAnswerConverged`)
+                    return Ok(inverted.reason);
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {}

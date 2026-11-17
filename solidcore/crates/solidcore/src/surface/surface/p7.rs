@@ -142,6 +142,8 @@
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::eval::collapse::certified_partials;
+use crate::eval::spline::EvalSurface;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent1d::ExtentNd;
 use crate::geom::extent2d::Extent2d;
@@ -167,10 +169,11 @@ use crate::math::{
 };
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{
-    BSplineSurface, BoundingBoxRequest, LocationType, SurfParamType,
+    BSplineSurface, BSplineSurfaceForm, BoundingBoxRequest, LocationType, SurfParamType,
 };
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::{gamma, NOW, NOZ};
 use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface_cache::SurfaceCache;
 use crate::topology::BrepId;
@@ -1296,7 +1299,18 @@ impl Surface {
         // beside a kink; upstream accepts any answer it reports found. A stationary
         // answer takes one more Newton step when that step is still a maximum and
         // does not grow `|F|`: the solve stops at `|F| < SM_EFF_ZERO`, which bounds
-        // the parameter only through `F'` (on a sphere in degrees, to `3.3e-9`).
+        // the parameter only through `F'` (on a sphere in degrees, to `3.3e-9`). Each
+        // sign is charged its rounding ([`slope_charges`], from the certified partials
+        // of the surface's net; none for the kinds that evaluate their own way): an
+        // end's and a kink's slopes must be proven, and a stationary point's curvature
+        // counts as not positive unless it is proven above `SM_EFF_ZERO`.
+        let certified = certified_evaluator(k, self)?;
+        let charges = |t: f64, f: f64, f_prime: f64| -> (f64, f64) {
+            certified
+                .as_ref()
+                .and_then(|e| slope_charges(e, uv, s_dir, singular_dir, t, f, f_prime))
+                .unwrap_or((0.0, 0.0))
+        };
         let efo = super::p1::FindSingularParamWithGivenTangentDir::new(
             k,
             self,
@@ -1305,8 +1319,12 @@ impl Surface {
             singular_dir,
             EFF_ZERO,
         );
-        let slope = |t: f64| -> Result<Option<(f64, f64)>> {
-            Ok(ignored(efo.evaluate(t))?.map(|(f, f_prime, _)| (f, f_prime)))
+        // (`F`, `F'` and their charges)
+        let slope = |t: f64| -> Result<Option<(f64, f64, f64, f64)>> {
+            Ok(ignored(efo.evaluate(t))?.map(|(f, f_prime, _)| {
+                let (cf, cfp) = charges(t, f, f_prime);
+                (f, f_prime, cf, cfp)
+            }))
         };
         // WR-57: where the surface is closed in the singular direction the interval's
         // ends meet at the seam, so an end where `A` grows outward is not a maximum:
@@ -1316,9 +1334,10 @@ impl Surface {
         let closed =
             ignored(self.is_closed(k, &domain, singular_dir, None, true))?.is_some_and(|(c, _)| c);
         let grows_outward =
-            |t: f64, f: f64| (t <= s_ivl.min() && f < 0.0) || (t >= s_ivl.max() && f > 0.0);
-        let is_local_max = |t: f64, f: f64, f_prime: f64| -> bool {
-            (!closed && grows_outward(t, f)) || (f.abs() < tol && f_prime <= scaled_zero())
+            |t: f64, f: f64, cf: f64| (t <= s_ivl.min() && f < -cf) || (t >= s_ivl.max() && f > cf);
+        let is_local_max = |t: f64, (f, f_prime, cf, cfp): (f64, f64, f64, f64)| -> bool {
+            (!closed && grows_outward(t, f, cf))
+                || (f.abs() < tol && f_prime - cfp <= scaled_zero())
         };
         // the interior knots in the singular direction: where `A'` may jump (a kink)
         let knots: Vec<f64> = ignored(self.knots_with_nurb(k, singular_dir, Some(&s_ivl)))?
@@ -1327,14 +1346,28 @@ impl Surface {
             .into_iter()
             .filter(|&x| x > s_ivl.min() && x < s_ivl.max())
             .collect();
-        let side_slope = |s: f64, side: Side| -> Result<Option<f64>> {
-            ignored(alignment_slope(k, self, uv, s_dir, singular_dir, s, side))
-        };
-        let interior_max = |t: f64| -> Result<Option<f64>> {
-            let Some((f, f_prime)) = slope(t)? else {
+        // (a one-sided slope's sign where it is proven: `Some(true)` for `+`,
+        // `Some(false)` for `-`; its charge's gap term holds the side's difference)
+        let side_sign = |s: f64, side: Side| -> Result<Option<bool>> {
+            let Some(f) = ignored(alignment_slope(k, self, uv, s_dir, singular_dir, s, side))?
+            else {
                 return Ok(None);
             };
-            if !is_local_max(t, f, f_prime) {
+            let (cf, _) = charges(s, f, 0.0);
+            Ok(if f > cf {
+                Some(true)
+            } else if f < -cf {
+                Some(false)
+            } else {
+                None
+            })
+        };
+        let interior_max = |t: f64| -> Result<Option<f64>> {
+            let Some(at_t) = slope(t)? else {
+                return Ok(None);
+            };
+            let (f, f_prime, _, _) = at_t;
+            if !is_local_max(t, at_t) {
                 // a kink: `A` rises from `t` (`F(t)`, the slope on `t`'s right, gives
                 // the side) to the first knot that way, where its one-sided slopes are
                 // `+` on the left and `-` on the right; the solve's bisection stops
@@ -1348,9 +1381,9 @@ impl Surface {
                 };
                 if let Some(x) = kink {
                     // (`Side::Right` is the span `(x_prev, x]`: the limit from the left)
-                    let left = side_slope(x, Side::Right)?;
-                    let right = side_slope(x, Side::Left)?;
-                    if left.is_some_and(|l| l > 0.0) && right.is_some_and(|r| r < 0.0) {
+                    let left = side_sign(x, Side::Right)?;
+                    let right = side_sign(x, Side::Left)?;
+                    if left == Some(true) && right == Some(false) {
                         return Ok(Some(x));
                     }
                 }
@@ -1358,8 +1391,8 @@ impl Surface {
             }
             if f.abs() < tol && f_prime < -scaled_zero() {
                 let polished = s_ivl.clamp_value(t - f / f_prime);
-                if let Some((pf, pf_prime)) = slope(polished)? {
-                    if pf.abs() <= f.abs() && is_local_max(polished, pf, pf_prime) {
+                if let Some(at_p) = slope(polished)? {
+                    if at_p.0.abs() <= f.abs() && is_local_max(polished, at_p) {
                         return Ok(Some(polished));
                     }
                 }
@@ -1372,15 +1405,15 @@ impl Surface {
         // end and its answer is checked as any other
         let local_max = |t: f64| -> Result<Option<f64>> {
             if closed {
-                if let Some((f, _)) = slope(t)? {
-                    if grows_outward(t, f) {
+                if let Some((f, _, cf, _)) = slope(t)? {
+                    if grows_outward(t, f, cf) {
                         let other = if t <= s_ivl.min() {
                             s_ivl.max()
                         } else {
                             s_ivl.min()
                         };
-                        if let Some((of, _)) = slope(other)? {
-                            if grows_outward(other, of) {
+                        if let Some((of, _, ocf, _)) = slope(other)? {
+                            if grows_outward(other, of, ocf) {
                                 return Ok(Some(t));
                             }
                         }
@@ -1492,8 +1525,8 @@ impl Surface {
                 let (Some(a), Some(b)) = (a, b) else {
                     continue;
                 };
-                let rises = side_slope(a, Side::Left)?.is_some_and(|f| f > 0.0);
-                if !rises || !side_slope(b, Side::Right)?.is_some_and(|f| f < 0.0) {
+                let rises = side_sign(a, Side::Left)? == Some(true);
+                if !rises || side_sign(b, Side::Right)? != Some(false) {
                     continue;
                 }
                 let mut bracket = Extent1d::new();
@@ -3557,6 +3590,116 @@ fn alignment_slope(
     Ok(unit_t.dot(dir))
 }
 
+/// The certified evaluator ([`crate::eval::collapse::certified_partials`]) of the net
+/// whose evaluation is `surface`'s ([`super::p8::evaluation_net`]), for the rounding
+/// charged to `FindDegenParamForDirection`'s sign tests (WR-57); `None` for the kinds
+/// that evaluate their own way, a power-basis form or a net that is not finite or has
+/// a weight that is not positive.
+///
+/// # Errors
+///
+/// Those of making the surface's NURB.
+fn certified_evaluator(k: &Kernel, surface: &Surface) -> Result<Option<EvalSurface>> {
+    let Some(net) = super::p8::evaluation_net(k, surface)? else {
+        return Ok(None);
+    };
+    if net.form() == BSplineSurfaceForm::Polynomial {
+        return Ok(None);
+    }
+    let Some(nurb) = net.gw_nurb() else {
+        return Ok(None);
+    };
+    let cp = nurb.cpts();
+    let nu = cp.len();
+    let nv = cp.first().map_or(0, Vec::len);
+    let mut ctrl = Vec::new();
+    for j in 0..nv {
+        for row in &cp {
+            let Some(c) = row.get(j) else {
+                return Ok(None);
+            };
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            let z = if c.z == NOZ { 0.0 } else { c.z };
+            let h = [c.x, c.y, z, w];
+            if w <= 0.0 || h.iter().any(|x| !x.is_finite()) {
+                return Ok(None);
+            }
+            ctrl.push(h);
+        }
+    }
+    Ok(Some(EvalSurface::nurbs_closed(
+        [nurb.p(), nurb.q()],
+        [nurb.u_knots().to_vec(), nurb.v_knots().to_vec()],
+        [nu, nv],
+        ctrl,
+        [false; 2],
+    )))
+}
+
+/// The rounding charges of `FindDegenParamForDirection`'s `F = A'(s)` and
+/// `F' = A''(s)` at `s` (WR-57): bounds on `|F_exact - f|` and `|F'_exact - f_prime|`
+/// for the solve's computed `f` and `f_prime` there, from the certified partials
+/// `w`, `w'`, `w''` (`w` the derivative across the singular direction, `'` along it)
+/// with their error bounds `ea`, `eb`, `ec`: each unit derivative's perturbation is
+/// bounded by its terms' (`|a / |a| - b / |b|| <= 2 |a - b| / |a|`, a projection
+/// `I - T T^T` by `(2 + d) d` for `d` that bound, the products'
+/// and quotients' by their factors'), and the gap between the certified value and the
+/// solve's own is added (they are both computed: the exact value is within the bound
+/// of the first, so within that plus the gap of the second; a one-sided evaluation at
+/// a knot that differs from the certified side shows up in that gap). `None` where
+/// the evaluator gives no bound or `|w|` is not above its error.
+#[allow(clippy::too_many_arguments)]
+fn slope_charges(
+    eval: &EvalSurface,
+    uv: Point2,
+    dir: Vec3,
+    singular_dir: SurfParamType,
+    s: f64,
+    f: f64,
+    f_prime: f64,
+) -> Option<(f64, f64)> {
+    let (q, w, ws, wss) = if singular_dir == SurfParamType::U {
+        ([s, uv.y], (0, 1), (1, 1), (2, 1))
+    } else {
+        ([uv.x, s], (1, 0), (1, 1), (1, 2))
+    };
+    let (d, e) = certified_partials(eval, q).ok()?;
+    let get = |(i, j): (usize, usize)| -> Option<(Vec3, f64)> {
+        Some((*d.get(i)?.get(j)?, *e.get(i)?.get(j)?))
+    };
+    let ((a, ea), (b, eb), (c, ec)) = (get(w)?, get(ws)?, get(wss)?);
+    let r = a.length();
+    if r <= ea || r.is_nan() {
+        return None;
+    }
+    // the certified values: T = a / r, T' = P b / r, T'' = P c / r - 2 (T.b / r) T'
+    // - |T'|^2 T (P = I - T T^T), F = T'.dir, F' = T''.dir
+    let t = a / r;
+    let t1 = (b - t * t.dot(b)) / r;
+    let cb = t.dot(b) / r;
+    let t2 = (c - t * t.dot(c)) / r - t1 * (2.0 * cb) - t * t1.length_squared();
+    let (fc, fpc) = (t1.dot(dir), t2.dot(dir));
+    // their perturbation bounds
+    let rl = r - ea;
+    let delta = 2.0 * ea / r;
+    let (bl, cl) = (b.length(), c.length());
+    let tau = bl / r;
+    let d1 = (eb + (2.0 + delta) * (bl + eb) * delta) / rl + tau * ea / rl;
+    let dpc = (ec + (2.0 + delta) * (cl + ec) * delta) / rl + (cl / r) * ea / rl;
+    let dcb = (eb + (bl + eb) * delta) / rl + tau * ea / rl;
+    let d2 = dpc
+        + 2.0 * (dcb * (tau + d1) + tau * d1)
+        + (2.0 * tau + d1) * d1
+        + (tau + d1) * (tau + d1) * delta;
+    // (and the rounding of the certified values' own formulas, at most a few dozen
+    // operations on terms each at most `|c| / r + 3 tau^2 + tau`)
+    let own = gamma(64) * (cl / r + 3.0 * tau * tau + tau + 1.0);
+    let scale = 1.0 + gamma(16);
+    let cf = ((d1 + own) + (fc - f).abs()) * scale;
+    let cfp = ((d2 + own) + (fpc - f_prime).abs()) * scale;
+    (cf.is_finite() && cfp.is_finite()).then_some((cf, cfp))
+}
+
 /// The Newton solve of `FindDegenParamForDirection`
 /// (`SmFindSingularParamWithGivenTangentDirEFO` with `SmLocalSolve1d::SolveIt` from
 /// `start`): `(found, t)`.
@@ -3697,7 +3840,7 @@ mod tests {
 
     #[test]
     fn flat_corner_points_preserve_each_mask_bit() {
-        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::math::CPoint;
 
         let k = Kernel::default();
         // Only the lower/lower corner has nonzero parallel tangents. Reverse
@@ -3740,7 +3883,7 @@ mod tests {
 
     #[test]
     fn flat_corner_points_preserve_multiple_bits_and_regular_corners() {
-        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::math::CPoint;
         let k = Kernel::default();
         let net = vec![
             vec![
@@ -3784,7 +3927,7 @@ mod tests {
     /// not a converged foot, so it is refused whatever its guess.
     #[test]
     fn wr_56_good_drop_result_compares_the_right_distances() {
-        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::math::CPoint;
 
         let net = vec![
             vec![
@@ -4090,9 +4233,7 @@ mod tests {
         let v = vec![0.0, 0.0, 0.15893773335490313, 0.4332409252690698, 1.0, 1.0];
         let nl = NlSurface::new(net, 2, 1, u, v).unwrap();
         let mut s = BSplineSurface::from_nurb(nl.clone(), false);
-        s.set_b_spline_surface_form(
-            crate::nurbs::b_spline_surface::BSplineSurfaceForm::from_code(11).unwrap(),
-        );
+        s.set_b_spline_surface_form(BSplineSurfaceForm::from_code(11).unwrap());
         (Surface::from(s), nl)
     }
 
@@ -4150,9 +4291,7 @@ mod tests {
         let u = vec![u0, u0, 1.1222893888182777, 1.8763197218556462, u1, u1];
         let v = vec![0.0, 0.0, 0.5987377657284333, 1.0, 1.0];
         let mut b = BSplineSurface::from_nurb(NlSurface::new(net, 1, 1, u, v).unwrap(), false);
-        b.set_b_spline_surface_form(
-            crate::nurbs::b_spline_surface::BSplineSurfaceForm::from_code(11).unwrap(),
-        );
+        b.set_b_spline_surface_form(BSplineSurfaceForm::from_code(11).unwrap());
         let s = Surface::from(b);
         let k = Kernel::default();
         let dom = Extent2d::from_bounds(
@@ -4401,7 +4540,7 @@ mod tests {
     }
 
     fn wr57_double_root_patch_u(u_min: f64, u_max: f64) -> Surface {
-        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::math::CPoint;
 
         // S(u, v) = v * (1, 16 * (s - 0.25) * (s - 0.75), 0), s = (u - u_min) / (u_max - u_min):
         // singular along v = 0, with exact +X non-singular tangents at s = 0.25 and s = 0.75
@@ -4428,7 +4567,7 @@ mod tests {
     }
 
     fn wr57_double_root_patch_v(v_min: f64, v_max: f64) -> Surface {
-        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::math::CPoint;
 
         let net = vec![
             vec![
@@ -4620,7 +4759,7 @@ mod tests {
     /// row one point; with its `u` knots and `v_max`.
     fn wr57_gen0435_surface() -> (Surface, [f64; 6], f64) {
         use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
-        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::math::CPoint;
 
         let row = |pts: [[f64; 3]; 5]| -> Vec<CPoint> {
             pts.iter()

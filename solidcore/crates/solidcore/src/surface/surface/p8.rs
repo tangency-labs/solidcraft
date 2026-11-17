@@ -64,7 +64,8 @@
 //! curve cache of each boundary curve for all its intersections, as upstream keeps
 //! it on the curve, so each boundary curve builds one cache per check.
 //! `InvertPointNearSingularity` refuses an answer proven farther from the test point
-//! than its guess, other than its own point (upstream reports it found).
+//! than its guess, the evaluations' rounding bounded from the net (upstream reports it
+//! found); a maximize keeps the farthest drop, or its guess reported unconverged.
 //! Unported callees return [`SolidError::Unported`], also where upstream ignores the
 //! status. Recursion: none.
 
@@ -107,9 +108,10 @@ use crate::math::{
 };
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
-use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::{gamma, NOW, NOZ};
 use crate::surface::plane::Coincidence;
 use crate::surface::surface::p7::SpGlobalSolver;
 use crate::surface::surface_cache::p1::SurfaceCache;
@@ -3152,7 +3154,9 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
 pub struct SingularityInversion {
     /// `rUVGuess`: the parameters of the closest point.
     pub uv: Point2,
-    /// `reReason`: always `FoundAnswerConverged` on success.
+    /// `reReason`: `FoundAnswerConverged` on success (upstream's only value), or, not
+    /// upstream, `UnableToConverge` for a maximize that keeps its guess: nothing shows
+    /// the guess is a maximum.
     pub reason: TerminationReason,
 }
 
@@ -3163,16 +3167,17 @@ impl Surface {
     /// to it, may already be the answer; else the degenerate parameter is found where
     /// the surviving tangent points to the test point
     /// ([`Surface::find_degen_param_for_direction`]), and the other parameter by
-    /// dropping the point to the iso curve there. Not upstream: an answer proven
-    /// farther from `test_pt` than the guess, other than the guess's own point within rounding, is refused (upstream
-    /// reports it found).
+    /// dropping the point to the iso curve there. Not upstream: where the surface's
+    /// point evaluation has a rounding bound ([`point_rounding`]), an answer proven
+    /// farther from `test_pt` than the guess is refused (upstream reports it found),
+    /// the evaluations' rounding charged to both distances.
     ///
     /// # Errors
     ///
     /// The status of a failing degenerate parameter search (`SM_ERR` when it does not
     /// converge) or iso curve creation or curve drop; `SM_ERR` for an answer proven
-    /// farther from `test_pt` than the guess (other than its own point); [`SolidError::Unported`] from the
-    /// evaluations and drops.
+    /// farther from `test_pt` than the guess, or for a distance that is not a number;
+    /// [`SolidError::Unported`] from the evaluations and drops.
     pub fn invert_point_near_singularity(
         &self,
         k: &Kernel,
@@ -3187,9 +3192,11 @@ impl Surface {
     /// [`Surface::invert_point_near_singularity`] for a closest point (`farthest`
     /// false) or for a maximize (`farthest` true, not upstream): of the drops the
     /// farthest from `test_pt` is kept, and where it is proven nearer than the guess
-    /// the guess is the answer (the point-solve stepper's `Maximize` ends its
-    /// iteration at an inversion's answer; the nearest drop ended goldens
-    /// `surface_point_solve_p3` `matrix_0105` at 18192 against the guess's 21900).
+    /// the guess is kept, reported [`TerminationReason::UnableToConverge`] (the
+    /// point-solve stepper's `Maximize` ends its iteration at an inversion's answer;
+    /// the nearest drop ended goldens `surface_point_solve_p3` `matrix_0105` at 18192
+    /// against the guess's 21900, and the drops minimize along their iso curves, so
+    /// none of this shows the guess is a maximum).
     ///
     /// # Errors
     ///
@@ -3276,6 +3283,10 @@ impl Surface {
         let diff_vec = test_pt - pole_pt; // we know this isn't zero.
         let (degen, roots) =
             self.degen_param_search(k, sing_uv, diff_vec, true, sing_dir, tol, true)?;
+        // (not upstream) The rounding of this surface's point evaluation: where it has
+        // no bound ([`point_rounding`]), no distance comparison below can be proven, and
+        // the inversion is upstream's (the search's answer, its drop, no refusal).
+        let bounded = point_rounding(k, self, uv_guess)?.is_some();
         // (not upstream) The degenerate parameters to drop onto: the search's answer,
         // then every parameter where upstream's search solve reports found from one of
         // its starts. The iso curve through the closest point is the most aligned one
@@ -3292,9 +3303,11 @@ impl Surface {
                 degen.uv.y
             });
         }
-        for r in roots {
-            if !degen_params.contains(&r) {
-                degen_params.push(r);
+        if bounded {
+            for r in roots {
+                if !degen_params.contains(&r) {
+                    degen_params.push(r);
+                }
             }
         }
         if degen_params.is_empty() {
@@ -3305,7 +3318,23 @@ impl Surface {
             ));
         }
 
-        let mut nearest: Option<(certified::Bounded, Point2, Point3)> = None;
+        // (not upstream) The enclosure of the true distance from `test_pt` to the
+        // surface's point at `at`, whose evaluation is `pt`: the computed distance's own
+        // rounding ([`certified::distance`]) and the evaluation's ([`point_rounding`]);
+        // `None` where the evaluation has no bound or a number is not finite.
+        let enclose = |at: Point2, pt: Point3| -> Result<Option<(f64, f64)>> {
+            let d = certified::distance(pt, test_pt);
+            let Some(e) = point_rounding(k, self, at)? else {
+                return Ok(None);
+            };
+            let reach = d.bound + e;
+            let lo = certified::next_down(d.value - reach);
+            let hi = certified::next_up(d.value + reach);
+            Ok((lo.is_finite() && hi.is_finite()).then_some((lo, hi)))
+        };
+
+        // (each kept: the parameters and the enclosure of its distance)
+        let mut kept: Option<(Point2, Option<(f64, f64)>)> = None;
         let mut first_err = None;
         for param in degen_params {
             sing_uv = if sing_dir == SurfParamType::U {
@@ -3330,71 +3359,71 @@ impl Surface {
                     continue;
                 }
             };
-            // (a later drop replaces the kept one only where it is proven nearer: the
-            // upper end of its certified distance below the lower end of the kept
-            // one's, so drops equally near within the distances' rounding keep the
-            // search's answer; a distance that is not a number ranks last)
-            let d = certified::distance(found_pt, test_pt);
-            let replaces = match nearest {
-                None => true,
-                Some((nd, _, _)) if !nd.value.is_finite() => d.value.is_finite(),
-                Some((nd, _, _)) if farthest => {
-                    d.above(certified::next_up(nd.value + nd.bound)).is_yes()
+            // (a later drop replaces the kept one only where it is proven nearer (for a
+            // maximize, farther): its enclosure wholly below (above) the kept one's, so
+            // drops equally near within the rounding keep the search's answer; one
+            // without an enclosure replaces nothing, and is replaced by any with one)
+            let d = enclose(uv, found_pt)?;
+            let replaces = match (&kept, d) {
+                (None, _) | (Some((_, None)), Some(_)) => true,
+                (Some((_, Some((klo, khi)))), Some((lo, hi))) => {
+                    if farthest {
+                        lo > *khi
+                    } else {
+                        hi < *klo
+                    }
                 }
-                Some((nd, _, _)) => d
-                    .at_most(certified::next_down(nd.value - nd.bound))
-                    .is_yes(),
+                (Some(_), None) => false,
             };
             if replaces {
-                nearest = Some((d, uv, found_pt));
+                kept = Some((uv, d));
             }
         }
-        let Some((_, uv, found_pt)) = nearest else {
+        let Some((uv, found_d)) = kept else {
             return Err(first_err.unwrap_or_else(|| {
                 SolidError::surface_failed(OP_INVERT, "no iso curve drop succeeded")
             }));
         };
+        if !bounded {
+            return Ok(SingularityInversion { uv, reason });
+        }
 
-        // (not upstream) The answer is the closest point only if it is not farther from
-        // the test point than the guess: one proven farther (the certified distance of
-        // its evaluated point has its lower end above the guess's upper end) is not an
-        // answer, unless it is the guess's own point within rounding (16 ulps of the
-        // largest coordinate: the certified distances bound the distances' rounding
-        // only, not the two evaluations'). The method assumes the
-        // boundary at `sSingUV` is a pole; where it is not collapsed, the iso curve at the
-        // degenerate parameter can lie far from the test point (goldens `surface_p8`
-        // gen1191: 35505.9 away, the guess 1395.2), and upstream reports it found.
-        let d_guess = certified::distance(srf_pt, test_pt);
-        let allowance = 16.0
-            * f64::EPSILON
-            * (1.0
-                + srf_pt
-                    .max_dimension()
-                    .max(test_pt.max_dimension())
-                    .max(found_pt.max_dimension()));
-        let guess_hi = certified::next_up(d_guess.value + d_guess.bound);
-        // (not upstream) For a maximize the guess is the answer where the drop kept is
-        // proven nearer the test point than it: the stepper ends its iteration at the
-        // answer, and stepping on from the guess ends nearer still (goldens
+        // (not upstream) The answer and the guess compared, each distance enclosed with
+        // its evaluation's rounding: the guess's own point (a pole, where every
+        // degenerate parameter gives the same point) differs from the answer's only by
+        // that rounding, which no comparison below can mistake for a distance. A
+        // distance that is not a number is refused, never compared.
+        let (Some((found_lo, found_hi)), Some((guess_lo, guess_hi))) =
+            (found_d, enclose(uv_guess, srf_pt)?)
+        else {
+            return Err(SolidError::surface_failed(
+                OP_INVERT,
+                "a distance from the test point is not a number",
+            ));
+        };
+        // (not upstream) For a maximize the guess is kept where the drop kept is proven
+        // nearer the test point than it: the stepper ends its iteration at the answer,
+        // and stepping on from the guess ends nearer still (goldens
         // `surface_point_solve_p3` matrix_0105: the one drop 18192 away, the guess
         // 21900; matrix_0822 and matrix_0957 end at 0.591 and 0.619 when stepping on).
-        let d_found = certified::distance(found_pt, test_pt);
-        if farthest
-            && d_found
-                .at_most(certified::next_down(d_guess.value - d_guess.bound))
-                .is_yes()
-        {
-            return Ok(SingularityInversion {
-                uv: uv_guess,
-                reason,
-            });
+        // The drops minimize along their iso curves, so nothing here shows the guess is
+        // a maximum: it is reported unconverged.
+        if farthest {
+            if found_hi < guess_lo {
+                return Ok(SingularityInversion {
+                    uv: uv_guess,
+                    reason: TerminationReason::UnableToConverge,
+                });
+            }
+            return Ok(SingularityInversion { uv, reason });
         }
-        if !farthest
-            && d_found.above(guess_hi).is_yes()
-            && certified::distance(found_pt, srf_pt)
-                .above(allowance)
-                .is_yes()
-        {
+        // (not upstream) The answer is the closest point only if it is not farther from
+        // the test point than the guess: one proven farther is not an answer. The method
+        // assumes the boundary at `sSingUV` is a pole; where it is not collapsed, the
+        // iso curve at the degenerate parameter can lie far from the test point (goldens
+        // `surface_p8` gen1191: 35505.9 away, the guess 1395.2), and upstream reports it
+        // found.
+        if found_lo > guess_hi {
             return Err(SolidError::surface_failed(
                 OP_INVERT,
                 "the point found is farther from the test point than the guess",
@@ -3461,6 +3490,125 @@ impl Surface {
         };
         Ok((uv, self.evaluate_point(k, uv)?))
     }
+}
+
+/// A bound on `|computed - exact|` of [`Surface::evaluate_point`] at `uv` (not upstream,
+/// WR-57), for the kinds whose point is their NURB's (`N_SrfEvalPt` on a B-spline,
+/// ball patch, sphere, torus, surface of revolution or of extrusion); `None` for any
+/// other kind (their evaluations are their own), a power-basis form, a net that is not
+/// finite or has a weight that is not positive, and a rational net evaluated past its
+/// knots (where its weight sum is not bounded below).
+///
+/// The bound is derived from the net, not the point (Higham, *Accuracy and Stability of
+/// Numerical Algorithms*, 2nd ed., section 3.1, the standard model): `N_SrfEvalPt` takes
+/// each homogeneous coordinate through the Cox-de Boor recurrence (`p` levels in u,
+/// `q` in v, each a difference, a sum, a quotient, two products and a sum) and two
+/// blending sums of `p + 1` and `q + 1` terms, so it is within `gamma(8 (p + q + 2))` of
+/// `sum |N_i| |N_j| |P_ij|`. Inside the knots the basis is non-negative and sums to 1, so
+/// that is at most the net's largest coordinate; past them (an out-of-bounds
+/// evaluation continues the end span `[a, b]` as a polynomial) each recurrence level
+/// grows `sum |N|` by at most `1 + 2 d / (b - a)` at a distance `d` past the span, as
+/// [`extrapolation`] counts. A rational net's weight sum carries the same relative
+/// error, and dividing by it (at least the smallest weight inside the knots) adds
+/// `2 g m W / (w - g W)` (`m` the largest Euclidean coordinate, `W`, `w` the largest and
+/// smallest weights) and two roundings. The coordinate bound times 2 (above `sqrt 3`,
+/// with room for the bound's own rounding) bounds the point.
+pub(crate) fn point_rounding(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Option<f64>> {
+    Ok(evaluation_net(k, surface)?.and_then(|net| net_point_rounding(&net, uv)))
+}
+
+/// The B-spline net whose evaluation is [`Surface::evaluate`]'s for `surface` (WR-57):
+/// a B-spline's own, a ball patch's, a sphere's, torus's or surface of revolution's
+/// NURB and a surface of extrusion's; `None` for every other kind (their evaluations
+/// are their own).
+pub(crate) fn evaluation_net<'s>(
+    k: &Kernel,
+    surface: &'s Surface,
+) -> Result<Option<Cow<'s, BSplineSurface>>> {
+    Ok(Some(match surface.kind_with_nurb(k)? {
+        SurfaceKind::BSpline(s) => Cow::Borrowed(s),
+        SurfaceKind::BallPatch(s) => Cow::Borrowed(s.net()),
+        SurfaceKind::SurfOfRevolution(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
+            Cow::Borrowed(surface.analytic_base_with_nurb(k)?)
+        }
+        SurfaceKind::SurfOfExtrusion(_) => surface.extrusion_base_with_nurb(k)?,
+        _ => return Ok(None),
+    }))
+}
+
+/// [`point_rounding`] of a B-spline surface's own evaluation.
+fn net_point_rounding(s: &BSplineSurface, uv: Point2) -> Option<f64> {
+    if s.form() == BSplineSurfaceForm::Polynomial {
+        return None;
+    }
+    let nurb = s.gw_nurb()?;
+    let (p, q) = (nurb.p(), nurb.q());
+    let grow = extrapolation(nurb.u_knots(), p, uv.x)? * extrapolation(nurb.v_knots(), q, uv.y)?;
+    let (mut m, mut w_min, mut w_max, mut rational) = (0.0_f64, f64::INFINITY, 0.0_f64, false);
+    for row in nurb.rows() {
+        for c in row {
+            let w = if c.w == NOW {
+                1.0
+            } else {
+                rational = true;
+                c.w
+            };
+            if !(w > 0.0 && w.is_finite()) {
+                return None;
+            }
+            w_min = w_min.min(w);
+            w_max = w_max.max(w);
+            let z = if c.z == NOZ { 0.0 } else { c.z };
+            for x in [c.x, c.y, z] {
+                if !x.is_finite() {
+                    return None;
+                }
+                m = m.max(x.abs() / w);
+            }
+        }
+    }
+    let g = gamma(8 * (p + q + 2)) * grow;
+    let coordinate = if rational {
+        // (the weight sum is at least `w_min - g W` only inside the knots, and only
+        // where that is positive, here at least half the smallest weight)
+        if grow > 1.0 || g * w_max >= 0.5 * w_min || g.is_nan() {
+            return None;
+        }
+        2.0 * g * m * w_max / (w_min - g * w_max) + gamma(2) * m
+    } else {
+        g * m
+    };
+    let bound = 2.0 * coordinate * (1.0 + gamma(8));
+    bound.is_finite().then_some(bound)
+}
+
+/// The growth of `sum |N_i|` of the degree-`p` basis over `knots` at `t`
+/// ([`net_point_rounding`]): 1 inside the knots' domain; past it, `(1 + 2 d / (b - a))^p`
+/// at the distance `d` past the end span `[a, b]` (each recurrence level's two ratios
+/// `(t - u_i) / (u_(i+k) - u_i)` and `(u_(i+k) - t) / (u_(i+k) - u_i)`, over an
+/// interval holding the span, sum in absolute value to at most that). `None` for knots
+/// too few for the degree, a span of no length or a `t` that is not finite.
+fn extrapolation(knots: &[f64], p: usize, t: f64) -> Option<f64> {
+    let lo = *knots.get(p)?;
+    let hi = *knots.get(knots.len().checked_sub(p + 1)?)?;
+    if !t.is_finite() {
+        return None;
+    }
+    if t >= lo && t <= hi {
+        return Some(1.0);
+    }
+    let (d, span) = if t < lo {
+        (lo - t, knots.iter().copied().find(|&x| x > lo)? - lo)
+    } else {
+        (t - hi, hi - knots.iter().rev().copied().find(|&x| x < hi)?)
+    };
+    if span <= 0.0 || span.is_nan() {
+        return None;
+    }
+    let ratio = (1.0 + 2.0 * d / span) * (1.0 + gamma(4));
+    let exponent = i32::try_from(p).ok()?;
+    let grow = ratio.powi(exponent) * (1.0 + gamma(p.saturating_add(1)));
+    grow.is_finite().then_some(grow)
 }
 
 /// `SM_CURVE_ENABLE_OUTOFBOUNDS` for the B-spline part of `curve` (kept for the rest
@@ -3923,7 +4071,6 @@ pub fn intersect_srf_bndry_crv(
 mod tests {
     use super::*;
     use crate::geom::vector3d::Vec3;
-    use crate::nurbs::b_spline_surface::BSplineSurface;
 
     fn bilinear() -> Surface {
         Surface::from(
@@ -3935,6 +4082,93 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    /// A triangle (the edge u = 0 collapsed to its corner) a billion units from the
+    /// origin, `o + (2u, 3uv, uv)`, and a test point 1 above its plane over the point
+    /// at (0.1, 0.2).
+    fn far_pole_triangle() -> (Surface, Point3) {
+        let o = Vec3::new(1e9, -2e9, 3e9);
+        let s = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                o,
+                o + Vec3::new(2.0, 0.0, 0.0),
+                o,
+                o + Vec3::new(2.0, 3.0, 1.0),
+            )
+            .unwrap(),
+        );
+        // (the plane's unit normal: (2, 0, 0) x (2, 3, 1) = (0, -2, 6))
+        let n = Vec3::new(0.0, -1.0, 3.0) / 10.0_f64.sqrt();
+        (s, o + Vec3::new(0.2, 0.06, 0.02) + n)
+    }
+
+    /// WR-57 (#17856): a guess that is the closest point, on a net far from the
+    /// origin, is its own answer, never refused as farther than itself. The search
+    /// drops onto the guess's iso curve, so the answer and the guess are the same
+    /// point evaluated twice, apart by the evaluations' rounding (ulps of `4.8e-7`
+    /// at `3e9`), far above the ulps of their distance (`2.2e-16` at 1): here the
+    /// answer's computed distance exceeds the guess's by about 2.4e9 of those ulps, so
+    /// an allowance in ulps of the distance (16 before #17856 r1) refuses it, and only a
+    /// bound scaled by the net's magnitude tells it from a farther point.
+    #[test]
+    fn invert_near_singularity_keeps_the_guess_own_point_on_a_far_net() {
+        let k = Kernel::default();
+        let (s, test) = far_pole_triangle();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let guess = Point2::new(0.1, 0.2);
+        let e = point_rounding(&k, &s, guess).unwrap().unwrap();
+        // (the bound grows with the net, not with the point's distance)
+        assert!(e > 1e-8 && e < 1e-4, "{e:e}");
+        let inv = s
+            .invert_point_near_singularity(&k, test, &dom, guess, 1e-9)
+            .expect("the guess's own point is not farther than itself");
+        let at_guess = s.evaluate_point(&k, guess).unwrap();
+        let found = s.evaluate_point(&k, inv.uv).unwrap();
+        // (a few ulps of the coordinates, 4.8e-7 each at 3e9)
+        assert!(found.distance(at_guess) <= 1e-5, "{inv:?}");
+        let (f, g) = (found.distance(test), at_guess.distance(test));
+        assert!(f > g + 16.0 * f64::EPSILON * g, "{f} {g}");
+        assert!(f - g < e, "{f} {g} {e:e}");
+        assert_eq!(inv.reason, TerminationReason::FoundAnswerConverged);
+    }
+
+    /// WR-57 (#17856): a distance that is not a number is never compared; the
+    /// inversion refuses it.
+    #[test]
+    fn invert_near_singularity_refuses_a_distance_that_is_not_a_number() {
+        let k = Kernel::default();
+        let (s, _) = far_pole_triangle();
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let test = Point3::new(f64::NAN, 0.0, 0.0);
+        let r = s.invert_point_near_singularity(&k, test, &dom, Point2::new(0.1, 0.2), 1e-9);
+        assert!(r.is_err(), "{r:?}");
+    }
+
+    /// The point rounding is bounded only for a net's own evaluation, and grows past
+    /// the knots by the basis's extrapolation: `(1 + 2 * 0.5)^1` per linear direction.
+    #[test]
+    fn point_rounding_scales_with_the_net_and_its_extrapolation() {
+        let k = Kernel::default();
+        let (s, _) = far_pole_triangle();
+        let inside = point_rounding(&k, &s, Point2::new(0.5, 0.5))
+            .unwrap()
+            .unwrap();
+        let past = point_rounding(&k, &s, Point2::new(1.5, 0.5))
+            .unwrap()
+            .unwrap();
+        assert!(
+            past > 1.9 * inside && past < 2.1 * inside,
+            "{inside:e} {past:e}"
+        );
+        let small = point_rounding(&k, &bilinear(), Point2::new(0.5, 0.5))
+            .unwrap()
+            .unwrap();
+        assert!(inside > 1e8 * small, "{inside:e} {small:e}");
+        assert_eq!(
+            point_rounding(&k, &s, Point2::new(f64::NAN, 0.5)).unwrap(),
+            None
+        );
     }
 
     #[test]
