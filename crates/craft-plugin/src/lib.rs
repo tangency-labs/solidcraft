@@ -12,7 +12,7 @@ use serde_json::Value;
 // The WIT package declaration is the sole source of the API identifier.
 include!(concat!(env!("OUT_DIR"), "/api.rs"));
 pub const WIT: &str = include_str!("../wit/plugin.wit");
-pub const MAX_MANIFEST_BYTES: usize = 16 * 1024;
+pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 pub const MAX_COMPONENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_JSON_BYTES: usize = 1024 * 1024;
 /// An importer's component may be larger: a real converter measured 28 to 42 MB (RFC 0002).
@@ -608,7 +608,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 /// [`parse_manifest`], naming the host `app` in a capability refusal.
 pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manifest> {
     if text.len() > MAX_MANIFEST_BYTES {
-        return Err(HostError::LimitExceeded { limit: "manifest size exceeds 16 KiB".into() });
+        return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
     if let Ok(value) = serde_json::from_slice::<Value>(text)

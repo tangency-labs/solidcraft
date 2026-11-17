@@ -38,6 +38,7 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
         mutate(&mut m);
         assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_err(), "{m}");
     }
+    assert_eq!(MAX_MANIFEST_BYTES, 64 * 1024);
     assert!(parse_manifest(&vec![b' '; MAX_MANIFEST_BYTES + 1], "sample").is_err());
 }
 #[test]
