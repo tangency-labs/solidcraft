@@ -347,7 +347,7 @@ mod tests {
         entries.retain(|i| i.id != "-");
         // App menu 2 + Quit; File: New, Open, 1 recent, Clear, 3 inserts, Save, Save As, JSON,
         // Verify Signature, 8 exports, Properties; Edit 2; Window 1; Help 7.
-        assert_eq!(entries.len(), 3 + 4 + 3 + 4 + 8 + 1 + 2 + 1 + 7,"{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
+        assert_eq!(entries.len(), 3 + 4 + 3 + 4 + 8 + 1 + 2 + 1 + 7, "{:?}", entries.iter().map(|i| &i.id).collect::<Vec<_>>());
         for item in &entries {
             assert!(entry_of(&item.id, item.params.as_ref()).is_some(), "`{}` {:?} runs nothing", item.id, item.params);
         }
