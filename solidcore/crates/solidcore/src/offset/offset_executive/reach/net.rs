@@ -382,15 +382,21 @@ impl Net {
             if b - a > period {
                 return None;
             }
+            // each part of the box past an end is taken round the seam by one period, that
+            // part alone: a box wholly past an end (a point among them, as Newton's steps
+            // and Krawczyk's middle may be) is its own copy, not the whole way from the
+            // seam to it
             if a < r0 {
-                out.push(Part::On(a + period, r1));
+                let hi = if b < r0 { (b + period).min(r1) } else { r1 };
+                out.push(Part::On((a + period).min(hi), hi));
             }
             let (c0, c1) = (a.max(r0), b.min(r1));
             if c0 <= c1 {
                 out.push(Part::On(c0, c1));
             }
             if b > r1 {
-                out.push(Part::On(r0, b - period));
+                let lo = if a > r1 { (a - period).max(r0) } else { r0 };
+                out.push(Part::On(lo, (b - period).max(lo)));
             }
             let in_range = out
                 .iter()
