@@ -691,3 +691,35 @@ fn the_slot_face_read_from_the_body() {
         .is_empty());
     assert!(slot_face(&mut k, &bottom, p, 0.0).is_err());
 }
+
+#[test]
+fn the_strip_read_from_the_bodies() {
+    let mut k = crate::kernel::Kernel::default();
+    let bottom = box_solid(&mut k, [0.0, 0.0, 0.0], [160.0, 100.0, 6.0]);
+    let wall = box_solid(&mut k, [10.0, 30.0, 6.0], [150.0, 36.0, 66.0]);
+    let p = plane(0.0, 0.0, 6.0, 0.0, 0.0, 1.0);
+    let sigma = crate::plate_contact::strip(&mut k, &wall, &bottom, p, TOL)
+        .expect("strip")
+        .expect("a strip");
+    let along = sigma
+        .extent_along(crate::math::Vec2::new(1.0, 0.0), TOL)
+        .expect("u");
+    let across = sigma
+        .extent_along(crate::math::Vec2::new(0.0, 1.0), TOL)
+        .expect("w");
+    assert!(
+        (along.0 - 10.0).abs() < 1e-6 && (along.1 - 150.0).abs() < 1e-6,
+        "{along:?}"
+    );
+    assert!(
+        (across.0 - 30.0).abs() < 1e-6 && (across.1 - 36.0).abs() < 1e-6,
+        "{across:?}"
+    );
+    let lifted = box_solid(&mut k, [10.0, 30.0, 10.0], [150.0, 36.0, 70.0]);
+    assert!(
+        crate::plate_contact::strip(&mut k, &lifted, &bottom, p, TOL)
+            .expect("none")
+            .is_none()
+    );
+    assert!(crate::plate_contact::strip(&mut k, &wall, &bottom, p, 0.0).is_err());
+}

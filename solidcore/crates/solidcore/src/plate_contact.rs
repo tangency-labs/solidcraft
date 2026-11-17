@@ -895,6 +895,92 @@ fn face_regions_in(
     )
 }
 
+/// The strip Σ of the pair (T, S) at `p` (design 5.5's input), as [`pair_at`] chooses it: the
+/// first region of T's footprint on `p` ([`footprint_on`]) sharing an area with S's faces in `p`
+/// ([`slot_face`]), or, when that is no touch over an area of S's face, the first such region of
+/// T's section by `p` ([`footprint_across`]). In the frame of `p` ([`slot_face`]'s `(u, w)`
+/// plane). `None` when T meets no area of S's face there. Neither body is changed.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for `tol` not positive and finite or a bad plane;
+/// `Unsupported` for an overlap not decided; those of the reads and the section.
+pub fn strip(
+    k: &mut crate::kernel::Kernel,
+    t: &crate::topology::Brep,
+    s: &crate::topology::Brep,
+    p: Plane,
+    tol: f64,
+) -> Result<Option<crate::prism::profile::Region2>> {
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("tol must be positive and finite"));
+    }
+    check_plane(p)?;
+    let frame = frame_of(p)?;
+    let t_faces = read_faces(k, t, &frame, tol)?;
+    let touch = first_touch(&t_faces, p, tol)?;
+    Ok(sigma_of(k, t, s, p, &frame, touch, tol)?.0)
+}
+
+/// The touch level of T's first planar face within `tol` of `p` ([`touch_offset`]).
+fn first_touch(t_faces: &[FaceRead], p: Plane, tol: f64) -> Result<Option<f64>> {
+    for q in t_faces.iter().filter_map(|f| f.plane) {
+        if let Some(delta) = touch_offset(q, p, tol)? {
+            return Ok(Some(delta));
+        }
+    }
+    Ok(None)
+}
+
+/// Σ as [`pair_at`] chooses it, with whether it came from T's faces on `p` (`on_has_area`) or
+/// from T's section by `p` (`across_has_area`); `frame` is `p`'s, already checked.
+fn sigma_of(
+    k: &mut crate::kernel::Kernel,
+    t: &crate::topology::Brep,
+    s: &crate::topology::Brep,
+    p: Plane,
+    frame: &crate::eval::Frame,
+    touch: Option<f64>,
+    tol: f64,
+) -> Result<(Option<crate::prism::profile::Region2>, bool, bool)> {
+    use crate::prism::profile::{regions_overlap, Region2};
+    let s_regions = face_regions_in(k, s, p, frame, tol)?;
+    let on_s = |a: &Region2| -> Result<bool> {
+        for b in &s_regions {
+            match regions_overlap(a, b, tol) {
+                Some(true) => return Ok(true),
+                Some(false) => {}
+                None => {
+                    return Err(SolidError::Unsupported {
+                        operation: OP,
+                        reason: "whether the tab plate meets the slot plate's face is not decided",
+                    })
+                }
+            }
+        }
+        Ok(false)
+    };
+    let mut sigma = None;
+    for r in footprint_on(k, t, frame, tol)? {
+        if on_s(&r)? {
+            sigma = Some(r);
+            break;
+        }
+    }
+    let on_has_area = sigma.is_some();
+    let mut across_has_area = false;
+    if !(on_has_area && touch.is_some()) {
+        for r in footprint_across(k, t, frame, tol)? {
+            if on_s(&r)? {
+                sigma = Some(r);
+                across_has_area = true;
+                break;
+            }
+        }
+    }
+    Ok((sigma, on_has_area, across_has_area))
+}
+
 /// The pair (T, S) at `p` read from the two bodies and decided by [`pair`] (design v2 5.3, 5.4):
 /// S's faces in `p` facing `n` (every vertex within `tol` of it), T's footprint on `p`
 /// ([`footprint_on`]) and the touch level of T's first planar face facing `−n` within `tol`
@@ -918,7 +1004,6 @@ pub fn pair_at(
     p: Plane,
     tol: f64,
 ) -> Result<core::result::Result<PairJoint, PairSkip>> {
-    use crate::prism::profile::{regions_overlap, Region2};
     if !(tol.is_finite() && tol > 0.0) {
         return Err(invalid("tol must be positive and finite"));
     }
@@ -926,47 +1011,8 @@ pub fn pair_at(
     let n = p.normal;
     let frame = frame_of(p)?;
     let t_faces = read_faces(k, t, &frame, tol)?;
-    let s_regions = face_regions_in(k, s, p, &frame, tol)?;
-    let on_s = |a: &Region2| -> Result<bool> {
-        for b in &s_regions {
-            match regions_overlap(a, b, tol) {
-                Some(true) => return Ok(true),
-                Some(false) => {}
-                None => {
-                    return Err(SolidError::Unsupported {
-                        operation: OP,
-                        reason: "whether the tab plate meets the slot plate's face is not decided",
-                    })
-                }
-            }
-        }
-        Ok(false)
-    };
-    let mut sigma = None;
-    for r in footprint_on(k, t, &frame, tol)? {
-        if on_s(&r)? {
-            sigma = Some(r);
-            break;
-        }
-    }
-    let mut touch = None;
-    for q in t_faces.iter().filter_map(|f| f.plane) {
-        if let Some(delta) = touch_offset(q, p, tol)? {
-            touch = Some(delta);
-            break;
-        }
-    }
-    let on_has_area = sigma.is_some();
-    let mut across_has_area = false;
-    if !(on_has_area && touch.is_some()) {
-        for r in footprint_across(k, t, &frame, tol)? {
-            if on_s(&r)? {
-                sigma = Some(r);
-                across_has_area = true;
-                break;
-            }
-        }
-    }
+    let touch = first_touch(&t_faces, p, tol)?;
+    let (sigma, on_has_area, across_has_area) = sigma_of(k, t, s, p, &frame, touch, tol)?;
     let how = contact(on_has_area, touch, across_has_area, tol, || {
         let mut a = crate::topology::brep::p3::brep_copy(k, t)?;
         let mut b = crate::topology::brep::p3::brep_copy(k, s)?;
