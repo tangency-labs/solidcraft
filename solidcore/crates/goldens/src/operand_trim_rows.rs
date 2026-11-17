@@ -11,7 +11,10 @@
 //!   trims and the listed ones is main's, bit for bit.
 //! * **Soundness.** The result body's `check_brep` level 2 reports no line main's same body
 //!   does not ([`level2_within_main`]: four `fc*` bodies carry main's base-geometry
-//!   warnings) ([`validation::soundness`]).
+//!   warnings) ([`validation::soundness`]), but for a line certified a false positive of
+//!   its check ([`face34`]: test #34 on main's own geometry at a tolerance no larger than
+//!   main's, coincident only inside the end contact of the edges' transversal meeting at
+//!   their shared vertex).
 //! * **Trims on edges.** Every trim the body holds lies on its edge within the edge's
 //!   tolerance, and its edge within that of the trim's image
 //!   ([`crate::trims_on_edges`], rounded interval arithmetic).
@@ -20,9 +23,10 @@
 //!   distance to each surface of the faces it lies on enclosed ([`crate::certify::nearest`]);
 //!   the move is `closer` where this branch's upper end is below main's lower end on some
 //!   face and above on none, `farther` the other way, `equal` where the enclosures meet. A
-//!   tolerance must cover its vertex's distance to its edges' curve ends (enclosed in
-//!   intervals); both values must, and the move is `closer` when this branch's is the
-//!   smaller, `equal` when the two differ by at most that distance's upper end (each
+//!   tolerance must cover its vertex's distance to its edges' curve ends and to the end
+//!   images of their uses' trims (enclosed in intervals), and its edges' needs (below: the
+//!   ball holds each edge's tolerance tube where it ends); both values must, and the move
+//!   is `closer` when this branch's is the smaller, `equal` when the two differ by at most that distance's upper end (each
 //!   records the kernel default `1e-5` plus a measure of a gap that small), `farther`
 //!   otherwise. An edge's tolerance is classed alike against the most of its uses' trims'
 //!   certified bounds and its ends' distances to its vertices. A moved sample of a face's
@@ -254,9 +258,20 @@ fn point_class(k: &Kernel, b: &Brep, faces: &[FaceId], main: Point3, now: Point3
 }
 
 /// An upper bound on the distance from `v`'s point to the nearer end of each of its edges'
-/// curves, the ends enclosed in intervals: the most over the edges.
-fn vertex_need(b: &Brep, v: VertexId) -> f64 {
+/// curves and of each of its edges' uses' trims' images (the vertex's ball holds the ends
+/// of both: [`crate::trims_on_edges::trim_end_images`]), the ends enclosed in intervals,
+/// and on each of its edges' [`edge_need`] (the ball holds the edge's tolerance tube where
+/// it ends, as the kernel keeps a vertex's tolerance at least its edges'): the most of these.
+fn vertex_need(b: &Brep, certs: &[crate::trims_on_edges::TrimCertificate], v: VertexId) -> f64 {
+    let k = Kernel::default();
     let at = b.vertex(v).unwrap().point;
+    let to_v = |c: V3<Ivl>| {
+        norm_hi(V3 {
+            x: c.x - Ivl::from(at.x),
+            y: c.y - Ivl::from(at.y),
+            z: c.z - Ivl::from(at.z),
+        })
+    };
     let mut need = 0.0_f64;
     for e in vertex_edges(b, v) {
         let rec = b.edge(e).unwrap();
@@ -264,14 +279,16 @@ fn vertex_need(b: &Brep, v: VertexId) -> f64 {
         let mut nearest_end = f64::INFINITY;
         for s in [rec.interval.min(), rec.interval.max()] {
             let c = curve_derivs_over(&cn, Ivl::from(s), 0, None).unwrap()[0];
-            let d = norm_hi(V3 {
-                x: c.x - Ivl::from(at.x),
-                y: c.y - Ivl::from(at.y),
-                z: c.z - Ivl::from(at.z),
-            });
-            nearest_end = nearest_end.min(d);
+            nearest_end = nearest_end.min(to_v(c));
         }
         need = need.max(nearest_end);
+        for (eu, r) in b.edgeuses().iter() {
+            if r.edge == Some(e) && r.uv_trim_curve.is_some() {
+                let [p0, p1] = crate::trims_on_edges::trim_end_images(&k, b, eu).unwrap();
+                need = need.max(to_v(p0).min(to_v(p1)));
+            }
+        }
+        need = need.max(edge_need(b, certs, e));
     }
     round_up(need)
 }
@@ -465,29 +482,8 @@ fn masked(line: &str) -> String {
     out
 }
 
-/// Level 2 lines of a row's body that main's does not report and this change does not
-/// certify: (case, body prefix, line, the open defects that block it). The row is NOT
-/// certified while it is listed; the entry fails once its line is gone.
-///
-/// `single_face_fillet1019_6`: face test #34 flags edges e21/e24 (feature body: e5/e8), which
-/// only share vertex 14, as partially coincident. Their geometry is main's bit for bit; e24's
-/// tolerance is 1.49e-3 here, 2.89e-3 on main, where the lazy trim refit ratchet (#18162)
-/// raised it, and test #34's verdict on this pair flips with the tolerance (fires at 1.4e-3,
-/// 1.49e-3, 2.5e-3, 4e-3; not at 2e-3, 2.89e-3: #18212).
-const BLOCKED_LEVEL2: &[(&str, &str, &str, &str)] = &[
-    (
-        "single_face_fillet1019_6",
-        "base_",
-        "SmFace::Test #34 Face has partially Coincident Edges: Face has partially Coincident Edges. [owner SmFace]",
-        "#18162, #18212",
-    ),
-    (
-        "single_face_fillet1019_6",
-        "feature0_",
-        "SmFace::Test #34 Face has partially Coincident Edges: Face has partially Coincident Edges. [owner SmFace]",
-        "#18162, #18212",
-    ),
-];
+mod face34;
+use face34::FALSE_POSITIVES;
 
 /// `check_brep` level 2 of a row's body, `lines`, against main's for the same body
 /// (`MAIN_LEVEL2`, keyed by case and body prefix; a body not listed had none): every line is
@@ -497,27 +493,21 @@ const BLOCKED_LEVEL2: &[(&str, &str, &str, &str)] = &[
 /// this branch copies instead of re-dropping. A line neither takes must be, verbatim, one of
 /// `operand`'s, the input model's level 2 before the operation (each taken once): the
 /// warning of an operand trim this branch copies where main re-dropped it.
-fn level2_within_main(name: &str, prefix: &str, lines: &[String], operand: &[String]) {
+fn level2_within_main(
+    name: &str,
+    prefix: &str,
+    lines: &[String],
+    operand: &[String],
+    certified: &[&str],
+) {
     let main: &[&str] = MAIN_LEVEL2
         .iter()
         .find(|(c, p, _)| *c == name && *p == prefix)
         .map_or(&[], |e| e.2);
     let mut left: Vec<&str> = main.to_vec();
     let mut unmatched = Vec::new();
-    for (c, p, line, open) in BLOCKED_LEVEL2 {
-        if *c == name && *p == prefix {
-            assert!(
-                lines.iter().any(|l| l == line),
-                "{name} {prefix}: blocked line gone, remove its BLOCKED_LEVEL2 entry: {line}"
-            );
-            eprintln!("  level 2: BLOCKED on {open}, not certified: {line}");
-        }
-    }
     for l in lines {
-        if BLOCKED_LEVEL2
-            .iter()
-            .any(|(c, p, line, _)| *c == name && *p == prefix && line == l)
-        {
+        if certified.contains(&l.as_str()) {
             continue;
         }
         match left.iter().position(|m| m == l) {
@@ -570,8 +560,33 @@ pub(crate) fn certify_body(
 ) -> Vec<Class> {
     let mut k = Kernel::default();
     // soundness
-    let s = validation::soundness(&mut k, raw.unwrap_or(b)).unwrap();
-    level2_within_main(name, prefix, &s.check.lines(), operand);
+    let body: &mut Brep = match raw {
+        Some(r) => r,
+        None => &mut *b,
+    };
+    let s = validation::soundness(&mut k, body).unwrap();
+    let lines = s.check.lines();
+    // lines certified false positives of their check ([`face34`])
+    let mut certified: Vec<&str> = Vec::new();
+    for fp in FALSE_POSITIVES {
+        if fp.0 == name && fp.1 == prefix {
+            assert!(
+                lines.iter().any(|l| l == fp.2),
+                "{name} {prefix}: certified line gone, remove its FALSE_POSITIVES entry: {}",
+                fp.2
+            );
+            let (pairs, worst) = face34::certify(&k, body, fp)
+                .unwrap_or_else(|e| panic!("{name} {prefix}: {} not certified: {e}", fp.3));
+            eprintln!(
+                "  level 2: {} pair(s) certified a false positive ({}): main's geometry, no \
+                 looser, ranges inside the shared vertex's transversal end contact (at most \
+                 {worst:.3} of its reach): {}",
+                pairs, fp.3, fp.2
+            );
+            certified.push(fp.2);
+        }
+    }
+    level2_within_main(name, prefix, &lines, operand, &certified);
     // moved values
     let (rk, gk) = (format!("{prefix}record"), format!("{prefix}geometry"));
     let (head, slot) = if blinded { (1, 1) } else { (0, 0) };
@@ -709,7 +724,7 @@ pub(crate) fn certify_body(
                 touched.extend(vertex_edges(b, vid));
                 if c == 3 {
                     let (m, n) = (main_of("geometry", i, geometry[i]), geometry[i]);
-                    let need = vertex_need(b, vid);
+                    let need = vertex_need(b, &certs, vid);
                     assert!(
                         m >= need && n >= need,
                         "{name}: vertex {v} tolerance {m:e} / {n:e} under {need:e}"
@@ -781,7 +796,7 @@ pub(crate) fn certify_body(
             assert!(c.holds(), "{name}: {c:?}");
             eprintln!(
                 "  trim of {:?} on {:?}: bound {:e} (at midpoints {:e}) of {:e}, {} pieces, {}, \
-                 {:e} past its surface's knots",
+                 {:e} past its surface's knots{}",
                 c.edgeuse,
                 c.edge,
                 c.bound,
@@ -789,7 +804,15 @@ pub(crate) fn certify_body(
                 c.tolerance,
                 c.pieces,
                 if c.reversed { "reversed" } else { "forward" },
-                c.past
+                c.past,
+                if c.at_vertex > 0.0 {
+                    format!(
+                        ", an end stretch in its vertex's ball ({:.3} of its tolerance)",
+                        c.at_vertex
+                    )
+                } else {
+                    String::new()
+                }
             );
             held += 1;
         } else if !c.holds() {
@@ -854,7 +877,7 @@ mod local_operation {
 /// tolerances against the trims' certified bounds, edge and surface samples by enclosed
 /// distances, a moved surface domain as the samples it moves.
 mod feature_executive {
-    use super::{certify_body, plain_digest, Class, BLOCKED_LEVEL2};
+    use super::{certify_body, plain_digest, Class, FALSE_POSITIVES};
     use crate::units::blend_feature_executive::{result_breps, Runner};
     use crate::UnitDiff;
 
@@ -868,9 +891,6 @@ mod feature_executive {
     include!("operand_trim_rows/feature_executive.rs");
 
     #[test]
-    #[ignore = "not yet certified: fillet_group_fillet1019_rb23 edge 7's trim bound 1.48459e-4 \
-                is over its tolerance 1.48453e-4 (trims_on_edges' end piece doubles the \
-                trim end's 7.42e-5 offset from the edge end)"]
     fn feature_executive_rows_are_certified() {
         let (mut closer, mut equal) = (0, 0);
         for row in ROWS {
@@ -921,16 +941,15 @@ mod feature_executive {
                 }
             }
         }
-        let blocked: Vec<&str> = ROWS
+        let false_positive: Vec<&str> = ROWS
             .iter()
             .map(|r| r.case)
-            .filter(|c| BLOCKED_LEVEL2.iter().any(|b| b.0 == *c))
+            .filter(|c| FALSE_POSITIVES.iter().any(|b| b.0 == *c))
             .collect();
         eprintln!(
-            "{} rows ({} certified, blocked: {blocked:?}): moved values closer {closer}, \
-             equal {equal}",
-            ROWS.len(),
-            ROWS.len() - blocked.len()
+            "{} rows certified (level 2 false positives certified in {false_positive:?}): \
+             moved values closer {closer}, equal {equal}",
+            ROWS.len()
         );
         assert_eq!(ROWS.len(), 6);
     }

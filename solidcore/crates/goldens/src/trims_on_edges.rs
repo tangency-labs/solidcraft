@@ -10,9 +10,9 @@
 //!
 //! **The bound.** The trim's parameter range is cut into pieces `[a, b]`; on each, `sigma`
 //! is the affine map from `[a, b]` onto `[sa, sb]`, the edge parameters of the pieces' ends
-//! (the edge's own ends at the trim's ends, in the order that matches; inside, the
-//! parameter whose curve point is nearest to the trim's point, found by Newton's method:
-//! any value is sound, a good one is tight). With `D(t) = S(T(t)) - C(sigma(t))` and `m`
+//! (at every end, the trim's own ends too, the parameter whose curve point is nearest to
+//! the trim's point, found by Newton's method from the matching edge end or the affine
+//! guess: any value is sound, a good one is tight). With `D(t) = S(T(t)) - C(sigma(t))` and `m`
 //! the piece's middle, the mean-value inequality for the continuous, piecewise `C^1` `D`
 //! gives, for every `t` in `[a, b]`,
 //!
@@ -29,7 +29,18 @@
 //! then within `|D|` of a point of the edge); the true images of two consecutive pieces'
 //! `sigma` meet up to the enclosures of their shared end, so every edge parameter lies in
 //! some piece's image up to that gap `g`, and an edge point is within `|D| + sup |C'| g` of
-//! the trim's image. The certificate's `bound` is the larger of the two.
+//! the trim's image. The pieces cover the edge between the feet `f` of the trim's two ends;
+//! a point `C(s)` between a foot and its edge end `e` is bounded by its distance to the
+//! trim's end point `P = S(T(t_end))`: on parts `[a, b]` of that stretch,
+//! `|C(s) - P| <= |C(m) - P| + sup |C'| max(m - a, b - m)`, `P`, `C(m)` and `C'` enclosed,
+//! the parts halved as the pieces are (a trim end off the edge end along the curve then
+//! costs that offset once; pinning `sigma` to `e` would make the end piece pay it twice).
+//! The certificate's `bound` is the largest of these. A stretch farther than the edge's
+//! tolerance from `P` is still accounted for when the stretch and `P` both lie in the
+//! tolerance ball of a vertex of the edge (`|C(s) - V|` bounded alike, `|P - V|` enclosed):
+//! the vertex joins the edge's end and the trim's there, as a tolerant B-rep's vertex ball
+//! does; the certificate's `at_vertex` records the most of those distances over the vertex's
+//! tolerance, and the stretch adds nothing to `bound`.
 //!
 //! The surface is read in its NURBS form (`as_b_spline`, as every analytic surface but the
 //! plane is evaluated; the plane's net is its exact bilinear form), a curve-bounded surface
@@ -80,6 +91,11 @@ pub(crate) struct TrimCertificate {
     /// The largest `|D(m)|` enclosed at a piece's midpoint: the bound's lower part, near
     /// the distance the trim actually lies from its edge.
     pub(crate) sampled: f64,
+    /// 0, or, when an end stretch of the edge (between an edge end and the foot of the
+    /// trim's matching end) is not within the tolerance of the trim's end point but both lie
+    /// in a vertex's tolerance ball, the most of their enclosed distances to that vertex over
+    /// its tolerance (at most 1; see the module docs).
+    pub(crate) at_vertex: f64,
 }
 
 impl TrimCertificate {
@@ -464,18 +480,96 @@ pub(crate) fn certify_edgeuse(
     }
     nodes.push(0.5 * (prev + t1));
     nodes.push(t1);
+    // every node's edge parameter is the foot of its image, the trim's ends' too (from the
+    // edge end they meet): an end piece pinned to the edge end would have to stretch
+    // `sigma` over the distance between the trim's end and the edge's end within itself,
+    // and its slope term would double that distance; the stretch from a foot to its edge
+    // end is covered on its own below
     let mut s_nodes = Vec::with_capacity(nodes.len());
-    for (i, &t) in nodes.iter().enumerate() {
-        let s = if i == 0 {
-            e0
-        } else if i + 1 == nodes.len() {
-            e1
-        } else {
-            let guess = e0 + (e1 - e0) * (t - t0) / (t1 - t0);
-            pieces.foot(pieces.image(t)?, guess)
-        };
-        s_nodes.push(s);
+    for &t in &nodes {
+        let guess = e0 + (e1 - e0) * (t - t0) / (t1 - t0);
+        s_nodes.push(pieces.foot(pieces.image(t)?, guess));
     }
+    let (foot0, foot1) = (
+        s_nodes.first().copied().unwrap_or(e0),
+        s_nodes.last().copied().unwrap_or(e1),
+    );
+    // an upper bound on the distance from the edge's points over [lo, hi] to the point
+    // enclosure `p`: on parts [a, b], |C(s) - p| <= |C(m) - p| + sup |C'| max(m - a, b - m),
+    // the parts halved as the trim's pieces are (against the tolerance `tol`)
+    let farthest = |p: V3<Ivl>, lo: f64, hi: f64, tol: f64| -> Result<f64, String> {
+        let mut parts: Vec<(f64, f64, u32)> = vec![(lo, hi, 0)];
+        let (mut worst, mut count) = (0.0_f64, 0usize);
+        while let Some((a, b, depth)) = parts.pop() {
+            let m = 0.5 * (a + b);
+            let (c, _) = pieces.curve_over(Ivl::from(m))?;
+            let d_m = norm_hi(sub(p, c));
+            let (_, c1) = pieces.curve_over(Ivl::new(a, b))?;
+            let half = (Ivl::from(m) - Ivl::from(a))
+                .hi
+                .max((Ivl::from(b) - Ivl::from(m)).hi);
+            let d = round_up(d_m + round_up(norm_hi(c1) * half));
+            // halved while the slope term counts, or while a bound above the tolerance may
+            // still come under it
+            let open = d > 1.25 * d_m || (d > tol && d_m <= tol);
+            if d > 0.125 * tol && open && depth < MAX_DEPTH && count + parts.len() < MAX_PIECES {
+                parts.push((m, b, depth + 1));
+                parts.push((a, m, depth + 1));
+                continue;
+            }
+            count += 1;
+            // (f64::max would drop a NaN)
+            worst = if d.is_nan() {
+                f64::INFINITY
+            } else {
+                worst.max(d)
+            };
+        }
+        Ok(worst)
+    };
+    let vertices = {
+        let (v0, v1) = solidcore::topology::edge::start_end_vertices(b, edge).map_err(e)?;
+        let mut out = Vec::new();
+        for v in [v0, v1].into_iter().flatten() {
+            let r = b.vertex(v).map_err(e)?;
+            out.push((
+                V3 {
+                    x: Ivl::from(r.point.x),
+                    y: Ivl::from(r.point.y),
+                    z: Ivl::from(r.point.z),
+                },
+                r.tolerance,
+            ));
+        }
+        out
+    };
+    // the edge between an end `end` of it and the foot of the trim's matching end (at
+    // `t`): within the edge's tolerance of the trim's end point P (the bound returned), or
+    // else, with P, inside the tolerance ball of a vertex of the edge (the most of their
+    // distances to it over its tolerance returned second; the bound then 0: the vertex
+    // joins them)
+    let stretch = |t: f64, foot: f64, end: f64| -> Result<(f64, f64), String> {
+        let (uv, _) = pieces.trim_over(Ivl::from(t))?;
+        let p = pieces.surface_over(uv)?[0];
+        let (lo, hi) = (foot.min(end), foot.max(end));
+        let d = farthest(p, lo, hi, erec.tolerance)?;
+        // (a NaN is not within)
+        if d <= erec.tolerance {
+            return Ok((d, 0.0));
+        }
+        for &(v, vt) in &vertices {
+            let to_v = farthest(v, lo, hi, vt)?.max(norm_hi(sub(p, v)));
+            if to_v <= vt {
+                return Ok((0.0, to_v / vt));
+            }
+        }
+        Ok((if d.is_nan() { f64::INFINITY } else { d }, 0.0))
+    };
+    let (ends, at_vertex) = {
+        let (x, xv) = stretch(t0, foot0, e0)?;
+        let (y, yv) = stretch(t1, foot1, e1)?;
+        (x.max(y), xv.max(yv))
+    };
     // a stack of pieces (a, b, sa, sb, depth), last first so they are visited in order
     let mut stack: Vec<(f64, f64, f64, f64, u32)> = Vec::new();
     for i in (0..nodes.len() - 1).rev() {
@@ -515,13 +609,15 @@ pub(crate) fn certify_edgeuse(
             pieces.curve_over(Ivl::new(sigma.lo.max(pieces.s0), sigma.hi.min(pieces.s1)))?;
         c1_all = c1_all.max(norm_hi(c1));
     }
-    // the last piece ends at the edge's end: its sigma end enclosed against it
+    // the last piece ends at the last foot: its sigma end enclosed against it
     if let Some(end) = last_end {
         gap = gap.max(round_up(
-            end.hull(Ivl::from(e1)).hi - end.hull(Ivl::from(e1)).lo,
+            end.hull(Ivl::from(foot1)).hi - end.hull(Ivl::from(foot1)).lo,
         ));
     }
-    let bound = round_up(bound + round_up(c1_all * gap));
+    // the pieces cover the edge from foot0 to foot1 (up to the gaps), the stretches the
+    // rest: the larger of the two bounds holds everywhere
+    let bound = round_up(bound + round_up(c1_all * gap)).max(ends);
     Ok(TrimCertificate {
         edgeuse: eu,
         edge,
@@ -531,7 +627,43 @@ pub(crate) fn certify_edgeuse(
         reversed,
         past: pieces.past.get(),
         sampled,
+        at_vertex,
     })
+}
+
+/// Enclosures of the images `S(T(t0))`, `S(T(t1))` of the ends of the trim in `eu`'s own
+/// slot on its face's surface.
+///
+/// # Errors
+///
+/// A missing trim, face or surface; data with no NURBS form.
+pub(crate) fn trim_end_images(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<[V3<Ivl>; 2], String> {
+    let e = |x: solidcore::SolidError| x.to_string();
+    let rec = b.edgeuse(eu).map_err(e)?;
+    let trim = rec
+        .uv_trim_curve
+        .as_ref()
+        .ok_or("no trim in the edge use's slot")?;
+    let face = eu1::face(b, eu).map_err(e)?.ok_or("no face")?;
+    let surface = b
+        .face(face)
+        .map_err(e)?
+        .surface
+        .as_ref()
+        .ok_or("no surface")?;
+    let form = as_b_spline(k, crate::certify::measured(surface))
+        .map_err(e)?
+        .ok_or("no NURBS form")?;
+    let sn = Nurbs::of(&form).map_err(e)?;
+    let tn = curve_nurbs(trim)?;
+    let (t0, t1) = range(&tn);
+    let past = Cell::new(0.0);
+    let at = |t: f64| -> Result<V3<Ivl>, String> {
+        let d = curve_derivs_over(&tn, Ivl::from(t), 0, None).map_err(|x| x.to_string())?;
+        let uv = *d.first().ok_or("no enclosure")?;
+        Ok(surface_over(&sn, uv, &past)?[0])
+    };
+    Ok([at(t0)?, at(t1)?])
 }
 
 /// Certifies every trim held in an edge use's own slot ([`certify_edgeuse`]), each refined
@@ -656,5 +788,81 @@ mod tests {
             Ok(c) => assert!(c.bound >= 5.0, "{c:?}"),
             Err(e) => assert!(e.contains("sigma"), "{e}"),
         }
+    }
+
+    /// An edge running `delta` past its trim's end along its own curve (the trim's end
+    /// short of the edge's end, as a fillet's trims can be): the edge's end point is
+    /// `delta` from the trim's image, and the bound pays that once, so a tolerance of
+    /// `1.5 delta` holds (an end piece pinned to the edge's end paid about `2 delta`). The
+    /// true distance is `delta`, so a tolerance below it is still refused.
+    #[test]
+    fn a_trim_ending_short_of_its_edge_end_pays_the_offset_once() {
+        use solidcore::geom::extent1d::Extent1d;
+        let mut k = Kernel::default();
+        let mut b = solidcore::primitive::api_primitives::create_box(
+            &mut k,
+            solidcore::Point3::new(0.0, 0.0, 0.0),
+            10.0,
+            20.0,
+            30.0,
+        )
+        .unwrap();
+        let ids: Vec<EdgeuseId> = b.edgeuses().iter().map(|(eu, _)| eu).collect();
+        for &eu in &ids {
+            solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+                &k, &mut b, eu, false, false, true,
+            )
+            .unwrap()
+            .status
+            .unwrap();
+        }
+        let eu = *ids
+            .iter()
+            .find(|&&x| b.edgeuse(x).unwrap().uv_trim_curve.is_some())
+            .unwrap();
+        let edge = b.edgeuse(eu).unwrap().edge.unwrap();
+        let delta = 1e-3;
+        let speed = {
+            let rec = b.edge(edge).unwrap();
+            let (s0, s1) = (rec.interval.min(), rec.interval.max());
+            let n = curve_nurbs(rec.curve.as_ref().unwrap()).unwrap();
+            let d = curve_derivs_over(&n, Ivl::from(0.5 * (s0 + s1)), 1, None).unwrap();
+            norm_hi(d[1])
+        };
+        {
+            let rec = b.edge_mut(edge).unwrap();
+            let (s0, s1) = (rec.interval.min(), rec.interval.max());
+            rec.interval = Extent1d::from_min_max(s0, s1 + delta / speed);
+        }
+        let with = |b: &mut Brep, tol: f64| {
+            b.edge_mut(edge).unwrap().tolerance = tol;
+            certify_edgeuse(&k, b, eu, 0.125 * tol).unwrap()
+        };
+        let c = with(&mut b, 1.5 * delta);
+        assert!(c.holds(), "{c:?}");
+        // (a part stops halving once its bound is within a quarter of its midpoint's)
+        assert!(
+            c.bound >= delta * (1.0 - 1e-9) && c.bound <= 1.25 * delta * (1.0 + 1e-9),
+            "{c:?}"
+        );
+        let c = with(&mut b, 0.9 * delta);
+        assert!(!c.holds() && c.at_vertex == 0.0, "{c:?}");
+        // the edge's vertices' balls widened to 1.2 delta: the stretch past the trim's end
+        // (delta long, from the box corner where the trim ends) lies in the corner's ball
+        let (v0, v1) = solidcore::topology::edge::start_end_vertices(&b, edge).unwrap();
+        for v in [v0, v1].into_iter().flatten() {
+            b.vertex_mut(v).unwrap().tolerance = 1.2 * delta;
+        }
+        let c = with(&mut b, 0.9 * delta);
+        assert!(
+            c.holds() && c.at_vertex > 0.8 && c.at_vertex <= 1.0,
+            "{c:?}"
+        );
+        // a ball too small for the stretch still refuses
+        for v in [v0, v1].into_iter().flatten() {
+            b.vertex_mut(v).unwrap().tolerance = 0.95 * delta;
+        }
+        let c = with(&mut b, 0.9 * delta);
+        assert!(!c.holds() && c.at_vertex == 0.0, "{c:?}");
     }
 }
