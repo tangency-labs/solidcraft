@@ -561,7 +561,8 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         if plugins.is_empty() {
             // First-time users need the package format and a way to find the guide before
             // global host resource limits, which are rarely useful without a plugin (#18764).
-            let intro = crate::ui_kit::text(ui, solidcraft_ui_text::tr("prefs.plugins_get_started"), crate::ui_kit::Text::Hint("plugins_get_started"));
+            let intro =
+                crate::ui_kit::text(ui, solidcraft_ui_text::tr("prefs.plugins_get_started"), crate::ui_kit::Text::Hint("plugins_get_started"));
             crate::scenario::publish_rect("prefs:plugins:get_started", intro.rect);
             let guide = ui.hyperlink_to(
                 RichText::new(solidcraft_ui_text::tr("prefs.plugins_guide")),
@@ -578,11 +579,8 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         }
         ui.add_space(8.0);
         let was_expanded = app.preferences.plugin_limits_expanded;
-        let advanced = crate::ui_kit::checkbox(
-            ui,
-            solidcraft_ui_text::tr("prefs.plugins_advanced_limits"),
-            &mut app.preferences.plugin_limits_expanded,
-        );
+        let advanced =
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.plugins_advanced_limits"), &mut app.preferences.plugin_limits_expanded);
         crate::scenario::publish_target("prefs:plugins:advanced_limits", advanced.rect);
         if was_expanded && !app.preferences.plugin_limits_expanded {
             // Do not leave a hidden, incomplete fuel or memory edit pending for Apply.
