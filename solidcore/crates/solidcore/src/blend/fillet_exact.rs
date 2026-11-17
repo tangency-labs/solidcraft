@@ -2195,8 +2195,12 @@ fn fixed_centre(collapsed: &BlendQuadric, other: &BlendQuadric, near: Point3) ->
     match collapsed.kind {
         QuadricKind::Point => Some(collapsed.point),
         QuadricKind::Line => {
-            let (a, b, c) = other.implicit();
+            // in a frame at the line's point, so `other`'s implicit constant is read from its
+            // own place relative to the line, not from a world origin far away
             let (p, d) = (collapsed.point, collapsed.dir);
+            let mut local = *other;
+            local.point = other.point - p;
+            let (a, b, c) = local.implicit();
             let times = |x: Vec3| {
                 let [r0, r1, r2] = a;
                 Vec3::new(
@@ -2205,11 +2209,10 @@ fn fixed_centre(collapsed: &BlendQuadric, other: &BlendQuadric, near: Point3) ->
                     r2[0] * x.x + r2[1] * x.y + r2[2] * x.z,
                 )
             };
-            let b = Vec3::new(b[0], b[1], b[2]);
-            // qa t^2 + 2 qb t + qc = 0 for x = p + t d
+            // qa t^2 + 2 qb t + qc = 0 for x = t d (the line's point at the frame's origin)
             let qa = d.dot(times(d));
-            let qb = d.dot(times(p)) + b.dot(d);
-            let qc = p.dot(times(p)) + 2.0 * b.dot(p) + c;
+            let qb = b[0] * d.x + b[1] * d.y + b[2] * d.z;
+            let qc = c;
             let roots = if qa == 0.0 {
                 if qb == 0.0 {
                     return None;
@@ -2306,11 +2309,11 @@ fn faces_hold(
         if !dropped.success {
             return Ok(None);
         }
-        if surface
+        // accepted only within `tol`: a distance that is not a number holds nothing
+        let distance = surface
             .evaluate_point(k, dropped.result_uv)?
-            .distance(point)
-            > tol
-        {
+            .distance(point);
+        if !(distance.is_finite() && distance <= tol) {
             return Ok(Some(false));
         }
     }
