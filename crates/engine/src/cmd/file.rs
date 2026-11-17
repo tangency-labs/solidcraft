@@ -1824,7 +1824,12 @@ fn signed_container(
     gpg: Option<crate::gpg::Gpg>,
 ) -> Result<(Vec<u8>, Option<SignedSave>, Option<String>)> {
     let Some(gpg) = gpg else {
-        return Err(bad("file.save", "signing needs GnuPG, which was not found on this computer"));
+        // The chain is kept, as a save without a key keeps it: only the signature is missing.
+        let save = solidcraft_io::ProvenanceSave { source: None, chain, author: None, tool: Some("SolidCraft"), note: None, created: None };
+        let bytes =
+            s.design_container_signed(Some(path), compression, preview, cache, &save).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        let skipped = "the design was saved unsigned: signing needs GnuPG, which was not found on this computer".to_owned();
+        return Ok((bytes, None, Some(skipped)));
     };
     let signer = crate::gpg::Signer::new(&gpg, signing_key.map(str::trim).filter(|key| !key.is_empty()));
     let save = solidcraft_io::ProvenanceSave {

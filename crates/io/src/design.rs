@@ -370,16 +370,16 @@ fn write_container(
     if let Some(png) = thumbnail {
         thumbnail::write(&mut writer, png, &metadata)?;
     }
-    let bytes = writer.finish()?;
-    if bytes.len() > max_design() {
-        return Err(invalid(format!(
-            "the design would be {} MB, over the {} MB a design file may hold. {}",
-            bytes.len() >> 20,
-            max_design() >> 20,
-            crate::limits::how_to_raise()
-        )));
-    }
-    Ok(bytes)
+    // THE SIZE LIMIT GUARDS READING, NOT WRITING (#18686).
+    //
+    // The limit is the largest design file SolidCraft reads (crate::limits): it
+    // is there so that a file this app did not write cannot exhaust its memory
+    // before it is read. The bytes of a save are already in memory, so refusing
+    // to write them loses the user's work for a guard that does not apply here:
+    // an assembly that grew over the limit could not be saved, not even by Save
+    // As, and the autosave failed again and again. The design is written and the
+    // caller says how big it is and how to raise the limit to open it again.
+    writer.finish()
 }
 
 fn validate_mesh(mesh: &MeshData) -> Result<()> {
