@@ -875,9 +875,7 @@ fn a_construction_point_is_not_a_hole_site_and_the_flag_is_saved() {
     let saved = s.doc.to_json();
     let reopened = solidcraft_doc::Document::from_json(&saved).unwrap();
     let sketch_id = s.model.state().sketches.first().map(|k| k.feature).expect("the sketch");
-    let flags = |d: &solidcraft_doc::Document| {
-        d.sketch(sketch_id).unwrap().points.iter().map(|p| (p.id.clone(), p.construction)).collect::<Vec<_>>()
-    };
+    let flags = |d: &solidcraft_doc::Document| d.sketch(sketch_id).unwrap().points.iter().map(|p| (p.id.clone(), p.construction)).collect::<Vec<_>>();
     assert!(flags(&reopened).contains(&("guide".into(), true)) && flags(&reopened).contains(&("mine".into(), false)), "{:?}", flags(&reopened));
     run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": 10, "depth": 8, "name": "H"}));
     near(removed(&mut s), 628.3);
