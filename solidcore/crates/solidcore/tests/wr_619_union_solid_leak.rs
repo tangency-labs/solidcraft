@@ -6,9 +6,9 @@
 //! tolerance but inside the intersection tolerance (their sum, 2e-5), the kernel's identity
 //! radius: since #15718 decides B's corner on A's face as one event (`split_edges_at_vertices`)
 //! the union is the narrow strip's closed form, one valid solid of volume 128 - 20.2 d^2, as
-//! `wr_614_coincident_strip_crossing.rs` derives for d <= 1e-5. The opt-in
-//! `Kernel::fixes.boolean_union_refuses_solid_leak` then has no leak to refuse and leaves the
-//! union as it is.
+//! `wr_614_coincident_strip_crossing.rs` derives for d <= 1e-5. The union's WR-619 guard
+//! (`boolean/merge/p4.rs`, refusing a union whose face deletion leaves no solid region) then
+//! has no leak to refuse and leaves the union as it is.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -64,11 +64,6 @@ fn solid_regions(b: &Brep) -> usize {
         .count()
 }
 
-#[test]
-fn wr_619_union_refuses_solid_leak_is_off_by_default() {
-    assert!(!Kernel::default().fixes.boolean_union_refuses_solid_leak);
-}
-
 /// The union is one valid solid of the narrow strip's closed-form volume: the overlap of A
 /// (64) and B (64) is the prism over P0 Q4 Q1, 4 high, of volume 20.2 d^2
 /// (`wr_614_coincident_strip_crossing.rs`, `overlap_volume`), and every check of Level 2 (all
@@ -100,32 +95,18 @@ fn wr_619_union_is_one_valid_solid_by_default() {
     assert_one_valid_solid(&mut k, &mut u, "default");
 }
 
+/// Two overlapping boxes: the guard leaves an ordinary union alone. The bar [2, 6] x [1, 3]
+/// x [1, 3] runs out of the cube [0, 4]^3 through its face x = 4: the union is the cube's 6
+/// faces (x = 4 with a square hole) and the bar's 5 outside faces, with the cube's 12 edges,
+/// the hole's 4, the bar's 4 along x and its end's 4.
 #[test]
-fn wr_619_union_with_the_fix_is_the_same_valid_solid() {
+fn wr_619_guard_leaves_an_ordinary_union_alone() {
     let mut k = Kernel::default();
-    k.fixes.boolean_union_refuses_solid_leak = true;
-    let (a, b) = operands(&mut k);
-    let mut u = boolean_union(&mut k, a, b).unwrap();
-    assert_one_valid_solid(&mut k, &mut u, "with the fix");
-}
-
-/// Two overlapping boxes: the fix leaves an ordinary union alone.
-#[test]
-fn wr_619_fix_leaves_an_ordinary_union_alone() {
-    let union = |fix: bool| {
-        let mut k = Kernel::default();
-        k.fixes.boolean_union_refuses_solid_leak = fix;
-        let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 4.0, 4.0, 4.0).unwrap();
-        let b = create_box(&mut k, Point3::new(2.0, 1.0, 1.0), 4.0, 2.0, 2.0).unwrap();
-        let u = boolean_union(&mut k, a, b).unwrap();
-        (
-            p1::faces(&u, None).unwrap().len(),
-            p1::edges(&u, None).unwrap().len(),
-            solid_regions(&u),
-            is_manifold_solid(&u).unwrap(),
-        )
-    };
-    let off = union(false);
-    assert_eq!((off.2, off.3), (1, true));
-    assert_eq!(union(true), off);
+    let a = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 4.0, 4.0, 4.0).unwrap();
+    let b = create_box(&mut k, Point3::new(2.0, 1.0, 1.0), 4.0, 2.0, 2.0).unwrap();
+    let u = boolean_union(&mut k, a, b).unwrap();
+    assert_eq!(p1::faces(&u, None).unwrap().len(), 11, "faces");
+    assert_eq!(p1::edges(&u, None).unwrap().len(), 24, "edges");
+    assert_eq!(solid_regions(&u), 1);
+    assert!(is_manifold_solid(&u).unwrap());
 }

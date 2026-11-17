@@ -33,11 +33,10 @@
 //! its void flags follow the nesting): upstream's union that seals a void left the
 //! void's shell first and failed `SmBrep::AssertValid` test 12 (the fork's fix,
 //! tangency-labs/smlib `abastran/void-shell-check`; WR-265,
-//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). Opt-in
-//! (`Kernel::fixes`, off by default): with
-//! `boolean_union_refuses_solid_leak` (own design, WR-619), a union whose step 6 would
-//! delete a face between the infinite region and a solid region is refused with `SM_ERR`
-//! (the face in the error) instead of returning a body whose solid merged into the outside.
+//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). Own design
+//! (WR-619): a union whose step 6 deletes a face between the infinite region and a solid
+//! region, and which then has no solid region left (the solid merged into the outside), is
+//! refused with `SM_ERR` (the face in the error) instead of returning that body.
 //! Own design, not upstream: in step 6 a region that a deleted face joins to another, neither
 //! with merge data (no face of the other body was copied into them, as when a union fills a
 //! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
@@ -1547,13 +1546,11 @@ fn editing_stages(
             }
         }
     }
-    // Not upstream unless opted in (`fixes.boolean_union_refuses_solid_leak`, WR-619): a
-    // union whose face deletion merges a solid into the outside is refused below. A face
-    // between a solid and the outside is also deleted where the other body's solid lies just
-    // across it (a coincident wall, #13455), so only a union left with no solid is refused.
-    let leak = if kernels.primary.fixes.boolean_union_refuses_solid_leak
-        && operation == BooleanOperation::Union
-    {
+    // Not upstream (WR-619): a union whose face deletion merges a solid into the outside is
+    // refused below. A face between a solid and the outside is also deleted where the other
+    // body's solid lies just across it (a coincident wall), so only a union left with no
+    // solid is refused.
+    let leak = if operation == BooleanOperation::Union {
         face_leaking_solid(primary, &faces.delete)?
     } else {
         None

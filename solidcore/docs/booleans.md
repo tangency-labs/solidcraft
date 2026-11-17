@@ -594,7 +594,7 @@ small error.
 | near-coincident planar strip | a crossing fixed only to tol / sin θ, its ends unrelated | upstream's `make_faceuse` `SM_ERR`; the crossing is no event, decided before the face pair is intersected | curved strips; offsets where the crossing's distance to an event equals the tolerance |
 | an intersection loop stays open across a cut | two curve ends on an edge with a loose tolerance lie apart (each face's curve ends where its own surface meets the other face, up to tol / sin φ along the edge), or one ends inside a face; the face is not cut through and the flood crosses the gap | the two causes found are closed before the imprint: one proto vertex per crossing of an edge with a face, and a curve end classified by the face's trims (§5); a loop still open is classified as before, wrong for the set flooded across the gap | a refusal by name for a loop left open across a cut; a crossing whose piece of the edge is not proved inside the band |
 | an imprint fails half way | both bodies are partly imprinted | the imprint's error is returned, not overwritten (`topology_intersector/p2.rs`) | |
-| union deletes a face between the outside and a solid | the solid merges into the infinite region | with `boolean_union_refuses_solid_leak`, refused with `SM_ERR` naming the face (`merge/p4.rs`) | on by default |
+| union deletes a face between the outside and a solid | the solid merges into the infinite region | a union left with no solid region after such a deletion is refused with `SM_ERR` naming the face (`merge/p4.rs`); a deletion where the other body's solid lies across the face is kept | a refusal that also catches a leak which leaves another solid region |
 | result not a solid | an open or inward body from solid operands | ops refuses with `Error::NotSolid` | |
 | result empty | no faces left | ops returns `None` (`boolean`) or `Error::Empty` (`union_all`, `imprint`) | |
 
@@ -642,9 +642,9 @@ A reviewer can check each of these on a change to the boolean.
 - The rig: 130 boolean cases in `solidcore/tests/kernel_cases/booleans/`, two listed in
   `known_failing.json` (the two 3012 sliver cases: the kernel absorbs the 1e-4 wide faces, so it
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
-- Opt-in fixes for the cases in §5, §6 and §8: `boolean_union_refuses_solid_leak`,
-  `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing` (`solidcore/src/kernel.rs`).
-  Always on: the outer shell first, the clean-up of slits and the split of a coincident
+- Opt-in fix for the cases in §5, §6 and §8: `keep_operand_uv_trims`
+  (`solidcore/src/kernel.rs`). Always on: the union's solid-leak refusal (WR-619), a boolean
+  vertex placed by its steepest edge crossing (WR-410), the outer shell first, the clean-up of slits and the split of a coincident
   definition across a split point (WR-533). Every boolean, 3D included, skips the face pairs
   whose boxes lie apart, and a new planar face leaves in place the inner loops whose boxes lie
   outside its outer loop's box (WR-527), always.

@@ -46,7 +46,6 @@ use solidcore::Kernel;
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
-    "boolean_union_refuses_solid_leak",
     "box_face_failures_propagate",
     "bspline_trim_preserves_uv_spans",
     "classify_edge_interval",
