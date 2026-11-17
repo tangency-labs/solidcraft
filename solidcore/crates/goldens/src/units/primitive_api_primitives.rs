@@ -1375,7 +1375,8 @@ impl UnitDiff for Runner {
 }
 
 /// #14246 G1 (WR-596 / WR-662 retired): the rows whose success became a refusal, each
-/// with its typed refusal and the closed-form reason no valid body exists for its inputs.
+/// with its typed refusal and either the closed-form reason no valid body exists for its
+/// inputs or, for a kernel limit, the closed-form reason main's answer was not the body.
 /// On main these rows returned success with an empty body (no faces), an open body (one to
 /// five faces, not closed) or a body that fails the level-2 check; the blend rows returned
 /// the input box with no blend face. The per-row main bodies are listed in #18402.
@@ -1394,14 +1395,21 @@ mod moved_rows {
         /// The shortest side is within the new B-rep's tolerance of zero, so the two
         /// vertices of each edge along it are one vertex.
         BelowTolerance,
-        /// The f64 spacing (one ulp) at the largest coordinate the body reaches exceeds
-        /// the B-rep's tolerance, so a point there cannot be placed within the tolerance
-        /// of where it belongs: no vertex or edge out there can meet the tolerance it is
-        /// checked against.
-        SpacingAboveTolerance,
-        /// No closed form: a kernel limit. The box is refused although a larger one at
-        /// the same place builds (asserted by
-        /// [`a_box_at_1e6_builds_from_3e_3`]); main returned the empty body, no box.
+        /// Some origin coordinate plus its side is not representable in f64 within the
+        /// B-rep's tolerance (the exact rounding error of the sum, from [`two_sum`],
+        /// exceeds it), so the requested far corner cannot be placed.
+        CornerNotRepresentable,
+        /// No closed form: a kernel limit. The requested box exists exactly in f64, but
+        /// `create_face`'s surface checks (`topology::brep::p7`, "surface degenerates to
+        /// a curve" / "... to a point": `is_degenerate_curve` / `is_degenerate_point` of
+        /// the plane's or cylinder's B-spline form at `DEGENERATE_TOL_3D`) compare
+        /// against a tolerance that scales with position, e.g. `1000 * EFF_ZERO * (1 +
+        /// max |coord|)` in `base_is_degenerate_point`, so they refuse sides up to about
+        /// 1e-9 times the coordinate (a 5e3 cube at 1e12 is refused). Tracked in
+        /// tangency-labs/solidcraft#18634. A larger box at the same place builds
+        /// ([`a_box_at_1e6_builds_from_3e_3`]). These rows lose no answer: main's was
+        /// not the box either (0 faces, a body that fails level 2, or one face where
+        /// six were asked; per row in [`BOXES`]).
         KernelLimit,
     }
 
@@ -1409,6 +1417,14 @@ mod moved_rows {
     fn ulp(x: f64) -> f64 {
         let x = x.abs();
         f64::from_bits(x.to_bits() + 1) - x
+    }
+
+    /// The exact rounding error of `a + b` in f64 (Knuth's `TwoSum`: `a + b` equals the
+    /// rounded sum plus this, exactly, when nothing overflows; NaN on overflow).
+    fn two_sum(a: f64, b: f64) -> f64 {
+        let s = a + b;
+        let bb = s - a;
+        (a - (s - bb)) + (b - bb)
     }
 
     /// A box row: the inputs' origin and the sides (a cylindrical box: its length and
@@ -1432,16 +1448,11 @@ mod moved_rows {
             return Reason::Collapses;
         }
         let shortest = sides.iter().copied().fold(f64::INFINITY, f64::min);
-        // every coordinate the body reaches is at most this far out: the origin's, the
-        // far corner's, and (a cylindrical box) its length and radii
-        let largest = (0..6)
-            .map(|n| i.arg(n).unwrap().abs())
-            .chain((0..3).filter(|_| i.op == OpName::Box).map(|n| (o[n] + sides[n]).abs()))
-            .fold(0.0, f64::max);
         if shortest <= tolerance {
             Reason::BelowTolerance
-        } else if ulp(largest) > tolerance {
-            Reason::SpacingAboveTolerance
+        } else if i.op == OpName::Box && (0..3).any(|n| two_sum(o[n], sides[n]).abs() > tolerance)
+        {
+            Reason::CornerNotRepresentable
         } else {
             Reason::KernelLimit
         }
@@ -1469,21 +1480,25 @@ mod moved_rows {
     const P7: &str = "topology::brep::p7";
     const SEGMENT: &str = "curve::line::Line::create_line_segment";
 
-    /// (row, refusal site, reason)
+    /// (row, refusal site, reason). For the [`Reason::KernelLimit`] rows, main's answer
+    /// (the golden row this PR replaces) was not the box: `box_at_1e6_size_1e_3_refused`
+    /// and `box_origin_1e12_size_0p5_control` 0 faces; `box_l_huge` 5 faces, failing
+    /// level 2; `cyl_box_len_huge` 1 face where 6 were asked; `cyl_box_outside_huge` 3
+    /// faces, failing level 2.
     const BOXES: [(&str, &str, Reason); 25] = [
         ("box_1e6_size_1e_6_refused", P8, Reason::BelowTolerance),
         ("box_at_1e6_size_1e_3_refused", P8, Reason::KernelLimit),
         ("box_l_above_effzero", P8, Reason::BelowTolerance),
-        ("box_l_huge", P8, Reason::SpacingAboveTolerance),
-        ("box_origin_1e12_size_0p5_control", P8, Reason::SpacingAboveTolerance),
+        ("box_l_huge", P8, Reason::KernelLimit),
+        ("box_origin_1e12_size_0p5_control", P8, Reason::KernelLimit),
         ("box_origin_1e200_size_0p5", SEGMENT, Reason::Collapses),
         ("box_origin_1e294_size_1em3", SEGMENT, Reason::Collapses),
         ("box_origin_1e95_size_0p5", SEGMENT, Reason::Collapses),
         ("box_origin_x_1e294_size_0p5", SEGMENT, Reason::Collapses),
         ("box_origin_x_1e95_size_0p5", SEGMENT, Reason::Collapses),
         ("cyl_box_len_above_effzero", P8, Reason::BelowTolerance),
-        ("cyl_box_len_huge", P7, Reason::SpacingAboveTolerance),
-        ("cyl_box_outside_huge", P7, Reason::SpacingAboveTolerance),
+        ("cyl_box_len_huge", P7, Reason::KernelLimit),
+        ("cyl_box_outside_huge", P7, Reason::KernelLimit),
         ("gen0025", P8, Reason::BelowTolerance),
         ("gen0165", P8, Reason::BelowTolerance),
         ("gen0179", P9, Reason::BelowTolerance),
@@ -1493,7 +1508,7 @@ mod moved_rows {
         ("gen0627", P8, Reason::BelowTolerance),
         ("gen0711", P8, Reason::Collapses),
         ("gen0756", P9, Reason::BelowTolerance),
-        ("gen0939", P8, Reason::SpacingAboveTolerance),
+        ("gen0939", P8, Reason::CornerNotRepresentable),
         ("gen1014", P8, Reason::BelowTolerance),
         ("wr596_box_smaller_than_tolerance", P8, Reason::BelowTolerance),
     ];
@@ -1518,9 +1533,10 @@ mod moved_rows {
 
     /// The kernel limit `box_at_1e6_size_1e_3_refused` stands on: at (1e6, 1e6, 1e6) the
     /// 1e-3 cube is refused, and the 3e-3 cube builds a closed six-face box that passes
-    /// the level-2 check. The f64 spacing there (1.2e-10) is far below the tolerance, so
-    /// the refusal has no closed form; main's answer for the 1e-3 cube was the empty
-    /// body, which is no box either.
+    /// the level-2 check. 3e-3 is a sample above the position-scaled threshold (about
+    /// 1e-9 x 1e6; 1.5e-3 builds too), not the smallest size that builds. The f64
+    /// spacing there (1.2e-10) is far below the tolerance, so the refusal has no closed
+    /// form; main's answer for the 1e-3 cube was the empty body, which is no box either.
     #[test]
     fn a_box_at_1e6_builds_from_3e_3() {
         let at = Point3::new(1e6, 1e6, 1e6);
