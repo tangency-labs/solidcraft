@@ -3177,6 +3177,9 @@ fn offset_instances(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
 #[derive(Clone, Copy)]
 struct OffsetOptions {
     side: Option<Vec2>,
+    /// `side` is the caller's point, read against the whole chain ([`chain_side`]); off, it is
+    /// a later instance's step past the first curve ([`offset_beyond`]), read off that curve.
+    side_of_chain: bool,
     chain: bool,
     distance: f64,
     symmetric: bool,
@@ -3186,7 +3189,7 @@ struct OffsetOptions {
 /// Build every side of one connected source group. The pool is frozen before any output
 /// is created, so later groups cannot accidentally walk a newly created offset.
 fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::HashSet<String>, options: OffsetOptions) -> Result<Vec<Side>> {
-    let OffsetOptions { side, chain: use_chain, distance: d0, symmetric, distance2 } = options;
+    let OffsetOptions { side, side_of_chain, chain: use_chain, distance: d0, symmetric, distance2 } = options;
     let cmd = "sketch.offset";
     sk.refresh_offsets()?;
     let sel: Vec<usize> = ids.iter().map(|i| sk.curve_index(i).ok_or_else(|| bad(cmd, format!("unknown curve `{i}`")))).collect::<Result<_>>()?;
@@ -3255,7 +3258,7 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
             // arc is alone: a fillet's circle is small, and a point in the middle of the
             // outline is outside it though on the arc's inner side (#18606). A chain of lines
             // and arcs answers for itself ([`chain_side`]); other chains ask the first curve.
-            let chained = if order.len() > 1 { chain_side(sk, &order, closed, q) } else { None };
+            let chained = if side_of_chain && order.len() > 1 { chain_side(sk, &order, closed, q) } else { None };
             let forward = order.iter().find(|x| x.0 == first).is_none_or(|x| x.1);
             let left = chained.or_else(|| match sk.curves.get(first).map(|c| c.kind.clone()) {
                 Some(CurveKind::Line { a, b }) => {
@@ -3449,7 +3452,7 @@ fn offset_ladder(
             // One side at a time from here: the side this rung follows is the whole of its
             // direction, so `side`, `symmetric` and `distance2` had their say in the first rung.
             let beyond = offset_beyond(sk, curves);
-            let step = OffsetOptions { side: beyond, chain: false, distance: *distance, symmetric: false, distance2: None };
+            let step = OffsetOptions { side: beyond, side_of_chain: false, chain: false, distance: *distance, symmetric: false, distance2: None };
             // Which instance ran out of room is the whole of the answer, so the refusal names it
             // in front of the reason, rather than wrapping one "invalid parameters" in another.
             let (made, _) = offset_rung(sk, cmd, curves, eligible, step, std::slice::from_ref(name)).map_err(|error| {
@@ -3540,7 +3543,7 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         let mut pending = ids.clone();
         let mut sides = Vec::new();
         while !pending.is_empty() {
-            let options = OffsetOptions { side, chain: use_chain, distance: d0, symmetric, distance2 };
+            let options = OffsetOptions { side, side_of_chain: true, chain: use_chain, distance: d0, symmetric, distance2 };
             let (group, sources) = offset_ladder(sk, cmd, &pending, &eligible, options, instances, &made)?;
             let before = pending.len();
             pending.retain(|id| !sources.contains(id));
