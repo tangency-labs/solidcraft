@@ -24,6 +24,8 @@
 //! - **Hover**: a view's boundary shows only while the pointer is near its edge, so the sheet stays
 //!   clean (D17); any other object shows its box while the pointer is over it.
 
+mod view_tools;
+
 use std::time::Duration;
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, pos2, vec2};
@@ -180,6 +182,7 @@ pub struct Page {
     sheet: Option<u64>,
     drawing: Option<(u64, u64)>,
     marks: Option<Marks>,
+    view_tools: view_tools::State,
     /// What the last frame showed, for `ui.inspect`.
     shown: Option<Value>,
 }
@@ -187,7 +190,17 @@ pub struct Page {
 impl Default for Page {
     fn default() -> Self {
         let cam = Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, fov: 0.0, distance: 1000.0, ..Camera::default() };
-        Page { cam, scale: true_size(1.0, 1.0), fitted: None, fitted_on: None, sheet: None, drawing: None, marks: None, shown: None }
+        Page {
+            cam,
+            scale: true_size(1.0, 1.0),
+            fitted: None,
+            fitted_on: None,
+            sheet: None,
+            drawing: None,
+            marks: None,
+            view_tools: Default::default(),
+            shown: None,
+        }
     }
 }
 
@@ -213,6 +226,7 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
         page.fitted = None;
         page.fitted_on = None;
         page.marks = None;
+        page.view_tools = Default::default();
         page.shown = None;
     }
 }
@@ -220,6 +234,11 @@ pub(crate) fn select_sheet(app: &mut SolveApp, sheet: u64) {
 /// Fit Sheet: the sheet is framed again on the next frame.
 pub fn fit(app: &mut SolveApp) {
     app.drawing_workspace.page.fitted = None;
+}
+
+/// Clear the selected view or cancel its drag.
+pub(crate) fn clear_view_selection(app: &mut SolveApp) -> bool {
+    view_tools::clear(app)
 }
 
 /// The sheet at true size, about the canvas's centre.
@@ -270,7 +289,7 @@ fn with_sheet_camera(app: &mut SolveApp, navigate: impl FnOnce(&mut SolveApp)) {
 
 /// Where paper millimetres land on the canvas, and back.
 #[derive(Clone, Copy, Debug)]
-struct OnScreen {
+pub(crate) struct OnScreen {
     centre: Pos2,
     target: Vec2,
     scale: f64,
@@ -282,7 +301,7 @@ impl OnScreen {
         OnScreen { centre: canvas.center(), target: Vec2::new(cam.target.x, cam.target.y), scale }
     }
 
-    fn screen(self, p: Vec2) -> Pos2 {
+    pub(crate) fn screen(self, p: Vec2) -> Pos2 {
         let x = f64::from(self.centre.x) + (p.x - self.target.x) * self.scale;
         let y = f64::from(self.centre.y) - (p.y - self.target.y) * self.scale;
         pos2(x as f32, y as f32)
@@ -296,6 +315,12 @@ impl OnScreen {
 
     fn rect(&self, b: &Aabb2) -> Rect {
         Rect::from_two_pos(self.screen(b.min), self.screen(b.max))
+    }
+
+    pub(crate) fn paint_preview(self, painter: &egui::Painter, marks: &Marks, position: Vec2, ink: Color32) {
+        let shifted = Self { centre: self.screen(position), target: Vec2::ZERO, scale: self.scale };
+        let clip = painter.clip_rect();
+        marks.paint(painter, &shifted, shifted.visible(clip), ink, painter.ctx().pixels_per_point());
     }
 
     fn visible(&self, canvas: Rect) -> Aabb2 {
@@ -354,6 +379,9 @@ fn scene_for_frame(app: &mut SolveApp, sheet: u64) -> solidcraft_engine::Result<
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     app.drawing_workspace.page.shown = None;
     let Ok(drawing) = app.session.drawing(drawing_scene::CMD).cloned() else {
+        if crate::drawing_workspace::placing_view(app) {
+            crate::drawing_workspace::close_panel(app);
+        }
         app.drawing_workspace.page = Page::default();
         return false;
     };
@@ -400,9 +428,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let framed_as = (app.drawing_workspace.page.cam.target, app.drawing_workspace.page.scale);
     let page = &mut app.drawing_workspace.page;
     page.cam.distance = distance_for(page.scale, canvas.height());
-    with_sheet_camera(app, |app| {
-        crate::navigation::handle(app, ui, canvas, &response, crate::navigation::NavCaps { orbit: false, pick: false });
-    });
+    let before_navigation = OnScreen::of(&page.cam, canvas);
+    if !view_tools::owns_drag(app, &response, before_navigation, &view.objects) {
+        with_sheet_camera(app, |app| {
+            crate::navigation::handle(app, ui, canvas, &response, crate::navigation::NavCaps { orbit: false, pick: false });
+        });
+    }
     let page = &mut app.drawing_workspace.page;
     let scale = OnScreen::of(&page.cam, canvas).scale;
     page.scale = if scale.is_finite() && scale > 0.0 { scale.clamp(base * ZOOM.start(), base * ZOOM.end()) } else { base };
@@ -431,7 +462,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     }
     crate::scenario::publish_rect("sheet:paper", sheet_rect);
     let hover = response.hover_pos().filter(|p| !crate::shell::covered(app, *p)).map(|p| at.paper(p));
-    let hit = hover.and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
+    let on_paper = hover.filter(|p| (0.0..=size.x).contains(&p.x) && (0.0..=size.y).contains(&p.y));
+    let placement_painter = painter.with_clip_rect(sheet_rect.intersect(painter.clip_rect()));
+    let placing = crate::drawing_workspace::placement::on_sheet(app, &placement_painter, at, &drawing, sheet, on_paper, response.clicked());
+    view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
+        .show(app, ui, placing);
+    let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
     if response.double_clicked()
         && let Some(hit) = hit
     {

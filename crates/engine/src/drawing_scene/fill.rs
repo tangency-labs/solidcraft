@@ -6,7 +6,7 @@ use solidcore_ops::hatch::{Mark, generate};
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_doc::drawing::{Drawing, FillPaint, ResolvedSketchFill};
 use solidcraft_doc::ids;
-use solidcraft_geom::paper::{Grid, GridItem, Group, Item, MAX_RECORDS, ObjectKind, Piece, Scene};
+use solidcraft_geom::paper::{GridItem, Group, Item, MAX_RECORDS, ObjectKind, Piece, Scene};
 
 use crate::Result;
 
@@ -16,10 +16,10 @@ fn dot_item(at: Vec2, width: f64) -> std::result::Result<Item, String> {
     let item = Item::Fill { region };
     let scene = Scene::new(Vec2::new(1.0, 1.0), vec![Group { object: 1, kind: ObjectKind::Fill, items: vec![item.clone()] }]);
     let prepared = scene.prepare().map_err(|error| format!("dot disk: {error}"))?;
-    // SVG/PNG share nanometres; the existing P1 PDF writer uses 10 nm. Refuse
-    // precision loss here while the item is still known to be a hatch dot.
-    let pdf_grid = Grid::new(1e5).ok_or_else(|| "dot disk: invalid PDF precision grid".to_string())?;
-    for grid in [Grid::NANOMETRE, pdf_grid] {
+    // Every paper writer's grid, as io lists them. Refuse precision loss here
+    // while the item is still known to be a hatch dot.
+    let grids = solidcraft_io::paper::writer_grids().map_err(|error| format!("dot disk: {error}"))?;
+    for grid in grids {
         let on = prepared.on_grid(grid).map_err(|error| format!("dot disk on {} steps/mm: {error}", grid.per_mm()))?;
         let survives = on.report.pieces_merged == 0
             && on.groups.first().is_some_and(|group| match group.items.as_slice() {

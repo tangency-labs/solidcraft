@@ -12,7 +12,7 @@
 //! the drawing's projection ([`TitleBlockLayout::paper`]), with its labels and values set on them
 //! ([`title_block_text`]). Within a band, groups paint in the order they join: views by id, their
 //! dimensions, notes and balloons by view and id. A shaded view's group holds its pictures under its lines;
-//! nothing here draws their pixels ([`crate::drawing_picture`]).
+//! [`build`] draws no pixels: each writer asks for them ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
 //! then moved to its centre, so the same lines on the same centre are the same bytes however they
@@ -37,6 +37,12 @@
 //! them, and read again by the same rules, and also after any change to the document, as its text
 //! reads the drawing's and the design's fields. A note or a revision tag on a sheet reads no model: it
 //! is set with the sheet's title block ([`sheet_texts`]).
+//! The provider also draws each shaded view's pictures for the page, once its lines and dimensions
+//! are up to date: [`step`] draws one band of one picture at a time, on the grid the sheet's dpi
+//! gives it, and keeps it in the view's entry, centred on the view as its lines are. So a move draws
+//! nothing again. A picture is current while its view's drawing and the bodies' geometry and
+//! appearance are as they were (`Looks`). Otherwise [`extract`] hands the last one on, marked stale,
+//! until the new one is done: never a half-drawn one ([`SheetView::pictures`]).
 //!
 //! A balloon (#3874) rides the same path as one more kind: read with its view, kept and read again
 //! by the same rules, and also after any change to the document, as its number reads a parts list and
@@ -85,11 +91,16 @@ use solidcraft_geom::hlr::Source;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::text::{Font, TextRun, font_in};
 use solidcraft_geom::paper::{DrawnFor, Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
+use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid, PixelGridError};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, ArcMap};
+use solidcraft_render::job::MAX_PICTURE_PIXEL_TESTS;
+use solidcraft_render::transmission::Transmission;
+use solidcraft_render::{FaceAppearance, ProductScene};
 use solidcraft_sketch::PaperFonts;
+use solidcraft_viewport::surface::OpaqueSurface;
 
-use crate::drawing_picture::{picture_items, view_parts};
+use crate::drawing_picture::{PictureRows, over_budget, picture_items, view_parts, view_pictures};
 use crate::drawing_table_paper::SheetTables;
 use crate::drawing_view::{
     CHORD_MM, Choice, LineRequest, MIN_MODEL_CHORD_MM, PreparedBodies, Shown, ShownSet, Stats, Styles, Unmeasured, ViewSessions, copy_for,
@@ -123,6 +134,11 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Numbers every view asked of [`begin`], in every session, so a result is only ever taken by the
 /// cache that asked for it: not by the one a drawing gets when it is closed and opened again.
 static REQUEST: AtomicU64 = AtomicU64::new(0);
+
+/// The most pixels the page draws one picture with: 64 MB of rows. A finer one is drawn at the
+/// sheet's dpi divided by the least whole number that keeps it within this, so it still lies on its
+/// lines.
+const WINDOW_PICTURE_PIXELS: u64 = 16 << 20;
 
 /// What became of one view of a sheet scene.
 #[derive(Clone, Debug, PartialEq)]
@@ -169,6 +185,23 @@ pub struct ViewState {
     pub why: Option<String>,
     /// Its label, when it draws one ([`Drawing::label_text`]).
     pub label: Option<LabelState>,
+    /// A section view's hatching, per body it hatches ([`crate::drawing_view::hatches`]).
+    pub hatches: Vec<HatchState>,
+}
+
+/// One body's hatching in a section view (#13046).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HatchState {
+    /// The body's name.
+    pub body: String,
+    /// Its lines' angle on paper, in radians.
+    pub angle: f64,
+    /// Its lines' spacing on paper, in millimetres.
+    pub spacing_mm: f64,
+    /// Painted solid: too thin to hatch.
+    pub filled: bool,
+    /// How many hatch lines it drew.
+    pub strokes: usize,
 }
 
 /// A view's label in a sheet scene (#13044).
@@ -350,8 +383,10 @@ pub struct SheetScene {
     pub tables: Vec<TableState>,
     /// Each revision tag on the sheet, in the drawing's order.
     pub tags: Vec<TagState>,
-    /// The views, dimensions, notes and balloons a deferred drawing shows as they last were ([`as_shown`]).
-    pub out_of_date: Vec<u64>,
+    /// The views, dimensions, notes, balloons, sketches and fills a deferred drawing shows as they last
+    /// were ([`as_shown`]), each with its kind as the scene knew it, so no reader works the kind out again
+    /// from the id.
+    pub out_of_date: Vec<(u64, ObjectKind)>,
     /// What each view whose lines are in the scene drew them from: its world state and its bodies.
     drawn: Vec<(Arc<ModelState>, Arc<Owners>)>,
 }
@@ -410,6 +445,30 @@ pub struct SheetView {
     pub waiting_for_fonts: bool,
     /// Centre annotations omitted and why, as last shown.
     pub annotation_failures: Vec<AnnotationFailure>,
+    /// The pixels of each picture in `scene` drawn so far ([`SheetPicture`]), by view and bottom first.
+    /// Made again for each answer, so a picture done shows without the scene changing.
+    pub pictures: Arc<[SheetPicture]>,
+    /// A picture is out of date: [`step`] is drawing it, so the page keeps ticking.
+    pub drawing_pictures: bool,
+}
+
+/// The pixels of one picture of a sheet's scene, as the page last drew them ([`step`]). The page
+/// finds it by the `source` of an [`Item::Picture`] and draws `rows` over `grid`'s rectangle at the
+/// item's opacity. A new picture is new `rows`, so the page can key its texture by their address.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SheetPicture {
+    pub source: u64,
+    pub view: u64,
+    /// Where on the sheet its pixels lie: its rectangle at the sheet's dpi, or coarser for a large one.
+    pub grid: PixelGrid,
+    /// Its pixels, `grid.width` by `grid.height`: straight alpha sRGB RGBA, top row first. None
+    /// before it is first drawn, or when it can't be drawn (`why`).
+    pub rows: Option<Arc<[u8]>>,
+    /// The rows are its last picture, from before its view or its bodies changed: a new one is
+    /// being drawn.
+    pub stale: bool,
+    /// Why it can't be drawn.
+    pub why: Option<String>,
 }
 
 /// What is under a point of a sheet ([`hit`]).
@@ -508,6 +567,15 @@ pub fn line_at(s: &mut Session, sheet: u64, point_mm: Vec2, band_mm: f64) -> Res
 pub fn sheet_id(drawing: &Drawing, named: &str, cmd: &str) -> Result<u64> {
     let at = drawing.sheet_index(named).map_err(|e| bad(cmd, e.to_string()))?;
     drawing.sheets.get(at).map(|sheet| sheet.id).ok_or_else(|| bad(cmd, format!("no sheet `{named}`")))
+}
+
+/// The last drawn boundary relative to the view centre, when available for a thumbnail.
+pub fn cached_view_boundary(s: &Session, drawing: u64, view: u64) -> Option<Aabb2> {
+    let cache = &s.drawing_scenes;
+    if cache.drawing != Some(drawing) {
+        return None;
+    }
+    cache.views.get(&view)?.drawn.boundary
 }
 
 /// Sheet `sheet` of `drawing`, one of `s`'s design's drawings, drawn at once: its border, then each
@@ -609,11 +677,14 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
     let shown = extract(s, sheet)?;
     // A held view's dimensions, notes and balloons are out of date with it: listed after the views,
     // never read again here against its old lines. `stale_dimensions`, `stale_notes` and
-    // `stale_balloons` hold those of the views up to date.
-    let up_to_date = shown.stale_dimensions.into_iter().chain(shown.stale_notes).chain(shown.stale_balloons);
+    // `stale_balloons` hold those of the views up to date, each list one kind, as do the sheet's
+    // `stale_sketches` and `stale_fills`.
+    let of = |listed: Vec<u64>, kind: ObjectKind| listed.into_iter().map(move |id| (id, kind));
+    let notes_and_balloons = of(shown.stale_notes, ObjectKind::Note).chain(of(shown.stale_balloons, ObjectKind::Balloon));
+    let up_to_date = of(shown.stale_dimensions, ObjectKind::Dimension).chain(notes_and_balloons);
     let annotations = out_of_date_annotations(d, &shown.stale, up_to_date);
-    let out_of_date =
-        shown.stale.iter().copied().chain(annotations).chain(shown.stale_sketches.iter().copied()).chain(shown.stale_fills.iter().copied()).collect();
+    let on_the_sheet = of(shown.stale_sketches, ObjectKind::Sketch).chain(of(shown.stale_fills, ObjectKind::Fill));
+    let out_of_date = shown.stale.iter().map(|&view| (view, ObjectKind::View)).chain(annotations).chain(on_the_sheet).collect();
     let (scene, objects) = (Arc::unwrap_or_clone(shown.scene), shown.objects.to_vec());
     // Each view in the scene as it was last drawn, from the world state it was drawn from.
     let entries = &s.drawing_scenes.views;
@@ -738,6 +809,8 @@ struct Drawn {
     owners: Option<Arc<Owners>>,
     /// What it says beside its lines ([`ViewState::why`]).
     why: Option<String>,
+    /// A section view's hatching ([`ViewState::hatches`]).
+    hatches: Vec<HatchState>,
 }
 
 /// What drew each item of a view's group: for a stroke, the body (its index among `bodies`) and what
@@ -870,7 +943,7 @@ fn draw(
         (Some(state), Some(uncut)) => Some(format!("{state}; {uncut}")),
         (state, uncut) => state.or(uncut),
     };
-    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone() };
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone(), hatches: Vec::new() };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
     let not_drawable = not_drawable.or_else(|| crate::drawing_view::not_cut_yet(view));
@@ -898,24 +971,70 @@ fn draw(
     let lines = frame.boundary(&around).map_err(|e| bad(CMD, e.to_string())).and_then(|rect| {
         let mut lines = crate::drawing_view::lines(s, &set, &frame, &request, prepared, CMD)?;
         styles.leave_shaded_to_pictures(&mut lines);
-        Ok((lines, rect))
+        let hatched = match &view.cut {
+            Some(cut) => crate::drawing_view::hatches(&set, cut, &frame, view.line_group.value),
+            None => crate::drawing_view::Hatching::default(),
+        };
+        Ok((lines, rect, hatched))
     });
     match lines {
-        Ok((lines, rect)) => {
+        Ok((lines, rect, hatched)) => {
             let (mut group, drew) = paper_lines(&lines, id, view.line_group.value);
-            let pictures = picture_items(id, &view_parts(&set, styles), rect);
-            // The pictures go under the strokes, so the owners start with one empty entry for each.
+            // The pictures, then the hatching, go under the strokes, so the owners start with one empty
+            // entry for each.
+            let mut under = picture_items(id, &view_parts(&set, styles), rect);
+            under.extend(hatch_items(&hatched.bodies, view.line_group.value));
             let owner = |at: usize| lines.lines.get(at).map(|line| (line.shown, line.source));
-            let items = std::iter::repeat_n(None, pictures.len()).chain(drew.into_iter().map(|at| at.and_then(owner))).collect();
-            group.items.splice(0..0, pictures);
+            let items = std::iter::repeat_n(None, under.len()).chain(drew.into_iter().map(|at| at.and_then(owner))).collect();
+            group.items.splice(0..0, under);
+            // A body the hatcher refused is drawn unhatched, and the view says so.
+            let refused = hatched.refused.iter().map(|(at, why)| {
+                let name = set.bodies.get(*at).map_or("a body", |b| b.body.as_str());
+                format!("{name} isn't hatched: {why}")
+            });
+            // A body hatched in doubt, too.
+            let doubted = hatched.doubted.iter().map(|(at, why)| {
+                let name = set.bodies.get(*at).map_or("a body", |b| b.body.as_str());
+                format!("{name}: {why}")
+            });
+            let says = why.clone().into_iter().chain(refused).chain(doubted).reduce(|a, b| format!("{a}; {b}"));
+            let hatches = hatched
+                .bodies
+                .iter()
+                .map(|h| HatchState {
+                    body: set.bodies.get(h.shown).map(|b| b.body.clone()).unwrap_or_default(),
+                    angle: h.angle,
+                    spacing_mm: h.spacing_mm,
+                    filled: h.filled,
+                    strokes: h.strokes.len(),
+                })
+                .collect();
             if group.records() > MAX_RECORDS {
                 return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
             }
             let owners = Some(Arc::new(Owners { bodies: set.into_owned().bodies, items }));
-            Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: Some(lines.stats), boundary, frame: Some(frame), owners, why }
+            Drawn {
+                group: Some(Arc::new(group)),
+                status: Status::Drawn,
+                stats: Some(lines.stats),
+                boundary,
+                frame: Some(frame),
+                owners,
+                why: says,
+                hatches,
+            }
         }
         Err(e) => none(Status::Failed(reason(e))),
     }
+}
+
+/// A section view's hatching as paper items: each filled body's cut faces painted solid, then each
+/// other body's hatch lines, thin, each its own stroke.
+fn hatch_items(hatched: &[crate::drawing_view::BodyHatch], group: LineGroup) -> Vec<Item> {
+    let width_mm = LineKind::Thin.width_mm(group);
+    let fills = hatched.iter().filter(|h| h.filled).flat_map(|h| h.regions.iter().cloned().map(|region| Item::Fill { region }));
+    let strokes = hatched.iter().flat_map(|h| &h.strokes).map(|seg| Item::Stroke { path: vec![*seg], closed: false, width_mm, pattern: None });
+    fills.chain(strokes).collect()
 }
 
 /// Flat pattern view `id`, drawing as `view` does, of its body's flat `of` ([`crate::drawing_view::flat`]):
@@ -924,7 +1043,7 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
     let flat = crate::drawing_view::flat(s, of, CMD);
     let placing = crate::drawing_view::flat_measured(&flat);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: None };
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: None, hatches: Vec::new() };
     if let Some(why) = crate::drawing_view::not_drawable_flat(view) {
         return none(Status::Failed(why.into()));
     }
@@ -940,7 +1059,16 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
     if group.records() > MAX_RECORDS {
         return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
     }
-    Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: None, boundary, frame: Some(frame), owners: None, why: None }
+    Drawn {
+        group: Some(Arc::new(group)),
+        status: Status::Drawn,
+        stats: None,
+        boundary,
+        frame: Some(frame),
+        owners: None,
+        why: None,
+        hatches: Vec::new(),
+    }
 }
 
 /// Why a sheet leaves out a dimension or a note whose view it doesn't draw.
@@ -1042,12 +1170,12 @@ fn draw_dimensions(
     lines
 }
 
-/// The dimensions, notes and balloons of `d` a sheet shows as they last were, by id: those of each
-/// view out of date (`stale_views`), as their view is, then `up_to_date`, those of the views up to
-/// date that were read from another record, model, drawing of their view, lettering or revision
-/// ([`Cache::stale_dimensions`]).
-fn out_of_date_annotations(d: &Drawing, stale_views: &[u64], up_to_date: impl IntoIterator<Item = u64>) -> Vec<u64> {
-    let held = dimensions_on(d, stale_views.iter().copied()).into_iter().map(|record| record.id());
+/// The dimensions, notes and balloons of `d` a sheet shows as they last were, by id with their kind:
+/// those of each view out of date (`stale_views`), as their view is, then `up_to_date`, those of the
+/// views up to date that were read from another record, model, drawing of their view, lettering or
+/// revision ([`Cache::stale_dimensions`]).
+fn out_of_date_annotations(d: &Drawing, stale_views: &[u64], up_to_date: impl IntoIterator<Item = (u64, ObjectKind)>) -> Vec<(u64, ObjectKind)> {
+    let held = dimensions_on(d, stale_views.iter().copied()).into_iter().map(|record| (record.id(), record.kind()));
     held.chain(up_to_date).collect()
 }
 
@@ -1640,7 +1768,7 @@ fn assemble<D: Borrow<Drawn>>(
             .objects
             .extend(SheetObject::on_paper(view, ObjectKind::View, lines.unwrap_or(Aabb2::EMPTY), boundary_mm).map(banded(DrawnFor::View)));
         let label = labels.iter().find(|label| label.view == view).map(|label| assembly.add_label(label, centre, drawn.boundary));
-        assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone(), label });
+        assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone(), label, hatches: drawn.hatches.clone() });
     }
     Ok(assembly)
 }
@@ -1792,6 +1920,10 @@ pub struct Cache {
     kept: KeptLines,
     /// The latest view asked of [`begin`]: the one result [`finish`] may take.
     requested: Option<u64>,
+    /// The bodies pictures are drawn from, for the last world state and design they were read for.
+    bodies: Option<Bodies>,
+    /// The picture being drawn.
+    picturing: Option<Picturing>,
     /// Views drawn, for tests: a move draws none.
     #[cfg(test)]
     projections: usize,
@@ -1801,6 +1933,9 @@ pub struct Cache {
     fill_solves: usize,
     #[cfg(test)]
     fill_expansions: usize,
+    /// Picture bands drawn, for tests: a step draws as many as its budget allows.
+    #[cfg(test)]
+    bands: usize,
 }
 
 #[derive(PartialEq)]
@@ -1904,6 +2039,100 @@ struct Entry {
     /// Centre annotations last shown with these lines, in view-local paper coordinates.
     marks: Vec<Mark>,
     serial: u64,
+    /// Its pictures' pixels, by source, carried over from its last drawing until drawn again.
+    pixels: BTreeMap<u64, Pixels>,
+}
+
+/// One picture's pixels as [`step`] drew them, centred on its view as its lines are, or why it
+/// couldn't be drawn; and what they were drawn from.
+#[derive(Clone, Debug)]
+struct Pixels {
+    grid: PixelGrid,
+    rows: std::result::Result<Arc<[u8]>, String>,
+    from: DrawnFrom,
+    /// The pixel tests it cost: its view's pictures together stay within the renderer's limit.
+    tests: u64,
+}
+
+impl Pixels {
+    /// Drawn from what its picture would be drawn from now.
+    fn current(&self, now: &DrawnFrom) -> bool {
+        self.from.same(now)
+    }
+}
+
+/// What a picture's pixels are drawn from: its view's drawing (by serial, which holds the picture's
+/// rectangle), the bodies' looks, and the dpi of the sheet the page shows, which sets its grid. The
+/// one rule for whether pixels, a picture being drawn or one asked for are still the ones wanted.
+#[derive(Clone, Debug)]
+struct DrawnFrom {
+    serial: u64,
+    looks: Arc<Looks>,
+    /// None while no sheet is open: no grid, so nothing is drawn.
+    dpi: Option<f64>,
+}
+
+impl DrawnFrom {
+    /// For the pictures of the view `entry` draws, of bodies that look as `looks` says, at `dpi`
+    /// ([`dpi_now`]).
+    fn of(entry: &Entry, looks: &Arc<Looks>, dpi: Option<f64>) -> DrawnFrom {
+        DrawnFrom { serial: entry.serial, looks: looks.clone(), dpi }
+    }
+
+    fn same(&self, other: &DrawnFrom) -> bool {
+        self.serial == other.serial && Arc::ptr_eq(&self.looks, &other.looks) && self.dpi == other.dpi
+    }
+}
+
+/// The dpi of the sheet the page shows ([`extract`]'s last), of the drawing open; None with none.
+fn dpi_now(s: &Session) -> Option<f64> {
+    let (Ok(d), Some(sheet)) = (s.drawing(CMD), s.drawing_scenes.sheet) else { return None };
+    sheet_of(d, sheet).ok().map(|sheet| sheet.dpi)
+}
+
+/// How the bodies of a world state stand and look in a picture: each body's geometry key and its
+/// colours, in the world state's order. Pictures drawn from equal looks are the same pixels. None,
+/// equal to no other, when a body's geometry has no key or the bodies couldn't be read.
+#[derive(Debug)]
+struct Looks(Option<Vec<(u64, Look)>>);
+
+/// A body's colours in a picture, as [`ProductScene`] gives them.
+type Look = ([u8; 3], f64, Option<OpaqueSurface>, Option<Transmission>, Vec<FaceAppearance>);
+
+impl PartialEq for Looks {
+    fn eq(&self, other: &Looks) -> bool {
+        matches!((&self.0, &other.0), (Some(a), Some(b)) if a == b)
+    }
+}
+
+impl Looks {
+    /// `scene`'s, the bodies of world state `state` in its order.
+    fn of(state: &ModelState, scene: Option<&ProductScene>) -> Looks {
+        let Some(scene) = scene.filter(|scene| scene.meshes.len() == state.bodies.len()) else { return Looks(None) };
+        let look = |(body, mesh): (&solidcraft_doc::ModelBody, &solidcraft_render::ProductMesh)| {
+            Some((body.geometry_key()?, (mesh.color, mesh.opacity, mesh.surface, mesh.transmission, mesh.faces.clone())))
+        };
+        Looks(state.bodies.iter().zip(&scene.meshes).map(look).collect())
+    }
+}
+
+/// Every body the design places as its pictures draw them ([`crate::product_scene::extract_where`]),
+/// and how they look, read once for the world state and design they are for.
+struct Bodies {
+    state: Arc<ModelState>,
+    doc: Arc<Document>,
+    scene: std::result::Result<Arc<ProductScene>, String>,
+    looks: Arc<Looks>,
+}
+
+/// The picture [`step`] is drawing, a band at a time, and what it is drawn from.
+struct Picturing {
+    view: u64,
+    source: u64,
+    from: DrawnFrom,
+    grid: PixelGrid,
+    tests: u64,
+    rows: PictureRows,
 }
 
 impl Entry {
@@ -2018,7 +2247,15 @@ impl Cache {
         let kept = self.kept.take(drawing);
         for (id, kept) in kept.views {
             self.serial += 1;
-            let entry = Entry { state: gone.clone(), shows: kept.shows, view: kept.view, drawn: kept.drawn, marks: kept.marks, serial: self.serial };
+            let entry = Entry {
+                state: gone.clone(),
+                shows: kept.shows,
+                view: kept.view,
+                drawn: kept.drawn,
+                serial: self.serial,
+                marks: kept.marks,
+                pixels: kept.pixels,
+            };
             self.views.insert(id, entry);
         }
         // From the same gone state, so read again: its `view_serial`, from before the close, never
@@ -2255,7 +2492,9 @@ pub fn standing(s: &mut Session, d: &Drawing) -> Standing {
     let on: Vec<(u64, ResolvedView, Vec2)> =
         d.views.iter().filter_map(|v| Some((v.id, d.resolve_view(v.id).ok()?, d.view_centre(v.id).ok()?))).collect();
     let stale_dimensions = state.as_ref().map_or_else(Vec::new, |state| cache.stale_dimensions(d, &on, state, &lettering, revision));
-    let annotations = out_of_date_annotations(d, &stale, stale_dimensions.iter().map(Annotation::id));
+    // By id alone: its readers ask after a dimension, note or balloon by its id.
+    let up_to_date = stale_dimensions.iter().map(|record| (record.id(), record.kind()));
+    let annotations = out_of_date_annotations(d, &stale, up_to_date).into_iter().map(|(id, _)| id).collect();
     Standing { views, annotations }
 }
 
@@ -2394,6 +2633,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
                 )
             }
         };
+    let (pictures, drawing_pictures) = sheet_pictures(s, &d, &on, &state);
     let answer = SheetView {
         scene,
         generation,
@@ -2414,6 +2654,8 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
         stale_sketches,
         fills,
         stale_fills,
+        pictures,
+        drawing_pictures,
     };
     let cache = &mut s.drawing_scenes;
     // Views, dimensions and notes no longer in the drawing are forgotten: each holds a world state.
@@ -2517,31 +2759,42 @@ fn provider_marks(
     groups.sort_by_key(|group| (matches!(group.kind, ObjectKind::CentreLine), group.object));
     (groups, updates)
 }
+/// How long one [`step`] draws a picture's bands: about half a frame at 60 Hz, so the window keeps
+/// drawing while a picture is. A step draws at least one band, and stops after the band that ends
+/// past it.
+const PICTURE_STEP: std::time::Duration = std::time::Duration::from_millis(8);
 
 /// Draws the first view out of date on the sheet last extracted or, with none, reads the dimensions
-/// out of date of one view, and says whether more are waiting: a short piece of work for the UI's
-/// tick, one view's projection or one read of a view's dimensions. Text that waits for its font is
-/// no work for it: [`extract`] sets it, and its answer says so ([`SheetView::waiting_for_fonts`]).
+/// out of date of one view or, with none, draws bands of a picture out of date for about
+/// [`PICTURE_STEP`], and says whether more are waiting: a short piece of work for the UI's tick, one
+/// view's projection, one read of a view's dimensions or a few bands. Text that waits for its font
+/// is no work for it: [`extract`] sets it, and its answer says so ([`SheetView::waiting_for_fonts`]).
 pub fn step(s: &mut Session) -> bool {
+    let started = web_time::Instant::now();
+    step_within(s, &mut || started.elapsed() >= PICTURE_STEP)
+}
+
+/// [`step`], whose picture bands stop once `spent` says so: it is asked after each band.
+fn step_within(s: &mut Session, spent: &mut dyn FnMut() -> bool) -> bool {
     let Some((d, on, state)) = drawable(s) else { return false };
     let lettering = Lettering::of(s, &d);
     let waiting: Vec<(u64, ResolvedView)> =
         on.iter().filter(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).map(|(id, view, _)| (*id, view.clone())).collect();
     let Some((id, view)) = waiting.first().cloned() else {
-        if !s.drawing_scenes.stale_dimensions(&d, &on, &state, &lettering, s.revision).is_empty() {
-            return step_dimensions(s, &d, &on, &state, lettering) || fills_waiting(s, &d) || sketches_waiting(s, &d);
-        }
-        if fills_waiting(s, &d) {
-            return step_fill(s, &d);
-        }
-        return step_sketch(s, &d);
+        return match step_dimensions(s, &d, &on, &state, lettering) {
+            Some(more) => more || fills_waiting(s, &d) || sketches_waiting(s, &d) || waiting_picture(s, &on, &state).is_some(),
+            None if fills_waiting(s, &d) => step_fill(s, &d) || waiting_picture(s, &on, &state).is_some(),
+            None if sketches_waiting(s, &d) => step_sketch(s, &d) || waiting_picture(s, &on, &state).is_some(),
+            None => step_pictures(s, &on, &state, spent),
+        };
     };
     let done = job_for(s, &d, id, view, state.clone()).run();
-    finish(s, done);
+    finish_view(s, done);
     waiting.len() > 1
         || !s.drawing_scenes.stale_dimensions(&d, &on, &state, &lettering, s.revision).is_empty()
         || fills_waiting(s, &d)
         || sketches_waiting(s, &d)
+        || waiting_picture(s, &on, &state).is_some()
 }
 
 fn fills_waiting(s: &mut Session, d: &Arc<Drawing>) -> bool {
@@ -2618,9 +2871,36 @@ fn drawable(s: &mut Session) -> Option<(Arc<Drawing>, Vec<(u64, ResolvedView, Ve
 /// A shown set, and the world state it was worked out for.
 type ShownFor = (Arc<ModelState>, std::result::Result<ShownSet, Unmeasured>);
 
-/// One view's lines, worked out beside the window: [`begin`] asks for them, [`Job::run`] works them
-/// out anywhere, and [`finish`] takes them.
-pub struct Job {
+/// Work beside the window, one view's lines or a picture's setup: [`begin`] asks for it,
+/// [`Job::run`] does it anywhere, and [`finish`] takes it.
+pub struct Job(Work);
+
+enum Work {
+    View(ViewJob),
+    Picture(PictureJob),
+}
+
+/// A job's work, for [`finish`].
+pub struct Done(Worked);
+
+enum Worked {
+    // Boxed: a view's lines and a picture's start are about 0.8 and 1.4 KB, and a `Done` moves between threads.
+    View(Box<ViewDone>),
+    Picture(Box<PictureDone>),
+}
+
+impl Job {
+    /// Does the job's work: the one long piece of it, on any thread.
+    pub fn run(self) -> Done {
+        Done(match self.0 {
+            Work::View(job) => Worked::View(Box::new(job.run())),
+            Work::Picture(job) => Worked::Picture(Box::new(job.run())),
+        })
+    }
+}
+
+/// One view's lines, worked out beside the window.
+struct ViewJob {
     /// The session as its view draws the design: as it places its parts, or in another state of it.
     /// For a view of another configuration, the design its copy is made from.
     copy: Session,
@@ -2649,9 +2929,9 @@ struct Ticket {
     lettering: Lettering,
 }
 
-/// A job's work, for [`finish`]: the view's lines and what they show, its dimensions and notes through
-/// its new frame, and the shown set they were drawn from.
-pub struct Done {
+/// A view job's work: the view's lines and what they show, its dimensions and notes through its new
+/// frame, and the shown set they were drawn from.
+struct ViewDone {
     ticket: Ticket,
     drawn: Drawn,
     shows: Option<Arc<SourceKey>>,
@@ -2663,10 +2943,10 @@ pub struct Done {
     shown: Option<ShownFor>,
 }
 
-impl Job {
+impl ViewJob {
     /// Works the view's lines, dimensions and notes out: the one long piece of work, on any thread.
-    pub fn run(self) -> Done {
-        let Job { copy, refused, later, placed, drawing, ticket, shown } = self;
+    fn run(self) -> ViewDone {
+        let ViewJob { copy, refused, later, placed, drawing, ticket, shown } = self;
         // A view of another configuration: its copy, made here ([`copy_for`]). A panic while it is made
         // fails the view, as `Session::execute` fails a command, and the view is then up to date: its
         // job isn't asked for again until the design changes.
@@ -2713,7 +2993,7 @@ impl Job {
             marks::unframed(&drawing, ticket.view, &drawn.status)
         };
         let shown = placed.then_some((state, shown));
-        Done { ticket, drawn, shows, dimensions, lines, marks, shown }
+        ViewDone { ticket, drawn, shows, dimensions, lines, marks, shown }
     }
 }
 
@@ -2751,18 +3031,27 @@ pub(crate) mod copy_panics {
     }
 }
 
-/// Asks for the first view out of date on the sheet last extracted, to draw beside the window, as
-/// [`step`] would draw it: none when nothing is waiting, or while a deferred drawing holds. One at a
-/// time: asking again replaces the earlier request.
+/// Asks for the work [`step`] would do next that takes long, to do beside the window: the first view
+/// out of date on the sheet last extracted or, once its dimensions are read too, the setup of the
+/// first picture out of date. None when nothing such is waiting (a picture set up draws its bands in
+/// [`step`]), or while a deferred drawing holds. One at a time: asking again replaces the earlier
+/// request.
 pub fn begin(s: &mut Session) -> Option<Job> {
     let (d, on, state) = drawable(s)?;
-    let (id, view, _) = on.into_iter().find(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view))?;
-    Some(job_for(s, &d, id, view, state))
+    if let Some((id, view, _)) = on.iter().find(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).cloned() {
+        return Some(Job(Work::View(job_for(s, &d, id, view, state))));
+    }
+    let lettering = Lettering::of(s, &d);
+    if !s.drawing_scenes.stale_dimensions(&d, &on, &state, &lettering, s.revision).is_empty() {
+        return None;
+    }
+    let waiting = waiting_picture(s, &on, &state)?;
+    picture_job(s, waiting, &state).map(|job| Job(Work::Picture(job)))
 }
 
 /// Asks for view `id` of drawing `d`, resolved as `view`, of the world `state`: the latest request
 /// from now on.
-fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state: Arc<ModelState>) -> Job {
+fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state: Arc<ModelState>) -> ViewJob {
     let request = REQUEST.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     s.drawing_scenes.requested = Some(request);
     let lettering = Lettering::of(s, d);
@@ -2779,15 +3068,23 @@ fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state
         }
     };
     let ticket = Ticket { request, view: id, resolved: view, state, revision: s.revision, lettering };
-    Job { copy, refused, later, placed, drawing: d.clone(), ticket, shown }
+    ViewJob { copy, refused, later, placed, drawing: d.clone(), ticket, shown }
 }
 
 /// Takes a job's work into the cache when it is for its latest request and nothing it was asked from
-/// has changed since: the drawing, the model and the view as it resolves. Otherwise it is dropped and
-/// nothing changes. Says whether it was taken.
+/// has changed since. Otherwise it is dropped and nothing changes. Says whether it was taken.
 pub fn finish(s: &mut Session, done: Done) -> bool {
     forget_closed(s);
-    let Done { ticket, drawn, shows, dimensions, lines, marks, shown } = done;
+    match done.0 {
+        Worked::View(done) => finish_view(s, *done),
+        Worked::Picture(done) => finish_picture(s, *done),
+    }
+}
+
+/// [`finish`] for a view's lines: nothing they were asked from has changed, the drawing, the model
+/// and the view as it resolves.
+fn finish_view(s: &mut Session, done: ViewDone) -> bool {
+    let ViewDone { ticket, drawn, shows, dimensions, lines, marks, shown } = done;
     if s.drawing_scenes.requested != Some(ticket.request) {
         return false;
     }
@@ -2806,7 +3103,9 @@ pub fn finish(s: &mut Session, done: Done) -> bool {
     }
     cache.serial = cache.serial.wrapping_add(1);
     let serial = cache.serial;
-    let entry = Entry { state: ticket.state.clone(), shows, view: ticket.resolved, drawn, marks, serial };
+    // Its last pictures show, stale, until they are drawn again.
+    let pixels = cache.views.remove(&ticket.view).map(|e| e.pixels).unwrap_or_default();
+    let entry = Entry { state: ticket.state.clone(), shows, view: ticket.resolved, drawn, marks, serial, pixels };
     cache.views.insert(ticket.view, entry);
     cache.keep_dimensions(dimensions, lines, &ticket.state, serial, &ticket.lettering, ticket.revision);
     #[cfg(test)]
@@ -2829,15 +3128,15 @@ pub(crate) fn designed(s: &Session) -> Session {
 }
 
 /// Reads the dimensions and notes out of date of the first view that has any, through its frame,
-/// and says whether another view's are waiting.
-fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: Lettering) -> bool {
+/// and says whether another view's are waiting: None when none was.
+fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: Lettering) -> Option<bool> {
     let revision = s.revision;
     let stale = s.drawing_scenes.stale_dimensions(d, on, state, &lettering, revision);
-    let Some(view) = stale.first().map(Annotation::view) else { return false };
+    let view = stale.first().map(Annotation::view)?;
     // Its copy evaluates the design, which only its job does: its job reads them again with its lines.
     if by_their_jobs(s, on).contains(&view) {
         s.drawing_scenes.redraw(view);
-        return true;
+        return Some(true);
     }
     let (these, others): (Vec<_>, Vec<_>) = stale.into_iter().partition(|record| record.view() == view);
     let entry = s.drawing_scenes.views.get(&view);
@@ -2847,7 +3146,7 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     let cache = &mut s.drawing_scenes;
     cache.serial = cache.serial.wrapping_add(1);
     cache.keep_dimensions(these, lines, state, view_serial, &lettering, revision);
-    !others.is_empty()
+    Some(!others.is_empty())
 }
 
 /// The views of `on` whose copy evaluates the design ([`Choice::evaluates`]): the window's frame paths
@@ -2951,6 +3250,258 @@ fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clo
     }
 }
 
+/// The bodies pictures are drawn from now, and their looks, read once for `state` and the design:
+/// as the design places its parts, as the lines are drawn ([`designed`]). Looks equal to the last
+/// ones keep their identity, so a change that leaves them as they were keeps every picture current.
+/// Bodies that can't be read now (the model is mid-gesture) say why and leave the last looks as they
+/// were, so the pictures drawn from them aren't drawn again for it.
+fn bodies(s: &mut Session, state: &Arc<ModelState>) -> (std::result::Result<Arc<ProductScene>, String>, Arc<Looks>) {
+    if let Some(b) = s.drawing_scenes.bodies.as_ref().filter(|b| Arc::ptr_eq(&b.state, state) && Arc::ptr_eq(&b.doc, &s.doc)) {
+        return (b.scene.clone(), b.looks.clone());
+    }
+    let copy = designed(s);
+    let scene = crate::product_scene::extract_where(&copy, |_| true).map_err(|e| e.to_string());
+    if let (Err(why), Some(was)) = (&scene, &s.drawing_scenes.bodies) {
+        return (Err(why.clone()), was.looks.clone());
+    }
+    let looks = copy.world_state().map_or(Looks(None), |placed| Looks::of(&placed, scene.as_ref().ok()));
+    let looks = match &s.drawing_scenes.bodies {
+        Some(was) if *was.looks == looks => was.looks.clone(),
+        _ => Arc::new(looks),
+    };
+    let scene = scene.map(Arc::new);
+    s.drawing_scenes.bodies = Some(Bodies { state: state.clone(), doc: s.doc.clone(), scene: scene.clone(), looks: looks.clone() });
+    (scene, looks)
+}
+
+/// A view's pictures in its group, centred on it, bottom first.
+fn pictures_of(drawn: &Drawn) -> impl Iterator<Item = &Picture> {
+    drawn.group.iter().flat_map(|g| &g.items).filter_map(|item| if let Item::Picture(p) = item { Some(p) } else { None })
+}
+
+/// The first picture of a view of `on`, up to date itself, whose pixels aren't current, and what it
+/// would be drawn from now. The bodies are read only when a view has a picture.
+fn waiting_picture(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>) -> Option<(u64, Picture, DrawnFrom)> {
+    let fresh = |s: &Session| on.iter().filter(|(id, view, _)| s.drawing_scenes.fresh(*id, state, view)).map(|(id, ..)| *id).collect::<Vec<_>>();
+    let shaded: Vec<u64> =
+        fresh(s).into_iter().filter(|id| s.drawing_scenes.views.get(id).is_some_and(|e| pictures_of(&e.drawn).next().is_some())).collect();
+    if shaded.is_empty() {
+        return None;
+    }
+    let (looks, dpi) = (bodies(s, state).1, dpi_now(s));
+    shaded.into_iter().find_map(|id| {
+        let entry = s.drawing_scenes.views.get(&id)?;
+        let now = DrawnFrom::of(entry, &looks, dpi);
+        let mut pictures = pictures_of(&entry.drawn);
+        let picture = pictures.find(|p| !entry.pixels.get(&p.source).is_some_and(|px| px.current(&now)))?;
+        Some((id, *picture, now))
+    })
+}
+
+/// The grid the page draws `picture` on: its own at `dpi`, or at `dpi / k` for the least whole `k`
+/// that keeps it within [`WINDOW_PICTURE_PIXELS`].
+fn window_grid(picture: &Picture, dpi: f64) -> std::result::Result<PixelGrid, String> {
+    let size = picture.rect.size();
+    let at = |dpi: f64| (size.x * dpi / 25.4) * (size.y * dpi / 25.4);
+    // The least k the area allows, then the next few, as each side rounds up to whole pixels.
+    let least = (at(dpi) / WINDOW_PICTURE_PIXELS as f64).sqrt().floor();
+    let least = if least.is_finite() && least >= 1.0 { least.min(1e6) as u32 } else { 1 };
+    for k in least..least.saturating_add(4) {
+        match picture.grid(dpi / f64::from(k)) {
+            Ok(grid) if grid.pixels() <= WINDOW_PICTURE_PIXELS => return Ok(grid),
+            Ok(_) | Err(PixelGridError::TooLarge { .. }) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err(format!("its picture is more than {WINDOW_PICTURE_PIXELS} pixels at any dpi"))
+}
+
+/// The grid the page draws `picture` on at the sheet's `dpi` ([`window_grid`]), or why it has none.
+fn page_grid(picture: &Picture, dpi: Option<f64>) -> std::result::Result<PixelGrid, String> {
+    dpi.ok_or_else(|| "its sheet isn't open".to_string()).and_then(|dpi| window_grid(picture, dpi))
+}
+
+/// The grid of a picture with no pixels: none, at its rectangle's corner.
+fn no_pixels(picture: &Picture) -> PixelGrid {
+    PixelGrid { x0: picture.rect.min.x, y0: picture.rect.min.y, pitch: 1.0, width: 0, height: 0 }
+}
+
+/// Draws bands of the first picture out of date ([`waiting_picture`]) until `spent` says so, and
+/// says whether one is still waiting. Its setup is [`begin`]'s job; with none in hand, it is done
+/// here first, as on the web. A picture in hand for anything else, which would be stale once done,
+/// is dropped; one that can't be drawn keeps why, so it isn't tried again until its view or its
+/// bodies change.
+fn step_pictures(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, spent: &mut dyn FnMut() -> bool) -> bool {
+    let Some(waiting) = waiting_picture(s, on, state) else {
+        s.drawing_scenes.picturing = None;
+        return false;
+    };
+    if let Some(job) = picture_job(s, waiting, state) {
+        finish_picture(s, job.run());
+    }
+    let cache = &mut s.drawing_scenes;
+    let Some(picturing) = cache.picturing.as_mut() else { return waiting_picture(s, on, state).is_some() };
+    let rows = loop {
+        #[cfg(test)]
+        {
+            cache.bands += 1;
+        }
+        match picturing.rows.band() {
+            Ok(None) if !spent() => {}
+            Ok(None) => return true,
+            Ok(Some(rows)) => break Ok(Arc::from(rows)),
+            Err(why) => break Err(why),
+        }
+    };
+    let Some(Picturing { view, source, from, grid, tests, .. }) = cache.picturing.take() else { return false };
+    keep_pixels(s, view, source, Pixels { grid, rows, from, tests });
+    waiting_picture(s, on, state).is_some()
+}
+
+/// A picture's setup, worked out beside the window: the shown set, the parts its view draws and the
+/// rows to draw, from a copy of the session and the bodies read for it.
+struct PictureJob {
+    copy: Session,
+    ticket: PictureTicket,
+    /// Its view as it resolved when drawn.
+    resolved: ResolvedView,
+    /// Its grid on the page, or the grid it has none on and why.
+    grid: std::result::Result<PixelGrid, (PixelGrid, String)>,
+    scene: std::result::Result<Arc<ProductScene>, String>,
+    /// The pixel tests its view's other pictures cost, as they are now.
+    others: u64,
+}
+
+/// What a picture's setup was asked from: its request, its view, what the picture is drawn from,
+/// and the session's world state and revision then.
+struct PictureTicket {
+    request: u64,
+    revision: u64,
+    state: Arc<ModelState>,
+    view: u64,
+    picture: Picture,
+    from: DrawnFrom,
+}
+
+/// A picture's setup done: its grid, its pixel tests and its rows to draw, or its grid and why it
+/// can't be drawn.
+struct PictureDone {
+    ticket: PictureTicket,
+    started: std::result::Result<(PixelGrid, u64, PictureRows), (PixelGrid, String)>,
+}
+
+impl PictureJob {
+    /// Sets the picture up from the frame and the parts its lines were drawn by ([`view_pictures`],
+    /// centred on the view), within its view's pixel-test limit.
+    fn run(self) -> PictureDone {
+        let PictureJob { copy, ticket, resolved, grid, scene, others } = self;
+        let started = grid.and_then(|grid| {
+            let fail = |why: String| (grid, why);
+            let scene = scene.map_err(fail)?;
+            let shown = crate::drawing_view::shown(&copy);
+            let pictures = view_pictures(&shown, ticket.view, &resolved, Vec2::ZERO).map_err(|e| fail(reason(e)))?;
+            let source = ticket.picture.source;
+            let (_, wanted) = pictures.into_iter().find(|(s, _)| *s == source).ok_or_else(|| fail("its view no longer draws it".into()))?;
+            let mut rows = PictureRows::new(&scene, &wanted, &grid, GridWindow { x0: 0, y0: 0, x1: grid.width, y1: grid.height }).map_err(fail)?;
+            let tests = rows.pixel_tests();
+            if others.saturating_add(tests) > MAX_PICTURE_PIXEL_TESTS {
+                return Err(fail(over_budget(MAX_PICTURE_PIXEL_TESTS)));
+            }
+            rows.prepare().map_err(fail)?;
+            Ok((grid, tests, rows))
+        });
+        PictureDone { ticket, started }
+    }
+}
+
+/// Asks for the setup of `waiting` ([`waiting_picture`]) on its grid at the sheet's dpi: the latest
+/// request from now on. None when it is the picture being drawn, or its view isn't drawn.
+fn picture_job(s: &mut Session, waiting: (u64, Picture, DrawnFrom), state: &Arc<ModelState>) -> Option<PictureJob> {
+    let (view, picture, from) = waiting;
+    let entry = s.drawing_scenes.views.get(&view)?;
+    let resolved = entry.view.clone();
+    let others = entry.pixels.iter().filter(|(source, p)| **source != picture.source && p.current(&from)).map(|(_, p)| p.tests).sum();
+    let same = |p: &Picturing| p.view == view && p.source == picture.source && p.from.same(&from);
+    if s.drawing_scenes.picturing.as_ref().is_some_and(same) {
+        return None;
+    }
+    let grid = page_grid(&picture, from.dpi).map_err(|why| (no_pixels(&picture), why));
+    let scene = bodies(s, state).0;
+    let request = REQUEST.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+    s.drawing_scenes.requested = Some(request);
+    let ticket = PictureTicket { request, revision: s.revision, state: state.clone(), view, picture, from };
+    Some(PictureJob { copy: designed(s), ticket, resolved, grid, scene, others })
+}
+
+/// [`finish`] for a picture's setup: nothing it was asked from has changed, the design, the model,
+/// and what the picture is drawn from. Then [`step`] draws its bands, or it keeps why it can't be
+/// drawn.
+fn finish_picture(s: &mut Session, done: PictureDone) -> bool {
+    let PictureDone { ticket, started } = done;
+    if s.drawing_scenes.requested != Some(ticket.request) {
+        return false;
+    }
+    s.drawing_scenes.requested = None;
+    let holds = s.revision == ticket.revision
+        && s.world_state().is_ok_and(|state| Arc::ptr_eq(&state, &ticket.state))
+        && (s.drawing_scenes.views.get(&ticket.view).zip(s.drawing_scenes.bodies.as_ref()))
+            .is_some_and(|(entry, b)| ticket.from.same(&DrawnFrom::of(entry, &b.looks, dpi_now(s))));
+    if !holds {
+        return false;
+    }
+    let PictureTicket { view, picture, from, .. } = ticket;
+    match started {
+        Ok((grid, tests, rows)) => s.drawing_scenes.picturing = Some(Picturing { view, source: picture.source, from, grid, tests, rows }),
+        Err((grid, why)) => {
+            s.drawing_scenes.picturing = None;
+            keep_pixels(s, view, picture.source, Pixels { grid, rows: Err(why), from, tests: 0 });
+        }
+    }
+    true
+}
+
+/// Keeps `pixels` as picture `source` of view `view`, and forgets its pixels of pictures it no
+/// longer draws. The cache's serial moves, so [`extract`] answers again.
+fn keep_pixels(s: &mut Session, view: u64, source: u64, pixels: Pixels) {
+    let cache = &mut s.drawing_scenes;
+    let Some(entry) = cache.views.get_mut(&view) else { return };
+    let drawn: BTreeSet<u64> = pictures_of(&entry.drawn).map(|p| p.source).collect();
+    entry.pixels.retain(|source, _| drawn.contains(source));
+    entry.pixels.insert(source, pixels);
+    cache.serial += 1;
+}
+
+/// Each picture of the views `on` as the page shows it, moved to its view's centre, and whether one
+/// is waiting to be drawn: not while a deferred drawing holds, as nothing is drawn then.
+fn sheet_pictures(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>) -> (Arc<[SheetPicture]>, bool) {
+    if !on.iter().any(|(id, ..)| s.drawing_scenes.views.get(id).is_some_and(|e| pictures_of(&e.drawn).next().is_some())) {
+        return (Arc::from([]), false);
+    }
+    let (looks, dpi) = (bodies(s, state).1, dpi_now(s));
+    let cache = &s.drawing_scenes;
+    let held = cache.holds(d, state);
+    let (mut pictures, mut waiting) = (Vec::new(), false);
+    for (id, view, centre) in on {
+        let Some(entry) = cache.views.get(id) else { continue };
+        let fresh = cache.fresh(*id, state, view);
+        for picture in pictures_of(&entry.drawn) {
+            let pixels = entry.pixels.get(&picture.source);
+            let current = fresh && pixels.is_some_and(|p| p.current(&DrawnFrom::of(entry, &looks, dpi)));
+            waiting |= !current && !held;
+            let (grid, rows, why) = match pixels {
+                Some(p) => (p.grid, p.rows.as_ref().ok().cloned(), p.rows.as_ref().err().cloned()),
+                None => match page_grid(picture, dpi) {
+                    Ok(grid) => (grid, None, None),
+                    Err(why) => (no_pixels(picture), None, Some(why)),
+                },
+            };
+            let grid = PixelGrid { x0: grid.x0 + centre.x, y0: grid.y0 + centre.y, ..grid };
+            pictures.push(SheetPicture { source: picture.source, view: *id, grid, rows, stale: !current, why });
+        }
+    }
+    (pictures.into(), waiting)
+}
+
 /// Drops the cache once its drawing isn't the one open: closing a drawing (or opening another) ends
 /// its scenes, and the world states they hold. Its views' and dimensions' lines are kept, for when
 /// it opens again, and forgotten with the drawing. [`Session::execute`] calls it after every command.
@@ -2960,7 +3511,7 @@ pub(crate) fn forget_closed(s: &mut Session) {
         let mut kept = std::mem::take(&mut cache.kept);
         let views = std::mem::take(&mut cache.views)
             .into_iter()
-            .map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows, marks: e.marks }));
+            .map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows, marks: e.marks, pixels: e.pixels }));
         let dimensions = std::mem::take(&mut cache.dimensions)
             .into_iter()
             .map(|(id, e)| (id, KeptDimension { record: e.record, view_serial: e.view_serial, lettering: e.lettering, drawn: e.drawn }));
