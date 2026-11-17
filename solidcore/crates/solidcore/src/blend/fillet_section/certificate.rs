@@ -281,6 +281,38 @@ pub fn curve_derivs_over(
     ld: usize,
     piece: Option<usize>,
 ) -> Result<Vec<V3<Ivl>>> {
+    derivs_over(cn, s, ld, piece, None)
+}
+
+/// [`curve_derivs_over`] of the curve moved by `−about`: the derivatives of `C − about`,
+/// the homogeneous curve's point derivatives taken less `about` times the weight's, in
+/// intervals, before the quotient. The derivatives of order above 0 are those of `C`;
+/// enclosed about a point near `s` they are far narrower where the weights vary (the
+/// quotient's `w_i C` terms are of the size of `C − about`, not of `C`'s distance from the
+/// origin), as [`nurbs_partials_over_piece_about`] encloses a surface's partials.
+///
+/// # Errors
+///
+/// As [`curve_derivs_over`].
+pub fn curve_derivs_over_about(
+    cn: &NurbsCurve,
+    s: Ivl,
+    ld: usize,
+    piece: Option<usize>,
+    about: [f64; 3],
+) -> Result<Vec<V3<Ivl>>> {
+    derivs_over(cn, s, ld, piece, Some(about))
+}
+
+/// [`curve_derivs_over`], of the curve moved by `−about` where given
+/// ([`curve_derivs_over_about`]).
+fn derivs_over(
+    cn: &NurbsCurve,
+    s: Ivl,
+    ld: usize,
+    piece: Option<usize>,
+    about: Option<[f64; 3]>,
+) -> Result<Vec<V3<Ivl>>> {
     let k0 = piece.unwrap_or_else(|| span(&cn.u, cn.p, cn.n, s.lo));
     let k1 = piece.unwrap_or_else(|| span(&cn.u, cn.p, cn.n, s.hi));
     let fixed = piece.is_some();
@@ -325,6 +357,12 @@ pub fn curve_derivs_over(
                 y = y + nj * Ivl::from(pw_at(&cn.pw, li + 1));
                 z = z + nj * Ivl::from(pw_at(&cn.pw, li + 2));
                 w = w + nj * Ivl::from(pw_at(&cn.pw, li + 3));
+            }
+            if let Some([ox, oy, oz]) = about {
+                // (A − o w): the homogeneous form of C − o
+                x = x - Ivl::from(ox) * w;
+                y = y - Ivl::from(oy) * w;
+                z = z - Ivl::from(oz) * w;
             }
             if let (Some(ad), Some(wd)) = (am.get_mut(d), wm.get_mut(d)) {
                 *ad = V3 { x, y, z };
@@ -7288,5 +7326,65 @@ mod tests {
             SolidError::blend_failed(OP, "no piece covers the parameter")
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// A quarter circle r 0.2 about (−300, 0, 1), the rational quadratic: over a piece of
+    /// width 2.4e-4, its derivatives enclosed about the point at the piece's middle are of
+    /// the circle's size, where enclosed about the origin they are of 300's (the quotient's
+    /// `w' C` terms); both meet the derivatives enclosed at points of the piece, and so
+    /// does the moved point plus `about` the point.
+    #[test]
+    fn a_rational_curve_far_from_the_origin_is_enclosed_about_a_near_point() {
+        let (r, w) = (0.2, core::f64::consts::FRAC_1_SQRT_2);
+        let points = [(-300.0 + r, 0.0, 1.0), (-300.0 + r, r, w), (-300.0, r, 1.0)];
+        let mut pw = Vec::new();
+        for (x, y, weight) in points {
+            pw.extend_from_slice(&[x * weight, y * weight, weight, weight]);
+        }
+        let cn = NurbsCurve {
+            p: 2,
+            n: 3,
+            u: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            pw,
+        };
+        let s = Ivl::new(0.5, 0.5 + 2.44e-4);
+        let middle = curve_derivs_over(&cn, Ivl::from(s.mid()), 0, None).unwrap();
+        let about = [middle[0].x.mid(), middle[0].y.mid(), middle[0].z.mid()];
+        let plain = curve_derivs_over(&cn, s, 2, None).unwrap();
+        let near = curve_derivs_over_about(&cn, s, 2, None, about).unwrap();
+        let width = |i: Ivl| i.hi - i.lo;
+        assert!(
+            width(plain[1].x) > 100.0 * width(near[1].x),
+            "{:?} against {:?}",
+            plain[1].x,
+            near[1].x
+        );
+        for d in 1..=2 {
+            for i in [near[d].x, near[d].y, near[d].z] {
+                assert!(width(i) < 1e-3, "order {d}: {i:?}");
+            }
+        }
+        for t in [s.lo, s.mid(), s.hi] {
+            let at = curve_derivs_over(&cn, Ivl::from(t), 2, None).unwrap();
+            // both hold the derivative at t
+            let holds = |a: Ivl, b: Ivl| a.lo <= b.hi && b.lo <= a.hi;
+            for d in 1..=2 {
+                for (a, b) in [
+                    (near[d].x, at[d].x),
+                    (near[d].y, at[d].y),
+                    (near[d].z, at[d].z),
+                ] {
+                    assert!(holds(a, b), "order {d} at {t}: {b:?} apart from {a:?}");
+                }
+            }
+            let point = [
+                near[0].x + Ivl::from(about[0]),
+                near[0].y + Ivl::from(about[1]),
+                near[0].z + Ivl::from(about[2]),
+            ];
+            for (a, b) in point.into_iter().zip([at[0].x, at[0].y, at[0].z]) {
+                assert!(holds(a, b), "point at {t}: {b:?} apart from {a:?}");
+            }
+        }
     }
 }

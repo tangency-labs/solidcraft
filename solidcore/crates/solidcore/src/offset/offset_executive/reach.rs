@@ -33,7 +33,9 @@
 //! the choice of asking again are `MarkusReichart`'s on #2926). Analytic faces are left as
 //! they were.
 
-use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
+use crate::blend::fillet_section::certificate::{
+    curve_derivs_over, curve_derivs_over_about, NurbsCurve,
+};
 use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::series::V3;
 use crate::curve::curve::CurveKind;
@@ -1835,14 +1837,38 @@ fn edge_nurbs(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<NurbsCurve>
 /// The edge point and tangent over the parameters `s`, each with its rate (from the
 /// curve's derivatives to order 2 enclosed over `s`, [`curve_derivs_over`]); `None` where
 /// no piece of the curve covers `s`.
+///
+/// The derivatives are enclosed about the curve's point at the middle of `s`
+/// ([`curve_derivs_over_about`]), which is added back to the point: a rational edge's
+/// enclosures are then of the size of the edge near `s`, not of its distance from the
+/// origin (a hole's rim r 0.2 three hundred from the origin had its tangent enclosed over
+/// a piece of width 2.4e-4 as wide as the tangent itself, so no piece was decided).
 fn point_and_tangent(cn: &NurbsCurve, s: Ivl) -> Result<Option<(Dv, Dv)>> {
-    let ders = match curve_derivs_over(cn, s, 2, None) {
-        Ok(d) => d,
-        Err(e @ SolidError::Cancelled { .. }) => return Err(e),
-        Err(_) => return Ok(None),
+    let enclosed = |found: Result<Vec<V3<Ivl>>>| match found {
+        Ok(d) => Ok(Some(d)),
+        Err(e @ SolidError::Cancelled { .. }) => Err(e),
+        Err(_) => Ok(None),
     };
-    let (Some(&d0), Some(&d1), Some(&d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+    let Some(middle) = enclosed(curve_derivs_over(cn, Ivl::from(s.mid()), 0, None))? else {
         return Ok(None);
+    };
+    let Some(c) = middle.first().map(|p| [p.x.mid(), p.y.mid(), p.z.mid()]) else {
+        return Ok(None);
+    };
+    if !c.iter().all(|x| x.is_finite()) {
+        return Ok(None);
+    }
+    let Some(ders) = enclosed(curve_derivs_over_about(cn, s, 2, None, c))? else {
+        return Ok(None);
+    };
+    let [cx, cy, cz] = c;
+    let (Some(&moved), Some(&d1), Some(&d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+        return Ok(None);
+    };
+    let d0 = V3 {
+        x: moved.x + Ivl::from(cx),
+        y: moved.y + Ivl::from(cy),
+        z: moved.z + Ivl::from(cz),
     };
     Ok(Some((Dv::of(d0, d1), Dv::of(d1, d2))))
 }
