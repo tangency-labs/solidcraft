@@ -46,7 +46,8 @@
 //!   that will use it), and the kept edge's tolerance is the larger;
 //! - a piece of no length is cut out of a B-spline (a Bézier piece between two C0 joints whose
 //!   control points the check calls one point) only when the cut moves the curve no farther
-//!   than the edge's tolerance and the new curve is within half of it from its faces.
+//!   than the edge's tolerance and the new curve is within half of it from its faces. Several
+//!   cuts on one edge are bounded by the sum of their bounds, from the curve as read.
 //!
 //! No tolerance is grown: what cannot be certified is left as it is and reported with why
 //! ([`Refusal`]).
@@ -118,7 +119,7 @@ pub enum Refusal {
     /// around it (bounded by the gap of a re-ended edge's whole curve to that face): the bound.
     VertexOffFace(FaceId, f64),
     /// The two edges of a two-edge face are not certified within the kept edge's tolerance of
-    /// each other: the bound, or `None` when none could be found.
+    /// each other: the bound, or infinity when none could be found.
     NotCoincident(f64),
     /// The kept edge of a two-edge face is not certified within half its tolerance of the
     /// face across the other edge: the bound, or `None`.
@@ -129,7 +130,8 @@ pub enum Refusal {
     /// The kept edge's tolerance is smaller than the other's: collapsing would grow it.
     WouldGrow,
     /// A piece of no length in the edge's curve could not be cut out within the edge's
-    /// tolerance: the certified bound of what cutting it would move.
+    /// tolerance: the certified bound of how far that cut, with the edge's cuts before it,
+    /// would move the curve as read.
     PieceTooLong(f64),
     /// The edge's curve, a piece of no length cut out, is not certified within half its
     /// tolerance of one of its faces: the bound, or `None`.
@@ -166,7 +168,7 @@ pub struct Healed {
     /// The two-edge faces collapsed, each with the certified bound of its edges' distance.
     pub collapsed: Vec<(FaceId, f64)>,
     /// Pieces of no length cut out of edge curves: the edge and the certified bound of how far
-    /// the cut moved the curve.
+    /// its cuts, together, moved the curve.
     pub cut_pieces: Vec<(EdgeId, f64)>,
     /// Edges shorter than their tolerance by their vertices that were left, with why.
     pub refused_edges: Vec<(EdgeId, Refusal)>,
@@ -840,7 +842,8 @@ pub fn collapse_coincident_two_edge_faces(
             continue;
         }
         let tol = edge::tolerance(b, keep)?;
-        if edge::tolerance(b, gone)? > tol {
+        // a NaN tolerance on either edge refuses too
+        if !within(edge::tolerance(b, gone)?, tol) {
             healed.refused_faces.push((f, Refusal::WouldGrow));
             continue;
         }
@@ -1069,7 +1072,10 @@ pub fn cut_degenerate_pieces(
             CurveKind::BSpline(s) => s.nurb_ref()?.knots().len(),
             _ => continue,
         };
-        let mut worst = 0.0_f64;
+        // how far the cuts so far moved the curve, from the curve as it was: each cut's bound is
+        // from the curve the cut before left, so the bounds add up (the triangle inequality),
+        // rounded up so the sum is never below the exact one
+        let mut moved = 0.0_f64;
         let mut cut_any = false;
         let mut gaps = Vec::new();
         for _ in 0..knots {
@@ -1082,17 +1088,18 @@ pub fn cut_degenerate_pieces(
             let Some((c, bound)) = cut_one_piece(s.nurb_ref()?, s.is_rational()?)? else {
                 break;
             };
-            if !within(bound, tol) {
-                healed.refused_edges.push((e, Refusal::PieceTooLong(bound)));
+            let total = crate::geom::certified::next_up(moved + bound);
+            if !within(total, tol) {
+                healed.refused_edges.push((e, Refusal::PieceTooLong(total)));
                 break;
             }
-            match face_gaps(k, b, e, &c)? {
-                Ok(g) => gaps = g,
+            let cut_gaps = match face_gaps(k, b, e, &c)? {
+                Ok(g) => g,
                 Err((f, gap)) => {
                     healed.refused_edges.push((e, Refusal::CutOffFace(f, gap)));
                     break;
                 }
-            }
+            };
             // the trimmed form may snap its interval to a knot: both ends must still meet
             // their vertices within the vertices' tolerances
             let (s, t) = edge::start_end_vertices(b, e)?;
@@ -1109,12 +1116,14 @@ pub fn cut_degenerate_pieces(
                 break;
             }
             edge::replace_3d_curve(b, e, Some(c), env)?;
-            worst = worst.max(bound);
+            // the trims are made from the curve installed, at its gaps
+            gaps = cut_gaps;
+            moved = total;
             cut_any = true;
         }
         if cut_any {
             remake_trims(k, b, e, &gaps)?;
-            healed.cut_pieces.push((e, worst));
+            healed.cut_pieces.push((e, moved));
             any = true;
         }
     }

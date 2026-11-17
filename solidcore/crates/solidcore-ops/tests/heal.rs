@@ -663,3 +663,274 @@ fn an_edge_a_hair_longer_than_its_tolerance_is_not_squeezed() {
         }
     }
 }
+
+/// [`box_with_a_short_spline_span`] whose bottom front edge has five Bezier pieces, the second
+/// and the fourth each with control points `dt` apart in the line's parameter (`10 dt` mm): two
+/// pieces the check calls one point, on the one edge. The curve is the line at its own
+/// parameter.
+fn box_with_two_short_spline_spans(tols: Tols, dt: f64) -> Record {
+    let mut rec = box_with_a_short_spline_span(tols, dt);
+    let e = rec
+        .edges
+        .iter()
+        .position(|e| matches!(e.curve, Curve::Spline { .. }))
+        .unwrap();
+    let Curve::Spline { points: old, .. } = rec.edges[e].curve.clone() else {
+        unreachable!()
+    };
+    let (a, b) = (old[0], old[old.len() - 1]);
+    let at = |t: f64| {
+        [
+            a[0] + t * (b[0] - a[0]),
+            a[1] + t * (b[1] - a[1]),
+            a[2] + t * (b[2] - a[2]),
+        ]
+    };
+    let short = |t: f64| [at(t + dt), at(t + 2.0 * dt), at(t + 3.0 * dt)];
+    let mut points = vec![a, at(0.1), at(0.2), at(0.3)];
+    points.extend(short(0.3));
+    let t = 0.3 + 3.0 * dt;
+    points.extend([
+        at(t + (0.6 - t) / 3.0),
+        at(t + 2.0 * (0.6 - t) / 3.0),
+        at(0.6),
+    ]);
+    points.extend(short(0.6));
+    let t = 0.6 + 3.0 * dt;
+    points.extend([at(t + (1.0 - t) / 3.0), at(t + 2.0 * (1.0 - t) / 3.0), b]);
+    // each piece's parameter length is its share of the line, so the curve runs at one speed
+    // (the face-gap certificate follows the curve by its parameter, and does not close on a
+    // piece that is short in space and long in parameter)
+    let (s1, s2) = (0.3 + 3.0 * dt, 0.6 + 3.0 * dt);
+    let knots = vec![
+        0.0, 0.0, 0.0, 0.0, 0.3, 0.3, 0.3, s1, s1, s1, 0.6, 0.6, 0.6, s2, s2, s2, 1.0, 1.0, 1.0,
+        1.0,
+    ];
+    assert_eq!(points.len() + 4, knots.len());
+    rec.edges[e].curve = Curve::Spline {
+        knots: knots.clone(),
+        points: points.clone(),
+    };
+    rec.edges[e].interval = [0.0, 1.0];
+    for u in rec.edges[e].uses.clone() {
+        let face = &mut rec.faces[u.face as usize];
+        let Surface::Plane {
+            origin,
+            u_axis,
+            v_axis,
+        } = face.surface
+        else {
+            unreachable!()
+        };
+        let uv: Vec<[f64; 2]> = points
+            .iter()
+            .map(|&p| [dot(sub(p, origin), u_axis), dot(sub(p, origin), v_axis)])
+            .collect();
+        let Loop::Edges { edges } = &mut face.loops[u.r#loop as usize] else {
+            unreachable!()
+        };
+        edges[u.position as usize].pcurve = Curve2::Spline {
+            knots: knots.clone(),
+            points: uv,
+        };
+    }
+    rec
+}
+
+/// #17708 review: two pieces of no length on one edge are bounded together. Each cut is bounded
+/// from the curve the cut before left, so the curve moves from the one read by up to the sum of
+/// the bounds: with the edge's tolerance between one piece's span and two, the first piece is
+/// cut and the second refused with the sum, past the tolerance.
+#[test]
+fn two_cuts_on_one_edge_are_bounded_by_their_sum() {
+    use solidcore::heal::tolerance_defects::{cut_degenerate_pieces, Healed, Refusal};
+    use solidcore::topology::brep::p3::edit_brep;
+    // each short piece spans 3 dt of the 10 mm edge: 3e-7 mm
+    let (dt, span) = (1e-8, 3e-7);
+    let tol = 1.5 * span;
+    let tols = Tols {
+        body: 1e-9,
+        edge: tol,
+        vertex: tol,
+    };
+    let rec = box_with_two_short_spline_spans(tols, dt);
+    let mut k = solidcore::Kernel::default();
+    let (mut b, order) = solidcore_convert::brep::to_kernel(&mut k, &rec, true).unwrap();
+    let spline = rec
+        .edges
+        .iter()
+        .position(|e| matches!(e.curve, Curve::Spline { .. }))
+        .unwrap();
+    let e = order.edges[spline];
+    // the edge's tolerance between one piece's span and two
+    let healed = edit_brep(&mut k, &mut b, |k, b, scope| {
+        solidcore::topology::edge::set_tolerance(b, e, tol, false, false)?;
+        let mut healed = Healed::default();
+        cut_degenerate_pieces(k, b, scope.env, &mut healed)?;
+        Ok(healed)
+    })
+    .unwrap();
+    let [(cut, moved)] = healed.cut_pieces[..] else {
+        panic!("one edge cut: {healed:?}")
+    };
+    assert_eq!(cut, e);
+    assert!((span * (1.0 - 1e-6)..=tol).contains(&moved), "{moved}");
+    let [(edge, Refusal::PieceTooLong(total))] = healed.refused_edges[..] else {
+        panic!("the second cut refused: {healed:?}")
+    };
+    assert_eq!(edge, e);
+    assert!(
+        total > tol && total >= 2.0 * span * (1.0 - 1e-6),
+        "{total} {tol}"
+    );
+}
+
+/// The hair step with its riser's two end edges squeezed (as the heal's first step does): the
+/// riser is a face bounded by its two long sides, between the same two vertices. The brep, the
+/// riser and its two edges.
+fn squeezed_riser(
+    k: &mut solidcore::Kernel,
+) -> (
+    solidcore::topology::Brep,
+    solidcore::topology::FaceId,
+    [solidcore::topology::EdgeId; 2],
+) {
+    use solidcore::heal::tolerance_defects::{collapse_short_edges, squeeze_targets, Healed};
+    use solidcore::topology::brep::p3::edit_brep;
+    use solidcore::topology::{brep::p1, edge};
+    let (mut b, _) =
+        solidcore_convert::brep::to_kernel(k, &hair_step_box(3e-4, TOLS), true).unwrap();
+    edit_brep(k, &mut b, |k, b, scope| {
+        let targets = squeeze_targets(b)?;
+        collapse_short_edges(k, b, scope.env, &targets, &mut Healed::default())
+    })
+    .unwrap();
+    let mut on: HashMap<solidcore::topology::FaceId, Vec<solidcore::topology::EdgeId>> =
+        HashMap::new();
+    for e in p1::edges(&b, None).unwrap() {
+        for f in edge::faces(&b, e, None).unwrap() {
+            on.entry(f).or_default().push(e);
+        }
+    }
+    let riser: Vec<_> = on.iter().filter(|(_, es)| es.len() == 2).collect();
+    let [(f, es)] = riser[..] else {
+        panic!("one two-edge face: {riser:?}")
+    };
+    (b, *f, [es[0], es[1]])
+}
+
+/// What collapsing the two-edge faces of `b` does after `change`: the faces collapsed and the
+/// faces refused.
+fn collapse_after(
+    k: &mut solidcore::Kernel,
+    b: &mut solidcore::topology::Brep,
+    change: impl FnOnce(
+        &mut solidcore::topology::Brep,
+        &mut solidcore::topology::edge::NotifyEnv<'_>,
+    ) -> solidcore::Result<()>,
+) -> solidcore::heal::tolerance_defects::Healed {
+    use solidcore::heal::tolerance_defects::{collapse_coincident_two_edge_faces, Healed};
+    use solidcore::topology::brep::p3::edit_brep;
+    edit_brep(k, b, |k, b, scope| {
+        change(b, scope.env)?;
+        let mut healed = Healed::default();
+        collapse_coincident_two_edge_faces(k, b, scope.env, &mut healed)?;
+        Ok(healed)
+    })
+    .unwrap()
+}
+
+/// The real-defect side of the sliver collapse's certificate (#17708 review): a riser whose two
+/// sides are a hair farther apart than the kept edge's tolerance is not collapsed, and the
+/// refusal names the bound; one whose removed edge has the larger tolerance is not collapsed
+/// either (collapsing would grow the kept edge's), while the same tolerance on the kept edge
+/// collapses it.
+#[test]
+fn a_sliver_wider_than_its_tolerance_or_losing_the_larger_tolerance_is_not_collapsed() {
+    use solidcore::heal::tolerance_defects::Refusal;
+    use solidcore::topology::{edge, vertex};
+    let mut k = solidcore::Kernel::default();
+    let (_, f, [e1, e2]) = squeezed_riser(&mut k);
+    // As squeezed, the riser collapses.
+    let (mut b, ..) = squeezed_riser(&mut k);
+    let healed = collapse_after(&mut k, &mut b, |_, _| Ok(()));
+    assert_eq!(healed.collapsed.len(), 1, "{healed:?}");
+    let tol = TOLS.edge;
+    // One side bowed in its middle a hair past the tolerance, away from the other.
+    for side in [e1, e2] {
+        let (mut b, ..) = squeezed_riser(&mut k);
+        let bow = 1.01 * tol;
+        let healed = collapse_after(&mut k, &mut b, |b, env| {
+            let (s, t) = edge::start_end_vertices(b, side)?;
+            let (p, q) = (vertex::point(b, s.unwrap())?, vertex::point(b, t.unwrap())?);
+            let mid = (p + q) * 0.5;
+            // a quadratic Bezier is `bow` from its chord at its middle when its middle control
+            // point is twice that off the chord
+            let off = solidcore::math::Vec3::new(0.0, 0.0, 2.0 * bow);
+            let cpts = [p, mid + off, q]
+                .map(solidcore::nurbs::math::CPoint::from_point)
+                .to_vec();
+            let nurb = solidcore::nurbs::crv_basic::Curve::new(
+                cpts,
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )?;
+            let c = solidcore::curve::curve::Curve::from(
+                solidcore::nurbs::b_spline_curve::BSplineCurve::from_nurb(nurb, 3, false),
+            );
+            let interval = solidcore::curve::curve::p2::CurveEvaluate::natural_interval(&c);
+            let options = edge::SetCurveOptions {
+                delete_old_curve: true,
+                ..edge::SetCurveOptions::default()
+            };
+            edge::set_curve(b, side, Some(c), options, env, [None, None])?;
+            edge::set_interval(b, side, &interval)
+        });
+        assert!(healed.collapsed.is_empty(), "{healed:?}");
+        let [(face, Refusal::NotCoincident(d))] = healed.refused_faces[..] else {
+            panic!("refused as not coincident: {healed:?}")
+        };
+        assert_eq!(face, f);
+        assert!(d >= bow * (1.0 - 1e-9) && d > tol, "{d} {bow}");
+    }
+    // The larger tolerance on each side in turn: removed, it refuses; kept, it collapses.
+    let mut outcomes = Vec::new();
+    for side in [e1, e2] {
+        let (mut b, ..) = squeezed_riser(&mut k);
+        let healed = collapse_after(&mut k, &mut b, |b, _| {
+            edge::set_tolerance(b, side, 2.0 * tol, false, false)
+        });
+        outcomes.push(match (&healed.collapsed[..], &healed.refused_faces[..]) {
+            ([_], []) => "collapsed",
+            ([], [(face, Refusal::WouldGrow)]) if *face == f => "would grow",
+            _ => panic!("{healed:?}"),
+        });
+    }
+    outcomes.sort_unstable();
+    assert_eq!(outcomes, ["collapsed", "would grow"]);
+}
+
+/// #17708 review: a NaN tolerance on either side of a sliver refuses its collapse, and no NaN
+/// reaches the edge kept.
+#[test]
+fn a_sliver_with_a_nan_tolerance_is_not_collapsed() {
+    use solidcore::topology::edge;
+    let mut k = solidcore::Kernel::default();
+    let (_, f, [e1, e2]) = squeezed_riser(&mut k);
+    for side in [e1, e2] {
+        let (mut b, ..) = squeezed_riser(&mut k);
+        let healed = collapse_after(&mut k, &mut b, |b, _| {
+            edge::set_tolerance(b, side, f64::NAN, false, false)
+        });
+        assert!(healed.collapsed.is_empty(), "{healed:?}");
+        assert!(
+            matches!(healed.refused_faces[..], [(face, _)] if face == f),
+            "{healed:?}"
+        );
+        assert!(solidcore::topology::brep::p1::edges(&b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&e| e != side)
+            .all(|e| !edge::tolerance(&b, e).unwrap().is_nan()));
+    }
+}
