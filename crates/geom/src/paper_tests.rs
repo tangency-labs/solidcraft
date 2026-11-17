@@ -528,14 +528,22 @@ fn slivers_and_radii_are_in_the_grids_own_steps() {
     assert!(on.report.curve_cubics > 1 && walked.pieces.len() == on.report.curve_cubics, "{:?}", on.report);
     assert!(walked.pieces.iter().all(|piece| matches!(piece, Piece::Cubic { .. })));
     assert_eq!(walked.pieces.last().map(Piece::to), Some(GridPoint { x: 20_000_000, y: 0 }));
-    // And within the curves' error of it: the cubics, flattened to a tenth of the error, are that
-    // close to the ellipse (a fine polyline of it), give or take the flattening.
+    // And within the curves' error of it: points along each cubic are that close to the ellipse
+    // (a fine polyline of it), give or take the polyline.
     let error = grid::CURVE_ERROR_MM;
     let truth: Vec<Vec2> = (0..=20_000).map(|i| arch.point_at(f64::from(i) / 20_000.0)).collect();
     let to_line = |q: Vec2, a: Vec2, b: Vec2| q.dist(a + (b - a) * ((q - a).dot(b - a) / (b - a).dot(b - a)).clamp(0.0, 1.0));
-    for q in flatten(&walked, error * 0.1 * 1e6).unwrap() {
-        let off = truth.windows(2).map(|ab| to_line(q * 1e-6, ab[0], ab[1])).fold(f64::INFINITY, f64::min);
-        assert!(off <= error * 1.2, "{off} mm from the ellipse");
+    let mm = |q: GridPoint| Vec2::new(q.x as f64, q.y as f64) * 1e-6;
+    let mut at = walked.start;
+    for piece in &walked.pieces {
+        let Piece::Cubic { c1, c2, to } = *piece else { panic!("a cubic") };
+        let cubic = Seg2::Cubic { p0: mm(at), p1: mm(c1), p2: mm(c2), p3: mm(to) };
+        for k in 0..=100 {
+            let q = cubic.point_at(f64::from(k) / 100.0);
+            let off = truth.windows(2).map(|ab| to_line(q, ab[0], ab[1])).fold(f64::INFINITY, f64::min);
+            assert!(off <= error * 1.2, "{off} mm from the ellipse");
+        }
+        at = to;
     }
 }
 
