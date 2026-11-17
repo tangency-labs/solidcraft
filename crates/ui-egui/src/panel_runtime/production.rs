@@ -34,6 +34,7 @@ enum Product {
     DrawingSheets,
     DrawingInspector,
     CutList,
+    CuttingPlan,
 }
 impl Product {
     const ALL: &[Self] = &[
@@ -49,6 +50,7 @@ impl Product {
         Self::DrawingSheets,
         Self::DrawingInspector,
         Self::CutList,
+        Self::CuttingPlan,
     ];
     const NEW_RENDER: [Self; 3] = [Self::RenderLibrary, Self::RenderInspector, Self::RenderShots];
 
@@ -71,6 +73,7 @@ impl Product {
             Self::DrawingSheets => 9,
             Self::DrawingInspector => 10,
             Self::CutList => 11,
+            Self::CuttingPlan => 12,
         }
     }
     fn visible(self, app: &crate::SolveApp) -> bool {
@@ -85,6 +88,7 @@ impl Product {
             Self::SketchOptions => true,
             Self::Bom => crate::bom_panel::available(app),
             Self::CutList => crate::cutlist_panel::available(app),
+            Self::CuttingPlan => crate::cutting_plan_panel::available(app),
             Self::DrawingSheets => crate::drawing_workspace::sheets_visible(app),
             Self::DrawingInspector => crate::drawing_workspace::inspector_visible(app),
         }
@@ -105,7 +109,8 @@ impl Product {
             Self::DrawingInspector => {}
             Self::Bom if !open => app.bom = None,
             Self::CutList if !open => app.cutlist = None,
-            Self::Bom | Self::CutList | Self::SketchOptions => {}
+            Self::CuttingPlan if !open => app.cutting_plan = None,
+            Self::Bom | Self::CutList | Self::CuttingPlan | Self::SketchOptions => {}
         }
     }
 
@@ -123,6 +128,7 @@ impl Product {
             Self::DrawingSheets => "drawing-sheets",
             Self::DrawingInspector => "drawing-inspector",
             Self::CutList => "cutlist",
+            Self::CuttingPlan => "cutting-plan",
         }
     }
     fn kind(self) -> &'static str {
@@ -139,6 +145,7 @@ impl Product {
             Self::DrawingSheets => "solidcraft.drawing_sheets",
             Self::DrawingInspector => "solidcraft.drawing_inspector",
             Self::CutList => "solidcraft.cutlist",
+            Self::CuttingPlan => "solidcraft.cutting_plan",
         }
     }
     fn title_key(self) -> &'static str {
@@ -155,12 +162,13 @@ impl Product {
             Self::DrawingSheets => "ui.drawing_sheets.title",
             Self::DrawingInspector => "ui.drawing_sheets.settings",
             Self::CutList => "cmd.cutlist.parts",
+            Self::CuttingPlan => "cmd.cutlist.layout",
         }
     }
     fn icon(self) -> &'static str {
         match self {
             Self::SketchOptions => "sketch",
-            Self::Bom | Self::CutList => "bom",
+            Self::Bom | Self::CutList | Self::CuttingPlan => "bom",
             Self::DrawingSheets => "ws_drawing",
             Self::DrawingInspector => "settings",
             _ => "list",
@@ -180,6 +188,7 @@ impl Product {
             Self::SketchOptions => !render && (crate::sketch_palette::editing(app) || crate::sketch_palette::image_tool(app)),
             Self::Bom => crate::bom_panel::available(app),
             Self::CutList => crate::cutlist_panel::available(app),
+            Self::CuttingPlan => crate::cutting_plan_panel::available(app),
             Self::DrawingSheets => {
                 crate::drawing_workspace::active(app)
                     && !matches!(app.preferences.drawing_sheets_visibility.as_str(), "legacy" | "off")
@@ -195,7 +204,7 @@ impl Product {
             Self::RenderBrowser | Self::RenderLibrary if placement.render_browser_side == "right" => Zone::Right,
             Self::RenderShots => Zone::Bottom,
             Self::RenderInspector if placement.render_inspector_side != "left" => Zone::Right,
-            Self::SketchOptions | Self::Bom | Self::CutList => Zone::Right,
+            Self::SketchOptions | Self::Bom | Self::CutList | Self::CuttingPlan => Zone::Right,
             Self::DrawingInspector if placement.drawing_panel_side != "left" => Zone::Right,
             _ => Zone::Left,
         }
@@ -233,7 +242,7 @@ impl Product {
             Self::RenderInspector => vec![("remove", "render.inspector_remove", "delete")],
             Self::DrawingSheets => vec![("add-sheet", "ui.drawing_sheets.add", "plus")],
             Self::Browser => vec![("magnifier", "ui.browser_search_hint", "zoom")],
-            Self::RenderShots | Self::SketchOptions | Self::Bom | Self::CutList | Self::DrawingInspector => Vec::new(),
+            Self::RenderShots | Self::SketchOptions | Self::Bom | Self::CutList | Self::CuttingPlan | Self::DrawingInspector => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
     }
@@ -350,7 +359,7 @@ impl Product {
                     pressed: Some(crate::browser_search::bar_shown(app)),
                 }]
             }
-            Self::RenderShots | Self::SketchOptions | Self::Bom | Self::CutList | Self::DrawingInspector => Vec::new(),
+            Self::RenderShots | Self::SketchOptions | Self::Bom | Self::CutList | Self::CuttingPlan | Self::DrawingInspector => Vec::new(),
         };
         presentation
     }
@@ -375,7 +384,7 @@ impl PanelVisibilitySnapshot {
 
     pub(crate) fn restore(self, app: &mut crate::SolveApp) {
         for (product, visible) in Product::ALL.iter().copied().zip(self.0) {
-            if !matches!(product, Product::Bom | Product::CutList | Product::SketchOptions | Product::RenderLibrary) {
+            if !matches!(product, Product::Bom | Product::CutList | Product::CuttingPlan | Product::SketchOptions | Product::RenderLibrary) {
                 product.set_visible(app, visible);
             }
         }
@@ -537,6 +546,7 @@ fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Optio
     if pop_out.is_none() {
         crate::bom_panel::set_focus_pending(app, true);
         crate::cutlist_panel::set_focus_pending(app, true);
+        crate::cutting_plan_panel::set_focus_pending(app, true);
     }
     if repaired && pop_out.is_none() {
         super::preferences::report_notice(app);
@@ -559,7 +569,7 @@ pub(crate) fn refresh_production(app: &crate::SolveApp) -> PanelResult<()> {
     // Keep an explicit view-toggle edge pending while its content context is
     // unavailable. Ordinary workspace changes do not create a new toggle edge.
     for product in Product::ALL.iter().copied() {
-        if matches!(product, Product::Bom | Product::CutList) {
+        if matches!(product, Product::Bom | Product::CutList | Product::CuttingPlan) {
             continue;
         }
         let visible = product.visible(app);
@@ -635,7 +645,7 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                 }
             }
             Product::Browser => crate::browser::magnifier(app),
-            Product::RenderShots | Product::SketchOptions | Product::Bom | Product::CutList | Product::DrawingInspector => {}
+            Product::RenderShots | Product::SketchOptions | Product::Bom | Product::CutList | Product::CuttingPlan | Product::DrawingInspector => {}
         }
     }
     Ok(())
@@ -797,7 +807,7 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
     let addition = app.universal_panel_frame().map(|frame| (revision, frame.layout.capacity));
     let mut adding = None;
     for product in Product::ALL.iter().copied() {
-        if matches!(product, Product::Bom | Product::CutList) {
+        if matches!(product, Product::Bom | Product::CutList | Product::CuttingPlan) {
             continue;
         }
         let visible = product.visible(app);
@@ -881,7 +891,7 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
         app.render_workspace.view.inspector_visibility_request = None;
     }
     sync_sketch_options(app)?;
-    for product in [Product::Bom, Product::CutList] {
+    for product in [Product::Bom, Product::CutList, Product::CuttingPlan] {
         sync_report(app, product)?;
     }
     Ok(())
@@ -899,6 +909,7 @@ fn sync_report(app: &mut crate::SolveApp, product: Product) -> PanelResult<()> {
     let pending = match product {
         Product::Bom => crate::bom_panel::focus_pending(app),
         Product::CutList => crate::cutlist_panel::focus_pending(app),
+        Product::CuttingPlan => crate::cutting_plan_panel::focus_pending(app),
         _ => false,
     };
     if pending {
@@ -926,6 +937,7 @@ fn sync_report(app: &mut crate::SolveApp, product: Product) -> PanelResult<()> {
         match product {
             Product::Bom => crate::bom_panel::set_focus_pending(app, false),
             Product::CutList => crate::cutlist_panel::set_focus_pending(app, false),
+            Product::CuttingPlan => crate::cutting_plan_panel::set_focus_pending(app, false),
             _ => {}
         }
     }
@@ -1050,7 +1062,7 @@ fn registry() -> PanelResult<PanelRegistry> {
         let history = product == Product::History;
         let assistant = product == Product::Assistant;
         let sketch = product == Product::SketchOptions;
-        let report = matches!(product, Product::Bom | Product::CutList);
+        let report = matches!(product, Product::Bom | Product::CutList | Product::CuttingPlan);
         let mut allowed_zones = [Zone::Left, Zone::Right, Zone::Floating].into_iter().collect::<std::collections::BTreeSet<_>>();
         let shots = product == Product::RenderShots;
         if history || shots {
@@ -1064,14 +1076,19 @@ fn registry() -> PanelResult<PanelRegistry> {
             allowed_zones,
             default_zone: match product {
                 Product::History | Product::RenderShots => Zone::Bottom,
-                Product::RenderInspector | Product::SketchOptions | Product::Bom | Product::CutList | Product::DrawingInspector => Zone::Right,
+                Product::RenderInspector
+                | Product::SketchOptions
+                | Product::Bom
+                | Product::CutList
+                | Product::CuttingPlan
+                | Product::DrawingInspector => Zone::Right,
                 _ => Zone::Left,
             },
             min_size: Size {
                 width: if history { crate::ui_kit::history_width(false) } else { 240.0 },
                 height: match product {
                     Product::RenderLibrary => 180.0,
-                    Product::Bom | Product::CutList => 200.0,
+                    Product::Bom | Product::CutList | Product::CuttingPlan => 200.0,
                     Product::SketchOptions => 150.0,
                     Product::RenderInspector => 160.0,
                     Product::Assistant => 120.0,
@@ -1110,7 +1127,7 @@ fn default_layout(app: &crate::SolveApp, placement: &crate::prefs::Prefs, worksp
     let share = if (0.05..=0.95).contains(&share) { share } else { 0.5 };
     for product in Product::ALL.iter().copied() {
         let id = InstanceId::new(product.id())?;
-        let requested_open = !matches!(product, Product::Bom | Product::CutList) && product.visible(app);
+        let requested_open = !matches!(product, Product::Bom | Product::CutList | Product::CuttingPlan) && product.visible(app);
         let kind = PanelKind::new(product.kind())?;
         let spec = registry.get(&kind)?;
         let zone = product.default_zone(placement);
@@ -1567,6 +1584,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             Product::SketchOptions => crate::sketch_palette::shared_body(self.app, ui),
             Product::Bom => crate::bom_panel::shared_content(self.app, ui),
             Product::CutList => crate::cutlist_panel::shared_content(self.app, ui),
+            Product::CuttingPlan => crate::cutting_plan_panel::shared_content(self.app, ui),
             Product::RenderLibrary => crate::render_workspace::library::shared_library(self.app, ui),
             Product::RenderInspector => crate::render_workspace::inspector_panel::shared_body(self.app, ui),
             Product::RenderShots => crate::render_workspace::shots::shared_shots(self.app, ui, context.flow, slot == ContentSlot::Inline),

@@ -217,6 +217,12 @@ A list of physical pieces to cut from stock, grouped by size and material, with 
 
 - **In SolidCraft:** `cutlist.parts` lists loose bodies and placed component bodies, excluding purchased and reference components.
 
+### cutting plan
+
+An assignment of each physical cut part to purchasable stock, with its position and cutting order.
+
+- **In SolidCraft:** `cutlist.layout` derives the plan from `cutlist.parts`; plans are not stored in designs.
+
 ### design
 
 The model that is open in SolidCraft: its timeline, components, bodies, sketches, parameters and
@@ -264,6 +270,12 @@ rectangular or round and need not follow the profile.
 - **Don't use:** plug, lid, blank (for the plate).
 - **Elsewhere:** end cap, end plate, cap plate.
 - **For translators:** a closing plate on a tube's end, not a cap of a sketch or surface.
+
+### end trim, edge trim
+
+An allowance removed from each end of length stock (end trim) or from each sheet edge (edge trim).
+
+- **In SolidCraft:** `cutlist.layout.trim` applies twice along each usable stock dimension; trim is waste, not a reusable offcut.
 
 ### equation curve
 
@@ -315,7 +327,7 @@ Radius of the surface neighbourhood used to estimate illumination from nearby ph
 
 The direction of the fibres in wood relative to a part's stock dimensions.
 
-- **In SolidCraft:** the cut list leaves grain empty until a manufacturing grain property is assigned.
+- **In SolidCraft:** the cut list names the stock side the grain runs along (length, width or thickness, or oblique) and leaves it empty until a body has a grain direction; `cutlist.layout` keeps the grain along the stock's length.
 
 ### group
 
@@ -332,6 +344,12 @@ features are computed.
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
 
+### guillotine cut
+
+A cut that runs from one edge of the current stock rectangle to its opposite edge.
+
+- **In SolidCraft:** each numbered kerf band in `cutlist.layout` splits a remaining rectangle before the next cut.
+
 ### item number
 
 The number that names a row of a bill of materials, the one a parts list and a balloon show.
@@ -347,6 +365,12 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Don't use:** position, balloon number, find number; index.
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
+
+### kerf
+
+The width of material removed by a saw cut.
+
+- **In SolidCraft:** `cutlist.layout.kerf` is a positive length in millimetres.
 
 ### leader
 
@@ -400,6 +424,12 @@ overlap are all multi-trims; `frame.multi_trim` sets how one corner of a frame i
 - **Elsewhere:** member trim, coping, end fitting.
 - **For translators:** not a sketch's trim of a curve and not a surface trim.
 
+### nesting
+
+Assigning parts to stock with their allowed orientations to reduce the stock used.
+
+- **In SolidCraft:** `cutlist.layout` packs lengths and rectangles with bounded, deterministic work.
+
 ### note
 
 Text on a sheet or a view of a drawing, in its fields and its words, that may point at the model
@@ -425,6 +455,12 @@ component changes every copy. The browser names occurrences with a number, such 
 - **Don't use:** instance, placement.
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
+
+### offcut
+
+Usable stock left after the parts, trim and kerf are removed.
+
+- **In SolidCraft:** `cutlist.layout` reports offcut positions and sizes for reuse as stock choices.
 
 ### opaque path lighting
 
@@ -706,6 +742,18 @@ The space left between frame members where they meet, for a weld to fill.
 - **Don't use:** clearance; gap on its own where it could mean a hem gap.
 - **Elsewhere:** weld gap, root gap, root opening.
 - **For translators:** not a sheet metal hem gap and not a clearance.
+
+### workshop mark
+
+A name for one physical piece in a cutting plan and on its label.
+
+- **In SolidCraft:** letters name the cut-list row and the number names its piece, for example `A-1`.
+
+### yield
+
+The finished part length or area divided by the gross stock length or area.
+
+- **In SolidCraft:** `cutlist.layout` reports yield per stock piece; trim and kerf count in the gross stock.
 
 ## Words with more than one meaning
 

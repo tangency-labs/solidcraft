@@ -1,0 +1,28 @@
+[
+  {
+    "call": "engine.execute",
+    "params": {
+      "command": "solid.box",
+      "params": {
+        "length": 800,
+        "width": 400,
+        "height": 18,
+        "body_name": "Shelf"
+      }
+    }
+  },
+  {
+    "start": "cutlist.parts"
+  },
+  {
+    "widget": "Cutting Plan"
+  },
+  {
+    "widget": "Run cutting plan"
+  },
+  {
+    "expect": {
+      "errors": 0
+    }
+  }
+]

@@ -64,7 +64,7 @@ pub struct Row {
     pub count: u64,
     pub material: String,
     pub stock: Stock,
-    /// Empty until a manufacturing grain property is assigned.
+    /// Empty when unset, otherwise length, width, thickness or oblique relative to the stock box.
     pub grain: String,
     pub bodies: Vec<String>,
 }
