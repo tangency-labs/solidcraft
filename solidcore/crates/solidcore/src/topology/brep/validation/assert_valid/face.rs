@@ -21,8 +21,9 @@
 use std::collections::BTreeMap;
 
 use super::{base, class, geometry_key, seams, Cx};
-use crate::curve::curve::CurveKind;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::SS_NONE;
 use crate::geom::solution_array::SolutionType;
 use crate::intersect::point_class::{PointClassType, PointClassification};
@@ -387,32 +388,44 @@ fn assert_test_face34(k: &Kernel, b: &Brep, f: FaceId) -> Result<bool> {
             let i2 = b.edge(e2)?.interval;
             let t2 = b.edge(e2)?.tolerance;
             let t = if t1 > t2 { t1 } else { t2 };
-            // status ignored
-            let Some(found) = crate::error::ignored(
-                c1.global_coincidence_checker::<crate::topology::ObjectHandle>(
-                    k,
-                    &i1,
-                    c2,
-                    &i2,
-                    t,
-                    true,
-                    [None, None],
-                ),
-            )?
-            else {
-                continue;
-            };
-            // Check solutions for range intersections
-            if found
-                .solutions
-                .iter()
-                .any(|s| s.solution_type == SolutionType::RangeOfValues)
-            {
+            if partially_coincident(k, c1, &i1, c2, &i2, t)? {
                 return Ok(false);
             }
         }
     }
     Ok(true)
+}
+
+/// Test 34's verdict for one edge pair: whether `GlobalCoincidenceChecker` (with
+/// `snap_to_ends`) finds the curves over `i1` and `i2` coincident over a range at `t`.
+/// A failed check counts as no range (its status is ignored).
+pub(super) fn partially_coincident(
+    k: &Kernel,
+    c1: &Curve,
+    i1: &Extent1d,
+    c2: &Curve,
+    i2: &Extent1d,
+    t: f64,
+) -> Result<bool> {
+    let Some(found) = crate::error::ignored(
+        c1.global_coincidence_checker::<crate::topology::ObjectHandle>(
+            k,
+            i1,
+            c2,
+            i2,
+            t,
+            true,
+            [None, None],
+        ),
+    )?
+    else {
+        return Ok(false);
+    };
+    // Check solutions for range intersections
+    Ok(found
+        .solutions
+        .iter()
+        .any(|s| s.solution_type == SolutionType::RangeOfValues))
 }
 
 /// `sm_AssertTestFace39`: `false` when a vertex is used by two loops of the face.
