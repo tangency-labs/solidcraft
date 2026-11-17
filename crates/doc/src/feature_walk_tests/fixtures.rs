@@ -148,6 +148,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "cell_grid",
             json!({"type": "cell_grid", "sketch": 1, "profiles": {"type": "indices", "indices": [0]}, "sides": "cell_grid.sides", "size": "cell_grid.size", "web": "cell_grid.web", "angle": "cell_grid.angle", "margin": "cell_grid.margin", "anchor": ["cell_grid.x", "cell_grid.y", "cell_grid.z"], "depth": "cell_grid.depth"}),
         ),
+        (
+            "tab_slot",
+            json!({"type": "tab_slot", "tab_plates": [], "slot_plates": [], "next_plate_key": 3, "count": "tab_slot.count", "spacing": "tab_slot.spacing", "tab_width": "tab_slot.tab_width", "end_distance": "tab_slot.end_distance", "clearance": "tab_slot.clearance", "protrusion": "tab_slot.protrusion"}),
+        ),
         ("sheet_base", json!({"type": "sheet_base", "sketch": 1, "profiles": {"type": "all"}})),
         ("sheet_contour", json!({"type": "sheet_contour", "sketch": 1, "curves": ["l1"], "distance": "contour.distance"})),
         (
@@ -265,6 +269,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         | "boss" | "lip" | "snap_fit" | "rest" | "surface_offset" => {
             json!({"body": "B"})
         }
+        "tab_slot" => json!({"tab_plates": [{"key": 1, "body": "B", "near": o}], "slot_plates": [{"key": 2, "body": "B"}]}),
         "combine" => json!({"target": "B", "tools": ["B"]}),
         "pattern_rectangular" | "pattern_circular" | "pattern_path" | "mirror" => json!({"bodies": ["B"]}),
         "hole_simple" | "hole_drilled" | "hole_counterbore" | "hole_countersink" => json!({"points": {"sketch": 3, "ids": ["p"]}}),
