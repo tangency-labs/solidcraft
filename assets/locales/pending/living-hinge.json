@@ -1,0 +1,11 @@
+{
+  "en": { "cmd.solid_living_hinge": "Living Hinge" },
+  "ar": { "cmd.solid_living_hinge": "مفصل مرن" },
+  "de": { "cmd.solid_living_hinge": "Biegescharnier" },
+  "he": { "cmd.solid_living_hinge": "ציר גמיש" },
+  "ja": { "cmd.solid_living_hinge": "リビングヒンジ" },
+  "ko": { "cmd.solid_living_hinge": "리빙 힌지" },
+  "nb": { "cmd.solid_living_hinge": "Bøyehengsel" },
+  "vi": { "cmd.solid_living_hinge": "Bản lề dẻo" },
+  "zh": { "cmd.solid_living_hinge": "活动铰链" }
+}
