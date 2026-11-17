@@ -4,6 +4,7 @@
 //! decides, and ops does no float maths of its own.
 
 use solidcore::plate_contact::{self as pc, PairJoint, PairSkip, Plane};
+use solidcore::prism::profile::Region2;
 
 use crate::body::Body;
 use crate::contact::{copy_of, poisoned};
@@ -14,6 +15,7 @@ use crate::Result;
 pub type Pair = core::result::Result<PairJoint, PairSkip>;
 
 impl Answer for Pair {}
+impl Answer for Vec<Region2> {}
 
 impl Body {
     /// This body as the tab plate T against `slot` (S) on `p`, a plane of one of S's outward
@@ -52,5 +54,80 @@ impl Body {
                 pc::with_swap(|| Ok(forward), || pc::pair_at(k, &s, &t, q, tol))
             },
         )
+    }
+
+    /// This body as the slot plate S: its face region in `p` ([`solidcore::plate_contact::slot_face`],
+    /// in the `(u, w)` frame [`Body::plate_pair`] reads), what the slot checks of design 7.4
+    /// test a slot outline against. Empty when the body has no face in `p`. It does not change.
+    ///
+    /// # Errors
+    /// [`crate::Error::Refused`], in the kernel's words, for a `tol` not positive and finite or a
+    /// bad plane; those of the session.
+    pub fn slot_face(&self, p: Plane, tol: f64) -> Result<Vec<Region2>> {
+        poisoned(&[self])?;
+        run_on("plate_contact::slot_face", &[("s", self)], |k| {
+            let s = copy_of(k, self)?;
+            pc::slot_face(k, &s, p, tol)
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::make_box;
+    use solidcore::plate_contact::Contact;
+    use solidcore::tab_slot::{check_slot, slot_outline, SlotSkip};
+    use solidcore::Vec3;
+
+    const TOL: f64 = 1.0e-3;
+
+    /// F's Bottom (0,0,0)-(160,100,6) and P its top (z = 6, n = +z).
+    fn bottom() -> (Body, Plane) {
+        let b = make_box([0.0, 0.0, 0.0], [160.0, 100.0, 6.0]).unwrap();
+        (
+            b,
+            Plane {
+                normal: Vec3::Z,
+                offset: 6.0,
+            },
+        )
+    }
+
+    /// 16.2 touch: Wall (20,30,6)-(140,36,66) standing on P is a joint, touching at 0, 6 thick;
+    /// lifted to z = 10 it is `no_contact`, 4 apart. Neither body changes; tol 0 is refused.
+    #[test]
+    fn a_wall_on_p_is_a_touch_joint() {
+        let (s, p) = bottom();
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let joint = wall.plate_pair(&s, p, TOL).unwrap().expect("joint");
+        assert_eq!(joint.contact, Contact::Touch { delta: 0.0 });
+        assert!((joint.faces.thickness - 6.0).abs() < 1e-9, "{joint:?}");
+        let lifted = make_box([20.0, 30.0, 10.0], [120.0, 6.0, 60.0]).unwrap();
+        match lifted.plate_pair(&s, p, TOL).unwrap() {
+            Err(PairSkip::Contact(Contact::NoContact { distance })) => {
+                assert!((distance - 4.0).abs() < 1e-2, "{distance}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(wall.plate_pair(&s, p, 0.0).is_err());
+    }
+
+    /// The slot face through ops: one hole-free region; a slot on it is cut, one past x = 160 is
+    /// `at_edge`.
+    #[test]
+    fn the_slot_face_through_ops() {
+        let (s, p) = bottom();
+        let face = s.slot_face(p, TOL).unwrap();
+        assert_eq!(face.len(), 1, "{face:?}");
+        assert!(face[0].holes.is_empty());
+        let inside = slot_outline(70.0, 10.0, (30.0, 36.0), 0.1).unwrap();
+        assert_eq!(check_slot(&inside, &face[0], 0.5, TOL).unwrap(), None);
+        let past = slot_outline(155.0, 10.0, (30.0, 36.0), 0.1).unwrap();
+        assert_eq!(
+            check_slot(&past, &face[0], 0.5, TOL).unwrap(),
+            Some(SlotSkip::AtEdge)
+        );
+        assert!(s.slot_face(p, 0.0).is_err());
     }
 }
