@@ -19,9 +19,17 @@ fn one(ir: &CadIr) -> Solid {
     bodies.read.into_iter().next().unwrap().solid
 }
 
+/// The fit of a model of the unit cube's size at its tolerance.
+fn fit() -> geometry::Fit {
+    geometry::Fit {
+        tolerance: 1e-6,
+        extent: 20.0,
+    }
+}
+
 /// A solved surface read as a record surface, and whether it is reversed against CADIR's.
 fn record_surface(g: &SurfaceGeometry) -> (solidcore_record::brep::Surface, bool) {
-    match geometry::surface(g).unwrap() {
+    match geometry::surface(g, fit()).unwrap() {
         Some((geometry::FaceSurface::Record(s), reversed)) => (s, reversed),
         other => panic!("{other:?}"),
     }
@@ -263,7 +271,7 @@ fn a_polyline_with_decreasing_parameters_keeps_its_parameters() {
     let Some(geometry::Carrier::Curve {
         curve: solidcore_record::brep::Curve::Spline { knots, points },
         periodic: false,
-    }) = geometry::curve(&g).unwrap()
+    }) = geometry::curve(&g, fit()).unwrap()
     else {
         panic!("not a spline")
     };
@@ -403,6 +411,75 @@ fn a_sphere_face_with_no_boundary_is_the_whole_ball() {
     assert_eq!(s.brep.faces.len(), 1);
     let ball = 4.0 / 3.0 * std::f64::consts::PI * 125.0;
     assert!((volume(&s) - ball).abs() < 1e-6 * ball, "{}", volume(&s));
+}
+
+/// The cube's shell as one face with no loops on `sphere`: the whole of it.
+fn whole_ball(sphere: SolvedSurfaceGeometry) -> CadIr {
+    let mut ir = cube();
+    let shell = ir.model.shells.first().unwrap().clone();
+    let face = ir.model.faces.first().unwrap().clone();
+    *ir.model.shells.first_mut().unwrap() = cadmpeg_ir::topology::Shell::new(
+        shell.id.clone(),
+        shell.region.clone(),
+        vec![face.id.clone()],
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let surface = ir
+        .model
+        .surfaces
+        .iter_mut()
+        .find(|s| s.id == face.surface)
+        .unwrap();
+    surface.geometry = SurfaceGeometry::Solved(sphere);
+    let f = ir.model.faces.first_mut().unwrap();
+    f.loops = FaceLoops::unspecified(Vec::new());
+    f.sense = Sense::Forward;
+    ir
+}
+
+/// A placement 1e-14 short of a similarity (within the 64 ulp its columns may differ by) moves a
+/// sphere it places by up to 1e-14 of the sphere's size: within the tolerance on a ball of radius
+/// 5, which comes in placed, and past it on one of radius 1e8, which is refused
+/// with the reason. The same placement on both, so only the carrier's extent decides.
+#[test]
+fn a_placement_off_a_similarity_is_refused_on_a_carrier_too_large_for_its_rounding() {
+    use cadmpeg_ir::geometry::PlacedSurface;
+    use cadmpeg_ir::geometry::analytic::SphereSurface;
+    let near = cadmpeg_ir::transform::Transform::affine([
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0 + 1e-14, 0.0],
+    ])
+    .unwrap();
+    let placed = |radius: f64| {
+        let ball = SphereSurface::try_new(
+            Point3::new(5.0, 5.0, 5.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            radius,
+        )
+        .unwrap();
+        whole_ball(SolvedSurfaceGeometry::Transformed(
+            PlacedSurface::try_new(Box::new(SolvedSurfaceGeometry::Sphere(ball)), near).unwrap(),
+        ))
+    };
+    let s = one(&placed(5.0));
+    assert_eq!(s.brep.faces.len(), 1);
+    assert!(
+        matches!(s.brep.faces[0].surface, solidcore_record::brep::Surface::Sphere { radius, .. }
+            if (radius - 5.0).abs() < 1e-12),
+        "{:?}",
+        s.brep.faces[0].surface
+    );
+    let bodies = read_bodies(&placed(1e8), None);
+    assert!(bodies.read.is_empty());
+    assert!(
+        bodies.failures[0].message.contains("past the tolerance"),
+        "{:?}",
+        bodies.failures
+    );
 }
 
 /// A curve-less edge between two vertices at one point collapses, and the loops through it run on
