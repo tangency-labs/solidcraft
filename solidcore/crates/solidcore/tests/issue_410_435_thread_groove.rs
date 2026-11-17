@@ -116,14 +116,15 @@ fn cut(p: f64, r: f64, len: f64, depth: f64, flat: f64) -> (f64, f64) {
 }
 
 /// M44x1 on 4 mm (SolidCraft case 2209). On the helix-swept groove an edge ended 9.8e-6
-/// from its vertex; on the screw-motion groove the worst edge ends 3.54e-6 from its vertex,
+/// from its vertex; on the screw-motion groove the worst edge ended 3.54e-6 from its vertex,
 /// under half the vertex's tolerance, as the C++ reference gives on the same body (which
-/// passes SMLib's check there). The end fits leave that edge as it is.
+/// passes SMLib's check there). With the vertices placed by their steepest crossing (WR-410)
+/// the worst edge ends 2.05e-6 from its vertex, closer. The end fits leave that edge as it is.
 #[test]
 fn issue_435_m44x1_edges_end_at_their_vertices() {
     let (gap, tol) = cut(1.0, 22.0, 4.0, 0.61, 0.25);
     assert!(
-        gap < tol / 2.0 && (gap - 3.5414e-6).abs() < 1e-9,
+        gap < tol / 2.0 && (gap - 2.0451e-6).abs() < 1e-9,
         "gap {gap:e}, tolerance {tol:e}"
     );
 }
