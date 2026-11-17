@@ -64,7 +64,14 @@ pub(super) fn placed(ir: &CadIr, product: &str, read: Vec<Unplaced>, warnings: &
     // Bodies no occurrence reaches stay where they are, under a root named after the file.
     let loose: Vec<usize> = (0..read.len()).filter(|i| !walk.first.contains_key(i)).collect();
     if !loose.is_empty() {
-        let mut node = StepNode { name: product.to_string(), transform: IDENTITY, bodies: Vec::new(), children: Vec::new() };
+        let mut node = StepNode {
+            name: product.to_string(),
+            transform: IDENTITY,
+            bodies: Vec::new(),
+            items: Vec::new(),
+            left_out: Vec::new(),
+            children: Vec::new(),
+        };
         for i in loose {
             let Some(u) = read.get(i) else { continue };
             if !walk.room() {
@@ -116,7 +123,8 @@ impl Walk<'_, '_> {
             _ => None,
         };
         let name = definition.map_or_else(|| o.name.clone().unwrap_or_default(), product_name);
-        let mut node = StepNode { name: name.clone(), transform: IDENTITY, bodies: Vec::new(), children: Vec::new() };
+        let mut node =
+            StepNode { name: name.clone(), transform: IDENTITY, bodies: Vec::new(), items: Vec::new(), left_out: Vec::new(), children: Vec::new() };
         let label = if name.is_empty() { o.id.as_str().to_string() } else { name.clone() };
         if depth > IMPORT_MAX_DEPTH || stack.iter().any(|s| s == o.id.as_str()) {
             self.warnings.push("assembly nested too deeply or recursive: some components were left out".into());
