@@ -2,7 +2,19 @@
   "en": {
     "cmd.pointcloud_deviation": "Point Cloud Deviation"
   },
+  "ar": {
+    "cmd.pointcloud_deviation": "انحراف سحابة النقاط"
+  },
+  "he": {
+    "cmd.pointcloud_deviation": "סטיית ענן נקודות"
+  },
   "ja": {
     "cmd.pointcloud_deviation": "点群の偏差"
+  },
+  "vi": {
+    "cmd.pointcloud_deviation": "Độ lệch đám mây điểm"
+  },
+  "zh": {
+    "cmd.pointcloud_deviation": "点云偏差"
   }
 }
