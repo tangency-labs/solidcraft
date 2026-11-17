@@ -3328,13 +3328,16 @@ mod tests {
         h.app.home.open = false;
         h.app.preferences.look_at_anim = false;
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
-        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"origin":[500,0,0],"new_body":true})).unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[500,0,0],"operation":"new"})).unwrap();
         let bodies = h.app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
         assert!(bodies.len() >= 2, "{bodies:?}");
         let far = bodies[1].clone();
         h.app.run("select.set", json!({"items":[Sel::Body { name: bodies[0].clone() }]})).unwrap();
         h.frames(2);
-        let zoom = items(&h.app, &Target::Body { name: far.clone() }).into_iter().find(|i| i.id == "ui.zoomTo").expect("Zoom to Selection in the Browser menu");
+        let zoom = items(&h.app, &Target::Body { name: far.clone() })
+            .into_iter()
+            .find(|i| i.id == "ui.zoomTo")
+            .expect("Zoom to Selection in the Browser menu");
         assert_eq!(zoom.label, "Zoom to Selection");
         assert!(zoom.enabled);
         run_item(&mut h.app, &zoom, Pos2::ZERO);
