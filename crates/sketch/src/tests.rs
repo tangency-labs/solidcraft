@@ -2551,3 +2551,30 @@ fn circle_touching_two_caps_corner_closes_the_regions_there() {
         }
     }
 }
+
+#[test]
+fn mirror_axis_does_not_drift_when_dimensioning_mirrored_geometry() {
+    use ConstraintKind::*;
+    let mut sk = Sketch::new();
+    // axis vertical at x = 50, from (50,0) to (50,100)
+    let axis = sk.add_line(v(50.0, 0.0), v(50.0, 100.0), None, None, None).unwrap();
+    // primary point p left of axis
+    let p = sk.add_point(v(25.0, 25.0), None).unwrap();
+    // mirror point q right of axis
+    let q = sk.add_point(v(75.0, 25.0), None).unwrap();
+    sk.add_constraint(Symmetric { p, q, l: axis }, None).unwrap();
+    // fix axis orientation vertical
+    sk.add_constraint(Vertical { l: axis }, None).unwrap();
+    // dimension p to axis = 25 (distance)
+    sk.add_constraint(PointLineDistance { p, l: axis, value: 25.0 }, None).unwrap();
+    let before_axis = line_pts(&sk, axis);
+    // a "corner" point T
+    let t = sk.add_point(v(50.0, 100.0), None).unwrap();
+    // dimension p to T = 10
+    sk.add_constraint(Distance { p, q: t, value: 10.0 }, None).unwrap();
+    let _ = solve(&mut sk);
+    let after_axis = line_pts(&sk, axis);
+    // axis endpoints should not move
+    assert!((before_axis.0 - after_axis.0).len() < 1e-6, "axis moved");
+    assert!((before_axis.1 - after_axis.1).len() < 1e-6, "axis moved");
+}

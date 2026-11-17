@@ -2332,3 +2332,92 @@ fn a_join_past_an_imported_edge_that_lies_off_its_face_keeps_the_tool() {
     assert_eq!(corner().counts().unwrap(), [7, 15, 10]);
     joins_as_both_less_the_shared(&corner, &slab, true, [12, 27, 18], 1e-4);
 }
+
+/// `b` written to a record and read back, as the app hands its operands to the kernel.
+fn through_record(b: &Body) -> Body {
+    Body::from_record(&b.to_record().unwrap().0, true)
+        .unwrap()
+        .0
+}
+
+/// #17596: a block with a bore of radius 149 up to z = 100 and one of radius 143 on through the
+/// top, the bore's ceiling edge rounded 2 mm, less a cylinder of radius 155 up to z = 100. The
+/// tool's top merges with the ceiling, an annulus with the 143 bore as its inner loop, and the
+/// merge turns the surviving face over: the inner loop must move onto the face use that keeps its
+/// side. It landed on the other one, and the result was refused as no solid (in the app: "Face
+/// Loop has bad orientation", "Edgeuses share same region"). The round lies inside the tool (r 147
+/// to 149, z 98 to 100), so the result is the block less the r 155 cylinder up to z = 100 and the
+/// r 143 one above it: 400 · 400 · 108 − π (155² · 100 + 143² · 8).
+#[test]
+fn a_cylinder_cut_flush_with_a_rounded_bore_ceiling_is_one_valid_solid() {
+    all_fixes();
+    let block = make_box([-200.0, -200.0, 0.0], [400.0, 400.0, 108.0]).unwrap();
+    let bore = solidcore_ops::make_cylinder([0.0, 0.0, -1.0], 149.0, 101.0).unwrap();
+    let block = boolean(block, bore, BooleanOp::Subtract).unwrap().unwrap();
+    let upper = solidcore_ops::make_cylinder([0.0, 0.0, 99.0], 143.0, 10.0).unwrap();
+    let block = boolean(block, upper, BooleanOp::Subtract).unwrap().unwrap();
+    let ceiling = common::edge_at(&block, [0.0, 149.0, 100.0]);
+    blend(
+        &block,
+        Blend::Round,
+        &[ceiling],
+        &[2.0],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    assert!(block.check(CheckLevel::All).unwrap().is_valid());
+    let tool = solidcore_ops::make_cylinder([0.0, 0.0, -11.0], 155.0, 111.0).unwrap();
+    let r = boolean(
+        through_record(&block),
+        through_record(&tool),
+        BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    let want = 400.0 * 400.0 * 108.0 - PI * (155.0 * 155.0 * 100.0 + 143.0 * 143.0 * 8.0);
+    one_valid_solid_of_volume(&r, [9, 18, 12], want, 1e-9);
+}
+
+/// The closed drum of #16133: radius 105.5, 82 tall, walls 3 thick all round (a void of radius
+/// 102.5 from z = 3 to 79), a radius 9 hole through its axis.
+fn drum_with_a_hole() -> Body {
+    let drum = solidcore_ops::make_cylinder([0.0; 3], 105.5, 82.0).unwrap();
+    let void = solidcore_ops::make_cylinder([0.0, 0.0, 3.0], 102.5, 76.0).unwrap();
+    let drum = boolean(drum, void, BooleanOp::Subtract).unwrap().unwrap();
+    let hole = solidcore_ops::make_cylinder([0.0, 0.0, -1.0], 9.0, 97.0).unwrap();
+    boolean(drum, hole, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// #16133: Split Body keeps what lies on each side of a plane by intersecting with a box whose
+/// face lies in it, here the plane of the drum's void ceiling, z = 79. Above it, the box's bottom
+/// merges with the ceiling, an annulus whose inner loop is the hole, and the merge turns the
+/// surviving face over: the hole's loop must move onto the face use that keeps its side. It
+/// landed on the other one and the part was refused as no solid (in the app: "Face Loop has bad
+/// orientation", "Edgeuses share same region"). Operands go through the record as the app's do.
+/// Below: π (105.5² · 79 − 102.5² · 76 − 9² · 3); above, the 3 mm lid: π (105.5² − 9²) · 3.
+#[test]
+fn a_drum_cut_on_its_void_ceiling_with_a_hole_through_both_is_two_valid_solids() {
+    all_fixes();
+    let drum = drum_with_a_hole();
+    assert!(drum.check(CheckLevel::All).unwrap().is_valid());
+    let below = make_box([-200.0, -200.0, -10.0], [400.0, 400.0, 89.0]).unwrap();
+    let above = make_box([-200.0, -200.0, 79.0], [400.0, 400.0, 20.0]).unwrap();
+    for (tool, counts, want) in [
+        (
+            below,
+            [6, 9, 6],
+            PI * (105.5 * 105.5 * 79.0 - 102.5 * 102.5 * 76.0 - 9.0 * 9.0 * 3.0),
+        ),
+        (above, [4, 6, 4], PI * (105.5 * 105.5 - 9.0 * 9.0) * 3.0),
+    ] {
+        let r = boolean(
+            through_record(&drum_with_a_hole()),
+            through_record(&tool),
+            BooleanOp::Intersect,
+        )
+        .unwrap()
+        .unwrap();
+        one_valid_solid_of_volume(&r, counts, want, 1e-9);
+    }
+}

@@ -74,6 +74,10 @@ pub struct Sending {
     /// Times an upload was resumed or started again (parts missing, a hash mismatch): a few, then
     /// the report fails rather than going round for ever.
     redo: u8,
+    /// The current step went unanswered once and is being sent again.
+    again: bool,
+    /// The current request's method and path (`PUT /api/uploads/up1/parts/1`), for the log.
+    asked: String,
 }
 
 /// How the last report went.
@@ -204,6 +208,8 @@ fn start(app: &mut SolveApp, mut report: payload::Outgoing, folder: Option<PathB
         total,
         draft: None,
         redo: 0,
+        again: false,
+        asked: String::new(),
     });
 }
 
@@ -294,7 +300,9 @@ fn tick_send(app: &mut SolveApp) {
     };
     let token = s.draft.as_ref().map(|d| d.upload_token.clone()).unwrap_or_default();
     let Some(call) = s.call.take() else {
-        s.call = Some(Call::start(&http, request(&s, &token)));
+        let r = request(&s, &token);
+        s.asked = format!("{} {}", r.method, r.url.strip_prefix(&api::server()).unwrap_or_default());
+        s.call = Some(Call::start(&http, r));
         app.tickets.sending = Some(s);
         return;
     };
@@ -307,6 +315,7 @@ fn tick_send(app: &mut SolveApp) {
     // match starts again. A few times at most.
     if let (Step::Finish(i), Ok((status @ (409 | 422), _))) = (s.step, &reply) {
         s.redo = s.redo.saturating_add(1);
+        s.again = false;
         if s.redo > 3 {
             fail(app, &s, format!("the server did not take an attachment after several tries (HTTP {status})"));
             return;
@@ -324,7 +333,17 @@ fn tick_send(app: &mut SolveApp) {
     }
     let value = match api::answer(reply) {
         Ok(v) => v,
-        Err(api::Failure::Offline(why)) => return keep_for_later(app, s, why),
+        // No answer: the same step once more on a new connection, then the report waits.
+        Err(api::Failure::Offline(why)) if !s.again => {
+            log(app, format!("no answer to {} ({why}); trying once more", s.asked));
+            s.again = true;
+            app.tickets.sending = Some(s);
+            return;
+        }
+        Err(api::Failure::Offline(why)) => {
+            let why = format!("{why} (at {})", s.asked);
+            return keep_for_later(app, s, why);
+        }
         // A draft's upload token gone stale: the draft expired.
         Err(api::Failure::SignedOut) => return fail(app, &s, "the report's draft expired on the server (HTTP 401)".into()),
         Err(api::Failure::Refused(e)) => return fail(app, &s, e),
@@ -379,6 +398,7 @@ fn tick_send(app: &mut SolveApp) {
             next_file(&s.report, i + 1)
         }
     };
+    s.again = false;
     match step {
         Some(step) => {
             s.step = step;

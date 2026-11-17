@@ -47,7 +47,6 @@ pub struct DocSlot {
     pre_sketch_component: Option<crate::PreSketchComponent>,
     pre_edit_component: Option<crate::PreEditComponent>,
     view: DocView,
-    occurrence_move: Option<crate::browser::OccMove>,
     reveals: crate::browser::PendingReveals,
     agent_chat: crate::agent_chat::AgentChat,
     /// Its linked design files as the design last read them (`Documents::link_stamps`).
@@ -163,7 +162,6 @@ impl DocSlot {
             pre_sketch_component: None,
             pre_edit_component: None,
             view: DocView::default(),
-            occurrence_move: None,
             reveals: Default::default(),
             agent_chat: Default::default(),
             link_stamps: Vec::new(),
@@ -459,7 +457,6 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
         pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
-        occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
         reveals,
         agent_chat: slot.agent_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),

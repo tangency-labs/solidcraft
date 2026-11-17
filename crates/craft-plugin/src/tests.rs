@@ -226,6 +226,10 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     refused(&|v| v["runtime"]["entries"].as_array_mut().unwrap().push(json!({"name":"make"})), "runtime.entries");
     refused(&|v| v["runtime"]["commands"] = json!(["app.make"]), "runtime.commands");
     refused(&|v| v["runtime"]["limits"]["stack_kib"] = json!(1 << 20), "stack_kib");
+    // An importer may also check its result; a command may not ask to.
+    let mut evaluating = importer();
+    evaluating["capabilities"] = json!(["evaluate@0.1", "formats@0.1"]);
+    assert!(parse(&evaluating).is_ok());
     // A command claims no extension, reads no input folder and still finishes within 30 s.
     let command = |change: &dyn Fn(&mut Value), field: &str| {
         let mut value = manifest();
@@ -234,6 +238,7 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     };
     command(&|v| v["runtime"]["entries"] = json!([{"name":"make","extensions":["f3d"]}]), "extensions");
     command(&|v| v["runtime"]["permissions"] = json!({"input_folder":true}), "input_folder");
+    command(&|v| v["capabilities"] = json!(["commands@0.1", "evaluate@0.1"]), "capabilities");
     command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
 }
 
