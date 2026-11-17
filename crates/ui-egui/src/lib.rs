@@ -384,6 +384,7 @@ pub mod view_gizmo;
 mod view_memory;
 pub mod view_pick;
 mod view_tiles;
+mod view_window_drag;
 pub mod view_windows;
 pub mod viewport;
 mod viewport_details;
@@ -961,6 +962,7 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
+    view_window_drag: view_window_drag::State,
     view_windows: view_windows::Windows,
     /// Last OS title inputs; unchanged frames allocate nothing and send no title command.
     pub(crate) window_title: documents::WindowTitle,
@@ -1199,6 +1201,7 @@ impl SolveApp {
             open_meshing_next: false,
             frame_watch: Default::default(),
             docs: documents::Documents::default(),
+            view_window_drag: view_window_drag::State::default(),
             view_windows: view_windows::Windows::default(),
             window_title: Default::default(),
             applied_fonts_language: "en".into(),
@@ -2359,6 +2362,18 @@ impl SolveApp {
         }
         if render_workspace::start_interactive(self, id) {
             return;
+        }
+        match id {
+            "tab.view.pop_out" => {
+                let view = self.docs.views.active().id;
+                crate::design_view_ui::move_to_window(self, view, json!("new"));
+                return;
+            }
+            "tab.view.move_to_window" => {
+                crate::view_windows::cycle_view(self);
+                return;
+            }
+            _ => {}
         }
         // A display toggle leaves the current modelling tool and camera in place, and the ribbon
         // where it is: F6, the navigation bar and the navigator never went through `start`, so

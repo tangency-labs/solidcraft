@@ -1,6 +1,9 @@
 use serde_json::{Value, json};
 
-use super::{TabViewActivateParams, TabViewIdParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply};
+use super::{
+    TabViewActivateParams, TabViewBesideParams, TabViewIdParams, TabViewLayoutParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams,
+    TabViewRenameParams, TabViewReply,
+};
 use crate::Session;
 use crate::schema::tab_windows::{
     TabViewMoveToWindowParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply, TabWindowMoveReply,
@@ -10,7 +13,9 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<TabViewOpenParams>(), &["kind", "reuse", "subject"]);
+    assert_keys(input_schema_for::<TabViewOpenParams>(), &["kind", "reuse", "subject", "window"]);
+    assert_keys(input_schema_for::<TabViewLayoutParams>(), &["layout", "window"]);
+    assert_keys(input_schema_for::<TabViewBesideParams>(), &["edge", "id", "placement", "window"]);
     assert_keys(input_schema_for::<TabViewIdParams>(), &["id"]);
     assert_keys(input_schema_for::<TabViewActivateParams>(), &["id", "index", "window"]);
     assert_keys(input_schema_for::<TabViewRenameParams>(), &["id", "name"]);
@@ -29,6 +34,8 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
         ("tab.view.open", json!({}), json!({"reuse": false})),
         ("tab.view.open", json!({"kind": "sketch", "subject": "7"}), json!({"kind": "sketch", "subject": "7", "reuse": true})),
         ("tab.view.open", json!({"kind": "render", "reuse": true}), json!({"kind": "render", "reuse": true})),
+        ("tab.view.open", json!({"window": 0}), json!({"reuse": false, "window": 0})),
+        ("tab.view.open", json!({"window": null}), json!({"reuse": false})),
         ("tab.view.close", json!({}), json!({})),
         ("tab.view.close", json!({"id": 3}), json!({"id": 3})),
         ("tab.view.reopen", json!({}), json!({})),
@@ -42,7 +49,9 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
         ("tab.view.move", json!({"from": 0, "to": 2}), json!({"from": 0, "to": 2})),
         ("tab.view.layout", json!({"layout": "grid"}), json!({"layout": "grid"})),
         ("tab.view.layout", json!({"layout": "single"}), json!({"layout": "single"})),
+        ("tab.view.layout", json!({"layout": "side_by_side", "window": 3}), json!({"layout": "side_by_side", "window": 3})),
         ("tab.view.beside", json!({}), json!({"edge": "right"})),
+        ("tab.view.beside", json!({"window": 4}), json!({"edge": "right", "window": 4})),
         ("tab.view.beside", json!({"id": 2, "edge": "bottom"}), json!({"id": 2, "edge": "bottom"})),
         (
             "tab.view.beside",
@@ -95,6 +104,9 @@ fn bad_view_requests_are_refused() {
         ("tab.view.beside", json!({"id": 2, "placement": {"kind": "empty", "index": 0, "target": 1}})),
         ("tab.view.list", json!({"all": true})),
         ("tab.view.pop_out", json!({"id": "2"})),
+        ("tab.view.open", json!({"window": -1})),
+        ("tab.view.layout", json!({"layout": "grid", "window": 4_294_967_296_u64})),
+        ("tab.view.beside", json!({"window": "0"})),
     ] {
         assert!(s.execute(id, &params).is_err(), "{id} {params}");
     }
@@ -128,6 +140,7 @@ fn window_commands_check_and_echo_requests_without_editing_the_design() {
             json!({"view": 2, "window": "new", "display": 0, "level": "views_only"}),
             output_schema_for::<TabWindowMoveReply>(),
         ),
+        ("tab.view.move_to_window", json!({"view": 2, "window": 0}), json!({"view": 2, "window": 0}), output_schema_for::<TabWindowMoveReply>()),
         ("tab.window.list", Value::Null, json!({}), output_schema_for::<TabWindowListReply>()),
         ("tab.window.focus", json!({"window": 0}), json!({"window": 0}), output_schema_for::<TabWindowIdParams>()),
         ("tab.window.close", json!({"window": 1}), json!({"window": 1}), output_schema_for::<TabWindowCloseReply>()),
@@ -164,7 +177,13 @@ fn window_commands_refuse_malformed_requests() {
         ("tab.view.move_to_window", json!({"view": -1})),
         ("tab.view.move_to_window", json!({"view": "2"})),
         ("tab.view.move_to_window", json!({"view": 2, "unknown": true})),
-        ("tab.view.move_to_window", json!({"view": 2, "window": 1})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": "1"})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": {"new": null}})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": -1})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": 4_294_967_296_u64})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": 1, "display": 0})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": 1, "x": 0})),
+        ("tab.view.move_to_window", json!({"view": 2, "window": 1, "level": "views_only"})),
         ("tab.view.move_to_window", json!({"view": 2, "level": "clean"})),
         ("tab.view.move_to_window", json!({"view": 2, "display": -1})),
         ("tab.view.move_to_window", json!({"view": 2, "display": 4_294_967_296_u64})),
@@ -194,7 +213,8 @@ fn the_view_shortcuts_are_the_defaults() {
         ("tab.view.rename", Some("F2")),
         ("tab.view.close", None),
         ("tab.view.list", None),
-        ("tab.view.pop_out", None),
+        ("tab.view.pop_out", Some("Ctrl+Alt+O")),
+        ("tab.view.move_to_window", Some("Ctrl+Alt+W")),
     ] {
         assert_eq!(crate::find_command(id).map(|c| c.shortcut), Some(key), "{id}");
     }

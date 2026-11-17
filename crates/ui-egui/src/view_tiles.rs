@@ -28,7 +28,7 @@ const GUTTER: f32 = 12.0;
 /// The space between the cards and the edge of the free workspace.
 const MARGIN: f32 = 8.0;
 /// Height of a card's header.
-const HEADER: f32 = 28.0;
+pub(crate) const HEADER: f32 = 28.0;
 /// Corner radius of a card.
 const CARD_RADIUS: u8 = 8;
 
@@ -229,8 +229,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         Some((id, CardAction::Close)) => {
             crate::documents::view_close(app, id);
         }
-        Some((id, CardAction::PopOut)) => {
-            crate::design_view_ui::move_to_new_window(app, id);
+        Some((id, CardAction::MoveToWindow(window))) => {
+            crate::design_view_ui::move_to_window(app, id, window.map_or_else(|| serde_json::json!("new"), |id| serde_json::json!(id)));
         }
         None => {}
     }
@@ -272,7 +272,7 @@ pub(crate) fn cancel_placement_on_escape(app: &mut SolveApp, ctx: &egui::Context
     });
     let dragging = drag.is_some_and(|drag| ctx.cumulative_frame_nr().saturating_sub(drag.frame) <= 1)
         && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released());
-    app.docs.view_placement.take().is_some() || dragging
+    app.docs.view_placement.take().is_some() || dragging || crate::app_bar::view_drag_active(ctx, crate::documents::tab_strip_id(ctx.viewport_id()))
 }
 
 pub(crate) fn tab_drag(app: &mut SolveApp, ctx: &egui::Context, view: u64, pointer: Pos2, released: bool) {
@@ -563,7 +563,7 @@ enum CardAction {
     /// Stop showing this view in the window; it stays open, reached from the bar.
     Remove,
     Close,
-    PopOut,
+    MoveToWindow(Option<u32>),
 }
 
 /// The controls of the cards, each acting on its own view. The focused view's are
@@ -640,7 +640,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
             CardAction::Maximise => solidcraft_ui_text::tr_label("Maximise this view"),
             CardAction::Remove => solidcraft_ui_text::tr_label("Remove from this window"),
             CardAction::Close => solidcraft_ui_text::tr_label("Close view"),
-            CardAction::PopOut => solidcraft_ui_text::tr("multi_window.move_to_window"),
+            CardAction::MoveToWindow(_) => solidcraft_ui_text::tr("multi_window.move_to_window"),
         };
         let resp = resp.backing_on_hover_text(tip);
         if resp.hovered() {
@@ -664,7 +664,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
                 painter.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], ink);
                 painter.line_segment([c + vec2(-4.5, 4.5), c + vec2(4.5, -4.5)], ink);
             }
-            CardAction::PopOut => {}
+            CardAction::MoveToWindow(_) => {}
         }
         if resp.clicked() {
             action = Some(kind);
@@ -685,15 +685,34 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
             },
             |ui| {
                 crate::ui_kit::Menu::text(ui, app.tr("multi_window.move_to_window"), |ui| {
-                    crate::ui_kit::menu::button(ui, app.tr("multi_window.new_window"), "").clicked()
+                    let mut chosen = None;
+                    let enabled = crate::view_windows::can_create(app);
+                    let new = crate::ui_kit::menu::button_enabled(ui, app.tr("multi_window.new_window"), "window", enabled);
+                    if !enabled {
+                        new.clone().backing_on_hover_text(app.tr("multi_window.too_many"));
+                    }
+                    if new.clicked() {
+                        chosen = Some(CardAction::MoveToWindow(None));
+                    }
+                    crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::sep());
+                    crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::heading(app.tr("multi_window.open_windows")));
+                    for choice in crate::view_windows::window_choices(app).iter() {
+                        let id = format!("view.window.{}", choice.id);
+                        let mut item = crate::ui_kit::MenuItem::new(&id, &choice.label, "");
+                        item.checked = (choice.id == app.view_windows.current_window()).then_some(true);
+                        if item.show(ui).clicked() {
+                            chosen = Some(CardAction::MoveToWindow(Some(choice.id)));
+                        }
+                    }
+                    chosen
                 })
                 .inner
-                .unwrap_or(false)
+                .flatten()
             },
         );
-        if result.inner == Some(true) {
+        if let Some(chosen) = result.inner.flatten() {
             child.close();
-            action = Some(CardAction::PopOut);
+            action = Some(chosen);
         }
     }
     action
