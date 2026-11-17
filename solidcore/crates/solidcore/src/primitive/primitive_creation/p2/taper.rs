@@ -34,7 +34,7 @@ use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::composite_curve::{
     CompositeCurve, OffsetCornerType, OffsetDirection, OffsetMapAttribute, OffsetParams,
 };
-use crate::curve::curve::p3::{compute_crvs_normal_written, crvs_fix_gaps};
+use crate::curve::curve::p3::{compute_crvs_normal, crvs_fix_gaps};
 use crate::curve::curve::p4::fix_chain_curves_list;
 use crate::curve::curve::p5::crvs_cleanup;
 use crate::curve::curve::Curve;

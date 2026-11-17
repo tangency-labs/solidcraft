@@ -20,7 +20,7 @@
 //! computed.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
-use crate::curve::curve::p3::{compute_crvs_normal, compute_crvs_normal_written};
+use crate::curve::curve::p3::compute_crvs_normal_written;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
