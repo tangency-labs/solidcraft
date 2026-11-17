@@ -1631,6 +1631,49 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     assert_eq!(history, (s.undo.len(), s.redo.len(), s.evaluations));
 }
 
+/// #18096: Select Parallel Edges takes the straight edges parallel to one, by their exact lines:
+/// the four edges of a box that run along the picked one (two of them shortened by the round). With no parameters (command search, a
+/// key, the menu) it takes the selected edge. A curved edge is refused.
+#[test]
+fn select_parallel_edges_takes_a_box_edges_four_parallels_and_refuses_a_curved_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":20,"width":10,"height":5,"body_name":"Block"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 5, 5]], "radius": 1}));
+    let history = (s.undo.len(), s.redo.len());
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Block","point":[10,0,0]}]}));
+    assert_eq!(run(&mut s, "select.parallel_edges", json!({}))["selected"], 4);
+    for sel in &s.selection {
+        let Sel::Edge { body, point, .. } = sel else { panic!("not an edge: {sel:?}") };
+        assert_eq!(body, "Block");
+        assert!([0.0, 10.0].contains(&point.y) && [0.0, 5.0].contains(&point.z), "not one of the box's edges along x: {point:?}");
+    }
+    // Along y: the box's four, less the rounded one, plus the round's two tangent lines.
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Block","point":[20,5,0]}]}));
+    assert_eq!(run(&mut s, "select.parallel_edges", Value::Null)["selected"], 5);
+    let Some(Sel::Edge { index, .. }) = s.selection.first().cloned() else { panic!("no edge selected") };
+    assert_eq!(run(&mut s, "select.parallel_edges", json!({"body":"Block","edge":index}))["selected"], 5);
+    // An arc at the end of the round: its middle is 45 degrees round the axis at (1, y, 4).
+    let half = std::f64::consts::FRAC_1_SQRT_2;
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Block","point":[1.0 - half, 0, 4.0 + half]}]}));
+    let Some(Sel::Edge { index: arc, .. }) = s.selection.first().cloned() else { panic!("no arc selected") };
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"Block","point":[10,5,5]}]}));
+    let selected = s.selection.clone();
+    for params in [
+        json!({}),
+        json!({"body":"Block","edge":arc}),
+        json!({"body":"Block","edge":100_000}),
+        json!({"body":"missing","edge":0}),
+        json!({"edge":0}),
+        json!({"body":"Block","edge":-1}),
+        json!({"body":"Block","edge":0,"extra":1}),
+        json!([]),
+    ] {
+        assert!(s.execute("select.parallel_edges", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected);
+    }
+    assert_eq!(history, (s.undo.len(), s.redo.len()));
+}
+
 /// A body changed by a few hundred features in a row whose names nothing asks for, then
 /// filleted: reordering or moving an earlier feature evaluates them all again, and the fillet
 /// finds its edge by the names of the body before it, which are worked out from the body before
