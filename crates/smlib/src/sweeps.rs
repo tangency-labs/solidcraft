@@ -124,18 +124,44 @@ impl Brep {
     /// The planar `profile` turned `angle` radians (0 < angle <= 2 pi) right-handed about the
     /// axis through `origin` along `direction`, in the profile's plane (touching it at most).
     pub fn revolve(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], angle: f64, cap: bool) -> Result<Brep> {
-        let r = solidcore_ops::sweep::join_profile_arcs(profile)
-            .map_err(|e| match e {
-                solidcore_ops::Error::Argument => crate::Error::Argument,
-                e => crate::Error::Refused(e),
-            })
-            .and_then(|joined| core::sweep::revolve(&joined, origin, direction, angle, cap))
-            .map(Brep::made_core);
+        Self::revolve_profile(profile, origin, direction, angle, cap, false)
+    }
+
+    /// Like [`Self::revolve`], with contiguous pieces of the same circle certified and joined
+    /// before turning the profile.
+    pub fn revolve_joining_arcs(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], angle: f64, cap: bool) -> Result<Brep> {
+        Self::revolve_profile(profile, origin, direction, angle, cap, true)
+    }
+
+    fn revolve_profile(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], angle: f64, cap: bool, join_arcs: bool) -> Result<Brep> {
+        let revolve = |curves: &[Curve]| core::sweep::revolve(curves, origin, direction, angle, cap);
+        let (result, joined) = if join_arcs {
+            let join = || solidcore_ops::sweep::join_profile_arcs(profile);
+            let joined = match crate::stop::token() {
+                Some(stop) => solidcore_ops::cancel::within(&stop, join),
+                None => join(),
+            };
+            match joined {
+                Ok(curves) => (revolve(&curves), Some(curves)),
+                Err(e) => (
+                    Err(match e {
+                        solidcore_ops::Error::Argument => crate::Error::Argument,
+                        solidcore_ops::Error::Cancelled => crate::Error::Cancelled("smlib_revolve"),
+                        e => crate::Error::Refused(e),
+                    }),
+                    None,
+                ),
+            }
+        } else {
+            (revolve(profile), None)
+        };
+        let r = result.map(Brep::made_core);
+        // Replay the profile actually sent to the sweep, without needing the join recipe.
         trace::made(
             "revolve",
             &[],
             &r,
-            || json!({"profile": trace::curves(profile), "origin": origin, "direction": direction, "angle": angle, "cap": cap}),
+            || json!({"profile": trace::curves(joined.as_deref().unwrap_or(profile)), "origin": origin, "direction": direction, "angle": angle, "cap": cap}),
         );
         r
     }

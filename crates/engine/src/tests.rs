@@ -965,26 +965,30 @@ fn revolve_a_spherical_shell_off_the_origin() {
     }
 }
 
-#[test]
-fn a_revolved_arc_split_by_a_handle_path_keeps_one_face_and_takes_its_round() {
-    // #18537: the open leg cuts the pot profile into two arcs on the same circle.
-    // Revolving them as separate faces introduced a boundary through the handle junction.
-    let mut s = Session::default();
-    run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": true, "name": "Pot"}));
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [66.14378277661477, 0]], "ids": ["base"]}));
-    run(&mut s, "sketch.arc.center_point", json!({"center": [0, 75], "start": [66.14378277661477, 0], "end": [0, 175], "id": "round"}));
-    run(&mut s, "sketch.line", json!({"points": [[0, 175], [0, 0]], "ids": ["axis"]}));
-    run(&mut s, "sketch.line", json!({"points": [[0, 250], [40, 250]], "ids": ["top"]}));
+fn split_revolve_profile(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XZ", "flip": true, "name": "Pot"}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [66.14378277661477, 0]], "ids": ["base"]}));
+    run(s, "sketch.arc.center_point", json!({"center": [0, 75], "start": [66.14378277661477, 0], "end": [0, 175], "id": "round"}));
+    run(s, "sketch.line", json!({"points": [[0, 175], [0, 0]], "ids": ["axis"]}));
+    run(s, "sketch.line", json!({"points": [[0, 250], [40, 250]], "ids": ["top"]}));
     run(
-        &mut s,
+        s,
         "sketch.arc.center_point",
         json!({
             "center": [40, 190], "start": [40, 250], "end": [95.4327719506772, 167.0389940580946], "clockwise": true, "id": "bend"
         }),
     );
-    run(&mut s, "sketch.line", json!({"points": [[95.4327719506772, 167.0389940580946], [57.308972344637716, 75]], "ids": ["leg"]}));
-    run(&mut s, "sketch.finish", json!({}));
+    run(s, "sketch.line", json!({"points": [[95.4327719506772, 167.0389940580946], [57.308972344637716, 75]], "ids": ["leg"]}));
+    run(s, "sketch.finish", json!({}));
     assert_eq!(s.model.state().sketches[0].profiles[0].outer_curves.iter().filter(|id| *id == "round").count(), 2);
+}
+
+#[test]
+fn a_revolved_arc_split_by_a_handle_path_keeps_one_face_and_takes_its_round() {
+    // #18537: the open leg cuts the pot profile into two arcs on the same circle.
+    // Revolving them as separate faces introduced a boundary through the handle junction.
+    let mut s = Session::default();
+    split_revolve_profile(&mut s);
     run(&mut s, "solid.revolve", json!({"sketch": "Pot", "profiles": [{"curves": ["base", "round", "axis"]}], "axis": {"curve": "axis"}}));
     let faces = run(&mut s, "model.faces", json!({"body": "Body1"}));
     let names: Vec<&str> = faces["faces"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
@@ -1003,6 +1007,62 @@ fn a_revolved_arc_split_by_a_handle_path_keeps_one_face_and_takes_its_round() {
     assert_eq!(measured["body_count"], 1);
     assert_eq!(measured["bodies"][0]["closed"], true);
     assert!(measured["total"]["volume_mm3"].as_f64().unwrap() > before, "the concave junction round adds material");
+}
+
+#[test]
+fn an_old_split_revolve_reopens_with_both_named_faces() {
+    let mut s = Session::default();
+    split_revolve_profile(&mut s);
+    let params = json!({"sketch": "Pot", "profiles": [{"curves": ["base", "round", "axis"]}], "axis": {"curve": "axis"}});
+    let mut legacy_params = params.clone();
+    legacy_params["join_profile_arcs"] = json!(false);
+    run(&mut s, "solid.revolve", legacy_params);
+    let picks = [[100.0, 0.0, 75.0], [60.0, 0.0, 155.0]];
+    for (pick, name) in picks.iter().zip(["Lower", "Upper"]) {
+        run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "name": name}));
+    }
+
+    // The old format had no joining option. The planes hold the exact names of the two
+    // faces, as they would in a design saved before Revolve could join the arcs.
+    let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    legacy["format"] = json!("solidcraft/58");
+    legacy.as_object_mut().unwrap().remove("format_pending");
+    assert!(legacy["features"][1].get("join_profile_arcs").is_none());
+    let names = [2, 3].map(|i| legacy["features"][i]["plane"]["face"]["name"].as_str().unwrap().to_owned());
+    assert_eq!(names, ["F2:side:round#[F2:side:base]", "F2:side:round"]);
+
+    let dir = std::env::temp_dir().join(format!("solidcraft-split-revolve-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.solidcraft");
+    std::fs::write(&path, legacy.to_string()).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": path}));
+    let check = |s: &Session| {
+        let state = s.model.state();
+        let body = state.body("Body1").unwrap();
+        assert_eq!(body.body.face_count(), 3, "both original sphere faces and the bottom plane");
+        let faces: Vec<_> = names
+            .iter()
+            .zip(picks)
+            .map(|(name, pick)| {
+                let pick = Vec3::from(pick);
+                let (face, _) = solidcraft_doc::naming::face_on_body(body, name, pick).unwrap();
+                let (distance, exact_face) = body.body.nearest_face(pick).unwrap();
+                assert!(distance < 1e-5, "{name}: {distance}");
+                assert_eq!(face, exact_face, "{name}");
+                face
+            })
+            .collect();
+        assert_ne!(faces[0], faces[1]);
+        let planes = crate::view::construction_planes(s);
+        assert!(planes.iter().any(|(_, name, _)| name == "Lower") && planes.iter().any(|(_, name, _)| name == "Upper"));
+    };
+    check(&reopened);
+    // An ordinary redefine of an old feature keeps its topology, including when its
+    // original command parameters did not specify an arc-joining mode.
+    run(&mut reopened, "timeline.redefine", json!({"feature": "Revolve1", "command": "solid.revolve", "params": params}));
+    check(&reopened);
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

@@ -90,6 +90,7 @@ fn schemas_and_the_key_check_agree() {
             "face",
             "face_body",
             "fixed",
+            "join_profile_arcs",
             "name",
             "operation",
             "participants",
