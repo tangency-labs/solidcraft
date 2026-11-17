@@ -37,10 +37,11 @@
 //! too short to build, though its closed curve's two ends meet (the fork refuses an uncut
 //! hole circle beside a crossing as three loops at one point). Where the offset's results
 //! are not merged (the local operation's included), a face whose loops cross is refused
-//! ([`crate::error::offset::LoopCrossing::Unmerged`]) where, at a crossing, the walls the
-//! two loops come from leave the face on one side: only the merge cuts them where they
-//! pass through each other. Where at every crossing they leave it on opposite sides
-//! (solidcraft#18374: a boss whose foot the drafted side now runs inside), they meet only
+//! ([`crate::error::offset::LoopCrossing::Unmerged`]): only the merge cuts the walls the
+//! crossing loops come from where they pass through each other. In the local operation,
+//! whose final gate refuses a body that is not sound, a face whose loops cross is rebuilt
+//! where at every crossing the walls of the two loops leave it on opposite sides
+//! (solidcraft#18374: a boss whose foot the drafted side now runs inside): they meet only
 //! at the crossing, and each is split there before the stitch.
 //!
 //! Not in the fork (solidcraft#16983): a face of one loop is resolved as well. Where the
@@ -53,7 +54,7 @@
 
 use std::collections::BTreeMap;
 
-use super::p1::OffsetExecutive;
+use super::p1::{OffsetExecutive, OffsetOperation};
 use super::p2::OffsetNotifications;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p8::CurveIntersectOptions;
@@ -784,8 +785,9 @@ impl OffsetExecutive {
         // rebuilt) or the face keeps loops that cross (`SmFace` test #38, the face left as
         // it is). Body type does not tell where that happens: an open sheet with a hole
         // through a face of its own has the same two walls as a solid. An unmerged offset
-        // whose face's loops cross is therefore refused, unless at every crossing the
-        // walls of the two loops leave the face on opposite sides of it (solidcraft#18374:
+        // whose face's loops cross is therefore refused, unless it is the local operation
+        // and at every crossing the walls of the two loops leave the face on opposite
+        // sides of it (solidcraft#18374:
         // a boss on a face whose drafted side now runs inside the boss's foot): there the
         // two walls meet only at the crossing, on their edges, and each wall's edge is
         // split at it (`split_walls_at_crossings`), so the stitch joins every stretch to
@@ -794,9 +796,11 @@ impl OffsetExecutive {
         // stitched alike before they are moved into the body.
         if !self.merge_results() {
             // (a face turned inside out whole, crossing nowhere, comes of walls that
-            // passed each other)
+            // passed each other; only the local operation's final gate holds the stitched
+            // body to a sound solid, so the other unmerged offsets stay refused)
             let crossings = crossings_of(kernel, b, &edgeuses, &uvs, &cuts)?;
-            if crossings.is_empty()
+            if self.operation() != OffsetOperation::LocalOperation
+                || crossings.is_empty()
                 || !self.walls_part_at_crossings(kernel, original, b, f, &crossings, tol_3d)?
             {
                 return Err(unresolved(LoopCrossing::Unmerged));
