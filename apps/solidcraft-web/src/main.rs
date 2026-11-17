@@ -1446,6 +1446,8 @@ mod web {
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
+    // The kernel's fix set, named to solidcore-ops before any call runs on it.
+    solidcraft_engine::kernel::start();
     web::start();
 }
 

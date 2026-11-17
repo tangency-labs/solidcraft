@@ -1190,6 +1190,8 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
+    // The kernel's fix set, named to solidcore-ops before any call runs on it.
+    solidcraft_engine::kernel::start();
     solidcraft_ui_egui::i18n::install();
     solidcraft_look::install_tables();
     solidcraft_ui_egui::workspace::install_tabs();

@@ -222,6 +222,7 @@ pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_pris
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
 pub use solidcraft_smlib::hold_a_kernel;
+pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::{SplitTool, face_split_if_on_face, has_cap_at, split_body, split_faces, split_faces_with_map};
