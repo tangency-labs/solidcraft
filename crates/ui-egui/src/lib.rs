@@ -905,6 +905,9 @@ pub struct SolveApp {
     control_answering: Vec<control_job::ControlJob>,
     /// Most recent completed inspection per session and package, ordered by request.
     plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
+    /// Set by the desktop app ([`Self::share_plugin_grants`]): the approved plugin grants are kept
+    /// in the plugins folder's grant store too, shared with the command line and headless MCP.
+    plugin_grant_store: Option<solidcraft_engine::plugin::grant_store::Synced>,
     plugin_slots: plugin_slots::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
@@ -1152,6 +1155,7 @@ impl SolveApp {
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
             plugin_inspection_versions: Default::default(),
+            plugin_grant_store: None,
             plugin_slots: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
@@ -1507,6 +1511,14 @@ impl SolveApp {
         panel_runtime::load_preferences(self, &v);
     }
 
+    /// Keep approved plugin grants in the plugins folder's grant store, which the command line and
+    /// headless MCP read and write too, instead of in these preferences alone. Once the store
+    /// exists it is the whole truth; the first time, the grants approved in this app move to it.
+    /// Call after [`Self::load_prefs`].
+    pub fn share_plugin_grants(&mut self) {
+        crate::plugins::share_grants(self);
+    }
+
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
         self.control_rx = Some(rx);
         self
@@ -1654,11 +1666,16 @@ impl SolveApp {
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
             _ => r,
         };
-        if let Ok(v) = &r {
-            if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
-                plugins::persist_grants(self);
+        // A grant taken back here that the shared store still holds is not taken back: say so.
+        let r = match r {
+            Ok(v) if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") => {
+                let saved = plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
+                saved.map(|()| v)
             }
+            r => r,
+        };
+        if let Ok(v) = &r {
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -2130,6 +2147,12 @@ impl SolveApp {
         // Folding the ribbon, or showing it whole, keeps the tab it shows (no switch to VIEW).
         if id == "view.ribbon_tabs_only" {
             let _ = self.run(id, json!({}));
+            return;
+        }
+        // The View ribbon's Save View captures the on-screen camera, like the Browser's
+        // New Named View action. Programmatic view.save still takes an explicit camera.
+        if id == "view.save" {
+            let _ = browser::save_view(self, None);
             return;
         }
         if id == "timeline.play" {
@@ -4280,7 +4303,9 @@ impl SolveApp {
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
                 if self.preferences.plugin_grants != self.session.plugin_state.grants {
-                    plugins::persist_grants(self);
+                    if let Err(e) = plugins::persist_grants(self) {
+                        log::warn!("plugins: {e}");
+                    }
                     plugin_slots::invalidate(self);
                 }
                 let _ = reply.send(v);

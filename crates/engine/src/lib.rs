@@ -959,7 +959,7 @@ impl Session {
             project_construction: false,
             disabled_plugins: Default::default(),
             plugin_limits: plugin::default_host_limits(),
-            plugin_state: Default::default(),
+            plugin_state: plugin::AppState::for_process(),
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,

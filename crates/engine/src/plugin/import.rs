@@ -114,6 +114,7 @@ pub fn describe(session: &Session) -> Vec<ImporterInfo> {
 /// Run `importer` on `path` and make its design this session's, as a new design that is not saved
 /// anywhere yet. Nothing changes unless the whole import succeeds; a trap names the plugin and file.
 pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
+    session.plugin_state.refresh_stored();
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
     let package = with_installed(session, &importer.folder, || read_package(&importer.folder))?;
     if package.manifest.id != importer.plugin_id || session.disabled_plugins.contains(&importer.plugin_id) {
