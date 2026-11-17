@@ -1774,6 +1774,10 @@ impl TouchNavigation {
             let egui::Event::Touch { device_id, id, phase, pos, .. } = event else { continue };
             match phase {
                 egui::TouchPhase::Start => {
+                    if ended_last {
+                        *self = Self::default();
+                        ended_last = false;
+                    }
                     if self.contacts.is_empty() {
                         self.owned = can_start && visible(*pos);
                         self.origin = Some(*pos);
@@ -3887,6 +3891,24 @@ mod tests {
         assert_eq!(motion.centre, Some(centre));
         assert_eq!(motion.delta, egui::Vec2::ZERO);
         assert_eq!(motion.zoom, 1.0);
+    }
+
+    #[test]
+    fn touchscreen_new_contact_after_end_in_same_frame_starts_new_gesture() {
+        use egui::TouchPhase::{End, Move, Start};
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        let mut time = 0.0;
+        let mut touch = super::TouchNavigation::default();
+        touch_motion_frame(&mut touch, &ctx, vec![finger(1, Start, 300.0, 300.0)], &mut time, rect);
+        let transition = touch_motion_frame(&mut touch, &ctx, vec![finger(1, End, 300.0, 300.0), finger(2, Start, 350.0, 300.0)], &mut time, rect);
+        assert!(transition.active);
+        assert_eq!(transition.delta, egui::Vec2::ZERO);
+        assert_eq!(touch.contacts.len(), 1);
+        let motion = touch_motion_frame(&mut touch, &ctx, vec![finger(2, Move, 370.0, 310.0)], &mut time, rect);
+        assert!(motion.active);
+        assert_eq!(motion.mode, Some(super::NavMode::Pan));
+        assert_eq!(motion.delta, egui::vec2(20.0, 10.0));
     }
 
     #[test]

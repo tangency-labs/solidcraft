@@ -410,7 +410,7 @@ pub fn point_set_summary(points: &[[f64; 2]]) -> Result<PointSetSummary> {
 pub fn point_displacement(from: [f64; 2], to: [f64; 2]) -> Result<[f64; 2]> {
     let (from, to) = (point2(from)?, point2(to)?);
     q::point_displacement(from, to)
-        .map(|v| v.to_array())
+        .map(solidcore::Vec2::to_array)
         .map_err(status)
 }
 
@@ -1442,7 +1442,8 @@ pub(crate) mod tests {
     fn point_set_summary_and_displacement_adapt_kernel_results() {
         let summary = point_set_summary(&[[0.0, 0.0], [6.0, 0.0], [0.0, 6.0]]).unwrap();
         assert_eq!(summary.centroid, [2.0, 2.0]);
-        let expected = (2.0 * 2.0_f64.sqrt() + 4.0 * 5.0_f64.sqrt()) / 3.0;
+        // (2√2 + 4√5) / 3, evaluated independently.
+        let expected = 3.924_233_011_581_783;
         assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
         assert_eq!(
             point_displacement([2.0, 2.0], [5.0, 6.0]).unwrap(),
