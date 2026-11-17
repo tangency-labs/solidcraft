@@ -47,23 +47,39 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == CMD).then(|| {
         (
             Kind::LivingHinge(LivingHinge::default()),
-            vec![SelInput::new("Profiles", PROFILES, true), SelInput::new("Plate", BODIES, true), SelInput::new("Anchor", VERTICES, false)],
+            vec![
+                SelInput::new("ui.profiles", PROFILES, true),
+                SelInput::new("ui.living_hinge.plate", BODIES, true),
+                SelInput::new("Anchor", VERTICES, false),
+            ],
         )
     })
 }
 
 pub fn rows(_: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, _: &[SelInput]) -> bool {
-    choice_row(ui, "Bend axis", "living_hinge_axis", &mut h.axis, &["Along X", "Along Y", "At an angle"]);
+    choice_row(
+        ui,
+        "ui.living_hinge.bend_axis",
+        "living_hinge_axis",
+        &mut h.axis,
+        &["ui.living_hinge.along_x", "ui.living_hinge.along_y", "ui.living_hinge.at_angle"],
+    );
     let mut enter = false;
     if h.axis == 2 {
-        enter |= expr_row(ui, "Angle", &mut h.angle);
+        enter |= expr_row(ui, "ui.angle", &mut h.angle);
     }
-    enter |= expr_row(ui, "Slot length", &mut h.slot_length);
-    enter |= expr_row(ui, "Bridge", &mut h.bridge);
-    enter |= expr_row(ui, "Row spacing", &mut h.row_spacing);
-    enter |= expr_row(ui, "Slot width", &mut h.slot_width);
-    choice_row(ui, "Clip", "living_hinge_clip", &mut h.clip, &["Run out", "Shorten", "Whole"]);
-    enter |= expr_row(ui, "Margin", &mut h.margin);
+    enter |= expr_row(ui, "ui.living_hinge.slot_length", &mut h.slot_length);
+    enter |= expr_row(ui, "ui.living_hinge.bridge", &mut h.bridge);
+    enter |= expr_row(ui, "ui.living_hinge.row_spacing", &mut h.row_spacing);
+    enter |= expr_row(ui, "ui.living_hinge.slot_width", &mut h.slot_width);
+    choice_row(
+        ui,
+        "ui.living_hinge.clip",
+        "living_hinge_clip",
+        &mut h.clip,
+        &["ui.living_hinge.run_out", "ui.living_hinge.shorten", "ui.living_hinge.whole"],
+    );
+    enter |= expr_row(ui, "ui.living_hinge.margin", &mut h.margin);
     enter
 }
 
