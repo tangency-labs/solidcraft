@@ -85,4 +85,4 @@ mod tests {
     fn all_duplicate_rows_remain_in_original_order() {
         assert_eq!(order(&[("a", "1", false), ("a", "2", false), ("a", "3", false)], refs), Some(vec![0, 1, 2]));
     }
-     }
+}
