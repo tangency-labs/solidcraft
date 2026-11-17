@@ -2874,7 +2874,7 @@ fn coons_side_angle(
         let Some(side_frames) = side_frames else {
             continue;
         };
-        let mut angles = Vec::with_capacity(side_frames.len());
+        let mut angles = Vec::new();
         for &(s, frame) in side_frames {
             let uv = coons_station_uv(ii, s, &su, &sv);
             // next to a collapsed corner the station is then skipped or left out
