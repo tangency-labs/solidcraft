@@ -160,23 +160,33 @@ fn resolve_plate(s: &Session, sketch: u64, profiles: &ProfileSel, cmd: &str) -> 
 /// Adds the feature's report (what the evaluation cut) to its reply.
 fn with_report(s: &Session, reply: &mut Value) {
     let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return };
-    let st = s.model.state();
-    let Some(r) = st.living_hinge_report(id) else { return };
+    let Some(fields) = report(s, id) else { return };
     let Some(o) = reply.as_object_mut() else { return };
-    for (k, v) in [
-        ("slots", Value::from(r.slots)),
-        ("rows", r.rows.into()),
-        ("whole", r.whole.into()),
-        ("shortened", r.shortened.into()),
-        ("run_out", r.run_out.into()),
-        ("left_out", r.left_out.into()),
-        ("cut_length_mm", r.cut_length.into()),
-        ("outline_length_mm", r.outline_length.into()),
-        ("open_area_mm2", r.open_area.into()),
-        ("band_width_mm", r.band_width.into()),
-    ] {
-        o.insert(k.into(), v);
-    }
+    o.extend(fields);
+}
+
+/// What the evaluation counted for the Living Hinge feature `id`, keyed as the create reply has it
+/// (`timeline.inspect`'s `report` reads the same); `None` while the feature has no report.
+pub(crate) fn report(s: &Session, id: u64) -> Option<serde_json::Map<String, Value>> {
+    let st = s.model.state();
+    let r = st.living_hinge_report(id)?;
+    Some(
+        [
+            ("slots", Value::from(r.slots)),
+            ("rows", r.rows.into()),
+            ("whole", r.whole.into()),
+            ("shortened", r.shortened.into()),
+            ("run_out", r.run_out.into()),
+            ("left_out", r.left_out.into()),
+            ("cut_length_mm", r.cut_length.into()),
+            ("outline_length_mm", r.outline_length.into()),
+            ("open_area_mm2", r.open_area.into()),
+            ("band_width_mm", r.band_width.into()),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect(),
+    )
 }
 
 #[cfg(test)]

@@ -161,3 +161,19 @@ fn living_hinge_speed() {
         );
     }
 }
+
+#[test]
+fn timeline_inspect_reports_what_the_hinge_counted() {
+    let mut s = wall();
+    let reply = hinge(&mut s, json!({"targets": ["Wall"]})).unwrap();
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature": "CornerHinge"}));
+    let report = inspected["report"].as_object().unwrap_or_else(|| panic!("no report: {inspected}"));
+    assert_eq!(report.len(), 10, "{inspected}");
+    for (k, v) in report {
+        assert_eq!(&reply[k], v, "{k}: {inspected} vs {reply}");
+    }
+    // A feature that keeps no report has no `report` key.
+    let first = s.doc.features[0].id;
+    let plate = run(&mut s, "timeline.inspect", json!({"feature": first}));
+    assert!(plate.get("report").is_none(), "{plate}");
+}
