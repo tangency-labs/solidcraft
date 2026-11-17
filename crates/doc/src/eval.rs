@@ -452,6 +452,16 @@ impl ModelBody {
         })
     }
 
+    /// Whether [`ModelBody::plan_mesh_in_place_at`] is made already (tried, at least), so asking
+    /// for it does not plan now: a placed copy's is its definition's, shared by every copy.
+    pub fn plan_mesh_in_place_made(&self, q: crate::display_quality::DisplayQuality) -> bool {
+        let cells = match self.mesh_placement.as_deref() {
+            Some(placed) => placed.plan_mesh_cells(),
+            None => &self.plan_mesh,
+        };
+        cells.get(q.index()).is_some_and(|cell| cell.get().is_some())
+    }
+
     /// [`ModelBody::plan_mesh_at`] as a shared mesh and the move that places it, as
     /// [`ModelBody::mesh_in_place`] does for the reference mesh.
     pub fn plan_mesh_in_place_at(&self, q: crate::display_quality::DisplayQuality) -> Option<(Arc<Mesh>, crate::Mat)> {
@@ -13059,9 +13069,11 @@ mod world_placement_cache_tests {
                             bodies: vec!["Support".into()],
                             translate: [translate.x.to_string().into(), translate.y.to_string().into(), translate.z.to_string().into()],
                             rotate_axis: Some(axis.into()),
+                            rotate_about: None,
                             origin: origin.map(crate::point_expr),
                             angle: Some(text.into()),
                             copy: false,
+                            copy_frames: vec![],
                         },
                         None,
                     )

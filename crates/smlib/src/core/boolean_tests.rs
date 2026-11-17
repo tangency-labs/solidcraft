@@ -13,7 +13,7 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::mass::integrator::properties::brep_area;
 use solidcore::primitive::primitive_creation::p1::create_rectangle;
 
-use super::boolean::{boolean, boolean2d, edge_closes, imprint, union_all};
+use super::boolean::{boolean, boolean2d, imprint, union_all};
 use super::{Body, counts, make_box, make_cylinder, make_sphere, run, solid_count, to_arrays, volume, with_body};
 use crate::export::native;
 use crate::{BooleanOp, Error};
@@ -234,20 +234,6 @@ fn boolean2d_combines_overlapping_squares() {
     }
     let (a, far) = (rectangle(0.0, 0.0, 10.0, 10.0), rectangle(20.0, 0.0, 10.0, 10.0));
     assert!(boolean2d(&a, &far, BooleanOp::Intersect).unwrap().is_none(), "disjoint squares intersected");
-}
-
-/// `closed_nonmanifold`'s test of an edge, as the capi's: an edge whose wire or edgeuse query
-/// fails makes the body not closed non-manifold (false), never an error that fails the boolean.
-#[test]
-fn closed_nonmanifold_takes_a_failed_edge_query_as_false() {
-    let failed = || solidcore::SolidError::null_pointer("GetEdgeuses");
-    assert!(edge_closes(Ok(false), Ok(4)));
-    assert!(edge_closes(Ok(false), Ok(8)));
-    assert!(!edge_closes(Ok(false), Ok(2)));
-    assert!(!edge_closes(Ok(false), Ok(6)));
-    assert!(!edge_closes(Ok(true), Ok(4)));
-    assert!(!edge_closes(Ok(false), Err(failed())));
-    assert!(!edge_closes(Err(failed()), Ok(4)));
 }
 
 /// Two 10 mm cubes touching along one edge, joined: a closed body whose two solids meet along

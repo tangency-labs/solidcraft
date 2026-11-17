@@ -2959,7 +2959,8 @@ mod tests {
         assert!(context::complete(&h.app));
         let projection = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
         let exact = live_cad::selection_geometry(&h.app).unwrap();
-        let face = &exact.body.record().faces[0];
+        let native = exact.faces.iter().position(|owner| matches!(owner, live_cad::ExactFaceOwner::Face(0))).unwrap();
+        let face = &exact.body.record().faces[native];
         let [[a, b], [c, d]] = face.domain;
         let chart = solidcraft_engine::geom::brep::eval::SurfaceEval::new(face.parameters()).unwrap();
         let point = chart.point([a + 0.37 * (b - a), c + 0.63 * (d - c)]).unwrap();
@@ -3025,7 +3026,8 @@ mod tests {
     fn delayed_native_face_clicks_apply_additive_selection_and_toggles_in_order() {
         let (mut h, first, projection) = exact_face_press_fixture_with_segments([2, 1, 1]);
         let exact = live_cad::selection_geometry(&h.app).unwrap();
-        let face = &exact.body.record().faces[1];
+        let native = exact.faces.iter().position(|owner| matches!(owner, live_cad::ExactFaceOwner::Face(1))).unwrap();
+        let face = &exact.body.record().faces[native];
         let [[a, b], [c, d]] = face.domain;
         let chart = solidcraft_engine::geom::brep::eval::SurfaceEval::new(face.parameters()).unwrap();
         let second = chart.point([a + 0.37 * (b - a), c + 0.63 * (d - c)]).unwrap();
@@ -3044,6 +3046,7 @@ mod tests {
         };
         h.frame_with(events(points[0], true, false));
         let first_answer = face_press::solve_for_test(&h.app).unwrap();
+        assert!(matches!(first_answer, Ok(face_pick::Answer::Hit { owner: face_pick::Owner::Face(0), .. })));
         let first_result = face_press::response_for_test(&mut h.app).unwrap();
         h.frame_with(events(points[0], false, false));
         h.frame_with(events(points[1], true, true));
@@ -3054,8 +3057,9 @@ mod tests {
         first_result.send(first_answer).unwrap();
         h.frames(1);
         assert_eq!(h.app.forms_prototype.elements, BTreeSet::from([Element::Face(0)]));
-        for expected in [BTreeSet::from([Element::Face(0), Element::Face(1)]), BTreeSet::from([Element::Face(1)])] {
+        for (owner, expected) in [(1, BTreeSet::from([Element::Face(0), Element::Face(1)])), (0, BTreeSet::from([Element::Face(1)]))] {
             let answer = face_press::solve_for_test(&h.app).unwrap();
+            assert!(matches!(answer, Ok(face_pick::Answer::Hit { owner: face_pick::Owner::Face(id), .. }) if id == owner));
             face_press::response_for_test(&mut h.app).unwrap().send(answer).unwrap();
             h.frames(1);
             assert_eq!(h.app.forms_prototype.elements, expected);

@@ -1948,3 +1948,33 @@ fn a_pattern_keeps_the_names_of_a_left_out_bodys_copies() {
     run(&mut s, "timeline.suppress", json!({"feature": a, "suppressed": false}));
     assert_eq!(copies(&s), before, "every copy has its name back");
 }
+
+/// Placing a part many times moves none of its bodies' records: the placed world keeps each
+/// part's record with each placement's motion, and a placement's record is moved only when its
+/// own exact geometry is needed. Every placement of a large assembly placed a hundred times was
+/// moved as it was placed, tens of gigabytes.
+#[test]
+fn placing_a_part_many_times_moves_no_record_until_one_is_needed() {
+    let mut s = Session::default();
+    let c = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
+    for k in 0..3 {
+        run(&mut s, "solid.cylinder", json!({"base": [12 * k, 0, 0], "radius": 5, "height": 20, "body_name": format!("B{k}")}));
+    }
+    run(&mut s, "component.activate", json!({"component": 0}));
+    for k in 1..=10 {
+        run(&mut s, "occurrence.copy", json!({"component": c["component"], "translate": [0, 40 * k, 0]}));
+    }
+    let before = solidcraft_kernel::lazy_moves_made();
+    let world = s.world_state().unwrap();
+    assert_eq!(world.bodies.len(), 3 * 11);
+    // Their shapes are drawn, named and framed from the part's: meshes, face counts, outlines,
+    // whether they are closed (the viewport asks every frame it builds).
+    for b in &world.bodies {
+        let _ = (b.body.face_count(), b.mesh_in_place(), b.outline_bounds(), b.is_closed());
+    }
+    assert_eq!(solidcraft_kernel::lazy_moves_made(), before, "no placement's record moved to place or draw it");
+    // A measure of one placement needs its own geometry: that one is moved, once.
+    let placed = world.bodies.iter().find(|b| b.placed_definition().is_some()).unwrap();
+    let _ = placed.body.record();
+    assert_eq!(solidcraft_kernel::lazy_moves_made(), before + 1);
+}
