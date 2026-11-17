@@ -39,7 +39,9 @@ mod tests;
 
 pub use crate::cell_grid::{MAX_CELLS as MAX_SLOTS, MAX_COORD, MIN_SIZE};
 pub use near::{clean_crossing, component, near_set, near_union, outside, NearEdge};
-pub use plan::{closed_edges, frame_box, meets, near_loop, plan, slot_region};
+pub use plan::{
+    closed_edges, frame_box, frame_loop, frame_point, meets, near_loop, plan, slot_region,
+};
 pub use rows::{plan_rows, plan_rows_zoned, RowSpan};
 pub use spans::{chain_ids, clean_ends, row_crossings, row_spans, row_zone};
 

@@ -64,19 +64,35 @@ pub fn frame_box(loops: &[Vec<NearEdge>]) -> FrameBox {
 /// rounding: a line or chord end within [`ON_EDGE`] of the arc end it meets is moved onto it, so
 /// both edges agree on which side of a row their common point lies.
 pub fn near_loop(lp: &Loop2) -> Option<Vec<NearEdge>> {
+    frame_loop(lp, 0.0)
+}
+
+/// The sketch point `p` in the hinge frame of `angle` (design 1a): `(p·û, p·v̂)` with
+/// `û = (cos α, sin α)` along the slots and `v̂ = (−sin α, cos α)` across the rows. An angle of 0
+/// leaves `p` as it is, bit for bit.
+#[must_use]
+pub fn frame_point(p: (f64, f64), angle: f64) -> (f64, f64) {
+    let (s, c) = angle.sin_cos();
+    (p.0 * c + p.1 * s, p.1 * c - p.0 * s)
+}
+
+/// [`near_loop`] of a sketch loop `lp` in the hinge frame of `angle` ([`frame_point`]): every
+/// point turned into the frame, an arc's angles less `angle`, then the arc ends snapped.
+pub fn frame_loop(lp: &Loop2, angle: f64) -> Option<Vec<NearEdge>> {
+    let at = |p: Vec2| frame_point((p.x, p.y), angle);
     let mut out = Vec::with_capacity(lp.segs.len());
     for seg in &lp.segs {
         match *seg {
-            Seg2::Line { a, b } => out.push(NearEdge::Line((a.x, a.y), (b.x, b.y))),
+            Seg2::Line { a, b } => out.push(NearEdge::Line(at(a), at(b))),
             Seg2::Arc {
                 center,
                 radius,
                 start,
                 sweep,
             } => out.push(NearEdge::Arc {
-                center: (center.x, center.y),
+                center: at(center),
                 radius,
-                start,
+                start: start - angle,
                 sweep,
             }),
             Seg2::Cubic { .. } | Seg2::Conic { .. } | Seg2::Bezier { .. } => {
@@ -85,7 +101,7 @@ pub fn near_loop(lp: &Loop2) -> Option<Vec<NearEdge>> {
                     points
                         .iter()
                         .zip(points.iter().skip(1))
-                        .map(|(p, q)| NearEdge::Chord((p.x, p.y), (q.x, q.y))),
+                        .map(|(&p, &q)| NearEdge::Chord(at(p), at(q))),
                 );
             }
         }
@@ -322,7 +338,8 @@ fn crossing_vs(x: &Carrier, y: &Carrier, out: &mut Vec<f64>) {
                 out.push(a.1 + t * r.1);
             }
         }
-        (Carrier::Line(a, b), Carrier::Circle(c, r)) | (Carrier::Circle(c, r), Carrier::Line(a, b)) => {
+        (Carrier::Line(a, b), Carrier::Circle(c, r))
+        | (Carrier::Circle(c, r), Carrier::Line(a, b)) => {
             line_circle(a, b, c, r, out);
         }
         (Carrier::Circle(c0, r0), Carrier::Circle(c1, r1)) => {
@@ -346,7 +363,12 @@ fn critical_vs(a: &[Vec<NearEdge>], b: &[Vec<NearEdge>]) -> Vec<f64> {
     for e in a.iter().chain(b).flatten() {
         match *e {
             NearEdge::Line(p, q) | NearEdge::Chord(p, q) => vs.extend([p.1, q.1]),
-            NearEdge::Arc { center, radius, start, sweep } => {
+            NearEdge::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => {
                 vs.push(center.1 + radius * start.sin());
                 vs.push(center.1 + radius * (start + sweep).sin());
                 for t in [FRAC_PI_2, -FRAC_PI_2] {
