@@ -1575,6 +1575,49 @@ fn resolve_appearance(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> 
     }
 }
 
+/// A display-only growth axis, anchored to construction coordinates through moves and copies.
+/// Invalid saved grain has no preview; it is never inferred from the tessellation.
+fn wood_finish_frame(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> Option<[[f32; 3]; 2]> {
+    if app.session.colored_components.is_some() {
+        return None;
+    }
+    let axis = app.session.doc.grain_direction(b).ok()??;
+    let origin = b.grain_frame.as_ref().map_or(Vec3::ZERO, |frame| solidcraft_engine::doc::apply_point(&frame.matrix, Vec3::ZERO));
+    if !origin.is_finite() || [origin.x, origin.y, origin.z].iter().any(|v| v.abs() > 1e9) {
+        return None;
+    }
+    Some([origin.to_f32(), axis.to_f32()])
+}
+
+/// Whether `look` carries a built-in wood recipe: its colour, opacity and optical parameters equal
+/// the library oak or a starter wood preset. A look's name is inert, so a custom colour that borrows
+/// a wood name gets no figure, and a renamed wood recipe keeps it.
+fn is_wood_look(look: &solidcraft_engine::doc::appearance::Look) -> bool {
+    use solidcraft_engine::doc::{appearance, appearance_pack};
+    type Recipe = ([u8; 3], f64, Option<solidcraft_engine::doc::pbr_appearance::PbrParameters>);
+    static WOOD: std::sync::OnceLock<Vec<Recipe>> = std::sync::OnceLock::new();
+    WOOD.get_or_init(|| {
+        appearance::library("Wood - Oak")
+            .into_iter()
+            .chain(
+                appearance::OPAQUE_FINISHES
+                    .iter()
+                    .filter(|(name, ..)| name.starts_with("Wood - "))
+                    .filter_map(|(name, ..)| appearance::library(name)),
+            )
+            .chain(
+                appearance_pack::STARTER_PACK
+                    .iter()
+                    .filter(|preset| preset.category == appearance_pack::Category::Wood)
+                    .filter_map(|preset| preset.opaque_look().ok()),
+            )
+            .map(|wood| (wood.color, wood.opacity, wood.pbr))
+            .collect()
+    })
+    .iter()
+    .any(|(color, opacity, pbr)| *color == look.color && *opacity == look.opacity && *pbr == look.pbr)
+}
+
 /// How a body whose faces all share one class may be drawn from its plan: opaque on any GPU
 /// path; faded or see-through only where the renderer blends them order-independently (the
 /// sorted fallback needs the triangles on the CPU). `None`: faces of different classes, which
@@ -2732,7 +2775,18 @@ fn body_scene(
                 // A copy drawn finer than the others (zoomed in on) is drawn from its own plan, in
                 // its face slots: shared, they would name no motion, and a joint drag would leave it.
                 .filter(|_| repeated_copy(app, b) && refined(app, b).is_none())
-                .map(|definition| (definition, look_key(&s.doc, b, &appearance.faces, colored)));
+                .map(|definition| {
+                    let look = look_key(&s.doc, b, &appearance.faces, colored);
+                    // A slot's material holds one wood grain frame, so copies with grain share
+                    // slots only where their frames match: each copy's figure follows its own
+                    // placement.
+                    let look = wood_finish_frame(app, b).map_or(look, |grain| {
+                        let mut h = std::collections::hash_map::DefaultHasher::new();
+                        (look, grain.map(|v| v.map(f32::to_bits))).hash(&mut h);
+                        h.finish()
+                    });
+                    (definition, look)
+                });
             let slots = match copy {
                 Some((definition, look)) => {
                     let key = copy_keys.entry((definition, look, faded)).or_insert_with(|| format!("\u{0}placed {definition:x} {look:x} {faded}"));
@@ -2801,6 +2855,15 @@ fn body_scene(
         arena.set_material(slots.instance, finish(base, body_pbr));
         let no_looks = std::collections::HashMap::new();
         let face_looks = if ghosted { &no_looks } else { &resolved.face_looks };
+        // Ghost Frame Members are drawn in the plain body colour, with no wood figure.
+        let wood_frame = wood_finish_frame(app, b).filter(|_| !ghosted);
+        let body_look = s.doc.model_body_look(b);
+        if let Some(frame) = wood_frame
+            && body_look.as_ref().is_some_and(is_wood_look)
+        {
+            arena.set_wood(slots.body, frame);
+            arena.set_wood(slots.instance, frame);
+        }
         let faces = b.body.face_count();
         // A face falls back to the body's own slot only when its face slots run short (the arena
         // full): only then do the copies' faces differ, each copy having a colour slot of its own.
@@ -2834,6 +2897,11 @@ fn body_scene(
                     let pbr = look.map_or(body_pbr, |l| l.pbr.filter(|_| finishes && opacity >= 0.999));
                     let material = finish(color, pbr);
                     arena.set_material(slot, material);
+                    if let Some(frame) = wood_frame
+                        && look.or(body_look.as_ref()).is_some_and(is_wood_look)
+                    {
+                        arena.set_wood(slot, frame);
+                    }
                     face_colors.push(slot);
                     face_classes.push(class);
                     if !face_looks.is_empty() {
@@ -2994,6 +3062,7 @@ fn finish(color: Color32, pbr: Option<solidcraft_engine::doc::pbr_appearance::Pb
         ior: p.dielectric_ior() as f32,
         pbr: true,
         two_sided: false,
+        wood: None,
     })
 }
 

@@ -39,6 +39,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, grain: &mut Grain) -> bool {
         }
     }
     ui.label(app.tr("ui.grain_preview"));
+    ui.label(app.tr("ui.wood_finish_preview"));
     enter
 }
 
