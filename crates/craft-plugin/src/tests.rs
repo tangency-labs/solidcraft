@@ -75,7 +75,7 @@ fn named_files_permissions_require_access_and_unique_names() {
 fn hostile_manifest_fields_return_errors() {
     assert!(matches!(
         parse_manifest(&serde_json::to_vec(&manifest()).unwrap(), "another-folder"),
-        Err(HostError::InvalidManifest { field, reason }) if field == "id" && reason.contains("does not match")
+        Err(HostError::InvalidManifest { field, reason }) if field == "id" && reason.contains("does not match") && reason.contains("rename the folder to")
     ));
     for change in [
         |value: &mut Value| value["runtime"]["module"] = json!("../plugin.wasm"),

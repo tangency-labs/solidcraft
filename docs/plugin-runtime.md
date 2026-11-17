@@ -27,7 +27,9 @@ supplies an owned scratch session and adopts its edits only after a successful c
    stored grants. See [Installing](plugins.md#installing).
 2. `plugin.inspect` reads bounded bytes through the caller's existing file scope and returns
    the manifest and content approval hash. It neither instantiates the component nor invokes
-   a manifest function. Metadata can therefore be reviewed before code runs.
+   a manifest function. Metadata can therefore be reviewed before code runs. The package folder
+   must be named after the plugin's `id`, as Install names it; `plugin.check` accepts any folder
+   name and says when it differs.
 3. The user reviews the package and explicitly calls `plugin.run` with that exact hash, an
    exported entry and JSON parameters. The package is read once for this call; the bytes whose
    hash was checked are the bytes compiled and executed. Changing the files afterward cannot
