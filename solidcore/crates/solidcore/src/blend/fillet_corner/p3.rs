@@ -2646,39 +2646,49 @@ fn mixed_corner_rails_cross(
 pub const FACE_CLOSES_TO_A_POINT: &str = "a face beside the blended edge narrows to a point here, \
      where the edge touches another edge of that face tangentially, so no blend of any size fits";
 
-/// Not upstream (#16404): whether a face around the vertex closes to a cusp between a blended
-/// edge and an edge not blended there: in some face's loop the two edges leave the vertex along
-/// one tangent, within `ang_tol_deg` degrees and in the same sense, so the face's corner angle
-/// between them is zero (a boss's base circle tangent to the rim of the face it stands on). A
-/// round with any width there runs off that face, whatever its size. The walk is
+/// Not upstream (#16404): whether a face around `vertex` closes to a cusp between a blended
+/// edge and an edge of the other convexity not blended there: in some face's loop the two edges
+/// leave the vertex along one tangent, within `tangency_tol_radians` and in the same sense, so
+/// the face's corner angle between them is zero (a boss's concave base circle tangent to the
+/// convex rim of the face it stands on). The blend's contact line on that face is squeezed
+/// between the two edges, and past the other edge it would have to roll on the far side of the
+/// faces, which a blend cannot cross to (as a tangent chain does not run on into an edge of the
+/// other convexity): no blend of any size fits. Where both are convex or both concave the blend
+/// may run over the other edge, so that is not this case; nor are two edges that run on into
+/// each other (opposite senses), two uses of one edge, a pair both or neither blended, an edge
+/// whose convexity there is not decided ([`crate::query::edge_turn::convex_at`]), and a tangent
+/// that cannot be evaluated or is shorter than `SM_EFF_ZERO`. The walk is
 /// [`FilletCorner::create_noting_roll_overs`]': each step is one face's corner at the vertex,
-/// the edge use leaving it and its clockwise neighbour arriving at it. Two edges that run on
-/// into each other (opposite senses), two uses of one edge, a pair both or neither blended, and
-/// a tangent that cannot be evaluated or is shorter than `SM_EFF_ZERO` are not this case.
-/// `solver_eus`: the blended edge uses at the vertex, the first leaving it.
+/// the edge use leaving it and its clockwise neighbour arriving at it. `solver_eus`: the
+/// blended edge uses at the vertex, the first leaving it.
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a walk that does not close or an edge use without a
-/// neighbour, radial partner or edge.
+/// neighbour, radial partner or edge; those of the convexity test.
 pub fn face_closes_to_a_point(
     k: &Kernel,
-    b: &Brep,
+    b: &mut Brep,
+    vertex: VertexId,
     solver_eus: &[EdgeuseId],
-    ang_tol_deg: f64,
+    tangency_tol_radians: f64,
 ) -> Result<bool> {
     let Some(&start_eu) = solver_eus.first() else {
         return Ok(false);
     };
-    let edge_of = |eu: EdgeuseId| -> Result<EdgeId> {
+    // the convexity test's smooth angle, in (0, pi / 2)
+    if !(tangency_tol_radians > 0.0 && tangency_tol_radians < std::f64::consts::FRAC_PI_2) {
+        return Ok(false);
+    }
+    let edge_of = |b: &Brep, eu: EdgeuseId| -> Result<EdgeId> {
         eu1::edge(b, eu)?.ok_or_else(|| invalid(OP_CREATE, "edge use without edge"))
     };
     let blended = solver_eus
         .iter()
-        .map(|&eu| edge_of(eu))
+        .map(|&eu| edge_of(b, eu))
         .collect::<Result<Vec<_>>>()?;
     // the edge use's tangent at its start (`at` 0) or end (`at` 1), along its own sense
-    let tangent = |eu: EdgeuseId, at: f64| -> Option<Vec3> {
+    let tangent = |b: &Brep, eu: EdgeuseId, at: f64| -> Option<Vec3> {
         crate::topology::edgeuse::p3::normalized_evaluate_read_only(k, b, eu, at, false, true)
             .ok()
             .and_then(|e| e.first_deriv)
@@ -2695,13 +2705,22 @@ pub fn face_closes_to_a_point(
         let leaving = eu;
         let arriving = eu1::cw_edgeuse(b, leaving)?
             .ok_or_else(|| invalid(OP_CREATE, "edge use without clockwise neighbour"))?;
-        let (e0, e1) = (edge_of(leaving)?, edge_of(arriving)?);
+        let (e0, e1) = (edge_of(b, leaving)?, edge_of(b, arriving)?);
         if e0 != e1 && blended.contains(&e0) != blended.contains(&e1) {
             // both pointing away from the vertex
-            if let (Some(d0), Some(d1)) = (tangent(leaving, 0.0), tangent(arriving, 1.0)) {
-                let ang = ignored(d0.angle_between(-d1))?;
-                if ang.is_some_and(|a| rad_to_deg(a) < ang_tol_deg) {
-                    return Ok(true);
+            let cusp = match (tangent(b, leaving, 0.0), tangent(b, arriving, 1.0)) {
+                (Some(d0), Some(d1)) => ignored(d0.angle_between(-d1))?
+                    .is_some_and(|a| a < tangency_tol_radians),
+                _ => false,
+            };
+            if cusp {
+                let convex = |b: &mut Brep, e: EdgeId| {
+                    crate::query::edge_turn::convex_at(k, b, e, vertex, tangency_tol_radians)
+                };
+                if let (Some(c0), Some(c1)) = (convex(b, e0)?, convex(b, e1)?) {
+                    if c0 != c1 {
+                        return Ok(true);
+                    }
                 }
             }
         }

@@ -2180,9 +2180,10 @@ impl<'target> FilletSession<'target> {
                     roll_over_classify.then_some(&mut *roll_overs),
                 )?;
                 // Not upstream (#16404): a face beside a blended edge that closes to a point
-                // at the vertex, between that edge and one not blended there, leaves no room
-                // for a round of any size, so the corner is refused saying so, in place of the
-                // unsupported corner or the later failure it would otherwise be. A round that
+                // at the vertex, between that edge and one of the other convexity not blended
+                // there, leaves no room for a blend of any size, so the corner is refused
+                // saying so, in place of the unsupported corner or the later failure it would
+                // otherwise be. A round that
                 // runs out at the vertex (the degenerate corner) has no width there and builds.
                 if !made
                     .as_ref()
@@ -2208,8 +2209,9 @@ impl<'target> FilletSession<'target> {
                         && crate::blend::fillet_corner::p3::face_closes_to_a_point(
                             k,
                             target,
+                            vertex,
                             &edgeuses,
-                            crate::math::rad_to_deg(tangency_tol_radians),
+                            tangency_tol_radians,
                         )?
                     {
                         let location = crate::topology::vertex::point(target, vertex).ok();
