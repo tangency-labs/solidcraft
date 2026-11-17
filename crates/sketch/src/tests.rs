@@ -2427,13 +2427,13 @@ fn a_spline_ending_where_two_lines_cross_a_circle_does_not_stop_the_cut() {
     sk.add_line(v(0.0, 0.0), v(-2.3016510816076967, 1.5428434089881773), None, None, Some("l1")).unwrap();
     sk.add_line(v(0.0, 0.0), v(1.440261156344587, 2.367194814046595), None, None, Some("l2")).unwrap();
     let areas: Vec<f64> = find_profiles(&sk).iter().map(|p| p.area).collect();
-    // The sectors between the lines: the angle from one line to the other, and the rest.
-    let (a1, a2) = (1.5428434089881773_f64.atan2(-2.3016510816076967), 2.367194814046595_f64.atan2(1.440261156344587));
-    let small = (a1 - a2) * r * r / 2.0;
     // The two sectors and the band between the circle and the spline.
     assert_eq!(areas.len(), 3, "{areas:?}");
-    for want in [small, PI * r * r - small] {
-        assert!(areas.iter().any(|a| (a - want).abs() < 1e-3 * want), "no sector of {want}: {areas:?}");
+    // The sectors' areas in mm² as the issue reports them for the circle and the two lines alone
+    // (87.5° and the rest of the disc of radius 2.08, given to four decimals). On main the disc
+    // stays whole, one profile of 13.5918.
+    for want in [3.3029, 10.2889] {
+        assert!(areas.iter().any(|a| (a - want).abs() < 1e-4), "no sector of {want}: {areas:?}");
     }
 }
 
