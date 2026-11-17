@@ -1943,7 +1943,9 @@ fn weld_corner(sk: &mut Sketch, p: &Value) {
                 !matches!(other.kind, ConstraintKind::Coincident { .. }) && points.contains(&o) && points.contains(&q)
             });
             let linked = (0..sk.curves.len()).any(|c| sk.is_linked_curve(c) && sk.curves.get(c).is_some_and(|x| x.kind.uses(o)));
-            (o != 0 && !twice && !linked).then_some(o)
+            // A partner with a place of its own (fixed, or set by an expression) would lose it.
+            let placed = sk.points.get(o).is_some_and(|pt| pt.fixed || pt.exprs.is_some());
+            (o != 0 && !twice && !linked && !placed).then_some(o)
         });
         let Some(o) = partner else { return };
         for c in sk.curves.iter_mut() {

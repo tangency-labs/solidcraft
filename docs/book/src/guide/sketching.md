@@ -131,7 +131,8 @@ into reference geometry that doesn't form profiles. Modify tools include trim (T
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
 and all go when you let go, in one undo step (`sketch.trim.path`). Fillet also rounds a corner
-where a conic or a control-point spline meets another curve: the curve is cut back exactly to the
+where a conic or a non-periodic control-point spline meets a line, an arc, a conic or another
+such spline: the curve is cut back exactly to the
 tangent point and keeps its id. A spline keeps its degree and its knots past the cut. Such a
 corner cannot stay as a virtual sharp corner, so a corner that a dimension measures to is refused
 there, and so is a constraint that holds something on the cut curve. Fit-point splines are not

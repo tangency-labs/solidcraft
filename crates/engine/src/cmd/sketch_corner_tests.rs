@@ -788,3 +788,49 @@ fn rounds_with_a_conic_or_spline_side_refuse_with_the_cause_named() {
         .clone();
     refused(&mut s, "sketch.fillet", json!({"a": l, "b": sp, "radius": 1}), &format!("`{sp}` starts and ends at the corner"));
 }
+
+#[test]
+fn a_freeform_corner_keeps_what_its_line_side_and_its_partner_point_hold() {
+    let line_conic = |s: &mut Session| {
+        let l = curves(&run(s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
+        let c = curves(&run(s, "sketch.conic", json!({"start": format!("{l}.end"), "apex": [20, 5], "end": [20, 10], "rho": 0.5})))[0].clone();
+        (l, c)
+    };
+    // An equal length on the line side would measure the shortened line.
+    let mut s = new_sketch();
+    let (l, _) = line_conic(&mut s);
+    let other = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]], "connect": false})))[0].clone();
+    run(&mut s, "sketch.constraint.equal", json!({"a": l, "b": other}));
+    let before = sk(&s);
+    let e = s.execute("sketch.fillet", &json!({"point": format!("{l}.end"), "radius": 1})).unwrap_err().to_string();
+    assert!(e.contains(&format!("measures the length or midpoint of `{l}`")), "{e}");
+    assert_eq!(sk(&s), before);
+    // A rational spline whose weights differ: its conic pieces run on their own parameter.
+    let mut s = new_sketch();
+    let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
+    let sp = curves(&run(&mut s, "sketch.spline.control_point", json!({"points": [format!("{l}.end"), [15, 5], [20, 10]]})))[0].clone();
+    let mut k = sk(&s);
+    let ci = k.curve_index(&sp).unwrap();
+    if let Some(solidcraft_sketch::CurveKind::Spline { degree, nurbs, .. }) = k.curves.get_mut(ci).map(|c| &mut c.kind) {
+        *degree = 2;
+        *nurbs = Some(solidcraft_sketch::Nurbs { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], weights: vec![1.0, 2.0, 3.0] });
+    }
+    let e = crate::cmd::sketch_corner_freeform::round_freeform_corner(&mut k, &json!({"point": format!("{l}.end")}), 1.0, "sketch.fillet")
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains(&format!("`{sp}`, a rational spline whose weights differ")), "{e}");
+    // A corner drawn as two points held coincident is welded only where the partner has no place
+    // of its own: a fixed partner keeps its point.
+    let mut s = new_sketch();
+    let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
+    let c = curves(&run(&mut s, "sketch.conic", json!({"start": [10, 0], "apex": [20, 5], "end": [20, 10], "rho": 0.5})))[0].clone();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{l}.end"), "b": format!("{c}.start")}));
+    let mut k = sk(&s);
+    let partner = k.resolve_point(&format!("{c}.start")).unwrap();
+    let id = k.points[partner].id.clone();
+    k.points[partner].fixed = true;
+    super::weld_corner(&mut k, &json!({"a": l, "b": c}));
+    let kept = k.point_index(&id).expect("the fixed partner stays");
+    assert!(k.points[kept].fixed);
+    assert_ne!(k.resolve_point(&format!("{l}.end")), k.resolve_point(&format!("{c}.start")));
+}

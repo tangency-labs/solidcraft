@@ -75,6 +75,7 @@ pub(super) fn round_freeform_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &st
         }
     }
     refuse_kept_corner(sk, q, [ca, cb], cmd)?;
+    refuse_line_relations(sk, [ca, cb], cmd)?;
     let Some(pc) = sk.point(q) else { return Ok(None) };
     let side = |c: usize| Side::new(sk, c, q).ok_or_else(|| bad(cmd, format!("`{}` has no shape", id_of(sk, c))));
     let (sa, sb) = (side(ca)?, side(cb)?);
@@ -129,6 +130,11 @@ fn refuse_side(sk: &Sketch, c: usize, q: usize, cmd: &str) -> Result<()> {
             };
             return Err(bad(cmd, format!("not supported yet: a fillet on `{id}`, {why}")));
         }
+        // A rational span's exact conic runs on a parameter of its own once its end weights
+        // differ, so a cut placed by that parameter would miss the tangent point on the knots.
+        CurveKind::Spline { nurbs: Some(n), .. } if n.weights.windows(2).any(|w| matches!(w, [u, v] if u != v)) => {
+            return Err(bad(cmd, format!("not supported yet: a fillet on `{id}`, a rational spline whose weights differ")));
+        }
         _ => {}
     }
     Ok(())
@@ -151,6 +157,28 @@ fn refuse_curve_holds(sk: &Sketch, c: usize, q: usize, cmd: &str) -> Result<()> 
         }
         let id = id_of(sk, c);
         return Err(bad(cmd, format!("`{}` holds something on `{id}`, and the fillet cuts `{id}` back, which would change what it holds", k.id)));
+    }
+    Ok(())
+}
+
+/// A line side is cut short too, so an equal length or a midpoint on it would measure the
+/// shorter line. A line fillet keeps the original side as construction geometry through the
+/// sharp corner for these, which a corner with a conic or spline side cannot keep.
+fn refuse_line_relations(sk: &Sketch, sides: [usize; 2], cmd: &str) -> Result<()> {
+    for c in sides {
+        if !matches!(sk.curves.get(c).map(|x| &x.kind), Some(CurveKind::Line { .. })) {
+            continue;
+        }
+        let measures = |k: &ConstraintKind| {
+            matches!(*k, ConstraintKind::Equal { a, b } if a == c || b == c) || matches!(*k, ConstraintKind::Midpoint { l, .. } if l == c)
+        };
+        if let Some(k) = sk.constraints.iter().find(|k| measures(&k.kind)) {
+            let id = id_of(sk, c);
+            return Err(bad(
+                cmd,
+                format!("`{}` measures the length or midpoint of `{id}`, and the fillet shortens `{id}`, which would change what it measures", k.id),
+            ));
+        }
     }
     Ok(())
 }
