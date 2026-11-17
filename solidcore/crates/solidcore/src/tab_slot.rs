@@ -16,7 +16,7 @@
 //! | [`Layout`], [`StretchSkip`], [`place`] | none |
 //! | [`laser_g_min`]              | none     |
 //! | [`TabSkip`], [`tab_outline`] | none     |
-//! | [`slot_outline`]             | none     |
+//! | [`slot_outline`], [`slot_outline_along`] | none |
 
 use crate::error::{Result, SolidError};
 use crate::math::Point2;
@@ -263,6 +263,45 @@ pub fn slot_outline(start: f64, width: f64, faces: (f64, f64), clearance: f64) -
         (start - clearance, wa - clearance),
         (start + width + clearance, wb + clearance),
     ))
+}
+
+/// [`slot_outline`] for a strip running along `d` in P's frame `(x, y)`: the outline is laid out
+/// in the strip's own `(u, w)`, `u` along `d` and `w` a quarter turn left of it (as
+/// [`crate::plate_contact::strip_defects`] reads them), then turned into P's frame, still
+/// counter-clockwise.
+///
+/// # Errors
+///
+/// Those of [`slot_outline`], and [`SolidError::InvalidInput`] for a `d` that is not a finite
+/// unit vector.
+pub fn slot_outline_along(
+    start: f64,
+    width: f64,
+    faces: (f64, f64),
+    clearance: f64,
+    d: crate::math::Vec2,
+) -> Result<Region2> {
+    if !(d.x.is_finite() && d.y.is_finite() && (d.x.hypot(d.y) - 1.0).abs() <= 1e-9) {
+        return Err(invalid("the strip's direction is not unit"));
+    }
+    let r = slot_outline(start, width, faces, clearance)?;
+    let turn = |p: Point2| Point2::new(p.x * d.x - p.y * d.y, p.x * d.y + p.y * d.x);
+    let segs = r
+        .outer
+        .segs
+        .iter()
+        .map(|s| match *s {
+            Seg2::Line { a, b } => Ok(Seg2::Line {
+                a: turn(a),
+                b: turn(b),
+            }),
+            _ => Err(invalid("a slot outline has only lines")),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Region2 {
+        outer: Loop2 { segs },
+        holes: Vec::new(),
+    })
 }
 
 /// Why one slot is not cut (design 7.4, the checks before cutting).

@@ -3,11 +3,14 @@
 //! hands the plane and the tolerance on as the caller gives them; the kernel reads the faces and
 //! decides, and ops does no float maths of its own.
 
+use solidcore::math::Vec2;
 use solidcore::plate_contact::{self as pc, PairJoint, PairSkip, Plane};
 use solidcore::prism::profile::Region2;
+use solidcore::tab_slot::{self as ts, Layout, SlotSkip, StretchSkip};
 
 use crate::body::Body;
 use crate::contact::{copy_of, poisoned};
+use crate::error::status;
 use crate::session::{run_on, Answer};
 use crate::Result;
 
@@ -15,6 +18,47 @@ use crate::Result;
 pub type Pair = core::result::Result<PairJoint, PairSkip>;
 
 impl Answer for Pair {}
+
+/// What the Tab and Slot recipe is asked for (design 6, 7): the layout, the tab width `W`, the
+/// end distance `e`, the slot clearance `c` and the least land `MIN_LAND`, all the caller's.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TabSlotSpec {
+    /// How the tabs of each stretch are laid out.
+    pub layout: Layout,
+    /// The tab width `W`.
+    pub width: f64,
+    /// The end distance `e`.
+    pub end_distance: f64,
+    /// The slot clearance `c`.
+    pub clearance: f64,
+    /// The least land of S beside a slot.
+    pub min_land: f64,
+}
+
+/// One tab of a stretch: where it starts along the strip, its slot outline in P's frame, and
+/// why the slot is not cut (`None`: it is).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TabPlan {
+    /// The tab's start `u_k` along the strip.
+    pub start: f64,
+    /// The slot's laser outline in P's `(x, y)` frame.
+    pub slot: Region2,
+    /// The first failing check of design 7.4, if any.
+    pub skip: Option<SlotSkip>,
+}
+
+/// One stretch of the strip and its tabs, or why it gets none.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StretchPlan {
+    /// The stretch `[a, b]` along the strip.
+    pub stretch: (f64, f64),
+    /// Its tabs, or why there are none.
+    pub tabs: core::result::Result<Vec<TabPlan>, StretchSkip>,
+}
+
+/// The recipe's answer for a pair: the strip's run `d` in P's frame and its stretches, or why
+/// the pair has no joint.
+pub type TabSlotPlan = core::result::Result<(Vec2, Vec<StretchPlan>), PairSkip>;
 impl Answer for Vec<Region2> {}
 
 impl Body {
@@ -86,6 +130,73 @@ impl Body {
             let s = copy_of(k, slot)?;
             pc::strip(k, &t, &s, p, tol)
         })
+    }
+
+    /// The Tab and Slot recipe for this body as T against `slot` (S) on `p` (design 5 to 7.4):
+    /// the pair ([`Body::plate_pair`]), the strip Σ ([`Body::strip`]) and its run
+    /// ([`solidcore::plate_contact::strip_direction`] from the joint's face a), its band and
+    /// defects, the stretches, the tabs of each ([`solidcore::tab_slot::place`] with the laser
+    /// `g_min`), and each slot outline ([`solidcore::tab_slot::slot_outline_along`], across Σ's
+    /// width) checked against S's face in `p` ([`Body::slot_face`]): cut when it passes on any
+    /// region, else the first region's skip (`at_edge` when S has no face there). Every number
+    /// is the kernel's; neither body changes.
+    ///
+    /// # Errors
+    /// Those of the reads it makes and of the kernel's checks of `spec` and `tol`.
+    pub fn tab_slot_plan(
+        &self,
+        slot: &Body,
+        p: Plane,
+        spec: TabSlotSpec,
+        tol: f64,
+    ) -> Result<TabSlotPlan> {
+        let joint = match self.plate_pair(slot, p, tol)? {
+            Ok(joint) => joint,
+            Err(skip) => return Ok(Err(skip)),
+        };
+        let d = pc::strip_direction(p, joint.faces.a).map_err(status)?;
+        let Some(sigma) = self.strip(slot, p, tol)? else {
+            return Ok(Ok((d, Vec::new())));
+        };
+        let (band, defects) = pc::strip_defects(&sigma, d, tol).map_err(status)?;
+        let across = pc::strip_across(&sigma, d, tol).map_err(status)?;
+        let face = slot.slot_face(p, tol)?;
+        let g_min = ts::laser_g_min(spec.clearance, spec.min_land).map_err(status)?;
+        let mut out = Vec::new();
+        for stretch in pc::stretches(band, &defects, tol).map_err(status)? {
+            let starts = ts::place(stretch, spec.layout, spec.width, spec.end_distance, g_min)
+                .map_err(status)?;
+            let tabs = match starts {
+                Err(skip) => Err(skip),
+                Ok(starts) => {
+                    let mut tabs = Vec::with_capacity(starts.len());
+                    for start in starts {
+                        let outline =
+                            ts::slot_outline_along(start, spec.width, across, spec.clearance, d)
+                                .map_err(status)?;
+                        let mut skip = Some(SlotSkip::AtEdge);
+                        for (i, region) in face.iter().enumerate() {
+                            let s = ts::check_slot(&outline, region, spec.min_land, tol)
+                                .map_err(status)?;
+                            if s.is_none() || i == 0 {
+                                skip = s;
+                            }
+                            if s.is_none() {
+                                break;
+                            }
+                        }
+                        tabs.push(TabPlan {
+                            start,
+                            slot: outline,
+                            skip,
+                        });
+                    }
+                    Ok(tabs)
+                }
+            };
+            out.push(StretchPlan { stretch, tabs });
+        }
+        Ok(Ok((d, out)))
     }
 }
 
@@ -167,5 +278,59 @@ mod tests {
         let lifted = make_box([20.0, 30.0, 10.0], [120.0, 6.0, 60.0]).unwrap();
         assert!(lifted.strip(&s, p, TOL).unwrap().is_none());
         assert!(wall.strip(&s, p, 0.0).is_err());
+    }
+
+    /// 16.2 the recipe through ops: Wall (20..140) on Bottom, count 2, W 10, e 5, c 0.1: one
+    /// stretch [20, 140], tabs at 25 and 125 (along d; mirrored when d runs -x), both slots cut;
+    /// a wall flush with S's edge at y = 100 gets its slots `at_edge`; lifted: `no_contact`.
+    #[test]
+    fn the_tab_slot_recipe_through_ops() {
+        let (s, p) = bottom();
+        let spec = TabSlotSpec {
+            layout: Layout::Count(2),
+            width: 10.0,
+            end_distance: 5.0,
+            clearance: 0.1,
+            min_land: 0.5,
+        };
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let (d, plan) = wall
+            .tab_slot_plan(&s, p, spec, TOL)
+            .unwrap()
+            .expect("joint");
+        assert_eq!(plan.len(), 1, "{plan:?}");
+        let tabs = plan[0].tabs.as_ref().expect("tabs");
+        assert_eq!(tabs.len(), 2, "{tabs:?}");
+        let x = |u: f64| u * d.x;
+        let mut xs: Vec<f64> = tabs.iter().map(|t| x(t.start)).collect();
+        xs.sort_by(f64::total_cmp);
+        let want = if d.x > 0.0 {
+            [25.0, 125.0]
+        } else {
+            [-135.0, -35.0]
+        };
+        assert!(
+            (xs[0] - want[0]).abs() < 1e-6 && (xs[1] - want[1]).abs() < 1e-6,
+            "{xs:?} {d:?}"
+        );
+        assert!(tabs.iter().all(|t| t.skip.is_none()), "{tabs:?}");
+        let past = make_box([20.0, 94.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let (_, plan) = past
+            .tab_slot_plan(&s, p, spec, TOL)
+            .unwrap()
+            .expect("joint");
+        let skips: Vec<_> = plan
+            .iter()
+            .flat_map(|st| st.tabs.as_ref().expect("tabs").iter().map(|t| t.skip))
+            .collect();
+        assert!(
+            !skips.is_empty() && skips.iter().all(|k| *k == Some(SlotSkip::AtEdge)),
+            "{plan:?}"
+        );
+        let lifted = make_box([20.0, 30.0, 10.0], [120.0, 6.0, 60.0]).unwrap();
+        assert!(matches!(
+            lifted.tab_slot_plan(&s, p, spec, TOL).unwrap(),
+            Err(PairSkip::Contact(Contact::NoContact { .. }))
+        ));
     }
 }

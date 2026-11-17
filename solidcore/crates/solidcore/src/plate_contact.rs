@@ -1021,6 +1021,28 @@ pub fn strip_direction(p: Plane, a: Plane) -> Result<crate::math::Vec2> {
     Ok(crate::math::Vec2::new(-mw / len, mu / len))
 }
 
+/// The strip's width: `Σ`'s extent across its run `d`, along `w`, a quarter turn left of `d` (as
+/// [`strip_defects`] reads it); for a tab plate standing on `p` these are the levels of its faces
+/// A and B the slots span.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `tol` not positive and finite, a `d` that is not a finite
+/// unit vector, or a strip whose extent cannot be found.
+pub fn strip_across(
+    sigma: &crate::prism::profile::Region2,
+    d: crate::math::Vec2,
+    tol: f64,
+) -> Result<(f64, f64)> {
+    check_tol(tol)?;
+    if !(d.x.is_finite() && d.y.is_finite() && (d.x.hypot(d.y) - 1.0).abs() <= 1e-9) {
+        return Err(invalid("the strip's direction is not unit"));
+    }
+    sigma
+        .extent_along(crate::math::Vec2::new(-d.y, d.x), tol)
+        .ok_or_else(|| invalid("the strip's extent could not be found"))
+}
+
 /// The touch level of T's first planar face within `tol` of `p` ([`touch_offset`]).
 fn first_touch(t_faces: &[FaceRead], p: Plane, tol: f64) -> Result<Option<f64>> {
     for q in t_faces.iter().filter_map(|f| f.plane) {
