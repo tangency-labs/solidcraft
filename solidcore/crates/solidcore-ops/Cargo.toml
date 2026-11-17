@@ -23,8 +23,8 @@ path = "tests/ops/main.rs"
 name = "kernel_cases"
 path = "tests/kernel_cases.rs"
 
-# These set the process's fix set (`session::set_fixes`), which tests in `ops` that name no
-# fixes of their own run with: each keeps a process of its own.
+# These set the process-wide fix set (`session::set_fixes`). In `ops` they would change the
+# fixes of the tests that name none, so each keeps a process of its own.
 [[test]]
 name = "boolean"
 path = "tests/boolean.rs"

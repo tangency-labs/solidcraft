@@ -141,27 +141,56 @@ mod trim;
 #[path = "../turn_over.rs"]
 mod turn_over;
 
-/// Every `tests/*.rs` file is a module above or a test target of its own in `Cargo.toml`. With
-/// `autotests = false` cargo builds no file it is not told about, so a file left out would
-/// silently run nothing.
+/// Every `tests/*.rs` file is a module above or a test target of its own in `Cargo.toml`, and so
+/// is every `tests/<dir>/main.rs`. With `autotests = false` cargo builds no file it is not told
+/// about, so a file left out would silently run nothing.
 #[test]
 #[allow(clippy::unwrap_used)] // test
 fn every_test_file_is_built() {
     let main = include_str!("main.rs");
     let manifest = include_str!("../../Cargo.toml");
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-    let mut missing: Vec<String> = std::fs::read_dir(dir)
+    let mut missing: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
         .filter(|name| {
-            name.ends_with(".rs")
-                && !main.contains(&format!("#[path = \"../{name}\"]"))
-                && !manifest.contains(&format!("path = \"tests/{name}\""))
+            if name.ends_with(".rs") {
+                !main.contains(&format!("#[path = \"../{name}\"]"))
+                    && !manifest.contains(&format!("path = \"tests/{name}\""))
+            } else {
+                dir.join(name).join("main.rs").is_file()
+                    && !manifest.contains(&format!("path = \"tests/{name}/main.rs\""))
+            }
         })
         .collect();
     missing.sort();
     assert!(
         missing.is_empty(),
         "tests/ops/main.rs builds no module for {missing:?}: add `#[path = \"../<file>.rs\"] mod <file>;` there"
+    );
+}
+
+/// No module above sets the process's fix set (`session::set_fixes`): the tests here that name
+/// no fixes of their own run with it, so such a file is a test target of its own in `Cargo.toml`.
+#[test]
+#[allow(clippy::unwrap_used)] // test
+fn no_module_sets_the_process_fixes() {
+    let main = include_str!("main.rs");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut setting: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| {
+            name.ends_with(".rs")
+                && main.contains(&format!("#[path = \"../{name}\"]"))
+                && std::fs::read_to_string(dir.join(name))
+                    .unwrap()
+                    .contains("set_fixes(")
+        })
+        .collect();
+    setting.sort();
+    assert!(
+        setting.is_empty(),
+        "{setting:?} set the process's fixes: make each a [[test]] of its own in Cargo.toml"
     );
 }
