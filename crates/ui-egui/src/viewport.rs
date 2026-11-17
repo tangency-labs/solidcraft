@@ -234,6 +234,8 @@ pub struct ViewportState {
     /// The view being drawn when the window shows several together ([`crate::view_tiles`]): its
     /// frame goes to the GPU as a tile of its own. None: the one viewport.
     pub(crate) tile: Option<u64>,
+    /// A native window has a separate renderer slot for its ground and every tile.
+    window_scene_slots: Option<std::collections::HashMap<Option<u64>, u64>>,
     /// The cards of a tiled window with the body of each (below its header), for their controls.
     pub(crate) cards: Vec<(u64, Rect)>,
     /// A press in a tiled canvas asks for focus once this frame's controls have run.
@@ -7089,10 +7091,28 @@ impl ViewportState {
     }
 }
 
+impl ViewportState {
+    pub(crate) fn isolate_window_scenes(&mut self) {
+        self.window_scene_slots = Some(Default::default());
+    }
+
+    pub(crate) fn window_scene_slots(&self) -> impl Iterator<Item = u64> + '_ {
+        self.window_scene_slots.iter().flat_map(|slots| slots.values().copied())
+    }
+
+    pub(crate) fn scene_slot(&mut self) -> Option<u64> {
+        let Some(slots) = &mut self.window_scene_slots else { return self.tile };
+        // The lower half belongs to tile ids in the main window and slot 0.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1 << 63);
+        Some(*slots.entry(self.tile).or_insert_with(|| NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)))
+    }
+}
+
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if app.viewport.scene_target != app.viewport.tile {
+    let scene_slot = app.viewport.scene_slot();
+    if app.viewport.scene_target != scene_slot {
         app.viewport.invalidate_view_uploads();
-        app.viewport.scene_target = app.viewport.tile;
+        app.viewport.scene_target = scene_slot;
     }
     crate::joint_handles::sync(app);
     let t = Tokens::get();
@@ -7350,7 +7370,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             sky: sky_uniform(crate::safe_graphics::dark_parts_shading(app), crate::safe_graphics::material_finish(app), proj.cam.up),
             moving,
         };
-        match app.viewport.tile {
+        match app.viewport.scene_slot() {
             // A tile is its own paint callback: it does not go through the blur's source.
             Some(slot) => {
                 painter.add(egui_wgpu::Callback::new_paint_callback(paint, solidcraft_viewport_egui::TileCallback(slot, frame)));
