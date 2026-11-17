@@ -3114,3 +3114,49 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
     assert_eq!(volumes(&other), [125.0, 1000.0], "another model keeps the file's bodies");
     assert_eq!(fingerprints(&other), before);
 }
+
+/// #17708 review: the evaluation that brings an import's healed parts in reads the file again,
+/// and that read's checks heal it again. When they end with the heals the model already has,
+/// the import is not news: the window is told of the heal once, and nothing goes stale.
+#[test]
+fn a_heal_the_next_read_finds_again_is_told_once() {
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    // A run of the import's checks that healed its first part (each run its own, as each read
+    // starts one).
+    let run = || {
+        let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+        let n = healed.face_count();
+        kernel::ImportChecks::ended_for_tests(
+            vec![issue.clone()],
+            vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+        )
+    };
+    let ended = |model: &mut Model, checks: kernel::ImportChecks| {
+        let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+        r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks }));
+    };
+    ended(&mut model, run());
+    assert!(model.settle_import_checks());
+    assert_eq!(model.take_import_notices(), [import], "the heal is news once");
+    model.evaluate(&doc);
+    let fingerprints: Vec<u64> = model.results.iter().map(|r| r.fingerprint).collect();
+    // The checks of the read that brought the heal in end with the same heals.
+    ended(&mut model, run());
+    assert!(!model.settle_import_checks(), "the same heals owe no evaluation");
+    assert!(model.take_import_notices().is_empty(), "the same heal found again is not news");
+    assert!(model.results.iter().all(|r| !r.stale));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fingerprints);
+}

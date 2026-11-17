@@ -3275,14 +3275,18 @@ impl Model {
                 continue;
             }
             let run = &report.checks;
-            if let Some(heals) = run.heals()
+            // The read that brings healed parts in checks and heals the file again: that run ends
+            // with the heals the model already has, and is not news.
+            let heals = run.heals();
+            let known = heals.as_ref().is_some_and(|h| digests.heals(r.id).is_some_and(|k| k.digest() == h.digest()));
+            if let Some(heals) = heals
+                && !known
                 && let Some((_, text)) = digests.steps.get(&r.id)
-                && digests.heals(r.id).is_none_or(|known| known.digest() != heals.digest())
             {
                 digests.heals.insert(r.id, (*text, heals));
                 stale_from = Some(stale_from.map_or(i, |s| s.min(i)));
             }
-            let fresh = run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
+            let fresh = !known && run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
             if fresh {
                 told.push((r.id, run.clone()));
             }

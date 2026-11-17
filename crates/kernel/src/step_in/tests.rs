@@ -4824,3 +4824,89 @@ fn the_checks_heal_a_shared_import_once_they_end() {
     let (_, again) = heal_run(&hair, &[IDENTITY, translation([20.0, 0.0, 0.0])], 1);
     assert_eq!(again.map(|h| h.digest()), Some(heals.digest()), "the same heal every time");
 }
+
+/// #17708 review: the heal is the part every instance shares, so a placement whose check passed
+/// on the part as read and fails (or cannot run) on the healed part keeps the part as read for
+/// all of them: no heal, and the part's own check still says it needs repair.
+#[test]
+fn a_placement_the_healed_part_fails_keeps_the_part_as_read() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    // No real placement is known to fail the healed hair step (rigid, scaled, mirrored, sheared
+    // and far placements all pass it), so the second job's check stands in for one: as read it
+    // passed, and on the healed part it cannot run (a placement that is not finite).
+    let (mut jobs, heals) = part_jobs(&hair, &[IDENTITY, translation([20.0, 0.0, 0.0])]);
+    let first = &jobs[0];
+    let mut m = translation([20.0, 0.0, 0.0]);
+    m[3][0] = f64::NAN;
+    let second = checks::Job {
+        item: first.item,
+        part: first.part.clone(),
+        what: first.what.clone(),
+        body: first.body.clone(),
+        times: 1,
+        label: first.label.clone(),
+        m,
+        source: first.source.clone(),
+    };
+    jobs.push(second);
+    let outcomes = vec![checks::Outcome::NeedsRepair("as read".into()), checks::Outcome::Passes];
+    let run = ImportChecks::ran(&jobs, outcomes, &heals);
+    assert!(!run.stopped());
+    assert!(run.heals().is_none(), "the heal is not kept");
+    let issues = run.issues().expect("ended");
+    assert!(issues.iter().all(|i| i.kind != IssueKind::Repaired), "{issues:?}");
+    assert!(issues.iter().any(|i| i.kind == IssueKind::NeedsRepair && i.detail.contains("as read")), "{issues:?}");
+    // The same part at the identity alone heals: the placement is what kept it as read.
+    let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
+    let run = ImportChecks::ran(&jobs, vec![checks::Outcome::NeedsRepair("as read".into())], &heals);
+    assert!(run.heals().is_some());
+}
+
+/// #17708 review: a token stopped by the time the heals end stops the run, even when no heal saw
+/// it (here no part is healed at all): the run says it was stopped, with no heals, so nothing
+/// holds a stopped run as finished.
+#[test]
+fn a_token_stopped_after_the_heals_stops_the_run() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
+    let outcomes = || vec![checks::Outcome::CouldNotRun("SMLib's check could not run".into())];
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    let run = stop.within(|| ImportChecks::ran(&jobs, outcomes(), &heals));
+    assert!(run.stopped());
+    assert!(run.heals().is_none());
+    let run = ImportChecks::ran(&jobs, outcomes(), &heals);
+    assert!(!run.stopped(), "not stopped without the token");
+}
+
+/// #17708 review (#7167 with one worker, as in the browser): a heal the caller's token stops
+/// at the read's last step stops the import, so no stopped run is cached for the next read of
+/// the same text; the same read unstopped is cached.
+#[test]
+fn a_heal_stopped_with_one_worker_fails_the_import_uncached() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    let reading = |name: &str| {
+        let text = boxes_step(1, name);
+        let mut reading = StepReading::with_workers(&text, 1).expect("parsed");
+        assert!(reading.single);
+        while reading.step() {}
+        // The part the read checks is the hair step, failing its check.
+        let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
+        reading.rd.check_jobs = jobs;
+        reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair("as read".into())];
+        reading.rd.instances = heals.instances;
+        reading.rd.uses = heals.uses;
+        (text_key(&text), reading)
+    };
+    let cached = |key: (u64, usize)| RECENT.lock().unwrap().iter().any(|r| r.key == key && r.import.strong_count() > 0);
+    let (key, read) = reading("stopped heal, one worker");
+    let stop = solidcraft_smlib::stop::Stop::new();
+    stop.stop();
+    let err = stop.within(|| read.finish_shared()).expect_err("the stopped heal stops the import");
+    assert!(err.to_string().contains("cancelled"), "{err}");
+    assert!(!cached(key), "a stopped import is not cached");
+    let (key, read) = reading("unstopped heal, one worker");
+    let imp = read.finish_shared().expect("read");
+    assert!(imp.report.checks.heals().is_some(), "healed");
+    assert!(cached(key));
+}

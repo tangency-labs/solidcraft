@@ -1663,7 +1663,13 @@ impl StepReading {
             }
         };
         report.checks = if self.single {
-            checks::ImportChecks::ran(&jobs, std::mem::take(&mut rd.check_outcomes), &heals)
+            let checks = checks::ImportChecks::ran(&jobs, std::mem::take(&mut rd.check_outcomes), &heals);
+            // The heal runs here, under the caller's token: a heal it stopped stops the import
+            // too, so no stopped run is kept for the next read of the same text (#7167).
+            if checks.stopped() {
+                return Err(crate::watch::cancelled_error("STEP import"));
+            }
+            checks
         } else {
             checks::ImportChecks::start(jobs, heals, rd.workers, over)
         };

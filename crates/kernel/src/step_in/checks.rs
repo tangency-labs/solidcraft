@@ -96,8 +96,10 @@ impl ImportHeals {
         &self.bodies
     }
 
-    /// A digest of what was healed (which bodies, and their faces' file faces): the heal of a
-    /// file is the same every time, so equal heals of one file have equal digests.
+    /// A digest of what was healed (which bodies, and their faces' file faces). It does not hash
+    /// the healed geometry: the heal of a file is the same every time (deterministic, whatever
+    /// the threads), and a heal is only ever compared with heals of the same text, so equal heals
+    /// of one file have equal digests.
     pub fn digest(&self) -> u64 {
         self.digest
     }
