@@ -8,7 +8,7 @@
 //! edge/face gap of a `CrvOnSurf` on the other surface itself at its own uv, the exact
 //! foot (`heal/gap.rs` `own_foot`). Together they move 2462 elements of 333 rows of
 //! `topology.edgeuse_p2` (47), `topology.edgeuse_p3` (2343) and `topology.face_p3` (72),
-//! and the 82 elements of 6 rows of three other units below.
+//! and the 476 elements of 39 rows of six other units below.
 //! `data/issue_18325_moved_rows.tsv` lists them (`E unit case key i main new class`, main's
 //! and the new golden's values and the pinned class), main's whole vector of every row (`M`,
 //! the bits) and main's old golden line (`O`), with the stations the drop quality maxima are
@@ -85,10 +85,10 @@
 //!
 //! The rows are those of a fresh bless of main and of the fix, diffed bit for bit, in
 //! these three units, including elements that move by less than the goldens' tolerance;
-//! all of them are re-blessed. The same diff moves 41 rows of six other units by at most
-//! `1e-10` relative, all within the goldens' tolerance. Every one of those moves comes from
+//! all of them are re-blessed. The same diff moves 39 rows of six other units, all within
+//! the goldens' tolerance (their block comparison). Every one of those moves comes from
 //! the exact drop ends: with the gap seed reverted the fresh bless of all nine units is the
-//! same bit for bit. Eleven of them (103 elements) are certified here and re-blessed:
+//! same bit for bit. All of them are certified here and re-blessed:
 //!
 //! * `topology.vertexuse` (2 rows): the uv point, tangents and sector angle at a vertex use
 //!   of a face whose edges are all domain sides' iso curves (checked on the replayed model,
@@ -109,9 +109,16 @@
 //!   within its evaluation's rounding, and `|new − x*|` bounded by `|J⁻¹|` times it
 //!   (`label_rail_eu`).
 //!
-//! The other 30 are not certified and keep main's expectations: `mass.integrator` (29) and
-//! `boolean.api_brep` (1, two areas), both the kernel's nested adaptive integration along
-//! the trims, whose reference needs an interval replay of the integrator's own partition.
+//! * `mass.integrator` (27 rows) and `boolean.api_brep` (1 row, two areas): the kernel's
+//!   nested adaptive Gauss-Kronrod integration of a face's properties along its trims, the
+//!   trims the face's domain sides (every end a domain corner bit for bit). The integrator
+//!   is replayed in floats (bit for bit the row's values, recording each piece's
+//!   accept/split decision) and then over the same partition in outward-rounded intervals
+//!   ([`mass_replay`]): `R` the exact quadrature of that partition on the exact sides (the
+//!   ideal pipeline's value), `E` the enclosure of the kernel's float result (every
+//!   recorded float intermediate checked inside it). Each moved element has `R ⊆ E` and
+//!   `new ∈ E` (at rounding), or new is closer; main's value is asserted in the same `E`
+//!   or farther than new (`label_mass`, `label_api_areas`).
 //!
 //! Run: `cargo test --profile goldens -p goldens --test issue_18325_moved_rows -- --nocapture`
 //! (prints the table: element classes per unit and kind, the largest `|new − r| / B` of the
@@ -162,6 +169,8 @@ const DATA: &str = include_str!("data/issue_18325_moved_rows.tsv");
 
 const UNITS: &[&str] = &[
     "blend.fillet_solver_p2",
+    "boolean.api_brep",
+    "mass.integrator",
     "query.face_p2",
     "topology.brep_validation",
     "topology.edgeuse_p2",
@@ -169,6 +178,10 @@ const UNITS: &[&str] = &[
     "topology.face_p3",
     "topology.vertexuse",
 ];
+
+/// Units whose committed main goldens may hold values older than main's output (passing,
+/// so a bless kept them): there `M` is checked to pass `O`, not to equal it.
+const STALE_GOLDEN_UNITS: &[&str] = &["boolean.api_brep", "mass.integrator"];
 
 const BLADE: &str = "own_reader_blade_hub_create_eu36_rebuild";
 
@@ -2332,6 +2345,14 @@ fn certificates(
         label_rail_eu(case, v, &mut out);
         return out;
     }
+    if unit == "mass.integrator" {
+        label_mass(case, v, main, &mut out);
+        return out;
+    }
+    if unit == "boolean.api_brep" {
+        label_api_areas(case, v, main, &mut out);
+        return out;
+    }
     let dom = if let Some(x) = inputs["brep"].get("dom") {
         let a = nums(x);
         [a[0], a[1], a[2], a[3]]
@@ -3304,6 +3325,972 @@ impl Srf {
     }
 }
 
+// ---- mass.integrator: the Gauss-Kronrod partition, replayed in intervals ----------------------
+
+// The integrator's rules (`mass/integrator/properties.rs`, private there): the 7-point
+// Gauss-Kronrod rule of the trim pieces and the 15-point rule of the iso-u lines, centre node
+// first, then each node at `±x`, with its Kronrod weight (the Gauss weights decide only
+// acceptance, which the replay takes from the kernel's own decisions).
+const KR7_NODES: [f64; 4] = [
+    0.0,
+    0.434_243_749_346_802_558_002_071_502_844_628,
+    0.774_596_669_241_483_377_035_853_079_956_480,
+    0.960_491_268_708_020_283_423_507_092_629_080,
+];
+const KR7_WEIGHTS: [f64; 4] = [
+    0.450_916_538_658_474_142_345_110_087_045_571,
+    0.401_397_414_775_962_222_905_051_818_618_432,
+    0.268_488_089_868_333_440_728_569_280_666_710,
+    0.104_656_226_026_467_265_193_823_857_192_073,
+];
+const GAUSS3_WEIGHTS: [f64; 4] = [8.0 / 9.0, 0.0, 5.0 / 9.0, 0.0];
+const KR15_NODES: [f64; 8] = [
+    0.0,
+    0.207_784_955_007_898_467_600_689_403_773_245,
+    0.405_845_151_377_397_166_906_606_412_076_961,
+    0.586_087_235_467_691_130_294_144_845_693_013,
+    0.741_531_185_599_394_439_863_864_773_280_788,
+    0.864_864_423_359_769_072_789_712_788_640_926,
+    0.949_107_912_342_758_524_526_189_684_047_851,
+    0.991_455_371_120_812_639_206_854_697_526_329,
+];
+const KR15_WEIGHTS: [f64; 8] = [
+    0.209_482_141_084_727_828_012_999_174_891_714,
+    0.204_432_940_075_298_892_414_161_999_234_649,
+    0.190_350_578_064_785_409_913_256_402_421_014,
+    0.169_004_726_639_267_902_826_583_426_598_550,
+    0.140_653_259_715_525_918_745_189_590_510_238,
+    0.104_790_010_322_250_183_839_876_322_541_518,
+    0.063_092_092_629_978_553_290_700_663_189_204,
+    0.022_935_322_010_529_224_963_732_008_058_970,
+];
+const GAUSS7_WEIGHTS: [f64; 8] = [
+    0.417_959_183_673_469_387_755_102_040_816_327,
+    0.0,
+    0.381_830_050_505_118_944_950_369_775_488_975,
+    0.0,
+    0.279_705_391_489_276_667_901_467_771_423_780,
+    0.0,
+    0.129_484_966_168_869_693_270_611_432_679_082,
+    0.0,
+];
+type Rule = (&'static [f64], &'static [f64], &'static [f64]);
+const KR7: Rule = (&KR7_NODES, &KR7_WEIGHTS, &GAUSS3_WEIGHTS);
+const KR15: Rule = (&KR15_NODES, &KR15_WEIGHTS, &GAUSS7_WEIGHTS);
+
+/// `kronrod_integrate_with` in floats, operation for operation, appending each piece's
+/// accept (`true`) or halve decision to `tape` in the kernel's order (a piece's decision
+/// after its nodes', and so after its nodes' inner integrals').
+#[allow(clippy::too_many_arguments)]
+fn kr_float<F>(
+    (nodes, kw, gw): Rule,
+    a: f64,
+    b: f64,
+    accuracy: f64,
+    scale: &[f64],
+    y: &mut [f64],
+    tape: &mut Vec<bool>,
+    mut f: F,
+) where
+    F: FnMut(f64, &mut [f64], &mut Vec<bool>),
+{
+    use solidcore::math::EFF_ZERO;
+    let n = y.len();
+    let mut stack = vec![(a, b, 0_u32)];
+    while let Some((lo, hi, depth)) = stack.pop() {
+        let mid = 0.5 * (lo + hi);
+        let half = 0.5 * (hi - lo);
+        let mut kronrod = vec![0.0; n];
+        let mut gauss = vec![0.0; n];
+        let mut centre = vec![0.0; n];
+        f(mid, &mut centre, tape);
+        for (i, &x) in nodes.iter().enumerate().skip(1) {
+            for side in [-1.0, 1.0] {
+                let mut dy = vec![0.0; n];
+                f(mid + side * x * half, &mut dy, tape);
+                for (((kv, gv), d), c) in kronrod.iter_mut().zip(&mut gauss).zip(&dy).zip(&centre) {
+                    let off = *d - *c;
+                    *kv += kw[i] * off;
+                    *gv += gw[i] * off;
+                }
+            }
+        }
+        let mut accepted = true;
+        for (i, ((kv, gv), c)) in kronrod.iter_mut().zip(&mut gauss).zip(&centre).enumerate() {
+            *kv = half * (2.0 * *c + *kv);
+            *gv = half * (2.0 * *c + *gv);
+            let s = kv
+                .abs()
+                .max(scale.get(i).copied().unwrap_or(0.0))
+                .max(EFF_ZERO);
+            let estimate = (*kv - *gv).abs();
+            if estimate.is_nan() || estimate > accuracy * s {
+                accepted = false;
+            }
+        }
+        tape.push(accepted);
+        if accepted {
+            for (t, p) in y.iter_mut().zip(&kronrod) {
+                *t += *p;
+            }
+            continue;
+        }
+        assert!(
+            depth < 48,
+            "the replay bisects past the kernel's depth bound"
+        );
+        stack.push((mid, hi, depth + 1));
+        stack.push((lo, mid, depth + 1));
+    }
+}
+
+/// [`kr_float`] over intervals, the decisions read from `tape` at `pos`: every operation
+/// enclosed (outward) and, `round`, widened by its own float rounding (`u |result|`), so the
+/// result encloses the kernel's float sum wherever the integrand's enclosures hold its float
+/// values (`round`), or the exact sum of the same partition (not `round`). `0.5 x` and `2 x`
+/// are exact; `side · x` is an exact negation.
+#[allow(clippy::too_many_arguments)]
+fn kr_iv<F>(
+    (nodes, kw, _): Rule,
+    a: Iv,
+    b: Iv,
+    round: bool,
+    y: &mut [Iv],
+    tape: &[bool],
+    pos: &mut usize,
+    mut f: F,
+) where
+    F: FnMut(Iv, &mut [Iv], &mut usize),
+{
+    let r = |x: Iv| rnd(x, U, round);
+    let n = y.len();
+    let mut stack = vec![(a, b)];
+    while let Some((lo, hi)) = stack.pop() {
+        let mid = r(lo.add(hi)).mul(Iv::p(0.5));
+        let half = r(hi.sub(lo)).mul(Iv::p(0.5));
+        let mut kronrod = vec![Iv::p(0.0); n];
+        let mut centre = vec![Iv::p(0.0); n];
+        f(mid, &mut centre, pos);
+        for (i, &x) in nodes.iter().enumerate().skip(1) {
+            for side in [-1.0, 1.0] {
+                let mut dy = vec![Iv::p(0.0); n];
+                let at = r(mid.add(r(Iv::p(side * x).mul(half))));
+                f(at, &mut dy, pos);
+                for ((kv, d), c) in kronrod.iter_mut().zip(&dy).zip(&centre) {
+                    let off = r(d.sub(*c));
+                    *kv = r(kv.add(r(Iv::p(kw[i]).mul(off))));
+                }
+            }
+        }
+        let accepted = tape[*pos];
+        *pos += 1;
+        if accepted {
+            for ((t, kv), c) in y.iter_mut().zip(&kronrod).zip(&centre) {
+                let part = r(half.mul(r(Iv::p(2.0).mul(*c).add(*kv))));
+                *t = r(t.add(part));
+            }
+            continue;
+        }
+        stack.push((mid, hi));
+        stack.push((lo, mid));
+    }
+}
+
+/// The kernel's float `S`, `S_u`, `S_v` of a rational net at `(u, v)` enclosed operation for
+/// operation as `first_derivs_span` (`nurbs/srf_nurb.rs`) computes them (`round`), or the
+/// exact values (not `round`): the basis values and first derivatives from `univariate_first`
+/// (enclosed as [`Srf::kernel`] counts them, `γ_{6p}` of `Σ|terms|`), the Euclidean points
+/// `P (1/w)`, the weight sums `d00`, `d01`, `d10` (one rounding per product and per sum), the
+/// reciprocal `1/d00`, and per control point the rational basis recurrence `r00 = w a0 b0 /
+/// d00`, `r01 = (w a0 b1 − d01 r00) / d00`, `r10 = (w a1 b0 − d10 r00) / d00` and the running
+/// sums `s += r P`.
+fn srf_kernel_eval(s: &Srf, u: Iv, v: Iv, round: bool) -> Eval {
+    assert!(s.rational, "the rational path");
+    let r = |x: Iv| rnd(x, U, round);
+    let (nu, du, dua) = basis(&s.u, s.p, u);
+    let (nv, dv, dva) = basis(&s.v, s.q, v);
+    let widen = |x: &[Iv], m: Option<&[Iv]>, p: usize| -> Vec<Iv> {
+        x.iter()
+            .enumerate()
+            .map(|(i, xi)| {
+                if !round {
+                    return *xi;
+                }
+                let g = gam(6 * p);
+                match m {
+                    None => xi.rel(g),
+                    Some(m) => xi.widen(up_mul(g, m[i].hi)),
+                }
+            })
+            .collect()
+    };
+    let (a0s, a1s) = (widen(&nu, None, s.p), widen(&du, Some(&dua), s.p));
+    let (b0s, b1s) = (widen(&nv, None, s.q), widen(&dv, Some(&dva), s.q));
+    let zero = Iv::p(0.0);
+    let w = |i: usize, j: usize| Iv::p(s.net[i][j][3]);
+    let pe = |i: usize, j: usize| -> V3 {
+        let rw = r(Iv::p(1.0).div(w(i, j)));
+        std::array::from_fn(|c| r(Iv::p(s.net[i][j][c]).mul(rw)))
+    };
+    let (ni, nj) = (s.net.len(), s.net[0].len());
+    // d[k][l]: Σ_i (Σ_j w_ij b_l,j) a_k,i
+    let mut d = [[zero; 2]; 2];
+    for (l, bl) in [&b0s, &b1s].into_iter().enumerate() {
+        let tu: Vec<Iv> = (0..ni)
+            .map(|i| {
+                let mut t = zero;
+                for (j, b) in bl.iter().enumerate().take(nj) {
+                    t = r(t.add(r(w(i, j).mul(*b))));
+                }
+                t
+            })
+            .collect();
+        for (kk, ak) in [&a0s, &a1s].into_iter().enumerate() {
+            let mut x = zero;
+            for (t, a) in tu.iter().zip(ak) {
+                x = r(x.add(r(t.mul(*a))));
+            }
+            d[kk][l] = x;
+        }
+    }
+    let (d00, d01, d10) = (d[0][0], d[0][1], d[1][0]);
+    let inv = r(Iv::p(1.0).div(d00));
+    let mut sum = [[zero; 3]; 3];
+    for i in 0..ni {
+        for j in 0..nj {
+            let (a0, a1, b0, b1) = (a0s[i], a1s[i], b0s[j], b1s[j]);
+            let wij = w(i, j);
+            let r00 = r(r(r(wij.mul(a0)).mul(b0)).mul(inv));
+            let r01 = r(r(r(r(wij.mul(a0)).mul(b1)).sub(r(d01.mul(r00)))).mul(inv));
+            let v10 = r(r(r(wij.mul(a1)).mul(b0)).sub(r(d10.mul(r00))));
+            let r10 = r(v10.mul(inv));
+            let p = pe(i, j);
+            for (slot, rr) in sum.iter_mut().zip([r00, r10, r01]) {
+                for c in 0..3 {
+                    slot[c] = r(slot[c].add(r(rr.mul(p[c]))));
+                }
+            }
+        }
+    }
+    (sum[0], sum[1], sum[2])
+}
+
+/// The iso-u integrand (`OdeIsoCurveLength::evaluate`, thickness 0) at `(u, v)` about
+/// `origin`, operation for operation: `g[c]` is the kernel's `dydx[c + 1]`.
+fn iso_iv(s: &Srf, lay: &Layout, origin: [f64; 3], u: Iv, v: Iv, round: bool) -> Vec<Iv> {
+    use solidcore::math::EFF_ZERO_SQ;
+    let r = |x: Iv| rnd(x, U, round);
+    let (pt, su, sv) = srf_kernel_eval(s, u, v, round);
+    let x: V3 = std::array::from_fn(|c| r(pt[c].sub(Iv::p(origin[c]))));
+    let cr = |i: usize, j: usize| r(r(su[i].mul(sv[j])).sub(r(su[j].mul(sv[i]))));
+    let norm = [cr(1, 2), cr(2, 0), cr(0, 1)];
+    let sq = |a: &V3| r(r(r(a[0].mul(a[0])).add(r(a[1].mul(a[1])))).add(r(a[2].mul(a[2]))));
+    let area = r(sq(&norm).sqrt());
+    let mut g = vec![Iv::p(0.0); lay.n];
+    assert!(sq(&su).lo > 0.0, "|S_u| > 0 is undecided");
+    g[0] = area;
+    if lay.area != 0 {
+        g[lay.area - 1] = area;
+    }
+    let m = |a: Iv, b: Iv| r(a.mul(b));
+    if let Some(i) = lay.moments[0] {
+        for c in 0..3 {
+            g[i + c] = m(x[c], area);
+        }
+    }
+    if let Some(i) = lay.moments[1] {
+        let xx = m(x[0], x[0]);
+        let yy = m(x[1], x[1]);
+        let zz = m(x[2], x[2]);
+        g[i] = m(xx, area);
+        g[i + 1] = m(yy, area);
+        g[i + 2] = m(zz, area);
+        g[i + 3] = m(m(x[1], x[2]), area);
+        g[i + 4] = m(m(x[2], x[0]), area);
+        g[i + 5] = m(m(x[0], x[1]), area);
+        g[i + 6] = m(r(yy.add(zz)), area);
+        g[i + 7] = m(r(xx.add(zz)), area);
+        g[i + 8] = m(r(xx.add(yy)), area);
+    }
+    if lay.volume == 0 && lay.moments[4].is_none() && lay.moments[5].is_none() {
+        return g;
+    }
+    let lsq = sq(&norm);
+    assert!(
+        lsq.lo > EFF_ZERO_SQ,
+        "the normal's unitisation is undecided"
+    );
+    let lsq1 = lsq.sub(Iv::p(1.0)).abs();
+    assert!(lsq1.lo > EFF_ZERO_SQ, "the normal's unit test is undecided");
+    let len = r(lsq.sqrt());
+    let nz = r(norm[2].div(len));
+    let vd = m(m(area, x[2]), nz);
+    if lay.volume != 0 {
+        g[lay.volume - 1] = vd;
+    }
+    let half = |a: Iv| a.mul(Iv::p(0.5));
+    if let Some(i) = lay.moments[4] {
+        g[i] = m(x[0], vd);
+        g[i + 1] = m(x[1], vd);
+        g[i + 2] = half(m(x[2], vd));
+    }
+    if let Some(i) = lay.moments[5] {
+        let xx = m(x[0], x[0]);
+        let yy = m(x[1], x[1]);
+        let zz3 = r(m(x[2], x[2]).div(Iv::p(3.0)));
+        g[i] = m(xx, vd);
+        g[i + 1] = m(yy, vd);
+        g[i + 2] = m(zz3, vd);
+        g[i + 3] = half(m(m(x[1], x[2]), vd));
+        g[i + 4] = half(m(m(x[2], x[0]), vd));
+        g[i + 5] = m(m(x[0], x[1]), vd);
+        g[i + 6] = m(r(yy.add(zz3)), vd);
+        g[i + 7] = m(r(xx.add(zz3)), vd);
+        g[i + 8] = m(r(xx.add(yy)), vd);
+    }
+    g
+}
+
+/// `PrecisePropertyLayout` with 0-based component slots of `dydx[1..]` (`g`): the control
+/// component is `g[0]`.
+struct Layout {
+    n: usize,
+    area: usize,
+    volume: usize,
+    moments: [Option<usize>; 8],
+}
+
+impl Layout {
+    fn of(l: &solidcore::topology::face::p2::PrecisePropertyLayout) -> Layout {
+        Layout {
+            n: l.num_components,
+            area: l.area,
+            volume: l.volume,
+            moments: l.moments.map(|m| if m == 0 { None } else { Some(m - 1) }),
+        }
+    }
+}
+
+/// One straight trim of the rectangle face (a degree-1 B-spline from `c0` to `c1` over
+/// `[t0, t1]`), as `create_oriented_trim_boundary` returns it: exact corners of the domain.
+struct Side {
+    curve: Curve,
+    c0: [f64; 2],
+    c1: [f64; 2],
+    t: [f64; 2],
+}
+
+impl Side {
+    /// `C(t)` and `C'(t)` over `t`, enclosed: exact (not `round`), or the kernel's float
+    /// `evaluate` (`round`: the exact values widened by `γ_16 Σ|terms|`, more than the
+    /// degree-1 chains of the basis (a level: `left`/`right`, their sum, the quotient, the
+    /// product and the sum) and the derivative (the divisor, the reciprocal, the product,
+    /// the factor `p`, the sum) and the weighted sums).
+    fn eval(&self, t: Iv, round: bool) -> ([Iv; 2], [Iv; 2]) {
+        let (t0, t1) = (Iv::p(self.t[0]), Iv::p(self.t[1]));
+        let dt = t1.sub(t0);
+        let n1 = t.sub(t0).div(dt);
+        let n0 = t1.sub(t).div(dt);
+        let mut p = [Iv::p(0.0); 2];
+        let mut d = [Iv::p(0.0); 2];
+        for c in 0..2 {
+            let (a, b) = (Iv::p(self.c0[c]), Iv::p(self.c1[c]));
+            p[c] = n0.mul(a).add(n1.mul(b));
+            d[c] = b.sub(a).div(dt);
+            if round {
+                let g = gam(16);
+                let mp = up_add(n0.mul(a).mag(), n1.mul(b).mag());
+                let md = Iv::p(self.c0[c].abs())
+                    .add(Iv::p(self.c1[c].abs()))
+                    .div(dt)
+                    .hi;
+                p[c] = p[c].widen(up_mul(g, mp));
+                d[c] = d[c].widen(up_mul(g, md));
+            }
+        }
+        (p, d)
+    }
+}
+
+/// The kernel's float result of `boundary_properties` (unbanded, thickness 0) over the
+/// rectangle face, replayed, with the decision tape; and the same partition in intervals,
+/// `(R, E)`: `R` the exact sums over the exact trims, `E` the enclosure of the kernel's float
+/// sums. Each output as `[area, volume, moments (8 × 3)]`.
+struct MassReplay {
+    float: Vec<f64>,
+    r: Vec<Iv>,
+    e: Vec<Iv>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn mass_replay(
+    k: &Kernel,
+    surface: &Surface,
+    sides: &[Side],
+    face_box: &solidcore::geom::extent3d::Extent3d,
+    min_v: f64,
+    same: bool,
+    accuracy: f64,
+    origin: [f64; 3],
+    estimated_area: f64,
+    flags: u64,
+) -> MassReplay {
+    use solidcore::geom::extent3d::Extent3d;
+    use solidcore::math::{Vec3, EFF_ZERO, EFF_ZERO_SQ};
+    use solidcore::nurbs::b_spline_curve::p2::BoundingBoxRequest;
+    use solidcore::topology::face::p2::{
+        surface_knots_inside, trim_curve_breaks, OdeIsoCurveLength, PrecisePropertyLayout,
+    };
+    const POWERS: [u32; 8] = [1, 2, 2, 2, 2, 3, 3, 3];
+    let accuracy = if accuracy < EFF_ZERO {
+        EFF_ZERO_SQ
+    } else {
+        accuracy
+    };
+    let layout = PrecisePropertyLayout::new(flags);
+    let lay = Layout::of(&layout);
+    let o3 = Vec3::new(origin[0], origin[1], origin[2]);
+    let mut scale = vec![solidcore::math::BIG_DOUBLE; layout.num_components];
+    let origin_distance = face_box.min_distance(&Extent3d::from_point(o3));
+    let sign = if same { -1.0 } else { 1.0 };
+    // the base: the trims' lowest v (trims_v_range), no lower than the domain's
+    let req = BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let mut base = solidcore::math::BIG_DOUBLE;
+    let mut top = -solidcore::math::BIG_DOUBLE;
+    for s in sides {
+        let bb = s
+            .curve
+            .calculate_bounding_box(k, &s.curve.natural_interval(), req, true)
+            .unwrap()
+            .normal
+            .unwrap();
+        base = base.min(bb.min().y);
+        top = top.max(bb.max().y);
+    }
+    // (trims_v_range: no lower than the domain's lowest v)
+    if base < min_v {
+        base = min_v;
+    }
+    let top = if top > base { top } else { base };
+    let lines = surface_knots_inside(k, surface, SurfParamType::V, base, top).unwrap();
+    assert!(lines.len() < 12, "a banded face");
+    let area_scale = estimated_area / 10.0;
+    scale[0] = area_scale;
+    let length = {
+        let a = 10.0 * estimated_area.sqrt();
+        if a > origin_distance {
+            a
+        } else {
+            origin_distance
+        }
+    };
+    if layout.volume != 0 {
+        scale[layout.volume - 1] = area_scale * length;
+    }
+    for (&index, &power) in layout.moments.iter().zip(POWERS.iter()) {
+        if index == 0 {
+            continue;
+        }
+        let ms = area_scale * length.powf(f64::from(power));
+        for cc in 0..3 {
+            scale[index - 1 + cc] = ms;
+        }
+    }
+    let iso_acc = accuracy / 10.0;
+    let n = layout.num_components;
+    let srf = Srf::of(nurb_of(k, surface));
+    // which trims integrate: the vertical sides have `du/dt = 0` (no integral), the bottom
+    // `v = base` a zero-width one; the top's iso lines run from `base` up to it
+    for s in sides {
+        let vertical = s.c0[0] == s.c1[0];
+        let horizontal = s.c0[1] == s.c1[1];
+        assert!(vertical != horizontal, "a trim that is not axis-parallel");
+        if horizontal {
+            assert!(s.c0[1] >= base, "a trim below the base");
+        }
+    }
+
+    // ---- floats, recording the tape ----
+    let mut tape = Vec::new();
+    let mut vals: Vec<f64> = Vec::new();
+    let mut y = vec![0.0; n];
+    let mut breaks_of = Vec::new();
+    for s in sides {
+        let trim = &s.curve;
+        let vertical = s.c0[0] == s.c1[0];
+        let flat = !vertical && s.c0[1] == base;
+        let breaks = trim_curve_breaks(k, trim, surface, &[]).unwrap();
+        let mut trim_y = vec![0.0; n];
+        for w in breaks.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            if b.partial_cmp(&a) != Some(std::cmp::Ordering::Greater) {
+                continue;
+            }
+            let mut span_y = vec![0.0; n];
+            kr_float(
+                KR7,
+                a,
+                b,
+                accuracy / 10.0,
+                &scale,
+                &mut span_y,
+                &mut tape,
+                |t, dy, tape| {
+                    let pv = trim.evaluate(k, t, 1, true, true).unwrap();
+                    let (p0, p1) = (pv[0], pv[1]);
+                    dy.fill(0.0);
+                    if p1.x == 0.0 {
+                        assert!(vertical, "a zero du/dt off a vertical side");
+                        return;
+                    }
+                    assert!(!vertical, "a vertical side's float du/dt is not 0");
+                    assert!(p0.y >= base, "a trim point below the base");
+                    if p0.y == base {
+                        assert!(flat, "a trim point on the base off the bottom");
+                        return;
+                    }
+                    assert!(!flat, "the bottom's float point is off the base");
+                    vals.extend([p0.x, p0.y, p1.x]);
+                    let eval = OdeIsoCurveLength::new(k, surface, p0.x, o3, 0.0, &layout);
+                    let mut scratch = vec![0.0; n + 1];
+                    let mut v0 = base;
+                    let knots =
+                        surface_knots_inside(k, surface, SurfParamType::V, base, p0.y).unwrap();
+                    for v1 in knots.into_iter().chain(std::iter::once(p0.y)) {
+                        kr_float(KR15, v0, v1, iso_acc, &scale, dy, tape, |v, g, _| {
+                            eval.evaluate(v, &mut scratch).unwrap();
+                            for (d, x) in g.iter_mut().zip(scratch.iter().skip(1)) {
+                                *d = *x;
+                            }
+                            vals.extend_from_slice(g);
+                        });
+                        v0 = v1;
+                    }
+                    for d in dy.iter_mut() {
+                        *d = -(*d * p1.x);
+                    }
+                },
+            );
+            for (t, p) in trim_y.iter_mut().zip(&span_y) {
+                *t += *p;
+            }
+        }
+        for (t, p) in y.iter_mut().zip(&trim_y) {
+            *t += *p;
+        }
+        breaks_of.push(breaks);
+    }
+    let assemble = |y: &[f64]| -> Vec<f64> {
+        let value = |i: usize| if i == 0 { 0.0 } else { y[i - 1] };
+        let mut out = vec![0.0; 26];
+        if layout.area != 0 {
+            out[0] = 0.0 + value(layout.area);
+        }
+        if layout.volume != 0 {
+            out[1] = 0.0 + value(layout.volume) * sign;
+        }
+        for (kk, &index) in layout.moments.iter().enumerate() {
+            if index == 0 {
+                continue;
+            }
+            let ms = if kk < 4 { 1.0 } else { sign };
+            for c in 0..3 {
+                out[2 + 3 * kk + c] = 0.0 + value(index + c) * ms;
+            }
+        }
+        out
+    };
+    let float = assemble(&y);
+
+    // ---- intervals over the same partition ----
+    let interval = |round: bool| -> Vec<Iv> {
+        let r = |x: Iv| rnd(x, U, round);
+        let mut pos = 0usize;
+        let mut vcount = 0usize;
+        let vc = &mut vcount;
+        let mut y = vec![Iv::p(0.0); n];
+        for (s, breaks) in sides.iter().zip(&breaks_of) {
+            let vertical = s.c0[0] == s.c1[0];
+            let flat = !vertical && s.c0[1] == base;
+            let mut trim_y = vec![Iv::p(0.0); n];
+            for w in breaks.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                if b.partial_cmp(&a) != Some(std::cmp::Ordering::Greater) {
+                    continue;
+                }
+                let mut span_y = vec![Iv::p(0.0); n];
+                kr_iv(
+                    KR7,
+                    Iv::p(a),
+                    Iv::p(b),
+                    round,
+                    &mut span_y,
+                    &tape,
+                    &mut pos,
+                    |t, dy, pos| {
+                        dy.fill(Iv::p(0.0));
+                        if vertical || flat {
+                            return;
+                        }
+                        let (mut p0, p1) = s.eval(t, round);
+                        if round {
+                            for (c, x) in [p0[0], p0[1], p1[0]].iter().enumerate() {
+                                assert!(
+                                    x.contains(vals[*vc + c]),
+                                    "a trim value outside E: {x:?} {}",
+                                    vals[*vc + c]
+                                );
+                            }
+                        }
+                        // the kernel's float v of the trim point
+                        let fy = vals[*vc + 1];
+                        *vc += 3;
+                        // A side of constant v (the sides are the domain's: of constant u, whose
+                        // pieces add nothing, or of constant v): the exact trim point's v is that
+                        // constant, `R`'s top bit for bit; `E` keeps the evaluation's enclosure.
+                        if !round {
+                            p0[1] = Iv::p(s.c0[1]);
+                        }
+                        // the top's iso line: base up to the trim point, split at the v knots
+                        // strictly between, the kernel's (from its float v): the exact top's, and
+                        // at most the top itself as well (a float v an ulp past a knot the side
+                        // lies on), whose piece is `[top, top]` in `R`, adding exactly nothing
+                        let knots =
+                            surface_knots_inside(k, surface, SurfParamType::V, base, fy).unwrap();
+                        let exact =
+                            surface_knots_inside(k, surface, SurfParamType::V, base, s.c0[1])
+                                .unwrap();
+                        assert!(
+                        knots.len() >= exact.len()
+                            && knots[..exact.len()] == exact[..]
+                            && knots[exact.len()..].iter().all(|&x| x == s.c0[1]),
+                        "the kernel's knots below the trim point {knots:?} are not the exact top's {exact:?}"
+                    );
+                        let mut v0 = Iv::p(base);
+                        let mut ends: Vec<Iv> = knots.iter().map(|&x| Iv::p(x)).collect();
+                        ends.push(p0[1]);
+                        for v1 in ends {
+                            kr_iv(KR15, v0, v1, round, dy, &tape, pos, |v, g, _| {
+                                let iso = iso_iv(&srf, &lay, origin, p0[0], v, round);
+                                if round {
+                                    for (c, x) in iso.iter().enumerate() {
+                                        assert!(
+                                            x.contains(vals[*vc + c]),
+                                            "an integrand value outside E: [{c}] {x:?} {}",
+                                            vals[*vc + c]
+                                        );
+                                    }
+                                }
+                                *vc += iso.len();
+                                g.copy_from_slice(&iso);
+                            });
+                            v0 = v1;
+                        }
+                        for d in dy.iter_mut() {
+                            *d = r(d.mul(p1[0])).neg();
+                        }
+                    },
+                );
+                for (t, p) in trim_y.iter_mut().zip(&span_y) {
+                    *t = r(t.add(*p));
+                }
+            }
+            for (t, p) in y.iter_mut().zip(&trim_y) {
+                *t = r(t.add(*p));
+            }
+        }
+        assert_eq!(pos, tape.len(), "the tape is not consumed");
+        assert_eq!(*vc, vals.len(), "the values are not consumed");
+        let value = |i: usize| if i == 0 { Iv::p(0.0) } else { y[i - 1] };
+        let mut out = vec![Iv::p(0.0); 26];
+        if layout.area != 0 {
+            out[0] = value(layout.area);
+        }
+        if layout.volume != 0 {
+            out[1] = value(layout.volume).mul(Iv::p(sign));
+        }
+        for (kk, &index) in layout.moments.iter().enumerate() {
+            if index == 0 {
+                continue;
+            }
+            let ms = if kk < 4 { 1.0 } else { sign };
+            for c in 0..3 {
+                out[2 + 3 * kk + c] = value(index + c).mul(Iv::p(ms));
+            }
+        }
+        out
+    };
+    MassReplay {
+        float,
+        r: interval(false),
+        e: interval(true),
+    }
+}
+
+/// The B-spline the kernel evaluates a surface by (`evaluate_simple_first_into`): its own,
+/// or an analytic kind's NURB (`analytic_base_with_nurb`).
+fn nurb_of<'a>(k: &Kernel, s: &'a Surface) -> &'a BSplineSurface {
+    match s.kind_with_nurb(k).unwrap() {
+        SurfaceKind::BSpline(b) => b,
+        SurfaceKind::Cone(c) => c.rev().base(),
+        SurfaceKind::Sphere(c) => c.base().base(),
+        SurfaceKind::Torus(c) => c.base().base(),
+        SurfaceKind::SurfOfRevolution(c) => c.base(),
+        SurfaceKind::SurfOfExtrusion(c) => c.base(),
+        other => panic!("a surface the replay does not evaluate: {other:?}"),
+    }
+}
+
+impl Srf {
+    /// A kernel B-spline surface's net (homogeneous points, as the kernel stores them).
+    fn of(s: &BSplineSurface) -> Srf {
+        let n = s.gw_nurb().expect("a nurb");
+        let (p, q) = n.degrees();
+        let net: Vec<Vec<[f64; 4]>> = n
+            .cpts()
+            .iter()
+            .map(|row| row.iter().map(|c| [c.x, c.y, c.z, c.w]).collect())
+            .collect();
+        let rational = net.iter().flatten().any(|cp| cp[3] > -1e300);
+        Srf {
+            net,
+            rational,
+            p,
+            q,
+            u: n.u_knots().to_vec(),
+            v: n.v_knots().to_vec(),
+        }
+    }
+}
+
+/// A face's precise properties as `face_properties` integrates them, replayed
+/// ([`mass_replay`]) with the kernel's own preparation in its order: the face's box (the
+/// estimated area `d²/100` and, `origin` `None`, the box middle as the origin), the oriented
+/// trims, the box again (the scale's origin distance). The trims must be the face's domain
+/// sides, every end a corner of `uv_domain` bit for bit (the exact sides). Returns the
+/// replay and the origin.
+fn face_replay(
+    k: &Kernel,
+    b: &mut Brep,
+    f: solidcore::topology::FaceId,
+    same: bool,
+    origin: Option<[f64; 3]>,
+    flags: u64,
+    accuracy: f64,
+) -> (MassReplay, [f64; 3]) {
+    use solidcore::geom::attribute::ObjectKey;
+    use solidcore::geom::object::ObjectRef;
+    use solidcore::EntityRef;
+    let bbox = solidcore::query::face::p1::calculate_bounding_box(k, &*b, f, false).unwrap();
+    let key_of = |e: EntityRef| ObjectRef {
+        type_code: 0,
+        key: ObjectKey(match e {
+            EntityRef::Edgeuse(eu) => u64::from(eu.index()),
+            _ => 0,
+        }),
+    };
+    let trims = solidcore::topology::face::p1::create_oriented_trim_boundary(
+        k, b, f, true, true, None, &key_of,
+    )
+    .unwrap()
+    .curves;
+    let fbox = solidcore::query::face::p1::calculate_bounding_box(k, &*b, f, false).unwrap();
+    let dom = b.face(f).unwrap().uv_domain;
+    let (us, vs) = ([dom.min().x, dom.max().x], [dom.min().y, dom.max().y]);
+    let sides: Vec<Side> = trims
+        .into_iter()
+        .map(|c| {
+            let CurveKind::BSpline(bs) = c.kind() else {
+                panic!("a trim that is not a B-spline")
+            };
+            let cr = crv_of(bs);
+            assert!(cr.p == 1 && cr.cps.len() == 2, "a trim that is not a line");
+            assert!(cr.cps.iter().all(|q| q[3] == 1.0 && q[2] == 0.0));
+            // the exact sides: every end a corner of the domain, bit for bit
+            for q in &cr.cps {
+                assert!(
+                    us.contains(&q[0]) && vs.contains(&q[1]),
+                    "a trim end off the domain's corners: {q:?}"
+                );
+            }
+            let t = [cr.knots[1], cr.knots[2]];
+            assert!(cr.knots[0] == t[0] && cr.knots[3] == t[1]);
+            Side {
+                c0: [cr.cps[0][0], cr.cps[0][1]],
+                c1: [cr.cps[1][0], cr.cps[1][1]],
+                t,
+                curve: c,
+            }
+        })
+        .collect();
+    let surface = b.face(f).unwrap().surface.clone().expect("a surface");
+    let size = bbox.size();
+    let d = size.x.max(size.y).max(size.z);
+    let est = d * d / 100.0;
+    let mid = bbox.mid();
+    let origin = origin.unwrap_or([mid.x, mid.y, mid.z]);
+    let m = mass_replay(
+        k, &surface, &sides, &fbox, vs[0], same, accuracy, origin, est, flags,
+    );
+    (m, origin)
+}
+
+/// The certificates of the moved elements `i` (`v[i] != main[i]`) of a row whose replayed
+/// float values are `fl` and interval values `(rr, ee)`: `Enc { r: R, e: E }`, asserting the
+/// replay is the row's vector bit for bit, and that main's value lies in the same `E` or the
+/// new value is closer.
+fn label_replayed(
+    name: &str,
+    fl: &[f64],
+    rr: &[Iv],
+    ee: &[Iv],
+    v: &[f64],
+    main: &[f64],
+    out: &mut BTreeMap<usize, Cert>,
+) {
+    assert_eq!(
+        bits(fl),
+        bits(v),
+        "{name}: the replay is not the row's vector"
+    );
+    let mut moved = 0;
+    let mut main_in_e = 0;
+    let mut width = 0.0f64;
+    for (i, (r, e)) in rr.iter().zip(ee).enumerate() {
+        if v[i].to_bits() == main[i].to_bits() {
+            continue;
+        }
+        width = width.max((e.hi - e.lo) / v[i].abs());
+        let c = Cert::Enc {
+            r: *r,
+            e: Some(*e),
+            what: "Gauss-Kronrod partition replay",
+        };
+        let main_in = e.contains(main[i]);
+        assert!(
+            main_in || classify(v[i], main[i], &c) == Class::Closer,
+            "{name} [{i}]: main {:?} is outside E {e:?} and the new {:?} is not closer",
+            main[i],
+            v[i]
+        );
+        moved += 1;
+        main_in_e += usize::from(main_in);
+        out.insert(i, c);
+    }
+    eprintln!(
+        "replayed {name}: {moved} moved, main in E at {main_in_e}, largest width(E) / |new| {width:.1e}"
+    );
+}
+
+/// The certificate of a moved `mass.integrator` face row (`issue1435_multispan_*`: the
+/// rational kind-5 face over a rectangle of its domain; the query's own outputs, as the
+/// runner computes them): the integrator's partition replayed in floats, bit for bit the
+/// row's vector, and in intervals over the same partition (the exact trims, the domain's
+/// sides: the reference `R`, the exact quadrature of that partition; and the enclosure `E`
+/// of the kernel's float result).
+fn label_mass(case: &goldens::Case, v: &[f64], main: &[f64], out: &mut BTreeMap<usize, Cert>) {
+    use goldens::units::mass_integrator::face_scene;
+    use solidcore::topology::face::p2::{PPF_AREA, PPF_AREA_FIRST_MOMENTS};
+    let (k, mut b, f, p, query) = face_scene(case).unwrap().expect("a face case");
+    let (same, origin, flags) = match query {
+        0 => (p[14] == 0.0, Some([p[9], p[10], p[11]]), p[15] as u64),
+        2 | 4 => (true, None, PPF_AREA),
+        3 => (true, None, PPF_AREA | PPF_AREA_FIRST_MOMENTS),
+        _ => panic!("query {query}"),
+    };
+    assert!(query != 0 || p[13] == 0.0, "a thick face");
+    let (m, origin) = face_replay(&k, &mut b, f, same, origin, flags, p[12]);
+    // the query's outputs from the properties
+    let (fl, rr, ee): (Vec<f64>, Vec<Iv>, Vec<Iv>) = match query {
+        0 => (m.float.clone(), m.r.clone(), m.e.clone()),
+        2 | 4 => (
+            vec![m.float[0].abs()],
+            vec![m.r[0].abs()],
+            vec![m.e[0].abs()],
+        ),
+        3 => {
+            // `origin + m / area`
+            let c = |round: bool, ar: &[Iv]| -> Vec<Iv> {
+                let mut o = vec![ar[0].abs()];
+                for (c, &oc) in origin.iter().enumerate() {
+                    let q = rnd(ar[2 + c].div(ar[0]), U, round);
+                    o.push(rnd(Iv::p(oc).add(q), U, round));
+                }
+                o
+            };
+            let a = m.float[0];
+            let mut fo = vec![a.abs()];
+            for (c, &oc) in origin.iter().enumerate() {
+                fo.push(oc + m.float[2 + c] / a);
+            }
+            (fo, c(false, &m.r), c(true, &m.e))
+        }
+        _ => unreachable!(),
+    };
+    label_replayed(&case.name, &fl, &rr, &ee, v, main, out);
+}
+
+/// The certificate of a moved `boolean.api_brep` areas row (`more0138`, a rotational sweep):
+/// the swept B-rep's face areas as the runner takes them (`face_area` of each face in order,
+/// at `AREA_ACCURACY`, then sorted), with every face whose area moved replayed
+/// ([`face_replay`]) in its place in that order; the others the kernel's.
+fn label_api_areas(case: &goldens::Case, v: &[f64], main: &[f64], out: &mut BTreeMap<usize, Cert>) {
+    use goldens::units::boolean_api_brep::rotational_sweep_scene;
+    use solidcore::mass::integrator::properties::face_area;
+    use solidcore::topology::face::p2::PPF_AREA;
+    const AREA_ACCURACY: f64 = 1e-4;
+    let moved: Vec<usize> = (1..v.len())
+        .filter(|&i| v[i].to_bits() != main[i].to_bits())
+        .collect();
+    // which faces: the kernel's areas in the runner's order
+    let (k, mut b) = rotational_sweep_scene(case)
+        .unwrap()
+        .expect("a swept B-rep");
+    let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
+    let kernel: Vec<f64> = faces
+        .iter()
+        .map(|&f| face_area(&k, &mut b, f, AREA_ACCURACY).unwrap())
+        .collect();
+    let target: Vec<usize> = (0..faces.len())
+        .filter(|&j| moved.iter().any(|&i| kernel[j].to_bits() == v[i].to_bits()))
+        .collect();
+    assert_eq!(
+        target.len(),
+        moved.len(),
+        "{}: the moved areas' faces",
+        case.name
+    );
+    // again, the moved faces replayed
+    let (k, mut b) = rotational_sweep_scene(case)
+        .unwrap()
+        .expect("a swept B-rep");
+    let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
+    let mut rows: Vec<(f64, Iv, Iv)> = Vec::new();
+    for (j, &f) in faces.iter().enumerate() {
+        if target.contains(&j) {
+            let (m, _) = face_replay(&k, &mut b, f, true, None, PPF_AREA, AREA_ACCURACY);
+            rows.push((m.float[0].abs(), m.r[0].abs(), m.e[0].abs()));
+        } else {
+            let a = face_area(&k, &mut b, f, AREA_ACCURACY).unwrap();
+            rows.push((a, Iv::p(a), Iv::p(a)));
+        }
+    }
+    rows.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut fl = vec![faces.len() as f64];
+    let mut rr = vec![Iv::p(fl[0])];
+    let mut ee = rr.clone();
+    for (a, r, e) in rows {
+        fl.push(a);
+        rr.push(r);
+        ee.push(e);
+    }
+    label_replayed(&case.name, &fl, &rr, &ee, v, main, out);
+}
+
 /// `|new − r| / B` of an at-rounding element.
 fn ratio(new: f64, c: &Cert) -> f64 {
     match c {
@@ -3330,6 +4317,7 @@ fn moved_elements_are_closer_equal_or_at_rounding() {
     let mut tally: BTreeMap<(String, &'static str, Class), (usize, f64)> = BTreeMap::new();
     let mut rows: BTreeMap<(String, Class), usize> = BTreeMap::new();
     let mut seen = 0usize;
+    let mut stale = 0usize;
     for runner in registry() {
         if !UNITS.contains(&runner.id()) {
             continue;
@@ -3369,11 +4357,23 @@ fn moved_elements_are_closer_equal_or_at_rounding() {
                 values: BTreeMap::from([(key.clone(), main.clone())]),
                 ..Output::default()
             };
-            assert_eq!(
-                encode(name, &mine)["values"][key],
-                d.olds[&(unit.clone(), name.clone())],
-                "{unit}/{name}: M is not main's committed golden"
-            );
+            let enc = encode(name, &mine)["values"][key].clone();
+            let old = &d.olds[&(unit.clone(), name.clone())];
+            if enc != *old {
+                // A committed golden older than main's output and within the goldens'
+                // tolerance of it (a bless keeps a passing value): main's output passes
+                // main's golden, the check CI runs on main, and no tighter tie exists.
+                assert!(
+                    STALE_GOLDEN_UNITS.contains(&unit.as_str()),
+                    "{unit}/{name}: M is not main's committed golden"
+                );
+                let wrap = |x: &Value| serde_json::json!({ "values": { key.as_str(): x } });
+                assert!(
+                    goldens::golden::diff(&wrap(old), &wrap(&enc), runner.abs_floors()).is_none(),
+                    "{unit}/{name}: M does not pass main's committed golden"
+                );
+                stale += 1;
+            }
             assert_eq!(v.len(), main.len(), "{unit}/{name}: the vector's length");
             let listed: BTreeMap<usize, &El> = els.iter().map(|e| (e.i, e)).collect();
             for (i, (x, m)) in v.iter().zip(main).enumerate() {
@@ -3456,6 +4456,7 @@ fn moved_elements_are_closer_equal_or_at_rounding() {
         std::fs::write(path, pins.join("\n") + "\n").unwrap();
     }
     if filter.is_none() {
+        eprintln!("main goldens older than main's output (passing): {stale} rows");
         assert_eq!(seen, d.els.values().map(Vec::len).sum::<usize>());
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
