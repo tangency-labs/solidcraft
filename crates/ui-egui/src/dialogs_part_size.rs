@@ -215,6 +215,24 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
     false
 }
 
+/// The live preview's commands: a modelled thread takes seconds to cut, so a resize that would
+/// cut one, asked for or kept from the part as it is, shows a cosmetic thread; OK cuts it.
+pub(crate) fn preview(k: &Resize, cmds: &mut [(String, Value)]) {
+    let keeps_modeled = crate::dialogs_parts::THREADS.get(k.original_thread).is_some_and(|t| t.0 == "modeled");
+    for (id, p) in cmds {
+        let modeled = match p.get("thread") {
+            Some(thread) => thread.as_str() == Some("modeled"),
+            None => keeps_modeled,
+        };
+        if id == "parts.resize"
+            && modeled
+            && let Value::Object(m) = p
+        {
+            m.insert("thread".into(), json!("cosmetic"));
+        }
+    }
+}
+
 pub fn commands(app: &SolveApp, k: &Resize) -> Result<Vec<(String, Value)>, String> {
     k.current(app)?;
     let (size, _) = k.family.sizes.get(k.size).ok_or("Pick a part size")?;
@@ -295,6 +313,21 @@ mod tests {
         assert_eq!(app.session.doc.parts.get(&id).and_then(|p| p.thread.clone()).as_deref(), Some("none"));
         open(&mut app, id);
         assert_eq!(editor(&app).thread, 2, "it reopens on the thread the part has");
+    }
+
+    /// A part with a modelled thread previews a new size with a cosmetic thread, though the
+    /// command leaves `thread` out; OK's command still leaves it out, so the thread stays modelled.
+    #[test]
+    fn a_resize_preview_of_a_modeled_part_stays_cosmetic() {
+        let (mut app, id) = part("hex_nut", "M6", None);
+        app.run("parts.resize", json!({"component": id, "thread": "modeled"})).unwrap();
+        open(&mut app, id);
+        let Kind::PartSize(k) = &mut app.dialog.as_mut().unwrap().kind else { panic!("not a part-size dialog") };
+        k.size += 1;
+        let preview = crate::dialogs::preview_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(preview[0].1["thread"], "cosmetic", "{preview:?}");
+        let commands = crate::dialogs::apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
+        assert!(commands[0].1.get("thread").is_none(), "{commands:?}");
     }
 
     #[test]
