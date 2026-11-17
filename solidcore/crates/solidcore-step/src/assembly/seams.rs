@@ -1560,8 +1560,13 @@ impl Assembly<'_> {
     /// between then meets no loop, so it lies in the face: the regions off the face beyond a loop
     /// are bounded by that loop alone. A piece whose angle is not monotone, or one that comes within
     /// its pad of the ruling's angle without crossing it between its ends, may meet the ruling
-    /// anywhere over its hull's heights, none of which may be on the seam. Vertices are tried in
-    /// loop order, `la`'s first.
+    /// anywhere over the heights [`meets`] gives it, none of which may be on the seam. A ruling
+    /// that crosses the other loop within a piece's pad of a joint between two of its pieces (a knot
+    /// of a helix, the next quarter of a circle) has the piece across the joint come that near
+    /// without crossing: where both run one way round the axis the loop passes the ruling once
+    /// there, and that piece is the loop going on from the seam's end, no matter unless it reaches
+    /// back along the seam from there by more than the tolerance. Vertices are tried in loop order,
+    /// `la`'s first.
     fn wound_band_seam(&mut self, fi: usize, la: usize, lb: usize, ax: &Axis, eval: &SurfaceEval, splits: &mut usize) -> R<()> {
         let frame = Perpendicular::new(ax);
         let height = |p: Vec3| (p - ax.origin).dot(ax.z);
@@ -1623,6 +1628,12 @@ impl Assembly<'_> {
             // reach of anything else along the ruling (from the vertex on, or straddling it).
             let mut nearest: Option<(f64, u32, Vec3, f64)> = None;
             let mut other = f64::INFINITY;
+            // The other loop's pieces counted along it: the place and way of the one its nearest
+            // crossing is on, those that may meet the ruling without crossing it (place, way,
+            // reach), and how many it has.
+            let mut crossed: Option<(usize, Option<i8>)> = None;
+            let mut doubtful: Vec<(usize, Option<i8>, f64)> = Vec::new();
+            let mut count = 0usize;
             for &p in &points {
                 let d = along(height(p));
                 if !(Blocked { arcs: vec![frame.point_arc(p, self.tol)] }).clear(theta) && d > -self.tol {
@@ -1630,9 +1641,12 @@ impl Assembly<'_> {
                 }
             }
             for (li, luses) in &loops {
+                let mut place = 0usize;
                 for (ui, w) in luses.iter().enumerate() {
                     let last = w.pieces.len().saturating_sub(1);
                     for (pi, piece) in w.pieces.iter().enumerate() {
+                        let here = place;
+                        place += 1;
                         // The vertex's own pieces meet the ruling there only (monotone, under half
                         // a turn).
                         if *li == from && ((ui == k && pi == 0) || (ui == before && pi == last)) {
@@ -1645,6 +1659,7 @@ impl Assembly<'_> {
                                 if d > 0.0 {
                                     if nearest.is_none_or(|(n, ..)| d < n) {
                                         nearest = Some((d, w.edge, p, x));
+                                        crossed = Some((here, piece.runs));
                                     }
                                 } else if d > -self.tol {
                                     other = 0.0;
@@ -1654,12 +1669,30 @@ impl Assembly<'_> {
                             Meets::Once { d, .. } => {
                                 other = other.min(if d > -self.tol { d.max(0.0) } else { f64::INFINITY });
                             }
+                            // The other loop's own: judged once its nearest crossing is known.
+                            Meets::Hull(Some(reach)) if *li == onto => doubtful.push((here, piece.runs, reach)),
                             Meets::Hull(reach) => other = other.min(reach.unwrap_or(f64::INFINITY)),
                         }
                     }
                 }
+                if *li == onto {
+                    count = place;
+                }
             }
             let Some((d, e, p, x)) = nearest else { continue };
+            for (place, runs, reach) in doubtful {
+                // The piece next along the loop to the one crossed, both running one way round
+                // the axis: their angle is monotone through the joint between them, so the loop
+                // passes the ruling once, at the crossing, and this piece is the loop going on
+                // from there. It is on the seam only where it reaches back along it.
+                let goes_on = crossed.is_some_and(|(at, way)| {
+                    let apart = at.abs_diff(place);
+                    way.is_some() && way == runs && (apart == 1 || apart.checked_add(1) == Some(count))
+                });
+                if !(goes_on && reach > d - self.tol) {
+                    other = other.min(reach);
+                }
+            }
             // Anything else at the crossing or before it: another loop, a doubtful piece, or a
             // crossing of the other loop's own short of where the seam would end.
             if !(d > self.tol) || other <= d + self.tol {
@@ -1989,7 +2022,8 @@ impl Perpendicular {
     /// runs, a piece that reaches half a turn in halves ([`MAX_HALVINGS`]); the whole turn where a
     /// hull is still not clear of the axis.
     pub(crate) fn pieces(&self, curve: &BCurve, interval: [f64; 2], tol: f64) -> Vec<Piece> {
-        let whole = || vec![Piece { arc: [0.0, TAU], pad: 0.0, runs: None, on: interval, heights: [f64::NEG_INFINITY, f64::INFINITY] }];
+        let whole =
+            || vec![Piece { arc: [0.0, TAU], pad: 0.0, runs: None, on: interval, heights: [f64::NEG_INFINITY, f64::INFINITY], points: Vec::new() }];
         let Some((form, [a, b])) = nurbs_form(curve, interval) else { return whole() };
         let (knots, homogeneous): (&Vec<f64>, Vec<[f64; 4]>) = match &form {
             BCurve::Spline { knots, points } => (knots, points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()),
@@ -2039,7 +2073,7 @@ impl Perpendicular {
             let z = self.x.cross(self.y);
             let height = |p: &Vec3| (*p - self.origin).dot(z);
             let heights = points.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |[lo, hi], p| [lo.min(height(p)), hi.max(height(p))]);
-            out.push(Piece { arc, pad, runs: angular_sign(&flat), on: [s, t], heights });
+            out.push(Piece { arc, pad, runs: angular_sign(&flat), on: [s, t], heights, points: piece });
         }
         out
     }
@@ -2093,8 +2127,9 @@ pub(crate) enum Meets {
     Clear,
     /// At one point, `d` along the ruling from the vertex: `p`, at parameter `x` of the edge's form.
     Once { d: f64, p: Vec3, x: f64 },
-    /// Anywhere over the piece's hull's heights, from this far along the ruling (none where the
-    /// whole hull lies behind the vertex by more than the tolerance).
+    /// Anywhere over the heights of the piece's hull, or of the hull of the part of it that comes
+    /// within its pad of the ruling's angle, from this far along the ruling (none where that hull
+    /// lies behind the vertex by more than the tolerance).
     Hull(Option<f64>),
 }
 
@@ -2103,7 +2138,11 @@ pub(crate) enum Meets {
 /// piece under half a turn meets it once where its angle reaches `theta` between its ends. One
 /// within its pad of the ruling's angle without crossing it between its ends (a near miss), and
 /// one whose angle is not monotone, may meet it anywhere over the heights of their hull: the
-/// angle of the nearer end says nothing of where in between the piece comes near.
+/// angle of the nearer end says nothing of where in between the piece comes near. A near miss
+/// whose angle is monotone comes within its pad only between its nearer end and where its angle
+/// is the pad away, past which it runs farther off: it may meet the ruling over the heights of
+/// that part's hull alone ([`Piece::heights_between`]), the whole piece's where the part cannot
+/// be cut out or the piece stays within its pad.
 pub(crate) fn meets(
     frame: &Perpendicular,
     form: &Option<CurveEval>,
@@ -2122,8 +2161,19 @@ pub(crate) fn meets(
     };
     Ok(match crossing {
         Some((true, p, x)) => Meets::Once { d: along(height(p)), p, x },
-        Some((false, ..)) | None => {
-            let [lo, hi] = piece.heights.map(along);
+        near => {
+            let within = match (near, form) {
+                (Some((false, end, x)), Some(c)) => {
+                    // Where the angle is the pad away from the ruling's, on the nearer end's side.
+                    let side = wrap(frame.angle(end) - theta);
+                    match ruling_crossing(frame, c, piece.on, theta + piece.pad.copysign(side))? {
+                        Some((true, _, leaves)) => piece.heights_between(x, leaves, &height),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            let [lo, hi] = within.unwrap_or(piece.heights).map(along);
             let (lo, hi) = (lo.min(hi), lo.max(hi));
             Meets::Hull((hi > -tol).then_some(lo.max(0.0)))
         }
@@ -2159,12 +2209,39 @@ pub(crate) struct Piece {
     on: [f64; 2],
     /// The heights along the axis its control points reach (its hull's), lowest first.
     heights: [f64; 2],
+    /// Its Bézier control points on `on`, homogeneous with positive weights (none for an edge
+    /// taken to reach the whole turn).
+    points: Vec<[f64; 4]>,
 }
 
 impl Piece {
     /// The arc the piece blocks: its own, widened by its pad.
     pub(crate) fn blocked(&self) -> [f64; 2] {
         padded(self.arc, self.pad)
+    }
+
+    /// The heights (`height` of a point, lowest first) the part of the piece between parameters
+    /// `a` and `b` of its form reaches: those of that part's own control points, the piece cut
+    /// there as the kernel cuts a spline ([`solidcore::eval::pcurve::segment`], the piece being
+    /// a Bézier curve on `on`). `None` where the piece has no control points or the part is
+    /// empty or cannot be cut out.
+    fn heights_between(&self, a: f64, b: f64, height: impl Fn(Vec3) -> f64) -> Option<[f64; 2]> {
+        let degree = self.points.len().checked_sub(1).filter(|d| *d > 0)?;
+        let [s, t] = self.on;
+        let (a, b) = (a.min(b).max(s), a.max(b).min(t));
+        if !(a < b) {
+            return None;
+        }
+        let knots: Vec<f64> = std::iter::repeat_n(s, degree + 1).chain(std::iter::repeat_n(t, degree + 1)).collect();
+        let (_, part) = solidcore::eval::pcurve::segment(degree, &knots, &self.points, a, b).ok()?;
+        if part.len() != degree + 1 || part.iter().any(|h| !(h[3] > 0.0)) {
+            return None;
+        }
+        let heights = part.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |[lo, hi], h| {
+            let z = height(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+            [lo.min(z), hi.max(z)]
+        });
+        heights.iter().all(|z| z.is_finite()).then_some(heights)
     }
 }
 

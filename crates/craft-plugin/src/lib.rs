@@ -113,9 +113,13 @@ fn invalid(field: impl Into<String>, reason: impl Into<String>) -> HostError {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Effect {
+    /// Reads the open design and changes nothing.
     Read,
+    /// Changes the open design.
     #[default]
     Edit,
+    /// Opens a file as a new design and leaves the open one as it is: every importer's effect.
+    Open,
 }
 
 /// The app supplies the same contracts it exposes to its other programmatic clients.
@@ -392,7 +396,9 @@ struct DeclaredEntry {
     label: String,
     #[serde(default)]
     needs_plugin_data: bool,
-    /// Default: an exporter reads the design; anything else edits.
+    /// A command's effect is `edit` unless it says `read`; an exporter's is `read`; an importer's is
+    /// `open`. An importer that says `edit` (the only effect it could state before `open` existed)
+    /// still opens a new design.
     #[serde(default)]
     effect: Option<Effect>,
     #[serde(default = "empty_input_schema")]
@@ -419,7 +425,12 @@ impl From<EntryDeclaration> for Entry {
                 extensions: value.extensions,
                 label: value.label.trim().to_string(),
                 needs_plugin_data: value.needs_plugin_data,
-                effect: value.effect.unwrap_or(if value.kind == EntryKind::Exporter { Effect::Read } else { Effect::Edit }),
+                effect: match (value.kind, value.effect) {
+                    (EntryKind::Importer, None | Some(Effect::Edit)) => Effect::Open,
+                    (_, Some(effect)) => effect,
+                    (EntryKind::Exporter, None) => Effect::Read,
+                    (EntryKind::Command, None) => Effect::Edit,
+                },
                 input_schema: value.input_schema,
                 slots: value.slots,
             },
@@ -555,6 +566,9 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
         EntryKind::Command if !entry.extensions.is_empty() || !entry.label.is_empty() => {
             Err(invalid(format!("{field}.extensions"), "only an import or export slot claims file extensions and has a label"))
         }
+        EntryKind::Command if entry.effect == Effect::Open => {
+            Err(invalid(format!("{field}.effect"), "only an importer opens a file as a new design; a command's effect is read or edit"))
+        }
         EntryKind::Command => Ok(()),
         EntryKind::Importer | EntryKind::Exporter => {
             let mut seen = BTreeSet::new();
@@ -566,8 +580,8 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
                     "an import or export slot claims 1..32 distinct lowercase extensions without the dot, such as \"f3d\"",
                 ));
             }
-            if entry.kind == EntryKind::Importer && entry.effect != Effect::Edit {
-                return Err(invalid(format!("{field}.effect"), "an importer makes a design: its effect is edit"));
+            if entry.kind == EntryKind::Importer && entry.effect != Effect::Open {
+                return Err(invalid(format!("{field}.effect"), "an importer opens a file as a new design: its effect is open"));
             }
             if entry.kind == EntryKind::Exporter && entry.effect != Effect::Read {
                 return Err(invalid(format!("{field}.effect"), "an exporter only reads the design: its effect is read"));

@@ -302,7 +302,10 @@ plugin and importer.
 
 An importer turns a file of another format into a SolidCraft design. Its manifest says
 `"capabilities": ["formats@0.1"]`, and each of its entries has `"kind": "importer"` and the
-extensions it claims, lowercase without the dot:
+extensions it claims, lowercase without the dot. An importer's effect is `open`: it opens a file
+as a new design and leaves the open one as it is. It need not say so; `plugin.list` and
+`plugin.install` report it, and an importer that says `"effect": "edit"` is still read as `open`.
+Only an importer may say `open`.
 
 ```json
 {"id": "sample", "name": "Sample", "version": "1.0.0", "capabilities": ["formats@0.1"],
@@ -331,7 +334,14 @@ extensions it claims, lowercase without the dot:
   ("Parts of the file kept as they are"); `code` is the importer's stable code for it. Both may be empty.
   The Import report window shows the summary, then one line per title with how many items it covers,
   worst first, and folds every item with its code, subject and message under **Details**; programs
-  get the whole report in the reply.
+  get the whole report in the reply. `details` is the importer's own JSON (for example how far it
+  checked the history it rebuilt, and each feature it mapped or could not). The window shows it
+  under **From the importer** as folding lines: each field a line with its key read as words
+  (`final_body` reads "Final body"), each object or list a group, a list's element named by its
+  `name` (or `title`, `label`, `subject`, `stage`, `id`, `kind` or `code`) and its `status`, and
+  empty values left out. **Copy report** puts the whole report on the clipboard as text, and
+  **Save report…** saves it as a `.txt` file, or as a `.json` file in the shape of the reply.
+  After OK, Plugins › Last import report… shows the last import's report again.
   Nothing changes unless the whole import succeeds.
 - **Assemblies.** `source.read`, `source.size` and `source.resolve` with path `""` reach the file
   being imported. Any other path is relative to that file's folder (an assembly's parts) and needs

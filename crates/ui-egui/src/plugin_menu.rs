@@ -34,6 +34,8 @@ use crate::ui_kit::BackingTooltipExt as _;
 
 /// The menu row that installs a plugin.
 const INSTALL: &str = "install";
+/// Last import report…: the report of the last file an importer plugin opened, again.
+const LAST_REPORT: &str = "last_import_report";
 
 /// The start of a plugin command's ribbon button id: `plugin_entry:<plugin id>:<entry name>`.
 pub(crate) const RIBBON_PREFIX: &str = "plugin_entry:";
@@ -603,11 +605,15 @@ pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
     listed
 }
 
-/// The menu's rows: Install plugin…, a separator, then each plugin's entries.
+/// The menu's rows: Install plugin…, Last import report…, a separator, then each plugin's entries.
 pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     use crate::app_bar::{FileItem, FileRow};
     let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
-    let mut rows = vec![item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true), FileRow::Separator];
+    let mut rows = vec![
+        item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true),
+        item(LAST_REPORT.into(), app.tr("ui.plugin_menu_last_report").into(), app.import_report.is_some()),
+        FileRow::Separator,
+    ];
     if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
         rows.push(item("empty".into(), app.tr("ui.plugin_menu_empty").into(), false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
@@ -660,6 +666,10 @@ pub(crate) fn refresh(app: &mut SolveApp) {
 pub(crate) fn choose(app: &mut SolveApp, id: &str) {
     if id == INSTALL {
         install_plugin_action(app);
+        return;
+    }
+    if id == LAST_REPORT {
+        crate::import_report::reopen(app);
         return;
     }
     let mut parts = id.strip_prefix("entry:").into_iter().flat_map(|rest| rest.split(':')).map(str::parse::<usize>);
