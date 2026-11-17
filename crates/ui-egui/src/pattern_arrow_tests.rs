@@ -179,3 +179,42 @@ fn a_solid_pattern_spacing_arrow_dragged_past_zero_goes_negative() {
         assert!((x - (5.0 + k * v)).abs() < 1e-6, "{copy} centred at x = {x} for Spacing {spacing}");
     }
 }
+
+/// Quantity and Extent, centred and flipped (#8523): the arrow runs the way the copies go
+/// furthest and shows that side's share of the extent (Quantity 4 over 30 mm: two 10 mm steps
+/// ahead, one behind); Spacing and Extent adds its own Extent arrow beside Spacing's.
+#[test]
+fn a_centred_extent_arrow_shows_its_own_side_and_turns_with_flip() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"start": "solid.pattern.rectangular"},
+        {"click": {"world": [5, 5, 10]}},
+        {"call": "ui.dialogInput", "params": {"index": 1}},
+        {"click": {"axis": "X"}}
+    ]))
+    .unwrap();
+    h.call("ui.camera", json!({"target": [5, 5, 5]}));
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        for (key, value) in [("distance1", json!("count_extent")), ("alignment", json!("center")), ("reversed", json!(true))] {
+            d.extra.insert(key.into(), value);
+        }
+        if let Kind::PatternRect { count, extent, .. } = &mut d.kind {
+            *count = "4".into();
+            *extent = "30 mm".into();
+        }
+    }
+    h.settle();
+    let (base, dir) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).expect("an anchor");
+    assert!(dir.is_some_and(|v| v.dist(solidcore_record::Vec3::new(-1.0, 0.0, 0.0)) < 1e-9), "Flip turns the arrow round: {dir:?}");
+    let Some(tip) = handle_at("arrow") else { panic!("no extent arrow") };
+    let end = h.call("ui.worldToScreen", json!({"points": [[base.x - 20.0, base.y, base.z]]}))["result"][0].clone();
+    let end = egui::pos2(end[0].as_f64().unwrap() as f32, end[1].as_f64().unwrap() as f32);
+    assert!(tip.distance(end) < 2.0, "the arrow ends 20 mm along -X: tip {tip:?}, expected {end:?}");
+    assert!(handle_at("arrow_extent").is_none(), "Quantity and Extent has one arrow");
+    h.app.dialog.as_mut().unwrap().extra.insert("distance1".into(), json!("spacing_extent"));
+    h.settle();
+    assert!(handle_at("arrow").is_some() && handle_at("arrow_extent").is_some(), "Spacing and Extent shows both arrows");
+}

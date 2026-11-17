@@ -14,9 +14,17 @@ selection inputs. Click an input to pick into it; click a selected item again to
 remove it, or use its clear button. The preview uses the same commands as OK.
 Cancel leaves the design and undo history unchanged.
 
-Rectangular feature patterns have two direction columns, each with Quantity,
-Spacing, Flip and Center controls. Directions can meet at any angle. A missing
-second direction produces a single row. Direction vectors are saved with the
+Rectangular feature patterns have two direction columns, each with a Distance
+Type, its values, Flip and Center controls. The Distance Type says what is given:
+Quantity and Spacing (the default), Quantity and Extent (the spacing is the extent
+divided by one less than the quantity) or Spacing and Extent (as many copies as
+fit in the extent: 80 mm at 15 mm makes 6, the last at 75 mm). With Spacing and
+Extent, Copy at the end adds one more copy exactly at the end of the extent when
+the spacing doesn't divide it, so only the last gap is shorter. A centred
+direction set by Spacing and Extent reaches half the extent each way from the
+original, with as many copies on each side; Copy at the end then adds a copy at
+either end. Directions can meet at any angle. A missing second direction
+produces a single row. Direction vectors are saved with the
 feature; editing a picked guide later does not change these saved vectors.
 
 Circular feature patterns have Quantity, Total angle, Flip and Center controls.

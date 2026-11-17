@@ -8856,34 +8856,167 @@ pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind)
     pattern_transforms(doc, &vals, st, 0, p)
 }
 
-fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, p: &crate::PatternKind) -> Result<Vec<Mat>> {
-    let count = |e: &str| -> Result<usize> {
-        let n = expr::eval_count(e, vals)?;
-        if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
-            return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
+/// A pattern count: a whole number of 1 to [`MAX_INSTANCES`].
+fn pattern_count(vals: &BTreeMap<String, Value>, e: &str) -> Result<usize> {
+    let n = expr::eval_count(e, vals)?;
+    if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
+        return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
+    }
+    Ok(n as usize)
+}
+
+/// One direction of a rectangular pattern, worked out from its distance type (#8523).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatternRow {
+    /// How many, the original included.
+    pub count: usize,
+    /// The step between neighbours.
+    pub step: f64,
+    /// Copy at the end: the length the row spans, its last copy at the extent's end and the gap
+    /// before it shorter than `step` (centred: half of it each way, a copy at either end).
+    pub end: Option<f64>,
+}
+
+impl PatternRow {
+    /// Each one's offset along the direction in slot order, the original's (zero) first, placed
+    /// by the alignment and Flip as the copies always were. With Copy at the end, the last slot
+    /// moves to where the whole row spans exactly the extent; centred, the outermost slot on
+    /// each side moves to half the extent that way.
+    pub fn offsets(&self, alignment: solidcraft_sketch::PatternAlignment, reversed: bool) -> Vec<f64> {
+        let mut out: Vec<f64> = (0..self.count).map(|i| self.step * alignment.multiplier(i, reversed)).collect();
+        let last = self.count.saturating_sub(1);
+        if let Some(end) = self.end
+            && alignment == solidcraft_sketch::PatternAlignment::Center
+        {
+            let outer = (0..self.count).map(|i| alignment.multiplier(i, reversed).abs()).fold(0.0_f64, f64::max);
+            for (i, slot) in out.iter_mut().enumerate() {
+                let m = alignment.multiplier(i, reversed);
+                if outer > 0.0 && m.abs() == outer {
+                    *slot = end / 2.0 * m.signum();
+                }
+            }
+        } else if let Some(end) = self.end
+            && last > 0
+        {
+            let others = out.iter().take(last);
+            let lo = others.clone().copied().fold(0.0_f64, f64::min);
+            let hi = others.copied().fold(0.0_f64, f64::max);
+            let ahead = alignment.multiplier(last, reversed) >= 0.0;
+            if let Some(slot) = out.get_mut(last) {
+                *slot = if ahead { lo + end } else { hi - end };
+            }
         }
-        Ok(n as usize)
+        out
+    }
+}
+
+/// One rectangular pattern direction from its distance type and the expressions it uses: the
+/// count, the spacing and the extent (one it doesn't use may be anything, or left out). A
+/// centred direction set by spacing and extent reaches half the extent each way from the
+/// original, with as many copies on each side.
+pub fn pattern_row(
+    vals: &BTreeMap<String, Value>,
+    distance: crate::PatternDistance,
+    count: Option<&str>,
+    spacing: Option<&str>,
+    extent: Option<&str>,
+    copy_at_end: bool,
+    alignment: solidcraft_sketch::PatternAlignment,
+) -> Result<PatternRow> {
+    use crate::PatternDistance as D;
+    let missing = |what: &str| DocError::Invalid(format!("the pattern's {what} is missing"));
+    let positive = |e: Option<&str>, what: &str| -> Result<f64> {
+        let v = val(vals, e.ok_or_else(|| missing(what))?, Kind::Length)?;
+        if !v.is_finite() || v <= 0.0 || v >= 1e9 {
+            return Err(DocError::Invalid(format!("the pattern's {what} must be greater than zero")));
+        }
+        Ok(v)
     };
+    match distance {
+        D::CountSpacing => {
+            let n = pattern_count(vals, count.ok_or_else(|| missing("count"))?)?;
+            let step = val(vals, spacing.ok_or_else(|| missing("spacing"))?, Kind::Length)?;
+            Ok(PatternRow { count: n, step, end: None })
+        }
+        D::CountExtent => {
+            let n = pattern_count(vals, count.ok_or_else(|| missing("count"))?)?;
+            let extent = positive(extent, "extent")?;
+            let step = if n > 1 { extent / (n - 1) as f64 } else { 0.0 };
+            Ok(PatternRow { count: n, step, end: None })
+        }
+        D::SpacingExtent => {
+            let step = positive(spacing, "spacing")?;
+            let extent = positive(extent, "extent")?;
+            let centred = alignment == solidcraft_sketch::PatternAlignment::Center;
+            // How far the copies reach on each side they go to.
+            let reach = if centred { extent / 2.0 } else { extent };
+            // Float noise such as 0.1 + 0.2 must not lose the copy at the extent's end.
+            let tol = 1e-9 * extent.max(1.0);
+            if step > reach + tol {
+                let what = if centred { "half its extent" } else { "its extent" };
+                return Err(DocError::Invalid(format!("the pattern's spacing ({step} mm) is longer than {what} ({extent} mm)")));
+            }
+            let sides = if centred { 2 } else { 1 };
+            let fit = ((reach + tol) / step).floor();
+            if !fit.is_finite() || fit * sides as f64 >= MAX_INSTANCES as f64 {
+                return Err(DocError::Invalid(format!("pattern count must be 1…{MAX_INSTANCES}")));
+            }
+            let gaps = fit as usize * sides;
+            let short = reach - fit * step > tol;
+            if copy_at_end && short {
+                return Ok(PatternRow { count: gaps + 1 + sides, step, end: Some(extent) });
+            }
+            Ok(PatternRow { count: gaps + 1, step, end: None })
+        }
+    }
+}
+
+fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, p: &crate::PatternKind) -> Result<Vec<Mat>> {
+    let count = |e: &str| pattern_count(vals, e);
     let mut out = Vec::new();
     match p {
-        crate::PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
-            let (n1, s1) = (count(count1)?, val(vals, spacing1, Kind::Length)?);
+        crate::PatternKind::Rectangular {
+            dir1,
+            count1,
+            spacing1,
+            dir2,
+            count2,
+            spacing2,
+            alignment,
+            alignment2,
+            reversed,
+            reversed2,
+            distance1,
+            distance2,
+            extent1,
+            extent2,
+            copy_at_end1,
+            copy_at_end2,
+        } => {
+            let row1 = pattern_row(vals, *distance1, Some(count1), Some(spacing1), extent1.as_deref(), *copy_at_end1, *alignment)?;
             let d1 = dir1.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
-            let (n2, s2, d2) = match (dir2, count2, spacing2) {
-                (Some(d), Some(c), Some(sp)) => {
-                    (count(c)?, val(vals, sp, Kind::Length)?, d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?)
-                }
-                _ => (1, 0.0, Vec3::Y),
+            // A second direction without the values its distance type uses is left out, as one
+            // without a count or a spacing always was.
+            let complete = (!distance2.uses_count() || count2.is_some())
+                && (!distance2.uses_spacing() || spacing2.is_some())
+                && (!distance2.uses_extent() || extent2.is_some());
+            let (row2, d2) = match dir2 {
+                Some(d) if complete => (
+                    pattern_row(vals, *distance2, count2.as_deref(), spacing2.as_deref(), extent2.as_deref(), *copy_at_end2, *alignment2)?,
+                    d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?,
+                ),
+                _ => (PatternRow { count: 1, step: 0.0, end: None }, Vec3::Y),
             };
-            if n1.saturating_mul(n2) > MAX_INSTANCES {
+            if row1.count.saturating_mul(row2.count) > MAX_INSTANCES {
                 return Err(DocError::Invalid("too many pattern instances".into()));
             }
-            for i in 0..n1 {
-                for j in 0..n2 {
+            let (along1, along2) = (row1.offsets(*alignment, *reversed), row2.offsets(*alignment2, *reversed2));
+            for (i, a) in along1.iter().enumerate() {
+                for (j, b) in along2.iter().enumerate() {
                     if i == 0 && j == 0 {
                         continue;
                     }
-                    out.push(translation(d1 * (s1 * alignment.multiplier(i, *reversed)) + d2 * (s2 * alignment2.multiplier(j, *reversed2))));
+                    out.push(translation(d1 * *a + d2 * *b));
                 }
             }
         }

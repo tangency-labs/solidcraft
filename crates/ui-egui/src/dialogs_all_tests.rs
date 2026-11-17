@@ -227,7 +227,7 @@ fn command_dialog_remembers_values_for_the_same_command_only_in_this_session() {
     let mut h = Harness::new();
     h.app.preferences.remember_dialog_values = true;
     let mut pattern = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
-    if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut pattern.kind {
+    if let Kind::PatternRect { count, spacing, count2, spacing2, .. } = &mut pattern.kind {
         *count = "7".into();
         *spacing = "12 mm".into();
         *count2 = "3".into();
@@ -240,7 +240,7 @@ fn command_dialog_remembers_values_for_the_same_command_only_in_this_session() {
     let recalled = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
     assert!(matches!(
         &recalled.kind,
-        Kind::PatternRect { count, spacing, count2, spacing2 }
+        Kind::PatternRect { count, spacing, count2, spacing2, .. }
             if count == "7" && spacing == "12 mm" && count2 == "3" && spacing2 == "8 mm"
     ));
 
@@ -1485,6 +1485,57 @@ fn rectangular_pattern_groups_each_direction_in_the_same_order() {
         h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
         h.settle();
     }
+}
+
+/// Each direction's Distance Type (#8523): the dialog shows the rows that type takes and sends
+/// only the values it uses (Quantity and Extent: Quantity and Extent; Spacing and Extent:
+/// Spacing, Extent and Copy at the end), and a pattern made with them opens with them again.
+#[test]
+fn rectangular_pattern_distance_type_sends_what_it_uses_and_reopens() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Block"})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    d.inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
+    d.extra.insert("distance1".into(), json!("count_extent"));
+    d.extra.insert("distance2".into(), json!("spacing_extent"));
+    d.extra.insert("copy_at_end2".into(), json!(true));
+    if let Kind::PatternRect { count, extent, spacing2, extent2, .. } = &mut d.kind {
+        *count = "5".into();
+        *extent = "80 mm".into();
+        *spacing2 = "15 mm".into();
+        *extent2 = "40 mm".into();
+    }
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (id, p) = &commands[0];
+    assert_eq!(id, "solid.pattern.rectangular");
+    assert_eq!((&p["distance1"], &p["count1"], &p["extent1"]), (&json!("count_extent"), &json!("5"), &json!("80 mm")), "{p}");
+    assert_eq!((&p["distance2"], &p["spacing2"], &p["extent2"]), (&json!("spacing_extent"), &json!("15 mm"), &json!("40 mm")), "{p}");
+    assert_eq!(p["copy_at_end2"], json!(true), "{p}");
+    assert!(p.get("spacing1").is_none() && p.get("count2").is_none(), "only the values each type uses: {p}");
+    h.app.dialog = Some(d);
+    h.settle();
+    for row in ["ui.pattern_distance_type", "ui.pattern_extent", "ui.pattern_distance_type_2", "ui.pattern_extent_2", "ui.pattern_copy_at_end_2"] {
+        assert!(scenario::rect_of(&format!("dialog:row:{row}")).is_some(), "{row} is shown");
+    }
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    h.settle();
+    // Made and opened again: the same distance types, values and Copy at the end.
+    h.app.run(id, p.clone()).unwrap();
+    let name = h.app.session.doc.features.last().unwrap().name.clone();
+    h.call("ui.editFeature", json!({"feature": name}));
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("the pattern opens to edit");
+    assert_eq!(d.extra.get("distance1"), Some(&json!("count_extent")));
+    assert_eq!(d.extra.get("distance2"), Some(&json!("spacing_extent")));
+    assert_eq!(d.extra.get("copy_at_end2"), Some(&json!(true)));
+    assert!(
+        matches!(&d.kind, Kind::PatternRect { count, extent, spacing2, extent2, .. }
+            if count == "5" && extent == "80 mm" && spacing2 == "15 mm" && extent2 == "40 mm"),
+        "{:?}",
+        d.kind
+    );
 }
 
 #[test]
