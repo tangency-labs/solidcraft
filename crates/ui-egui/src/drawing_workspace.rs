@@ -118,6 +118,14 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
     true
 }
 
+pub(crate) fn start_projected(app: &mut SolveApp, parent: u64) -> bool {
+    let Some(tool) = placement::Placement::from_parent(app, parent) else { return false };
+    close_panel(app);
+    app.drawing_workspace.placement = Some(tool);
+    app.drawing_workspace.options = Some(Tool::Projected);
+    true
+}
+
 pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
     let tool = match kind {
         "view" => Tool::Edit(Some(object)),
@@ -795,6 +803,41 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn view_boundary_opens_the_card_and_moves_a_view_in_one_undo_step() {
+        use serde_json::json;
+        use solidcraft_engine::{doc::ids::decode, drawing_scene};
+
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":60,"width":35,"height":12})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", json!({})).unwrap();
+        let created = h.app.run("drawing.view.base", json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[175,140]})).unwrap();
+        let id = decode(created["view"].as_str().unwrap()).unwrap();
+        let sheet = active_sheet(&h.app).unwrap();
+        drawing_scene::extract(&mut h.app.session, sheet).unwrap();
+        drawing_scene::step(&mut h.app.session);
+        h.frames(6);
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        let mm_x = created["boundary_mm"]["min"][0].as_f64().unwrap() as f32;
+        let x = paper.left() + paper.width() * (mm_x / 420.0);
+        let y = paper.bottom() - paper.height() * (140.0 / 297.0);
+        h.step(&json!({"click":[x,y]})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::handle_at("drawing:view_selection:project").is_some());
+
+        let before = h.app.session.undo.len();
+        h.step(&json!({"drag":[[x,y],[x+60.0,y+24.0]]})).unwrap();
+        h.frames(4);
+        let centre = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().view_centre(id).unwrap();
+        let after = centre(&h);
+        assert!(after.x > 175.0 && after.y < 140.0, "{after:?}");
+        assert_eq!(h.app.session.undo.len(), before + 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(centre(&h), Vec2::new(175.0, 140.0));
+    }
 
     #[test]
     fn base_view_places_projected_views_until_escape() {
