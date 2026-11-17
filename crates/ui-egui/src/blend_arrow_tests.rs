@@ -131,9 +131,19 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
     }
 }
 
-/// A box's top front edge, seen from the iso view: its faces are the top (+z) and the front
-/// (-y), so out of the material is (0, -1, 1) / sqrt 2.
+/// A box's top front edge: its faces are the top (+z) and the front (-y), so out of the material
+/// is (0, -1, 1) / sqrt 2. The view is turned a little from iso: in the exact iso view that way
+/// out shows along the edge itself, and the drag stays a box selection (see
+/// `in_the_exact_iso_view_a_drag_that_runs_along_the_edge_stays_a_box_selection`).
 fn creative_box(creative: bool) -> Harness {
+    let mut h = iso_box(creative);
+    h.step(&json!({"call": "ui.camera", "params": {"yaw": -0.45, "pitch": 0.45, "fit": true}})).unwrap();
+    h.settle();
+    h
+}
+
+/// The same box in the exact iso view.
+fn iso_box(creative: bool) -> Harness {
     let mut h = Harness::new();
     h.app.preferences.creative_mode = creative;
     h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
@@ -164,6 +174,14 @@ fn in_creative_mode_pulling_an_edge_out_fillets_it() {
     assert!(name.as_deref().is_some_and(|n| n.starts_with("Fillet")), "{name:?}");
     let measured = h.app.session.execute("inspect.measure", &json!({})).unwrap();
     assert!(measured["bodies"][0]["faces"].as_u64().unwrap_or(0) > 6, "the edge is rounded: {measured}");
+}
+
+/// In the exact iso view the top front edge's way out of the material shows along the edge, so a
+/// drag there cannot say in from out: it stays a box selection and adds nothing.
+#[test]
+fn in_the_exact_iso_view_a_drag_that_runs_along_the_edge_stays_a_box_selection() {
+    let mut h = iso_box(true);
+    assert_eq!(drag_across(&mut h, [20.0, 0.0, 20.0], false), None);
 }
 
 /// Pushing the same edge into the material cuts it flat: a chamfer.
