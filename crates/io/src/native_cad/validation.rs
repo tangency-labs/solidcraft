@@ -84,7 +84,13 @@ pub(super) fn check(ir: &CadIr, records: &ImportRecords, origins: &[Origin], imp
         let mut parts = Vec::new();
         let mut missing = false;
         for body in &bodies {
-            for &k in by_body.get(body).map(Vec::as_slice).unwrap_or(&[]) {
+            // A body no record came of (its conversion was refused, or its placement) was not
+            // imported: the total would leave it out.
+            let Some(records_of) = by_body.get(body) else {
+                missing = true;
+                continue;
+            };
+            for &k in records_of {
                 let measured = cache.entry(k).or_insert_with(|| measure(records, origins, &built, k));
                 match measured {
                     Some(p) if p.sheet == sheets => parts.push(k),

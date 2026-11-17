@@ -682,6 +682,25 @@ fn colours_read_into_records_are_the_ones_our_step_reader_reads() {
     assert_eq!(t, o);
 }
 
+/// A part whose body was not imported (its conversion refused) is not compared with the figures
+/// its file states, as if what did import were the whole part: the warning says it was not checked.
+#[test]
+fn a_part_whose_body_was_not_imported_is_said_not_checked() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let ours = solidcraft_kernel::step_import(&std::fs::read_to_string(dir.join("washer.step")).unwrap()).unwrap();
+    let m = solidcraft_kernel::measure(&ours.bodies[0].body).unwrap();
+    let text = washer_stating(m.volume, [m.centroid.x, m.centroid.y, m.centroid.z]);
+    let mut ir = neutral(text.as_bytes(), "washer.step");
+    assert!(!ir.model.declared_measures.is_empty());
+    // Every region refused: a coedge missing from each.
+    ir.model.coedges.clear();
+    let (records, origins) = traced_records(&ir, "washer", "", true);
+    assert!(records.bodies.is_empty(), "{:?}", records.warnings);
+    let imp = solidcraft_kernel::records_import(&records).unwrap();
+    let notes = validation::check(&ir, &records, &origins, &imp);
+    assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("was not checked")), "{notes:?}");
+}
+
 /// The washer with the CAx-IF validation properties a CAD system writes for it: its volume and its
 /// centre, as `volume` and `centre` give them.
 fn washer_stating(volume: f64, centre: [f64; 3]) -> String {
