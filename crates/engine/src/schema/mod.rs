@@ -67,6 +67,7 @@ pub mod component;
 pub mod component_link;
 pub mod config;
 pub mod construct;
+pub mod cutlist;
 pub mod delete;
 pub mod diagnostics;
 pub mod edit;

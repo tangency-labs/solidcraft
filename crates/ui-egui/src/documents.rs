@@ -72,6 +72,7 @@ pub struct DocSlot {
 struct DocWork {
     /// Shared panel content belongs to the design, independently of its current placement.
     bom: Option<crate::bom_panel::BomPanel>,
+    cutlist: Option<crate::cutlist_panel::CutListPanel>,
     dialog: Option<crate::dialogs::Dialog>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
@@ -86,14 +87,16 @@ struct DocWork {
 /// (`remember_toolbar_tab`), once the dialog and tool are gone, so it is a tab they leave behind.
 fn take_work(app: &mut SolveApp) -> DocWork {
     let bom = app.bom.take();
+    let cutlist = app.cutlist.take();
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
         app.tool = None;
         let tab = app.preferences.remember_toolbar_tab.then(|| (app.ui.tab.clone(), app.ui.ribbon_context.clone(), app.ui.sketch_return_tab.clone()));
-        return DocWork { bom, tab, ..DocWork::default() };
+        return DocWork { bom, cutlist, tab, ..DocWork::default() };
     }
     DocWork {
         bom,
+        cutlist,
         dialog: app.dialog.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
@@ -107,6 +110,8 @@ fn take_work(app: &mut SolveApp) -> DocWork {
 /// `before`: the session's revision before the switch moved it on to refresh the views.
 fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
     app.bom = work.bom;
+    app.cutlist = work.cutlist;
+    crate::cutlist_panel::set_focus_pending(app, true);
     crate::bom_panel::set_focus_pending(app, true);
     // That refresh is not a change to the design: the edit's Cancel must still see the design
     // it left (`Session::restore_editor` compares revisions), as `PendingFeatureEdit` does.
@@ -1015,6 +1020,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::dialogs::cancel(app);
         app.tool = None;
         app.bom = None;
+        app.cutlist = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
@@ -1178,6 +1184,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         crate::dialogs::cancel(app);
         app.tool = None;
         app.bom = None;
+        app.cutlist = None;
         app.session.replace_design(Session::default());
         give_up_renames_of_other_designs(app);
         app.session.revision = rev + 1;

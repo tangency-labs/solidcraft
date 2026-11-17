@@ -207,6 +207,12 @@ A sketch entity that is not a point: a line, an arc, a circle, an ellipse, a spl
 - **Elsewhere:** curve, sketch curve, segment.
 - **For translators:** not an edge of a body.
 
+### cut list
+
+A list of physical pieces to cut from stock, grouped by size and material, with the quantity of each.
+
+- **In SolidCraft:** `cutlist.parts` lists loose bodies and placed component bodies, excluding purchased and reference components.
+
 ### design
 
 The model that is open in SolidCraft: its timeline, components, bodies, sketches, parameters and
@@ -300,6 +306,12 @@ makes is a *group*.
 Radius of the surface neighbourhood used to estimate illumination from nearby photon hits.
 
 - **In SolidCraft:** Caustics `radius_mm`; smaller values preserve sharper details and require more photons to reduce noise.
+
+### grain direction
+
+The direction of the fibres in wood relative to a part's stock dimensions.
+
+- **In SolidCraft:** the cut list leaves grain empty until a manufacturing grain property is assigned.
 
 ### group
 
@@ -543,6 +555,12 @@ flange slope.
 - **Don't use:** catalogue profile, library profile (for the size).
 - **Elsewhere:** standard section, section size, section designation.
 - **For translators:** a steel section's size by name, not a dimension and not a standard part.
+
+### stock size
+
+The length, width and thickness of a blank that encloses a part along its own directions.
+
+- **In SolidCraft:** `cutlist.parts` reports millimetres, with the longest side as length and an exact or approximate box indicator.
 
 ### thin-film interference
 
