@@ -1725,7 +1725,7 @@ fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
             let count = if face { b.body.face_count() } else { b.body.edge_count() };
             let kind = if face { "face" } else { "edge" };
             for index in (0..count).filter(|i| !indices.contains(i)) {
-                if items.len() >= MAX {
+                if kept.len() + items.len() >= MAX {
                     return Err(bad("select.invert", "too many items"));
                 }
                 items.push(json!({"type": kind, "body": name, "index": index}));
@@ -1733,9 +1733,11 @@ fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
         }
     }
     if !bodies.is_empty() {
-        let hidden = &s.visibility.hidden_bodies;
-        for b in state.bodies.iter().filter(|b| !bodies.contains(&b.name.as_str()) && !hidden.contains(&b.name)) {
-            if items.len() >= MAX {
+        // Not the bodies the faces or edges invert in, and only bodies the view shows (a hidden
+        // folder or occurrence hides its bodies too).
+        let inverted_in = |name: &str| picked_faces.contains_key(name) || picked_edges.contains_key(name);
+        for b in state.bodies.iter().filter(|b| !bodies.contains(&b.name.as_str()) && !inverted_in(&b.name) && s.body_visible(&b.name)) {
+            if kept.len() + items.len() >= MAX {
                 return Err(bad("select.invert", "too many items"));
             }
             items.push(json!({"type": "body", "name": b.name}));
@@ -1749,6 +1751,10 @@ fn select_invert(s: &mut Session, _p: &Value) -> Result<Value> {
         {
             sel.push(one);
         }
+    }
+    // The kept items count too; refused, the selection stays as it was.
+    if sel.len() > MAX {
+        return Err(bad("select.invert", "too many items"));
     }
     s.selection = sel;
     s.refresh_display();

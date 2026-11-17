@@ -1639,6 +1639,11 @@ fn select_invert_swaps_each_kind_within_its_body_and_keeps_history() {
     assert_eq!(faces(&s, "A"), [0, 1, 3, 4, 5]);
     assert!(!s.selection.iter().any(|x| matches!(x, Sel::Body { .. })), "the body is where the faces invert");
     assert!(s.selection.contains(&Sel::Feature { id: 1 }), "a feature stays selected");
+    // Another body beside it: A is still not taken back as a whole body.
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"},{"type":"face","body":"A","index":0},{"type":"body","name":"B"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert_eq!(faces(&s, "A"), [1, 2, 3, 4, 5]);
+    assert!(!s.selection.iter().any(|x| matches!(x, Sel::Body { .. })), "neither A nor B (C is hidden)");
     // Nothing of those kinds: refused, the selection unchanged.
     run(&mut s, "select.set", json!({"items":[{"type":"feature","id":1}]}));
     let before = s.selection.clone();
@@ -1648,6 +1653,30 @@ fn select_invert_swaps_each_kind_within_its_body_and_keeps_history() {
     assert!(s.execute("select.invert", &json!({})).is_err());
     assert!(s.execute("select.invert", &json!({"kind":"face"})).is_err(), "no parameters");
     assert_eq!((s.undo.len(), s.redo.len()), history, "not an undo step");
+}
+
+/// Invert Selection leaves out bodies a hidden folder hides, and its 10,000 limit counts the
+/// items it keeps; a refusal leaves the selection as it was.
+#[test]
+fn select_invert_skips_folder_hidden_bodies_and_counts_kept_items_in_its_limit() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "solid.box", json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":name}));
+    }
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
+    assert!(!s.body_visible("B"));
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"A"}]}));
+    run(&mut s, "select.invert", json!({}));
+    assert!(s.selection.is_empty(), "B is hidden by its folder: {:?}", s.selection);
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": true}));
+
+    // 9,999 kept features and one face of A: five faces more would be 10,004 items.
+    run(&mut s, "select.set", json!({"items":[{"type":"face","body":"A","index":0}]}));
+    s.selection.extend((1..10_000).map(|id| Sel::Feature { id }));
+    let before = s.selection.clone();
+    let err = s.execute("select.invert", &json!({})).unwrap_err().to_string();
+    assert!(err.contains("too many items"), "{err}");
+    assert_eq!(s.selection, before, "the selection stays as it was");
 }
 
 #[test]
