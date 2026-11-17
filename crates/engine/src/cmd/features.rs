@@ -910,6 +910,20 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     {
         return Err(EngineError::of_feature(r, e));
     }
+    // A sheet metal body is rebuilt from its sheet features, so a change another feature made to
+    // it (a pad, a fillet) is lost when a later sheet feature runs (not supported yet). A new
+    // feature that would lose one is refused, naming it, instead of going on with a warning
+    // (#18292). Designs that already have such a feature open and evaluate as before.
+    let lost = before.sheets.iter().find_map(|old| {
+        let lost = old.altered_by.as_ref()?;
+        s.model.state().sheets.iter().any(|now| now.body == old.body && now.altered_by.is_none()).then(|| (old.body.clone(), lost.clone()))
+    });
+    if let Some((body, lost)) = lost {
+        return Err(EngineError::Other(format!(
+            "`{body}` is rebuilt from its sheet metal features, which would lose what {lost} changed (not supported yet): \
+             add {lost} after the sheet metal features, or remove it"
+        )));
+    }
     let st = s.model.state();
     let bodies: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
     // Bodies that were there before and now have other geometry, and bodies that are gone.

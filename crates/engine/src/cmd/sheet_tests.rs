@@ -6685,9 +6685,9 @@ fn a_mirror_or_a_join_into_a_sheet_refuses_its_flat_pattern_naming_the_feature()
     assert!((flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(0.0) - 75.0).abs() < 1e-9);
 }
 
-/// A fillet on a sheet's corner is refused in the flat pattern until a sheet metal feature
-/// rebuilds the body from its sheet features; that feature says the round is not kept, and the
-/// flat pattern describes the body again.
+/// A fillet on a sheet's corner is refused in the flat pattern; a later sheet metal feature,
+/// which would rebuild the body from its sheet features without the round, is refused naming the
+/// fillet (#18292), and the round stays.
 #[test]
 fn a_fillet_on_a_sheet_corner_is_refused_until_a_sheet_feature_rebuilds_the_body() {
     let mut s = Session::default();
@@ -6696,15 +6696,14 @@ fn a_fillet_on_a_sheet_corner_is_refused_until_a_sheet_feature_rebuilds_the_body
     assert!(out["warning"].as_str().is_some_and(|w| w.contains("is sheet metal")), "{out}");
     let error = s.execute("sheet.export_dxf", &json!({})).unwrap_err().to_string();
     assert!(error.contains("can't include Fillet1"), "{error}");
-    let out = run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
-    assert!(out["warning"].as_str().is_some_and(|w| w.contains("what Fillet1 changed is not kept")), "{out}");
-    assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
-    assert_eq!(s.model.state().sheets[0].altered_by, None);
+    let error = s.execute("sheet.flange", &json!({"edges": [[50, 0, 2.5]], "height": 20})).unwrap_err().to_string();
+    assert!(error.contains("would lose what Fillet1 changed"), "{error}");
+    assert_eq!(s.model.state().sheets[0].altered_by.as_deref(), Some("Fillet1"));
 }
 
 /// A cosmetic thread in a sheet's hole leaves its flat pattern as it is; a modelled thread cuts
-/// material the flat pattern lacks, so it is refused like a fillet until a sheet feature rebuilds
-/// the body and says the thread is not kept.
+/// material the flat pattern lacks, so it is refused like a fillet, and so is a later sheet
+/// feature that would rebuild the body without it (#18292).
 #[test]
 fn a_modelled_thread_in_a_sheet_hole_is_refused_but_a_cosmetic_one_is_not() {
     let mut s = Session::default();
@@ -6721,9 +6720,36 @@ fn a_modelled_thread_in_a_sheet_hole_is_refused_but_a_cosmetic_one_is_not() {
         let error = result.expect_err("a modelled thread the flat pattern lacks");
         assert!(error.contains("can't include Thread2"), "{error}");
     }
-    let out = run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
-    assert!(out["warning"].as_str().is_some_and(|w| w.contains("what Thread2 changed is not kept")), "{out}");
-    assert!(flat_exports(&mut s).into_iter().all(|r| r.is_ok()));
+    let error = s.execute("sheet.flange", &json!({"edges": [[50, 0, 2.5]], "height": 20})).unwrap_err().to_string();
+    assert!(error.contains("would lose what Thread2 changed"), "{error}");
+}
+
+/// #18292: a pad extruded onto a sheet and joined to it would be lost by a later flange, which
+/// rebuilds the body from its sheet features. The flange is refused, naming the pad's extrude,
+/// and the design keeps the pad (the issue's script).
+#[test]
+fn a_flange_that_would_lose_a_pad_extruded_onto_the_sheet_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 1, "k_factor": 0.44, "bend_radius": 1, "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run(&mut s, "sketch.line", json!({"points": [[-50, -20], [50, -20], [50, 20], [-50, 20]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Outline", "rule": "R", "body_name": "Main"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 1], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pad"}));
+    run(&mut s, "sketch.line", json!({"points": [[-5, -5], [5, -5], [5, 5], [-5, 5]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Pad", "distance": 5, "operation": "join", "targets": ["Main"]}));
+    assert!((volume(&mut s) - 4500.0).abs() < 1e-6, "sheet and pad");
+    let features = s.doc.features.len();
+
+    let error = s
+        .execute("sheet.flange", &json!({"edges": [[50, 0, 1]], "height": 30, "angle": "90 deg", "radius": 1, "body": "Main"}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("`Main`") && error.contains("would lose what Extrude1 changed"), "{error}");
+    assert_eq!(s.doc.features.len(), features, "the flange is not added");
+    assert!((volume(&mut s) - 4500.0).abs() < 1e-6, "the pad stays");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
 
 /// A sheet built and machined with sheet features (flanges, a hem, a hole and a cut across a

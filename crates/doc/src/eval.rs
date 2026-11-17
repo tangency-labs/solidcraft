@@ -4447,7 +4447,7 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
                     format!("`{}` is rebuilt from its sheet metal features: what {lost} changed is not kept (not supported yet)", sh.body),
                 );
             }
-        } else if sh.altered_by.is_none() {
+        } else if sh.altered_by.is_none() && !same_extent(&was.body, &now.body) {
             sh.altered_by = Some(f.name.clone());
             append_warning(
                 warning,
@@ -4458,6 +4458,17 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
             );
         }
     }
+}
+
+/// Whether two bodies have the same exact volume and box: a change that leaves both (an
+/// Intersect or a Cut that misses the body) changes nothing a sheet's rebuild would lose. Either
+/// one that can't be measured counts as a difference.
+fn same_extent(a: &kernel::Body, b: &kernel::Body) -> bool {
+    let close = |x: f64, y: f64, scale: f64| (x - y).abs() <= 1e-9 * scale.max(1.0);
+    let (Some(va), Some(vb), Ok(ba), Ok(bb)) = (a.volume_at(0.0), b.volume_at(0.0), a.exact_bounds(), b.exact_bounds()) else { return false };
+    let size = (ba.max - ba.min).len();
+    close(va, vb, va.abs())
+        && [(ba.min, bb.min), (ba.max, bb.max)].iter().all(|(p, q)| close(p.x, q.x, size) && close(p.y, q.y, size) && close(p.z, q.z, size))
 }
 
 /// A Join whose material meets none of its targets still joins it, to the first target as a
