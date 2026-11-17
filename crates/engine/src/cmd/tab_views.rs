@@ -30,6 +30,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("tab.view.close", "Close View", crate::checked!("tab.view.close", close))
         .icon("close").noundo().doc_only().contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the view (default: the active one) → id; closes it, which Reopen Closed View undoes; the last view of a design never closes (an error); never opens a dialog"),
+    CommandSpec::new("tab.view.pop_out", "Open View in New Window", crate::checked!("tab.view.pop_out", pop_out))
+        .icon("window").noundo().doc_only().contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .params("id?: the view (default: the active view) → id; moves the view to another desktop window of the live design; never opens a dialog"),
     CommandSpec::new("tab.view.reopen", "Reopen Closed View", crate::checked!("tab.view.reopen", reopen))
         .icon("undo").noundo().doc_only().key("Ctrl+Shift+T").contract(&NO_PARAMS_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("no parameters → id of the view brought back, which is shown again; an error when none was closed"),
@@ -79,6 +82,12 @@ fn open(_s: &mut Session, p: &Value) -> Result<Value> {
 fn close(_s: &mut Session, p: &Value) -> Result<Value> {
     let request: TabViewIdParams = parse("tab.view.close", p)?;
     reply("tab.view.close", TabViewReply { id: request.id, ..Default::default() })
+}
+
+fn pop_out(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "tab.view.pop_out";
+    let request: TabViewIdParams = parse(cmd, p)?;
+    reply(cmd, TabViewReply { id: request.id, ..Default::default() })
 }
 
 fn reopen(_s: &mut Session, p: &Value) -> Result<Value> {

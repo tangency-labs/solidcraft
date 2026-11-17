@@ -46,6 +46,7 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
             json!({"id": 2, "placement": {"kind":"split", "target":1, "edge":"bottom"}}),
         ),
         ("tab.view.list", json!({}), json!({})),
+        ("tab.view.pop_out", json!({"id": 2}), json!({"id": 2})),
     ] {
         let r = s.execute(id, &params).unwrap_or_else(|e| panic!("{id} {params}: {e}"));
         assert_eq!(r, echo, "{id} {params}");
@@ -87,6 +88,7 @@ fn bad_view_requests_are_refused() {
         ("tab.view.beside", json!({"id": 2, "placement": {"kind": "empty", "index": -1}})),
         ("tab.view.beside", json!({"id": 2, "placement": {"kind": "empty", "index": 0, "target": 1}})),
         ("tab.view.list", json!({"all": true})),
+        ("tab.view.pop_out", json!({"id": "2"})),
     ] {
         assert!(s.execute(id, &params).is_err(), "{id} {params}");
     }
@@ -100,6 +102,7 @@ fn the_view_shortcuts_are_the_defaults() {
         ("tab.view.rename", Some("F2")),
         ("tab.view.close", None),
         ("tab.view.list", None),
+        ("tab.view.pop_out", None),
     ] {
         assert_eq!(crate::find_command(id).map(|c| c.shortcut), Some(key), "{id}");
     }

@@ -384,6 +384,7 @@ pub mod view_gizmo;
 mod view_memory;
 pub mod view_pick;
 mod view_tiles;
+pub mod view_windows;
 pub mod viewport;
 mod viewport_details;
 mod viewport_layout;
@@ -960,6 +961,7 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
+    view_windows: view_windows::Windows,
     /// Last OS title inputs; unchanged frames allocate nothing and send no title command.
     pub(crate) window_title: documents::WindowTitle,
     /// The language the installed font fallback chain is ordered for (`ui_kit::type_face::fallback_order`);
@@ -1197,6 +1199,7 @@ impl SolveApp {
             open_meshing_next: false,
             frame_watch: Default::default(),
             docs: documents::Documents::default(),
+            view_windows: view_windows::Windows::default(),
             window_title: Default::default(),
             applied_fonts_language: "en".into(),
             applied_ui_font: String::new(),
@@ -4009,6 +4012,24 @@ impl SolveApp {
         control::publish_design(self, &control::DOCUMENT_WATCH);
     }
 
+    /// Input for another viewport of the same app. Shared jobs are serviced by the root window.
+    pub(crate) fn view_window_logic(&mut self, ctx: &egui::Context) {
+        let _language = solidcraft_ui_text::scope(&self.preferences.language);
+        self.now = ctx.input(|i| i.time);
+        self.escape_owner = None;
+        self.esc_handled = false;
+        self.step_view_animation(ctx);
+        ui_kit::install_keyboard_focus(ctx);
+        if self.issue_report.draft.is_none() && self.file_picker.is_none() {
+            panel_runtime::reserve_host_input(self, ctx);
+            if !keymap::capturing(self) {
+                expression_complete::begin_frame(ctx);
+            }
+            sketch_construction::claim_typed_length(self, ctx);
+            toolbar::shortcuts(self, ctx);
+        }
+    }
+
     /// The frame's input before the app reads it: synthetic events, then what is typed while a
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
@@ -4181,7 +4202,9 @@ impl SolveApp {
         self.cad_ui(ui, &mut report_input);
         semantic_content::finalize(self, ui.ctx());
         #[cfg(not(target_arch = "wasm32"))]
-        panel_runtime::show_desktop_windows(self, ui.ctx());
+        if !self.view_windows.is_child() {
+            panel_runtime::show_desktop_windows(self, ui.ctx());
+        }
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).

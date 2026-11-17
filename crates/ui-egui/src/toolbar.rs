@@ -2767,6 +2767,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     let key = crate::keymap::key_name(k, mods);
                     if mods.shift && !crate::keymap::commands_for(app, &key).is_empty() {
                         crate::keymap::press(app, &key, repeat);
+                    } else if !mods.shift && app.docs.views.len() < 2 && app.view_windows.close_current() {
+                        continue;
                     } else if mods.shift || app.docs.views.len() < 2 {
                         crate::documents::close(app, app.docs.active, false);
                     } else {

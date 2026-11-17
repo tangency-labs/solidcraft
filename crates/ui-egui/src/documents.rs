@@ -77,6 +77,8 @@ pub struct DocSlot {
 struct DocWork {
     /// Shared panel content belongs to the design, independently of its current placement.
     bom: Option<crate::bom_panel::BomPanel>,
+    params: Option<crate::params_dialog::ParamsDialog>,
+    design_properties: Option<crate::design_properties::DesignProperties>,
     dialog: Option<crate::dialogs::Dialog>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
@@ -89,9 +91,9 @@ struct DocWork {
 /// computing after OK can't wait (its result belongs to the window thread): that dialog is
 /// cancelled, as without the preference. Without the preference the toolbar tab is still kept
 /// (`remember_toolbar_tab`), once the dialog and tool are gone, so it is a tab they leave behind.
-fn take_work(app: &mut SolveApp) -> DocWork {
+fn take_work(app: &mut SolveApp, presenting: bool) -> DocWork {
     let bom = app.bom.take();
-    if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
+    if !presenting && (!app.preferences.keep_work_on_tab_switch || app.applying.is_some()) {
         crate::dialogs::cancel(app);
         app.tool = None;
         crate::drawing_workspace::close_panel(app);
@@ -100,6 +102,8 @@ fn take_work(app: &mut SolveApp) -> DocWork {
     }
     DocWork {
         bom,
+        params: presenting.then(|| app.params.take()).flatten(),
+        design_properties: presenting.then(|| app.design_properties.take()).flatten(),
         dialog: app.dialog.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
@@ -113,6 +117,8 @@ fn take_work(app: &mut SolveApp) -> DocWork {
 /// `before`: the session's revision before the switch moved it on to refresh the views.
 fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
     app.bom = work.bom;
+    app.params = work.params;
+    app.design_properties = work.design_properties;
     crate::bom_panel::set_focus_pending(app, true);
     // That refresh is not a change to the design: the edit's Cancel must still see the design
     // it left (`Session::restore_editor` compares revisions), as `PendingFeatureEdit` does.
@@ -253,6 +259,8 @@ pub struct Documents {
     /// What each of the shown design's views shows besides the camera ([`DocSlot::inspect`] for the others).
     pub(crate) inspect: ViewInspect,
     navigation: ViewNavigation,
+    /// Recalled framing waits for selection, across passive native-window swaps.
+    restore_views: bool,
     /// A view's name being typed in its sub-tab ([`view_rename_start`]).
     pub(crate) view_rename: Option<ViewRename>,
     /// Click placement in progress (design tab id, view id).
@@ -485,25 +493,33 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 }
 
 /// Put `slot` into the app and return what was there.
-fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
+fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     keep_look(app);
-    crate::select_other::close(app);
-    let reveals = crate::browser::take_reveals(app);
-    crate::semantic_content::leave_document(app);
-    if crate::render_workspace::active(app) {
-        let _ = crate::render_workspace::enter(app, false);
+    if !presenting {
+        crate::select_other::close(app);
     }
-    // Whatever was going on in the design leaves with it: cancelled, or kept with its tab
-    // (`take_work`).
-    crate::timeline::stop_playback(app);
-    crate::sketch_text_move::cancel_drag(app);
-    crate::control_joint_drive::discard(app);
-    let work = take_work(app);
-    crate::dim_view::cancel();
-    app.params = None;
-    app.design_properties = None;
-    app.cancel_view_animation();
-    app.viewport.orbit_free = None;
+    let reveals = crate::browser::take_reveals(app);
+    if !presenting {
+        crate::semantic_content::leave_document(app);
+        if crate::render_workspace::active(app) {
+            let _ = crate::render_workspace::enter(app, false);
+        }
+        crate::timeline::stop_playback(app);
+        crate::sketch_text_move::cancel_drag(app);
+        crate::dim_view::cancel();
+        app.cancel_view_animation();
+        app.viewport.orbit_free = None;
+        app.preview.reset();
+        app.viewport.hover = None;
+        crate::design_properties::close_object(app);
+        crate::sketch_attachment_ui::clear(app);
+        crate::agent_chat::leave_document(app);
+        app.edit_anchor_hint = None;
+    }
+    if !presenting {
+        crate::control_joint_drive::discard(app);
+    }
+    let work = take_work(app, presenting);
     let outgoing_view = app.docs.views.active().id;
     let mut outgoing_navigation = ViewLook::from_ui(&app.ui);
     outgoing_navigation.motion.swap(app);
@@ -518,15 +534,8 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     } else {
         crate::viewport::ViewScenes::default().swap(&mut app.viewport);
     }
-    app.preview.reset();
-    app.viewport.hover = None;
-    crate::design_properties::close_object(app);
-    crate::sketch_attachment_ui::clear(app);
-    crate::agent_chat::leave_document(app);
     app.agent_chat.swap_document(&mut slot.agent_chat);
     let out_rev = app.session.revision;
-    // A click's point means nothing in the other design.
-    app.edit_anchor_hint = None;
     let mut out = DocSlot {
         session: std::mem::replace(&mut app.session, slot.session),
         autosave: app.autosave.as_mut().and_then(|a| std::mem::replace(&mut a.active, slot.autosave)),
@@ -548,7 +557,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         inspect: std::mem::replace(&mut app.docs.inspect, slot.inspect),
         navigation: std::mem::replace(&mut app.docs.navigation, slot.navigation),
         fit: false,
-        restore_views: false,
+        restore_views: std::mem::replace(&mut app.docs.restore_views, slot.restore_views),
     };
     crate::browser::restore_reveals(app, slot.reveals);
     // Only the displayed design owns the process-wide crash replay journal.
@@ -567,13 +576,21 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
-    app.session.invalidate_view(out_rev);
-    if let Some(pending) = &mut app.pending_feature_edit {
-        pending.view_changed(before, app.session.revision);
+    if !presenting {
+        app.session.invalidate_view(out_rev);
+        if let Some(pending) = &mut app.pending_feature_edit {
+            pending.view_changed(before, app.session.revision);
+        }
+        app.jobs_view_changed(before, app.session.revision);
     }
-    app.jobs_view_changed(before, app.session.revision);
     crate::browser::forget_found(app);
     put_work(app, slot.work, before);
+    if presenting && app.docs.restore_views {
+        // Protect the root spec before a passive child paint parks its camera.
+        // Applying a workspace here would change the passive receiver.
+        let view = app.docs.views.active().clone();
+        show_look(app, &view);
+    }
     out
 }
 
@@ -617,11 +634,10 @@ pub fn switch(app: &mut SolveApp, i: usize) {
     };
     crate::linked_source::note_unread(app);
     let fit = incoming.fit;
-    let restore_views = incoming.restore_views;
-    let out = swap_in(app, incoming);
+    let out = swap_in(app, incoming, false);
     // Give up the old design's renames now, before an editor drawn later in this frame commits one.
     give_up_renames_of_other_designs(app);
-    if fit && !restore_views {
+    if fit && !app.docs.restore_views {
         app.fit_view();
     }
     let a = app.docs.active;
@@ -640,7 +656,7 @@ pub fn switch(app: &mut SolveApp, i: usize) {
         crate::linked_source::update_changed(app);
     }
     crate::edit_in_place::attach(app);
-    if restore_views {
+    if std::mem::take(&mut app.docs.restore_views) {
         let view = app.docs.views.active().clone();
         apply_recalled_view(app, &view);
     }
@@ -739,7 +755,7 @@ fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -
     let before = app.docs.views.active().id;
     keep_look(app);
     let result = change(&mut app.docs.views);
-    app.docs.navigation.retain(|id, _| app.docs.views.has_open_or_closed(*id));
+    app.docs.navigation.retain(|id, _| app.docs.views.has_open_or_closed(*id) || app.view_windows.keeps_view(app.docs.active_tab, *id));
     let active = app.docs.views.active();
     if active.id != before {
         let active = active.clone();
@@ -913,9 +929,97 @@ fn switch_navigation(app: &mut SolveApp, before: u64, id: u64) {
     }
 }
 
+/// Find and select a design by its stable tab id, even after tabs move.
+pub(crate) fn select_tab(app: &mut SolveApp, tab: u64) -> bool {
+    if app.docs.current_tab() == tab {
+        return true;
+    }
+    let Some(index) = app.docs.slots.iter().position(|slot| slot.as_ref().is_some_and(|slot| slot.tab == tab)) else {
+        return false;
+    };
+    let Some(incoming) = app.docs.slots.get_mut(index).and_then(Option::take) else {
+        return false;
+    };
+    let out = swap_in(app, incoming, true);
+    if let Some(slot) = app.docs.slots.get_mut(app.docs.active) {
+        *slot = Some(out);
+    }
+    app.docs.active = index;
+    true
+}
+
+pub(crate) fn detach_view(app: &mut SolveApp, id: u64) -> Option<ViewSet> {
+    keep_look(app);
+    let before = app.docs.views.active().id;
+    let detached = app.docs.views.detach(id)?;
+    if before == id {
+        park_navigation(app, before);
+        let active = app.docs.views.active().clone();
+        apply_view(app, &active);
+        show_active_look(app);
+    }
+    Some(detached)
+}
+
+fn park_navigation(app: &mut SolveApp, id: u64) {
+    let mut look = ViewLook::from_ui(&app.ui);
+    look.swap(app);
+    app.docs.navigation.insert(id, look);
+}
+
+pub(crate) fn park_active_look(app: &mut SolveApp) {
+    keep_look(app);
+    let active = app.docs.views.active();
+    if active.kind == ViewKind::Render {
+        app.render_workspace.view.render_camera = Some(app.cam);
+    }
+    let id = active.id;
+    park_navigation(app, id);
+}
+
+pub(crate) fn show_active_look(app: &mut SolveApp) {
+    let view = app.docs.views.active().clone();
+    if let Some(mut look) = app.docs.navigation.remove(&view.id) {
+        look.swap(app);
+    }
+    if view.kind == ViewKind::Render
+        && let Some(camera) = app.render_workspace.view.render_camera
+    {
+        app.cam = camera;
+        app.ui.perspective = camera.fov > 0.0;
+    }
+    show_look(app, &view);
+}
+
+/// Put a window's view strip back when the window closes or its drawing finishes.
+pub(crate) fn exchange_window_views(app: &mut SolveApp, tab: u64, views: &mut ViewSet) {
+    if app.docs.current_tab() == tab {
+        std::mem::swap(&mut app.docs.views, views);
+    } else if let Some(slot) = app.docs.slots.iter_mut().flatten().find(|slot| slot.tab == tab) {
+        std::mem::swap(&mut slot.views, views);
+        if let Some(spec) = slot.views.active().spec {
+            slot.cam = spec.camera;
+        }
+    }
+}
+
+pub(crate) fn restore_primary_ribbon(app: &mut SolveApp, tab: u64, ribbon: String) {
+    if let Some(slot) = app.docs.slots.iter_mut().flatten().find(|slot| slot.tab == tab) {
+        slot.work.tab = Some((ribbon, None, None));
+    }
+}
+
+pub(crate) fn reattach_window_views(app: &mut SolveApp, tab: u64, views: ViewSet) {
+    if app.docs.current_tab() == tab {
+        app.docs.views.reattach(views);
+    } else if let Some(slot) = app.docs.slots.iter_mut().flatten().find(|slot| slot.tab == tab) {
+        slot.views.reattach(views);
+    }
+}
+
 /// Keep how the shown Model view looks at the design (its camera) with that view, so it comes back
 /// as it was left: two Model views of one design are two angles, not one.
-fn keep_look(app: &mut SolveApp) {
+pub(crate) fn keep_look(app: &mut SolveApp) {
     let active = app.docs.views.active();
     if active.kind == ViewKind::Model {
         let id = active.id;
@@ -1063,6 +1167,7 @@ fn restore_views_in(app: &mut SolveApp, path: &str, dir: &std::path::Path) {
         .collect();
     if app.session.path.as_deref().is_some_and(|p| same_path(p, path)) {
         app.docs.views = set;
+        app.docs.restore_views = false;
         app.docs.inspect.clear();
         app.docs.navigation = navigation;
         let active = app.docs.views.active().clone();
@@ -1071,6 +1176,11 @@ fn restore_views_in(app: &mut SolveApp, path: &str, dir: &std::path::Path) {
         }
         apply_recalled_view(app, &active);
     } else if let Some(slot) = app.docs.slots.iter_mut().flatten().find(|slot| slot.session.path.as_deref().is_some_and(|p| same_path(p, path))) {
+        if matches!(set.active().kind, ViewKind::Model | ViewKind::Render)
+            && let Some(spec) = set.active().spec
+        {
+            slot.cam = spec.camera;
+        }
         slot.views = set;
         slot.inspect.clear();
         slot.navigation = navigation;
@@ -1356,6 +1466,10 @@ pub(crate) fn view_command(app: &mut SolveApp, command: &str, mut v: Value) -> R
             };
             v["shown"] = json!(app.docs.views.tiles().map_or(1, solidcraft_views::Tiles::len));
             Some(id)
+        }
+        "tab.view.pop_out" => {
+            crate::view_windows::detach(app, asked)?;
+            Some(asked)
         }
         "tab.view.move" => {
             let len = app.docs.views.len();
@@ -1979,9 +2093,13 @@ pub(crate) fn sync_window_title(app: &mut SolveApp, ctx: &egui::Context) {
     // The start page can overlay existing designs; only its untouched launch/last-close
     // session represents no open design. Documents::count includes that placeholder.
     let no_design = app.home.open && app.docs.count() == 1 && active_is_blank(app);
-    let name = (!no_design).then_some(app.session.doc.name.as_str());
+    let child_title = app.view_windows.is_child().then(|| {
+        let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+        format!("{} — {}", locale.given_name(&app.session.doc.name), locale.given_name(&app.docs.views.active().name))
+    });
+    let name = child_title.as_deref().or_else(|| (!no_design).then_some(app.session.doc.name.as_str()));
     if let Some(title) = app.window_title.update(name, app.session.is_dirty(), &app.preferences.language) {
-        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Title(title));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
 }
 
@@ -2298,8 +2416,9 @@ const TAB_HANDLES: crate::app_bar::TabHandles<'static> = crate::app_bar::TabHand
 const TEAR_OFF_BELOW: f32 = 40.0;
 
 /// The footer of a design's view switcher (option B), under the list of its views.
-const SWITCHER_MENU: [crate::app_bar::TabMenuRow<'static>; 3] = [
+const SWITCHER_MENU: [crate::app_bar::TabMenuRow<'static>; 4] = [
     crate::app_bar::TabMenuRow::new(crate::design_view_ui::SWITCHER_OPEN, "Open another view", "Ctrl+T"),
+    crate::app_bar::TabMenuRow::new(crate::design_view_ui::VIEW_NEW_WINDOW, "Open in new window", ""),
     crate::app_bar::TabMenuRow::new(crate::design_view_ui::SWITCHER_REOPEN, "Reopen closed view", "Ctrl+Shift+T"),
     crate::app_bar::TabMenuRow::new(crate::design_view_ui::SWITCHER_AS_TABS, "Show views as tabs", ""),
 ];
@@ -2351,14 +2470,14 @@ const TAB_MENU: [crate::app_bar::TabMenuRow<'static>; 3] = [
 /// The document tabs in the application bar, from `x0` to `x1` ([`crate::app_bar::tabs`]): click
 /// to switch, × to close, drag to reorder, + for the start page.
 pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
-    let owner_key = tab_strip_id().with("view_popup_owner");
+    let owner_key = tab_strip_id(ui.ctx().viewport_id()).with("view_popup_owner");
     let changed = ui.ctx().data_mut(|data| {
         let previous = data.get_temp::<u64>(owner_key);
         data.insert_temp(owner_key, app.session.uid);
         previous.is_some_and(|owner| owner != app.session.uid)
     });
     if changed {
-        crate::app_bar::clear_view_popup(ui.ctx(), tab_strip_id());
+        crate::app_bar::clear_view_popup(ui.ctx(), tab_strip_id(ui.ctx().viewport_id()));
     }
     let info = tabs_info(app);
     let paths = tab_paths(app);
@@ -2434,7 +2553,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             close_tip: "Close",
             more_tip: solidcraft_ui_text::tr_label("All open designs"),
             new_tip: &new_tip,
-            id: tab_strip_id(),
+            id: tab_strip_id(ui.ctx().viewport_id()),
             handles: TAB_HANDLES,
             views_as_tabs,
             switcher_always: DesignTabPrefs::from(&app.preferences).switcher_always(),
@@ -2853,13 +2972,13 @@ pub(crate) fn uses_file(app: &SolveApp, path: &str) -> bool {
 }
 
 /// Where SolidCraft's document tab strip keeps its state.
-fn tab_strip_id() -> egui::Id {
-    egui::Id::unique("sc_doc_tabs")
+fn tab_strip_id(viewport: egui::ViewportId) -> egui::Id {
+    egui::Id::unique(("sc_doc_tabs", viewport))
 }
 
 /// Whether the document tab strip's list of every open design is open.
 pub fn tab_list_open(ctx: &egui::Context) -> bool {
-    crate::app_bar::tab_list_open(ctx, tab_strip_id())
+    crate::app_bar::tab_list_open(ctx, tab_strip_id(ctx.viewport_id()))
 }
 
 /// A tab's tooltip ([`crate::app_bar::tab_tip`] over [`tab_place`]).
@@ -2897,6 +3016,36 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn unsaved_view_can_move_windows_without_replacing_its_session() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let uid = app.session.uid;
+        let revision = app.session.revision;
+        let model = app.docs.views.active().id;
+        let other = view_duplicate(&mut app, model).unwrap();
+        let tab = app.docs.active_tab();
+        app.ui.visual_style = 2;
+        app.ui.perspective = true;
+        let mut child = detach_view(&mut app, other).unwrap();
+        assert!(app.session.path.is_none());
+        assert_eq!(app.docs.views.active().id, model);
+        park_active_look(&mut app);
+        exchange_window_views(&mut app, tab, &mut child);
+        show_active_look(&mut app);
+        assert_eq!(app.docs.views.active().id, other);
+        assert_eq!(app.ui.visual_style, 2);
+        assert!(app.ui.perspective);
+        assert_eq!((app.session.uid, app.session.revision), (uid, revision));
+        park_active_look(&mut app);
+        exchange_window_views(&mut app, tab, &mut child);
+        show_active_look(&mut app);
+        assert_eq!(app.ui.visual_style, 0);
+        assert!(!app.ui.perspective);
+        reattach_window_views(&mut app, tab, child);
+        assert!(app.docs.views.get(other).is_some());
+        assert_eq!(app.docs.views.active().id, model);
     }
 
     #[test]
