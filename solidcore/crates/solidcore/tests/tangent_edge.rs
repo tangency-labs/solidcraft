@@ -301,7 +301,6 @@ fn walls_three_tenths_of_a_degree_apart() {
 /// root.
 fn procedural_round(k: &mut Kernel) -> (Brep, Vec<EdgeId>) {
     use solidcore::boolean::api_brep::boolean_union;
-    k.fixes.fillet_round_as_definition = true;
     let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
     let mut pipe = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
     let phi = 4.0_f64.to_radians();

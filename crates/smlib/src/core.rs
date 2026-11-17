@@ -125,7 +125,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
-    f.fillet_round_as_definition = true;
     f.keep_exact_pcurves = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;

@@ -160,6 +160,52 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
 ]}
 ```
 
+### Selection fields
+
+A field can take geometry picked in the viewport, with the same pick control as Extrude's
+Profiles and Chamfer's Edges. Mark an array property with `x-solidcraft-selection`; the property's
+key is the argument the plugin receives. The design follows the
+[native selection proposal](https://github.com/tangency-labs/solidcraft/pull/16281)
+([#16274](https://github.com/tangency-labs/solidcraft/issues/16274)).
+
+```json
+"edges": {"type": "array", "title": "Edges", "description": "The rims to seat", "minItems": 1,
+          "x-solidcraft-selection": {"version": 1, "accept": ["edge"]}},
+"body":  {"type": "array", "title": "Body to modify", "maxItems": 1,
+          "x-solidcraft-selection": {"version": 1, "accept": ["body"]}}
+```
+
+- **What it takes.** `accept` lists one or more of `profile`, `edge`, `face`, `body`,
+  `sketch_point` and `sketch_curve`. Sketch points and curves are picked with their sketch, because
+  ids repeat from one sketch to the next. The annotation has exactly `version` (1) and `accept`.
+  An unknown version or category, or any other keyword on the property (`uniqueItems`, a detailed
+  `items` schema), leaves Run off with the note to run the entry from the agent or the CLI.
+- **How many.** `minItems` and `maxItems` are the counts Run checks. With `maxItems: 1` a pick
+  replaces the last one; otherwise a click adds an item, and clicking it again takes it out.
+  `required` with `minItems` of 1 or more needs a pick; required with no minimum sends `[]`;
+  an optional field with nothing picked is left out.
+- **What the plugin receives.** Each item is the app's selection reference, as `select.set`
+  takes it: `{"type": "edge", "body": "Body1", "index": 3, "point": [x, y, z]}`,
+  `{"type": "face", ...}`, `{"type": "body", "name": "Body1"}`,
+  `{"type": "profile", "sketch": 2, "index": 0}`,
+  `{"type": "external_sketch_point", "sketch": 2, "id": "p3"}` and
+  `{"type": "external_sketch_curve", "sketch": 2, "id": "c1"}`, in pick order. `items`, if given,
+  is only `{"type": "object"}`.
+- **Reserved lists.** Without the annotation, `bodies` and `body_ids` take bodies and send their
+  names (`items` may be `{"type": "string"}`), and `selection`, `target` and `targets` take edges,
+  faces and bodies as references. Any other array still leaves Run off.
+- **Picking.** The first selection field takes the viewport's picks when the dialog opens, and
+  starts with what is selected that it takes. The other fields start empty, so one selection never
+  fills two fields. Clicking a field makes it the one that picks; its clear button, its list of
+  picks and the hover highlight work as in the native tools. One tool picks at a time: while a
+  native tool is open, clicking a plugin field says to finish or cancel it first.
+  Escape and Cancel close the dialog and stop the picking.
+- **References stay true.** The picks belong to the design they were made on. Any change to the
+  design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
+  the view or changing the selection does not. Picking runs no plugin code; Run sends the picks
+  through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
+  themselves; nothing fills them from the selection.
+
 ## Versions
 
 The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:
