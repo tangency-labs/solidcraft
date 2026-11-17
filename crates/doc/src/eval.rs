@@ -10022,16 +10022,19 @@ fn tapered_reach(
     taper: f64,
     corner: Option<kernel::DraftCorner>,
 ) -> Result<f64> {
+    let start_plane = ss.plane.offset(base);
+    let travel = if sign > 0.0 { ss.plane.normal() } else { -ss.plane.normal() };
+    // How far a body runs from the start along the travel: the far end of its exact box's span
+    // from the start, as the kernel measures it.
     let far_side = |body: &Body| -> Result<f64> {
         let bb = body.exact_bounds().map_err(|e| DocError::Invalid(e.to_string()))?;
-        let [lo, hi] = solidcore_ops::affine::span_along(bb.min.into(), bb.max.into(), ss.plane.origin.into(), ss.plane.normal().into())
+        let [_, far] = solidcore_ops::affine::span_along(bb.min.into(), bb.max.into(), start_plane.origin.into(), travel.into())
             .map_err(|e| DocError::Invalid(e.to_string()))?;
-        Ok(if sign > 0.0 { hi - base } else { base - lo })
+        Ok(far)
     };
     let target_far = far_side(&target.body)?.max(len) + to_offset.abs();
     let through = target_far + target.body.size() * 0.05 + 1.0;
     extrude_within_reach([base, base + sign * through])?;
-    let start_plane = ss.plane.offset(base);
     let mut envelopes = Vec::new();
     for r in regions {
         let outer = Region2 { outer: r.outer.clone(), holes: Vec::new() };
