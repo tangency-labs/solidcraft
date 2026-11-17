@@ -677,6 +677,25 @@ fn the_sub_tabs_return_what_was_clicked_and_dragged() {
     assert_eq!(actions, vec![TabAction::ReorderView { from: 0, to: 2 }]);
 }
 
+#[test]
+fn a_view_drag_reports_release_outside_the_client_and_escape_cancels_it() {
+    let rig = TabsRig::with(Some(true));
+    let from = rig.at("t:view:0");
+    let outside = pos2(850.0, from.y);
+    let escape = egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+    for cancel in [false, true] {
+        rig.frame(vec![egui::Event::PointerMoved(from)]);
+        rig.frame(vec![press(from, true)]);
+        rig.frame(vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))]);
+        assert!(rig.frame(vec![egui::Event::PointerMoved(outside)]).contains(&TabAction::DockView { view: 0, pointer: outside, released: false }));
+        if cancel {
+            rig.frame(vec![escape.clone()]);
+        }
+        let actions = rig.frame(vec![press(outside, false)]);
+        assert_eq!(actions.contains(&TabAction::DockView { view: 0, pointer: outside, released: true }), !cancel);
+    }
+}
+
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.
 #[test]
 fn the_view_switcher_lists_every_view() {

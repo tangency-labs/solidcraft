@@ -13,7 +13,7 @@ use crate::schema::tab_views::{
     TabViewOpenParams, TabViewRenameParams, TabViewReply,
 };
 use crate::schema::tab_windows::{
-    TabViewMoveToWindowParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply, TabWindowMoveReply,
+    TabViewMoveToWindowParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply, TabWindowMoveReply, TabWindowTarget,
 };
 use crate::{Result, Session};
 
@@ -32,16 +32,16 @@ const WINDOW_LIST_CONTRACT: TypedContract<TabWindowListParams> = TypedContract::
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("tab.view.open", "Open Another View", crate::checked!("tab.view.open", open))
         .icon("new").noundo().doc_only().key("Ctrl+T").contract(&OPEN_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("kind?: model|sketch|sheet|render|animation (default: the active view's kind); subject?: the sketch or sheet id; reuse?: bool (default: true with a subject) → the request, id: the view now shown; the window opens a sub-tab of the shown design; never edits the design or opens a dialog"),
+        .params("kind?: model|sketch|sheet|render|animation (default: the active view's kind); subject?: the sketch or sheet id; reuse?: bool (default: true with a subject); window?: id (default: last focused) → the request, id: the view now shown; the window opens a sub-tab of the shown design; never edits the design or opens a dialog"),
     CommandSpec::new("tab.view.close", "Close View", crate::checked!("tab.view.close", close))
         .icon("close").noundo().doc_only().contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the view (default: the active one) → id; closes it, which Reopen Closed View undoes; the last view of a design never closes (an error); never opens a dialog"),
     CommandSpec::new("tab.view.pop_out", "Open View in New Window", crate::checked!("tab.view.pop_out", pop_out))
-        .icon("panel_popout").noundo().doc_only().contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .icon("panel_popout").noundo().doc_only().key("Ctrl+Alt+O").contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the view (default: the active view) → id; moves the view to another desktop window of the live design; never opens a dialog"),
     CommandSpec::new("tab.view.move_to_window", "Move View to Window", crate::checked!("tab.view.move_to_window", move_to_window))
-        .icon("panel_popout").noundo().doc_only().contract(&MOVE_TO_WINDOW_CONTRACT).output(output_schema_for::<TabWindowMoveReply>)
-        .params("view: an open view id; window?: new (default); display?: name or index; x?, y?, w?, h?: logical points; level?: views_only → view, window, created, from, closed_source, placement"),
+        .icon("panel_popout").noundo().doc_only().key("Ctrl+Alt+W").contract(&MOVE_TO_WINDOW_CONTRACT).output(output_schema_for::<TabWindowMoveReply>)
+        .params("view: an open view id; window?: id or new (default); new only: display?: name or index, x?, y?, w?, h?: logical points, level?: views_only → view, window, created, from, closed_source, placement"),
     CommandSpec::new("tab.window.list", "List Windows", crate::checked!("tab.window.list", list_windows))
         .icon("list").noundo().doc_only().read_only().contract(&WINDOW_LIST_CONTRACT).output(output_schema_for::<TabWindowListReply>)
         .params("no parameters → windows of the active design; main window is 0; read-only"),
@@ -68,10 +68,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("from, to: places in tab order (0 first) → from, to; moves the view among the views of its design"),
     CommandSpec::new("tab.view.layout", "Show Views Together", crate::checked!("tab.view.layout", layout))
         .icon("list").noundo().doc_only().contract(&LAYOUT_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("layout: single|side_by_side|stacked|large_and_two|grid → layout, shown: how many views the window shows together; fills the layout with the design's Model and Render views in tab order (the active one among them); single shows one view at a time again; never edits the design"),
+        .params("layout: single|side_by_side|stacked|large_and_two|grid; window?: id (default: last focused) → layout, shown: how many views the window shows together; fills the layout with the window's Model and Render views in tab order (the active one among them); single shows one view at a time again; never edits the design"),
     CommandSpec::new("tab.view.beside", "Show View Beside", crate::checked!("tab.view.beside", beside))
         .icon("copy").noundo().doc_only().contract(&BESIDE_CONTRACT).output(output_schema_for::<TabViewReply>)
-        .params("id?: the open Model or Render view to show (default: a new Model angle); edge?: left|right|top|bottom of the active view (default: right); placement?: requires id and replaces edge, {kind:empty,index}, {kind:replace,target}, or {kind:split,target,edge} → id, edge or placement, shown; allows up to four views, including one Render view"),
+        .params("id?: the open Model or Render view to show (default: a new Model angle); edge?: left|right|top|bottom of the active view (default: right); placement?: requires id and replaces edge, {kind:empty,index}, {kind:replace,target}, or {kind:split,target,edge}; window?: id (default: last focused) → id, edge or placement, shown; allows up to four views, including one Render view"),
     CommandSpec::new("tab.view.list", "List Views", crate::checked!("tab.view.list", list))
         .icon("list").noundo().doc_only().contract(&NO_PARAMS_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("no parameters → views: [{id, kind, name, subject?, active}] of the shown design in tab order; read-only")];
@@ -94,7 +94,7 @@ fn open(_s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "subject must be at most 256 bytes"));
     }
     let reuse = request.reuse.unwrap_or(request.subject.is_some());
-    reply(cmd, TabViewReply { kind: request.kind, subject: request.subject, reuse: Some(reuse), ..Default::default() })
+    reply(cmd, TabViewReply { kind: request.kind, subject: request.subject, reuse: Some(reuse), window: request.window, ..Default::default() })
 }
 
 fn close(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -110,7 +110,17 @@ fn pop_out(_s: &mut Session, p: &Value) -> Result<Value> {
 
 fn move_to_window(_s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "tab.view.move_to_window";
-    let request: TabViewMoveToWindowParams = parse(cmd, p)?;
+    if p.get("window").is_some_and(|target| !target.is_string() && !target.is_u64()) {
+        return Err(bad(cmd, "window must be a window id or new"));
+    }
+    let mut request: TabViewMoveToWindowParams = parse(cmd, p)?;
+    if let TabWindowTarget::Existing(_) = request.window {
+        if ["display", "x", "y", "w", "h", "level"].into_iter().any(|key| p.get(key).is_some()) {
+            return Err(bad(cmd, "display, geometry and level require window: new"));
+        }
+    } else {
+        request.level = Some(request.level.unwrap_or_default());
+    }
     if [request.x, request.y].into_iter().flatten().any(|coord| !coord.is_finite())
         || [request.w, request.h].into_iter().flatten().any(|size| !size.is_finite() || size <= 0.0)
     {
@@ -177,7 +187,7 @@ fn move_view(_s: &mut Session, p: &Value) -> Result<Value> {
 
 fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
     let request: TabViewLayoutParams = parse("tab.view.layout", p)?;
-    reply("tab.view.layout", TabViewReply { layout: Some(request.layout), ..Default::default() })
+    reply("tab.view.layout", TabViewReply { layout: Some(request.layout), window: request.window, ..Default::default() })
 }
 
 fn beside(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -187,7 +197,7 @@ fn beside(_s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "placement requires id and takes the place of edge"));
     }
     let edge = request.placement.is_none().then_some(request.edge.unwrap_or(TabViewEdge::Right));
-    reply(cmd, TabViewReply { id: request.id, edge, placement: request.placement, ..Default::default() })
+    reply(cmd, TabViewReply { id: request.id, edge, placement: request.placement, window: request.window, ..Default::default() })
 }
 
 fn list(_s: &mut Session, p: &Value) -> Result<Value> {

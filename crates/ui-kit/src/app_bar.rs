@@ -676,6 +676,8 @@ pub struct TabMenuRow<'a> {
     pub separator_before: bool,
     /// The rows of this item's flyout.
     pub children: &'a [TabMenuRow<'a>],
+    pub checked: bool,
+    pub disabled_tip: Option<&'a str>,
 }
 
 impl<'a> TabMenuRow<'a> {
@@ -692,6 +694,8 @@ impl<'a> TabMenuRow<'a> {
             heading: false,
             separator_before: false,
             children: &[],
+            checked: false,
+            disabled_tip: None,
         }
     }
 
@@ -841,7 +845,7 @@ pub enum TabAction {
         from: usize,
         to: usize,
     },
-    /// A view tab dragged from the strip over the workspace.
+    /// A view tab dragged away from its strip. The app decides whether to dock or move it.
     DockView {
         view: usize,
         pointer: Pos2,
@@ -1050,6 +1054,7 @@ struct Pen<'a> {
     close_design: bool,
     /// The bar's bottom, where the menus open.
     below: f32,
+    view_centres: Vec<(usize, f32)>,
 }
 
 /// How the selected design's tab is laid out: what [`measure`] decided.
@@ -1254,10 +1259,14 @@ fn menu_rows<'a>(
         if keys && !row.key_on_selected.is_empty() {
             item = item.key(row.key_on_selected);
         }
-        item.enabled = (!row.needs_others || others) && row.id != off;
+        item.enabled = (!row.needs_others || others) && row.id != off && row.disabled_tip.is_none();
         let mut control = crate::MenuItem::from_item(&item, flyout.as_ref().is_some_and(|f| f.open == Some(i)));
+        control.checked = row.checked.then_some(true);
         control.submenu = !row.children.is_empty();
         let response = control.show(ui);
+        if let Some(tip) = row.disabled_tip {
+            response.clone().backing_on_hover_text(tip);
+        }
         solidcraft_ui_registry::publish_target(&format!("{prefix}{}", row.id), response.rect);
         if let Some(flyout) = flyout.as_deref_mut() {
             if control.submenu {
@@ -1537,17 +1546,25 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let mut x = start;
     for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
         let w = g.view_ws.get(k).copied().unwrap_or(0.0);
-        draw_view(ui, strip, k, view, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(w, VIEW_HEIGHT)), pen);
+        let rect = Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(w, VIEW_HEIGHT));
+        if view.to_window.is_none() {
+            pen.view_centres.push((k, rect.center().x));
+        }
+        draw_view(ui, strip, k, view, rect, pen);
         x += w + VIEW_GAP;
     }
     if count < tab.views.len() {
         more_button(ui, strip, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(g.more_w, VIEW_HEIGHT)), tab.views.len() - count, pen);
     }
-    let pointer = ui.input(|i| i.pointer.interact_pos());
+    let pointer = ui.ctx().pointer_interact_pos();
     let released = ui.input(|i| i.pointer.primary_released());
-    if let Some((d, pointer)) = pen.drag.zip(pointer).filter(|(_, p)| p.y > pen.below + 6.0) {
+    let viewport = ui.ctx().viewport_rect();
+    if let Some((d, pointer)) = pen.drag.zip(pointer).filter(|(_, p)| !viewport.contains(*p) || !pr.expand2(vec2(0.0, 6.0)).contains(*p)) {
         pen.actions.push(TabAction::DockView { view: d.from, pointer, released });
-    } else if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from)) {
+    }
+    if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from))
+        && pointer.is_some_and(|p| p.y <= pen.below + 6.0 && viewport.contains(p))
+    {
         let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
         let left = ui.ctx().pointer_latest_pos().map_or(start, |p| p.x) - d.grab;
         let slot = drop_slot(left, start, &widths, first, d.from);
@@ -1834,13 +1851,32 @@ pub fn clear_view_popup(ctx: &egui::Context, strip: egui::Id) {
     });
 }
 
+/// The selected design strip can receive a view from another window.
+#[derive(Debug)]
+pub struct ViewDropZone {
+    pub document: usize,
+    pub rect: Rect,
+    pub view_centres: Vec<(usize, f32)>,
+}
+
+/// The strip owns this drag until the user releases the pointer or cancels it.
+pub fn view_drag_active(ctx: &egui::Context, strip: egui::Id) -> bool {
+    ctx.data(|d| d.get_temp::<ViewDrag>(strip.with("view_drag")).is_some()) && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released())
+}
+
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
 /// reorder, a right-click for the tab's menu, » for every tab when they don't all fit, + for a
 /// new one. The selected design with several views expands to show them (see [`DocTab::views`]).
 pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> Vec<TabAction> {
+    tabs_with_view_drop_zones(ui, strip, r, x0, x1).0
+}
+
+/// Draw the strip and report the current drop geometry in window coordinates.
+pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> (Vec<TabAction>, Vec<ViewDropZone>) {
     let t = Tokens::get();
     let h = strip.handles;
     let n = strip.tabs.len();
+    let mut view_drop_zones = Vec::new();
     let mut actions = Vec::new();
     // Each tab fits its name (up to MAX_FIT) while all of them fit; otherwise they share the room.
     const MAX_FIT: f32 = 200.0;
@@ -1889,6 +1925,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         drag: ui.ctx().data(|d| d.get_temp::<ViewDrag>(vdrag_id)).filter(|_| (held_down || released) && !escape),
         close_design: false,
         below: r.bottom(),
+        view_centres: Vec::new(),
     };
     // The shown tabs' widths, in strip order.
     let widths: Vec<f32> = (first..first + shown)
@@ -1988,6 +2025,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             (SelectedLayout::Switcher, Some(g)) => draw_switcher(ui, strip, &tab, tr, g, &mut pen),
             _ => {}
         }
+        view_drop_zones.push(ViewDropZone { document: i, rect: tr, view_centres: std::mem::take(&mut pen.view_centres) });
         let lit = resp.hovered() || held.is_some_and(|(from, _)| from == i);
         if plain {
             tab_shape(ui.painter(), &t, tr, active, lit || resp.has_focus());
@@ -2138,7 +2176,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     actions.append(&mut pen.actions);
     // A new tab.
     if strip.pop_out {
-        return actions;
+        return (actions, view_drop_zones);
     }
     let pr = Rect::from_center_size(pos2(x + 14.0, r.center().y), vec2(22.0, 22.0));
     let presp = ui.interact(pr, ui.scope_id().with("doc_new"), Sense::click());
@@ -2157,7 +2195,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     }
     actions.extend(dropped.map(|(from, to)| TabAction::Reorder { from, to }));
     actions.extend(torn.map(TabAction::TearOff));
-    actions
+    (actions, view_drop_zones)
 }
 
 /// A row of the File menu: what it runs (its `id`), its label, shortcut and kit icon.

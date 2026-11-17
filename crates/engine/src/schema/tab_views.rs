@@ -100,6 +100,9 @@ impl From<solidcraft_views::Placement> for TabViewPlacement {
 pub struct TabViewLayoutParams {
     /// How to lay them out. `single` shows one view at a time again.
     pub layout: TabViewLayout,
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.beside`: show another view beside the active one.
@@ -116,6 +119,9 @@ pub struct TabViewBesideParams {
     /// An explicit cell and position. Requires `id` and replaces the top-level `edge` option.
     #[serde(default)]
     pub placement: Option<TabViewPlacement>,
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.open`: open a view of the shown design and make it the active one.
@@ -132,6 +138,9 @@ pub struct TabViewOpenParams {
     /// Default: true when a subject is given, else false.
     #[serde(default)]
     pub reuse: Option<bool>,
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.close`, `tab.view.duplicate`: act on one view.
@@ -221,7 +230,7 @@ pub struct TabViewReply {
     /// The place asked for (`tab.view.activate`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index: Option<u64>,
-    /// The window asked for (`tab.view.activate`).
+    /// The window asked for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<u32>,
     /// The name asked for, trimmed (`tab.view.rename`).
