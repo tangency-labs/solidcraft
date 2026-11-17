@@ -14,6 +14,165 @@ use crate::Services;
 use crate::dialogs::{apply_commands, edge_sel, face_sel, preview_commands};
 
 #[test]
+fn coderabbit_review_alignment_accepts_circular_edges_without_a_cylindrical_wall() {
+    let mut app = two_boxes();
+    app.run("component.activate", json!({"component":"B"})).unwrap();
+    app.run("solid.cone", json!({"radius":5,"top_radius":2,"height":10,"base":[40,10,20],"operation":"new"})).unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    let state = app.session.model.state();
+    let body = state.body("Body3").unwrap();
+    let record = body.body.record();
+    let index = record
+        .edges
+        .iter()
+        .position(|edge| {
+            matches!(edge.curve, solidcore_record::brep::Curve::Circle { .. })
+                && edge.uses.iter().all(|u| {
+                    !matches!(
+                        solidcraft_engine::kernel::face_surface(&body.body, u.face as usize),
+                        Some(solidcraft_engine::kernel::FaceSurface::Cylinder { .. })
+                    )
+                })
+        })
+        .expect("the cone has an exact circular edge without a cylindrical wall");
+    let point = body.mesh().edges[index][0];
+    let edge = Sel::Edge { body: "Body3".into(), index, point };
+    let reference = alignment_pick(&app.session, &edge, true).expect("an exact circular edge remains selectable without a cylinder");
+    assert_eq!(reference["reference"]["type"], "edge");
+    app.start("joint.create");
+    let mut dialog = app.dialog.take().unwrap();
+    for point in [Vec3::new(20.0, 10.0, 5.0), Vec3::new(50.0, 10.0, 5.0)] {
+        dialog.pick(&app.session, face_sel(&app.session, point).unwrap());
+    }
+    let Kind::Assembly(Asm::Joint(form)) = &dialog.kind else { panic!() };
+    dialog.active = form.alignment_order.iter().position(|side| *side == 1).unwrap() + 2;
+    assert!(alignment_accepts(&app.session, &dialog, &edge));
+    dialog.pick(&app.session, edge);
+    let commands = apply_commands(&app, &dialog).unwrap();
+    assert_eq!(commands[0].1["b_alignment"]["reference"]["type"], "edge");
+    app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+}
+
+#[test]
+fn coderabbit_review_alignment_resolves_component_origin_datums_and_rejects_nested_paths() {
+    let mut app = two_boxes();
+    let occurrence = app.session.doc.occurrences.iter().find(|o| o.name == "B:1").unwrap().id;
+    for (selection, kind, field, item) in [
+        (Sel::Axis { name: format!("o:{occurrence}/origin/X") }, "origin_axis", "axis", "X"),
+        (Sel::Plane { name: format!("o:{occurrence}/origin/YZ") }, "origin_plane", "plane", "YZ"),
+    ] {
+        let reference =
+            alignment_pick(&app.session, &selection, false).expect("a top-level component origin datum is a persistent alignment reference");
+        assert_eq!(reference["occurrence"], occurrence);
+        assert_eq!(reference["reference"]["type"], kind);
+        assert_eq!(reference["reference"][field], item);
+        app.start("joint.create");
+        let mut dialog = app.dialog.take().unwrap();
+        for point in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+            dialog.pick(&app.session, face_sel(&app.session, point).unwrap());
+        }
+        let Kind::Assembly(Asm::Joint(form)) = &dialog.kind else { panic!() };
+        dialog.active = form.alignment_order.iter().position(|side| *side == 1).unwrap() + 2;
+        assert!(alignment_accepts(&app.session, &dialog, &selection));
+        dialog.pick(&app.session, selection);
+        let commands = apply_commands(&app, &dialog).unwrap();
+        assert_eq!(commands[0].1["b_alignment"]["reference"]["type"], kind);
+        assert_eq!(commands[0].1["b_alignment"]["occurrence"], occurrence);
+        app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+    }
+    let parent = app.session.doc.occurrences.iter().find(|o| o.name == "A:1").unwrap().id;
+    for selection in
+        [Sel::Axis { name: format!("o:{parent}/{occurrence}/origin/X") }, Sel::Plane { name: format!("o:{parent}/{occurrence}/origin/YZ") }]
+    {
+        assert!(alignment_pick(&app.session, &selection, false).is_err(), "nested datums remain outside the supported scope");
+    }
+    assert_eq!(alignment_pick(&app.session, &Sel::Axis { name: "X".into() }, false).unwrap()["occurrence"], 0);
+    assert_eq!(alignment_pick(&app.session, &Sel::Plane { name: "YZ".into() }, false).unwrap()["occurrence"], 0);
+}
+
+#[test]
+fn coderabbit_review_no_cylinder_circle_marker_uses_edge_axis() {
+    let mut app = two_boxes();
+    app.run("component.activate", json!({"component":"B"})).unwrap();
+    app.run("solid.cone", json!({"radius":5,"top_radius":2,"height":10,"base":[40,15,20],"operation":"new"})).unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    let state = app.session.model.state();
+    let body = state.body("Body3").unwrap();
+    let record = body.body.record();
+    let index = record
+        .edges
+        .iter()
+        .position(|edge| {
+            matches!(edge.curve, solidcore_record::brep::Curve::Circle { .. })
+                && edge.uses.iter().all(|u| {
+                    !matches!(
+                        solidcraft_engine::kernel::face_surface(&body.body, u.face as usize),
+                        Some(solidcraft_engine::kernel::FaceSurface::Cylinder { .. })
+                    )
+                })
+        })
+        .expect("the cone has an exact circular edge without a cylindrical wall");
+    let point = body.mesh().edges[index][0];
+    let edge = Sel::Edge { body: "Body3".into(), index, point };
+    app.start("joint.create");
+    let mut dialog = app.dialog.take().unwrap();
+    for point in [Vec3::new(20.0, 10.0, 5.0), Vec3::new(50.0, 10.0, 5.0)] {
+        dialog.pick(&app.session, face_sel(&app.session, point).unwrap());
+    }
+    let Kind::Assembly(Asm::Joint(form)) = &dialog.kind else { panic!() };
+    dialog.active = form.alignment_order.iter().position(|side| *side == 1).unwrap() + 2;
+    assert!(alignment_accepts(&app.session, &dialog, &edge));
+    let mut confirmed = dialog.clone();
+    confirmed.pick(&app.session, edge);
+    let commands = apply_commands(&app, &confirmed).unwrap();
+    assert_eq!(commands[0].1["b_alignment"]["reference"]["type"], "edge");
+    app.session.scratch().execute(&commands[0].0, &commands[0].1).unwrap();
+    app.dialog = Some(dialog);
+    let marker = review_alignment_marker(&mut app, crate::viewport::Hit::Edge { body: "Body3".into(), index, mid: point, point })
+        .expect("the accepted circular edge has graphical feedback");
+    assert!(marker.z.x.abs() < 1e-6, "the cone's edge axis is along Z: {:?}", marker.z);
+    assert!(marker.z.y.abs() < 1e-6, "the marker must not point toward the displaced circle centre: {:?}", marker.z);
+    assert!((marker.z.z.abs() - 1.0).abs() < 1e-6, "the cone's edge axis is along Z: {:?}", marker.z);
+}
+
+#[test]
+fn coderabbit_review_alignment_hover_cache_tracks_rollback() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    h.app.start("joint.create");
+    h.app.dialog.as_mut().unwrap().active = 2;
+    h.frames(2);
+    let projection = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let pointer = egui::pos2(700.0, 400.0);
+    let first = Some((
+        crate::viewport::Hit::Face { body: "Body2".into(), index: 3, point: Vec3::ZERO },
+        Some(Sel::Face { body: "Body2".into(), index: 3, point: Vec3::ZERO }),
+    ));
+    let authored = Some((
+        crate::viewport::Hit::Face { body: "Body1".into(), index: 4, point: Vec3::ZERO },
+        Some(Sel::Face { body: "Body1".into(), index: 4, point: Vec3::ZERO }),
+    ));
+    assert_eq!(crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), first.clone()), first);
+    assert_eq!(
+        crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), None),
+        first,
+        "the unchanged pose keeps the stable candidate"
+    );
+    h.app.preview.rolled_back = true;
+    assert_eq!(
+        crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), authored.clone()),
+        authored,
+        "rollback must discard the candidate from the preview pose"
+    );
+    assert_eq!(crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), None), authored);
+    h.app.preview.rolled_back = false;
+    assert!(
+        crate::viewport::stable_alignment_hover(&mut h.app, &projection, Some(pointer), None).is_none(),
+        "returning to the preview must discard an authored-pose candidate"
+    );
+}
+
+#[test]
 fn secondary_alignment_edit_primary_replacement_uses_the_new_occurrence() {
     let mut app = two_boxes();
     app.start("joint.create");
@@ -815,11 +974,8 @@ fn secondary_alignment_feedback_accepts_named_edge_and_tracks_sketch_namespace()
     for p in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
         d.pick(&app.session, face_sel(&app.session, p).unwrap());
     }
-    let state = app.session.model.state();
-    let body = state.body("Body2").unwrap();
-    let mesh = body.mesh();
-    let index = mesh.edges.iter().position(|e| e.len() >= 2 && (e.last().unwrap().x - e[0].x).abs() > 19.0).unwrap();
-    let point = (mesh.edges[index][0] + *mesh.edges[index].last().unwrap()) / 2.0;
+    let point = Vec3::new(40.0, 0.0, 0.0);
+    let Sel::Edge { index, .. } = edge_sel(&app.session, point).unwrap() else { panic!() };
     let hit = crate::viewport::Hit::Edge { body: "Body2".into(), index, mid: point, point };
     let selection = d.candidate(&app.session, &hit).unwrap();
     d.pick(&app.session, selection);
@@ -850,9 +1006,28 @@ fn secondary_alignment_feedback_construction_picking_uses_the_preview_placement(
     for point in [a, b] {
         assert!((point.x - 10.0).abs() < 1e-6 && (point.z - 10.0).abs() < 1e-6, "{point:?}");
     }
+    // At this fixed orthographic view the displayed square reaches 14.4 mm from the
+    // solved plane origin (10,10,10). Compare its corners with independent fixture data.
+    app.cam.distance = 200.0;
+    app.cam.fov = 0.0;
     let (_, _, quad) = crate::viewport::construction_quads(&app).into_iter().find(|(name, ..)| name == "MovingPlane").unwrap();
-    let center = quad.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / 4.0;
-    assert!(center.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6, "{center:?}");
+    let expected = [Vec3::new(10.0, -4.4, -4.4), Vec3::new(10.0, 24.4, -4.4), Vec3::new(10.0, 24.4, 24.4), Vec3::new(10.0, -4.4, 24.4)];
+    let mut remaining = [true; 4];
+    for actual in quad {
+        let index = expected
+            .iter()
+            .enumerate()
+            .find_map(|(index, expected)| {
+                (remaining[index]
+                    && (actual.x - expected.x).abs() < 1e-6
+                    && (actual.y - expected.y).abs() < 1e-6
+                    && (actual.z - expected.z).abs() < 1e-6)
+                    .then_some(index)
+            })
+            .unwrap_or_else(|| panic!("unexpected or repeated plane corner: {actual:?}"));
+        remaining[index] = false;
+    }
+    assert!(remaining.into_iter().all(|unmatched| !unmatched), "all independent fixture corners must be present");
 }
 
 #[test]
