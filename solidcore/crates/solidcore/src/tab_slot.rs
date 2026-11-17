@@ -360,15 +360,23 @@ pub enum SlotSkip {
         /// The least distance from the slot to the hole.
         web: f64,
     },
+    /// `uneven_far_side`: S's far side under the slot is not one face (design 5.6, S steps or a
+    /// pocket edge runs under the slot).
+    UnevenFarSide,
+    /// `no_far_side`: no far face of S lies under the slot (design 5.6).
+    NoFarSide,
 }
 
 impl SlotSkip {
-    /// The skip's reason id of design v2 11.3 (tab level): `at_edge` or `over_hole`.
+    /// The skip's reason id of design v2 11.3 (tab level): `at_edge`, `over_hole`,
+    /// `uneven_far_side` or `no_far_side`.
     #[must_use]
     pub const fn reason_id(&self) -> &'static str {
         match self {
             Self::AtEdge => "at_edge",
             Self::OverHole { .. } => "over_hole",
+            Self::UnevenFarSide => "uneven_far_side",
+            Self::NoFarSide => "no_far_side",
         }
     }
 }

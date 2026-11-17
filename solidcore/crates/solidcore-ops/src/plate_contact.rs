@@ -4,8 +4,8 @@
 //! decides, and ops does no float maths of its own.
 
 use solidcore::math::Vec2;
-use solidcore::plate_contact::{self as pc, Contact, PairJoint, PairSkip, Plane};
-use solidcore::prism::profile::Region2;
+use solidcore::plate_contact::{self as pc, Contact, FarSide, PairJoint, PairSkip, Plane};
+use solidcore::prism::profile::{Loop2, Region2};
 use solidcore::tab_slot::{self as ts, Layout, SlotSkip, StretchSkip, TabSkip};
 
 use crate::body::Body;
@@ -89,6 +89,8 @@ pub struct StretchPlan {
 /// the pair has no joint.
 pub type TabSlotPlan = core::result::Result<(Vec2, Vec<StretchPlan>), PairSkip>;
 impl Answer for Vec<Region2> {}
+
+impl Answer for FarSide {}
 
 impl Body {
     /// This body as the tab plate T against `slot` (S) on `p`, a plane of one of S's outward
@@ -218,6 +220,22 @@ impl Body {
         })
     }
 
+    /// This body as the slot plate S: its far side under one slot `outline` (in `p`'s frame,
+    /// [`Body::slot_face`]'s `(u, w)` plane), the thickness `t_S,k` there or why the tab is
+    /// skipped ([`solidcore::plate_contact::slot_thickness_under`], design 5.6). It does not
+    /// change.
+    ///
+    /// # Errors
+    /// [`crate::Error::Refused`], in the kernel's words, for a `tol` not positive and finite, a
+    /// bad plane or loops the placement cannot decide; those of the session.
+    pub fn slot_thickness_under(&self, p: Plane, outline: &Loop2, tol: f64) -> Result<FarSide> {
+        poisoned(&[self])?;
+        run_on("plate_contact::slot_thickness_under", &[("s", self)], |k| {
+            let s = copy_of(k, self)?;
+            pc::slot_thickness_under(k, &s, p, outline, tol)
+        })
+    }
+
     /// This body as the tab plate T against `slot` (S) on `p`: the strip Σ, T's region meeting
     /// S's face in `p` ([`solidcore::plate_contact::strip`], in [`Body::slot_face`]'s `(u, w)`
     /// frame), what the tabs are laid out along. `None` when T meets no area of S's face there.
@@ -308,8 +326,21 @@ impl Body {
                                 break;
                             }
                         }
+                        let t_k = match slot.slot_thickness_under(p, &outline.outer, tol)? {
+                            FarSide::Thickness(t) => Some(t),
+                            far => {
+                                if skip.is_none() {
+                                    skip = Some(if far == FarSide::Uneven {
+                                        SlotSkip::UnevenFarSide
+                                    } else {
+                                        SlotSkip::NoFarSide
+                                    });
+                                }
+                                t_s
+                            }
+                        };
                         let tab =
-                            ts::tab_outline_for(start, spec.width, t_s, spec.protrusion, level)
+                            ts::tab_outline_for(start, spec.width, t_k, spec.protrusion, level)
                                 .map_err(status)?;
                         tabs.push(TabPlan {
                             start,
@@ -347,15 +378,17 @@ impl Body {
             Ok(planned) => planned,
             Err(skip) => return Ok(Err(skip)),
         };
-        let t_s = slot.slot_thickness(p, tol)?;
         let mut tabs = vec![self.copy()?];
         let mut slots = Vec::new();
         for t in plan.iter().filter_map(|st| st.tabs.as_ref().ok()).flatten() {
-            let (Ok(outline), None, Some(t_s)) = (&t.tab, t.skip, t_s) else {
+            let (Ok(outline), None) = (&t.tab, t.skip) else {
+                continue;
+            };
+            let FarSide::Thickness(t_k) = slot.slot_thickness_under(p, &t.slot.outer, tol)? else {
                 continue;
             };
             tabs.push(tab_prism(p, d, outline, t.faces)?);
-            slots.push(slot_prism(p, &t.slot, t_s, spec.overshoot)?);
+            slots.push(slot_prism(p, &t.slot, t_k, spec.overshoot)?);
         }
         let tab_plate = union_all(tabs)?;
         let slot_plate = if slots.is_empty() {
@@ -1289,6 +1322,79 @@ mod tests {
         assert_eq!(
             check_tool_faces(&[24], 20, 10).map(|c| c.reason_id()),
             Some("too_many_tool_faces")
+        );
+    }
+
+    /// Design 5.6 per tab: S (0,0,0)-(160,100,12) with x > 80 stepped up to z 6, Wall on its
+    /// top, count 2: the tab over the 12 is 13 long and its slot cuts 12, the one over the 6 is
+    /// 7 long and cuts 6 (T 43200 + 780 + 420, S 144000 - 10.2 x 6.2 x 18). The step at x = 30,
+    /// under the first slot: that tab is `uneven_far_side` and only the other is made.
+    #[test]
+    fn each_tab_reads_the_slot_thickness_under_it() {
+        let stepped = |x: f64| {
+            let whole = make_box([0.0, 0.0, 0.0], [160.0, 100.0, 12.0]).unwrap();
+            let step = make_box([x, 0.0, 0.0], [160.0 - x, 100.0, 6.0]).unwrap();
+            boolean(whole, step, BooleanOp::Subtract).unwrap().unwrap()
+        };
+        let p = Plane {
+            normal: Vec3::Z,
+            offset: 12.0,
+        };
+        let wall = make_box([20.0, 30.0, 12.0], [120.0, 6.0, 60.0]).unwrap();
+        let v = |b: &Body| b.mass_properties(1e-9).unwrap().volume;
+        let s = stepped(80.0);
+        let cut = wall
+            .tab_slot_cut(&s, p, spec2(), TOL)
+            .unwrap()
+            .expect("joint");
+        let tabs: Vec<_> = cut
+            .plan
+            .iter()
+            .filter_map(|st| st.tabs.as_ref().ok())
+            .flatten()
+            .collect();
+        assert_eq!(tabs.len(), 2, "{tabs:?}");
+        assert!(tabs.iter().all(|t| t.skip.is_none()), "{tabs:?}");
+        let far = |t: &TabPlan| s.slot_thickness_under(p, &t.slot.outer, TOL).unwrap();
+        assert_eq!(far(tabs[0]), FarSide::Thickness(12.0));
+        assert_eq!(far(tabs[1]), FarSide::Thickness(6.0));
+        let want = 43200.0 + 780.0 + 420.0;
+        assert!(
+            (v(&cut.tab_plate) - want).abs() < 1e-6,
+            "{}",
+            v(&cut.tab_plate)
+        );
+        let want = 144000.0 - 10.2 * 6.2 * 18.0;
+        assert!(
+            (v(&cut.slot_plate) - want).abs() < 1e-6,
+            "{}",
+            v(&cut.slot_plate)
+        );
+        let s = stepped(30.0);
+        let cut = wall
+            .tab_slot_cut(&s, p, spec2(), TOL)
+            .unwrap()
+            .expect("joint");
+        let skips: Vec<_> = cut
+            .plan
+            .iter()
+            .filter_map(|st| st.tabs.as_ref().ok())
+            .flatten()
+            .map(|t| t.skip)
+            .collect();
+        assert_eq!(skips, vec![Some(SlotSkip::UnevenFarSide), None]);
+        assert_eq!(SlotSkip::UnevenFarSide.reason_id(), "uneven_far_side");
+        assert_eq!(SlotSkip::NoFarSide.reason_id(), "no_far_side");
+        assert!(
+            (v(&cut.tab_plate) - 43620.0).abs() < 1e-6,
+            "{}",
+            v(&cut.tab_plate)
+        );
+        let want = 160.0 * 100.0 * 12.0 - 130.0 * 100.0 * 6.0 - 10.2 * 6.2 * 6.0;
+        assert!(
+            (v(&cut.slot_plate) - want).abs() < 1e-6,
+            "{}",
+            v(&cut.slot_plate)
         );
     }
 }
