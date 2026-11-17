@@ -1,0 +1,6 @@
+{
+  "en": {
+    "prefs.heal_tolerance_defects": "Heal imported parts that fail the check",
+    "prefs.heal_tolerance_defects_note": "When SMLib's check fails a STEP part only on tolerance-scale defects (edges shorter than their tolerance, slivers between coincident edges), heal them in the background after the import, and heal them first in Repair. Turn off to keep such parts as read, with the check's warning."
+  }
+}

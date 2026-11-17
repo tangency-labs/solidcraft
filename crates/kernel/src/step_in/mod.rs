@@ -1426,6 +1426,9 @@ pub fn step_validate(text: &str) -> std::result::Result<usize, String> {
 /// read the file, until the timeline has evaluated it), and strongly only when it is small.
 struct Recent {
     key: (u64, usize),
+    /// Read healing the parts its check fails ([`crate::heals_tolerance_defects`]): a read of the
+    /// same text with the preference the other way is a different import.
+    heal: bool,
     import: std::sync::Weak<StepImport>,
     /// Keeps a small import alive (never read).
     _small: Option<Arc<StepImport>>,
@@ -1446,9 +1449,9 @@ const KEEP_SMALL_BYTES: usize = 1 << 20;
 /// threads, and what it finds is in [`ImportReport::current`] once every check has ended
 /// ([`ImportReport::checks`]). [`step_import`] waits for them instead.
 pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
-    let key = text_key(text);
+    let (key, heal) = (text_key(text), crate::heals_tolerance_defects());
     if let Ok(cache) = RECENT.lock()
-        && let Some(imp) = cache.iter().filter(|r| r.key == key).find_map(|r| r.import.upgrade())
+        && let Some(imp) = cache.iter().filter(|r| r.key == key && r.heal == heal).find_map(|r| r.import.upgrade())
     {
         return Ok(imp);
     }
@@ -1464,11 +1467,12 @@ fn text_key(text: &str) -> (u64, usize) {
     (h.finish(), text.len())
 }
 
-/// Keep `imp` in the recent imports (strongly only when `small`).
-fn remember(key: (u64, usize), imp: &Arc<StepImport>, small: bool) {
+/// Keep `imp`, read healing its parts or not (`heal`), in the recent imports (strongly only when
+/// `small`).
+fn remember(key: (u64, usize), heal: bool, imp: &Arc<StepImport>, small: bool) {
     if let Ok(mut cache) = RECENT.lock() {
-        cache.retain(|r| r.key != key && r.import.strong_count() > 0);
-        cache.push(Recent { key, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
+        cache.retain(|r| (r.key, r.heal) != (key, heal) && r.import.strong_count() > 0);
+        cache.push(Recent { key, heal, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
         while cache.len() > 4 {
             cache.remove(0);
         }
@@ -1507,6 +1511,8 @@ pub struct StepReading {
     small: bool,
     /// One solid per step (no worker threads to share a batch between).
     single: bool,
+    /// Heal the parts the checks fail ([`crate::heals_tolerance_defects`] when the read began).
+    heal: bool,
 }
 
 impl StepReading {
@@ -1588,7 +1594,7 @@ impl StepReading {
             }
         }
         let single = workers <= 1;
-        Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })
+        Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single, heal: crate::heals_tolerance_defects() })
     }
 
     /// Convert the next solid (or batch of solids); false once all are converted (or the
@@ -1653,10 +1659,12 @@ impl StepReading {
             return Err(crate::watch::cancelled_error("STEP import"));
         }
         // What healing the parts the checks fail needs (nothing to copy when there is no check).
-        let heals = if jobs.is_empty() {
-            checks::Heals::default()
+        let heals = if jobs.is_empty() || !self.heal {
+            // The preference off: the parts stay as read, with what their checks found.
+            checks::Heals { as_read: !self.heal, ..checks::Heals::default() }
         } else {
             checks::Heals {
+                as_read: false,
                 instances: std::mem::take(&mut rd.instances),
                 paints: checks::Paints { colors: rd.colors.clone(), color_names: rd.color_names.clone(), opacity: rd.opacity.clone() },
                 uses: rd.uses.clone(),
@@ -1693,9 +1701,9 @@ impl StepReading {
     /// The import, cached for the next read of the same text, with SMLib's check of its parts
     /// still running ([`ImportReport::checks`]; in the steps before, with no worker threads).
     pub fn finish_shared(self) -> Result<Arc<StepImport>> {
-        let (key, small) = (self.key, self.small);
+        let (key, small, heal) = (self.key, self.small, self.heal);
         let imp = Arc::new(self.finish_checking(None)?);
-        remember(key, &imp, small);
+        remember(key, heal, &imp, small);
         Ok(imp)
     }
 }

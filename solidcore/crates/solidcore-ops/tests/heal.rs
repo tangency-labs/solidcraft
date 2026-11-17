@@ -366,8 +366,9 @@ fn failed(body: &Body) -> Vec<u32> {
 
 /// Every vertex of `after` lies within `moved` of a vertex of `before` (a squeeze moves the
 /// vertex it keeps to the midpoint of the two) whose tolerance is at least its own (the larger
-/// of the two such vertices), and no edge of `after` has a tolerance past the largest of
-/// `before`'s: the heal grew no tolerance.
+/// of the two such vertices), and every edge of `after` runs between vertices within `moved`
+/// of the ends of an edge of `before` whose tolerance is at least its own (the larger of such
+/// edges): the heal grew no tolerance.
 fn no_tolerance_grew(before: &Record, after: &Record, moved: f64) {
     let dist = |a: [f64; 3], b: [f64; 3]| {
         ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
@@ -392,11 +393,27 @@ fn no_tolerance_grew(before: &Record, after: &Record, moved: f64) {
             v.tolerance
         );
     }
-    let largest = before.edges.iter().map(|e| e.tolerance).fold(0.0, f64::max);
+    // each edge against the edges before between vertices within `moved` of its own (a
+    // re-ended edge moved one end; a collapse keeps one of two edges between the same two)
+    let ends = |r: &Record, e: &Edge| e.vertices.map(|i| r.vertices[i as usize].point);
     for e in &after.edges {
+        let [p, q] = ends(after, e);
+        let most = before
+            .edges
+            .iter()
+            .filter(|w| {
+                let [a, b] = ends(before, w);
+                (dist(a, p) <= moved && dist(b, q) <= moved)
+                    || (dist(a, q) <= moved && dist(b, p) <= moved)
+            })
+            .map(|w| w.tolerance)
+            .fold(None, |m: Option<f64>, t| Some(m.map_or(t, |m| m.max(t))));
+        let Some(most) = most else {
+            panic!("an edge from {p:?} to {q:?} far from every edge before");
+        };
         assert!(
-            e.tolerance <= largest,
-            "edge tolerance {} > {largest}",
+            e.tolerance <= most,
+            "edge from {p:?} to {q:?}: tolerance {} > {most}",
             e.tolerance
         );
     }
@@ -932,5 +949,108 @@ fn a_sliver_with_a_nan_tolerance_is_not_collapsed() {
             .into_iter()
             .filter(|&e| e != side)
             .all(|e| !edge::tolerance(&b, e).unwrap().is_nan()));
+    }
+}
+
+/// A cut whose curve no longer ends on its vertex is refused, and nothing is cut: the spline
+/// box's pieces of no length, with the spline edge's vertex tolerances 0 (so the trimmed form's
+/// ends, a rounding off the vertices, are farther than the vertices' tolerances).
+#[test]
+fn a_cut_whose_curve_misses_its_vertex_is_refused_and_nothing_is_cut() {
+    use solidcore::heal::tolerance_defects::{cut_degenerate_pieces, Healed, Refusal};
+    use solidcore::topology::brep::p3::edit_brep;
+    use solidcore::topology::{edge, vertex};
+    let mut k = solidcore::Kernel::default();
+    let tol = 3e-6;
+    let rec = box_with_two_short_spline_spans(
+        Tols {
+            body: 1e-9,
+            edge: tol,
+            vertex: tol,
+        },
+        1e-8,
+    );
+    let (mut b, order) = solidcore_convert::brep::to_kernel(&mut k, &rec, true).unwrap();
+    let spline = rec
+        .edges
+        .iter()
+        .position(|e| matches!(e.curve, Curve::Spline { .. }))
+        .unwrap();
+    let e = order.edges[spline];
+    let before = format!("{:?}", edge::curve(&b, e).unwrap());
+    let healed = edit_brep(&mut k, &mut b, |k, b, scope| {
+        let (s, t) = edge::start_end_vertices(b, e)?;
+        vertex::set_tolerance(b, s.unwrap(), 0.0, false, false)?;
+        vertex::set_tolerance(b, t.unwrap(), 0.0, false, false)?;
+        let mut healed = Healed::default();
+        let any = cut_degenerate_pieces(k, b, scope.env, &mut healed)?;
+        assert!(!any, "nothing is cut");
+        Ok(healed)
+    })
+    .unwrap();
+    assert!(healed.cut_pieces.is_empty(), "{healed:?}");
+    let [(edge_refused, Refusal::CutEnd(d))] = healed.refused_edges[..] else {
+        panic!("one CutEnd refusal: {healed:?}");
+    };
+    assert_eq!(edge_refused, e);
+    assert!(
+        d > 0.0 && d < 1e-9,
+        "a rounding off the vertex, above its tolerance 0: {d}"
+    );
+    assert_eq!(
+        format!("{:?}", edge::curve(&b, e).unwrap()),
+        before,
+        "the curve is as read"
+    );
+}
+
+/// A squeeze whose re-ended neighbour misses the new point (the edge's own vertices at
+/// tolerance 0), or whose neighbour's far end misses its own vertex (the neighbours' far
+/// vertices at tolerance 0), is refused with `NeighbourEnd`, and the edge stays.
+#[test]
+fn a_squeeze_whose_neighbour_misses_a_vertex_is_refused() {
+    use solidcore::heal::tolerance_defects::{collapse_short_edge, Refusal};
+    use solidcore::topology::brep::p3::edit_brep;
+    use solidcore::topology::{edge, vertex};
+    let mut k = solidcore::Kernel::default();
+    let step = 3e-4;
+    let (a, z) = ([0.0, 5.0, 10.0], [0.0, 5.0, 10.0 + step]);
+    for far in [false, true] {
+        let rec = hair_step_box(step, TOLS);
+        let (mut b, order) = solidcore_convert::brep::to_kernel(&mut k, &rec, true).unwrap();
+        let riser = rec
+            .edges
+            .iter()
+            .position(|e| matches!(e.curve, Curve::Line { start, end } if (start, end) == (a, z) || (start, end) == (z, a)))
+            .unwrap();
+        let e = order.edges[riser];
+        let r = edit_brep(&mut k, &mut b, |k, b, scope| {
+            let (s, t) = edge::start_end_vertices(b, e)?;
+            let (s, t) = (s.unwrap(), t.unwrap());
+            if far {
+                for x in [s, t] {
+                    for n in vertex::edges(b, x, None)? {
+                        let (p, q) = edge::start_end_vertices(b, n)?;
+                        for y in [p, q].into_iter().flatten().filter(|y| *y != s && *y != t) {
+                            vertex::set_tolerance(b, y, 0.0, false, false)?;
+                        }
+                    }
+                }
+            } else {
+                vertex::set_tolerance(b, s, 0.0, false, false)?;
+                vertex::set_tolerance(b, t, 0.0, false, false)?;
+            }
+            collapse_short_edge(k, b, scope.env, e, None)
+        })
+        .unwrap();
+        let Err(Refusal::NeighbourEnd(n, d)) = r else {
+            panic!("far {far}: a NeighbourEnd refusal: {r:?}");
+        };
+        assert_ne!(n, e);
+        assert!(
+            d > 0.0 && d < 1e-9,
+            "far {far}: a rounding off the vertex: {d}"
+        );
+        assert!(b.edge(e).is_ok(), "far {far}: the edge stays");
     }
 }

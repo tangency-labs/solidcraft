@@ -1480,6 +1480,8 @@ impl SolveApp {
         render_workspace::apply_memory_policy(self);
         // Before a design given at start opens: the largest sketch it may build (#10874).
         prefs::apply_sketch_limit(&self.preferences);
+        // Before a file given at start is read: whether its parts are healed (#17689).
+        prefs::apply_tolerance_heal(&self.preferences);
         // Saved before the theme was a preference: the Dark/Light flag says which.
         if v.get("preferences").and_then(|p| p.get("theme")).is_none() {
             self.preferences.theme = if self.ui.dark { "dark" } else { "light" }.into();

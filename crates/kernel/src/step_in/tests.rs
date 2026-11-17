@@ -995,6 +995,7 @@ fn part_jobs(body: &Body, placements: &[M4]) -> (Vec<checks::Job>, checks::Heals
         });
     }
     let heals = checks::Heals {
+        as_read: false,
         instances: placements.iter().map(|m| (7, *m)).collect(),
         paints: checks::Paints::default(),
         uses: [(7, placements.len())].into_iter().collect(),
@@ -4565,7 +4566,7 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
 fn repair_heals_a_hair_step_that_fails_the_check() {
     let body = hair_step_body(3e-4, 1e-3);
     assert!(crate::validation::failing_check(&body).unwrap().is_some());
-    let (out, report) = crate::repair(&body, &crate::RepairOptions { gap: 0.01, patch_holes: false }).unwrap();
+    let (out, report) = crate::repair(&body, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
     let healed = report.healed.as_ref().expect("the heal ran");
     assert_eq!((healed.squeezed_edges, healed.collapsed_faces), (2, 1), "{healed:?}");
     assert_eq!(healed.failed, [7, 0]);
@@ -4650,7 +4651,9 @@ fn a_scaled_instance_that_fails_as_placed_heals_nothing() {
         matches!(&issues[0], ImportIssue { kind: IssueKind::Repaired, detail, .. } if detail.contains("healed SMLib's check failures")),
         "{issues:?}"
     );
-    assert_eq!(issues.len(), 1 + usize::from(recheck.is_some()), "the warning is the healed body's check as placed: {issues:?}");
+    // the healed hair step passes as placed at the stretch: the Repaired note is the one issue
+    assert!(recheck.is_none(), "the healed part passes as placed: {recheck:?}");
+    assert_eq!(issues.len(), 1, "{issues:?}");
 }
 
 /// #17689: a heal is stopped by the token over the import's work (solidcore-ops' calls run under
@@ -4675,7 +4678,7 @@ fn a_stopped_heal_changes_nothing() {
         assert_eq!(checks.wait(), None);
         assert!(checks.stopped() && checks.heals().is_none());
     }
-    let repaired = stop.within(|| crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false }));
+    let repaired = stop.within(|| crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }));
     assert_eq!(repaired.err(), Some(KernelError::Heal(crate::HealFailure::Stopped)));
     // Not stopped, the same heal is kept.
     let Healed::Kept(healed, ..) = heal(&part, 7) else { panic!("kept") };
@@ -4909,4 +4912,66 @@ fn a_heal_stopped_with_one_worker_fails_the_import_uncached() {
     let imp = read.finish_shared().expect("read");
     assert!(imp.report.checks.heals().is_some(), "healed");
     assert!(cached(key));
+}
+
+/// #17708 review: with the heal preference off ([`crate::heals_tolerance_defects`]), a read keeps
+/// a part its check fails as read, as before the heal: the check's warning, no heal and no note
+/// of one, on one worker (the checks at the read's last steps) or several (in the background).
+/// The cache of recent reads keeps such a read apart from one of the same text with the
+/// preference on, which heals the part.
+#[test]
+fn with_the_heal_preference_off_a_failing_part_stays_as_read() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    for workers in [1, 2] {
+        let name = format!("heal preference, {workers} workers");
+        let text = boxes_step(1, &name);
+        let read = |heal: bool| {
+            let mut reading = StepReading::with_workers(&text, workers).expect("parsed");
+            assert_eq!(reading.single, workers == 1);
+            assert!(reading.heal, "on by default");
+            reading.heal = heal;
+            while reading.step() {}
+            // The part the read checks is the hair step, failing its check.
+            let (jobs, heals) = part_jobs(&hair, &[IDENTITY]);
+            reading.rd.check_jobs = jobs;
+            if reading.single {
+                reading.rd.check_outcomes = vec![checks::Outcome::NeedsRepair("SMLib's check fails it: as read".into())];
+            }
+            reading.rd.instances = heals.instances;
+            reading.rd.uses = heals.uses;
+            reading.finish_shared().expect("read")
+        };
+        let cached = |heal: bool| RECENT.lock().unwrap().iter().any(|r| r.key == text_key(&text) && r.heal == heal && r.import.strong_count() > 0);
+        let as_read = read(false);
+        let issues = as_read.report.checks.wait().expect("ended");
+        assert!(as_read.report.checks.heals().is_none(), "nothing healed");
+        assert!(issues.iter().all(|i| i.kind != IssueKind::Repaired), "{issues:?}");
+        let needs: Vec<&ImportIssue> = issues.iter().filter(|i| i.kind == IssueKind::NeedsRepair).collect();
+        assert!(
+            matches!(needs[..], [i] if i.detail.starts_with("solid 'Hair': needs repair before it can be modelled: SMLib's check fails it: ")),
+            "{issues:?}"
+        );
+        assert!(cached(false) && !cached(true));
+        // The same text with the preference on (as the read below asks): healed, and cached beside it.
+        let healed = read(true);
+        healed.report.checks.wait().expect("ended");
+        let heals = healed.report.checks.heals().expect("healed");
+        assert_eq!(heals.body(0).map(|b| b.body.face_count()), Some(7));
+        assert!(cached(false) && cached(true));
+        let shared = step_import_shared(&text).expect("cached");
+        assert!(Arc::ptr_eq(&shared, &healed) && !Arc::ptr_eq(&shared, &as_read), "a read with the preference on finds the healed read");
+    }
+}
+
+/// #17708 review: Repair with `heal_first` off (the heal preference off) is the repair before the
+/// heal: the hair step, which SMLib takes whole, is refused with the tests its check fails, the
+/// part unchanged; with it on, the part is healed.
+#[test]
+fn repair_without_heal_first_is_the_repair_before_the_heal() {
+    let hair = hair_step_body(3e-4, 1e-3);
+    let failure = crate::validation::failing_check(&hair).unwrap().expect("the hair step fails the check");
+    let off = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: false });
+    assert_eq!(off.err(), Some(KernelError::Repair(crate::RepairRefusal::CheckFails(failure))));
+    let (out, report) = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
+    assert!(report.healed.is_some() && out.face_count() == 7);
 }

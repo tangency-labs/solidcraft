@@ -1679,7 +1679,8 @@ impl ImportDigests {
                 FeatureKind::Import { step, .. } => {
                     let digest = known.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
                     out.steps.insert(f.id, (step.clone(), digest));
-                    if let Some(heals) = known.heals.get(&f.id).filter(|(of, _)| *of == digest) {
+                    // Kept while the heal preference is on: off, the import is its parts as read.
+                    if let Some(heals) = known.heals.get(&f.id).filter(|(of, _)| *of == digest && kernel::heals_tolerance_defects()) {
                         out.heals.insert(f.id, heals.clone());
                     }
                 }
@@ -2143,6 +2144,18 @@ fn validation_digest(validation: kernel::Validation) -> u64 {
             h.finish()
         }
     }
+}
+
+/// What the tolerance heal preference ([`kernel::heals_tolerance_defects`]) adds to the context
+/// digest: nothing with it on (the default), so a result is taken from the cache only as healed
+/// as it was evaluated (an import's parts, and Repair's heal first).
+pub(crate) fn heal_digest(heal: bool) -> u64 {
+    if heal {
+        return 0;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    ("tolerance heal", "off").hash(&mut h);
+    h.finish()
 }
 
 /// SMLib's check of every body a feature made or changed (in `after`, not in `before`, the
@@ -3279,8 +3292,10 @@ impl Model {
             // with the heals the model already has, and is not news.
             let heals = run.heals();
             let known = heals.as_ref().is_some_and(|h| digests.heals(r.id).is_some_and(|k| k.digest() == h.digest()));
+            // With the heal preference off, a run that healed (begun while it was on) is not taken.
             if let Some(heals) = heals
                 && !known
+                && kernel::heals_tolerance_defects()
                 && let Some((_, text)) = digests.steps.get(&r.id)
             {
                 digests.heals.insert(r.id, (*text, heals));
@@ -3574,7 +3589,7 @@ impl Model {
         let mut restored = 0;
         let marker = doc.marker.unwrap_or(usize::MAX);
         let validation = self.validation;
-        let ctx = context_digest(doc, &vals) ^ validation_digest(validation);
+        let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(kernel::heals_tolerance_defects());
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
@@ -11710,7 +11725,10 @@ fn eval_feature_kind(
             let gap = val(vals, gap, Kind::Length)?;
             let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let source = st.bodies.get(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
-            let (repaired, report) = kernel::repair(&source.body, &kernel::RepairOptions { gap, patch_holes: *patch_holes })?;
+            let (repaired, report) = kernel::repair(
+                &source.body,
+                &kernel::RepairOptions { gap, patch_holes: *patch_holes, heal_first: kernel::heals_tolerance_defects() },
+            )?;
             let repaired = repaired.with_color(source.body.color());
             let result = ModelBody::new(source.name.clone(), repaired, source.feature);
             let mut left: Vec<String> =

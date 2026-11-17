@@ -116,7 +116,8 @@ pub enum Refusal {
     /// of that vertex: the bound.
     NeighbourEnd(EdgeId, f64),
     /// The new point is not certified within half the kept vertex's tolerance of a face
-    /// around it (bounded by the gap of a re-ended edge's whole curve to that face): the bound.
+    /// around it (bounded by the gap of a re-ended edge's whole curve to that face plus the
+    /// new point's distance from that curve's end): the bound.
     VertexOffFace(FaceId, f64),
     /// The two edges of a two-edge face are not certified within the kept edge's tolerance of
     /// each other: the bound, or infinity when none could be found.
@@ -170,10 +171,22 @@ pub struct Healed {
     /// Pieces of no length cut out of edge curves: the edge and the certified bound of how far
     /// its cuts, together, moved the curve.
     pub cut_pieces: Vec<(EdgeId, f64)>,
-    /// Edges shorter than their tolerance by their vertices that were left, with why.
+    /// Edges shorter than their tolerance by their vertices that were left, with why, and
+    /// edges whose pieces of no length were left uncut, with why ([`Refusal::is_cut`]).
     pub refused_edges: Vec<(EdgeId, Refusal)>,
     /// Two-edge faces that were left, with why.
     pub refused_faces: Vec<(FaceId, Refusal)>,
+}
+
+impl Refusal {
+    /// Whether this is a refusal of [`cut_degenerate_pieces`] (which runs once, before the
+    /// squeezes) rather than of a squeeze or collapse.
+    pub fn is_cut(&self) -> bool {
+        matches!(
+            self,
+            Refusal::PieceTooLong(_) | Refusal::CutOffFace(..) | Refusal::CutEnd(_)
+        )
+    }
 }
 
 fn invalid(what: &'static str) -> SolidError {
@@ -456,11 +469,11 @@ fn certified_neighbours(
         } else {
             (range.max(), range.min(), s)
         };
-        match bounds::point_at_curve(p, &c, end) {
-            Ok(d) if d <= GAP_SHARE * vertex_tol => {}
+        let near = match bounds::point_at_curve(p, &c, end) {
+            Ok(d) if d <= GAP_SHARE * vertex_tol => d,
             Ok(d) => return Ok(Err(Refusal::NeighbourEnd(n, d))),
             Err(_) => return Ok(Err(Refusal::NeighbourEnd(n, f64::INFINITY))),
-        }
+        };
         // the trimmed form may snap its interval to a knot: its far end, unmoved, must still
         // meet its own vertex within that vertex's tolerance
         if let Err(d) = end_on_vertex(b, far_vertex, &c, far)? {
@@ -468,12 +481,13 @@ fn certified_neighbours(
         }
         match face_gaps(k, b, n, &c)? {
             Ok(gaps) => {
-                // the new point is the curve's end: no farther from each face than the curve
+                // the new point is within `near` of the curve's end, so within `g + near` of
+                // each face the curve is within `g` of
                 if let Some(&(f, g)) = gaps
                     .iter()
-                    .find(|(_, g)| !within(*g, GAP_SHARE * vertex_tol))
+                    .find(|(_, g)| !within(*g + near, GAP_SHARE * vertex_tol))
                 {
-                    return Ok(Err(Refusal::VertexOffFace(f, g)));
+                    return Ok(Err(Refusal::VertexOffFace(f, g + near)));
                 }
                 out.push((n, c, gaps));
             }
@@ -719,6 +733,7 @@ pub fn collapse_short_edges(
                 .map(|(_, p)| *p);
             match collapse_short_edge(k, b, env, e, target)? {
                 Ok(s) => {
+                    // the edge is gone: none of its refusals stands
                     healed.refused_edges.retain(|(x, _)| *x != e);
                     touched.insert(s.survivor);
                     for (n, _) in &s.re_ended {
@@ -731,7 +746,10 @@ pub fn collapse_short_edges(
                     squeezed = true;
                 }
                 Err(why) => {
-                    healed.refused_edges.retain(|(x, _)| *x != e);
+                    // a refusal of this squeeze replaces the edge's last; one of a cut stays
+                    healed
+                        .refused_edges
+                        .retain(|(x, why)| *x != e || why.is_cut());
                     healed.refused_edges.push((e, why));
                 }
             }
@@ -928,8 +946,16 @@ pub fn collapse_coincident_two_edge_faces(
     crate::topology::brep::p3::collapse_zero_area_two_edge_faces_among(k, b, env, &faces)?;
     let live = p1::faces(b, None)?;
     let mut any = false;
-    for (f, d, keep, _, gaps) in proved {
+    for (f, d, keep, gone, gaps) in proved {
         if live.contains(&f) {
+            // the face stays: its edge reversed above runs its own way again, exactly (its
+            // trims made again from its curve)
+            if let Some((gone, gone_gaps)) = gone {
+                if b.edge(gone).is_ok() {
+                    edge::reverse_orientation(k, b, gone)?;
+                    remake_trims(k, b, gone, &gone_gaps)?;
+                }
+            }
             healed.refused_faces.push((f, Refusal::NotZeroArea));
         } else {
             // the uses the kept edge took over carried the other edge's trims: all made

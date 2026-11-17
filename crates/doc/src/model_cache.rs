@@ -432,12 +432,19 @@ impl Model {
                 features.push(f);
             }
             // The check mode the results were evaluated under: they are another mode's results.
-            let records = json!({
+            let mut records = json!({
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
                 "sheets": w.sheets, "threads": w.threads, "validation": self.validation().id(), "rounds": w.rounds,
                 "sketch_key_sets": w.sketch_key_sets,
                 "named_faces": w.named_faces,
             });
+            // Evaluated with the tolerance heal off: recorded only then, so the models saved
+            // with it on (the default) are as before.
+            if !kernel::heals_tolerance_defects()
+                && let Some(out) = records.as_object_mut()
+            {
+                out.insert("tolerance_heal".into(), json!(false));
+            }
             Ok((SavedModel { records, bodies: w.bodies }, PendingChecks(pending)))
         })
         .ok()
@@ -979,6 +986,9 @@ impl SavedModel {
         if let (Some(validation), Some(out)) = (self.records.get("validation"), records.as_object_mut()) {
             out.insert("validation".into(), validation.clone());
         }
+        if let (Some(heal), Some(out)) = (self.records.get("tolerance_heal"), records.as_object_mut()) {
+            out.insert("tolerance_heal".into(), heal.clone());
+        }
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
         Some((SavedModel { records, bodies }, kept, used))
@@ -1013,7 +1023,9 @@ impl Model {
         let import_digests = ImportDigests::of(doc, &ImportDigests::default());
         let marker = doc.marker.unwrap_or(usize::MAX);
         // As `evaluate` digests the context under the mode, so the next evaluation reuses these.
-        let ctx = context_digest(doc, &vals) ^ validation_digest(validation);
+        // And under the tolerance heal preference it was evaluated with (on when not recorded).
+        let heal = records.get("tolerance_heal").and_then(Json::as_bool).unwrap_or(true);
+        let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let mut before = Arc::new(ModelState::default());
         // Whether `before` is the state before the feature: one the file left out only stands in.
         let mut exact = true;

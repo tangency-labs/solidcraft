@@ -865,6 +865,13 @@ pub fn apply_sketch_limit(p: &Prefs) {
     }
 }
 
+/// The STEP files read from now on heal the parts SMLib's check fails, and Repair heals a part
+/// first, as the preference says (Preferences › Design › Imported files). A read already done
+/// keeps what it was read with until the design is evaluated again.
+pub fn apply_tolerance_heal(p: &Prefs) {
+    solidcraft_engine::kernel::set_heals_tolerance_defects(p.heal_tolerance_defects);
+}
+
 /// Perspective view's default field of view (about 34°), in radians.
 const PERSPECTIVE_FOV: f64 = 0.6;
 
@@ -1563,6 +1570,11 @@ preference_settings! {
     remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
     /// Reopen an unchanged CAD import from the existing saved-design model cache.
     reuse_imports: bool = true, PAGE_DESIGN => check_id("prefs.reuse_imports");
+    /// A STEP part SMLib's check fails is healed of its tolerance-scale defects (edges shorter
+    /// than their tolerance, slivers between coincident edges, curve pieces of no length) in the
+    /// background once it is imported, and Repair heals a part first (#17689). Off: the part
+    /// stays as read, with its check's warning, and Repair does not heal first, as before.
+    heal_tolerance_defects: bool = true, PAGE_DESIGN => check_id("prefs.heal_tolerance_defects");
     /// Oldest-first bounded file answers; resetting settings preserves user history.
     stand_up_answers: crate::stand_up::Answers = Default::default();
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
@@ -2582,6 +2594,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     }
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
+    apply_tolerance_heal(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
@@ -4717,6 +4730,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     crate::render_workspace::apply_memory_policy(app);
     apply_file_limits(&app.preferences);
     apply_sketch_limit(&app.preferences);
+    apply_tolerance_heal(&app.preferences);
     if units_changed {
         default_units_changed(app);
     }
@@ -9644,6 +9658,23 @@ mod tests {
         assert_eq!(super::lenient(&json!({"display_quality": "ultra"})).display_quality, "ultra");
         super::defaults(&mut app, super::PAGE_GRAPHICS);
         assert_eq!(app.preferences.display_quality, "normal");
+    }
+
+    /// #17689: the tolerance heal is on by default, a saved choice reads back as saved, and the
+    /// preference reaches the kernel, which every STEP read and Repair consult. (The preference
+    /// off is not applied here: the kernel's switch is the process's, which tests beside this
+    /// one read; `with_the_heal_preference_off_a_failing_part_stays_as_read` and
+    /// `repair_without_heal_first_is_the_repair_before_the_heal` test the off path.)
+    #[test]
+    fn heal_tolerance_defects_is_on_by_default_and_reaches_the_kernel() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert!(app.preferences.heal_tolerance_defects, "on by default");
+        assert!(!super::lenient(&json!({"heal_tolerance_defects": false})).heal_tolerance_defects, "off reads back as saved");
+        assert!(super::lenient(&json!({})).heal_tolerance_defects);
+        let out = super::set(&mut app, &json!({"heal_tolerance_defects": true})).unwrap();
+        assert_eq!(out["heal_tolerance_defects"], true);
+        assert!(solidcraft_engine::kernel::heals_tolerance_defects(), "the kernel heals as the preference says");
     }
 
     /// The validation mode is once per feature by default; set by name or by the command, the

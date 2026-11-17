@@ -12,12 +12,35 @@
 //! fails fewer tests than the check that decided the heal and no kind of test more often, and
 //! the same against SMLib's own check of the body as it was (when the healed body still fails
 //! some test: one that passes is better than any).
+//!
+//! Whether imports and Repair heal at all is the app's preference
+//! ([`set_heals_tolerance_defects`]): on by default; off, an import keeps a part its check
+//! fails as read (with the check's warning) and Repair starts from the part as it is, as
+//! before the heal.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::body::Body;
 use crate::validation::CheckFailure;
 use crate::{KernelError, Result};
+
+/// Whether imports and Repair heal tolerance-scale defects ([`heals_tolerance_defects`]).
+static HEALS: AtomicBool = AtomicBool::new(true);
+
+/// Whether a STEP read from now on heals the parts SMLib's check fails, and Repair heals a part
+/// first (as the app sets [`crate::RepairOptions::heal_first`]): the preference
+/// `heal_tolerance_defects`, on unless [`set_heals_tolerance_defects`] turned it off.
+pub fn heals_tolerance_defects() -> bool {
+    HEALS.load(Ordering::Relaxed)
+}
+
+/// Heal (`true`, the default) or keep as read the parts of the STEP files read from now on, and
+/// have Repair heal first or not ([`heals_tolerance_defects`]). A read already done keeps what it
+/// was read with: the cache of recent reads keeps the two apart.
+pub fn set_heals_tolerance_defects(on: bool) {
+    HEALS.store(on, Ordering::Relaxed);
+}
 
 /// What [`heal_tolerance_defects`] did.
 #[derive(Clone, Debug, Default, PartialEq)]

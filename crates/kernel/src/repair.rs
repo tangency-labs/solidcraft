@@ -53,6 +53,11 @@ pub struct RepairOptions {
     pub gap: f64,
     /// Patch the loops of free edges no pair explains (missing faces), and sew the patches in.
     pub patch_holes: bool,
+    /// Heal the part's tolerance-scale defects first, when SMLib takes it and its check fails
+    /// ([`crate::heal_tolerance_defects`]); the app passes its preference
+    /// ([`crate::heals_tolerance_defects`]). Off: the repair starts from the part as it is, as
+    /// before the heal.
+    pub heal_first: bool,
 }
 
 /// A face rebuilt so SMLib takes it.
@@ -167,8 +172,9 @@ pub fn repair(body: &Body, opts: &RepairOptions) -> Result<(Body, RepairReport)>
     // 0. A part SMLib takes whose check fails: its tolerance-scale defects healed first (on a
     // copy, kept only when SMLib takes the healed body and its check fails fewer tests and no
     // kind more often: [`crate::heal_tolerance_defects`] checks the body it gives back).
-    // The heal runs the check itself and gives the part back when it passes.
-    let healed = if body.smlib().is_ok() {
+    // The heal runs the check itself and gives the part back when it passes. Not asked to
+    // (`heal_first` off), the repair is the one before the heal.
+    let healed = if opts.heal_first && body.smlib().is_ok() {
         match crate::tolerance_heal::heal_tolerance_defects(body) {
             Ok(healed) => healed,
             // a stopped heal stops the repair: the steps below would stop too
@@ -623,7 +629,7 @@ mod tests {
         let lid = transform(&faces[1], Vec3::new(0.0, 0.0, 0.05), Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), 0.0).unwrap();
         let part = stitch(&[&open, &lid], 1e-6).unwrap();
         assert_eq!(part.record().edges.iter().filter(|e| e.uses.len() == 1).count(), 8, "the gap's edges are free");
-        let opts = RepairOptions { gap: 0.1, patch_holes: false };
+        let opts = RepairOptions { gap: 0.1, patch_holes: false, heal_first: true };
         let (fixed, report) = repair(&part, &opts).unwrap();
         assert_eq!(report.sewn.len(), 4, "{report:?}");
         assert!(report.sewn.iter().all(|g| (g.gap - 0.05).abs() < 1e-6), "{report:?}");
@@ -640,14 +646,14 @@ mod tests {
         assert_eq!(loose.len(), 4, "{loose:?}");
         assert!(loose.iter().all(|t| *t >= 0.05 && *t <= 0.25), "{loose:?}");
         // A gap wider than asked for is not sewn: the free edges then bound holes.
-        let err = repair(&part, &RepairOptions { gap: 0.01, patch_holes: false }).unwrap_err().to_string();
+        let err = repair(&part, &RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap_err().to_string();
         assert!(err.contains("nothing sewn"), "{err}");
     }
 
     #[test]
     fn a_hole_is_offered_then_patched_flat_in_the_plane_around_it() {
         let open = open_box(&box_faces());
-        let opts = RepairOptions { gap: 0.2, patch_holes: false };
+        let opts = RepairOptions { gap: 0.2, patch_holes: false, heal_first: true };
         let err = repair(&open, &opts).unwrap_err().to_string();
         assert!(err.contains("a loop of 4 edges"), "{err}");
         // Planar walls around a planar loop: the patch is the loop's plane.
@@ -662,12 +668,15 @@ mod tests {
     #[test]
     fn a_part_with_nothing_to_repair_is_refused_with_why() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
-        let err = repair(&b, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err().to_string();
+        let err = repair(&b, &RepairOptions { gap: 0.2, patch_holes: true, heal_first: true }).unwrap_err().to_string();
         assert!(err.contains("nothing to repair"), "{err}");
         // #17689: typed, as the refusal when the check fails is.
-        assert_eq!(repair(&b, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err(), KernelError::Repair(RepairRefusal::NothingToRepair));
+        assert_eq!(
+            repair(&b, &RepairOptions { gap: 0.2, patch_holes: true, heal_first: true }).unwrap_err(),
+            KernelError::Repair(RepairRefusal::NothingToRepair)
+        );
         for gap in [0.0, -1.0, 2.0, f64::NAN, f64::INFINITY] {
-            assert!(repair(&b, &RepairOptions { gap, patch_holes: false }).is_err(), "{gap}");
+            assert!(repair(&b, &RepairOptions { gap, patch_holes: false, heal_first: true }).is_err(), "{gap}");
         }
     }
 
@@ -685,7 +694,7 @@ mod tests {
         assert_eq!((bad.face_count(), bad.edge_count(), bad.vertex_count()), (6, 12, 8), "a box's topology");
         let check = bad.smlib().unwrap().check(solidcraft_smlib::CheckLevel::All).unwrap();
         let failure = crate::validation::CheckFailure::of(&check).expect("the check fails it");
-        let err = repair(&bad, &RepairOptions { gap: 0.2, patch_holes: true }).unwrap_err();
+        let err = repair(&bad, &RepairOptions { gap: 0.2, patch_holes: true, heal_first: true }).unwrap_err();
         assert_eq!(err, KernelError::Repair(RepairRefusal::CheckFails(failure.clone())));
         let text = err.to_string();
         assert!(!text.contains("nothing to repair"), "{text}");

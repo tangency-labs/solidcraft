@@ -46,6 +46,9 @@ pub(super) struct Job {
 /// import is the part of which item, and how the reader dresses a part's body.
 #[derive(Default)]
 pub(super) struct Heals {
+    /// Heal nothing: the preference is off ([`crate::heals_tolerance_defects`]), and the parts
+    /// stay as read, with what their checks found.
+    pub as_read: bool,
     /// Each body of the import, by its index: its item and placement.
     pub instances: Vec<(u64, M4)>,
     /// The file's colours, for the healed parts' faces.
@@ -285,7 +288,7 @@ fn heal_parts(
     heals: &Heals,
     workers: usize,
 ) -> (HashMap<u64, (IssueKind, String)>, Option<Arc<ImportHeals>>, bool) {
-    let items = to_heal(jobs, outcomes);
+    let items = if heals.as_read { Vec::new() } else { to_heal(jobs, outcomes) };
     if items.is_empty() {
         return (HashMap::new(), None, false);
     }
