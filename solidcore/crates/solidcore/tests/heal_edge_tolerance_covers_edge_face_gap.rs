@@ -13,7 +13,7 @@
 //!
 //! [`corpus_reads_change_only_the_covered_tolerances`] and
 //! [`moved_fillet_rows_keep_main_geometry_and_mass`] replay the goldens rows the fix moved
-//! against main 2790650c2's values (tables made by this file's functions on main).
+//! against main 3a0f49b09's values (tables made by this file's functions on main).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -360,7 +360,7 @@ fn entries(table: &[(&str, &'static [(u32, u64)])], name: &str) -> &'static [(u3
         .map_or(&[], |(_, t)| *t)
 }
 
-/// Replays one read of `name` against main 2790650c2, recording every disagreement in
+/// Replays one read of `name` against main 3a0f49b09, recording every disagreement in
 /// `failures`:
 /// - each edge in `raised` (index, main's tolerance bits) had main's tolerance under its
 ///   edge/face gap `g`, and now has `zone_tol3d(gain * g)`, which covers `g`;
@@ -539,7 +539,7 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
 /// `blend.fillet_removal`, `blend.feature_executive`, `blend.fillet_executive_p3`, and the
 /// 26 `corpus.parity` rows).
 ///
-/// Main 2790650c2's values per file, made by this file's functions on main: the read's
+/// Main 3a0f49b09's values per file, made by this file's functions on main: the read's
 /// digest, the lazily made UV trims' digest, the rebuilding read's digest, and the
 /// bits of `corpus.parity`'s area and volume.
 const MAIN: [(&str, [u64; 5]); 28] = [
@@ -1670,17 +1670,17 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
     (d.0, mass)
 }
 
-/// Main 2790650c2's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
+/// Main 3a0f49b09's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
 /// functions on main.
 const FILLET_MAIN: [u64; 29] = [
-    0x9498a689cd285f9a,
-    0x39aa502f4d62fe6a,
-    0x7fbe40a7a6cb9b7e,
-    0xf4a6a8125098b084,
+    0x24f613f551b1b3ab,
+    0x241377ca06fbe761,
+    0xc9494b45a0f312d7,
+    0x7c0ce81dfdec54b0,
     0xc0013e51f46a74a,
     0x357c96c0893f37a2,
     0x2dd7a7af4ca5bb1e,
-    0x7811f3054fcd6ae2,
+    0x9362785e2dee39d1,
     0xb716929faf389955,
     0x30d463838d7fca03,
     0x30d463838d7fca03,
@@ -1704,9 +1704,44 @@ const FILLET_MAIN: [u64; 29] = [
     0x30d463838d7fca03,
 ];
 
-/// Main 2790650c2's mass bits for `source-file-corner_box-edge9` and
-/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 3 and 14).
-const FILLET_MAIN_MASS: [(usize, [u64; 12]); 2] = [
+/// Main 3a0f49b09's mass bits for the rows whose mass moved in the expectations:
+/// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
+/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14).
+const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
+    (
+        1,
+        [
+            0x4076bfbccb19102a,
+            0x407c8288ca848c80,
+            0x407c8288ca848c80,
+            0xc023e4f278d29639,
+            0xc0241052cfc69609,
+            0x400bb474093d6d56,
+            0x40eaa4527185e0b9,
+            0x40ebd653fa8df30d,
+            0x40f7abf16eb9815a,
+            0xc0cf08d416325adf,
+            0xc0ced0087d0fee1f,
+            0x40e6333a0d76af85,
+        ],
+    ),
+    (
+        2,
+        [
+            0x4076bfbccb19102a,
+            0x407c8288ca848c80,
+            0x407c8288ca848c80,
+            0xc023e51b0129d1ec,
+            0xc0241052cfc69609,
+            0x400bb4daf832b522,
+            0x40eaa466811c6f18,
+            0x40ebd6c16a9f8408,
+            0x40f7ac1e1ef702a8,
+            0xc0cf0946b86a1ab9,
+            0xc0ced0b92bef7338,
+            0x40e63367314308c1,
+        ],
+    ),
     (
         3,
         [
@@ -1745,9 +1780,9 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 2] = [
 
 /// The fillets behind `blend.fillet_executive_p3`'s moved rows make main's geometry and
 /// mass bit for bit: the rows moved only in the edge and vertex tolerances the result
-/// carries from the read. The two rows whose mass moved in the expectations
-/// (`source-file-corner_box-edge9`, `stubs4-delete-edge-bottle-e8-r0.1`) have main's mass
-/// bit for bit: main's committed rows were older than main's own output, and the bless
+/// carries from the read. The four rows whose mass moved in the expectations
+/// (`source-file-corner_box-edge4`, `-edge8`, `-edge9`,
+/// `stubs4-delete-edge-bottle-e8-r0.1`) have main's mass bit for bit: main's committed rows were older than main's own output, and the bless
 /// rewrote the whole row when the result's tolerances moved.
 #[test]
 fn moved_fillet_rows_keep_main_geometry_and_mass() {
