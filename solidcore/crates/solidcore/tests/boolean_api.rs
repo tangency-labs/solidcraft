@@ -989,6 +989,110 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
+/// A unit sphere cut by the plane y = -3e-5, which passes 3e-5 from both poles and runs
+/// 3e-5 beside the sphere's seam: the intersection is the cap y <= -3e-5, bounded by one
+/// circle. Near a pole the circle's trim curve on the sphere turns through a quarter of the
+/// u domain within a few 3e-5 of the curve; the drop that makes it accepted a first span
+/// 1/8192 of the circle long whatever its samples said, and that span's UV cubic reached
+/// u = 1.42 of the [0, 1] domain, its image up to 5e-4 off the circle (tolerance 1e-5): the trim
+/// jumped across the seam (`SmEdgeuse` test 7) and the union's and difference's sphere faces
+/// had intersecting loops (`SmFace` test 38). A span whose image is proved off the curve is
+/// now subdivided. Every trim curve on the sphere lies within the tolerance of the plane
+/// (sampled), inside the sphere's domain, the result has the cap's faces, edge and vertex
+/// and its exact volume, and the check reports neither test.
+#[test]
+fn a_circle_passing_near_a_spheres_poles_gets_a_trim_curve_on_the_circle() {
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::{edge, edgeuse, face};
+    let delta = 3e-5;
+    let tol = 1e-5;
+    let h = 1.0 - delta;
+    let cap = PI * h * h * (3.0 - h) / 3.0;
+    let mut failures = Vec::new();
+    for (op, name) in [(Op::Intersection, "intersection"), (Op::Union, "union")] {
+        let mut k = Kernel::default();
+        let a = api::create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0).unwrap();
+        let b =
+            api::create_box(&mut k, Point3::new(-2.0, -2.0, -2.0), 4.0, 2.0 - delta, 4.0).unwrap();
+        let result = match op {
+            Op::Intersection => boolean_intersection(&mut k, a, b),
+            _ => boolean_union(&mut k, a, b),
+        };
+        let mut brep = match result {
+            Ok(b) => b,
+            Err(e) => {
+                failures.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        for eu in solidcore::topology::brep::p2::edgeuses(&brep, None).unwrap() {
+            let f = edgeuse::p1::face(&brep, eu).unwrap().unwrap();
+            let surface = face::p2::surface(&brep, f).unwrap().unwrap();
+            if !matches!(surface.kind(), SurfaceKind::Sphere(_)) {
+                continue;
+            }
+            // the circle's edge uses (not the seam's, in the union)
+            let e = edgeuse::p1::edge(&brep, eu).unwrap().unwrap();
+            let on_plane = edge::curve(&brep, e).unwrap().is_some_and(|c| {
+                let ivl = edge::interval(&brep, e).unwrap();
+                let mid = c.evaluate_point(&k, 0.5 * (ivl.min() + ivl.max())).unwrap();
+                (mid.y + delta).abs() <= tol
+            });
+            let trim = edgeuse::p1::uv_trim_curve(&brep, eu).unwrap().0;
+            let Some(trim) = trim.filter(|_| on_plane) else {
+                continue;
+            };
+            let ivl = trim.natural_interval();
+            let mut worst = (0.0_f64, 0.0_f64);
+            for i in 0..=20_000 {
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 20_000.0;
+                let uv = trim.evaluate_point(&k, t).unwrap();
+                let p = surface
+                    .evaluate_point(&k, solidcore::geom::vector2d::Point2::new(uv.x, uv.y))
+                    .unwrap();
+                // how far the image is from the plane, and the trim from the domain [0, 1]^2
+                let outside = (-uv.x).max(uv.x - 1.0).max(-uv.y).max(uv.y - 1.0);
+                worst = (worst.0.max((p.y + delta).abs()), worst.1.max(outside));
+            }
+            // Written to accept: a NaN fails.
+            if !(worst.0 <= tol && worst.1 <= 1e-9) {
+                failures.push(format!(
+                    "{name}: a sphere trim is {:e} off the plane, {:e} outside the domain",
+                    worst.0, worst.1
+                ));
+            }
+        }
+        if let Op::Intersection = op {
+            let counts = [
+                solidcore::topology::brep::p1::faces(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::edges(&brep, None)
+                    .unwrap()
+                    .len(),
+                solidcore::topology::brep::p1::vertices(&brep, None)
+                    .unwrap()
+                    .len(),
+            ];
+            if counts != [2, 1, 1] {
+                failures.push(format!("{name}: faces/edges/vertices {counts:?}"));
+            }
+            let v = volume_of(&k, &mut brep);
+            let rel = (v - cap).abs() / cap;
+            if rel.is_nan() || rel > VOLUME_REL_TOL {
+                failures.push(format!("{name}: volume {v:e} vs {cap:e} (rel {rel:.2e})"));
+            }
+        }
+        let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+        for line in check.lines() {
+            if line.contains("SmEdgeuse::Test #7 ") || line.contains("SmFace::Test #38 ") {
+                failures.push(format!("{name}: {line}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
 /// A closed ellipse of semi-axes `b` (along x) and `a` (along y) about `(0, a)`, as the one
 /// rational B-spline of its four quarters (nine control points, knots 0..4), starting at the
 /// end of the major axis on +y and running counter-clockwise.
