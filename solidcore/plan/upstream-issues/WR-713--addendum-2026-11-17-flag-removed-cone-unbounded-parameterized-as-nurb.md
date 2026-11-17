@@ -22,11 +22,11 @@ Running with the fix always on exposed further defects in the same constructors.
   - The kept cone of a truncated offset runs from the cone's own STEP heights. Upstream placed it as if the bottom were at the origin, which for an unbounded cone gives another cone.
   - A copied offset rebuilds its polar circle on the offset cone. Upstream kept the original's circle, which is off the offset by the offset distance.
 
-- **Results:** 4,627 goldens rows move:
+- **Results:** 4,625 goldens rows move (against main after the WR-662 retirement, #18066):
 
   | Unit | Rows |
   |---|---|
-  | `surface.cone_p1` | 3,624 |
+  | `surface.cone_p1` | 3,622 |
   | `surface.surface_p2` | 941 |
   | `surface.cone_p2` | 27 |
   | `surface.cone_p3` | 14 |
@@ -37,7 +37,7 @@ Running with the fix always on exposed further defects in the same constructors.
 
   `crates/goldens/tests/wr704_wr713_cone_moves.rs` (ignored; it runs on the inventory of moved rows) certifies every row by closed form or certificate, with no sampling:
   - 4,152 rows are CLOSER: the new output meets the closed form and the old one does not.
-  - 475 rows are EQUAL: both outputs meet it.
+  - 473 rows are EQUAL: both outputs meet it.
   - No row is FARTHER.
   
   The certificates:

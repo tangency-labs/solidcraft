@@ -106,6 +106,11 @@ const SEEDS: usize = 16;
 /// `SM_SUCCESS`, `SM_ERR`.
 const SUCCESS: f64 = 1000.0;
 const SM_ERR: f64 = 1001.0;
+/// `SM_ERR_OUTSIDE_OF_DOMAIN` and `SM_ERR_NOT_WITHIN_TOLERANCE`: since WR-662 (#18066) an
+/// analytic inversion reports these where it reported `SM_ERR` for a point outside the
+/// sweep or off the generator, so both are the "not inside" answer.
+const OUTSIDE_OF_DOMAIN: f64 = 1020.0;
+const NOT_WITHIN_TOLERANCE: f64 = 1021.0;
 
 // ---- verdicts ---------------------------------------------------------------------------
 
@@ -1301,7 +1306,9 @@ fn cert_cone_row(
             let answer = if surface_api {
                 match status {
                     Some(SUCCESS) => Some((true, out[0], out[1])),
-                    Some(SM_ERR) => Some((false, f64::NAN, f64::NAN)),
+                    Some(SM_ERR | OUTSIDE_OF_DOMAIN | NOT_WITHIN_TOLERANCE) => {
+                        Some((false, f64::NAN, f64::NAN))
+                    }
                     _ => None,
                 }
             } else {
@@ -1311,7 +1318,9 @@ fn cert_cone_row(
                     // `SM_ERR` without outputs: the rotated point is on no generator, the
                     // same "not inside" answer (the surface API reports it as `SM_ERR`);
                     // the distance decides whether it is right
-                    Some(SM_ERR) => Some((false, f64::NAN, f64::NAN)),
+                    Some(SM_ERR | OUTSIDE_OF_DOMAIN | NOT_WITHIN_TOLERANCE) => {
+                        Some((false, f64::NAN, f64::NAN))
+                    }
                     _ => None,
                 }
             };
