@@ -767,18 +767,29 @@ impl Cone {
             // The kept cone runs between its new apex (where the offset radius reaches
             // zero) and the surviving end, at the original's slope: the radius spans
             // `old_top_radius - old_bot_radius` over `height`.
+            // (The ends are at the STEP domain's heights, not at the origin and `height`
+            // above it as upstream takes them: an unbounded cone runs from its apex, and an
+            // adjusted one from any height. Upstream placed the kept cone's origin as if the
+            // bottom were at the origin, off its apex by the bottom height, so the offset
+            // was another cone: the base radius at the wrong height. With the bottom at
+            // the origin, `0 + h` is `h` and nothing changes.)
+            let bot_height = self.bot_height();
             let (new_height, bot_origin, collapsed_at_base) = if new_bot_radius < approx_tol_3d {
                 let new_height = new_top_radius * height / (old_top_radius - old_bot_radius);
                 new_bot_radius = 0.0;
                 (
                     new_height,
-                    origin + (height + off_z_dist - new_height) * z_axis,
+                    origin + (bot_height + height + off_z_dist - new_height) * z_axis,
                     true,
                 )
             } else {
                 let new_height = new_bot_radius * height / (old_bot_radius - old_top_radius);
                 new_top_radius = 0.0;
-                (new_height, origin + off_z_dist * z_axis, false)
+                (
+                    new_height,
+                    origin + (bot_height + off_z_dist) * z_axis,
+                    false,
+                )
             };
 
             // New Cone Position - truncated at new apex position
@@ -942,6 +953,12 @@ impl Cone {
             SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
         })?;
         ignore_status(gen.transform(k, &mv, None))?;
+
+        // (The polar converter's circle is rebuilt on the offset cone, as the truncated
+        // branch above does: upstream's copy kept the original's circle, off the offset
+        // by the offset distance, so conversions through it named the original's
+        // parameters.) (status ignored)
+        ignore_status(off_cone.rebuild_cone_polar_converter(k))?;
 
         Ok(Some(off_cone))
     }
