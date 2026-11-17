@@ -784,7 +784,7 @@ fn a_projected_plane_of_another_component_lands_where_the_two_planes_meet() {
         .unwrap();
     let vals = doc.param_values().0;
     // The plane as it was built, in the root component's frame.
-    let built = doc.resolve_plane_in(&vals, &PlaneRef::Construction { feature: crate::FeatureId(mid) }, 0, 0, Some(&st)).unwrap();
+    let built = doc.resolve_plane_in(&vals, &PlaneRef::Construction { feature: crate::FeatureId(mid), placement: None }, 0, 0, Some(&st)).unwrap();
     assert!((built.origin.y - 10.).abs() < 1e-9, "the midplane is halfway between the two faces: {built:?}");
     st.construct.push(crate::construct::Construct {
         feature: mid,

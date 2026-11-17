@@ -22,6 +22,9 @@
 //! (WR-400, tangency-labs/solidcore#837): `SweepProfilesAlongPath` asks for caps only for a profile that closes.
 //! Not upstream (WR-780, #13687): the reference points of a mitre trim stay within the
 //! reach of the cutting line. No recursion.
+//! Not upstream (WR-793, #17314): a corner where the path turns back within 2 degrees is refused,
+//! where upstream takes it for a smooth joint and never mitres it, and so is a sweep of a
+//! closed profile meant as a solid that does not close (upstream returns it).
 
 use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::curve::p9::CurveSolveOptions;
@@ -45,6 +48,11 @@ use crate::topology::brep::p10::TrimType;
 use crate::topology::BrepId;
 
 const OP: &str = "primitive::primitive_creation::p2::planar_path";
+/// The refusal of a corner where the path turns back within 2 degrees (WR-793).
+const TURNS_BACK: &str = "the path turns back on itself at a corner";
+/// The refusal of a sweep of a closed profile meant as a solid that does not close
+/// (WR-793).
+const NOT_CLOSED: &str = "the sweep does not close";
 
 /// The solver handles of the cutting curve (0) and an intersection curve (1).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -227,8 +235,10 @@ impl PrimitiveCreation {
     ///
     /// `InvalidInput` for no path curves or a path curve that is not a B-spline;
     /// `SM_ERR` when the pieces do not unite into one B-rep, or for a manifold
-    /// result without material; those of the union, the final stitch and the
-    /// region classification. Mandatory evaluations, geometry construction, cap
+    /// result without material; `SM_ERR` for a corner where the path turns back within
+    /// 2 degrees, and for a closed profile meant as a solid (`cap_start` and `cap_end`, or
+    /// a closed path) whose result does not close (not upstream, WR-793); those of the
+    /// union, the final stitch and the region classification. Mandatory evaluations, geometry construction, cap
     /// removals, trims and cleanup also propagate (not upstream, #483); every owned
     /// temporary is deleted on any error. No transaction is imposed on the caller's
     /// B-rep.
@@ -391,6 +401,8 @@ impl PrimitiveCreation {
             if ii == 0 {
                 first_brep = Some(after_brep);
                 first_pv = after;
+            } else if before[1].parallel_sense(after[1], 2.0) == (true, Some(true)) {
+                return Err(SolidError::primitive_failed(OP, TURNS_BACK));
             } else if !before[1].is_parallel_to(after[1], 2.0) {
                 let path_normal =
                     path_plane_normal(a.kernel(context_of)?, paths, &mut path_normal)?;
@@ -542,8 +554,8 @@ impl PrimitiveCreation {
                     // when `step * sin(beta / 2) > tol` (the larger of `tol` and the
                     // face's tolerance, as `project_and_trim` takes it). A corner reaches this
                     // point only when its legs are more than 2 degrees from parallel
-                    // (the `is_parallel_to(.., 2.0)` test above, which also skips a
-                    // hairpin within 2 degrees), so `sin(beta / 2) > sin(1 deg) = 0.0175`.
+                    // (the `is_parallel_to(.., 2.0)` test above; a hairpin within 2
+                    // degrees is refused before it), so `sin(beta / 2) > sin(1 deg) = 0.0175`.
                     // Where `100 tol` sets the step, the point therefore lies at least
                     // `1.75 tol` from the line and the trim never fails. Where the reach
                     // cap wins (a profile with `max_dimension < 100 tol / sqrt(2)`, about
@@ -582,6 +594,9 @@ impl PrimitiveCreation {
                     .ok_or_else(|| SolidError::primitive_missing(OP, "the first piece's B-rep"))?;
                 after = first_pv;
 
+                if before[1].parallel_sense(after[1], 2.0) == (true, Some(true)) {
+                    return Err(SolidError::primitive_failed(OP, TURNS_BACK));
+                }
                 // tangent continuous paths need no trim
                 if !before[1].is_parallel_to(after[1], 2.0) {
                     let path_normal =
@@ -686,6 +701,17 @@ impl PrimitiveCreation {
         // Solid intent with a manifold boundary gets the nested-solid parity
         // classification.
         let solid_intent = closed || (cap_start && cap_end);
+        // Not upstream (WR-793): a closed profile meant as a solid must close, whatever
+        // left it open. One cause is a corner too sharp for its mitre: at an inner corner
+        // the pieces run `extend` past the corner and the cutting line reaches as far,
+        // while the mitre of a profile `w` wide on either side of the path reaches
+        // `w / sin(beta / 2)`, beta the angle between the legs.
+        if solid_intent
+            && profile_closes(a.kernel(sweep)?, profiles, tol)?
+            && !crate::topology::brep::p2::is_closed_manifold(a.brep(sweep)?)?
+        {
+            return Err(SolidError::primitive_failed(OP, NOT_CLOSED));
+        }
         let manifold = a.is_manifold_solid(sweep)?;
         if solid_intent && manifold {
             a.with_primitive_brep(sweep, |k, b| {

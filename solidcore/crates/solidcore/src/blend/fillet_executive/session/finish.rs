@@ -830,36 +830,16 @@ impl FilletSession<'_> {
                     return kept.map(drop);
                 }
             }
-            // The fork's (WR-631, WR-638): a cliff overflow closes the fillet faces into the
-            // region the blends remove and subtracts it from the target, instead of merging
-            // the fillet faces in; the error a failed subtraction noted stands.
-            // WR-674: a round left open at its tangent-continuation ends is built the same
-            // way, by subtraction
-            // WR-695 (the fork's TrimAtCreases, smlib#79 step 6): with
-            // `fillet_overflow_trim_at_creases` a cliff overflow is trimmed at its creases in
-            // place instead, and so is a WR-674 section end (WR-706)
+            // WR-695 (the fork's TrimAtCreases, smlib#79 step 6, which deletes the
+            // subtraction of WR-631 and WR-638): a cliff overflow is trimmed at its creases
+            // in place, and so is a round left open at its tangent-continuation ends as
+            // WR-674 section ends (WR-706)
             // The fork's ef57570 (smlib#125): so is an open G1 setback
             // corner's hole made (no patches: its spring curves are imprinted on its faces
             // with the sheet's boundary)
             let sectioned = session.executive.open_ends.iter().any(|end| end.section);
-            let trimmed = open_setback
-                || if sectioned {
-                    k.fixes.fillet_overflow_trim_at_creases
-                } else {
-                    session.executive.cliff_overflow && k.fixes.fillet_overflow_trim_at_creases
-                };
-            if trimmed {
+            if open_setback || sectioned || session.executive.cliff_overflow {
                 let result = session.trim_at_creases(k);
-                session.objects.target.set_editing_enabled(editing);
-                if let Some(output) = error_out {
-                    output.assign(&session.executive.error);
-                }
-                return result;
-            }
-            if session.executive.cliff_overflow
-                || session.executive.open_ends.iter().any(|end| end.section)
-            {
-                let result = session.subtract_removal_region(k);
                 session.objects.target.set_editing_enabled(editing);
                 if let Some(output) = error_out {
                     output.assign(&session.executive.error);

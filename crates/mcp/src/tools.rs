@@ -125,9 +125,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              after a delete (undo rewinds the counters with the design), usable right away \
              in sketch.dimension, sketch.constraint.* and sketch.delete. Feature commands return the feature's id \
              and name, every body (bodies) and the bodies the feature created, changed and removed (created_bodies, changed_bodies, removed_bodies). \
-             When connected to the running SolidCraft app, view.pick {pixels: [[x,y]…]} answers the body, face, exact world point, normal and depth under pixels of a screenshot. \
-             view.pick is unavailable in headless MCP, including with frame: \"model\". It is handled by the app and absent from list_commands and describe_command \
-             (read-only; docs/control-protocol.md). \
+             view.pick {rays: [{origin, dir}…]} answers, for each world ray, the body, face, exact world point, outward normal and depth where it first meets \
+             the design (null where it meets nothing), headless too. Connected to the running SolidCraft app, view.pick {pixels: [[x,y]…]} answers the same \
+             under pixels of a screenshot; pixels are unavailable in headless MCP, including with frame: \"model\" (read-only; docs/control-protocol.md). \
              `expect` {volume_mm3, tol, bodies, bbox} checks the design after the command (as `batch` does) and flags a mismatch.",
             object(
                 json!({
@@ -827,8 +827,10 @@ fn command_error(command: &str, error: String) -> String {
             let candidate = normalize(spec.id);
             let distance = command_distance(&normalized, &candidate);
             let shared = spec.id.split('.').filter(|word| words.iter().any(|w| w.eq_ignore_ascii_case(word))).count();
-            (distance <= (normalized.len() / 4).max(2) || shared > 0).then_some((
+            let alternative = solidcraft_engine::cmd::command_verb_alternative(id, spec.id);
+            (alternative || distance <= (normalized.len() / 4).max(2) || shared > 0).then_some((
                 normalized != candidate,
+                !alternative,
                 distance,
                 std::cmp::Reverse(shared),
                 spec.id,
@@ -836,7 +838,7 @@ fn command_error(command: &str, error: String) -> String {
         })
         .collect();
     closest.sort_unstable();
-    let hints: Vec<_> = closest.iter().take(3).map(|(_, _, _, id)| format!("`{id}`")).collect();
+    let hints: Vec<_> = closest.iter().take(3).map(|(_, _, _, _, id)| format!("`{id}`")).collect();
     let mut message = format!("unknown command `{command}`");
     if !hints.is_empty() {
         message.push_str(&format!("; closest: {}", hints.join(", ")));
@@ -1619,9 +1621,10 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
             Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
-            // Never sent: no app to send it to. Or sent and still running (it was not cancelled):
-            // the `pending` tool gets its result.
-            Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) => {
+            // Never sent: no app to send it to. Refused unrun: every connection the app serves is
+            // taken (#10967). Or sent and still running (it was not cancelled): the `pending` tool
+            // gets its result.
+            Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) || e.contains(crate::backend::REFUSED_UNRUN) => {
                 return (Value::String(e), true);
             }
             // The app may have run it: sending the steps again would apply them twice.

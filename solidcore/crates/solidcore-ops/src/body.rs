@@ -116,7 +116,8 @@ fn prove(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Option<Outward>> {
 /// only once the proof beside it is dropped, so no change of the B-rep keeps a proof made
 /// before it.
 #[derive(Debug)]
-pub(crate) struct BodyGuard<'a>(MutexGuard<'a, Held>);
+#[doc(hidden)] // public only for the bridge below ([`Body::kernel`])
+pub struct BodyGuard<'a>(MutexGuard<'a, Held>);
 
 impl std::ops::Deref for BodyGuard<'_> {
     type Target = Brep;
@@ -130,6 +131,31 @@ impl std::ops::DerefMut for BodyGuard<'_> {
         self.0.outward = None;
         self.0.primitive = None;
         &mut self.0.brep
+    }
+}
+
+/// A temporary bridge for SolidCraft's kernel wrapper (`crates/smlib`), which still calls the
+/// kernel crate itself for the operation families not yet moved onto this crate: it makes a
+/// body from a kernel B-rep and locks a body for its B-rep. Not part of the API: no other
+/// client may use it, and it is deleted with the last family (tangency-labs/solidcore#3304).
+#[doc(hidden)]
+impl Body {
+    /// A body of the kernel B-rep `b`, with no proof ([`Body::new`]).
+    #[must_use]
+    pub fn from_kernel(b: Brep) -> Body {
+        Body::new(b)
+    }
+
+    /// The kernel's body, locked ([`Body::lock`]): a body an earlier panic left unfinished is
+    /// still handed out, so the caller asks [`Body::kernel_left_unfinished`] first.
+    pub fn kernel(&self) -> BodyGuard<'_> {
+        self.lock()
+    }
+
+    /// Whether a panic interrupted an edit of this body ([`Body::is_poisoned`]).
+    #[must_use]
+    pub fn kernel_left_unfinished(&self) -> bool {
+        self.is_poisoned()
     }
 }
 
@@ -166,6 +192,20 @@ impl Body {
     /// [`with_body`] refuses it first.
     pub(crate) fn lock(&self) -> BodyGuard<'_> {
         BodyGuard(self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// Two different bodies locked at once, returned in the order given. They are locked in one
+    /// order whichever is given first (by address, which stays put while both are borrowed), so
+    /// two calls holding the same two bodies, on threads of their own, never wait on each other
+    /// for good. The only way ops holds two bodies at once.
+    pub(crate) fn lock_pair<'a>(a: &'a Body, b: &'a Body) -> (BodyGuard<'a>, BodyGuard<'a>) {
+        if std::ptr::from_ref(a) < std::ptr::from_ref(b) {
+            let ga = a.lock();
+            (ga, b.lock())
+        } else {
+            let gb = b.lock();
+            (a.lock(), gb)
+        }
     }
 
     /// The kernel's body, locked, unless a panic left it unfinished or it is held now (never

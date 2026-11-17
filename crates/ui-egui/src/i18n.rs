@@ -256,6 +256,11 @@ pub fn tr_engine_error(error: &str) -> String {
     if text == "nothing to break at there" {
         return tr("sketch.error.nothing_to_break").to_string();
     }
+    if let Some(name) = text.strip_prefix("sketch `").and_then(|rest| {
+        rest.strip_suffix("` comes after this sketch in the timeline, so its geometry cannot be used here. Move the source sketch earlier if its dependencies allow, or use a sketch after it.")
+    }) {
+        return format("sketch.error.source_later_in_timeline", &[("name", name)]);
+    }
     if let Some(id) = offset_error_id(
         text,
         " is an offset, and its ends follow its source curves: ",
@@ -357,6 +362,26 @@ mod tests {
         );
         assert_eq!(super::tr_engine_error("point `origin` is fixed and cannot move"), "Der Punkt `origin` ist fest und kann nicht verschoben werden");
         assert_eq!(super::tr_engine_error("another error"), "another error");
+    }
+
+    #[test]
+    fn a_later_sketch_source_is_translated_without_truncating_its_name() {
+        install();
+        let _scope = scope("de");
+        for name in ["Sketch3", "Source` comes after this sketch {name}"] {
+            let message = format!(
+                "sketch `{name}` comes after this sketch in the timeline, so its geometry cannot be used here. Move the source sketch earlier if its dependencies allow, or use a sketch after it."
+            );
+            let expected = format!(
+                "Die Skizze `{name}` liegt in der Zeitleiste nach dieser Skizze. Ihre Geometrie kann hier daher nicht verwendet werden. Verschiebe die Quellskizze nach vorne, wenn ihre Abhängigkeiten dies erlauben, oder verwende eine Skizze, die nach ihr liegt."
+            );
+            assert_eq!(super::tr_engine_error(&message), expected);
+            for command in ["sketch.project", "sketch.intersect", "sketch.include_3d"] {
+                assert_eq!(super::tr_engine_error(&format!("invalid parameters for `{command}`: {message}")), expected, "{command}");
+            }
+            let unknown = format!("sketch `{name}` is unavailable for another reason");
+            assert_eq!(super::tr_engine_error(&unknown), unknown);
+        }
     }
 
     #[test]

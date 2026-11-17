@@ -43,6 +43,8 @@ impl SolveApp {
         if self.file_picker_busy() {
             return;
         }
+        // The dialog offers the files installed importer plugins read too.
+        solidcraft_engine::io::formats::set_plugin_open_filters(solidcraft_engine::plugin::open_filters(&self.session));
         let future = self.services.pick_open.as_ref().map(|pick| pick(extensions));
         self.begin_picker(future, Box::new(complete));
     }
