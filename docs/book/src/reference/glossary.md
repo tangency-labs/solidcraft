@@ -680,3 +680,13 @@ its display name. Replies and scripts use the design-file key (`timeline.inspect
 - **British or American spelling** in the docs. The labels are settled: `en.json` is American
   English, and English (UK) (`en-GB.json`, #2501) holds the British spelling. The docs still use
   both (colour and color, centre and center); ids and keys use American spelling.
+
+## Wood grain
+
+**Wood grain**: The direction in which a piece of timber’s fibres run.
+
+Manufacturing grain belongs to the body and follows its movements and copies; it is separate from texture mapping. A frame member defaults to its member axis. Other bodies have no manufacturing grain until it is set.
+
+**Stock length along grain**: The distance between the two parallel planes perpendicular to the wood grain that enclose the body.
+
+The length comes from exact body geometry.

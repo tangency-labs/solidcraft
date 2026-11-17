@@ -45,14 +45,20 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         // feature's bodies.
         for (k, t) in made.into_iter().enumerate() {
             let name = new_name(st, f, k);
-            st.bodies.push(ModelBody::traced_new(name, t, f.id));
+            let mut body = ModelBody::traced_new(name, t, f.id);
+            body.grain_frame = Some(
+                crate::wood::GrainFrame { member_axis: segments.get(k).and_then(|(_, a, b)| (*b - *a).normalized()), ..Default::default() }.into(),
+            );
+            st.bodies.push(body);
         }
         return Ok(());
     }
     let base = body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or(description, str::to_string);
-    let ids: Vec<String> = segments.into_iter().map(|(id, _, _)| id).collect();
-    for (name, t) in member_names(st, &ids, names, &base).into_iter().zip(made) {
-        st.bodies.push(ModelBody::traced_new(name, t, f.id));
+    let ids: Vec<String> = segments.iter().map(|(id, _, _)| id.clone()).collect();
+    for ((name, t), (_, a, b)) in member_names(st, &ids, names, &base).into_iter().zip(made).zip(segments) {
+        let mut body = ModelBody::traced_new(name, t, f.id);
+        body.grain_frame = Some(crate::wood::GrainFrame { member_axis: (b - a).normalized(), ..Default::default() }.into());
+        st.bodies.push(body);
     }
     Ok(())
 }
