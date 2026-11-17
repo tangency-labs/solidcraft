@@ -56,6 +56,9 @@ pub struct AppState {
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
     pub plugins_dir: Option<PathBuf>,
+    /// The plugin whose run is under way, when it keeps data in designs (`storage@0.1`): the only
+    /// one that may change plugin data, and only its own. Set by the host for that run alone.
+    pub storage_caller: Option<storage::StorageCaller>,
 }
 
 impl AppState {
@@ -90,7 +93,11 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
                 format!("unknown command group `{group}`; SolidCraft has {}", COMMAND_GROUPS.join(", ")),
             ));
         }
+        let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
         for command in &runtime.commands {
+            if command.starts_with("storage.") && !storage {
+                return Err(refuse("runtime.commands", format!("`{command}` needs the storage capability: add \"storage@0.1\" to capabilities")));
+            }
             if catalog_command(command).is_none() {
                 return Err(refuse(
                     "runtime.commands",
@@ -222,6 +229,14 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         scratch.plugin_state.file_grants = grants.folders;
+        scratch.plugin_state.storage_caller = rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(
+            |data_format| storage::StorageCaller {
+                id: package.manifest.id.clone(),
+                name: package.manifest.name.clone(),
+                version: package.manifest.version.clone(),
+                data_format,
+            },
+        );
         let host =
             SolidCraftHost { session: scratch, transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new(), evaluation: None };
         let file_folders = host
@@ -255,6 +270,7 @@ mod import;
 pub mod install;
 #[cfg(not(target_arch = "wasm32"))]
 mod package;
+pub mod storage;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 

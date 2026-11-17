@@ -938,7 +938,7 @@ fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageR
             break;
         }
         if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
-            doc.plugin_data.insert(key.to_string(), solidcraft_doc::canvas::base64_encode(&bytes));
+            doc.plugin_data.insert(key.to_string(), solidcraft_doc::canvas::base64_encode(&bytes).into());
         }
     }
 }

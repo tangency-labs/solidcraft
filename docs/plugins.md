@@ -264,7 +264,7 @@ running app commands, logging, progress and cancellation, named files, a clock, 
 entry. A plugin's `plugin.json` lists what it needs, for example
 `"capabilities": ["commands@0.1"]`; the host refuses an unknown or newer capability when it reads
 the manifest, with a plain message such as "needs commands 0.2; update SolidCraft or the plugin".
-`formats@0.1` adds importers (below). `ui`, `viewport` and `storage` arrive later as their own
+`formats@0.1` adds importers and `storage@0.1` data kept in a design (both below). `ui` and `viewport` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
 
 ## Commands and permissions
@@ -340,4 +340,38 @@ extensions it claims, lowercase without the dot:
 
 A design container reserves `plugins/<plugin-id>/` for a plugin's own files. They are kept and
 saved back untouched when the plugin is missing, and opening a design never fails because a plugin
-is missing. The `storage` capability will let plugins read and write them.
+is missing.
+
+A command plugin keeps its own data there with the `storage@0.1` capability and a data format
+number. Its manifest lists the `storage.*` commands it calls, like any other command:
+
+```json
+{"id": "gears", "name": "Gears", "version": "1.4.0", "capabilities": ["commands@0.1", "storage@0.1"],
+ "runtime": {"module": "gears.wasm", "entries": ["make"], "data_format": 3,
+   "commands": ["solid.box", "storage.get", "storage.patch", "storage.put_blob"]}}
+```
+
+- **What it keeps.** One main JSON document (`data.json`, at most 16 MiB) and files of its own
+  (`blobs/<name>`; with `cache: true`, `cache/<name>`, files it can make again). Files are at most
+  256 MiB per plugin per design, and all plugin data in a design at most 256 MiB.
+  SolidCraft writes `meta.json` beside them: the plugin's id, name and version and the data's format.
+- **Reading.** `storage.get` returns the main document, the data's `format`, the running plugin's
+  `plugin_format`, `read_only` and the list of files. `storage.get_blob {name, offset?, len?}`
+  returns up to 512 KiB of a file, base64, so a reply stays inside a plugin's 1 MiB. Inside a
+  plugin's run these reach only that plugin's own data. Agents and scripts read any plugin's
+  data by naming it: `storage.get {"plugin": "gears"}`.
+- **Writing.** `storage.set {document}`, `storage.patch {patch}` (an RFC 7396 merge patch),
+  `storage.put_blob {name, data, cache?, append?}` (base64; `append` writes a large file in
+  parts) and `storage.delete_blob {name}` change only the running plugin's own data, and only
+  from its run: the whole run is one undo step, and a failed run changes nothing. Called from
+  anywhere else they are refused. A `read` entry can't call them.
+- **Formats.** Every write saves the data in the plugin's `data_format`. When `storage.get` says
+  `format` is lower than `plugin_format`, the data is from an older version of the plugin: the
+  plugin reads it, converts it and writes it back, which saves it in the new format as one undo
+  step. When `format` is higher, the data is from a newer version: this version reads it, and
+  every write is refused with "saved by a newer version of the plugin".
+- **Without the plugin.** The design opens as usual and the status line says so: "Contains Gears
+  data (plugin 1.4.0). Install it to edit." (or turn it on, or update it, when it's off or older
+  than the data). The data is saved back byte for byte. Nothing is downloaded, installed or run.
+  `storage.list` lists every plugin that keeps data in the open design, with its `status`
+  (`ready`, `migrate`, `missing`, `disabled` or `older`) and size.

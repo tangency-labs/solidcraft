@@ -101,6 +101,7 @@ pub(crate) mod motion;
 mod notes;
 mod parts;
 mod plugin;
+mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
 mod script;
@@ -381,6 +382,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
     v.extend(plugin::COMMANDS.iter());
+    v.extend(plugin_storage::COMMANDS.iter());
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());

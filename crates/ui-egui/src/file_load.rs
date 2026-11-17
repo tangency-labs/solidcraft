@@ -783,6 +783,7 @@ fn recovered(app: &mut SolveApp, request: &Request) {
     }
     app.set_status(format!("recovered {}: save it to keep it", request.path), false);
     app.say_newer_file();
+    app.say_plugin_data();
 }
 
 /// A recovered design that landed in a background tab: save it under that tab's own autosaver
@@ -1755,6 +1756,7 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     );
                     if !request.insert() {
                         app.say_newer_file();
+                        app.say_plugin_data();
                         app.say_signature(&made.result);
                     } else if request.note.is_none()
                         && let Some(note) = linked_signing_note(&request.path)

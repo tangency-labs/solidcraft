@@ -840,6 +840,70 @@ mod native {
         assert_eq!(direct["result"], namespaced["result"]);
     }
 
+    /// A component whose entry runs `storage.set` with `{"document":{"teeth":24}}`.
+    fn storage_component() -> Vec<u8> {
+        let template = component_template();
+        let code = "      call $box\n      call $box\n";
+        let data = "    (data (;2;) (i32.const 2048) \"file.export\")\n";
+        assert!(template.contains(code) && template.contains(data));
+        let source = template.replacen(code, "      i32.const 2560 i32.const 11 i32.const 3072 i32.const 25 i32.const 0 call $run\n", 1).replacen(
+            data,
+            &format!("{data}    (data (i32.const 2560) \"storage.set\")\n    (data (i32.const 3072) \"{{\\22document\\22:{{\\22teeth\\22:24}}}}\")\n"),
+            1,
+        );
+        wat::parse_str(source).unwrap()
+    }
+    #[test]
+    fn a_plugin_keeps_its_data_in_the_design_as_one_undo_step_and_a_newer_formats_data_stays_read_only() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("sample/plugin.wasm"), storage_component()).unwrap();
+        let write_manifest = |data_format: u32| {
+            let mut m = manifest();
+            m["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
+            m["runtime"]["commands"] = json!(["storage.set"]);
+            m["runtime"]["data_format"] = json!(data_format);
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        };
+        write_manifest(2);
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(f.0.join("installed"));
+        f.run(&mut s).unwrap();
+        assert_eq!(s.undo.len(), 1);
+        let data = s.execute("storage.get", &json!({"plugin":"sample"})).unwrap();
+        assert_eq!((data["document"].clone(), data["format"].clone(), data["name"].clone()), (json!({"teeth":24}), json!(2), json!("Sample")));
+        // Only the plugin's own run writes it.
+        assert!(s.execute("storage.set", &json!({"document":{}})).unwrap_err().to_string().contains("only a plugin changes its data"));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.plugin_data.is_empty(), "one undo takes the data out again");
+        s.execute("edit.redo", &json!({})).unwrap();
+        let saved = s.doc.to_json();
+
+        // Opened where the plugin is not installed, the data is kept and says whose it is.
+        let mut elsewhere = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        elsewhere.plugin_state.plugins_dir = Some(f.0.join("installed"));
+        let listed = elsewhere.execute("storage.list", &json!({})).unwrap();
+        assert_eq!(listed["plugins"][0]["status"], "missing");
+        assert_eq!((listed["plugins"][0]["name"].clone(), listed["plugins"][0]["read_only"].clone()), (json!("Sample"), json!(true)));
+        assert_eq!(elsewhere.doc.plugin_data, s.doc.plugin_data);
+
+        // An older version of the plugin reads the data but never changes it.
+        write_manifest(1);
+        let before = s.doc.to_json();
+        let refused = f.run(&mut s).unwrap_err().to_string();
+        assert!(refused.contains("saved by a newer version of the plugin (data format 2; this version writes 1)"), "{refused}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, 1));
+        assert_eq!(s.execute("storage.list", &json!({})).unwrap()["plugins"][0]["status"], "older");
+        // A newer one migrates it: the next write saves it in the newer format.
+        write_manifest(3);
+        assert_eq!(s.execute("storage.list", &json!({})).unwrap()["plugins"][0]["status"], "migrate");
+        f.run(&mut s).unwrap();
+        assert_eq!(s.execute("storage.get", &json!({"plugin":"sample"})).unwrap()["format"], 3);
+        // storage commands need the capability.
+        let mut m = manifest();
+        m["runtime"]["commands"] = json!(["storage.get"]);
+        let refused = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap_err().to_string();
+        assert!(refused.contains("needs the storage capability"), "{refused}");
+    }
     #[test]
     fn metadata_only_discovery_preserves_the_explicitly_inspected_path() {
         let f = Fixture::new("call $box");
@@ -1420,4 +1484,50 @@ mod install_zip {
         assert!(!root.join("plugins").exists() && !root.join("evil").exists());
         let _ = std::fs::remove_dir_all(root);
     }
+}
+
+/// The `storage.*` commands as a running plugin sees them: its own data only, files in parts, a
+/// merge patch, and the size limits.
+#[test]
+fn storage_commands_reach_only_the_running_plugins_data_within_its_limits() {
+    let mut s = Session::default();
+    let other = solidcraft_doc::canvas::base64_encode(br#"{"kept":true}"#);
+    s.doc_mut().plugin_data.insert("other-tool/data.json".into(), other.clone().into());
+    s.plugin_state.storage_caller =
+        Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1.4.0".into(), data_format: 3 });
+    s.execute("storage.set", &json!({"document":{"teeth":24,"module":{"value":2,"unit":"mm"}}})).unwrap();
+    s.execute("storage.patch", &json!({"patch":{"teeth":30,"module":{"unit":null},"name":"spur"}})).unwrap();
+    let data = s.execute("storage.get", &json!({})).unwrap();
+    assert_eq!(data["document"], json!({"teeth":30,"module":{"value":2},"name":"spur"}));
+    assert_eq!((data["format"].clone(), data["plugin_format"].clone(), data["read_only"].clone()), (json!(3), json!(3), json!(false)));
+    let meta = solidcraft_doc::plugin_data::meta(&s.doc.plugin_data, "gears");
+    assert_eq!((meta.name.as_str(), meta.plugin_version.as_str(), meta.format), ("Gears", "1.4.0", 3));
+    // A plugin reads only its own data, and never changes another's.
+    assert!(s.execute("storage.get", &json!({"plugin":"other-tool"})).unwrap_err().to_string().contains("only its own data"));
+    assert_eq!(s.doc.plugin_data["other-tool/data.json"].as_ref(), other.as_str());
+
+    // A file written in parts reads back in parts; writing it as a cache file moves it.
+    let b64 = solidcraft_doc::canvas::base64_encode;
+    s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[1, 2, 3])})).unwrap();
+    let grown = s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[4, 5]),"append":true})).unwrap();
+    assert_eq!(grown["bytes"], 5);
+    let part = s.execute("storage.get_blob", &json!({"name":"paths/op3.bin","offset":3,"len":10})).unwrap();
+    assert_eq!((part["data"].clone(), part["bytes"].clone()), (json!(b64(&[4, 5])), json!(5)));
+    s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[9]),"cache":true})).unwrap();
+    let blobs = s.execute("storage.get", &json!({})).unwrap()["blobs"].clone();
+    assert_eq!(blobs, json!([{"name":"paths/op3.bin","cache":true,"bytes":1}]));
+    assert!(s.execute("storage.put_blob", &json!({"name":"../escape","data":""})).is_err());
+    assert!(s.execute("storage.put_blob", &json!({"name":"x","data":"not base64!"})).is_err());
+    assert_eq!(s.execute("storage.delete_blob", &json!({"name":"paths/op3.bin"})).unwrap()["deleted"], true);
+    assert_eq!(s.execute("storage.delete_blob", &json!({"name":"paths/op3.bin"})).unwrap()["deleted"], false);
+    // Over the main document's limit, nothing changes.
+    let before = s.doc.plugin_data.clone();
+    let big = "x".repeat(storage::MAX_DOCUMENT_BYTES);
+    assert!(s.execute("storage.set", &json!({"document":big})).unwrap_err().to_string().contains("16 MiB"));
+    assert_eq!(s.doc.plugin_data, before);
+    // Outside a plugin's run, reads name the plugin and writes are refused.
+    s.plugin_state.storage_caller = None;
+    assert!(s.execute("storage.get", &json!({})).is_err());
+    assert_eq!(s.execute("storage.get", &json!({"plugin":"other-tool"})).unwrap()["document"], json!({"kept":true}));
+    assert!(s.execute("storage.patch", &json!({"patch":{}})).is_err());
 }

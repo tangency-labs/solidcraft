@@ -3211,6 +3211,29 @@ impl SolveApp {
         self.set_status(text, false);
     }
 
+    /// Tell the user when the open design keeps data of a plugin that can't change it here: one
+    /// that isn't installed, is turned off, or is older than the data. The data is kept and saved
+    /// back unchanged either way; nothing is installed or run.
+    pub(crate) fn say_plugin_data(&mut self) {
+        if self.session.doc.plugin_data.is_empty() {
+            return;
+        }
+        let Ok(listed) = self.session.execute("storage.list", &serde_json::json!({})) else { return };
+        for plugin in listed.get("plugins").and_then(serde_json::Value::as_array).into_iter().flatten() {
+            let text = |key: &str| plugin.get(key).and_then(serde_json::Value::as_str).unwrap_or_default();
+            let key = match (text("status"), text("plugin_version").is_empty()) {
+                ("missing", false) => "plugin_data.missing",
+                ("missing", true) => "plugin_data.missing_unversioned",
+                ("disabled", _) => "plugin_data.disabled",
+                ("older", _) => "plugin_data.older",
+                _ => continue,
+            };
+            let message = solidcraft_ui_text::format(key, &[("name", text("name")), ("version", text("plugin_version"))]);
+            self.messages.push(&message, false, now_ms());
+            self.set_status(message, false);
+        }
+    }
+
     /// Say what a design's signature check found (a `doc.open {verify: true}` or `file.verify`).
     pub(crate) fn say_signature(&mut self, result: &serde_json::Value) {
         let Some(signature) = result.get("signature") else { return };
@@ -3291,6 +3314,7 @@ impl SolveApp {
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
             self.say_newer_file();
+            self.say_plugin_data();
             self.say_signature(&r);
         }
     }
