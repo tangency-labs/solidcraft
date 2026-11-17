@@ -17,14 +17,13 @@ use solidcraft_doc::drawing::dimension::{
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
-
-use solidcraft_geom::paper::Scene;
 use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;
 use super::drawing_view::{check_drawn, drawn_warning};
-use crate::drawing_dimension_paper::{LineRole, paper_group};
-use crate::drawing_scene::{NO_PLACE, NOT_DRAWN, designed, moved};
+use crate::drawing_dimension_paper::{Drag, LineRole, NotDragged, dragged, paper_group};
+use crate::drawing_scene::{NO_PLACE, TEXT_WAITS, on_sheet_layout};
+use crate::drawing_view::{ViewSessions, on_its_sheet};
 use crate::params::bad;
 use crate::schema::drawing_dimension::{
     AddParams, ArrowResult, CandidateResult, CornerParam, DimensionLayoutResult, DimensionResult, DimensionSet, EdgeParam, EditParams, EditResult,
@@ -88,7 +87,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "dimension: its id; set: {offset_mm?, text?: centred or {at: [x, y]}, decimals?: 0..6, override_text?: text, or null to show \
              the number again; direction?, reading?: a linear or length dimension's, reading? and other_side?: an angle's, diameter?: a \
-             radial dimension's, direction?: a chain's or a silhouettes one's} → \
+             radial dimension's, direction?: a chain's or a silhouettes one's; a drag, instead of offset_mm and text: \
+             text_to_mm?: [x, y], where its text's centre goes, or line_through_mm?: [x, y], a point its line, arc or leader passes \
+             through, each in paper mm from the sheet's lower-left corner, as inspect's layout} → \
              {dimension, changed: [fields]}. What it measures stays: to measure something else, add a new one. One undo step, none \
              when nothing changes; no model is evaluated.",
         ),
@@ -414,9 +415,59 @@ fn slots(kind: &DimensionKind) -> String {
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let request: EditParams = crate::schema::read(EDIT, p)?;
     let id = request.dimension.0;
-    let changed = s.edit_drawing(EDIT, |d| change(d, id, &request.set))?;
+    let set = &request.set;
+    // A drag places the dimension as the rest of the edit leaves it.
+    let placed = match drag_asked(set)? {
+        Some(drag) => {
+            let mut staged = Drawing::clone(s.drawing(EDIT)?);
+            change(&mut staged, id, set, None)?;
+            Some(drag_on_sheet(s, &staged, id, drag)?)
+        }
+        None => None,
+    };
+    let changed = s.edit_drawing(EDIT, |d| change(d, id, set, placed))?;
     let reply = EditResult { dimension: ids::encode(id), changed, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// The drag `set` asks for, if any: one point, given without the `offset_mm` and `text` it sets.
+fn drag_asked(set: &DimensionSet) -> Result<Option<Drag>> {
+    let drag = match (set.text_to_mm, set.line_through_mm) {
+        (Some(_), Some(_)) => return Err(bad(EDIT, "`text_to_mm` and `line_through_mm` are a drag each: give one")),
+        (Some(to), None) => Drag::Text(to.0),
+        (None, Some(through)) => Drag::Line(through.0),
+        (None, None) => return Ok(None),
+    };
+    if set.offset_mm.is_some() || set.text.is_some() {
+        return Err(bad(EDIT, "a drag sets `offset_mm` and `text` itself: give the drag or them"));
+    }
+    Ok(Some(drag))
+}
+
+/// The offset and text place that put dimension `id` of `d` where `drag`, a point of its sheet, puts it
+/// ([`dragged`]): read on the session its view draws from and laid out through its view's frame, as
+/// inspect's layout and the sheet are. Refused in their words when its view isn't drawn or it has no
+/// place there, and when the drag can't place it.
+fn drag_on_sheet(s: &Session, d: &Drawing, id: u64, drag: Drag) -> Result<(f64, TextPlace)> {
+    let dimension = d.dimension(id).ok_or_else(|| bad(EDIT, format!("the drawing has no dimension {}", ids::encode(id))))?;
+    // Read and placed on one set of the views' sessions: a view's copy is made once.
+    let (r, on) = ViewSessions::designed(s, |sessions| {
+        let read =
+            sessions.read_on(d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions).map_err(|e| bad(EDIT, e.to_string()))?;
+        let r = read.into_iter().next().ok_or_else(|| bad(EDIT, format!("dimension {} wasn't read", ids::encode(id))))?;
+        let on = on_its_sheet(sessions, d, dimension.view, EDIT).map_err(|why| bad(EDIT, why))?;
+        Ok::<_, EngineError>((r, on))
+    })?;
+    let lettering = PaperFonts::new(&d.font, &d.language, false);
+    dragged(dimension, &r, &on.frame, &lettering, drag.seen_from(on.centre)).map_err(|why| {
+        let words = match why {
+            NotDragged::NoPlace => NO_PLACE,
+            NotDragged::ChainText => "a chain's texts sit on its members: drag its line",
+            NotDragged::BetweenEnds => "the line between silhouettes or faces runs beyond their ends: drag it past one of them",
+            NotDragged::TextWaits => TEXT_WAITS,
+        };
+        bad(EDIT, words)
+    })
 }
 
 /// A new radial dimension's default from its arc as read (its centre, start and middle): a diameter
@@ -460,8 +511,9 @@ fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearD
     }
 }
 
-/// `set` made on dimension `id` of `d`: the fields it changes, by name.
-fn change(d: &mut Drawing, id: u64, set: &DimensionSet) -> Result<Vec<String>> {
+/// `set` made on dimension `id` of `d`, with a drag's offset and text place when `placed`: the fields it
+/// changes, by name.
+fn change(d: &mut Drawing, id: u64, set: &DimensionSet, placed: Option<(f64, TextPlace)>) -> Result<Vec<String>> {
     let at = d.dimension_index(id).ok_or_else(|| bad(EDIT, format!("the drawing has no dimension {}", ids::encode(id))))?;
     let Some(dimension) = d.dimensions.get_mut(at).map(Arc::make_mut) else { return Ok(Vec::new()) };
     let before = dimension.clone();
@@ -469,6 +521,10 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet) -> Result<Vec<String>> {
         dimension.offset_mm = offset;
     }
     if let Some(text) = set.text {
+        dimension.text = text;
+    }
+    if let Some((offset, text)) = placed {
+        dimension.offset_mm = offset;
         dimension.text = text;
     }
     if let Some(decimals) = set.decimals {
@@ -579,10 +635,15 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?.clone();
     let dimension = d.dimension(id).ok_or_else(|| bad(cmd, format!("the drawing has no dimension {}", ids::encode(id))))?;
-    let resolved = crate::drawing_view::ViewSessions::new(s)
-        .read_on(&d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions)
-        .map_err(|e| bad(cmd, e.to_string()))?;
-    let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("dimension {} wasn't read", ids::encode(id))))?;
+    // Read and laid out on one set of the views' sessions: a view's copy is made once.
+    let (r, (layout, layout_why)) = ViewSessions::designed(s, |sessions| {
+        let resolved =
+            sessions.read_on(&d, &[(id, dimension.view)], solidcraft_doc::Document::resolve_dimensions).map_err(|e| bad(cmd, e.to_string()))?;
+        let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("dimension {} wasn't read", ids::encode(id))))?;
+        // Before `status_words` takes the status: the layout reads the whole reading.
+        let layout = layout_on_sheet(sessions, &d, dimension, &r);
+        Ok::<_, EngineError>((r, layout))
+    })?;
     let last_good = match r.measured {
         Some(m) => {
             s.dimension_values.insert((d.id, id), m.value);
@@ -590,8 +651,6 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         }
         None => s.dimension_values.get(&(d.id, id)).copied().or(dimension.last_good),
     };
-    // Before `status_words` takes the status: the layout reads the whole reading.
-    let (layout, layout_why) = layout_on_sheet(s, &d, dimension, &r);
     let (status, why, candidates) = status_words(r.status);
     let angle = dimension.kind.is_angle();
     let shown = |value: f64| if angle { value.to_degrees() } else { value };
@@ -617,70 +676,44 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// Why a dimension has no layout while the search for a font to fall back to runs: the search is
-/// never waited for here, as add and its dry run run on the window thread.
-const TEXT_WAITS: &str = "its text waits for a font to fall back to; drawing.scene draws it when one is found";
-
 /// Where `dimension` of `d`, read as `r`, sits on its view's sheet now, as the sheet draws it: laid out
-/// through its view's frame ([`paper_group`]), then moved to the view's centre. Or none, with why when
-/// its status doesn't say it, in the sheet's words: its view isn't drawn (a style it can't draw yet,
-/// or nothing to measure), has no place for what it measures, or its group alone fails the paper
-/// scene's checks; or its text still waits for a font ([`TEXT_WAITS`]). A text that can't be set has
-/// no box, and says why. It reads the model as it is evaluated and draws no view's lines, so a view
-/// whose lines fail still answers.
-fn layout_on_sheet(s: &Session, d: &Drawing, dimension: &Dimension, r: &Resolved) -> (Option<DimensionLayoutResult>, Option<String>) {
-    let id = dimension.view;
-    let not_drawn = || (None, Some(NOT_DRAWN.to_string()));
-    // The views draw from where the design places its parts, as the sheet does; a dimension reads the
-    // same either way, as it reads the model, not the session's moves.
-    let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
-    let s = copy.as_ref().unwrap_or(s);
-    let Ok(view) = d.resolve_view(id) else { return not_drawn() };
-    if d.view(id).and_then(crate::drawing_view::no_model_edges).is_some() {
-        return (None, Some(NO_PLACE.to_string()));
-    }
-    let unstyled = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
-    // Not yet on a section view: its cut faces' edges are in no part (#13046).
-    if unstyled.or_else(|| crate::drawing_view::not_drawable_apart(&view)).is_some() || view.cut.is_some() {
-        return not_drawn();
-    }
-    let on = match crate::drawing_view::on_sheet(s, d, id, INSPECT) {
-        Ok(on) if on.unmeasured.is_none() => on,
-        _ => return not_drawn(),
-    };
-    let size = d.views.iter().find(|v| v.id == id).and_then(|v| d.sheets.iter().find(|sheet| sheet.id == v.sheet)).map(|sheet| sheet.sheet.size_mm());
-    let (Ok(frame), Ok(centre), Some(Ok(size))) =
-        (crate::drawing_view::frame(view.basis, view.scale.value, &on.extents.model, Vec2::ZERO, INSPECT), d.view_centre(id), size)
-    else {
-        return not_drawn();
+/// through its view's frame ([`paper_group`]), then moved to the view's centre ([`on_sheet_layout`]).
+/// Or none, with why when its status doesn't say it, in the sheet's words: its view isn't drawn (a
+/// style it can't draw yet, or nothing to measure), has no place for what it measures, or its group
+/// alone fails the paper scene's checks; or its text still waits for a font. A text that can't be set
+/// has no box, and says why. It measures the view on `sessions`, the ones `r` was read on, reads the
+/// model as it is evaluated and draws no view's lines, so a view whose lines fail still answers.
+fn layout_on_sheet(sessions: &mut ViewSessions, d: &Drawing, dimension: &Dimension, r: &Resolved) -> (Option<DimensionLayoutResult>, Option<String>) {
+    let on = match on_its_sheet(sessions, d, dimension.view, INSPECT) {
+        Ok(on) => on,
+        Err(why) => return (None, Some(why.to_string())),
     };
     // Asks for a font to fall back to and doesn't wait: add and its dry run run on the window thread.
-    let Some(paper) = paper_group(dimension, r, &frame, view.line_group.value, &PaperFonts::new(&d.font, &d.language, false)) else {
+    let Some(paper) = paper_group(dimension, r, &on.frame, on.line_group, &PaperFonts::new(&d.font, &d.language, false)) else {
         return (None, (!r.points.is_empty()).then(|| NO_PLACE.to_string()));
     };
-    // No layout at all until the font is found: a short span's lines depend on its text's width.
-    if paper.pending {
-        return (None, Some(TEXT_WAITS.to_string()));
-    }
-    // As the sheet takes it: alone on its sheet, its group must pass the paper scene's checks.
-    let mut alone = Scene::new(size, vec![moved(&paper.group, centre)]);
-    alone.add_fonts(paper.fonts);
-    if let Err(e) = alone.validate() {
-        return (None, Some(e.to_string()));
-    }
-    // Each point plus the centre, as the sheet moves the group, so the two are the same numbers.
-    let at = |p: &Vec2| {
-        let p = *p + centre;
-        [p.x, p.y]
+    let layout = match on_sheet_layout(&paper, on.centre, on.size) {
+        Ok(layout) => layout,
+        Err(why) => return (None, Some(why)),
     };
-    let lines = |role: LineRole| paper.layout.lines.iter().filter(|(of, _)| *of == role).map(|(_, line)| line.iter().map(at).collect()).collect();
-    let layout = DimensionLayoutResult {
+    let lines = |role: LineRole| layout.lines.iter().filter(|(of, _)| *of == role).map(|(_, line)| line.iter().map(xy).collect()).collect();
+    let reply = DimensionLayoutResult {
         extension_lines: lines(LineRole::Extension),
         dimension_lines: lines(LineRole::Dimension),
-        arrows: paper.layout.arrows.iter().map(|(tip, dir)| ArrowResult { tip: at(tip), points: [dir.x, dir.y] }).collect(),
-        text_boxes: paper.layout.text_boxes.iter().map(|corners| corners.each_ref().map(at)).collect(),
+        arrows: layout.arrows.iter().map(arrow_result).collect(),
+        text_boxes: layout.text_boxes.iter().map(|corners| corners.each_ref().map(xy)).collect(),
     };
-    (Some(layout), paper.why)
+    (Some(reply), paper.why)
+}
+
+/// A point on paper in a reply's words.
+pub(super) fn xy(p: &Vec2) -> [f64; 2] {
+    [p.x, p.y]
+}
+
+/// An arrowhead of a layout (its tip and the unit direction it points in) in a reply's words.
+pub(super) fn arrow_result((tip, dir): &(Vec2, Vec2)) -> ArrowResult {
+    ArrowResult { tip: xy(tip), points: xy(dir) }
 }
 
 /// How a command's answer says where a reference stands with the model: the status's word, why
