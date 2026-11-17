@@ -133,6 +133,7 @@ fn open_windows(app: &SolveApp) -> Vec<&'static str> {
         (app.crashes.open, "crashes"),
         (app.issue_report.draft.is_some(), "report"),
         (app.messages.open, "messages"),
+        (app.review.open, "view.review"),
     ]
     .into_iter()
     .filter_map(|(open, command)| open.then_some(command))
@@ -212,6 +213,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.grid"
             | "view.ground_shadow"
             | "view.navigation_bar"
+            | "view.review"
             | "view.ribbon_tabs_only"
             | "view.next_tab"
             | "view.previous_tab"

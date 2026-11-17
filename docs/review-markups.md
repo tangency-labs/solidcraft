@@ -63,6 +63,15 @@ A markup is named by its number or its guid (`markup`). `by` says who writes; wi
 ]}
 ```
 
+## In the window
+
+**Review** (`view.review`, on the Inspect tab) shows the Review list and the pins; it is off until you turn it on. The window reads and writes the set only through the commands above and reads it again whenever the file changes, so a markup an agent adds or closes shows within a moment. Each pin stands where its markup is on the model and is coloured by where it stands: open, gone, done, rejected, or hidden here. The filter in the list decides which pins show, and the eye hides them all.
+
+- **Mark this** (or M while Review is on) puts a new markup on the face, edge or corner under the pointer; the card that opens takes the note and adds it. Esc or Cancel leaves nothing behind. With Review off, M stays Move/Copy.
+- Clicking a pin or a row opens its card: the thread, a reply, **Go there** (back to the view it was marked from), **Select**, pictures (**Screenshot** of the view, **Attach** a PNG or JPEG), and Resolve, Reject or Reopen with a reason.
+- A markup on no point (the view, a feature or a component) is a row in the list only.
+- A design that is not saved yet has no set: Mark this waits for a file.
+
 ## Tests
 
-`crates/io/src/markups_tests.rs` tests the file: a frozen format 1 set, a newer one refused and kept, unknown keys refused, the one check, two writers at once and pictures. `crates/engine/src/cmd/markups_tests.rs` tests the commands: a round trip that leaves the design and its undo history alone, anchors from a call, the selection and the view, a rebuild that keeps a face's markup and says where it moved, a face hidden by the history marker, a suppression and a configuration and gone once deleted, the reply limit, pictures, two sessions writing at once, and hostile values in every key.
+`crates/io/src/markups_tests.rs` tests the file: a frozen format 1 set, a newer one refused and kept, unknown keys refused, the one check, two writers at once and pictures. `crates/engine/src/cmd/markups_tests.rs` tests the commands: a round trip that leaves the design and its undo history alone, anchors from a call, the selection and the view, a rebuild that keeps a face's markup and says where it moved, a face hidden by the history marker, a suppression and a configuration and gone once deleted, the reply limit, pictures, two sessions writing at once, and hostile values in every key. `crates/ui-egui/src/review_pins_tests.rs` tests the window: M on a face and the card adding it without touching the design, Esc and Cancel, a pin click that selects nothing under it, reply, resolve and reopen from the card with an agent's write showing, the filter and the eye, a pin behind the history marker, M with Review off and with no file, a screenshot cut to the view, and no re-listing while nothing changes.

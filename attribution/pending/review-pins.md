@@ -1,0 +1,1 @@
+| crates/look/icons/design/svg/flat/review_mark.svg | SolidCraft contributors | Original analytic pin-with-plus icon for marking a place for review | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
