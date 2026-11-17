@@ -644,7 +644,7 @@ fn overflow_goes_first() {
     }
 }
 
-/// The capi's `rounds_at_a_concave_face_corner_are_mitred` (`fixes.fillet_mitre_concave_face_corners`,
+/// The capi's `rounds_at_a_concave_face_corner_are_mitred` (WR-642,
 /// fork 4f06e72): each edge loses (convex) or gains (concave) the spandrel r²(1 - π/4) along its
 /// length, and in the quadrant beyond both walls the mitred rounds take or add r³(5/3 - π/2): a
 /// 60 x 40 x 10 plate's 30 x 20 x 5 pocket rim at r2 (15 faces) and r5 (11), a 60 x 60 x 5 plate's
@@ -788,7 +788,7 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
     }
 }
 
-/// Solidcore alone: the pocket rim chamfered 5.5, as `fillet_mitre_concave_face_corners`' own test
+/// Solidcore alone: the pocket rim chamfered 5.5, as WR-642's own test
 /// does it, with `keep_operand_uv_trims` on too, on the body the boolean gives:
 /// 21000 - (50 d² + 4/3 d³) = 19265.666666667 (the fork, and the same body through the flat
 /// arrays). Before WR-654's B-spline run-on it was refused: error 3, Corner Edge Computation
@@ -803,7 +803,6 @@ fn pocket_chamfer_on_a_boolean_body() {
     let p = Point3::new;
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.keep_operand_uv_trims = true;
     let plate = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap();
     let cut = create_box(&mut k, p(15.0, 10.0, 5.0), 30.0, 20.0, 6.0).unwrap();
@@ -831,6 +830,44 @@ fn pocket_chamfer_on_a_boolean_body() {
     let v = volume(&Body::from_kernel(b), 1e-8).unwrap();
     let d: f64 = 5.5;
     assert!(rel(v, 21000.0 - (50.0 * d * d + 4.0 / 3.0 * d * d * d)) < 1e-8, "{v}");
+}
+
+/// A Ø20 x 20 cylinder with a Ø2 x 4 blind hole in its top face, and a Ø20 x 5 cap joined on top:
+/// the cap seals the hole into a void inside one solid (tangency-labs/solidcraft#18287). A 2 mm
+/// chamfer or round on the top or the bottom rim keeps the void: two shells, the void's three
+/// faces untouched (4 planes, 2 cylinders, and the chamfer's cone or the round's torus as a
+/// rational spline), and the record validates (the solid's region lists its outer shell first).
+/// Pappus for the rim: the chamfer takes the triangle d²/2, its centroid d/3 in from the rim; the
+/// round takes the spandrel, its centroid (10 - 3π)/(12 - 3π) r in.
+#[test]
+fn a_blend_on_a_cap_that_seals_a_hole_keeps_the_void() {
+    let (big, d) = (10.0, 2.0);
+    let sealed = move || {
+        let body = make_cylinder([0.0; 3], big, 20.0).unwrap();
+        let hole = make_cylinder([-4.0, 0.0, 16.0], 1.0, 4.0).unwrap();
+        let body = boolean(&body, &hole, BooleanOp::Subtract).unwrap().unwrap();
+        let cap = make_cylinder([0.0, 0.0, 20.0], big, 5.0).unwrap();
+        boolean(&body, &cap, BooleanOp::Union).unwrap().unwrap()
+    };
+    let whole = PI * big * big * 25.0 - PI * 4.0;
+    let chamfer_inset = d / 3.0;
+    let round_inset = (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI) * d;
+    for (kind, area, inset) in [(Blend::Chamfer, d * d / 2.0, chamfer_inset), (Blend::Round, spandrel(d), round_inset)] {
+        for z in [25.0, 0.0] {
+            let b = timed("sealed_cap_rim", move || blend(&sealed(), kind, &[[0.0, -big, z]], &[d], TOL, &[], &[], Corners::Filled).unwrap());
+            let v = volume(&b, 1e-10).unwrap();
+            let want = whole - 2.0 * PI * (big - inset) * area;
+            assert!(rel(v, want) < 1e-9, "{kind:?} at z {z}: volume {v}, want {want}");
+            let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{kind:?} at z {z}: record: {e:?}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{kind:?} at z {z}: record: {e}"));
+            assert_eq!(rec.shells.len(), 2, "{kind:?} at z {z}");
+            assert_eq!(rec.regions.iter().filter(|r| r.void).count(), 1, "{kind:?} at z {z}");
+            assert_eq!(counts(&b).unwrap(), [7, 8, 5], "{kind:?} at z {z}");
+            let face = if matches!(kind, Blend::Chamfer) { "cone" } else { "rational_spline" };
+            let surfaces = BTreeMap::from([("cylinder".to_owned(), 2), ("plane".to_owned(), 4), (face.to_owned(), 1)]);
+            assert_eq!(kinds(&rec), surfaces, "{kind:?} at z {z}");
+        }
+    }
 }
 
 /// The corner of r5 rounds at (60, 40, 20) on a 60 x 40 x 20 box, set back 8 and left open: the

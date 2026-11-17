@@ -28,11 +28,13 @@
 //! refusal is a return value, not out-params.
 
 use super::taper_walls::{
-    curvature_keeping_walls, has_corner, lines_and_arcs, CornerRefusal, WallsInput,
+    curvature_keeping_walls, has_corner, lines_and_arcs, CornerRefusal, TaperCornerRefusal,
+    WallsInput,
 };
 use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::composite_curve::{
     CompositeCurve, OffsetCornerType, OffsetDirection, OffsetMapAttribute, OffsetParams,
+    OffsetPiece,
 };
 use crate::curve::curve::p3::{compute_crvs_normal_written, crvs_fix_gaps};
 use crate::curve::curve::p4::fix_chain_curves_list;
@@ -44,7 +46,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::ANG_TOL_DEG;
 use crate::kernel::Kernel;
-use crate::math::{Vec3, PI};
+use crate::math::{Point3, Vec3, PI};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::BSplineSurface;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
@@ -465,6 +467,25 @@ fn taper(
             surface_intersection,
         };
 
+        // walls that meet across the profile before the far end (#18452): refused at the
+        // lowest height where they meet
+        if let Some(at) = offset_junction(a.kernel(brep)?, &trimmed, 2.0 * zone_tol)? {
+            let corner = walls_meet(
+                a.kernel(brep)?,
+                &composite,
+                direction,
+                &params,
+                at,
+                translation,
+                brep_tol,
+                p,
+            )?;
+            return Ok(Some(CornerRefusal {
+                reason: TaperCornerRefusal::WallCloses,
+                corner,
+            }));
+        }
+
         if trimmed.is_empty() {
             state.missing_faces = true;
             empty_offsets = true;
@@ -598,6 +619,83 @@ fn taper(
     ignore_status(passed_on(a.shrink_geometry(brep), p)?)?;
     ignore_status(passed_on(a.stitch_and_orient(brep), p)?)?;
     Ok(None)
+}
+
+/// Where three or more of the trimmed offset pieces `pieces` end at one point (within
+/// `tol`, the tolerance the pieces are chained with), or `None`. The trimmed offsets of one
+/// closed profile end two at each point, one piece running into the next. A third end
+/// there is a wall that runs on past the point where another wall meets it: the walls meet
+/// across the profile, as where a long corner extension (the tangent rule at a sharp notch)
+/// reaches a wall on the far side of the profile, which the offset method's trimming
+/// cannot split the section at (#18452). A piece whose ends lie within `tol` of each other
+/// is left out: chaining drops it, and it ends at its neighbours' ends.
+fn offset_junction(k: &Kernel, pieces: &[OffsetPiece], tol: f64) -> Result<Option<Point3>> {
+    let mut ends = Vec::new();
+    for piece in pieces {
+        let e = piece.curve.ends(k)?;
+        if e.start.distance(e.end) > tol {
+            ends.push(e.start);
+            ends.push(e.end);
+        }
+    }
+    for p in &ends {
+        if ends.iter().filter(|q| q.distance(*p) <= tol).count() > 2 {
+            return Ok(Some(*p));
+        }
+    }
+    Ok(None)
+}
+
+/// Halvings of the height to where walls first meet ([`walls_meet`]).
+const MEETING_HALVINGS: u32 = 100;
+
+/// The point where the walls of the draft first meet across the profile, given `at`, a
+/// point where the far end's trimmed offsets meet ([`offset_junction`]): the section at a
+/// fraction `f` of the height is the profile offset by `f` of the far end's offset, so the
+/// lowest fraction whose section has such a junction is halved to, until the bracket is
+/// within the B-rep's tolerance `tol` of the height, and the junction there is moved up by
+/// that fraction of `translation`, the height.
+#[allow(clippy::too_many_arguments)] // the offset method's state
+fn walls_meet(
+    k: &Kernel,
+    composite: &CompositeCurve,
+    direction: OffsetDirection,
+    params: &OffsetParams,
+    at: Point3,
+    translation: Vec3,
+    tol: f64,
+    p: bool,
+) -> Result<Point3> {
+    let height = translation.length();
+    let mut f_lo = 0.0;
+    let mut f_hi = 1.0;
+    let mut point = at;
+    for _ in 0..MEETING_HALVINGS {
+        if (f_hi - f_lo) * height <= tol {
+            break;
+        }
+        let f = 0.5 * (f_lo + f_hi);
+        let section = ignored(passed_on(
+            composite.create_trimmed_offsets(
+                k,
+                direction,
+                &OffsetParams {
+                    offset_distance: f * params.offset_distance,
+                    ..*params
+                },
+            ),
+            p,
+        )?)?
+        .unwrap_or_default();
+        match offset_junction(k, &section, params.xsect_tol_3d)? {
+            Some(q) => {
+                f_hi = f;
+                point = q;
+            }
+            None => f_lo = f,
+        }
+    }
+    Ok(point + f_hi * translation)
 }
 
 /// The missing-face fallback: ruled surfaces of the untrimmed offsets in

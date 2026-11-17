@@ -117,6 +117,11 @@ impl PlacedMesh {
 
     /// The definition's display plan mesh at quality `q` (shared by every placement of it) and
     /// this placement.
+    /// The definition's plan meshes, by display quality (made or not yet).
+    pub(super) fn plan_mesh_cells(&self) -> &Arc<[OnceLock<Option<Arc<Mesh>>>; 4]> {
+        &self.plan_meshes
+    }
+
     pub(super) fn source_plan_mesh(&self, q: crate::display_quality::DisplayQuality, name: &str) -> Option<(Arc<Mesh>, crate::Mat)> {
         let cell = self.plan_meshes.get(q.index())?;
         let source = cell

@@ -49,7 +49,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
-    k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
@@ -63,7 +62,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.box_face_failures_propagate = true;
-    k.fixes.fillet_removal_takes_ring_fillets = true;
 }
 
 fn read(k: &mut Kernel) -> Brep {
