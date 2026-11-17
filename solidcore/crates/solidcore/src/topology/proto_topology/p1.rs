@@ -185,8 +185,9 @@ pub use assembly::{Assembly, AssemblyInstance};
 pub use copy_brep_map::CopyBrepMap;
 pub use owning_topology::{destroy_topology, OwningRecords, OwningTopology};
 pub use proto::{
-    EdgeDefId, EdgeDefinition, ProtoEdge, ProtoEdgeId, ProtoFace, ProtoFaceId, ProtoGeometry,
-    ProtoTopology, ProtoTopologyManager, ProtoVertex, ProtoVertexId, VertexDefId, VertexDefinition,
+    DeclaredContact, EdgeDefId, EdgeDefinition, ProtoEdge, ProtoEdgeId, ProtoFace, ProtoFaceId,
+    ProtoGeometry, ProtoTopology, ProtoTopologyManager, ProtoVertex, ProtoVertexId, VertexDefId,
+    VertexDefinition,
 };
 
 #[cfg(test)]

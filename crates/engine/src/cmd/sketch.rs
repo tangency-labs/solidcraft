@@ -1273,7 +1273,7 @@ fn create_sketch_on(s: &mut Session, p: &Value, mut plane: PlaneRef, frame: Opti
 
 /// `flip` of `sketch.create`: `None` keeps the plane's own side, otherwise the axis to turn
 /// about (`true`: about y when the plane's y axis points upward, so it stays up, else about x).
-fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Option<bool>> {
+pub(super) fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Option<bool>> {
     let about_y = match p.get("flip") {
         None | Some(Value::Null) | Some(Value::Bool(false)) => return Ok(None),
         Some(Value::String(a)) if a.eq_ignore_ascii_case("x") => false,
@@ -1303,11 +1303,12 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
 }
 
 /// A new sketch on `plane`, as `sketch.create` replies.
-fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
+fn sketch_on_plane(s: &mut Session, p: &Value, mut plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
     let before = entry_point(s);
     if face::is_face(p) {
         face::capture_positions(s, &plane)?;
     }
+    solidcraft_doc::capture_sketch_plane_placement(&s.design_document(), &mut plane, s.active_component, &s.active_component_frame())?;
     // Validate the plane resolves.
     let (vals, _) = s.doc.param_values();
     s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;

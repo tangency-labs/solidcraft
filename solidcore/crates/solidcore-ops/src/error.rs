@@ -301,6 +301,23 @@ pub enum Error {
         /// The least radius that rounds it.
         smallest: f64,
     },
+    /// A control-point edit that moves a point on edge `edge` (its record index), whose two
+    /// faces' boundary rows along it are not one curve's control polygon (the kernel's
+    /// `seam_twins`): moving the point on one face would open the seam, and the faces are not
+    /// rebuilt to make the rows match. Why, as the kernel names it.
+    SeamMismatch {
+        /// The edge's record index.
+        edge: usize,
+        /// Why its two rows are not one curve's.
+        why: crate::surface_cvs::SeamMismatch,
+    },
+    /// A control-point edit that moves a vertex ending edge `edge` (its record index), which
+    /// cannot follow it: it is not a line between planar faces the edit keeps, so moving its end
+    /// would leave a gap at the vertex.
+    EdgeLeftBehind {
+        /// The edge's record index.
+        edge: usize,
+    },
     /// A corner's setback too short for the corner: it stops short of where the rails of the
     /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
     /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
@@ -858,6 +875,14 @@ impl std::fmt::Display for Error {
             Error::RoundTooSmall { edge, smallest, .. } => write!(
                 f,
                 "the round of edge {edge} is too small to change the part: the smallest is {smallest}"
+            ),
+            Error::SeamMismatch { edge, why } => write!(
+                f,
+                "edge {edge} is not one curve on its two faces, so its points cannot move together: {why}"
+            ),
+            Error::EdgeLeftBehind { edge } => write!(
+                f,
+                "edge {edge} cannot follow its moved end: it is not a line between planar faces"
             ),
             Error::SetbackTooShort {
                 vertex: Some(vertex),

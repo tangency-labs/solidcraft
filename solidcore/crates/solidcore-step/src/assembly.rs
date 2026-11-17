@@ -312,13 +312,34 @@ impl<'t> Assembly<'t> {
             }
             _ => bounds,
         };
-        let surface = match crate::topology::closed_within(&surface, self.tol) {
+        let mut surface = match crate::topology::closed_within(&surface, self.tol) {
             Some(closed) => {
                 self.splines_closed += 1;
                 closed
             }
             None => surface,
         };
+        if bounds.len() == 2
+            && let BSurface::Sphere { frame, .. } = &mut surface
+        {
+            let edges: Vec<&EdgeB> = bounds
+                .iter()
+                .filter_map(|b| match b {
+                    Bound::Edges(es) => Some(es),
+                    Bound::Vertex(_) => None,
+                })
+                .flatten()
+                .filter_map(|(e, _)| self.edges.get(*e as usize))
+                .collect();
+            if let Some(EdgeB { curve: BCurve::Circle { frame: rim, .. }, .. }) = edges.first() {
+                // Coaxial circular bounds are latitudes of the same sphere. Put its poles
+                // on their axis so an arbitrary placement cannot put a pole on a rim.
+                let aligned = Frame { origin: frame.origin, ..rim.clone() };
+                if edges.iter().all(|e| crate::kernel::form::on_frame(&e.curve, e.interval, &aligned, self.tol).is_some()) {
+                    *frame = aligned;
+                }
+            }
+        }
         let i = index(self.faces.len())?;
         self.faces.push(FaceB { origin, surface, loops: bounds, outer, forward, extent: None });
         Ok(i)

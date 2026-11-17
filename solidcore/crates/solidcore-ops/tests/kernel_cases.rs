@@ -31,7 +31,7 @@
 //! - `KERNEL_CASES_CASE`: run only cases whose name contains it;
 //! - `KERNEL_CASES_TIMEOUT_S`: a case's time limit in seconds; one past it is a hang. In this
 //!   process (`KERNEL_CASES_JOBS` unset or 1) it is wall time, 180 s by default, and the cases
-//!   after a hang are not run (it holds the process kernel). With jobs it is the case process's
+//!   after a hang are not run (it still runs on its thread). With jobs it is the case process's
 //!   CPU time (user and system, from `/proc` on Linux; wall time elsewhere), 600 s by default,
 //!   with a backstop of four times it in wall time for a process that hangs without using CPU;
 //!   the hung process is killed, and the other cases still run;
@@ -1522,8 +1522,7 @@ fn moved_from_the_rig(result: &[Slot], rig: f64, got: f64) -> Result<(), String>
         return Err(format!("{} result bodies, not one", result.len()));
     };
     let bytes = s.body.to_smb(true).map_err(|x| format!("to_smb: {x}"))?;
-    // the case's own fixes: the reader refuses what they write otherwise (a round kept as its
-    // definition, `fillet_round_as_definition`, writes a procedural blend surface)
+    // the case's own fixes: the reader refuses what they write otherwise
     let mut k = solidcore::Kernel::default();
     for name in session::fixes() {
         let flag = k
@@ -3683,7 +3682,7 @@ fn grade(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) -> 
             g.moved = is_listed;
             g.hang = true;
             g.note
-                .push_str(" (the run stops here: the case holds the process kernel)");
+                .push_str(" (the run stops here: the case still runs on its thread)");
             return g;
         }
     };
