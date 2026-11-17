@@ -3170,14 +3170,17 @@ impl Surface {
     /// dropping the point to the iso curve there. Not upstream: where the surface's
     /// point evaluation has a rounding bound ([`point_rounding`]), an answer proven
     /// farther from `test_pt` than the guess is refused (upstream reports it found),
-    /// the evaluations' rounding charged to both distances.
+    /// the evaluations' rounding charged to both distances, and so is one proven farther
+    /// than the point the test point drops to on the singular boundary (the method
+    /// assumes that boundary is a pole; where a point of it is nearer, it is not).
     ///
     /// # Errors
     ///
     /// The status of a failing degenerate parameter search (`SM_ERR` when it does not
     /// converge) or iso curve creation or curve drop; `SM_ERR` for an answer proven
-    /// farther from `test_pt` than the guess, or for a distance that is not enclosed (not
-    /// a number, or at a point past a rational net's knots);
+    /// farther from `test_pt` than the guess or than a point of the singular boundary
+    /// (the boundary is then not a pole), or for a distance that is not enclosed (not a
+    /// number, or at a point past a rational net's knots);
     /// [`SolidError::Unported`] from the evaluations and drops.
     pub fn invert_point_near_singularity(
         &self,
@@ -3431,7 +3434,110 @@ impl Surface {
                 "the point found is farther from the test point than the guess",
             ));
         }
+        // (not upstream) The pole assumption checked: the boundary at `sSingUV` is a
+        // pole only if every point of it is the same point. The test point is dropped
+        // onto that boundary (the iso curve at the boundary's good parameter, over the
+        // uv domain's degenerate interval, from the answer's degenerate parameter), and
+        // an answer farther than a boundary point proven nearer is not the closest
+        // point (goldens `surface_p8` gen1191: the answer 1163.2 from the test point,
+        // the boundary `u = 1` within 9.4 of it, upstream's search found). A failing
+        // drop or an enclosure that does not exist proves nothing, and refuses nothing.
+        if let Some(near_hi) = self.singular_boundary_distance(
+            k, sing_uv, sing_dir, uv, uv_domain, test_pt, tol, &enclose,
+        )? {
+            if near_hi < found_lo {
+                return Err(SolidError::surface_failed(
+                    OP_INVERT,
+                    "a point of the singular boundary is nearer the test point than the point \
+                     found: the boundary is not a pole",
+                ));
+            }
+        }
         Ok(SingularityInversion { uv, reason })
+    }
+
+    /// The upper end of the enclosed distance from `test_pt` to the nearest point found
+    /// on the singular boundary through `sing_uv` (not upstream, WR-57): `test_pt`
+    /// dropped onto the iso curve at `sing_uv`'s good parameter (the boundary along
+    /// `sing_dir`), over `uv_domain`'s interval in `sing_dir`, from `answer`'s
+    /// parameter in it. `None` where the iso curve, the drop or the evaluation fails,
+    /// or the distance has no enclosure (`enclose`, the caller's).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`], cancellation and preparation errors only; any other
+    /// failure gives `None`.
+    #[allow(clippy::too_many_arguments)]
+    fn singular_boundary_distance(
+        &self,
+        k: &Kernel,
+        sing_uv: Point2,
+        sing_dir: SurfParamType,
+        answer: Point2,
+        uv_domain: &Extent2d,
+        test_pt: Point3,
+        tol: f64,
+        enclose: &dyn Fn(Point2, Point3) -> Result<Option<(f64, f64)>>,
+    ) -> Result<Option<f64>> {
+        let passes = |e: &SolidError| {
+            e.is_unported_or_cancelled() || matches!(e, SolidError::PreparationRequired { .. })
+        };
+        let (boundary_dir, boundary_param, degen_domain, guess) = if sing_dir == SurfParamType::U {
+            (
+                SurfParamType::V,
+                sing_uv.y,
+                uv_domain.u_interval(),
+                answer.x,
+            )
+        } else {
+            (
+                SurfParamType::U,
+                sing_uv.x,
+                uv_domain.v_interval(),
+                answer.y,
+            )
+        };
+        let mut boundary = match self.create_iso_parametric_curve(
+            k,
+            boundary_dir,
+            boundary_param,
+            tol,
+            None,
+            false,
+        ) {
+            Ok(iso) => iso.curve,
+            Err(e) if passes(&e) => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        enable_out_of_bounds(&mut boundary);
+        let dropped = match boundary.drop_point(
+            k,
+            &degen_domain,
+            test_pt,
+            None,
+            tol,
+            Some(degen_domain.clamp_value(guess)),
+            SolverOperation::Minimize,
+        ) {
+            Ok(d) => d,
+            Err(e) if passes(&e) => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        let t = dropped.parameter;
+        if !t.is_finite() {
+            return Ok(None);
+        }
+        let at = if sing_dir == SurfParamType::U {
+            Point2::new(t, boundary_param)
+        } else {
+            Point2::new(boundary_param, t)
+        };
+        let pt = match self.evaluate_point(k, at) {
+            Ok(p) => p,
+            Err(e) if passes(&e) => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        Ok(enclose(at, pt)?.map(|(_, hi)| hi))
     }
 
     /// The drop of `InvertPointNearSingularity` onto the iso curve at the degenerate

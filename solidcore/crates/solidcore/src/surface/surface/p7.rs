@@ -57,6 +57,9 @@
 //!   `pSurfaceNode->GetOwnerObject()`) instead of the node and the unused patch.
 //!   `LocalCurveSolve`'s `cpdOptTargetDistance` (`NotUsed` upstream) and
 //!   `CreateParallelProjectionCurves`' context are dropped.
+//! - **Recursion bound.** The degenerate-direction search's certified evaluator looks
+//!   through nested curve-bounded bases at most `BASIS_DEPTH` (16) layers deep; past
+//!   that the search proves no sign, as for a kind with no certified evaluator.
 //! - **A blend's net for averages (#2510).** `ApproxDerivativeLengths`, an average that
 //!   scales tolerances, evaluates a procedural blend as its certified net
 //!   ([`crate::surface::procedural_blend::NetScope::new`]).
@@ -1302,13 +1305,16 @@ impl Surface {
         // does not grow `|F|`: the solve stops at `|F| < SM_EFF_ZERO`, which bounds
         // the parameter only through `F'` (on a sphere in degrees, to `3.3e-9`). Each
         // sign is charged its rounding ([`slope_charges`], from the certified partials
-        // of the surface's net; none for the kinds that evaluate their own way): an
-        // end's and a kink's slopes must be proven, and a stationary point's curvature
-        // counts as not positive unless it is proven above `SM_EFF_ZERO`. Where the
-        // net has a certified evaluator but a charge cannot be bounded (`|w|` not above
-        // its error near a collapsed corner, the partials failing, a charge not
-        // finite) the charge is infinite: no sign is proven there, so no end or kink
-        // is a maximum, and a stationary point's curvature is not proven positive.
+        // of the surface's net): an end's and a kink's slopes must be proven, and a
+        // stationary point's curvature counts as not positive unless it is proven
+        // above `SM_EFF_ZERO`. Where the net has a certified evaluator but a charge
+        // cannot be bounded (`|w|` not above its error near a collapsed corner, the
+        // partials failing, a charge not finite) the charges are infinite: no sign is
+        // proven there, so no end or kink is a maximum, and no stationary point is
+        // either (its curvature has no bound). The kinds without a certified
+        // evaluator (they evaluate their own way) prove no end or kink either (`F`'s
+        // charge infinite), and keep the stationary test on the solve's own `F'`
+        // (its charge zero): what they accept is upstream's stationary answer only.
         let certified = certified_alignment_evaluator(k, self)?;
         let charges_at = |t: f64, f: f64, f_prime: f64| -> (f64, f64, f64) {
             charges_or_unproven(certified.as_ref(), uv, s_dir, singular_dir, t, f, f_prime)
@@ -1343,7 +1349,7 @@ impl Surface {
             |t: f64, f: f64, cf: f64| (t <= s_ivl.min() && f < -cf) || (t >= s_ivl.max() && f > cf);
         let is_local_max = |t: f64, (f, f_prime, cf, cfp): (f64, f64, f64, f64)| -> bool {
             (!closed && grows_outward(t, f, cf))
-                || (f.abs() < tol && f_prime - cfp <= scaled_zero())
+                || (f.abs() < tol && cfp.is_finite() && f_prime - cfp <= scaled_zero())
         };
         // the interior knots in the singular direction: where `A'` may jump (a kink)
         let knots: Vec<f64> = ignored(self.knots_with_nurb(k, singular_dir, Some(&s_ivl)))?
@@ -3605,16 +3611,31 @@ fn alignment_slope(
     Ok(unit_t.dot(dir))
 }
 
+/// The curve-bounded layers [`certified_alignment_evaluator`] looks through to a basis
+/// (well above any nesting the fixtures reach, which is one).
+const BASIS_DEPTH: usize = 16;
+
 /// The certified evaluator ([`crate::eval::collapse::certified_partials`]) of the net
 /// whose evaluation is `surface`'s ([`super::p8::evaluation_net`]), for the rounding
 /// charged to `FindDegenParamForDirection`'s sign tests (WR-57); `None` for the kinds
 /// that evaluate their own way, a power-basis form or a net that is not finite or has
-/// a weight that is not positive.
+/// a weight that is not positive. A curve-bounded surface evaluates on its basis
+/// (`SmCurveBoundedSurface` passes every evaluation along), so its evaluator is its
+/// basis's, through at most [`BASIS_DEPTH`] curve-bounded layers (`None` past them).
 ///
 /// # Errors
 ///
 /// Those of making the surface's NURB.
 pub fn certified_alignment_evaluator(k: &Kernel, surface: &Surface) -> Result<Option<EvalSurface>> {
+    let mut surface = surface;
+    let mut layers = 0;
+    while let SurfaceKind::CurveBounded(c) = surface.kind() {
+        if layers == BASIS_DEPTH {
+            return Ok(None);
+        }
+        layers += 1;
+        surface = c.basis();
+    }
     let Some(net) = super::p8::evaluation_net(k, surface)? else {
         return Ok(None);
     };
@@ -3683,8 +3704,10 @@ fn slope_charges(
 }
 
 /// [`slope_charges`] where `eval` (the net's certified evaluator) is given, infinite
-/// charges where it cannot bound them (no sign is proven then), and none for the
-/// kinds without a certified evaluator, which evaluate their own way (WR-57).
+/// charges where it cannot bound them (no sign is proven then, and no curvature is
+/// bounded); for the kinds without a certified evaluator, which evaluate their own way,
+/// an infinite charge on `F` and the drift (no end or kink sign is proven) and none on
+/// `F'` (the stationary test is the solve's own) (WR-57).
 #[allow(clippy::too_many_arguments)]
 fn charges_or_unproven(
     eval: Option<&EvalSurface>,
@@ -3701,7 +3724,7 @@ fn charges_or_unproven(
             f64::INFINITY,
             f64::INFINITY,
         )),
-        None => (0.0, 0.0, 0.0),
+        None => (f64::INFINITY, 0.0, f64::INFINITY),
     }
 }
 
@@ -4986,10 +5009,11 @@ mod tests {
         let (cf, _, _) =
             charges_or_unproven(Some(&eval), uv, dir, SurfParamType::U, 1.78, inside.f, 0.0);
         assert!(cf.is_finite(), "{cf}");
-        // (a kind without a certified evaluator is charged nothing)
+        // (a kind without a certified evaluator proves no slope sign, and keeps the
+        // solve's own curvature for its stationary test)
         assert_eq!(
             charges_or_unproven(None, uv, dir, SurfParamType::U, u_min, 0.25, -0.5),
-            (0.0, 0.0, 0.0)
+            (f64::INFINITY, 0.0, f64::INFINITY)
         );
     }
 

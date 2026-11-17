@@ -93,7 +93,10 @@ pub(crate) fn evaluation_slack(k: &Kernel, surface: &Surface) -> f64 {
 /// past them each direction's de Boor steps take affine rather than convex combinations,
 /// with factors at most `1 + 2 d / span` for `d` the distance past the end knot and `span`
 /// the end span's length, so the rounding grows by at most that factor to the degree per
-/// direction (as `solidcore`'s own `point_rounding` charges it). `None` for a rational net
+/// direction (the growth factor `solidcore`'s own `point_rounding` charges; that bound
+/// also has a rational weight term, which this slack does not need: inside the knots
+/// `sum N_i w_i |x_i| <= m w(uv)` for `m` the largest Euclidean coordinate, so the
+/// slack above bounds a rational net's point too). `None` for a rational net
 /// past its knots, whose weight sum is not bounded away from zero there, and for
 /// parameters that are not finite: no enclosure is claimed.
 pub(crate) fn evaluation_slack_at(k: &Kernel, surface: &Surface, uv: Point2) -> Option<f64> {

@@ -904,15 +904,15 @@ mod tests {
 
     /// `InvertPointNearSingularity` near an edge that is not collapsed (`gen1191`: the
     /// guess is at u = 0.996, and the boundary u = 1 runs from 4.003 to 36085 away from
-    /// the test point). The degenerate-parameter search converges there at the end
-    /// v = -0.652, the maximum of its alignment, and the iso-curve drop at that `v` lands
-    /// 35505.9 from the test point, against 1395.2 at the guess; main refuses (1001).
-    /// The drops at the parameters upstream's starts reach are candidates too, and the
-    /// nearest is kept: the one at v = 0.4624 lands 1163.2 away, proven nearer than the
-    /// guess (certified enclosures). Fails with only the search's drop (refused).
+    /// the test point, tangency-labs/solidcraft#18052). The method assumes that boundary
+    /// is a pole, and its drops land at best 1163.2 from the test point (v = 0.4624),
+    /// nearer than the guess (1395.2) but not the closest point: S(1, 0.41725) is
+    /// certified 9.399 away. The test point dropped onto the boundary finds a point
+    /// proven nearer than the answer, so the boundary is not a pole and the inversion
+    /// refuses (1001, main's status). Fails without the boundary check (the drop at
+    /// v = 0.4624 is reported found).
     #[test]
-    fn invert_near_singularity_keeps_the_nearest_drop() {
-        use solidcore::geom::certified;
+    fn invert_near_singularity_refuses_a_drop_off_a_boundary_that_is_not_a_pole() {
         let case = crate::case::regression_case(&Runner, "gen1191");
         let i: Inputs = case.parse().expect("inputs");
         let OpIn::Invert { p, dom, uv, tol } = &i.op else {
@@ -921,16 +921,14 @@ mod tests {
         let k = Kernel::default();
         let s = surface_of(&k, &i.surface).expect("surface").expect("a surface");
         let r = s.invert_point_near_singularity(&k, v3(*p), &dom_of(*dom), p2(*uv), *tol);
-        let inv = r.expect("gen1191: the nearest drop is an answer");
-        let found = s.evaluate_point(&k, inv.uv).expect("evaluate");
-        let guess = s.evaluate_point(&k, p2(*uv)).expect("evaluate");
-        let d = certified::distance(found, v3(*p));
-        let g = certified::distance(guess, v3(*p));
-        assert!(
-            d.value + d.bound < g.value - g.bound,
-            "gen1191: {d:?} is not proven nearer than the guess's {g:?}"
-        );
-        assert!((inv.uv.y - 0.462_430_875_879_150_77).abs() < 1e-12, "{:?}", inv.uv);
+        let e = r.expect_err("gen1191: a drop off a boundary that is not a pole is refused");
+        assert_eq!(status(&e), 1001.0, "gen1191: {e}");
+        // (the drop the search kept is proven farther than a point of that boundary)
+        let near = wr57_distance(&k, &s, v3(*p), Point2::new(1.0, 0.41725)).expect("enclosed");
+        let drop = wr57_distance(&k, &s, v3(*p), Point2::new(1.0, 0.462_430_875_879_150_77)).expect("enclosed");
+        assert!(near.1 < 10.0 && drop.0 > 1000.0 && near.1 < drop.0, "gen1191: {near:?} {drop:?}");
+        let row = rust_run(&i).unwrap_or_else(|_| panic!("gen1191: rust"));
+        assert_eq!(row, [1001.0], "gen1191: row");
     }
 
     /// `InvertPointNearSingularity` refuses an answer proven farther than its guess
@@ -959,7 +957,7 @@ mod tests {
     /// `[status]`).
     #[rustfmt::skip]
     const WR57_MOVED: &[(&str, &[f64], &[f64])] = &[
-        ("gen0014", &[0.0, 1.0, 0.0, 0.3333333333333333], &[0.0, 1.0, 0.0, 0.4444444444444444]),
+        ("gen0014", &[0.0, 1.0, 0.0, 0.3333333333333333], &[1001.0]),
         ("gen0047", &[0.0, 1.0, 0.9066324340674627, 0.5394037365288399], &[0.0, 1.0, 0.9066324340699695, 0.5394037496452493]),
         ("gen0053", &[1001.0], &[0.0, 1.0, -0.7956794078729252, 0.0]),
         ("gen0074", &[1001.0], &[0.0, 1.0, -0.07409559152995882, 0.7883623775104649]),
@@ -970,9 +968,10 @@ mod tests {
         ("gen0188", &[1001.0], &[0.0, 1.0, 1.0, 0.5538509292645661]),
         ("gen0231", &[0.0, 1.0, -0.9288773064566884, 0.4215134453827129], &[1001.0]),
         ("gen0263", &[0.0, 1.0, 4.9446034172910664, 0.19409115069965427], &[0.0, 1.0, 1.0, 0.19409115069965427]),
+        ("gen0270", &[0.0, 1.0, 0.0, 0.7777777777777778], &[1001.0]),
         ("gen0305", &[0.0, 1.0, 0.0, 0.2761485602687741], &[0.0, 1.0, 0.2222222222222222, 0.27614856026877416]),
         ("gen0313", &[0.0, 1.0, 0.8490544991340391, 0.7096605998269282], &[1001.0]),
-        ("gen0350", &[0.0, 1.0, 0.0, 1.0], &[0.0, 1.0, 0.0, 0.8888888888888888]),
+        ("gen0350", &[0.0, 1.0, 0.0, 1.0], &[1001.0]),
         ("gen0367", &[1001.0], &[0.0, 1.0, 0.6833358118884136, 1.0]),
         ("gen0386", &[0.0, 1.0, 0.9996021360682996, 0.6437453228585033], &[1001.0]),
         ("gen0424", &[0.0, 1.0, 0.007337507469351864, 0.3333333333333333], &[0.0, 1.0, 0.007337507469351885, 0.2969559706197508]),
@@ -1007,14 +1006,13 @@ mod tests {
         ("gen1152", &[0.0, 1.0, 0.504635940702727, 0.2306637224781882], &[1001.0]),
         ("gen1178", &[0.0, 1.0, 2.314920805189961, -0.3381767038753387], &[1001.0]),
         ("gen1183", &[0.0, 1.0, 1.5573592017675013, 0.885123558981613], &[1001.0]),
-        ("gen1191", &[1001.0], &[0.0, 1.0, 1.0, 0.46243087587915077]),
         ("gen1246", &[1001.0], &[0.0, 1.0, -0.3446844117534995, 2.4351420286874634]),
         ("gen1257", &[0.0, 1.0, 4.166142441029816, 0.261747880000477], &[0.0, 1.0, 0.4878583181380995, 0.261747880000477]),
         ("gen1298", &[0.0, 1.0, 0.033334114380528836, 0.8888888888888888], &[0.0, 1.0, 0.03333411438052887, 0.6666666666666666]),
         ("gen1304", &[1001.0], &[0.0, 1.0, 1.1324709099809074, 0.899876532946227]),
         ("gen1400", &[1001.0], &[0.0, 1.0, 0.9016104159623767, 2.4381581600504143]),
         ("gen1414", &[1001.0], &[0.0, 1.0, -1.7939064783174012, 1.0]),
-        ("gen1486", &[0.0, 1.0, 0.4444444444444444, 0.0], &[0.0, 1.0, 0.6666666666666666, 0.0]),
+        ("gen1486", &[0.0, 1.0, 0.4444444444444444, 0.0], &[1001.0]),
         ("gen1510", &[1001.0], &[0.0, 1.0, 3.1179564298330127, 0.0]),
         ("gen1511", &[0.0, 1.0, 2.7462086273793243, 0.7716294691231871], &[1001.0]),
         ("gen1545", &[0.0, 1.0, 2.5113871811481134, 0.9166749287312247], &[0.0, 1.0, 0.0, 0.9166749287312247]),
@@ -1046,6 +1044,57 @@ mod tests {
         Some((d.value - d.bound - slack, d.value + d.bound + slack))
     }
 
+    /// A lower bound on the distance from `p` to `s` over its natural domain, as the least
+    /// of [`solidcore::query::distance_bound::surface_distance_lower_bound`] over a grid of
+    /// boxes covering it, each subdivided on its own (asked for `want`): 4, 16 and then
+    /// 64 boxes a side, stopping once the bound is within `1e-6` relative of `want`.
+    fn wr57_split_lower_bound(k: &Kernel, s: &Surface, p: Vec3, want: f64) -> f64 {
+        use solidcore::query::distance_bound::surface_distance_lower_bound;
+        let nat = s.natural_uv_domain_with_nurb(k).expect("the domain");
+        let (u0, v0, u1, v1) = (nat.min().x, nat.min().y, nat.max().x, nat.max().y);
+        let mut lo = 0.0;
+        for n in [4_u32, 16, 64] {
+            let at = |a: f64, b: f64, i: u32| if i == n { b } else { a + (b - a) * f64::from(i) / f64::from(n) };
+            lo = f64::INFINITY;
+            for iu in 0..n {
+                for iv in 0..n {
+                    let b = Extent2d::from_points(
+                        Point2::new(at(u0, u1, iu), at(v0, v1, iv)),
+                        Point2::new(at(u0, u1, iu + 1), at(v0, v1, iv + 1)),
+                    );
+                    lo = lo.min(surface_distance_lower_bound(k, s, Some(&b), p, want).expect("the lower bound"));
+                }
+            }
+            if want - lo <= 1e-6 * want {
+                break;
+            }
+        }
+        lo
+    }
+
+    /// The nearest of 2001 samples on each edge of `dom` to `p`, with its enclosed
+    /// distance ([`wr57_distance`]); `None` where no sample is enclosed.
+    fn wr57_nearest_edge_point(k: &Kernel, s: &Surface, p: Vec3, dom: &Extent2d) -> Option<((f64, f64), Point2)> {
+        let (u0, v0, u1, v1) = (dom.min().x, dom.min().y, dom.max().x, dom.max().y);
+        let mut best: Option<((f64, f64), Point2)> = None;
+        for i in 0..=2000_u32 {
+            let t = f64::from(i) / 2000.0;
+            for q in [
+                Point2::new(u0, v0 + (v1 - v0) * t),
+                Point2::new(u1, v0 + (v1 - v0) * t),
+                Point2::new(u0 + (u1 - u0) * t, v0),
+                Point2::new(u0 + (u1 - u0) * t, v1),
+            ] {
+                if let Some(d) = wr57_distance(k, s, p, q) {
+                    if best.is_none_or(|(b, _)| d.1 < b.1) {
+                        best = Some((d, q));
+                    }
+                }
+            }
+        }
+        best
+    }
+
     /// WR-57 (#17856): every row of `InvertPointNearSingularity` that moved from main is
     /// replayed (the code checked is the code that blessed: the row agrees with the golden)
     /// and certified with enclosed distances from the test point:
@@ -1067,6 +1116,7 @@ mod tests {
     fn wr57_moved_inversions_are_certified() {
         let k = Kernel::default();
         let (mut proven_nearer, mut ties, mut globally_nearest, mut argued) = (0usize, 0usize, 0usize, 0usize);
+        let (mut refused_farther_than_guess, mut refused_off_a_pole) = (0usize, 0usize);
         let mut unproven: Vec<&str> = Vec::new();
         for &(name, main, new) in WR57_MOVED {
             let case = crate::case::regression_case(&Runner, name);
@@ -1078,7 +1128,7 @@ mod tests {
                     && row.iter().zip(new).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
                 "{name}: the code gives {row:?}, not the new row"
             );
-            let OpIn::Invert { p, uv, .. } = &i.op else {
+            let OpIn::Invert { p, uv, dom, .. } = &i.op else {
                 panic!("{name}: not an invert case");
             };
             let s = surface_of(&k, &i.surface).expect("surface").expect("a surface");
@@ -1107,12 +1157,19 @@ mod tests {
                     };
                     assert!(n.0 <= guess.1, "{name}: new {n:?} proven farther than the guess {guess:?}");
                     let global = crate::certify::nearest(&k, &s, None, v3(*p), Point2::new(new[2], new[3]));
-                    if global.hi - global.lo <= 1e-6 * global.hi {
+                    // (where the whole surface's bound stops short, the bound over a
+                    // grid of boxes, each its own subdivision: the least of them)
+                    let lo = if global.hi - global.lo <= 1e-6 * global.hi {
+                        global.lo
+                    } else {
+                        wr57_split_lower_bound(&k, &s, v3(*p), global.hi)
+                    };
+                    if global.hi - lo <= 1e-6 * global.hi {
                         globally_nearest += 1;
                     } else {
                         argued += 1;
                     }
-                    eprintln!("{name}: answered now, new {n:?} guess {guess:?} surface's lower bound {}", global.lo);
+                    eprintln!("{name}: answered now, new {n:?} guess {guess:?} surface's lower bound {lo}");
                 }
                 (4, 1) => {
                     let (Some(m), Some(guess)) = (at(main), guess) else {
@@ -1120,18 +1177,41 @@ mod tests {
                         eprintln!("{name}: unproven (past a rational net's knots), main {main:?}");
                         continue;
                     };
-                    assert!(m.0 > guess.1, "{name}: main {m:?} not proven farther than the guess {guess:?}");
-                    eprintln!("{name}: refused now, main {m:?} guess {guess:?}");
+                    if m.0 > guess.1 {
+                        refused_farther_than_guess += 1;
+                        eprintln!("{name}: refused now, main {m:?} proven farther than the guess {guess:?}");
+                    } else {
+                        // (main's answer on a boundary that is not a pole: a point of the
+                        // inversion domain's edges proven nearer, found by sampling them;
+                        // a sampled point found nearer is a proof, its absence none)
+                        let edge = wr57_nearest_edge_point(&k, &s, v3(*p), &dom_of(*dom));
+                        assert!(
+                            edge.is_some_and(|(e, _)| e.1 < m.0),
+                            "{name}: main {m:?} proven neither farther than the guess {guess:?} nor than an edge point {edge:?}"
+                        );
+                        refused_off_a_pole += 1;
+                        eprintln!("{name}: refused now, main {m:?} proven farther than the edge point {edge:?}");
+                    }
                 }
                 _ => panic!("{name}: an unexpected transition {main:?} -> {new:?}"),
             }
         }
         eprintln!(
             "{proven_nearer} answers proven nearer than main's, {ties} ties; {globally_nearest} answers \
-             now proven the closest point, {argued} not farther than the guess only (ARGUED); unproven {unproven:?}"
+             now proven the closest point, {argued} not farther than the guess only (ARGUED); refused: \
+             {refused_farther_than_guess} main proven farther than the guess, {refused_off_a_pole} than an edge \
+             point; unproven {unproven:?}"
         );
         assert_eq!(
-            (proven_nearer, ties, globally_nearest, argued, unproven.as_slice()),
+            (
+                proven_nearer,
+                ties,
+                globally_nearest,
+                argued,
+                refused_farther_than_guess,
+                refused_off_a_pole,
+                unproven.as_slice()
+            ),
             WR57_COUNTS,
             "the certified counts moved"
         );
@@ -1139,10 +1219,14 @@ mod tests {
 
     /// [`wr57_moved_inversions_are_certified`]'s counts: proven nearer, ties, answered now
     /// and proven the closest point, answered now and not farther than the guess only, and
-    /// the rows without an enclosure. The tie is gen1668 (the enclosures an ulp apart);
-    /// the two answered rows only not farther than the guess are gen0074 (the surface's
-    /// lower bound 0.2260 against the answer's 0.2310) and gen1191 (lower bound 0).
-    const WR57_COUNTS: (usize, usize, usize, usize, &[&str]) = (31, 1, 24, 2, &[]);
+    /// the refused rows where main's answer is proven farther than the guess and where it is
+    /// proven farther than a point of the inversion domain's edges (gen0270, whose answer
+    /// lies on an edge that is not a pole), and the rows without an enclosure. The tie is
+    /// gen1668 (the enclosures an ulp apart). gen0074's answer, 1.1e-4 from the domain's
+    /// `u_min` in a narrow valley, is proven the closest point by the split bound
+    /// ([`wr57_split_lower_bound`]: 0.2309564528332 against its 0.2309564528361; the whole
+    /// surface's subdivision stops at 0.2260). gen1191 is main's refusal again (#18052).
+    const WR57_COUNTS: (usize, usize, usize, usize, usize, usize, &[&str]) = (28, 1, 25, 0, 19, 1, &[]);
 
     /// Generated cases reach every op, and the comparable ones mostly compare values.
     #[test]
