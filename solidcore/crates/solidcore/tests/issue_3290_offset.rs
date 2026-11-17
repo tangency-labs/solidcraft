@@ -328,3 +328,129 @@ fn ninth_shape_preserves_rounded_corners_and_closure() {
         .iter()
         .any(|piece| piece.attribute.is_some_and(|a| a.corner_offset)));
 }
+
+#[test]
+fn trimmed_offset_samples_do_not_enter_source_clearance() {
+    use solidcore::curve::curve::p1::GlobalPointSolveOptions;
+    use solidcore::geom::global_solver::{SolutionRequested, SolverOperation};
+    use solidcore::surface::surface::p4::NoObject;
+    let k = Kernel::default();
+    let original = Curve::from(source());
+    let parts = source()
+        .subdivide_at_discontinuity(&k, ContinuityType::C0, ANG_TOL_DEG)
+        .unwrap();
+    let comp = CompositeCurve::with_curves(
+        3,
+        parts.into_iter().map(Curve::from).collect(),
+        true,
+        None,
+        None,
+    )
+    .unwrap();
+    let params = OffsetParams {
+        xsect_tol_3d: 1e-5,
+        approx_tol_3d: 2.5e-6,
+        plane_normal: Vec3::new(0., 0., 1.),
+        corner: OffsetCornerType::FilletCorner,
+        trim_results: true,
+        offset_distance: 1.,
+        match_parameterization: false,
+    };
+    let result =
+        CompositeCurve::create_offsets_of_many_curves(&k, &[&comp], &[2], &params).unwrap();
+    assert!(!result.offsets.is_empty());
+    for piece in result.offsets {
+        let interval = piece.curve.natural_interval();
+        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let point = piece
+                .curve
+                .evaluate_point(&k, interval.evaluate(fraction))
+                .unwrap();
+            let distances = original
+                .global_point_solve::<NoObject>(
+                    &k,
+                    &original.natural_interval(),
+                    SolverOperation::Minimize,
+                    point,
+                    1e-7,
+                    SolutionRequested::Single,
+                    &GlobalPointSolveOptions::default(),
+                )
+                .unwrap();
+            let nearest = distances
+                .as_slice()
+                .first()
+                .expect("closest point")
+                .start
+                .solution_value;
+            assert!(
+                nearest >= 1.0 - params.xsect_tol_3d,
+                "offset sample {point:?} is only {nearest} from the source"
+            );
+        }
+    }
+}
+
+#[test]
+fn degree_one_spline_square_offsets_each_corner() {
+    let points = [[0., 0.], [10., 0.], [10., 10.], [0., 10.], [0., 0.]];
+    let controls: Vec<_> = points.iter().map(|p| Point3::new(p[0], p[1], 0.)).collect();
+    let spline = BSplineCurve::create_canonical(&CanonicalData {
+        dim: 3,
+        degree: 1,
+        control_points: &controls,
+        form: BSplineCurveForm::Unspecified,
+        knot_multiplicities: &[2, 1, 1, 1, 2],
+        knots: &[0., 0.25, 0.5, 0.75, 1.],
+        knot_type: KnotType::Unspecified,
+        weights: None,
+        trim: None,
+    })
+    .unwrap();
+    let k = Kernel::default();
+    let comp = CompositeCurve::with_curves(3, vec![Curve::from(spline)], true, None, None).unwrap();
+    let p = OffsetParams {
+        xsect_tol_3d: 1e-5,
+        approx_tol_3d: 2.5e-6,
+        plane_normal: Vec3::new(0., 0., 1.),
+        corner: OffsetCornerType::FilletCorner,
+        trim_results: true,
+        offset_distance: 1.,
+        match_parameterization: false,
+    };
+    let result = CompositeCurve::create_offsets_of_many_curves(&k, &[&comp], &[2], &p).unwrap();
+    assert_eq!(result.offsets.len(), 8);
+    assert_eq!(unmatched(&k, &result.offsets), 0);
+    let mut corners = 0;
+    for piece in &result.offsets {
+        let attr = piece.attribute.expect("offset provenance");
+        assert_eq!(attr.curve, 0);
+        let interval = piece.curve.natural_interval();
+        let mid = piece
+            .curve
+            .evaluate_point(&k, interval.evaluate(0.5))
+            .unwrap();
+        if attr.corner_offset {
+            corners += 1;
+            assert!(
+                points[..4]
+                    .iter()
+                    .any(|q| ((mid.x - q[0]).hypot(mid.y - q[1]) - 1.).abs() < 1e-5),
+                "corner midpoint {mid:?}"
+            );
+        } else {
+            assert!(
+                [
+                    (mid.x + 1.).abs(),
+                    (mid.x - 11.).abs(),
+                    (mid.y + 1.).abs(),
+                    (mid.y - 11.).abs()
+                ]
+                .into_iter()
+                .any(|v| v < 1e-5),
+                "edge midpoint {mid:?}"
+            );
+        }
+    }
+    assert_eq!(corners, 4);
+}

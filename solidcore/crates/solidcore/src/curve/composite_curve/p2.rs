@@ -984,6 +984,62 @@ impl CompositeCurve {
     ) -> Result<TrimmedOffsets> {
         let mut p = *params;
 
+        // A direction change that is small in angle may still create an offset
+        // gap larger than the intersection tolerance. Split B-splines with an
+        // angle derived from that tolerance and the offset distance.
+        let distance = p.offset_distance.abs();
+        let mut expanded = Vec::with_capacity(curves.len());
+        let mut source_indices = Vec::with_capacity(curves.len());
+        let mut origin_indices = Vec::new();
+        let mut original_base = 0usize;
+        for comp in curves {
+            let mut segments = Vec::new();
+            let mut sources = Vec::new();
+            let mut split_any = false;
+            for (index, seg) in comp.segments.iter().enumerate() {
+                let mut parts = match seg.curve.kind() {
+                    CurveKind::BSpline(b) if distance > 0.0 && p.xsect_tol_3d > 0.0 => {
+                        let angle = (2.0 * (p.xsect_tol_3d / (2.0 * distance)).min(1.0).asin())
+                            .to_degrees()
+                            .min(crate::geom::tol::ANG_TOL_DEG);
+                        let pieces = b.subdivide_at_discontinuity(k, ContinuityType::C0, angle)?;
+                        if pieces.len() == 1 {
+                            // A full-domain trim can change the numerical representation;
+                            // retain the original when there is no discontinuity to split.
+                            vec![seg.curve.clone()]
+                        } else {
+                            split_any = true;
+                            pieces.into_iter().map(Curve::from).collect::<Vec<_>>()
+                        }
+                    }
+                    _ => vec![seg.curve.clone()],
+                };
+                if !seg.same_sense {
+                    parts.reverse();
+                }
+                for curve in parts {
+                    let mut copy = seg.clone();
+                    copy.curve = curve;
+                    segments.push(copy);
+                    sources.push(index);
+                    origin_indices.push(original_base + index);
+                }
+            }
+            expanded.push(if split_any {
+                std::borrow::Cow::Owned(CompositeCurve {
+                    dim: comp.dim,
+                    segments,
+                    closed: comp.closed,
+                })
+            } else {
+                std::borrow::Cow::Borrowed(*comp)
+            });
+            source_indices.push(sources);
+            original_base += comp.segments.len();
+        }
+        let expanded_refs: Vec<_> = expanded.iter().map(std::borrow::Cow::as_ref).collect();
+        let curves = expanded_refs.as_slice();
+
         // SolidCraft change (tangency-labs/smlib 54148db): corners that keep the curves'
         // curvature are made by CreateTaperExtrude only so far; here they would get no
         // corner curves at all.
@@ -1202,9 +1258,26 @@ impl CompositeCurve {
         let out = approx
             .into_iter()
             .zip(sources)
-            .map(|(curve, src)| OffsetPiece {
-                curve,
-                attribute: offsets.get(src).and_then(|o| o.attribute),
+            .map(|(curve, src)| {
+                let attribute = offsets.get(src).and_then(|o| o.attribute).map(|mut attr| {
+                    if let Some(sources) = source_indices.get(attr.composite_index as usize) {
+                        if let Some(&index) = sources.get(attr.curve as usize) {
+                            attr.curve = index as u64;
+                        }
+                        if attr.corner_offset {
+                            if let Some(&index) = sources.get(attr.other_curve as usize) {
+                                attr.other_curve = index as u64;
+                            }
+                        }
+                    }
+                    if let Some(ref mut origin) = attr.originator {
+                        if let Some(&index) = origin_indices.get(origin.key.0 as usize) {
+                            origin.key = ObjectKey(index as u64);
+                        }
+                    }
+                    attr
+                });
+                OffsetPiece { curve, attribute }
             })
             .collect();
         Ok(TrimmedOffsets {
