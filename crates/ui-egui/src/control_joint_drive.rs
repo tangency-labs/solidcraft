@@ -79,6 +79,8 @@ fn local_preview(app: &SolveApp) -> bool {
         || app.tool.is_some()
         || app.params.is_some()
         || app.applying.is_some()
+        || app.tree.redefine.is_some()
+        || crate::plugin_menu::editing_dialog_open(app)
         || app.session.active_sketch.is_some()
         || app.viewport.joint_handles.is_some()
         || crate::joint_drag::active(app)

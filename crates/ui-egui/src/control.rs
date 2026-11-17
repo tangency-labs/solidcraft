@@ -1572,8 +1572,8 @@ pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(
 }
 
 #[cfg(test)]
-mod tests {
-    fn joint_drive_design() -> (crate::scenario::Harness, u64, u64) {
+pub(crate) mod tests {
+    pub(crate) fn joint_drive_design() -> (crate::scenario::Harness, u64, u64) {
         let mut h = crate::scenario::Harness::new();
         for (name, x) in [("Frame", 0), ("Arm", 30), ("Follower", 60)] {
             h.app.run("component.activate", json!({"component": "root"})).unwrap();
@@ -1615,6 +1615,35 @@ mod tests {
 
     fn joint_angle(h: &mut crate::scenario::Harness, joint: u64) -> f64 {
         h.app.run("joint.inspect", json!({"joint": joint})).unwrap()["joints"][0]["values"][0]["value"].as_f64().unwrap()
+    }
+
+    pub(crate) fn assert_local_editor_interrupts_joint_drive(
+        h: &mut crate::scenario::Harness,
+        joint: u64,
+        open_editor: impl FnOnce(&mut crate::SolveApp),
+    ) {
+        let client = std::sync::Arc::new(());
+        let angle = joint_angle(h, joint);
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let source = h.app.session.doc.clone();
+        let document_id = h.app.session.document_id.clone();
+        let movement = begin_joint_drive(h, &client, joint);
+        let r = joint_drive(h, &client, json!({"action": "update", "movement": movement, "value": 30}));
+        assert_eq!(r["result"]["values"][0]["value"], 30.0, "{r}");
+        assert!(h.app.preview.active);
+
+        let revision = h.app.session.revision;
+        open_editor(&mut h.app);
+        assert_eq!(h.app.session.revision, revision, "opening the editor preserves the session revision");
+        h.app.drain_control(&h.ctx);
+        assert!(!h.app.control_joint_drive.active() && !h.app.preview.active);
+        let finish = joint_drive(h, &client, json!({"action": "finish", "movement": movement}));
+        assert_eq!(finish["ok"], false, "{finish}");
+        let begin = joint_drive(h, &client, json!({"action": "begin", "document_id": document_id, "joint": joint}));
+        assert_eq!(begin["ok"], false, "{begin}");
+        assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &source));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!(joint_angle(h, joint), angle);
     }
 
     #[test]
@@ -1752,6 +1781,20 @@ mod tests {
         let r = joint_drive(&mut h, &client, json!({"action": "begin", "document_id": document_id, "joint": arm}));
         assert_eq!(r["ok"], false, "{r}");
         assert_eq!(joint_angle(&mut h, arm), 0.0);
+    }
+
+    #[test]
+    fn external_joint_drive_ends_when_the_sketch_plane_editor_opens() {
+        let (mut h, arm, _) = joint_drive_design();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        let sketch = h.app.session.active_sketch.unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        assert_local_editor_interrupts_joint_drive(&mut h, arm, |app| {
+            crate::browser::redefine_sketch(app, sketch);
+            assert_eq!(app.tree.redefine, Some(sketch));
+            assert!(app.dialog.is_none() && app.session.active_sketch.is_none());
+        });
     }
 
     fn panel_command_app() -> crate::SolveApp {
