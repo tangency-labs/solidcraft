@@ -232,13 +232,14 @@ jobs:
           # crates below the apps, the web app, the vendored crates, the manifests and lockfile, the
           # toolchain and cargo config, and this workflow. #8227 put a native-only call in
           # crates/ui-egui and the merge queue passed it, because nothing built for wasm there.
+          # The plugin guide and its example crates count too: the wasm job builds the examples.
           deps_wasm_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
                 Cargo.lock|Cargo.toml|*/Cargo.toml) deps=true ;;
               esac
               case "$path" in
-                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml) wasm=true ;;
+                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml|docs/book/plugin-examples/*|docs/book/src/dev/plugins.md) wasm=true ;;
               esac
             done < "$1"
           }
@@ -1300,7 +1301,8 @@ jobs:
           echo "This push only merges main into a change that already passed; the heavy checks were not repeated. Passing run: $CARRIED" >> "$GITHUB_STEP_SUMMARY"
 
   # Every crate below the apps and the web app must build for the browser (`cargo xtask wasm`, a
-  # cargo check, no tests). In the merge queue for a group that reaches the wasm build (Select
+  # cargo check, no tests), and the plugin guide's example plugins must match the guide and build
+  # (`cargo xtask plugin-examples`). In the merge queue for a group that reaches the wasm build (Select
   # checks' `wasm`), where `ci` requires it; by hand with cross_compile.
   wasm:
     name: Compile WebAssembly
@@ -1318,6 +1320,7 @@ jobs:
           key: wasm
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - run: cargo xtask wasm
+      - run: cargo xtask plugin-examples
 
   # SolidCore's own checks (its required fmt, clippy, test, kernel-rig, goldens and wasm, and its
   # deny and publish-dry-run, in solidcore/.github/workflows/ci.yml, which GitHub does not run from

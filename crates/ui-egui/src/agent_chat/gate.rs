@@ -65,7 +65,10 @@ const FILE_EXTENSIONS: &[&str] = &[
 /// Commands that only read (not counted as changes). Section Analysis changes only the view, but
 /// each change is an undo step.
 fn reads_only(id: &str) -> bool {
-    (id.starts_with("inspect.") && id != "inspect.section")
+    // The engine finds a command ignoring case, so the plugin readers are matched the same way.
+    id.eq_ignore_ascii_case("plugin.inspect")
+        || id.eq_ignore_ascii_case("plugin.check")
+        || (id.starts_with("inspect.") && id != "inspect.section")
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
@@ -78,14 +81,14 @@ fn reads_only(id: &str) -> bool {
                 | "render.settings.get"
                 | "file.slicers"
                 | "engine.describe"
-                | "plugin.check"
         )
 }
 
 /// Commands that read or write a file by their nature: any string they are given in a path
 /// parameter is a file, whatever it looks like.
 fn is_file_verb(id: &str) -> bool {
-    if id == "plugin.inspect" || id == "plugin.check" {
+    // Ignoring case, as the engine finds the command: `PLUGIN.CHECK` reads the package too.
+    if id.eq_ignore_ascii_case("plugin.inspect") || id.eq_ignore_ascii_case("plugin.check") {
         return true;
     }
     id.starts_with("library.") || ["export", "import", "save", "open", "insert", "load", "write", "recover"].iter().any(|v| id.contains(v))
@@ -381,7 +384,10 @@ mod tests {
             assert!(question.contains("sample") && question.contains("make"), "{question}");
         }
         assert!(matches!(exec("plugin.inspect", json!({"path":"sample"})), Verdict::Ask(_)));
-        assert!(matches!(exec("plugin.check", json!({"path":"sample"})), Verdict::Ask(_)), "checking a package reads its files");
+        for id in ["plugin.check", "PLUGIN.CHECK", "Plugin.Check", "Plugin.Inspect"] {
+            assert!(matches!(exec(id, json!({"path":"sample"})), Verdict::Ask(_)), "{id}: checking a package reads its files");
+            assert!(reads_only(id) && is_file_verb(id), "{id} reads, and only reads, a file");
+        }
     }
 
     #[test]

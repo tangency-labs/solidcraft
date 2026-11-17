@@ -1,0 +1,16 @@
+[package]
+name = "plate-maker-src"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde_json = "1"
+wit-bindgen = "0.57"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
