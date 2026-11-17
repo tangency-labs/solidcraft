@@ -1590,8 +1590,11 @@ mod tests {
     /// intersection.
     #[test]
     fn a_closed_ribbon_crosses_itself_once_and_its_seam_is_no_crossing() {
-        let mut k = Kernel::default();
-        k.fixes = crate::kernel::UpstreamFixes::all();
+        use crate::nurbs::b_spline_surface::p1::SurfParamType;
+        let k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
         // seam at (10, 0), a quarter turn from the crossing at the origin
         let swept = figure_eight_ribbon(std::f64::consts::FRAC_PI_2);
         // (an offset surface: the kind whose validity test asks its self intersection)
@@ -1602,7 +1605,6 @@ mod tests {
         ));
         let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
         let closed = |p| ribbon.is_closed(&k, &dom, p, None, false).unwrap().0;
-        use crate::nurbs::b_spline_surface::p1::SurfParamType;
         assert!(
             closed(SurfParamType::U) || closed(SurfParamType::V),
             "the ribbon closes"
@@ -1624,8 +1626,10 @@ mod tests {
     /// and is kept; only the seam's two sides meeting is no self intersection.
     #[test]
     fn a_crossing_on_the_seam_line_is_kept() {
-        let mut k = Kernel::default();
-        k.fixes = crate::kernel::UpstreamFixes::all();
+        let k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
         let ribbon = figure_eight_ribbon(0.0);
         let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
         let x = ribbon
