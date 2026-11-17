@@ -251,6 +251,7 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
 }
 
+pub mod check;
 mod import;
 pub mod install;
 #[cfg(not(target_arch = "wasm32"))]
