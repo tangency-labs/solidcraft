@@ -69,12 +69,10 @@ use solidcore_record::{Region2, Seg2, Vec2};
 pub mod annotate;
 pub mod clip;
 pub mod cubic_pieces;
-pub mod flatten;
 pub mod grid;
 pub mod line;
 pub mod text;
 
-pub use flatten::flatten;
 pub use grid::{FillRule, Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, OnGrid, Piece};
 use text::{Font, TextRun};
 
