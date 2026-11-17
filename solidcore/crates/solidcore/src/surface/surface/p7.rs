@@ -100,7 +100,10 @@
 //!   aligned than the best sample is not the largest: then the best sample's solve,
 //!   and the end where the best sample is an end sample, are tried too, and the most
 //!   aligned maximum is kept. Upstream accepts any answer the solve reports found (a
-//!   minimum, or a point beside a kink).
+//!   minimum, or a point beside a kink). At a corner collapsed to a pole, where the
+//!   tangent has no value, an end is a maximum by the certified limit of the slope from
+//!   inside (an exact pole); where the tangent is not enclosed away from zero otherwise,
+//!   the solve's own stationary answer is accepted as upstream accepts it.
 //! - **Projection curve class.** `CreateParallelProjectionCurves` takes a [`Curve`] for
 //!   upstream's `const SmBSplineCurve&`; a curve outside the `SmBSplineCurve` classes
 //!   (B-spline, line, ellipse, hyperbola, parabola), which upstream's type rules out,
@@ -1310,9 +1313,12 @@ impl Surface {
         // above `SM_EFF_ZERO`. Where the net has a certified evaluator but a charge
         // cannot be bounded (`|w|` not above its error near a collapsed corner, the
         // partials failing, a charge not finite) the charges are infinite: no sign is
-        // proven there, so no end or kink is a maximum, and no stationary point is
-        // either (its curvature has no bound). The kinds without a certified
-        // evaluator (they evaluate their own way) prove no end or kink either (`F`'s
+        // proven there, so no end or kink is a maximum by these charges, and no
+        // stationary point either (its curvature has no bound), except at a collapsed
+        // corner (below: an exact pole's end by its limit slope, and upstream's
+        // stationary test where the tangent is not defined to the rounding). The kinds
+        // without a certified evaluator (they evaluate their own way) prove no end or
+        // kink either (`F`'s
         // charge infinite), and keep the stationary test on the solve's own `F'`
         // (its charge zero): what they accept is upstream's stationary answer only.
         let certified = certified_alignment_evaluator(k, self)?;
@@ -1347,9 +1353,34 @@ impl Surface {
             ignored(self.is_closed(k, &domain, singular_dir, None, true))?.is_some_and(|(c, _)| c);
         let grows_outward =
             |t: f64, f: f64, cf: f64| (t <= s_ivl.min() && f < -cf) || (t >= s_ivl.max() && f > cf);
+        // WR-57: at an end where the surface is exactly collapsed (a pole) `w` is zero, so
+        // `A` and its slopes have no value there and no charge bounds them; `A` is then
+        // taken at its limit from inside, and the end is a maximum where the limit of `F`
+        // is proven to grow outward ([`collapsed_end_slope`])
+        let [collapsed_min, collapsed_max] = [
+            collapsed_end_slope(k, self, uv, s_dir, singular_dir, s_ivl.min(), true)?
+                .is_some_and(|(f, e)| f < -e),
+            collapsed_end_slope(k, self, uv, s_dir, singular_dir, s_ivl.max(), false)?
+                .is_some_and(|(f, e)| f > e),
+        ];
+        let collapsed_grows_outward =
+            |t: f64| (t <= s_ivl.min() && collapsed_min) || (t >= s_ivl.max() && collapsed_max);
+        // WR-57: where `w` is not enclosed away from zero (a corner collapsed to the
+        // rounding, where the tangent and `A` are not defined to it and no bound on `F'`
+        // exists), the solve's own stationary answer is accepted as upstream accepts it
+        let undefined_tangent = |t: f64| {
+            certified
+                .as_ref()
+                .is_some_and(|e| tangent_not_enclosed(e, uv, singular_dir, t))
+        };
         let is_local_max = |t: f64, (f, f_prime, cf, cfp): (f64, f64, f64, f64)| -> bool {
-            (!closed && grows_outward(t, f, cf))
-                || (f.abs() < tol && cfp.is_finite() && f_prime - cfp <= scaled_zero())
+            (!closed && (grows_outward(t, f, cf) || collapsed_grows_outward(t)))
+                || (f.abs() < tol
+                    && if cfp.is_finite() {
+                        f_prime - cfp <= scaled_zero()
+                    } else {
+                        undefined_tangent(t)
+                    })
         };
         // the interior knots in the singular direction: where `A'` may jump (a kink)
         let knots: Vec<f64> = ignored(self.knots_with_nurb(k, singular_dir, Some(&s_ivl)))?
@@ -3627,6 +3658,21 @@ const BASIS_DEPTH: usize = 16;
 ///
 /// Those of making the surface's NURB.
 pub fn certified_alignment_evaluator(k: &Kernel, surface: &Surface) -> Result<Option<EvalSurface>> {
+    Ok(alignment_net(k, surface)?
+        .map(|n| EvalSurface::nurbs_closed(n.degree, n.knots, n.count, n.ctrl, [false; 2])))
+}
+
+/// The net [`certified_alignment_evaluator`] evaluates: degrees, knots, counts and the
+/// homogeneous control points (`ctrl[j·count[0] + i]`).
+struct AlignmentNet {
+    degree: [usize; 2],
+    knots: [Vec<f64>; 2],
+    count: [usize; 2],
+    ctrl: Vec<[f64; 4]>,
+}
+
+/// [`certified_alignment_evaluator`]'s net, `None` where it has none.
+fn alignment_net(k: &Kernel, surface: &Surface) -> Result<Option<AlignmentNet>> {
     let mut surface = surface;
     let mut layers = 0;
     while let SurfaceKind::CurveBounded(c) = surface.kind() {
@@ -3663,13 +3709,144 @@ pub fn certified_alignment_evaluator(k: &Kernel, surface: &Surface) -> Result<Op
             ctrl.push(h);
         }
     }
-    Ok(Some(EvalSurface::nurbs_closed(
-        [nurb.p(), nurb.q()],
-        [nurb.u_knots().to_vec(), nurb.v_knots().to_vec()],
-        [nu, nv],
+    Ok(Some(AlignmentNet {
+        degree: [nurb.p(), nurb.q()],
+        knots: [nurb.u_knots().to_vec(), nurb.v_knots().to_vec()],
+        count: [nu, nv],
         ctrl,
-        [false; 2],
-    )))
+    }))
+}
+
+/// `a b` exactly, as `fl(a b)` and the remainder `a b - fl(a b)` (exact by a fused
+/// multiply-add); `None` where the remainder may underflow or the product overflow.
+fn exact_product(a: f64, b: f64) -> Option<(f64, f64)> {
+    if a == 0.0 || b == 0.0 {
+        return Some((0.0, 0.0));
+    }
+    let p = a * b;
+    // (|a b| at least 2^-968 keeps the remainder, a multiple of ulp(a) ulp(b), normal)
+    (p.is_finite() && p.abs() >= f64::from_bits(0x0370_0000_0000_0000))
+        .then(|| (p, a.mul_add(b, -p)))
+}
+
+/// Whether the iso-curve of `net` at the end `e` of the singular direction (`singular_dir`'s
+/// parameter is `s`; `at_min` for the interval's start) is exactly one point, so that the
+/// derivative `w` across the singular direction is exactly zero there (WR-57, a collapsed
+/// corner): the knots are clamped at `e` (its first or last `degree + 1` knots are `e`), so
+/// the iso-curve is the rational curve of that end's row of control points, and every point
+/// of the row is exactly the first's (`x_j / w_j = x_0 / w_0`, compared as the exact products
+/// `x_j w_0` and `x_0 w_j`). `false` where any of that is not proven.
+fn exactly_collapsed(
+    net: &AlignmentNet,
+    singular_dir: SurfParamType,
+    e: f64,
+    at_min: bool,
+) -> bool {
+    let (dir, other) = if singular_dir == SurfParamType::U {
+        (0, 1)
+    } else {
+        (1, 0)
+    };
+    let (Some(knots), Some(&p), Some(&n), Some(&m)) = (
+        net.knots.get(dir),
+        net.degree.get(dir),
+        net.count.get(dir),
+        net.count.get(other),
+    ) else {
+        return false;
+    };
+    let clamped = if at_min {
+        knots.len() > p && knots.iter().take(p + 1).all(|&x| x == e)
+    } else {
+        knots.len() > p && knots.iter().rev().take(p + 1).all(|&x| x == e)
+    };
+    if !clamped || n == 0 || m == 0 {
+        return false;
+    }
+    let row = if at_min { 0 } else { n - 1 };
+    let [nu, _] = net.count;
+    let point = |j: usize| -> Option<[f64; 4]> {
+        let (i_u, i_v) = if dir == 0 { (row, j) } else { (j, row) };
+        net.ctrl
+            .get(i_v.checked_mul(nu)?.checked_add(i_u)?)
+            .copied()
+    };
+    let Some([x0, y0, z0, w0]) = point(0) else {
+        return false;
+    };
+    (1..m).all(|j| {
+        point(j).is_some_and(|[x, y, z, w]| {
+            [(x, x0), (y, y0), (z, z0)].iter().all(|&(c, c0)| {
+                match (exact_product(c, w0), exact_product(c0, w)) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => false,
+                }
+            })
+        })
+    })
+}
+
+/// The certified limit of `FindDegenParamForDirection`'s slope `F = A'(s)` at an end `e`
+/// of the singular direction's interval where the surface is exactly collapsed
+/// ([`exactly_collapsed`]), with its error bound (WR-57). There `w(e) = 0`, so
+/// `w(s) = (s - e) g(s)` with `g` smooth on the end's knot span and `g(e) = w_s(e)`,
+/// `g'(e) = w_ss(e) / 2`; where `w_s(e)` is proven non-zero the unit tangent tends to
+/// `σ g(e) / |g(e)|` (`σ = +1` from inside at the start, `-1` at the end) and `F` to
+/// `σ (P w_ss(e) / 2) / |w_s(e)| . dir` (`P = I - T T^T`), the formula of
+/// [`alignment_slopes`]' `F` with `(w, w')` replaced by `(w_s, w_ss / 2)`, charged the same
+/// way. That limit proven negative at the start (positive at the end) makes `A`, extended
+/// to `e` by its limit, strictly decrease into the interval near `e`: the end is a strict
+/// local maximum. `None` where `e` is not exactly collapsed, the partials fail or
+/// `|w_s(e)|` is not above its error.
+pub fn collapsed_end_slope(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    dir: Vec3,
+    singular_dir: SurfParamType,
+    e: f64,
+    at_min: bool,
+) -> Result<Option<(f64, f64)>> {
+    let Some(net) = alignment_net(k, surface)? else {
+        return Ok(None);
+    };
+    if !exactly_collapsed(&net, singular_dir, e, at_min) {
+        return Ok(None);
+    }
+    let (q, ws, wss) = if singular_dir == SurfParamType::U {
+        ([e, uv.y], (1, 1), (2, 1))
+    } else {
+        ([uv.x, e], (1, 1), (1, 2))
+    };
+    let eval = EvalSurface::nurbs_closed(net.degree, net.knots, net.count, net.ctrl, [false; 2]);
+    let Ok((d, err)) = certified_partials(&eval, q) else {
+        return Ok(None);
+    };
+    let get = |(i, j): (usize, usize)| -> Option<(Vec3, f64)> {
+        Some((*d.get(i)?.get(j)?, *err.get(i)?.get(j)?))
+    };
+    let (Some((a, ea)), Some((b2, eb2))) = (get(ws), get(wss)) else {
+        return Ok(None);
+    };
+    // (halving is exact)
+    let (b, eb) = (b2 * 0.5, eb2 * 0.5);
+    let r = a.length();
+    if r <= ea || r.is_nan() {
+        return Ok(None);
+    }
+    let t = a / r;
+    let t1 = (b - t * t.dot(b)) / r;
+    let sigma = if at_min { 1.0 } else { -1.0 };
+    let fc = sigma * t1.dot(dir);
+    // (alignment_slopes' bound on `F`, and its own rounding)
+    let rl = r - ea;
+    let delta = 2.0 * ea / r;
+    let bl = b.length();
+    let tau = bl / r;
+    let d1 = (eb + (2.0 + delta) * (bl + eb) * delta) / rl + tau * ea / rl;
+    let own = gamma(64) * (3.0 * tau * tau + tau + 1.0);
+    let error = (d1 + own) * (1.0 + gamma(16));
+    Ok((fc.is_finite() && error.is_finite()).then_some((fc, error)))
 }
 
 /// The rounding charges of `FindDegenParamForDirection`'s `F = A'(s)` and
@@ -3799,6 +3976,34 @@ pub fn alignment_slopes(
         f_prime: fpc,
         f_prime_error: d2 + own,
     })
+}
+
+/// Whether the derivative `w` across the singular direction at `uv` (with `s` replacing
+/// its singular coordinate) is not enclosed away from zero by `eval`'s certified partials
+/// (`|w|` not above its error bound): a point collapsed to the rounding, where the unit
+/// tangent of `FindDegenParamForDirection`'s alignment is not defined to it (WR-57).
+/// `false` where the partials fail.
+pub fn tangent_not_enclosed(
+    eval: &EvalSurface,
+    uv: Point2,
+    singular_dir: SurfParamType,
+    s: f64,
+) -> bool {
+    let (q, (i, j)) = if singular_dir == SurfParamType::U {
+        ([s, uv.y], (0, 1))
+    } else {
+        ([uv.x, s], (1, 0))
+    };
+    let Ok((d, e)) = certified_partials(eval, q) else {
+        return false;
+    };
+    match (
+        d.get(i).and_then(|r| r.get(j)),
+        e.get(i).and_then(|r| r.get(j)),
+    ) {
+        (Some(w), Some(&ew)) => w.length() <= ew,
+        _ => false,
+    }
 }
 
 /// The Newton solve of `FindDegenParamForDirection`

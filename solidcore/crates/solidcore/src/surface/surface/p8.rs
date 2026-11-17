@@ -3461,7 +3461,8 @@ impl Surface {
     /// dropped onto the iso curve at `sing_uv`'s good parameter (the boundary along
     /// `sing_dir`), over `uv_domain`'s interval in `sing_dir`, from `answer`'s
     /// parameter in it. `None` where the iso curve, the drop or the evaluation fails,
-    /// or the distance has no enclosure (`enclose`, the caller's).
+    /// the boundary point is not inside `uv_domain`, or the distance has no enclosure
+    /// (`enclose`, the caller's).
     ///
     /// # Errors
     ///
@@ -3532,6 +3533,10 @@ impl Surface {
         } else {
             Point2::new(boundary_param, t)
         };
+        // (a point of the surface only inside its uv domain: the drop runs out of bounds)
+        if !(at.x.is_finite() && at.y.is_finite() && uv_domain.contains_point(at, 0.0)) {
+            return Ok(None);
+        }
         let pt = match self.evaluate_point(k, at) {
             Ok(p) => p,
             Err(e) if passes(&e) => return Err(e),

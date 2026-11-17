@@ -2142,37 +2142,44 @@ mod tests {
     /// certified evaluator).
     const WR57_COUNTS: (usize, usize, usize, usize, usize, &[&str]) = (18, 42, 42, 0, 1, &[]);
 
-    /// The rows of `FindDegenParamForDirection` that main reports converged and the
-    /// search now refuses (#17856 r3): each case's name, main's row and the new row.
+    /// The rows of `FindDegenParamForDirection` whose answer is at a corner collapsed to a
+    /// pole (#17856 r4): each case's name and main's row, which the search keeps.
     #[rustfmt::skip]
-    const WR57_REFUSED: &[(&str, &[f64], &[f64])] = &[
-        ("gen0169", &[0.0, 0.0, -1.2049964921589695], &[1001.0, 0.0, -1.2049964921589695]),
-        ("gen0548", &[0.0, 1.703464449656554e-17, 1.0], &[1001.0, 0.0, 1.0]),
-        ("gen0952", &[0.0, 0.8875235301771784, 1.0], &[1001.0, 0.8875235301771784, 1.0]),
-        ("gen2767", &[0.0, -1.7376978109616448, -0.118736981594457], &[1001.0, -1.7376978109616448, -0.118736981594457]),
+    const WR57_COLLAPSED_CORNERS: &[(&str, &[f64])] = &[
+        ("gen0169", &[0.0, 0.0, -1.2049964921589695]),
+        ("gen0548", &[0.0, 1.703464449656554e-17, 1.0]),
+        ("gen0952", &[0.0, 0.8875235301771784, 1.0]),
+        ("gen2767", &[0.0, -1.7376978109616448, -0.118736981594457]),
     ];
 
-    /// WR-57 (#17856 r3): the rows main reports converged and the search now refuses
-    /// are replayed, and main's answer is checked not to be proven a local maximum of
-    /// the alignment by the certified slopes ([`wr57_moved_degen_answers_are_not_less_aligned`]'s
-    /// tests): no end proven to grow outward, no interior curvature proven negative.
-    /// Where the slopes have no bound there (the derivative across the singular
-    /// direction not above its certified error, at a collapsed corner) nothing is
-    /// proven, and an unbounded charge accepts nothing; main accepts these on the
-    /// solve's float signs. Each row's reason is printed and the reasons asserted.
+    /// WR-57 (#17856 r4): main's converged answers at a collapsed corner are kept. Each
+    /// row is replayed and must equal main's (r3 refused all four: 1001). At each answer the
+    /// derivative `w` across the singular direction is not enclosed away from zero by the
+    /// certified partials ([`solidcore::surface::surface::p7::tangent_not_enclosed`]), so
+    /// the alignment and its slopes have no bound there. Where the corner's row of control
+    /// points is exactly one point (a pole, knots clamped), the end is PROVEN a strict
+    /// local maximum of the alignment taken at its limit from inside: the certified limit
+    /// of `F = A'` there ([`solidcore::surface::surface::p7::collapsed_end_slope`]) is
+    /// negative at the interval's start beyond its error (gen0548 and gen0952; gen0548's
+    /// answer `1.7e-17` is the solve's, within that end's rounding). Where the row is a pole
+    /// only to the rounding (rational rows whose `x_j / w_j` differ in the last bits:
+    /// gen0169's curve-bounded basis, gen2767) the search keeps upstream's acceptance of the
+    /// solve's stationary answer (ARGUED). The reasons are asserted.
     #[test]
-    fn wr57_refused_degen_answers_are_not_proven_maxima() {
-        use solidcore::surface::surface::p7::{alignment_slopes, certified_alignment_evaluator};
+    fn wr57_collapsed_corner_answers_keep_main() {
+        use solidcore::surface::surface::p7::{
+            alignment_slopes, certified_alignment_evaluator, collapsed_end_slope, tangent_not_enclosed,
+        };
         let k = Kernel::default();
         let mut reasons: Vec<(&str, &str)> = Vec::new();
-        for &(name, main, new) in WR57_REFUSED {
+        for &(name, main) in WR57_COLLAPSED_CORNERS {
             let case = crate::case::regression_case(&Runner, name);
             let i: Inputs = case.parse().expect("inputs");
             let row = rust_run(&k, &i).unwrap_or_else(|_| panic!("{name}: rust"));
             assert!(
-                row.len() == new.len()
-                    && row.iter().zip(new).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
-                "{name}: the code gives {row:?}, not the new row"
+                row.len() == main.len()
+                    && row.iter().zip(main).all(|(a, b)| (a - b).abs() <= crate::REL_TOL * a.abs().max(b.abs())),
+                "{name}: the code gives {row:?}, not main's row {main:?}"
             );
             let OpIn::Degen { uv, dir, from_pole, sdir, .. } = &i.op else {
                 panic!("{name}: not a degen case");
@@ -2192,32 +2199,33 @@ mod tests {
             }
             let answer = Point2::new(main[1], main[2]);
             let at_s = if singular_u { main[1] } else { main[2] };
-            let scale = 1.0 + solidcore::nurbs::math::gamma(16);
-            let eval = certified_alignment_evaluator(&k, &s).expect("the evaluator");
-            let slopes = eval.as_ref().and_then(|e| alignment_slopes(e, answer, d, sd, at_s));
-            let reason = match (eval.is_some(), slopes) {
-                (false, _) => "no certified evaluator",
-                (true, None) => "the slopes have no bound (a collapsed corner)",
-                (true, Some(e)) => {
-                    let err = e.f_error * scale;
-                    let outward = (at_s <= lo && e.f < -err) || (at_s >= hi && e.f > err);
-                    let concave = e.f_prime + e.f_prime_error * scale < 0.0;
-                    assert!(!outward && !concave, "{name}: main's answer is proven a maximum: {e:?}");
-                    "no sign proven within the charges"
+            let eval = certified_alignment_evaluator(&k, &s).expect("the evaluator").expect("an evaluator");
+            assert!(tangent_not_enclosed(&eval, answer, sd, at_s), "{name}: the tangent is enclosed at main's answer");
+            assert!(alignment_slopes(&eval, answer, d, sd, at_s).is_none(), "{name}: the slopes are bounded");
+            // (the end the answer is at, to the rounding)
+            let at_min = (at_s - lo).abs() <= (at_s - hi).abs();
+            let end = if at_min { lo } else { hi };
+            assert!(tangent_not_enclosed(&eval, answer, sd, end), "{name}: the end is not collapsed");
+            let limit = collapsed_end_slope(&k, &s, answer, d, sd, end, at_min).expect("the limit slope");
+            let reason = match limit {
+                Some((f, e)) => {
+                    assert!(if at_min { f < -e } else { f > e }, "{name}: the limit slope {f} ± {e} is not proven outward");
+                    "a pole: the limit slope proven outward"
                 }
+                None => "a pole to the rounding only: upstream's acceptance (ARGUED)",
             };
-            eprintln!("{name}: main {main:?} refused now: {reason}");
+            eprintln!("{name}: main {main:?} kept: {reason} {limit:?}");
             reasons.push((name, reason));
         }
-        assert_eq!(reasons.as_slice(), WR57_REFUSED_REASONS, "the reasons moved");
+        assert_eq!(reasons.as_slice(), WR57_COLLAPSED_CORNER_REASONS, "the reasons moved");
     }
 
-    /// [`wr57_refused_degen_answers_are_not_proven_maxima`]'s reasons.
-    const WR57_REFUSED_REASONS: &[(&str, &str)] = &[
-        ("gen0169", "the slopes have no bound (a collapsed corner)"),
-        ("gen0548", "the slopes have no bound (a collapsed corner)"),
-        ("gen0952", "the slopes have no bound (a collapsed corner)"),
-        ("gen2767", "the slopes have no bound (a collapsed corner)"),
+    /// [`wr57_collapsed_corner_answers_keep_main`]'s reasons.
+    const WR57_COLLAPSED_CORNER_REASONS: &[(&str, &str)] = &[
+        ("gen0169", "a pole to the rounding only: upstream's acceptance (ARGUED)"),
+        ("gen0548", "a pole: the limit slope proven outward"),
+        ("gen0952", "a pole: the limit slope proven outward"),
+        ("gen2767", "a pole to the rounding only: upstream's acceptance (ARGUED)"),
     ];
 
     /// Generated cases cover every op, most of the comparable ones not deferred.
