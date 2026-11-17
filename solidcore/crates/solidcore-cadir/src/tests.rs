@@ -1754,3 +1754,91 @@ fn a_face_named_by_its_model_id_is_left_out_of_an_open_surface() {
         s.notes
     );
 }
+
+/// A region is built at the largest tolerance its faces carry (a STEP file's part states its own
+/// uncertainty, which CADIR gives every face of the part), else at the document's: the cube with
+/// one face at 0.05 mm is a record of that tolerance, still closed. An edge's own tolerance (one
+/// off its curve) stays that edge's: the cube with one edge at 0.05 mm is built at the
+/// document's.
+#[test]
+fn a_region_is_built_at_the_largest_tolerance_its_faces_carry() {
+    assert!(
+        (one(&cube()).brep.tolerance - tolerance(&cube())).abs() < 1e-15,
+        "the document's"
+    );
+    let mut ir = cube();
+    let mut wire = serde_json::to_value(&ir.model.faces[0]).unwrap();
+    wire["tolerance"] = serde_json::json!(0.05);
+    ir.model.faces[0] = serde_json::from_value(wire).unwrap();
+    let s = one(&ir);
+    assert!(
+        (s.brep.tolerance - 0.05).abs() < 1e-12,
+        "{}",
+        s.brep.tolerance
+    );
+    assert!((volume(&s) - 1000.0).abs() < 1e-6, "{}", volume(&s));
+    let mut ir = cube();
+    let mut wire = serde_json::to_value(&ir.model.edges[0]).unwrap();
+    wire["tolerance"] = serde_json::json!(0.05);
+    ir.model.edges[0] = serde_json::from_value(wire).unwrap();
+    assert!(
+        (one(&ir).brep.tolerance - tolerance(&ir)).abs() < 1e-15,
+        "an edge's own tolerance is not the region's"
+    );
+}
+
+/// A torus whose tube reaches its axis (a spindle torus: major radius 1 under the tube's 5, as
+/// cadmpeg reads a STEP torus written with a negative major radius) is its meridian circle
+/// revolved about its axis, as the STEP reader reads one: the circle starts where the torus does
+/// (`C + (R + r) x` at u = v = 0), turns towards the axis, and the side follows the tube radius's
+/// sign as a plain torus's does.
+#[test]
+fn a_spindle_torus_is_its_meridian_circle_revolved() {
+    use cadmpeg_ir::geometry::analytic::TorusSurface;
+    use solidcore_step::assembly::SweptSurface;
+    let (c, z, x) = (
+        Point3::new(1.0, 2.0, 3.0),
+        Vector3::new(0.0, 0.0, 1.0),
+        Vector3::new(1.0, 0.0, 0.0),
+    );
+    for r in [5.0, -5.0] {
+        let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Torus(
+            TorusSurface::try_new(c, z, x, 1.0, r).unwrap(),
+        ));
+        let Some((
+            geometry::FaceSurface::Swept(SweptSurface::Revolution {
+                profile,
+                origin,
+                axis,
+            }),
+            reversed,
+        )) = geometry::surface(&g).unwrap()
+        else {
+            panic!("not a revolution: {:?}", geometry::surface(&g))
+        };
+        assert_eq!((origin, axis), ([1.0, 2.0, 3.0], [0.0, 0.0, 1.0]));
+        let solidcore_record::brep::Curve::Circle { frame, radius } = profile else {
+            panic!("{profile:?}")
+        };
+        assert_eq!(radius, 5.0);
+        assert_eq!(
+            frame.origin,
+            [2.0, 2.0, 3.0],
+            "the tube's centre at C + R x"
+        );
+        assert_eq!(
+            (frame.x_axis, frame.y_axis),
+            ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+            "from x towards z"
+        );
+        assert_eq!(reversed, r < 0.0, "tube radius {r}");
+    }
+    // A torus whose tube stays clear of its axis is still the record's torus.
+    let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Torus(
+        TorusSurface::try_new(c, z, x, 20.0, 5.0).unwrap(),
+    ));
+    assert!(matches!(
+        geometry::surface(&g).unwrap(),
+        Some((geometry::FaceSurface::Record(_), false))
+    ));
+}
