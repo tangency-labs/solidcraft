@@ -452,6 +452,16 @@ impl ModelBody {
         })
     }
 
+    /// Whether [`ModelBody::plan_mesh_in_place_at`] is made already (tried, at least), so asking
+    /// for it does not plan now: a placed copy's is its definition's, shared by every copy.
+    pub fn plan_mesh_in_place_made(&self, q: crate::display_quality::DisplayQuality) -> bool {
+        let cells = match self.mesh_placement.as_deref() {
+            Some(placed) => placed.plan_mesh_cells(),
+            None => &self.plan_mesh,
+        };
+        cells.get(q.index()).is_some_and(|cell| cell.get().is_some())
+    }
+
     /// [`ModelBody::plan_mesh_at`] as a shared mesh and the move that places it, as
     /// [`ModelBody::mesh_in_place`] does for the reference mesh.
     pub fn plan_mesh_in_place_at(&self, q: crate::display_quality::DisplayQuality) -> Option<(Arc<Mesh>, crate::Mat)> {
@@ -823,6 +833,11 @@ impl ModelState {
         self.kept_separate.get(&feature).copied()
     }
 
+    /// The sources (indices into its `bodies`) body Pattern `feature` could not copy and left out.
+    pub fn pattern_left_out(&self, feature: u64) -> &[usize] {
+        self.pattern_left_out.get(&feature).map_or(&[], Vec::as_slice)
+    }
+
     /// Each edge fillet `feature` tapered (a point on it) with the radius spline it was given.
     pub fn tapered(&self, feature: u64) -> Option<&[(Vec3, kernel::Taper)]> {
         self.tapered.get(&feature).map(Vec::as_slice)
@@ -928,6 +943,10 @@ pub struct ModelState {
     /// How the pieces a join split off into bodies of their own touched the others (by feature
     /// id), for its notice.
     kept_separate: BTreeMap<u64, KeptSeparate>,
+    /// The sources (indices into its `bodies`) each body Pattern could not copy and left out (by
+    /// feature id), so the session keeps the names stored for their copies in their places
+    /// ([`crate::Feature::pattern_pins`]).
+    pattern_left_out: BTreeMap<u64, Vec<usize>>,
     /// For a feature saved before format 14 that split a body, a digest of the later features'
     /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
     /// the state stands for the feature only while those picks are the same.
@@ -1537,6 +1556,11 @@ pub struct FeatureResult {
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     pub results: Vec<FeatureResult>,
+    /// Imports whose SMLib check found a part to repair after they were shown, not yet taken by
+    /// a window ([`Model::take_import_notices`]), in the order their checks were settled.
+    import_notices: Vec<u64>,
+    /// The import check runs this model has put in `import_notices`, by feature.
+    told_imports: Vec<(u64, kernel::ImportChecks)>,
     pub param_errors: BTreeMap<String, String>,
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
@@ -2129,23 +2153,74 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
         if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
             continue;
         }
+        // A thread output already checked (only successful checks are recorded) passed.
         if checked_thread_output(&b.body) {
             #[cfg(test)]
             cost_tests::count(|c| c.reused_checks += 1);
             continue;
         }
-        check_feature_body(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
+        check_feature_body(&b.body).map_err(|e| kept_refused(&b.name, &e, &replaced(before, after)))?;
     }
     Ok(())
 }
 
 /// [`check_kept`] of bodies whose checks were detached from them ([`kernel::detach_kept`]), by
-/// body name, in order: the first that fails is the feature's error, as there.
-fn run_kept(checks: Vec<(String, kernel::KeptCheck)>) -> kernel::Result<()> {
+/// body name, in order: the first that fails is the feature's error, as there. `inputs` are the
+/// bodies the feature replaced ([`replaced`]), for that error.
+fn run_kept(checks: Vec<(String, kernel::KeptCheck)>, inputs: Vec<(String, Body, bool)>) -> kernel::Result<()> {
     for (name, check) in checks {
-        check.run().map_err(|e| kernel::KernelError::Failed(format!("body `{name}`: {e}")))?;
+        check.run().map_err(|e| kept_refused(&name, &e, &inputs))?;
     }
     Ok(())
+}
+
+/// The bodies of `before` a feature that made `after` replaced or used up: its inputs, whose own
+/// check says whether a refusal of its result is the feature's doing. Each with whether the
+/// feature used it up (no body of `after` has its name, as a join's tools), so that a refusal of
+/// one result is blamed on its own former self or on bodies it consumed, never on another body
+/// the same feature changed beside it.
+fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body, bool)> {
+    before
+        .bodies
+        .iter()
+        .filter(|old| !after.bodies.iter().any(|b| b.body.same_shape(&old.body)))
+        .map(|old| (old.name.clone(), old.body.clone(), !after.bodies.iter().any(|b| b.name == old.name)))
+        .collect()
+}
+
+/// The feature's error when the check of body `name`, which it keeps, refused it (`e`): naming
+/// the bodies among `inputs` that went into it (its own former self, by name, and the bodies the
+/// feature used up) whose SMLib form, as the feature took them, fails SMLib's check
+/// ([`kernel::failing_check`]), since the result's check reports their defects too. Checked only
+/// here, once the result is refused.
+///
+/// That is a check of each input as it is now, not a replay of the check that kept it at the end
+/// of its own feature, which ran on that step's own result ([`kernel::check_kept`]; for a
+/// boolean, as the separate solids a non-manifold result exports to). The body decoded from a
+/// result is a different SMLib form, which can fail where the result passed, so the message says
+/// what was checked: the body as it was before this feature, not that its own feature let a
+/// failure through.
+fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bool)]) -> kernel::KernelError {
+    let failing: Vec<&str> = inputs
+        .iter()
+        .filter(|(n, _, used_up)| *used_up || n == name)
+        .filter(|(_, b, _)| kernel::failing_check(b).is_ok_and(|c| c.is_some()))
+        .map(|(n, _, _)| n.as_str())
+        .collect();
+    let before = match failing.as_slice() {
+        [] => String::new(),
+        [only] if *only == name => " (SMLib's check fails it as it was before this feature)".to_string(),
+        [only] => format!(" (SMLib's check fails body `{only}` as it was before this feature)"),
+        many => format!(
+            " (SMLib's check fails bodies {} as they were before this feature)",
+            many.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
+        ),
+    };
+    match e {
+        // A panic the check caught stays one, so it is not cached as an ordinary refusal.
+        kernel::KernelError::Internal(m) => kernel::KernelError::Internal(format!("body `{name}`{before}: {m}")),
+        _ => kernel::KernelError::Failed(format!("body `{name}`{before}: {e}")),
+    }
 }
 
 /// Whether `after`, a state feature `f` evaluated to from `before` in an earlier evaluation, is
@@ -2569,6 +2644,8 @@ struct Change {
     tapered: Option<Vec<(Vec3, kernel::Taper)>>,
     /// A join's touching pieces it kept as bodies of their own.
     kept_separate: Option<KeptSeparate>,
+    /// A body Pattern's sources it left out.
+    pattern_left_out: Option<Vec<usize>>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
 }
@@ -2616,6 +2693,7 @@ impl ModelState {
             && others_same(&self.fitted, &before.fitted, feature)
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
+            && others_same(&self.pattern_left_out, &before.pattern_left_out, feature)
             && others_same(&self.named_faces, &before.named_faces, feature)
             && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
         if !same_rest {
@@ -2647,6 +2725,7 @@ impl ModelState {
             fitted: self.fitted.get(&feature).cloned(),
             tapered: self.tapered.get(&feature).cloned(),
             kept_separate: self.kept_separate.get(&feature).copied(),
+            pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
             named_faces: self.named_faces.get(&feature).cloned(),
         })
     }
@@ -2683,6 +2762,10 @@ impl ModelState {
         next.kept_separate.remove(&feature);
         if let Some(k) = change.kept_separate {
             next.kept_separate.insert(feature, k);
+        }
+        next.pattern_left_out.remove(&feature);
+        if let Some(l) = &change.pattern_left_out {
+            next.pattern_left_out.insert(feature, l.clone());
         }
         next.named_faces.remove(&feature);
         if let Some(p) = &change.named_faces {
@@ -2740,6 +2823,23 @@ fn mirror_placements_digest(doc: &Document, f: &Feature, plane: &PlaneRef, place
     }
     // A feature added after the mirror that builds on its copies needs them made for that.
     placement_reuse::copies_only_shown(doc, f).hash(&mut h);
+    for placed in placements.iter().map(|path| mirror_copy_frame(doc, f.component, path)) {
+        placed.is_some().hash(&mut h);
+        if let Some((component, frame, picked)) = placed {
+            component.hash(&mut h);
+            frame.iter().chain(&picked).flatten().for_each(|x| x.to_bits().hash(&mut h));
+        }
+    }
+    for b in bodies {
+        serde_json::to_string(&doc.body_offsets.get(&b.0)).unwrap_or_default().hash(&mut h);
+    }
+    h.finish()
+}
+
+/// What a body pattern's picked placements read: each placement's frame and the component its
+/// copies join, both in the feature's component, and each body's offset.
+fn pattern_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
     for placed in placements.iter().map(|path| mirror_copy_frame(doc, f.component, path)) {
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
@@ -3010,7 +3110,11 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
         // frame: copies of a root block, patterned in a component, move with the component.
-        FeatureKind::Pattern { bodies, .. } if !bodies.is_empty() => {
+        FeatureKind::Pattern { bodies, placements, .. } if !bodies.is_empty() => {
+            // Bodies picked where a placement shows them follow those placements, as a mirror's.
+            if !placements.is_empty() {
+                pattern_placements_digest(doc, f, placements, bodies).hash(&mut h);
+            }
             for b in bodies {
                 reads.placed_body(st, &b.0);
             }
@@ -3168,6 +3272,46 @@ fn now() -> web_time::Instant {
 impl Model {
     pub fn new() -> Self {
         Model::default()
+    }
+
+    /// An import's SMLib check of its parts is still running ([`kernel::ImportReport::checks`]).
+    pub fn checking_imports(&self) -> bool {
+        self.results.iter().any(|r| r.import_report.as_ref().is_some_and(|i| i.checking()))
+    }
+
+    /// Fold what the ended checks of each import found into its result: its report's issues and
+    /// its warning, as an import that waited for them has them. An import whose checks found a
+    /// part to repair, that no one was told of yet, joins [`Self::take_import_notices`] (in
+    /// history order). Checks still running are left to a later call.
+    ///
+    /// Which runs were told of is this model's own record ([`Self::import_notices`]), kept with
+    /// its copies, so a copy evaluated beside it (a scratch or look-ahead evaluation) cannot take
+    /// a notice from it, and a result restored from the evaluation cache is not told of twice.
+    pub fn settle_import_checks(&mut self) {
+        let (found, told) = (&mut self.import_notices, &mut self.told_imports);
+        for r in &mut self.results {
+            let Some(report) = r.import_report.as_ref() else { continue };
+            if report.checks.is_empty() || report.checking() {
+                continue;
+            }
+            let run = &report.checks;
+            let fresh = run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
+            if fresh {
+                told.push((r.id, run.clone()));
+            }
+            let settled = report.current().into_owned();
+            r.warning = import_warning(&settled.issues.iter().map(|i| i.detail.as_str()).collect::<Vec<_>>());
+            r.import_report = (!settled.issues.is_empty()).then(|| Arc::new(settled));
+            if fresh {
+                found.push(r.id);
+            }
+        }
+    }
+
+    /// The imports whose checks found a part to repair since the last call
+    /// ([`Self::settle_import_checks`]): a window says so for each, once.
+    pub fn take_import_notices(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.import_notices)
     }
 
     /// The final model state.
@@ -3709,7 +3853,7 @@ impl Model {
                 // A parameter with an error fails the features using it, with that error.
                 let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
                 // The bodies whose check runs beside the features after this one.
-                let mut apart: Option<Vec<(String, kernel::KeptCheck)>> = None;
+                let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body, bool)>)> = None;
                 let refused = checks.refused(i);
                 let mut r = match frame_error.or(bad_param) {
                     _ if cached.is_some() => Ok(()),
@@ -3742,7 +3886,7 @@ impl Model {
                         if !deferred {
                             Ok(())
                         } else if let Some(detached) = checks.detach(&state, &next) {
-                            apart = Some(detached);
+                            apart = Some((detached, replaced(&state, &next)));
                             Ok(())
                         } else {
                             check_kept(&state, &next)
@@ -3775,7 +3919,8 @@ impl Model {
                         ms: t0.elapsed().as_secs_f64() * 1000.0,
                     };
                     let name = f.name.clone();
-                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after)));
+                    let (after, inputs) = after;
+                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after, inputs)));
                 }
                 if r.is_ok() && cached.is_none() {
                     // Profiles picked by curves that no longer bound a profile exactly were found
@@ -3908,6 +4053,8 @@ impl Model {
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
         self.poses = poses;
         self.results = out;
+        // A cached import's result is as its check left it, not as the import first showed.
+        self.settle_import_checks();
         self.last_recomputed = recomputed;
         self.recomputed += recomputed;
         self.last_restored = restored;
@@ -4334,7 +4481,7 @@ pub(crate) fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String 
 /// and number, and a new copy has none (#12114). Names that don't split evenly (stored before
 /// every copy was named), and names of a design saved before then (`in_order`, see
 /// `Feature::pattern_names_in_order`), are read in the order the copies are made.
-fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: usize, in_order: bool) -> Option<usize> {
+pub(crate) fn pattern_name_slot(stored: usize, sources: usize, copies: usize, s: usize, k: usize, in_order: bool) -> Option<usize> {
     if !in_order && sources > 1 && stored > 0 && stored.is_multiple_of(sources) {
         let per = stored / sources;
         return (k < per).then(|| s.saturating_mul(per).saturating_add(k));
@@ -7332,6 +7479,7 @@ fn centered_extrude(
     sketch: Option<&SolvedSketch>,
     thin: Option<&crate::lineage::ThinWallRoles>,
     two_sided: bool,
+    one_sided_direction: Option<crate::Direction>,
 ) -> Result<Vec<Traced>> {
     if !plane.origin.is_finite()
         || !plane.x.is_finite()
@@ -7354,7 +7502,20 @@ fn centered_extrude(
     } else {
         [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))]
     };
-    let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, thin };
+    // An extrude that spans its sketch plane (symmetric) has no cap on it. One made from a
+    // one-sided extrude knows the way that one went ([`crate::Extent::one_sided_direction`]):
+    // its cap at the end where the old start cap lay, facing the same way, also answers to
+    // `start`, so a reference to `start` picked before still finds that cap and never the
+    // other. Without that record no cap answers to `start`. It spans the plane when its caps
+    // lie on both sides of it, as their roles already say.
+    let spans = caps[0].as_deref() == Some("bottom") && caps[1].as_deref() == Some("top") && !two_sided;
+    let start_name = || Some("start".to_string());
+    let cap_synonyms = match one_sided_direction.filter(|_| spans) {
+        Some(crate::Direction::Positive) => [start_name(), None],
+        Some(crate::Direction::Negative) => [None, start_name()],
+        Some(crate::Direction::Symmetric) | None => [None, None],
+    };
+    let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
     // wire can tilt an otherwise exact planar cap through numeric cancellation.
     // A side drawn in collinear pieces is one face (#1788), and so is a side along one ellipse
@@ -7589,8 +7750,13 @@ fn feature_tools_with_constructor(
                 let mut tools: Vec<Traced> = regions
                     .iter()
                     .map(|r| {
-                        let roles =
-                            crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
+                        let roles = crate::lineage::ProfileRoles {
+                            sketch: Some(&ss),
+                            region: Some(r),
+                            caps: caps.clone(),
+                            cap_synonyms: [None, None],
+                            thin: thin_roles.as_ref(),
+                        };
                         let corner = match extent.corner {
                             Some(c) => c,
                             None => draft_corner_for(&ss, r, len, taper, &mut notes)?,
@@ -7678,7 +7844,16 @@ fn feature_tools_with_constructor(
             let untrimmed = extent.to.is_none() && extent.from.is_none() && !extent.through_all;
             let mut tools = Vec::new();
             for r in &regions {
-                tools.extend(centered_extrude(&ss.plane, r, run_lo + off, run_hi + off, Some(&ss), thin_roles.as_ref(), extent.distance2.is_some())?);
+                tools.extend(centered_extrude(
+                    &ss.plane,
+                    r,
+                    run_lo + off,
+                    run_hi + off,
+                    Some(&ss),
+                    thin_roles.as_ref(),
+                    extent.distance2.is_some(),
+                    extent.one_sided_direction.filter(|_| direction == crate::Direction::Symmetric && extent.distance2.is_none()),
+                )?);
             }
             if let Some(fp) = &from_slope {
                 let shift = off - from;
@@ -8734,6 +8909,68 @@ fn mirror_matrix(pl: &Plane) -> Mat {
 /// of nested ones; perforated plates and perfboard grids need a few thousand (#3042).
 const MAX_INSTANCES: usize = 10_000;
 
+/// The copies of body `n` (source `s` of `count`) a body pattern makes, one per matrix of
+/// `mats` past the first. Picked where a placement (`path`) shows it, the body is copied where
+/// that placement shows it, and its copies go into the component that placement shows, as a
+/// mirror's do. A body of another component, picked by its own name, is copied as the pattern
+/// moves it in the world and kept beside its source, in its component (#4763).
+#[allow(clippy::too_many_arguments)]
+fn pattern_body(doc: &Document, f: &Feature, st: &mut ModelState, mats: &[Mat], count: usize, s: usize, n: &str, path: Option<&[u64]>) -> Result<()> {
+    let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+    let here = doc.component_transform(f.component);
+    let singular = || DocError::Invalid(format!("the component holding `{n}` has a singular placement"));
+    // How a pattern matrix (in this feature's component) moves the body's own geometry, and
+    // the component its copies go into when it is not this feature's.
+    let (component, frames) = match mirrored_placement(doc, f.component, &mb, path)? {
+        Some((component, frame, source)) => {
+            let inverse = |m: &Mat| crate::mat_inverse(m).ok_or_else(singular);
+            (Some(component), Some((inverse(&frame)?, source)))
+        }
+        None if mb.component != f.component => {
+            let frame = doc.component_transform(mb.component);
+            let inverse = |m: &Mat| crate::mat_inverse(m).ok_or_else(singular);
+            (Some(mb.component), Some((crate::mat_mul(&inverse(&frame)?, &here), crate::mat_mul(&inverse(&here)?, &frame))))
+        }
+        None => (None, None),
+    };
+    // Named against an index of the names in use: searching every body for every name tried
+    // took time cubic in the copies.
+    let mut names = BodyNames::new(st);
+    let mut made = Vec::with_capacity(mats.len());
+    for (k, m) in mats.iter().enumerate() {
+        let local = match &frames {
+            Some((into, from)) => crate::mat_mul(into, &crate::mat_mul(m, from)),
+            None => *m,
+        };
+        let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
+        let slot = pattern_name_slot(f.body_names.len(), count, mats.len(), s, k, f.pattern_names_in_order);
+        let name = pattern_copy_name(&mut names, f, slot, &mb.name);
+        made.push((name, copy, local));
+    }
+    // Only once every copy of this body is made: a body that fails leaves none behind.
+    for (name, copy, local) in made {
+        copy_sheet(st, &mb.name, &name, &local);
+        let mut body = ModelBody::traced_new(name, copy, f.id);
+        // A copy is its source moved: it is drawn from the source's triangles and display plans,
+        // moved, rather than meshed and planned again for every copy.
+        body.mesh_placement = placed_mesh::PlacedMesh::new(&mb, &local).map(Arc::new);
+        if let Some(c) = component.filter(|c| *c != f.component) {
+            // Kept in that component as a moved body is (and through later features).
+            body.component = c;
+            body.transferred = true;
+        }
+        st.bodies.push(body);
+    }
+    Ok(())
+}
+
+/// The warning of a body pattern that left out the bodies `skipped`, the first for `why`.
+fn pattern_skipped_note(skipped: &[String], why: &DocError) -> String {
+    let shown: Vec<&str> = skipped.iter().take(3).map(String::as_str).collect();
+    let more = if skipped.len() > 3 { format!(" (+{} more)", skipped.len() - 3) } else { String::new() };
+    format!("{} of the bodies could not be copied and were left out: {}{more} ({why})", skipped.len(), shown.join(", "))
+}
+
 /// Where a mirrored body was picked and where its copy goes, for a mirror in component `own`: the
 /// component the copy joins and that component's frame, and the frame the body's own geometry is
 /// in where it was picked (its placement `path`, with its offset), both in `own`'s frame. `None` in
@@ -9186,7 +9423,7 @@ fn source_label(doc: &Document, id: FeatureId) -> String {
 /// or mirror of bodies (its copies are bodies, which a pattern or mirror of features can't take).
 fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<(Vec<FeatureId>, Vec<Mat>)>> {
     match &src.kind {
-        FeatureKind::Pattern { features, pattern, bodies } if bodies.is_empty() => {
+        FeatureKind::Pattern { features, pattern, bodies, .. } if bodies.is_empty() => {
             Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern)?)))
         }
         FeatureKind::Mirror { features, plane, bodies, .. } if bodies.is_empty() => {
@@ -9724,7 +9961,7 @@ fn replay(
 mod model_cache;
 #[path = "eval_more.rs"]
 mod more;
-pub use model_cache::SavedModel;
+pub use model_cache::{PendingChecks, SavedModel};
 #[path = "eval_cell_grid.rs"]
 pub mod cell_grid;
 #[path = "eval_frame.rs"]
@@ -10155,7 +10392,7 @@ fn tapered_reach(
             envelopes.push(Traced::unnamed(kernel::extrude_tapered_between(&start_plane, &outer, 0.0, through, 0.0, sign, taper, corner)?));
         } else {
             let (lo, hi) = if sign < 0.0 { (base - through, base) } else { (base, base + through) };
-            envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false)?);
+            envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false, None)?);
         }
     }
     let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
@@ -10194,6 +10431,41 @@ fn offset_sheet(target: &ModelBody, face: usize, near: Vec3, travel: Vec3, offse
 /// is long and thin, the prism over it many times the extrude's length, and the extrude starts
 /// at the face's level instead.
 const FROM_SLOPE_LEAST_SINE: f64 = 0.087_155_742_747_658_17;
+
+/// What an edit of extrude `old` into `new` keeps of the way a one-sided extrude went
+/// ([`crate::Extent::one_sided_direction`]); `model` holds `old` as last evaluated. A one-sided
+/// extrude made symmetric records the way it went, read from its caps' names just after it was
+/// built: besides its `start` cap it has a cap named `top` when it went along the sketch normal
+/// and `bottom` when it went against it. A symmetric extrude edited and still symmetric keeps
+/// what it had. Any other edit records nothing, and so does a one-sided extrude whose caps do not
+/// say (one gone, both alike, or the extrude not built): no cap of it will answer to `start`.
+pub fn keep_one_sided_direction(model: &Model, old: &Feature, new: &mut Feature) {
+    let FeatureKind::Extrude { extent: after, .. } = &mut new.kind else { return };
+    let symmetric = |e: &crate::Extent| e.direction == crate::Direction::Symmetric && e.distance2.is_none();
+    let FeatureKind::Extrude { extent: before, .. } = &old.kind else {
+        after.one_sided_direction = None;
+        return;
+    };
+    after.one_sided_direction = if !symmetric(after) {
+        None
+    } else if symmetric(before) {
+        before.one_sided_direction
+    } else if before.distance2.is_some() {
+        None
+    } else {
+        model.result(old.id).filter(|r| !r.skipped && r.error.is_none()).and_then(|r| {
+            let has = |role: &str| {
+                let name = format!("F{}:{role}", old.id);
+                r.state.bodies.iter().any(|b| crate::name_lookup::body_has_face_named(b, &name))
+            };
+            match (has("start"), has("top"), has("bottom")) {
+                (true, true, false) => Some(crate::Direction::Positive),
+                (true, false, true) => Some(crate::Direction::Negative),
+                _ => None,
+            }
+        })
+    };
+}
 
 /// Whether two versions of one extrude start From Object on the same face: the same pick
 /// point, or faces on one plane, each found as its build finds it in `st`, the model before the
@@ -10281,7 +10553,7 @@ fn half_space_traced(input: &Traced, plane: &Plane, positive: bool, cap: &str) -
     // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
     let cap = Some(cap.to_string());
     let caps = if positive { [cap, None] } else { [None, cap] };
-    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
     Ok(Some(Traced::step(part, &[input, &tool])))
 }
 
@@ -10414,7 +10686,7 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
         }
         PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => PlaneRef::AtAngle {
             base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?),
-            axis_origin: *axis_origin,
+            axis_origin: axis_origin.clone(),
             axis_dir: *axis_dir,
             angle: angle.clone(),
             line: line.clone(),
@@ -11094,52 +11366,39 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Pattern { features, pattern, bodies } => {
+        FeatureKind::Pattern { features, pattern, bodies, placements } => {
             let mats = pattern_transforms(doc, vals, st, f.component, pattern)?;
             if bodies.is_empty() {
                 return replay(doc, vals, f, st, features, &mats, warning);
             }
-            // Bodies: each copy is a new body named after its source.
-            let here = doc.component_transform(f.component);
+            // Bodies: each copy is a new body named after its source. A body that cannot be
+            // copied (gone, its placement gone, or its geometry refused by the move) is left out
+            // with a warning: the others are still copied, and only a pattern that copies none
+            // fails.
+            let mut skipped = Vec::new();
+            let mut left_out = Vec::new();
+            let mut first_error = None;
             for (s, n) in bodies.iter().enumerate() {
-                let mb = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                // A body of another component is held in that component's frame, the pattern's
-                // transforms in this feature's: each copy is moved as the pattern moves it in the
-                // world and kept beside its source, in its component (#4763). Taken as they were,
-                // the copies landed where the source sits before its component is placed.
-                let owner = (mb.component != f.component).then(|| {
-                    let frame = doc.component_transform(mb.component);
-                    let singular = || DocError::Invalid(format!("the component holding `{n}` has a singular placement"));
-                    Ok::<_, DocError>((frame, crate::mat_inverse(&frame).ok_or_else(singular)?, crate::mat_inverse(&here).ok_or_else(singular)?))
-                });
-                let owner = owner.transpose()?;
-                // Named against an index of the names in use: searching every body for every
-                // name tried took time cubic in the copies.
-                let mut names = BodyNames::new(st);
-                for (k, m) in mats.iter().enumerate() {
-                    let local = match &owner {
-                        Some((frame, frame_inv, here_inv)) => {
-                            crate::mat_mul(&crate::mat_mul(frame_inv, &here), &crate::mat_mul(&crate::mat_mul(m, here_inv), frame))
-                        }
-                        None => *m,
-                    };
-                    let copy = moved_copy(&mb, kernel::transform_matrix(&mb.body, local)?, k + 1);
-                    let slot = pattern_name_slot(f.body_names.len(), bodies.len(), mats.len(), s, k, f.pattern_names_in_order);
-                    let name = pattern_copy_name(&mut names, f, slot, &mb.name);
-                    copy_sheet(st, &mb.name, &name, &local);
-                    let mut body = ModelBody::traced_new(name, copy, f.id);
-                    // A copy is its source moved: it is drawn from the source's triangles and
-                    // display plans, moved, rather than meshed and planned again for every copy.
-                    body.mesh_placement = placed_mesh::PlacedMesh::new(&mb, &local).map(Arc::new);
-                    if owner.is_some() {
-                        // Kept in that component as a moved body is (and through later features).
-                        body.component = mb.component;
-                        body.transferred = true;
-                    }
-                    st.bodies.push(body);
+                if let Err(e) = pattern_body(doc, f, st, &mats, bodies.len(), s, n, placements.get(s).map(Vec::as_slice)) {
+                    skipped.push(n.to_string());
+                    left_out.push(s);
+                    first_error.get_or_insert(e);
                 }
             }
-            Ok(())
+            // Kept so the names stored for the left-out copies stay theirs when the session pins
+            // the names the copies have now (`Feature::pattern_pins`).
+            st.pattern_left_out.remove(&f.id);
+            if !left_out.is_empty() {
+                st.pattern_left_out.insert(f.id, left_out);
+            }
+            match first_error {
+                Some(e) if skipped.len() == bodies.len() => Err(e),
+                Some(e) => {
+                    append_warning(warning, pattern_skipped_note(&skipped, &e));
+                    Ok(())
+                }
+                None => Ok(()),
+            }
         }
         FeatureKind::Mirror { features, plane, bodies, combine, placements } => {
             let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;
@@ -11601,16 +11860,26 @@ fn eval_feature_kind(
                 }
                 st.bodies.push(ModelBody::traced_new(name, b, f.id));
             }
-            if !imp.warnings.is_empty() {
-                let n = imp.warnings.len();
-                let shown: Vec<&str> = imp.warnings.iter().take(3).map(String::as_str).collect();
-                let more = if n > 3 { format!(" (+{} more)", n - 3) } else { String::new() };
-                *warning = Some(format!("{}{more}", shown.join("; ")));
+            // SMLib's check of the parts may still be running: the report holds it, and what it
+            // finds joins the warning when it ends ([`Model::settle_import_checks`]).
+            *warning = import_warning(&imp.warnings);
+            if warning.is_some() || !imp.report.checks.is_empty() {
                 *import_report = Some(Arc::new(imp.report.clone()));
             }
             Ok(())
         }
     }
+}
+
+/// An import's warning on its feature: its first three warnings, and how many more.
+pub(crate) fn import_warning<S: AsRef<str>>(warnings: &[S]) -> Option<String> {
+    let n = warnings.len();
+    if n == 0 {
+        return None;
+    }
+    let shown: Vec<&str> = warnings.iter().take(3).map(AsRef::as_ref).collect();
+    let more = if n > 3 { format!(" (+{} more)", n - 3) } else { String::new() };
+    Some(format!("{}{more}", shown.join("; ")))
 }
 
 /// A sketch feature: its links refreshed against the model before it, solved, its profiles
@@ -13149,7 +13418,7 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
         // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
         let section = Some("section".to_string());
         let caps = if positive { [section, None] } else { [None, section] };
-        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
+        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
         parts.push(Traced::step(part, &[input, &tool]));
     }
     Ok(parts)
@@ -13259,5 +13528,47 @@ mod named_face_lookup_tests {
         let st = parts(3);
         let hit = body_at(&st, &None, &[Vec3::new(22.0, 5.0, 5.0)]).unwrap();
         assert_eq!(st.bodies[hit].name, "Part1");
+    }
+}
+
+#[cfg(test)]
+mod kept_refused_tests {
+    use super::*;
+
+    /// #17689: a refused result names the inputs that already failed SMLib's check: its own
+    /// former self and the bodies the feature used up, never another body the same feature
+    /// changed beside it.
+    #[test]
+    fn a_refusal_names_only_the_results_own_inputs_that_failed_the_check() {
+        let text = include_str!("../../../tests/step-regressions/block_edge_off_its_face.step");
+        let bad = kernel::step_import(text).unwrap().bodies.remove(0).body;
+        assert!(kernel::failing_check(&bad).unwrap().is_some(), "the block fails the check");
+        let good = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        assert!(kernel::failing_check(&good).unwrap().is_none(), "the box passes it");
+        let e = kernel::KernelError::Failed("refused".into());
+        let msg = |name: &str, inputs: &[(String, Body, bool)]| kept_refused(name, &e, inputs).to_string();
+        // Both moved by one feature: the box's result is not blamed on the block.
+        let both = [("Bloco".to_string(), bad.clone(), false), ("Box1".to_string(), good.clone(), false)];
+        assert!(!msg("Box1", &both).contains("before this feature"), "{}", msg("Box1", &both));
+        assert!(msg("Bloco", &both).contains("body `Bloco` (SMLib's check fails it as it was before this feature)"), "{}", msg("Bloco", &both));
+        // The block used up by a join into the box: named.
+        let joined = [("Bloco".to_string(), bad, true), ("Box1".to_string(), good, false)];
+        assert!(
+            msg("Box1", &joined).contains("body `Box1` (SMLib's check fails body `Bloco` as it was before this feature)"),
+            "{}",
+            msg("Box1", &joined)
+        );
+    }
+
+    /// A panic caught while checking a kept body stays an internal error with the body named, so
+    /// the evaluation does not cache it as an ordinary refusal.
+    #[test]
+    fn a_panic_in_the_check_stays_internal() {
+        let good = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let inputs = [("Box1".to_string(), good, false)];
+        let internal = kept_refused("Box1", &kernel::KernelError::Internal("SMLib copy: boom".into()), &inputs);
+        assert!(matches!(&internal, kernel::KernelError::Internal(m) if m == "body `Box1`: SMLib copy: boom"), "{internal:?}");
+        let refused = kept_refused("Box1", &kernel::KernelError::Failed("refused".into()), &inputs);
+        assert!(matches!(refused, kernel::KernelError::Failed(_)), "{refused:?}");
     }
 }

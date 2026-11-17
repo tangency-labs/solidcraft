@@ -35,6 +35,12 @@
 //!   The boundary bounding planes are computed on copies of the caches' (each lazily
 //!   computed plane is the same), and `FindBoundaryStartPoints` runs on copies of the
 //!   caches, flags included.
+//! - **Closure is no self intersection** (not upstream, #18117). A self intersection
+//!   drops the curves that are the surface's own closure: UV curves that are the iso-lines
+//!   at the two ends of a closing direction, at the same parameter across, proved for the
+//!   whole curve from their control points ([`is_closure_curve`]); upstream reports a
+//!   closed surface's seam as a self intersection, so a closed offset surface failed its
+//!   own validity test. Every other curve, a crossing on or next to the seam too, is kept.
 //! - **Outputs.** The out-params become one returned [`SurfaceIntersection`] (a
 //!   `NULL` UV curve is `None`); on an error nothing is returned. `GrazingBoxProcess`
 //!   returns its curve instead of appending it to the out-params.
@@ -77,7 +83,7 @@
 //!   point reordering experiment), `SmCacheCheckOutIn` (the caches are owned by the
 //!   caller), the unused context argument and the `SM_ASSERT`s.
 
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, passed_on, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::ExtentPointType;
 use crate::geom::extent2d::Extent2d;
@@ -92,6 +98,7 @@ use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::gamma;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{surface_cache, SurfaceIntersection, TsectCurveType};
 use crate::surface::surface::Surface;
@@ -890,6 +897,54 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             )?;
         }
 
+        // not upstream (#18117): a self intersection drops the curves that are the
+        // surface's own closure, its seam's two sides meeting, and keeps every other
+        if self.base.doing_self_intersection {
+            let mut kept = TsectCurves {
+                curves_3d: Vec::new(),
+                uv_curves: [Vec::new(), Vec::new()],
+                curve_types: Vec::new(),
+                deviations: Vec::new(),
+            };
+            if curves_3d.len() != surface1_uv_curves.len()
+                || curves_3d.len() != surface2_uv_curves.len()
+                || curves_3d.len() != curve_types.len()
+                || curves_3d.len() != deviations.len()
+            {
+                return Err(SolidError::invalid_input(
+                    OP_DI,
+                    "intersection curve arrays of different lengths",
+                ));
+            }
+            for ((((c, uv1), uv2), t), d) in curves_3d
+                .into_iter()
+                .zip(surface1_uv_curves)
+                .zip(surface2_uv_curves)
+                .zip(curve_types)
+                .zip(deviations)
+            {
+                if is_closure_curve(&self.base, &uv1, &uv2)? {
+                    continue;
+                }
+                kept.curves_3d.push(c);
+                kept.uv_curves[0].push(uv1);
+                kept.uv_curves[1].push(uv2);
+                kept.curve_types.push(t);
+                kept.deviations.push(d);
+            }
+            let TsectCurves {
+                curves_3d: c,
+                uv_curves: [u1, u2],
+                curve_types: t,
+                deviations: d,
+            } = kept;
+            curves_3d = c;
+            surface1_uv_curves = u1;
+            surface2_uv_curves = u2;
+            curve_types = t;
+            deviations = d;
+        }
+
         // set outputs
         result.curves_3d.extend(curves_3d);
         result
@@ -902,6 +957,77 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         result.curve_types.extend(curve_types);
         Ok(result)
     }
+}
+
+/// Not upstream (#18117): whether the curve of a self intersection with the UV curves
+/// `uv1` and `uv2` is the surface's own closure, proved for the whole curve from its UV
+/// curves alone. In a direction the surface closes in over the intersected domain
+/// (`m_bClosedU`, `m_bClosedV`), one UV curve is the iso-line at that direction's one end
+/// and the other the iso-line at its other end, and at every curve parameter the two have
+/// the same parameter across: the two sides of the seam at one point of it. The closure is
+/// where a closed surface meets itself by being closed, no self intersection; upstream
+/// reports a closed surface's seam as one, so a closed offset surface failed its own
+/// validity test.
+///
+/// The proof is the B-splines' convex hull: the two UV curves are B-splines with the same
+/// degree, knots and weights (the trace builds both on the curve's knots), so every point
+/// of each is a convex combination, with the same coefficients, of its control points. When
+/// every control point of the one lies on its end, every control point of the other on the
+/// other end and each pair has the same parameter across, so does every point of the
+/// curves. Each comparison allows only the rounding of the traced UV points
+/// ([`uv_rounding`]). 3D positions decide nothing: a crossing whose points lie on the seam
+/// in space, its branches elsewhere in the domain, is kept, and so is a curve that touches
+/// the seam only at some points, or one whose UV curves are not such B-splines.
+///
+/// # Errors
+///
+/// Those of the control polygons.
+fn is_closure_curve(si: &SurfaceIntersector<'_>, uv1: &Curve, uv2: &Curve) -> Result<bool> {
+    let (CurveKind::BSpline(c1), CurveKind::BSpline(c2)) = (uv1.kind(), uv2.kind()) else {
+        return Ok(false);
+    };
+    if c1.degree()? != c2.degree()? || c1.knots(None)? != c2.knots(None)? {
+        return Ok(false);
+    }
+    let ((p1, w1), (p2, w2)) = (c1.control_polygon()?, c2.control_polygon()?);
+    if p1.len() != p2.len() || p1.is_empty() || w1 != w2 || w1.iter().any(|&w| w <= 0.0) {
+        return Ok(false);
+    }
+    let dom = si.uv_domains[0];
+    let tol = uv_rounding(&dom);
+    let same = |a: f64, b: f64| (a - b).abs() <= tol;
+    for (closed, along_u, lo, hi) in [
+        (si.closed_u[0], true, dom.u_min(), dom.u_max()),
+        (si.closed_v[0], false, dom.v_min(), dom.v_max()),
+    ] {
+        if !closed {
+            continue;
+        }
+        // (the parameter in the closing direction, the parameter across)
+        let split = |p: &Point3| if along_u { (p.x, p.y) } else { (p.y, p.x) };
+        for (end1, end2) in [(lo, hi), (hi, lo)] {
+            let closure = p1.iter().zip(&p2).all(|(a, b)| {
+                let ((at_a, across_a), (at_b, across_b)) = (split(a), split(b));
+                same(at_a, end1) && same(at_b, end2) && same(across_a, across_b)
+            });
+            if closure {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// The rounding of the traced UV points in the domain `dom`: `8 gamma(16)` of its largest
+/// coordinate (at least 1), the bound the boundary search takes for its chord distances. A traced
+/// UV curve's control points are its points plus a third of their scaled tangents, a few
+/// rounded operations on numbers of the domain's size, so a curve that is an iso-line in
+/// exact arithmetic is one up to this; nothing geometric is decided by it.
+fn uv_rounding(dom: &Extent2d) -> f64 {
+    let size = [dom.u_min(), dom.u_max(), dom.v_min(), dom.v_max()]
+        .iter()
+        .fold(1.0f64, |m, c| m.max(c.abs()));
+    8.0 * gamma(16) * size
 }
 
 /// `SmSurface::Evaluate1stDerivatives(uv, TRUE, TRUE, ..)`.
@@ -1073,7 +1199,7 @@ mod tests {
         let b = plane([0.0, 0.5, -0.5], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut si = SurfaceIntersector::new(k, &a, &d, &b, &d, false).unwrap();
-        let tol = si.this_approx_tol_3d;
+        let tol = si.this_approx_tol_3d();
         assert!(tol > 0.0 && tol < 0.01, "{tol}");
         let touching = |p: Point3, uv: [f64; 2]| {
             let mut t = TsectPnt::new();
@@ -1404,5 +1530,167 @@ mod tests {
             Some(&crate::error::intersect::IntersectFailure::StageFailed)
         );
         assert_eq!(e.cause(), Some(&built));
+    }
+
+    /// A ribbon closed round a figure eight (#18117): a vertical segment of height 2 swept
+    /// along the curve (10 sin t, 10 sin t cos t) from `t = start` round once, closed on a seam
+    /// at that point; the eight crosses itself at the origin.
+    fn figure_eight_ribbon(start: f64) -> Surface {
+        use crate::nurbs::crv_fit::p1::ParamMethod;
+        let mut points: Vec<Point3> = (0..16)
+            .map(|i| {
+                let t = start + std::f64::consts::TAU * f64::from(i) / 16.0;
+                Point3::new(10.0 * t.sin(), 10.0 * t.sin() * t.cos(), 0.0)
+            })
+            .collect();
+        let first = points.first().copied().unwrap();
+        points.push(first);
+        let path = BSplineCurve::interpolate_points(
+            &points,
+            None,
+            3,
+            None,
+            None,
+            true,
+            ParamMethod::ChordLength,
+        )
+        .unwrap();
+        let segment = BSplineCurve::interpolate_points(
+            &[Point3::new(0.0, 0.0, 0.0), Point3::new(0.0, 0.0, 2.0)],
+            None,
+            1,
+            None,
+            None,
+            false,
+            ParamMethod::ChordLength,
+        )
+        .unwrap();
+        Surface::from(
+            BSplineSurface::create_sweep_surface(&segment, &path, None, true, 1e-4).unwrap(),
+        )
+    }
+
+    /// Whether `c` is a vertical line (one x and y along it) through a point within `r` of
+    /// the axis.
+    fn vertical_line_near_axis(k: &Kernel, c: &Curve, r: f64) -> bool {
+        let iv = c.natural_interval();
+        let p: Vec<Point3> = [0.0, 0.5, 1.0]
+            .iter()
+            .map(|&f| c.evaluate_point(k, iv.evaluate(f)).unwrap())
+            .collect();
+        let first = p.first().copied().unwrap();
+        p.iter()
+            .all(|q| (q.x - first.x).abs() < 1e-3 && (q.y - first.y).abs() < 1e-3)
+            && first.x.hypot(first.y) < r
+    }
+
+    /// A closed ribbon (#18117): the offset by 0.5 of the figure-eight ribbon closed a quarter
+    /// turn from its crossing. Its self intersection is the one vertical line where the ribbon
+    /// crosses itself; the seam, where it meets itself by being closed, is no self
+    /// intersection.
+    #[test]
+    fn a_closed_ribbon_crosses_itself_once_and_its_seam_is_no_crossing() {
+        use crate::nurbs::b_spline_surface::p1::SurfParamType;
+        let k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
+        // seam at (10, 0), a quarter turn from the crossing at the origin
+        let swept = figure_eight_ribbon(std::f64::consts::FRAC_PI_2);
+        // (an offset surface: the kind whose validity test asks its self intersection)
+        let ribbon = swept.create_offset_surface(&k, 0.5, 1e-4).unwrap().unwrap();
+        assert!(matches!(
+            ribbon.kind(),
+            crate::surface::surface::SurfaceKind::OffsetSurface(_)
+        ));
+        let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
+        let closed = |p| ribbon.is_closed(&k, &dom, p, None, false).unwrap().0;
+        assert!(
+            closed(SurfParamType::U) || closed(SurfParamType::V),
+            "the ribbon closes"
+        );
+        let x = ribbon
+            .global_surface_intersect(&k, &dom, &ribbon, &dom, [false, false], None, None)
+            .unwrap();
+        assert_eq!(x.curves_3d.len(), 1, "{:?}", x.curve_types);
+        assert_eq!(x.curve_types.first(), Some(&TsectCurveType::Crossing));
+        assert!(
+            vertical_line_near_axis(&k, x.curves_3d.first().unwrap(), 5.0),
+            "the one curve is the crossing"
+        );
+    }
+
+    /// The figure-eight ribbon closed at its crossing (#18117): there the ribbon's two
+    /// branches cross on the seam line itself, so every point of the crossing is a point of the
+    /// seam in space. It is still a crossing (one branch on the seam, the other halfway round)
+    /// and is kept; only the seam's two sides meeting is no self intersection.
+    #[test]
+    fn a_crossing_on_the_seam_line_is_kept() {
+        let k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
+        let ribbon = figure_eight_ribbon(0.0);
+        let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
+        let x = ribbon
+            .global_surface_intersect(&k, &dom, &ribbon, &dom, [false, false], None, None)
+            .unwrap();
+        assert!(!x.curves_3d.is_empty(), "the crossing is kept");
+        for (c, t) in x.curves_3d.iter().zip(&x.curve_types) {
+            assert_eq!(*t, TsectCurveType::Crossing);
+            assert!(
+                vertical_line_near_axis(&k, c, 1e-3),
+                "the crossing at the origin"
+            );
+        }
+    }
+
+    /// A curve that touches the seam only at some points is no closure (#18117): its first
+    /// UV curve is on the seam's low side at its ends and at a quarter, half and three
+    /// quarters along, and off it between; its second runs along the seam's high side.
+    #[test]
+    fn a_curve_touching_the_seam_at_points_is_no_closure() {
+        use crate::nurbs::crv_fit::p1::ParamMethod;
+        let k = Kernel::default();
+        let ribbon = figure_eight_ribbon(std::f64::consts::FRAC_PI_2);
+        let dom = ribbon.natural_uv_domain_with_nurb(&k).unwrap();
+        let si = SurfaceIntersector::new(&k, &ribbon, &dom, &ribbon, &dom, false).unwrap();
+        assert!(si.doing_self_intersection);
+        assert!(si.closed_v[0] && !si.closed_u[0], "the ribbon closes in v");
+        let (lo, hi) = (dom.v_min(), dom.v_max());
+        // polylines through equally spaced points (uniform parameters): along u, the first
+        // at v = lo on every other point and 0.05 above it between
+        let polyline = |v: &dyn Fn(u32) -> f64| {
+            let points: Vec<Point3> = (0..9u32)
+                .map(|i| {
+                    let u = dom.u_min() + (dom.u_max() - dom.u_min()) * f64::from(i) / 8.0;
+                    Point3::new(u, v(i), 0.0)
+                })
+                .collect();
+            Curve::from(
+                BSplineCurve::interpolate_points(
+                    &points,
+                    None,
+                    1,
+                    None,
+                    None,
+                    false,
+                    ParamMethod::Uniform,
+                )
+                .unwrap(),
+            )
+        };
+        let touching = polyline(&|i| if i % 2 == 0 { lo } else { lo + 0.05 });
+        let along_seam = polyline(&|_| hi);
+        let seam = polyline(&|_| lo);
+        // at the five points the UV curves are the seam's two sides
+        let iv = touching.natural_interval();
+        for f in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let p = touching.evaluate_point(&k, iv.evaluate(f)).unwrap();
+            assert!((p.y - lo).abs() < 1e-12, "{f}: {p:?}");
+        }
+        assert!(!is_closure_curve(&si, &touching, &along_seam).unwrap());
+        // the seam itself is the closure
+        assert!(is_closure_curve(&si, &seam, &along_seam).unwrap());
     }
 }
