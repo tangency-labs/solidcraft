@@ -36,7 +36,7 @@
 //! Foundation: [`math`], [`error`], [`kernel`], [`limits`], [`topology`], [`geom`]. Algorithm layers (filled
 //! in as units are ported, see `plan/modules.toml`): [`nurbs`], [`curve`],
 //! [`surface`], [`intersect`], [`boolean`], [`blend`], [`offset`], [`heal`], [`mass`],
-//! [`query`], [`sweep`], [`primitive`].
+//! [`query`], [`sweep`], [`primitive`]. Not upstream: [`weld`] (weld display geometry).
 #![forbid(unsafe_code)]
 
 pub mod error;
@@ -62,6 +62,7 @@ pub mod profile;
 pub mod query;
 pub mod surface;
 pub mod sweep;
+pub mod weld;
 
 pub use error::{EntityRef, Result, SolidError};
 pub use heal::face_props::Tri;
