@@ -3613,18 +3613,30 @@ mod tests {
                 .fb
                 .trim_geom(&m.k, g, &mut ivl)
                 .expect_err("the trim is refused");
+            // The margin by which the request misses must be well beyond any snap
+            // the trims apply (`100 * scaled_zero` on a B-spline, `EFF_ZERO_SQRT` on
+            // a surface iso), relative to the domain's size: a miss of a few ulps
+            // would be a snapping defect, not an impossible request.
+            let beyond_snap = |margin: f64, scale: f64| {
+                let snap = solidcore::math::EFF_ZERO_SQRT * scale.max(1.0);
+                println!("{name}: misses by {margin:e} (snap {snap:e})");
+                assert!(margin > snap, "{name}: misses by only {margin:e}");
+            };
             match e.failure().map(|f| &f.reason) {
                 Some(Reason::Nurbs(NurbsFailure::BSpline(BSplineFailure::ParameterOutside {
                     parameter,
                     lo,
                     hi,
-                }))) => assert!(
-                    parameter < lo || parameter > hi,
-                    "{name}: {parameter} is inside [{lo}, {hi}]"
+                }))) => beyond_snap(
+                    (lo - parameter).max(parameter - hi),
+                    (hi - lo).abs().max(parameter.abs()),
                 ),
-                Some(Reason::Geom(GeomFailure::Disjoint { a, b })) => assert!(
-                    a[0] > a[1] || b[0] > b[1] || a[1] < b[0] || b[1] < a[0],
-                    "{name}: {a:?} and {b:?} overlap"
+                Some(Reason::Geom(GeomFailure::Disjoint { a, b })) => beyond_snap(
+                    (a[0] - a[1])
+                        .max(b[0] - b[1])
+                        .max(b[0] - a[1])
+                        .max(a[0] - b[1]),
+                    a.iter().chain(b.iter()).fold(0.0_f64, |s, x| s.max(x.abs())),
                 ),
                 _ => {
                     assert!(

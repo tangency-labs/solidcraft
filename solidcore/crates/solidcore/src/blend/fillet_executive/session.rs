@@ -327,6 +327,9 @@ struct SessionObjects<'target> {
     /// WR-459: the target's edges, each with its end vertices, and faces before filleting,
     /// kept by the clean-up.
     cleanup_kept: Option<(CleanupKeptEdges, BTreeSet<FaceId>)>,
+    /// WR-661: the target's boundary (lamina edges) and faces before filleting, which an
+    /// open result must keep to be kept ([`finish::OpenInput`]).
+    open_input: finish::OpenInput,
     extended_surfaces: BTreeMap<FaceId, Surface>,
     edge_caches: BTreeMap<EdgeId, CurveCache<FilletObject>>,
     target_serial: u64,
@@ -1548,6 +1551,7 @@ impl<'target> FilletSession<'target> {
                 attributes_before,
                 merge_attributes: None,
                 cleanup_kept: None,
+                open_input: finish::OpenInput::default(),
                 extended_surfaces: BTreeMap::new(),
                 edge_caches: BTreeMap::new(),
                 target_serial,

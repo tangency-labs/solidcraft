@@ -644,6 +644,15 @@ impl ExecutiveAccess<Handle> for Access {
         let b = self.brep_mut(brep)?;
         orient_brep(k, b, outward, maybe_not_solid, just_unify, faces_to_swap_uv)
     }
+    fn keeps_open_result(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &SolidError,
+    ) -> SolidResult<bool> {
+        // this harness never stitches, so it never reaches the open-result pass-over
+        missing()
+    }
     fn do_stitching(
         &mut self,
         _: &mut Kernel,

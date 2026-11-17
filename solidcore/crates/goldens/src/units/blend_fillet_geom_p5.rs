@@ -1241,6 +1241,52 @@ mod tests {
                 ),
                 "{name}: {e:?}"
             );
+            // The refused interval is [param1, param2]: each end is the rail parameter
+            // stored on its processed vertex use, else the rail's natural end. The
+            // reversal must be real, not a snap: the rail's points at the two ends are
+            // further apart than the solver's approximation tolerance, below which
+            // `TrimRailCurves` treats two trim points as one (`pnt0.distance(pnt1) >
+            // app_tol`).
+            let approx = i
+                .solvers
+                .get(usize::try_from(geom_solver(&i, *g)).expect("a solver"))
+                .expect("the solver")
+                .approx;
+            let reversed: Vec<(f64, f64)> = (0..2)
+                .filter_map(|ii| {
+                    let fb = &rm.fb;
+                    let rail = fb.geom(gid).expect("geometry").rail(ii).expect("rail");
+                    let curve = edge::curve(fb.brep(), rail).expect("curve").expect("rail curve");
+                    let natural = curve.natural_interval();
+                    let prim = eu1::primary_edgeuse(fb.brep(), rail)
+                        .expect("edge use")
+                        .expect("primary");
+                    let mate = eu1::mate(fb.brep(), prim).expect("mate").expect("mate");
+                    let end = |eu, fallback: f64| {
+                        let vu = fb.brep().edgeuse(eu).expect("edge use").vertexuse;
+                        let vu = vu.expect("vertex use");
+                        let v = fb.brep().vertexuse(vu).expect("vertex use").vertex;
+                        let v = v.expect("vertex");
+                        if fb.fillet_vertex(v).expect("vertex").is_processed() {
+                            fb.fillet_vertexuse(vu).expect("vertex use").uv_point().x
+                        } else {
+                            fallback
+                        }
+                    };
+                    let param1 = end(prim, natural.min());
+                    let param2 = end(mate, natural.max());
+                    (param1 > param2).then(|| {
+                        let p1 = curve.evaluate_point(&k, param1).expect("point");
+                        let p2 = curve.evaluate_point(&k, param2).expect("point");
+                        (param1 - param2, p1.distance(p2))
+                    })
+                })
+                .collect();
+            println!("{name}: reversed by (parameter, distance) {reversed:?}, approx {approx:e}");
+            assert!(
+                reversed.iter().any(|&(_, distance)| distance > approx),
+                "{name}: no rail trim reversed beyond the approximation tolerance"
+            );
         }
     }
 }

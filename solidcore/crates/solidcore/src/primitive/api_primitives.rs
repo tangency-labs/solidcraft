@@ -1061,11 +1061,15 @@ mod tests {
     #[test]
     fn blend_returns_its_face_or_its_surface_failure() {
         let mut k = Kernel::default();
-        // (1, 1): edges 0 and 1 of face 1 meet at a corner, where the reference curve
-        // point lies on the boundary curve, so the blend surface's `GetSampleValues`
-        // fails. Upstream drops that status and skins samples the failure left unset; the
-        // fork passes it on (`SER( pDSDef->GetSampleValues(..) )`, tangency-labs/smlib
-        // 21dcf69, WR-663), so no blend surface is made.
+        // Two of the three pairs make no blend surface; both fail in the blend surface's
+        // `GetSampleValues`:
+        // - (3, 2): the boundary binormal projects to a zero direction in the surface's
+        //   parameters, so its unitize fails (zero-length vector);
+        // - (1, 1): edges 0 and 1 of face 1 meet at a corner, where the reference curve
+        //   point lies on the boundary curve.
+        // Upstream drops those statuses and skins samples the failure left unset; the
+        // fork passes them on (`SER( pDSDef->GetSampleValues(..) )`, tangency-labs/smlib
+        // 21dcf69, WR-663), so no blend surface is made and the call fails.
         let mut failures = Vec::new();
         for (edge2_index, face2_index, has_face) in [(3, 2, false), (2, 2, true), (1, 1, false)] {
             let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
@@ -1085,7 +1089,12 @@ mod tests {
                 // `CreateBlendPrimitive` drops the edge-use overload's status and returns
                 // success with no face, the box unchanged; the fork returns the failure
                 // (c8f6a31, `SER( CreateBlendPrimitive(pEdgeuse1, ..) )`)
-                failures.push(blend.unwrap_err().operation());
+                failures.push(blend.unwrap_err());
+                assert_eq!(
+                    crate::topology::brep::p1::faces(&brep, None).unwrap(),
+                    faces,
+                    "a failed blend leaves the box's faces"
+                );
                 continue;
             }
             let face = blend.unwrap().expect("a blend face");
@@ -1094,13 +1103,22 @@ mod tests {
             assert!(after_faces.contains(&face));
             assert!(brep.face(face).unwrap().surface.is_some());
         }
-        // both fail in the blend surface's `GetSampleValues`: (3, 2) where the gap to the
-        // reference projects to a zero UV direction, (1, 1) at the corner
+        // the typed causes, by kind, operation and reason: (3, 2), then (1, 1)
         assert_eq!(
             failures,
             [
-                "geom::vector2d::Vec2::unitize",
-                "surface::surface::p6::DerivSurfDefinition::sample_values"
+                SolidError::invalid_input("geom::vector2d::Vec2::unitize", "zero-length vector"),
+                SolidError::surface_failed(
+                    "surface::surface::p6::DerivSurfDefinition::sample_values",
+                    "the reference curve point lies on the boundary curve"
+                ),
+            ]
+        );
+        assert_eq!(
+            failures.iter().map(SolidError::kind).collect::<Vec<_>>(),
+            [
+                crate::error::ErrorKind::InvalidInput,
+                crate::error::ErrorKind::Failed
             ]
         );
 

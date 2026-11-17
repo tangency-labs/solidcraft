@@ -2736,12 +2736,16 @@ mod wr56_certificates {
     }
 }
 
-/// WR-661 (#14246, `fillet_statuses_pass_on` retired): a fillet of an open sheet keeps its
-/// result. The stitched result has lamina edges, so the closed-solid orientation's "face
-/// uses gathered from both sides" check fires (walking a face use's neighbours crosses
-/// the sheet's boundary to its other side) without the sheet being non-orientable; the
-/// executive keeps the stitched body and `StitchAndOrient` unifies its normals. Both rows
-/// passed with the status ignored; passing it on unconditionally refused them (1005).
+/// WR-661 (#14246, `fillet_statuses_pass_on` retired): a fillet of an open sheet may keep
+/// its result. The stitched result has lamina edges, so the closed-solid orientation's
+/// "face uses gathered from both sides" check fires (walking a face use's neighbours
+/// crosses the sheet's boundary to its other side) without the sheet being
+/// non-orientable. The executive keeps the stitched body only when the input was open,
+/// every lamina edge of the result has its ends on the input's boundary, no lamina edge
+/// runs along another (an unstitched seam), and, once the filleting is done, the body
+/// passes the level-2 check; otherwise the 1005 is returned and the body is restored.
+/// The `degenerate-test5` and `shell_fillet2` rows pass all three and are kept, as with the
+/// status ignored; the open-shell row fails level 2 and is refused.
 #[cfg(test)]
 mod wr661_open_sheets {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -2774,5 +2778,40 @@ mod wr661_open_sheets {
     #[test]
     fn a_shell_fillet2_sheet_fillet_is_kept() {
         keeps_the_filleted_sheet("stubs4-shell_fillet2-e5-r0.5", 3);
+    }
+
+    /// The open-shell sheet is open too, and its stitched result has its ends on the
+    /// sheet's boundary, but it fails the level-2 check (nine gaps beyond tolerance, up to
+    /// 3.0e-5: main's known-failing entry for this case, tangency-labs/solidcraft#13733), so
+    /// the pass-over does not keep it: the orientation's failure (1005) is returned and the
+    /// body is put back as it was.
+    #[test]
+    fn an_open_shell_sheet_fillet_that_fails_level_2_is_refused() {
+        let name = "stubs4-open_shell-e5-r0.5";
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let faces = p1::faces(&body, None).unwrap();
+        assert_eq!(faces.len(), 6, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let error = fillet_selected(&mut k, &mut body, &selected, &input)
+            .ok()
+            .unwrap()
+            .expect_err("the invalid open result is refused");
+        assert_eq!(solidcore::error::upstream_status(&error), Some(1005), "{name}: {error:?}");
+        // the closed-solid orientation's "gathered from both sides" failure, not another one
+        assert!(
+            matches!(
+                error.failure().map(|f| &f.reason),
+                Some(solidcore::error::Reason::Topology(
+                    solidcore::error::topology::TopologyFailure::Inconsistent(
+                        "more face uses are connected than faces remain to be oriented"
+                    )
+                ))
+            ),
+            "{name}: {error:?}"
+        );
+        assert_eq!(p1::faces(&body, None).unwrap(), faces, "{name}: the body is put back");
     }
 }

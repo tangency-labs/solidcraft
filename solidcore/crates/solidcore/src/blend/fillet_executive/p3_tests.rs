@@ -54,6 +54,8 @@ struct Access {
     solver_tolerance: Option<f64>,
     brep_tolerances: Vec<f64>,
     stitch_lamina: u64,
+    /// What `keeps_open_result` answers.
+    keeps_open: bool,
     corner_metadata: Option<CornerView<Handle>>,
     corner_predicates: [bool; 2],
     corner_point: Point3,
@@ -440,6 +442,10 @@ impl ExecutiveAccess<Handle> for Access {
             );
         }
         self.orient_error.clone().map_or(Ok(()), Err)
+    }
+    fn keeps_open_result(&mut self, _: &mut Kernel, _: Handle, _: &SolidError) -> Result<bool> {
+        self.events.push("keeps_open");
+        Ok(self.keeps_open)
     }
     fn calc_corner_vertices(
         &mut self,
@@ -883,8 +889,10 @@ fn piecewise_return_restores_both_temporary_flags_on_success_and_error() {
 
 /// The stitch is retried five times with doubled tolerances; then the orientation's
 /// failure is the fillet's (fork 873c7c9, `SER( m_pTargetBrep->OrientTrimmedSurfaces(..) )`;
-/// upstream ignores it, WR-661). The one failure kept is the closed-solid check's "face
-/// uses gathered from both sides" on a result left open (lamina edges): that body is kept.
+/// upstream ignores it, WR-661). The one failure passed over is the closed-solid check's
+/// "face uses gathered from both sides" on a result left open (lamina edges), and only
+/// when `keeps_open_result` keeps that body (an open input whose boundary the result
+/// keeps, level-2 clean); otherwise the failure is returned. No other failure asks.
 #[test]
 fn stitching_retries_exactly_five_times_doubles_tolerance_then_passes_on_orientation_error() {
     let gathered = SolidError::topology(
@@ -893,16 +901,20 @@ fn stitching_retries_exactly_five_times_doubles_tolerance_then_passes_on_orienta
             crate::topology::brep::p3::GATHERED_BOTH_SIDES,
         ),
     );
-    for (lamina, error, kept) in [
-        (1, failure(), false),
-        (1, gathered.clone(), true),
-        (0, gathered, false),
+    // (lamina, orientation error, keeps_open answer, asked, kept)
+    for (lamina, error, keeps_open, asked, kept) in [
+        (1, failure(), true, false, false),
+        (1, gathered.clone(), true, true, true),
+        // the open result is not kept (closed input left open, a gap, level-2 failure)
+        (1, gathered.clone(), false, true, false),
+        (0, gathered.clone(), true, false, false),
     ] {
         let mut executive = state();
         executive.options.trimming = true;
         let mut access = Access {
             stitch_lamina: lamina,
             orient_error: Some(error.clone()),
+            keeps_open,
             ..Access::default()
         };
         let mut k = Kernel::default();
@@ -910,8 +922,14 @@ fn stitching_retries_exactly_five_times_doubles_tolerance_then_passes_on_orienta
         if kept {
             assert_eq!(result, Ok(()), "lamina {lamina}");
         } else {
-            assert!(result.is_err(), "lamina {lamina}: {result:?}");
+            assert_eq!(result, Err(error.clone()), "lamina {lamina}");
         }
+        assert_eq!(
+            access.events.contains(&"keeps_open"),
+            asked,
+            "lamina {lamina} keeps_open {keeps_open}"
+        );
+        access.events.retain(|event| *event != "keeps_open");
         let tolerances: &[f64] = if lamina == 0 {
             &[0.125]
         } else {
