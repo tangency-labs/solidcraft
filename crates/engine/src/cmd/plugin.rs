@@ -211,7 +211,7 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
         exporters: plugin::describe_exporters(s),
         param_warnings: vec![],
     })
-        .map_err(|e| bad("plugin.list", e.to_string()))
+    .map_err(|e| bad("plugin.list", e.to_string()))
 }
 
 fn import(s: &mut Session, p: &Value) -> Result<Value> {

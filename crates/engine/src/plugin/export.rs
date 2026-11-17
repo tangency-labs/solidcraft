@@ -2,8 +2,8 @@
 //! it claims. The plugin reads the design through the read-only commands its manifest lists, on a
 //! copy of the session that is thrown away, and returns the file's bytes; the app writes them to
 //! the path the user chose, in one step, only when the whole export succeeds.
-use super::*;
 use super::import::{FormatSlot, checked_package, format_slots, slot_for};
+use super::*;
 use crate::schema::plugin::{ExportedFile, ImporterInfo};
 
 /// Every installed, enabled export slot, sorted by id.

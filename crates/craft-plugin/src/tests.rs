@@ -270,7 +270,10 @@ fn an_export_slot_claims_extensions_reads_the_design_and_asks_for_no_files() {
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([]), "extensions");
     refused(&|v| v["runtime"]["entries"][0]["effect"] = json!("edit"), "effect");
     refused(&|v| v["runtime"]["entries"][0]["label"] = json!("two\nlines"), "label");
-    refused(&|v| v["runtime"]["entries"].as_array_mut().unwrap().push(json!({"name":"open","kind":"importer","extensions":["smp"]})), "runtime.entries");
+    refused(
+        &|v| v["runtime"]["entries"].as_array_mut().unwrap().push(json!({"name":"open","kind":"importer","extensions":["smp"]})),
+        "runtime.entries",
+    );
     // An exporter writes only the file the user chooses: no folders, groups or input folder.
     refused(&|v| v["runtime"]["permissions"] = json!({"files":[{"name":"out","write":true}]}), "runtime.permissions");
     refused(&|v| v["runtime"]["permissions"] = json!({"command_groups":["file"]}), "runtime.permissions");

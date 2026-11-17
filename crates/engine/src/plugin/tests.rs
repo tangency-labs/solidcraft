@@ -1207,7 +1207,8 @@ mod exporters {
         root.join("files").join(name).to_string_lossy().into_owned()
     }
     fn files(root: &Path) -> Vec<String> {
-        let mut names: Vec<String> = std::fs::read_dir(root.join("files")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let mut names: Vec<String> =
+            std::fs::read_dir(root.join("files")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
         names
     }

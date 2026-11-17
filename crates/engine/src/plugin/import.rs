@@ -105,8 +105,9 @@ pub(super) fn slot_for(session: &Session, kind: EntryKind, path: &str, format: O
     if claiming.len() > 1 {
         let ids = claiming.iter().map(|i| i.id.as_str()).collect::<Vec<_>>().join(", ");
         let verb = if kind == EntryKind::Exporter { "write" } else { "read" };
-        return Err(HostError::InvalidInput { field: "format".into(), reason: format!("{ids} all {verb} .{extension} files; name one in `format`") }
-            .into());
+        return Err(
+            HostError::InvalidInput { field: "format".into(), reason: format!("{ids} all {verb} .{extension} files; name one in `format`") }.into()
+        );
     }
     Ok(claiming.pop())
 }
