@@ -234,8 +234,17 @@ pub enum GrantStatus {
 pub struct StoredGrant {
     pub id: String,
     pub status: GrantStatus,
-    #[serde(flatten)]
-    pub grants: crate::plugin::Grants,
+    /// The exact manifest and component approved (`approval` of `plugin.install`); none for a
+    /// record from before approvals were bound to a package, which needs approval again.
+    pub package_hash: Option<String>,
+    pub command_groups: std::collections::BTreeSet<String>,
+    pub folders: Vec<crate::plugin::FileGrant>,
+    /// Memory in MiB approved above the app's ceiling for plugins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mib: Option<usize>,
+    /// Whether an importer may read the files beside the one it opens.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub input_folder: bool,
 }
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct GrantsResult {

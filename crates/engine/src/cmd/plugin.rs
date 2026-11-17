@@ -233,11 +233,18 @@ fn grants(s: &mut Session, _p: &Value) -> Result<Value> {
                 },
                 _ => GrantStatus::NotInstalled,
             };
-            StoredGrant { id: id.clone(), status, grants: grants.clone() }
+            StoredGrant {
+                id: id.clone(),
+                status,
+                package_hash: grants.package_hash.clone(),
+                command_groups: grants.command_groups.clone(),
+                folders: grants.folders.clone(),
+                memory_mib: grants.memory_mib,
+                input_folder: grants.input_folder,
+            }
         })
         .collect();
-    serde_json::to_value(GrantsResult { grants, param_warnings: vec![] })
-        .map_err(|e| bad("plugin.grants", e.to_string()))
+    serde_json::to_value(GrantsResult { grants, param_warnings: vec![] }).map_err(|e| bad("plugin.grants", e.to_string()))
 }
 
 fn revoke(s: &mut Session, p: &Value) -> Result<Value> {
