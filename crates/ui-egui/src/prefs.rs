@@ -1357,6 +1357,11 @@ preference_settings! {
     /// A saved design's tab and its Browser top row are named after its file, so a Save As or a
     /// renamed file shows (#7267). Off: both show the name stored in the design, as before.
     names_from_file: bool = true, PAGE_DESIGN => check_id("settings.names_from_file");
+    /// A 3MF, STL, OBJ, PLY or glTF file added to a design joins it as solid bodies where the
+    /// conversion can take them (`file.insert_mesh` and `doc.open` get `as_solid`), so booleans,
+    /// fillets, holes and a shell work on them (#1704). Off: the file joins as mesh bodies and
+    /// Convert Mesh makes a solid when asked.
+    import_meshes_as_solid: bool = false, PAGE_DESIGN => check_id_help("prefs.import_meshes_as_solid", "prefs.import_meshes_as_solid_help");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Ask separately when closing several unsaved designs, as before grouped saving.

@@ -891,6 +891,24 @@ fn open_stands_a_y_up_step_file_up() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// \`open\` hands \`as_solid\` to the mesh import: the mesh file opens as a solid body, and the reply
+/// names the bodies it converted.
+#[test]
+fn open_imports_a_mesh_as_a_solid() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 20, "height": 30}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-as-solid-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("box.stl").to_string_lossy().to_string();
+    tool(&mut s, "export", json!({"path": stl}));
+    let r = tool(&mut s, "open", json!({"path": stl, "as_solid": true}));
+    let solids = r["solid_bodies"].as_array().cloned().unwrap_or_default();
+    assert_eq!(solids.len(), 1, "the mesh came in as one solid: {r}");
+    let r = tool(&mut s, "open", json!({"path": stl}));
+    assert!(r["solid_bodies"].is_null(), "left as a mesh body by default: {r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn save_selects_container_or_json_and_reopens_by_contents() {
     let mut s = server();

@@ -15,7 +15,7 @@ use solidcraft_doc::point_cloud::{MAX_POINTS, UNITS};
 use solidcraft_io::Format;
 
 use super::check::whole;
-use super::types::{StringList, not_blank_pattern};
+use super::types::{LengthExpr, StringList, not_blank_pattern};
 
 /// How closely an exported mesh follows curved faces.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
@@ -529,6 +529,16 @@ pub struct OpenParams {
     /// 5000000.
     #[serde(default)]
     pub max_points: Option<MaxPoints>,
+    /// For a 3MF, STL, OBJ, PLY or glTF file only (ignored for other files): true opens the file
+    /// with each mesh it brings turned into a solid body where it can, as `mesh.convert` does.
+    /// The reply names the ones it converted as `solid_bodies`; a mesh it cannot convert stays a
+    /// mesh body, with a warning, and the file still opens. Default: false.
+    #[serde(default)]
+    pub as_solid: Option<bool>,
+    /// With `as_solid`: the length expression the conversion holds itself to. A point the mesh
+    /// gives up to this far from a plane still becomes that plane. Default: 0.05 mm.
+    #[serde(default)]
+    pub tolerance: Option<LengthExpr>,
 }
 
 /// Another SolidCraft that has the design open, from its lock file.
@@ -734,8 +744,11 @@ pub struct OpenedFile {
     pub errors: usize,
     /// The bodies the file made, by name.
     pub bodies: Vec<String>,
-    /// What the reading could not carry over.
+    /// What the reading could not carry over, and the meshes `as_solid` could not convert.
     pub warnings: Vec<String>,
+    /// The bodies `as_solid` turned into solids, by name. Only when it converted some.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub solid_bodies: Vec<String>,
     /// The component made for the file (its id); it is the one being worked in.
     pub component: u64,
     /// The component's name.

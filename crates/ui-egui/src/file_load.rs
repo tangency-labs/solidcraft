@@ -511,6 +511,11 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
     if freecad && !app.preferences.freecad_history {
         out.insert("history".into(), json!("solids"));
     }
+    // Import meshes as solids (#1704): the conversion is the import's own, so it reads the same
+    // whichever command brings the file in.
+    if app.preferences.import_meshes_as_solid && (solidcraft_engine::io::is_mesh_path(path) || solidcraft_engine::io::is_ply_path(path)) {
+        out.insert("as_solid".into(), json!(true));
+    }
     out
 }
 

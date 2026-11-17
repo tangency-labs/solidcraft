@@ -1482,3 +1482,22 @@ fn a_waiting_stand_up_offer_follows_the_preferences_when_it_is_made() {
     assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "no estimate for an offer that won't be made");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Preferences › Design › Import meshes as solids reaches the import as \`as_solid\` for every kind
+/// of mesh file, and leaves a design or a STEP file alone (#1704).
+#[test]
+fn import_meshes_as_solids_is_passed_to_a_mesh_import() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    assert!(!h.app.preferences.import_meshes_as_solid, "off by default");
+    for path in ["/tmp/part.stl", "/tmp/part.3mf", "/tmp/part.glb", "/tmp/part.ply"] {
+        assert!(crate::file_load::preferred_options(&h.app, path).get("as_solid").is_none(), "{path} is untouched by default");
+    }
+    h.app.preferences.import_meshes_as_solid = true;
+    for path in ["/tmp/part.stl", "/tmp/part.3mf", "/tmp/part.obj", "/tmp/part.glb", "/tmp/part.ply"] {
+        assert_eq!(crate::file_load::preferred_options(&h.app, path).get("as_solid"), Some(&json!(true)), "{path} joins as solids");
+    }
+    for path in ["/tmp/part.sc", "/tmp/part.step"] {
+        assert!(crate::file_load::preferred_options(&h.app, path).get("as_solid").is_none(), "{path} is not a mesh");
+    }
+}

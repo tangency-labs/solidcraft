@@ -25,6 +25,48 @@ pub(crate) fn imported_box() -> Session {
     Session::new(doc)
 }
 
+/// \`as_solid\` on an import converts each mesh body the file made, so the design gains a solid a
+/// boolean or a fillet can work on, and the timeline holds the Convert Mesh that made it.
+#[test]
+fn inserting_a_mesh_as_a_solid_converts_the_body_it_imported() {
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length":10,"width":20,"height":30}));
+    let path = std::env::temp_dir().join(format!("solidcraft-insert-as-solid-{}.stl", std::process::id()));
+    run(&mut source, "file.save_mesh", json!({"path":path}));
+    let mut s = Session::default();
+    let reply = run(&mut s, "file.insert_mesh", json!({"path":path,"as_solid":true}));
+    let solids: Vec<String> = reply["solid_bodies"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+    assert_eq!(solids.len(), 1, "one body converted: {reply}");
+    let state = s.model.state();
+    let body = state.body(&solids[0]).expect("the converted body is there").body.clone();
+    assert!(!body.is_mesh(), "the body is a solid, not a mesh");
+    assert!(body.validity().is_empty(), "the converted solid is closed");
+    assert!(s.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::MeshConvert { .. })), "the conversion is a feature, so a rebuild repeats it");
+    std::fs::remove_file(path).unwrap();
+}
+
+/// A mesh the conversion cannot take stays a mesh body, named in a warning: the import succeeds.
+#[test]
+fn inserting_a_mesh_as_a_solid_keeps_one_it_cannot_convert() {
+    // One triangle: a surface with a boundary, which no closed solid describes.
+    let path = std::env::temp_dir().join(format!("solidcraft-insert-as-solid-open-{}.stl", std::process::id()));
+    let mut stl = vec![0u8; 80];
+    stl.extend_from_slice(&1u32.to_le_bytes());
+    for value in [0.0f32, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0] {
+        stl.extend_from_slice(&value.to_le_bytes());
+    }
+    stl.extend_from_slice(&0u16.to_le_bytes());
+    std::fs::write(&path, &stl).unwrap();
+    let mut s = Session::default();
+    let reply = run(&mut s, "file.insert_mesh", json!({"path":path,"as_solid":true}));
+    assert!(reply["solid_bodies"].is_null(), "nothing converted: {reply}");
+    let warnings = reply["warnings"].as_array().cloned().unwrap_or_default();
+    assert!(warnings.iter().any(|w| w.as_str().is_some_and(|w| w.contains("stayed a mesh body"))), "the mesh it could not convert is named: {reply}");
+    let state = s.model.state();
+    assert!(state.bodies.iter().all(|b| b.body.is_mesh()), "the body stays a mesh");
+    std::fs::remove_file(path).unwrap();
+}
+
 /// An edit keeps the design as it was for undo, and an imported mesh's triangles are shared
 /// with that copy, not copied (a scan's are hundreds of megabytes): after an edit and its undo
 /// the document holds the same arrays. They still save as plain arrays.

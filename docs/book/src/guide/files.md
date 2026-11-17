@@ -38,7 +38,11 @@ inserting one adds them to the current design. Later features build on them. A F
 sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
 when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
 General › FreeCAD files turns the rebuild off). Mesh bodies render,
-measure, move and export, but solid features need B-rep bodies.
+measure, move and export, but solid features need B-rep bodies: Convert Mesh
+(`mesh.convert`) rebuilds a closed one as a solid. Preferences › Design › Import meshes as solids
+does that for you as the file comes in — a 3MF, STL, OBJ, PLY or glTF file joins the design as
+solids where the conversion can take it, and a mesh it cannot convert stays a mesh body with a
+warning. Each converted body keeps a Convert Mesh in the timeline, so a rebuild repeats it.
 
 The stand-up offer for STEP and IGES files remembers your answer for unchanged files; Preferences › Design lets you turn this memory off or forget all remembered answers.
 
