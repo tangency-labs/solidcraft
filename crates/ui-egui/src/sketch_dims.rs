@@ -875,8 +875,10 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
                 }
             }
         } else {
-            let shown = ui.painter().text(start, egui::Align2::LEFT_TOP, crate::sketch_cursor_readout::text(app, point), font, grey);
-            crate::scenario::publish_rect("viewport:readout", shown);
+            if app.preferences.sketch_cursor_coordinates {
+                let shown = ui.painter().text(start, egui::Align2::LEFT_TOP, crate::sketch_cursor_readout::text(app, point), font, grey);
+                crate::scenario::publish_rect("viewport:readout", shown);
+            }
             quiet = true;
         }
     }

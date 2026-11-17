@@ -440,6 +440,9 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
 /// `point`'s sketch coordinates in grey below and right of the pointer at `at`, where the Line
 /// tool shows them.
 fn readout(app: &SolveApp, painter: &egui::Painter, proj: &Proj, at: egui::Pos2, point: Vec2) {
+    if !app.preferences.sketch_cursor_coordinates {
+        return;
+    }
     let shown = painter.text(
         crate::tool_cursor::readout_at(painter, proj.rect, at),
         egui::Align2::LEFT_TOP,
