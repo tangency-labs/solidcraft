@@ -162,6 +162,15 @@ mod tests {
     }
 
     #[test]
+    fn a_design_name_fallback_is_safe_for_the_export_file_picker() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.doc_mut().name = "Bracket/Rev:2?".into();
+        assert_eq!(default_for_bodies(&h.app, &[]), "Bracket_Rev_2_");
+        h.app.run("solid.box", json!({"length": 2, "width": 3, "height": 4, "body_name": "Base"})).unwrap();
+        assert_eq!(default_for_bodies(&h.app, &["Base".into()]), "Bracket_Rev_2_");
+    }
+
+    #[test]
     fn an_empty_template_offers_the_old_name() {
         assert_eq!(name("", "Bracket", Some("Base"), "Base"), "Base");
         assert_eq!(name("   ", "Bracket", None, "Bracket"), "Bracket");
