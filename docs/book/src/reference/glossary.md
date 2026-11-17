@@ -572,6 +572,20 @@ edge as a torus.
 - **Elsewhere:** mitred corner, swept corner, corner sweep.
 - **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
 
+### VR headset
+
+A display worn on the head that shows each eye its own picture of a scene, so the design stands
+in the room in front of the wearer.
+
+SolidCraft shows the design in one through OpenXR and moves it with the headset's hand
+controllers (`docs/vr.md`).
+
+- **In SolidCraft:** the `vr_headset` preference (Preferences › XR › Start in VR), `--vr`,
+  `SOLIDCRAFT_VR`; the `vr.*` catalogue entries.
+- **Don't use:** VR glasses, HMD (in labels).
+- **Elsewhere:** head-mounted display, VR goggles, XR headset.
+- **For translators:** "controller" here is the hand-held device, not a control in a dialog.
+
 ### view angles
 
 The yaw, pitch and roll, in degrees, that give the direction a view looks along and how its

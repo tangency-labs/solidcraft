@@ -64,6 +64,10 @@ pub const TABLE: &[(&str, Class)] = &[
     ("engine", Class::Layer(4)),
     ("ui-egui", Class::Layer(5)),
     ("gpu", Class::Layer(5)),
+    // the VR view: an OpenXR session on the window's Vulkan device, and its view maths (no workspace dependencies)
+    ("xr", Class::Layer(5)),
+    // the VR viewer: the model in the room, the controllers' grab and marks (the xr crate's maths only)
+    ("vr", Class::Layer(5)),
     ("mcp", Class::Layer(5)),
     ("testkit", Class::Testkit),
     // App-agnostic plugin contracts and the component runtime (RFC 0002 §6b).
@@ -106,8 +110,9 @@ pub const TABLE: &[(&str, Class)] = &[
 
 /// Explicit orderings *within* a layer (earlier may be used by later).
 /// The viewport draws display plans the GPU crate evaluates and draws with its pipelines; the MCP
-/// server's tests draw screenshots with them. The kernel reads and writes STEP through `step`.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"]];
+/// server's tests draw screenshots with them. The kernel reads and writes STEP through `step`. The
+/// VR viewer places the model with the xr crate's room maths.
+pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["gpu", "ui-egui"], &["gpu", "mcp"], &["smlib", "kernel"], &["step", "kernel"], &["xr", "vr"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));

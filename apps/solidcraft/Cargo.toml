@@ -68,6 +68,12 @@ interprocess = "2.4"
 [target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
 quick-xml = { workspace = true }
 
+# VR (src/vr.rs, docs/vr.md): the OpenXR session, and the viewer's room maths, grab and controller
+# marks. Where wgpu has a Vulkan backend to share with an OpenXR runtime.
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+solidcraft-xr = { workspace = true }
+solidcraft-vr = { workspace = true }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 hidapi = { version = "2.6.7", default-features = false, features = ["windows-native"] }
 # The main window's handle for src/native_frame.rs (already in the tree through eframe and winit).

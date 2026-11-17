@@ -53,3 +53,6 @@ bom = "list"
 # Render workspace drafts: shared meanings; owner review remains Open.
 # Removing a look override returns the body to its material look.
 render_remove_override = "render_from_material"
+
+# The XR preferences page (VR for now): a way of viewing the design.
+prefs_vr = "eye"

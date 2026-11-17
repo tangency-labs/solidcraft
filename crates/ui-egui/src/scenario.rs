@@ -357,7 +357,8 @@ impl Harness {
     }
 
     /// Accessibility bounds include scrolled-out page content. Reveal that content with
-    /// wheel input before using its coordinates; window actions and navigation stay put.
+    /// wheel input before using its coordinates: the page, and the page list where its rows do
+    /// not all fit; window actions stay put.
     fn reveal_widget(&mut self, text: &str, near: Option<&str>) -> Result<[f64; 2], String> {
         let find = |h: &Self| match near {
             Some(label) => h.widget_near(text, label),
@@ -366,9 +367,12 @@ impl Harness {
         for _ in 0..32 {
             let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
             let at = egui::pos2(point[0] as f32, point[1] as f32);
-            let page = self.app.prefs_window.shell.open.then(|| rect_of("prefs:page_body")).flatten();
+            // Preferences scrolls its page and, when its rows do not all fit, its page list.
+            let open = self.app.prefs_window.shell.open;
             let chrome = ["prefs:ok", "prefs:apply", "prefs:cancel", "prefs:search"].iter().any(|key| handle_at(key) == Some(at));
-            let Some(page) = page.filter(|page| !chrome && page.x_range().contains(at.x)) else { return Ok(point) };
+            let list = crate::prefs::page_row_at(at).then_some("dialog:pages_list");
+            let mut scrolled = ["prefs:page_body"].into_iter().chain(list).filter_map(|key| open.then(|| rect_of(key)).flatten());
+            let Some(page) = scrolled.find(|area| !chrome && area.x_range().contains(at.x)) else { return Ok(point) };
             if page.contains(at) {
                 return Ok(point);
             }

@@ -1498,6 +1498,8 @@ fn page_list_sized<S>(
     };
     let footer_height = sidebar_footer.map_or(0.0, |(height, _)| dimension(height).min(nav_inner.height()));
     let list = egui::Rect::from_min_max(nav_inner.min, egui::pos2(nav_inner.right(), nav_inner.bottom() - footer_height));
+    // The part of the page list that shows rows (it scrolls when they do not all fit).
+    solidcraft_ui_registry::publish_rect("dialog:pages_list", list);
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(nav));
         ui.spacing_mut().item_spacing.y = t.space_2;

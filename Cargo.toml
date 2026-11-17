@@ -49,6 +49,10 @@ solidcraft-control = { path = "crates/control" }
 solidcraft-control-egui = { path = "crates/control-egui" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
+# VR (#2172, docs/vr.md): an OpenXR session on the window's own Vulkan device, its controllers and view maths
+solidcraft-xr = { path = "crates/xr" }
+# The VR viewer (docs/vr.md): the model in the room and what the controllers do to it
+solidcraft-vr = { path = "crates/vr" }
 # The Rust port of NVIDIA's SMLib (Apache-2.0), the B-rep kernel behind crates/smlib. Vendored with
 # `git subtree` at solidcore: that tree is the source of truth, and
 # .github/workflows/solidcore-mirror.yml pushes changes in it back to its own repository (#13153).
@@ -151,6 +155,14 @@ wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 naga = { version = "30", default-features = false }
 pollster = "0.4"
 rfd = "0.17"
+
+# OpenXR runtime bindings (MIT OR Apache-2.0, Rust bindings for the Khronos loader). `loaded`
+# finds the loader the OpenXR runtime installs at run time, so no C++ toolchain and no CMake are
+# needed to build (crates/xr).
+openxr = { version = "0.22", default-features = false, features = ["loaded"] }
+# The Vulkan bindings wgpu-hal draws with (MIT OR Apache-2.0; already in the tree through it): an
+# OpenXR runtime creates the Vulkan instance and device, and crates/xr hands them to wgpu.
+ash = { version = "0.38", default-features = false, features = ["loaded", "std"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
