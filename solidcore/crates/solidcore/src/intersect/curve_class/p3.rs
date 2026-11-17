@@ -49,6 +49,13 @@
 //!   Upstream snaps on the parameter alone, which on a fast-parametrised curve (a loop
 //!   bisector over an infinite cylinder's ±1234567 axial range) merged two edge
 //!   crossings 3.5e-3 apart and lost a loop crossing (#18342).
+//! - **Coincident vertices keep the first (solidcore-native).** When `InsertPointClass`
+//!   merges a vertex into a boundary held by another vertex, both gaps are zero to the
+//!   scaled zero of the boundary's vertex and their pre-snap parameters agree to the
+//!   parameter's scaled zero, the boundary keeps the vertex it has. Upstream merges with
+//!   `Combine`, which keeps the vertex with the smaller gap, comparing rounding noise:
+//!   which loop owned a seam crossing then changed with the model's scale (#18342,
+//!   `query.face_p4` gen0381).
 //! - **Out-params.** `FindInterval` returns a [`FoundInterval`]; `InsertPointClass` returns
 //!   `rbInsertionMade`; `sm_ChangeEdgePointClassToNearVertex` returns
 //!   `rbChangedToVertexFlag`; `MergePointClass`'s optional output arrays are
@@ -1072,6 +1079,10 @@ impl<O: ClassObject> CurveClassification<O> {
         // PointClassifications on existing boundaries are merged not inserted.
         // This big if-statement will check those cases on existing boundaries.
 
+        // (not upstream) whether the boundary keeps its classification when the input
+        // merges into it: set below for two vertices that are indistinguishable
+        let mut keep_found = false;
+
         // when inserting point param is on a boundary and Insertion is to be computed
         if !do_insertion
             && (position == IntervalPosition::Start || position == IntervalPosition::End)
@@ -1199,8 +1210,19 @@ impl<O: ClassObject> CurveClassification<O> {
                         // schedule insertion of new point at InputPreSnapParam
                         curve_param = pt_class_pre_snap_param;
                         do_insertion = true;
+                    } else {
+                        // the preSnap parameters are the same (upstream: SE_MSG only).
+                        // Not upstream: keep the found vertex. Upstream merges, and
+                        // `Combine` then keeps the vertex with the smaller gap; both gaps
+                        // are zero to the scaled zero tested above, so that comparison
+                        // orders rounding noise, and the vertex (hence the loop) that owns
+                        // this crossing changed with the model's scale (query.face_p4
+                        // gen0381: at scale 1e-3 the gaps 2.2e-19 and 0 kept the second
+                        // vertex, at scale 1 the gaps 2.2e-16 and 8.9e-16 the first). The
+                        // first vertex inserted is kept: the insertion order follows the
+                        // topology, which is the same at every scale.
+                        keep_found = true;
                     }
-                    // else the preSnap parameters are the same: SE_MSG only
                 }
                 // When the input PtClass Deviation is effectively zero and the found
                 // PtClass Deviation is large - replace the found PtClass with the input
@@ -1398,6 +1420,10 @@ impl<O: ClassObject> CurveClassification<O> {
                 ivl2.interval = Extent1d::from_min_max(curve_param, ivl2.interval.max());
                 ivl2.mid.unset_parameters();
             }
+        }
+        // (not upstream) two indistinguishable vertices: the boundary keeps the found one
+        else if keep_found {
+            insertion_made = true;
         }
         // when merging a start boundary point classification
         else if position == IntervalPosition::Start {

@@ -1484,49 +1484,142 @@ mod tests {
         assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![3, 2, 1, 0]));
     }
 
-    /// #18342: a cone face at scale 1e-3 (generated case 381) whose loop 1 crosses the
-    /// U seam once. The bisector pass classifies loops 0 and 2 (loop 0 is crossed once,
-    /// a no-area loop, so the walk is cyclic), then loop 1's pass walks the U seam
-    /// touches: one odd crossing (`In`, `Out`) and no `Out`/`In` entry, so
-    /// `ClassifyLoops` returns `SM_ERR` (1001). WR-268 propagates that status from
-    /// `SetProps_Stage3` instead of reading it as not yet healable, the outcome
-    /// `wr266_public_heal_stage3_failure_does_not_quarantine_the_face` pins for the same
-    /// branch on the flat cylinder. Before the 3D end-touch rule the bisector met loop 0
-    /// at its ends only (`NoClassifyZeroCrosscnt`) and loop 1's pass was never reached.
+    /// #18342: a cone face at scale 1e-3 (generated case 381) gives the answer of the
+    /// same face at scale 1. Loops 0 and 1 are opposite u-isolines 1e-9 apart in
+    /// normalized v, each with one vertex on the U seam; the two vertices coincide to the
+    /// scaled zero (gaps 2.2e-19 and 0, seam parameters 1.0e-18 apart). The seam
+    /// classification used to keep the vertex with the smaller gap, rounding noise that
+    /// gave the crossing to loop 1 at this scale and to loop 0 at scale 1; with loop 1
+    /// crossed once, its seam walk had no entry and `ClassifyLoops` returned `SM_ERR`.
+    /// Now the first vertex (loop 0's) is kept at both scales: loop 0 is the seam pass's
+    /// no-area loop, the bisector meets loop 1 at no crossing (`NoClassifyZeroCrosscnt`),
+    /// and the ends are the pole without a vertex and none. Stage 3 reads that as not yet
+    /// healable (1040) at both scales, base's answer.
     #[test]
-    fn a_seam_walk_without_an_entry_on_a_small_cone_is_sm_err() {
+    fn coincident_seam_vertices_on_a_small_cone_classify_as_at_scale_one() {
         use solidcore::error::heal::HealFailure;
         use solidcore::heal::face_props::HealerOpType;
         let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 381));
         let i = gen_case(&mut rng);
-        let out = rust(&i).unwrap();
-        assert_eq!(out.values.get("status"), Some(&vec![f64::from(SM_ERR)]));
+        let out = assert_same_as_scaled_up(&i);
+        assert_eq!(out.values.get("status"), Some(&vec![0.0]));
         assert_eq!(
             out.ints.get("classifiable"),
-            Some(&vec![HealNotYetFaceType::NoProbs.code()])
+            Some(&vec![HealNotYetFaceType::NoClassifyZeroCrosscnt.code()])
         );
-        // both ends of the bisector on the seam without an edge use
-        let seam = CrvDirOnFaceType::SeamNoEdgeuse as i64;
-        assert_eq!(out.ints.get("start_stop"), Some(&vec![seam, seam]));
-        // loop 0 crossed once by the bisector: the walk is cyclic
+        assert_eq!(
+            out.ints.get("start_stop"),
+            Some(&vec![
+                CrvDirOnFaceType::PoleNoVertex as i64,
+                CrvDirOnFaceType::None as i64
+            ])
+        );
         assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![0]));
 
-        // the healer's view: Stage 3 of the same face, all its loops
+        // the healer's view: Stage 3 of the same face, all its loops, at both scales
+        for i in [i.clone(), scaled(&i, 1e3)] {
+            let k = Kernel::default();
+            let (mut b, _) = own_brep(&i.brep, i.validate_only, i.init_gaps)
+                .unwrap()
+                .unwrap();
+            let fi = i.face as usize % b.faces().len();
+            let face = FaceId::from_index(u32::try_from(fi).unwrap());
+            let mut props: FaceProps<H> = FaceProps::for_face(face, fi as u64);
+            let r = props.set_props_stage3_mut(&k, &mut b, face, fi as u64, HealerOpType::All);
+            let e = r.unwrap_err();
+            assert!(
+                matches!(e.heal_failure(), Some(HealFailure::NotYetHealable)),
+                "{e:?}"
+            );
+            assert!(props.has_not_yet_problems());
+        }
+    }
+
+    /// The largest distance from a sample of edge 0 of `i`'s B-rep to the nearest sample
+    /// of edge 1 (201 samples each), and the face's zone tolerance.
+    fn edge_gap(i: &Inputs) -> (f64, f64) {
+        use solidcore::topology::edge as topo_edge;
         let k = Kernel::default();
-        let (mut b, _) = own_brep(&i.brep, i.validate_only, i.init_gaps)
-            .unwrap()
-            .unwrap();
-        let fi = i.face as usize % b.faces().len();
-        let face = FaceId::from_index(u32::try_from(fi).unwrap());
-        let mut props: FaceProps<H> = FaceProps::for_face(face, fi as u64);
-        let r = props.set_props_stage3_mut(&k, &mut b, face, fi as u64, HealerOpType::All);
-        let e = r.unwrap_err();
-        assert_eq!(solidcore::error::upstream_status(&e), Some(SM_ERR), "{e:?}");
-        assert!(
-            !matches!(e.heal_failure(), Some(HealFailure::NotYetHealable)),
-            "{e:?}"
+        let (mut b, _) = own_brep(&i.brep, i.validate_only, i.init_gaps).unwrap().unwrap();
+        let (_face, props, _loops) = setup(&k, &mut b, i).unwrap().unwrap();
+        let edges = solidcore::topology::brep::p1::edges(&b, None).unwrap();
+        let samples: Vec<Vec<Point3>> = edges
+            .iter()
+            .take(2)
+            .map(|&e| {
+                let c = topo_edge::evaluation_curve(&b, e).unwrap().unwrap();
+                let iv = topo_edge::interval(&b, e).unwrap();
+                (0..=200)
+                    .map(|n| {
+                        let t = iv.min() + (iv.max() - iv.min()) * f64::from(n) / 200.0;
+                        c.evaluate_point(&k, t).unwrap()
+                    })
+                    .collect()
+            })
+            .collect();
+        let gap = samples[0]
+            .iter()
+            .map(|p| samples[1].iter().map(|q| p.distance(*q)).fold(f64::MAX, f64::min))
+            .fold(0.0, f64::max);
+        (gap, props.zone_tol_3d)
+    }
+
+    /// #18342: generated case 309, a cone at scale 1e-3 whose loops 0 and 1 are two
+    /// circles 9.9e-10 apart (a hundredth of the face's 1e-7 zone tolerance). It gives
+    /// the answer of the same face 3 and 10 times larger, where the circles are still
+    /// within a tenth of the tolerance: `NotYet` with both bisector ends typed as at every
+    /// larger scale ([8, 1]). The face 1000 times larger is no reference here: its
+    /// circles are 9.9e-7 apart, ten times the tolerance, and classify as distinct loops.
+    /// Before the fix the coincident seam vertices of loops 0 and 1 picked the classified
+    /// vertex by rounding noise, and the face at scales 1 and 3 was refused (`SM_ERR`).
+    #[test]
+    fn coincident_circles_on_a_small_cone_gen0309_classify_as_at_three_and_ten_times() {
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 309));
+        let i = gen_case(&mut rng);
+        let out = rust(&i).unwrap();
+        assert_eq!(out.error, None);
+        assert_eq!(out.values.get("status"), Some(&vec![0.0]));
+        assert_eq!(out.ints.get("classifiable"), Some(&vec![HealNotYetFaceType::NoClassifyZeroCrosscnt.code()]));
+        assert_eq!(
+            out.ints.get("start_stop"),
+            Some(&vec![CrvDirOnFaceType::PoleNoVertex as i64, CrvDirOnFaceType::None as i64])
         );
-        assert!(!props.has_not_yet_problems());
+        for f in [1.0, 3.0, 10.0] {
+            let (gap, tol) = edge_gap(&scaled(&i, f));
+            assert!(gap < 0.1 * tol, "x{f}: {gap:e} {tol:e}");
+            if f > 1.0 {
+                let o = rust(&scaled(&i, f)).unwrap();
+                assert_eq!(o.error, None);
+                assert_eq!(o.ints, out.ints, "x{f}");
+            }
+        }
+        let (gap, tol) = edge_gap(&scaled(&i, 1e3));
+        assert!(gap > 5.0 * tol, "x1e3: {gap:e} {tol:e}");
+    }
+
+    /// #18342: generated case 22 (a cone at scale 1e-3) gives the answer of the same face
+    /// at scale 1: its start is the pole without a vertex (`PoleNoVertex`, 8), not the
+    /// `Pole` (7) of a loop vertex that the parameter snap merged into the start.
+    #[test]
+    fn small_cone_gen0022_start_is_the_pole_without_a_vertex_as_at_scale_one() {
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 22));
+        let out = assert_same_as_scaled_up(&gen_case(&mut rng));
+        assert_eq!(
+            out.ints.get("start_stop").and_then(|s| s.first()),
+            Some(&(CrvDirOnFaceType::PoleNoVertex as i64))
+        );
+    }
+
+    /// #18342: generated case 247 (a natural cylinder at scale 1e-3) gives the answer of
+    /// the same face at scale 1, `scratch_size` included: its boundary loop crosses no v
+    /// seam, so `ClassifyLoops` builds the bisector, whose final reset leaves one
+    /// interval. Before the fix two snapped crossings sent it down the seam path (0).
+    #[test]
+    fn natural_cylinder_gen0247_uses_the_bisector_as_at_scale_one() {
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 247));
+        let out = assert_same_as_scaled_up(&gen_case(&mut rng));
+        assert_eq!(out.ints.get("scratch_size"), Some(&vec![1]));
+        assert_eq!(out.ints.get("classifiable"), Some(&vec![0]));
     }
 
     /// A circular UV trim spans both axes and winds in the requested direction.
