@@ -2732,7 +2732,7 @@
   "render.cpu_body_choose": "Kies een lichaam",
   "render.cpu_body_filter": "Lichamen filteren op naam",
   "render.cpu_body_filter_more": "Verfijn het filter om meer lichamen te zien.",
-  "render.cpu_body_missing": "Een reflectiedoel ontbreekt, is verborgen of dubbelzinnig, of heeft een naam langer dan 128 bytes. Kies het opnieuw.",
+  "render.cpu_body_missing": "Een reflectiedoel ontbreekt, is verborgen of dubbelzinnig, of heeft een naam langer dan 512 bytes. Kies het opnieuw.",
   "render.cpu_budget": "CPU-resourceprofiel",
   "render.cpu_budget_bodies": "Maximum aantal lichamen",
   "render.cpu_budget_compact": "Compact (oude limieten)",

@@ -2882,7 +2882,7 @@
   "render.cpu_body_choose": "바디 선택",
   "render.cpu_body_filter": "이름으로 바디 필터",
   "render.cpu_body_filter_more": "더 많은 바디를 보려면 필터를 좁히세요.",
-  "render.cpu_body_missing": "반사 대상이 없거나, 숨겨졌거나, 모호하거나, 이름이 128바이트를 넘습니다. 다시 선택하세요.",
+  "render.cpu_body_missing": "반사 대상이 없거나, 숨겨졌거나, 모호하거나, 이름이 512바이트를 넘습니다. 다시 선택하세요.",
   "render.cpu_budget": "CPU 리소스 프로필",
   "render.cpu_budget_bodies": "바디 수 상한",
   "render.cpu_budget_compact": "컴팩트 (기존 제한)",

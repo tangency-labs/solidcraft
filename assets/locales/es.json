@@ -3665,7 +3665,7 @@
   "render.cpu_body_choose": "Elegir un cuerpo",
   "render.cpu_body_filter": "Filtrar cuerpos por nombre",
   "render.cpu_body_filter_more": "Afina el filtro para ver más cuerpos.",
-  "render.cpu_body_missing": "Un cuerpo de los reflejos falta, está oculto, es ambiguo o su nombre supera 128 bytes. Vuelve a elegirlo.",
+  "render.cpu_body_missing": "Un cuerpo de los reflejos falta, está oculto, es ambiguo o su nombre supera 512 bytes. Vuelve a elegirlo.",
   "render.cpu_budget": "Perfil de recursos de CPU",
   "render.cpu_budget_bodies": "Máximo de cuerpos",
   "render.cpu_budget_compact": "Compacto (límites anteriores)",
