@@ -907,3 +907,21 @@ fn a_broken_mesh_record_is_left_out_with_why() {
         assert!(imp.bodies.is_empty() && imp.warnings.iter().any(|w| w.contains(why)), "{why}: {:?}", imp.warnings);
     }
 }
+
+/// A part on a layer the file hides (INVISIBILITY naming a PRESENTATION_LAYER_ASSIGNMENT) comes in
+/// hidden, as with SolidCraft's reader; on a layer that is not hidden it comes in shown.
+#[test]
+fn a_part_on_a_hidden_layer_comes_in_hidden() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let text = std::fs::read_to_string(dir.join("washer.step")).unwrap();
+    let with = |extra: &str| {
+        let at = text.rfind("ENDSEC;").unwrap();
+        let t = format!("{}{extra}{}", &text[..at], &text[at..]);
+        let (records, warnings, _) = cadmpeg_step_records(t.as_bytes(), "washer.step").unwrap();
+        assert_eq!(records.bodies.len(), 1, "{warnings:?}");
+        records.bodies[0].hidden
+    };
+    assert!(with("#300=PRESENTATION_LAYER_ASSIGNMENT('Hidden parts','',(#99));\n#301=INVISIBILITY((#300));\n"), "on a hidden layer");
+    assert!(!with("#300=PRESENTATION_LAYER_ASSIGNMENT('Parts','',(#99));\n"), "on a shown layer");
+    assert!(!with(""), "on no layer");
+}
