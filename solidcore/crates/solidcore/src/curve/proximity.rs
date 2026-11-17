@@ -589,9 +589,9 @@ impl Curve {
         if closed {
             if let Some(seam) = soft(other.evaluate_point(k, lo))? {
                 if let Some((t, _)) = foot_on(k, self, interval, seam)? {
-                    let at = cuts.partition_point(|&c| c < t);
-                    if a < t && t < b && cuts.get(at) != Some(&t) {
-                        cuts.insert(at, t);
+                    if a < t && t < b && !cuts.contains(&t) {
+                        cuts.push(t);
+                        cuts.sort_by(f64::total_cmp);
                     }
                 }
             }
