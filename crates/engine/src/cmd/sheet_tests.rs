@@ -4134,7 +4134,9 @@ fn a_corner_of_five_degrees_in_the_zone_is_refused_and_two_arcs_meeting_smoothly
     // 100 x 30, then 10 at x 120 less the first arc's bite, 10 at 120 − 20√3 plus the second
     // arc's, which is the same, and 10 at 140 − 20√3: 6800 − 400√3, 0.8 thick.
     let flat = (6800.0 - 400.0 * 3f64.sqrt()) * 0.8;
-    assert!(rel(volume(&mut s), flat) < 1e-12, "{} vs {flat}", volume(&mut s));
+    // Exact geometry; the kernel's measured volume of it moves in the twelfth digit between
+    // kernel versions.
+    assert!(rel(volume(&mut s), flat) < 1e-11, "{} vs {flat}", volume(&mut s));
     run(&mut s, "sheet.fold", fold);
     let want = flat + FRAC_PI_2 * (120.0 - 10.0 * 3f64.sqrt()) * 0.8 * 0.8 * (0.5 - 0.44);
     assert!(rel(volume(&mut s), want) < 1e-8, "{} vs {want}", volume(&mut s));
