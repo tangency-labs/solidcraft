@@ -3045,15 +3045,7 @@ mod tests {
         assert!(app.agent_chat.actions.is_empty(), "the disabled button starts no send");
         finish_composer(
             &mut app.agent_chat,
-            ComposerOutcome {
-                height: 0.0,
-                send_clicked: false,
-                stop_clicked: false,
-                enter: true,
-                steer: true,
-                esc: false,
-                no_agent: true,
-            },
+            ComposerOutcome { height: 0.0, send_clicked: false, stop_clicked: false, enter: true, steer: true, esc: false, no_agent: true },
         );
         assert!(app.agent_chat.actions.is_empty(), "Enter and Ctrl+Enter also cannot send");
         assert_eq!(app.agent_chat.input, "Make a plate", "the draft stays until setup is complete");
