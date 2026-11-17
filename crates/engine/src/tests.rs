@@ -1288,6 +1288,34 @@ fn registry_is_consistent() {
     assert!(!find_command("sketch.line").unwrap().info(&s).enabled);
 }
 
+/// One reading of a command id for everything that decides on it: any
+/// case and surrounding whitespace name the registered command; an id with any character that
+/// is not printable ASCII (a look-alike letter, a zero-width or non-breaking space inside) names
+/// none, so the engine never runs a command a gate took for something else. No two registered
+/// ids differ only in case, so a case variant names exactly one.
+#[test]
+fn command_ids_resolve_one_way() {
+    for (given, id) in [
+        ("FILE.SAVE", "file.save"),
+        (" file.open_in_easyprint ", "file.open_in_easyprint"),
+        ("\tDiagnostics.Crash_Reports\n", "diagnostics.crash_reports"),
+        ("\u{a0}DOC.OPEN\u{3000}", "doc.open"),
+    ] {
+        assert_eq!(find_command(given).map(|c| c.id), Some(id), "{given:?}");
+    }
+    for alike in ["fil\u{0435}.save", "file\u{ff0e}save", "\u{200b}file.save", "file.\u{200d}save", "FILE.SAVE\u{200b}", "\u{ff46}ile.save", "", "  "]
+    {
+        assert!(find_command(alike).is_none(), "{alike:?}");
+        assert!(matches!(Session::default().execute(alike, &json!({})), Err(EngineError::UnknownCommand(_))), "{alike:?}");
+    }
+    let mut lower: Vec<String> = command_specs().iter().map(|c| c.id.to_ascii_lowercase()).collect();
+    let n = lower.len();
+    lower.sort();
+    lower.dedup();
+    assert_eq!(lower.len(), n, "two command ids differ only in case");
+    assert!(command_specs().iter().all(|c| normalize_command_id(c.id) == Some(c.id)), "a registered id that does not read as itself");
+}
+
 /// Only SolidCraft's own dotted ids name commands; other ids are unknown commands.
 #[test]
 fn only_own_ids_name_commands() {
