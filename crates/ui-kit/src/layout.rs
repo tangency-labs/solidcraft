@@ -295,10 +295,11 @@ pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
 }
 
 /// Expression row with a checked field; preserves completion, Enter and label scrubbing.
+/// Its scrubbed value stops at zero, as `expr_row_positive`'s does.
 pub fn checked_expr_row(ui: &mut Ui, label: &str, value: &mut String, flagged: bool) -> bool {
     scrub_row(ui, label, |ui, scrub| {
         if let Some(scrub) = scrub {
-            super::fields::scrub(ui, scrub, value);
+            super::fields::scrub(ui, scrub, value, true);
         }
         super::checked_field(ui, value, "", flagged).0
     })
