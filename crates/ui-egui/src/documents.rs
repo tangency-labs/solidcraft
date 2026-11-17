@@ -627,6 +627,8 @@ fn enter_workspace(app: &mut SolveApp, render: bool) {
 /// is, as the app left them by itself. Called each frame and after a design switch, so a view
 /// entered from anywhere in the app (a ribbon button, a command, Finish Sketch) shows in the strip.
 /// A view of a sketch the design no longer has (cancelled, undone or deleted) closes (#18264).
+/// While the strip shows no views (views as tabs and the switcher both off), no view is opened
+/// here: the design enters the sketch or workspace in the view shown, as before design views.
 pub(crate) fn sync_views(app: &mut SolveApp) {
     let session = &app.session;
     app.docs.views.drop_views(|view| view.kind != ViewKind::Sketch || can_restore(session, view.kind, view.subject.as_deref()));
@@ -639,7 +641,7 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
     let views = &mut app.docs.views;
     match shown {
         Some((kind, subject)) => {
-            if prefs.opens_sub_tab(kind) && (views.active().kind != kind || views.active().subject != subject) {
+            if prefs.opens_views_by_itself() && prefs.opens_sub_tab(kind) && (views.active().kind != kind || views.active().subject != subject) {
                 views.open(kind, subject, prefs.reuse_views);
             }
         }
@@ -1839,6 +1841,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             id: tab_strip_id(),
             handles: TAB_HANDLES,
             views_as_tabs,
+            switcher_always: DesignTabPrefs::from(&app.preferences).switcher_always(),
             view_text: crate::app_bar::ViewText {
                 close_view: solidcraft_ui_text::tr_label("Close view"),
                 close_design: solidcraft_ui_text::tr_label("Close design"),
@@ -3658,9 +3661,66 @@ mod tests {
         assert_eq!(h.app.docs.views.len(), 3);
     }
 
-    /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
-    /// those that can still be shown, nothing from a stale memory, and nothing at all when the
-    /// preference is off.
+    /// The owner's ask: by default a design tab shows no view switcher while the design has its one
+    /// view, and entering a sketch or Render stays in that view, so the tab looks as it did before
+    /// design views. The switcher shows once the user opens a second view, with "Show the design
+    /// view switcher" on (even for one view, and a sketch then opens its own view again), and views
+    /// as tabs keeps its sub-tabs and the tab's + for a new view.
+    #[test]
+    fn a_design_tab_shows_no_view_switcher_until_it_has_a_second_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1280, "height": 720}));
+        let switcher = |h: &mut crate::scenario::Harness| {
+            h.frames(3);
+            crate::scenario::rect_of("tab:switcher").is_some()
+        };
+        assert!(!h.app.preferences.show_design_view_switcher && !h.app.preferences.design_views_as_tabs, "both off by default");
+        assert!(!switcher(&mut h), "one view: no switcher");
+        assert!(crate::scenario::handle_at("tab:design:0").is_some(), "the strip is drawn");
+        assert!(crate::scenario::handle_at("tab:view_new").is_none(), "nor the tab's + for a new view");
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
+        h.frames(2);
+        assert!(h.app.session.active_sketch.is_some(), "the sketch is entered");
+        assert_eq!(h.app.docs.views.len(), 1, "in the view shown");
+        assert!(!switcher(&mut h), "still no switcher while sketching");
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        assert!(!switcher(&mut h), "nor after Finish Sketch");
+        // The preference brings the switcher back for one view, and sketches open views again.
+        h.app.preferences.show_design_view_switcher = true;
+        assert!(switcher(&mut h), "the preference shows it for one view");
+        h.app.run("sketch.create", json!({"plane": "XZ", "name": "Sketch2"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.views.len(), 2, "a sketch opens its own view with the switcher on");
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.frames(2);
+        h.app.preferences.show_design_view_switcher = false;
+        assert!(switcher(&mut h), "a second view shows it with the preference off");
+        // Views as tabs: sub-tabs, no switcher, whatever the preference (on a bar with room for them;
+        // a narrow one falls back to the switcher).
+        h.call("ui.resize", json!({"width": 1920, "height": 1080}));
+        h.app.preferences.design_views_as_tabs = true;
+        assert!(!switcher(&mut h), "views as tabs draws sub-tabs instead");
+        assert!(crate::scenario::rect_of("tab:view:0").is_some(), "the sub-tabs are drawn");
+        h.app.preferences.show_design_view_switcher = true;
+        assert!(!switcher(&mut h));
+        // Back to one view with both off: no switcher again; a view opened with Ctrl+T shows it.
+        h.app.preferences.design_views_as_tabs = false;
+        h.app.preferences.show_design_view_switcher = false;
+        let first = h.app.docs.views.views()[0].id;
+        view_close_others(&mut h.app, first);
+        assert!(!switcher(&mut h), "one view again");
+        h.app.preferences.design_views_as_tabs = true;
+        assert!(!switcher(&mut h));
+        assert!(crate::scenario::handle_at("tab:view_new").is_some(), "views as tabs keeps the tab's + for a new view");
+        h.app.preferences.design_views_as_tabs = false;
+        h.call("ui.key", json!({"key": "T", "cmd": true}));
+        assert_eq!(h.app.docs.views.len(), 2, "Ctrl+T still opens another view");
+        assert!(switcher(&mut h), "and the switcher shows");
+    }
+
     /// #18264: cancelling a new sketch closes its view instead of leaving a tab that says the
     /// sketch no longer exists; so does undoing a finished sketch away, and Reopen does not bring
     /// either back. A finished sketch that stays keeps its view.
@@ -3668,6 +3728,11 @@ mod tests {
     fn a_view_closes_when_its_sketch_is_cancelled_or_undone_away() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        // Test change (#18264): editing a sketch opens a view of its own only while the strip shows
+        // views (the owner asked that it not by default), and this test is about closing such a
+        // view, so it runs with views as tabs on. With both off no sketch view opens at all, which
+        // `a_design_tab_shows_no_view_switcher_until_it_has_a_second_view` checks.
+        h.app.preferences.design_views_as_tabs = true;
         let sketch_views = |h: &crate::scenario::Harness| h.app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Sketch).count();
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
         h.frames(2);
@@ -3696,12 +3761,18 @@ mod tests {
         assert_eq!(h.app.docs.views.len(), 1);
     }
 
+    /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
+    /// those that can still be shown, nothing from a stale memory, and nothing at all when the
+    /// preference is off.
     #[test]
     fn a_design_gets_its_remembered_views_back_when_the_preference_is_on() {
         let dir = std::env::temp_dir().join(format!("solidcraft-documents-views-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        // Test change: the owner asked that a sketch open no view of its own while the strip shows
+        // no views (the new default); with the switcher on it does, which is what this test needs.
+        h.app.preferences.show_design_view_switcher = true;
         let path = std::env::temp_dir().join("solidcraft-remembered.scd").to_string_lossy().into_owned();
         h.app.session.path = Some(path.clone());
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();

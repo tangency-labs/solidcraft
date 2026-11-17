@@ -64,7 +64,12 @@ fn large_ribbon_lists_survive_profile_export_import_apply_and_restart() {
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 108, "include document browser settings, repeated shortcuts and large ribbon lists among the portable settings");
+    // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
+    assert_eq!(
+        keys.len(),
+        109,
+        "include document browser settings, repeated shortcuts, the design view switcher and large ribbon lists among the portable settings"
+    );
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -897,6 +902,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "selection_shift_add_only",
         "shortcut_again_ends_tool",
         "shortcut_cycles_modes",
+        "show_design_view_switcher",
         "show_document_browser",
         "show_selected_hidden_edges",
         "sketch_align_points",
@@ -942,7 +948,8 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 108);
+    // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
+    assert_eq!(expected.len(), 109);
     assert_eq!(actual, expected);
 }
 

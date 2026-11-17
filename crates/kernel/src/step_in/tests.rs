@@ -256,6 +256,55 @@ fn seam_only_torus_imports_as_a_whole_ring() {
     }
 }
 
+/// A torus (R 12, r 2) as SolidCraft 0.30.1 wrote it (#17930): two faces sharing one loop, a
+/// patch a third of the way round and half way round the tube, and the rest of the torus round
+/// it, each on its own TOROIDAL_SURFACE, both as written. The rest runs clockwise round the
+/// patch: it is the outside of its loop, and was read as the patch turned over, both faces on
+/// the patch and no volume. The same torus written again by 0.30.1 has its faces on
+/// SURFACE_OF_REVOLUTIONs of a rational circle (#17929), and the rest face got no pcurves. Both
+/// read as the closed torus: volume 2π²Rr², area 4π²Rr.
+#[test]
+fn a_torus_written_as_a_patch_and_the_rest_round_it_imports_whole() {
+    use std::f64::consts::PI;
+    let (major, minor) = (12.0_f64, 2.0_f64);
+    let (volume, area) = (2.0 * PI * PI * major * minor * minor, 4.0 * PI * PI * major * minor);
+    for (what, text) in [
+        ("toroidal", include_str!("../../../../tests/step-regressions/torus_patch_and_rest.step")),
+        ("revolved", include_str!("../../../../tests/step-regressions/torus_patch_and_rest_revolved.step")),
+    ] {
+        let imp = step_import(text).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(
+            !imp.warnings.iter().any(|w| w.contains("turned over") || w.contains("left out") || w.contains("surfaces")),
+            "{what}: {:?}",
+            imp.warnings
+        );
+        assert!(imp.bodies[0].closed, "{what}: {:?}", imp.warnings);
+        let m = measure(&imp.bodies[0].body).unwrap();
+        assert!(rel(m.volume, volume) < 1e-6, "{what}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-6, "{what}: area {} vs {area}", m.area);
+    }
+}
+
+/// A 30 × 30 × 10 block with a Ø14 hole through it, its top edge rounded at 1 mm, as SolidCraft
+/// 0.30.1 wrote it after reading its own file (#17929): the round on a SURFACE_OF_REVOLUTION of
+/// a rational circle, which got no pcurves, so the block came in open. The round reads as a
+/// torus and the block is closed: the box less the hole, 9000 − 490π, less the round's corner,
+/// the area 1 − π/4 outside a quarter circle of radius 1, turned about the axis at its
+/// centroid's radius 7 + (10 − 3π)/(12 − 3π) (Pappus).
+#[test]
+fn a_round_on_a_revolved_rational_circle_imports_as_a_torus() {
+    use std::f64::consts::PI;
+    let imp = step_import(include_str!("../../../../tests/step-regressions/hole_round_revolved.step")).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed, "{:?}", imp.warnings);
+    let corner = 1.0 - PI / 4.0;
+    let centroid = 7.0 + (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+    let volume = 9000.0 - 490.0 * PI - 2.0 * PI * centroid * corner;
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, volume) < 1e-6, "volume {} vs {volume}", m.volume);
+}
+
 #[test]
 #[ignore = "manual STEP import timing; run without concurrent builds"]
 fn benchmark_independent_step_solids() {
@@ -3967,6 +4016,77 @@ fn a_ball_end_split_through_its_pole_imports_closed() {
     // The cap below z = h: π H² (3R − H) / 3 with H = R + h.
     let cap = r + h;
     assert_closed_solid(&w.solid(&[north, south, disk]), 3, std::f64::consts::PI * cap * cap * (3.0 * r - cap) / 3.0);
+}
+
+/// A lens-like solid: a dome turned about the x axis from a quadratic B-spline profile that
+/// starts on the axis, a cylindrical band and a flat back, each split into halves along the
+/// plane z = 0, with no pcurves in the file (as a 2016 lens export has it). Each dome half is a
+/// SURFACE_OF_REVOLUTION face bounded by its two meridians (B-spline edges meeting at the pole)
+/// and half the rim circle, and its loop starts on a meridian, runs into the pole and comes back
+/// out on the other one. The band's frame is turned 45° about the axis, so the rim is labelled
+/// on it and has no closed-form pcurve on the dome. The meridian out of the pole and the rim's
+/// first point were projected from the last point before the pole, across the axis, and
+/// settled on the pole: each half's box stopped a sample short of its meridian, the rim's pcurve
+/// was cut back to that box, and both dome halves were left out. They read whole and the solid
+/// is closed, its volume the dome's π ∫ y² dx and the band's π r² l.
+#[test]
+fn a_dome_of_revolution_split_through_its_pole_keeps_both_halves() {
+    // Profile (0, 0), (0, 2), (1.5, 3): x = 1.5 t², y = 4t − t², so π ∫ y² x' dt = 7.7 π.
+    let (h, r, back) = (1.5_f64, 3.0_f64, 2.5_f64);
+    let k = std::f64::consts::FRAC_1_SQRT_2;
+    let mut w = Entities::default();
+    let point = |w: &mut Entities, p: [f64; 3]| w.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2]));
+    let quadratic = |w: &mut Entities, side: f64| {
+        let ps: Vec<String> = [[0.0, 0.0, 0.0], [0.0, 2.0 * side, 0.0], [h, r * side, 0.0]].iter().map(|p| format!("#{}", point(w, *p))).collect();
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',2,({}),.UNSPECIFIED.,.F.,.F.,(3,3),(0.,1.),.UNSPECIFIED.)", ps.join(",")))
+    };
+    let pole = w.vertex([0.0, 0.0, 0.0]);
+    let (east, west) = (w.vertex([h, r, 0.0]), w.vertex([h, -r, 0.0]));
+    let (east2, west2) = (w.vertex([back, r, 0.0]), w.vertex([back, -r, 0.0]));
+    let (east_c, west_c) = (quadratic(&mut w, 1.0), quadratic(&mut w, -1.0));
+    let mer_east = w.add(format!("EDGE_CURVE('',#{pole},#{east},#{east_c},.T.)"));
+    let mer_west = w.add(format!("EDGE_CURVE('',#{pole},#{west},#{west_c},.T.)"));
+    // Circles about the axis from +y, turning towards +z: halves from +y to −y and back.
+    let circle = |w: &mut Entities, x: f64| {
+        let a = w.axis([x, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        w.add(format!("CIRCLE('',#{a},{r:?})"))
+    };
+    let (rim_c, back_c) = (circle(&mut w, h), circle(&mut w, back));
+    let rim_up = w.add(format!("EDGE_CURVE('',#{east},#{west},#{rim_c},.T.)"));
+    let rim_down = w.add(format!("EDGE_CURVE('',#{west},#{east},#{rim_c},.T.)"));
+    let back_up = w.add(format!("EDGE_CURVE('',#{east2},#{west2},#{back_c},.T.)"));
+    let back_down = w.add(format!("EDGE_CURVE('',#{west2},#{east2},#{back_c},.T.)"));
+    let line = |w: &mut Entities, y: f64| {
+        let o = point(w, [h, y, 0.0]);
+        let d = w.add("DIRECTION('',(1.,0.,0.))");
+        let v = w.add(format!("VECTOR('',#{d},{:?})", back - h));
+        w.add(format!("LINE('',#{o},#{v})"))
+    };
+    let (line_e_c, line_w_c) = (line(&mut w, r), line(&mut w, -r));
+    let line_e = w.add(format!("EDGE_CURVE('',#{east},#{east2},#{line_e_c},.T.)"));
+    let line_w = w.add(format!("EDGE_CURVE('',#{west},#{west2},#{line_w_c},.T.)"));
+    let band = |w: &mut Entities| {
+        let a = w.axis([h, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, k, k]);
+        w.add(format!("CYLINDRICAL_SURFACE('',#{a},{r:?})"))
+    };
+    let dome = |w: &mut Entities| {
+        let o = point(w, [0.0; 3]);
+        let d = w.add("DIRECTION('',(1.,0.,0.))");
+        let axis = w.add(format!("AXIS1_PLACEMENT('',#{o},#{d})"));
+        w.add(format!("SURFACE_OF_REVOLUTION('',#{east_c},#{axis})"))
+    };
+    let (b_up, b_down, s_up, s_down) = (band(&mut w), band(&mut w), dome(&mut w), dome(&mut w));
+    let band_up = w.face(&[(rim_up, true), (line_w, true), (back_up, false), (line_e, false)], b_up);
+    let band_down = w.face(&[(rim_down, true), (line_e, true), (back_down, false), (line_w, false)], b_down);
+    let up = w.face(&[(mer_east, false), (mer_west, true), (rim_up, false)], s_up);
+    let down = w.face(&[(mer_west, false), (mer_east, true), (rim_down, false)], s_down);
+    let base = w.axis([back, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let plane = w.add(format!("PLANE('',#{base})"));
+    let disc = w.face(&[(back_up, true), (back_down, true)], plane);
+    // The band first, as the lens export lists its faces: the rim takes the band's frame.
+    let text = w.solid(&[band_up, band_down, up, down, disc]);
+    let pi = std::f64::consts::PI;
+    assert_closed_solid(&text, 5, 7.7 * pi + pi * r * r * (back - h));
 }
 
 /// An elliptic cylinder written as a SURFACE_OF_LINEAR_EXTRUSION of an ellipse, its side a band
