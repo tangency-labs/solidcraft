@@ -251,6 +251,8 @@ pub struct LivingHingePlan {
     pub rows: usize,
     /// Lattice slots that met the material and were left out.
     pub left_out: usize,
+    /// `V`, the area's extent across the slots (mm): the arc length the hinge bends over.
+    pub band_width: f64,
 }
 
 impl LivingHingePlan {

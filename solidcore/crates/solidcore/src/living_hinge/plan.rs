@@ -247,7 +247,7 @@ pub fn plan(
     };
     let rho = spec.edge_reach();
     let closed_reach = spec.radius() + spec.margin;
-    Ok(plan_rows_zoned(
+    let mut planned = plan_rows_zoned(
         spec,
         &lattice,
         |_, v| {
@@ -256,7 +256,9 @@ pub fn plan(
             spans
         },
         |_, v| row_zone(plate, closed, v, rho, closed_reach),
-    ))
+    );
+    planned.band_width = b.v_max - b.v_min;
+    Ok(planned)
 }
 
 /// A slot's region in the hinge frame for the extrude (design 7): two lines and two half-circle

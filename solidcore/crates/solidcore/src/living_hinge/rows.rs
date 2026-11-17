@@ -129,6 +129,7 @@ pub fn plan_rows_zoned(
         slots,
         rows,
         left_out,
+        band_width: 0.0,
     }
 }
 

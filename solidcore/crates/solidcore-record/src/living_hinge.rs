@@ -78,6 +78,18 @@ pub struct LivingHingePlan {
     pub rows: usize,
     /// Lattice slots that met the material and were left out.
     pub left_out: usize,
+    /// The centre lines' length inside the material (mm, design 8.1).
+    #[serde(default)]
+    pub cut_length: f64,
+    /// The slots' outlines' length inside the material (mm).
+    #[serde(default)]
+    pub outline_length: f64,
+    /// The slots' area inside the material (mm²).
+    #[serde(default)]
+    pub open_area: f64,
+    /// `V`, the area's extent across the slots (mm): the arc length the hinge bends over.
+    #[serde(default)]
+    pub band_width: f64,
 }
 
 #[cfg(test)]
@@ -109,6 +121,10 @@ mod tests {
             ],
             rows: 1,
             left_out: 0,
+            cut_length: 37.6,
+            outline_length: 76.0,
+            open_area: 7.6,
+            band_width: 40.0,
         };
         let text = serde_json::to_string(&plan).unwrap();
         assert!(text.contains("\"run_out\"") && !text.contains("\"crossing\":null"));

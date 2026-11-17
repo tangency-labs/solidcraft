@@ -107,16 +107,21 @@ pub fn plan(p: &LivingHingePlan) -> k::LivingHingePlan {
         slots: p.slots.iter().map(slot).collect(),
         rows: p.rows,
         left_out: p.left_out,
+        band_width: p.band_width,
     }
 }
 
-/// A kernel plan as the record's.
+/// A kernel plan as the record's, with its lengths and area for slots `slot_width` wide.
 #[must_use]
-pub fn record_plan(p: &k::LivingHingePlan) -> LivingHingePlan {
+pub fn record_plan(p: &k::LivingHingePlan, slot_width: f64) -> LivingHingePlan {
     LivingHingePlan {
         slots: p.slots.iter().map(record_slot).collect(),
         rows: p.rows,
         left_out: p.left_out,
+        cut_length: p.cut_length(),
+        outline_length: p.outline_length(slot_width),
+        open_area: p.open_area(slot_width),
+        band_width: p.band_width,
     }
 }
 
@@ -153,7 +158,21 @@ mod tests {
                 .collect(),
             rows: 1,
             left_out: 2,
+            band_width: 40.0,
+            ..Default::default()
         };
-        assert_eq!(record_plan(&plan(&p)), p);
+        let back = record_plan(&plan(&p), 0.2);
+        let r: f64 = 0.1;
+        let len = 19.8 + 19.8 + 18.4;
+        assert!((back.cut_length - len).abs() < 1e-9, "{back:?}");
+        assert!((back.outline_length - (2.0 * len + 5.0 * std::f64::consts::PI * r)).abs() < 1e-9);
+        assert!((back.open_area - (len * 0.2 + 2.5 * std::f64::consts::PI * r * r)).abs() < 1e-9);
+        let p = LivingHingePlan {
+            cut_length: back.cut_length,
+            outline_length: back.outline_length,
+            open_area: back.open_area,
+            ..p
+        };
+        assert_eq!(back, p);
     }
 }

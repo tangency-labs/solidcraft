@@ -67,7 +67,7 @@ pub fn plan_living_hinge(
     let p = frame_loops(plate, angle, false)?;
     let anchor = anchor.map(|a| kernel::frame_point((a.x, a.y), angle));
     let plan = kernel::plan(&f, &p, None, &convert::living_hinge::spec(spec), anchor)?;
-    Ok(convert::living_hinge::record_plan(&plan))
+    Ok(convert::living_hinge::record_plan(&plan, spec.slot_width))
 }
 
 /// Whether the area `field` and the plate's outline `plate` overlap (design 3.5): touching along
@@ -232,6 +232,43 @@ mod tests {
         )
         .unwrap();
         assert_eq!(counts(&p), (27, 95, 41, 26, 28, 0));
+    }
+
+    #[test]
+    fn case_i_reports_its_lengths_area_and_band() {
+        // Design 8.1: the band is 40 mm across the slots; per slot `len·w + πr²` (closed) or
+        // `len·w + πr²/2` (run-out), outlines `2·len + 2πr` or `2·len + πr`.
+        let spec = default_spec();
+        let p = plan_living_hinge(
+            &[rect(0.0, 30.0, 60.0, 70.0)],
+            &[rect(0.0, 0.0, 60.0, 100.0)],
+            &spec,
+            0.0,
+            None,
+        )
+        .unwrap();
+        assert!((p.band_width - 40.0).abs() < 1e-9, "{}", p.band_width);
+        let r = spec.slot_width / 2.0;
+        let pi = std::f64::consts::PI;
+        let (mut cut, mut outline, mut area) = (0.0, 0.0, 0.0);
+        for s in &p.slots {
+            let len = match s.crossing {
+                Some(x) if (x - s.a0).abs() < (x - s.a1).abs() => s.a1 - x,
+                Some(x) => x - s.a0,
+                None => s.a1 - s.a0,
+            };
+            let caps = if s.kind == SlotKind::RunOut { 0.5 } else { 1.0 };
+            cut += len;
+            outline += 2.0 * len + 2.0 * pi * r * caps;
+            area += len * spec.slot_width + pi * r * r * caps;
+        }
+        assert!(
+            cut > 0.0 && (p.cut_length - cut).abs() < 1e-6,
+            "{} {cut}",
+            p.cut_length
+        );
+        assert!((p.outline_length - outline).abs() < 1e-6);
+        assert!((p.open_area - area).abs() < 1e-6);
     }
 
     #[test]
