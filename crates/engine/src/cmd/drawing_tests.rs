@@ -1911,7 +1911,12 @@ fn a_view_sketch_is_made_edited_copied_and_deleted_with_its_view() {
     assert!(copies[0].id != on_view && copies[0].sketch == kept.sketch && copies[0].name == kept.name);
     assert!(Arc::ptr_eq(after.sheet_sketch(on_view).unwrap(), &kept), "the original is unchanged");
 
-    run(&mut s, "selection.delete", item);
+    let deleted = run(&mut s, "selection.delete", item);
+    assert_eq!(
+        (&deleted["views"], &deleted["sketches"], &deleted["fills"]),
+        (&json!([view]), &json!([ids::encode(on_view)]), &json!([])),
+        "{deleted}"
+    );
     let after = open_one(&s);
     assert!(after.sheet_sketch(on_view).is_none(), "the view's sketch goes with it");
     assert!(after.sheet_sketch(on_sheet).is_some() && after.sheet_sketch(copies[0].id).is_some(), "the others stay");
