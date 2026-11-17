@@ -44,10 +44,34 @@ impl Default for LivingHinge {
     }
 }
 
-pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
+/// The four lengths of a new dialog (design 13.3), in mm: the metric row, or the inch row for an
+/// inch or foot design. Not run through `length_input::defaults`, which would keep the number and
+/// swap the unit (a 0.2 mm kerf would become 0.2 in).
+fn default_lengths_mm(unit: &str) -> [f64; 4] {
+    match unit {
+        "in" | "ft" => [0.75 * 25.4, 0.125 * 25.4, 0.0625 * 25.4, 0.008 * 25.4],
+        _ => [20.0, 3.0, 1.5, 0.2],
+    }
+}
+
+/// A new dialog's values, the lengths written in the design's unit.
+fn new_hinge(doc: &solidcraft_engine::doc::Document) -> LivingHinge {
+    let shown = |mm: f64| crate::length_input::shown(doc, mm);
+    let [slot_length, bridge, row_spacing, slot_width] = default_lengths_mm(crate::length_input::unit(doc));
+    LivingHinge {
+        slot_length: shown(slot_length),
+        bridge: shown(bridge),
+        row_spacing: shown(row_spacing),
+        slot_width: shown(slot_width),
+        margin: shown(0.0),
+        ..LivingHinge::default()
+    }
+}
+
+pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == CMD).then(|| {
         (
-            Kind::LivingHinge(LivingHinge::default()),
+            Kind::LivingHinge(new_hinge(&app.session.doc)),
             vec![
                 SelInput::new("ui.profiles", PROFILES, true),
                 SelInput::new("ui.living_hinge.plate", BODIES, true).tip("ui.living_hinge.plate_tip"),
@@ -100,6 +124,10 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, _: &[SelInpu
                 r.backing_on_hover_text(solidcraft_ui_text::locale().format("ui.living_hinge.report_cut_tip", &[("outline", &outline)]));
             }
         }
+        if let Some(slow) = slow_warning(reply) {
+            let t = solidcraft_theme::Tokens::get();
+            ui.add(egui::Label::new(egui::RichText::new(slow).color(t.warning).size(t.font_small)).wrap());
+        }
     }
     enter
 }
@@ -109,6 +137,15 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, _: &[SelInpu
 fn report_lines(doc: &solidcraft_engine::doc::Document, reply: &Value) -> Vec<String> {
     let l = solidcraft_ui_text::locale();
     report_args(doc, reply).iter().map(|(id, args)| l.format(id, &args.iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>())).collect()
+}
+
+/// The slow warning under the report lines (design 13.4): a hinge of more than
+/// `SLOW_CUT_SLOTS` slots takes a while to cut. Over the cap the preview is refused instead.
+fn slow_warning(reply: &Value) -> Option<String> {
+    let slots = reply.get("slots").and_then(Value::as_u64)?;
+    let limit = solidcraft_engine::doc::SLOW_CUT_SLOTS;
+    (slots > limit as u64)
+        .then(|| solidcraft_ui_text::locale().format("ui.living_hinge.report_slow", &[("slots", &slots.to_string()), ("limit", &limit.to_string())]))
 }
 
 /// Each report line's message id and its arguments.
@@ -265,5 +302,29 @@ mod tests {
         let flat: Vec<String> = args.iter().flat_map(|(_, a)| a.iter().map(|(k, v)| format!("{k}={v}"))).collect();
         assert_eq!(flat, ["slots=95", "rows=27", "run_out=28", "shortened=0", "left_out=26", "length=1757.8 mm", "width=40 mm"]);
         assert_eq!(report_lines(&s.doc, &reply).len(), 4);
+    }
+
+    /// A new dialog's lengths follow the design unit's row (design 13.3), not the number with the
+    /// unit swapped.
+    #[test]
+    fn living_hinge_new_dialog_defaults_in_the_design_unit() {
+        let mut s = Session::default();
+        let h = new_hinge(&s.doc);
+        assert_eq!([h.slot_length, h.bridge, h.row_spacing, h.slot_width, h.margin], ["20 mm", "3 mm", "1.5 mm", "0.2 mm", "0 mm"]);
+        s.doc.units = "cm".into();
+        let h = new_hinge(&s.doc);
+        assert_eq!([h.slot_length, h.bridge, h.row_spacing, h.slot_width], ["2 cm", "0.3 cm", "0.15 cm", "0.02 cm"]);
+        s.doc.units = "in".into();
+        let h = new_hinge(&s.doc);
+        assert_eq!([h.slot_length, h.bridge, h.row_spacing, h.slot_width], ["0.75 in", "0.125 in", "0.0625 in", "0.008 in"]);
+    }
+
+    /// The slow warning shows only past `SLOW_CUT_SLOTS` slots.
+    #[test]
+    fn living_hinge_slow_warning_past_the_slow_count() {
+        let limit = solidcraft_engine::doc::SLOW_CUT_SLOTS as u64;
+        assert!(slow_warning(&json!({"slots": limit})).is_none());
+        assert!(slow_warning(&json!({})).is_none());
+        assert!(slow_warning(&json!({"slots": limit + 1})).is_some());
     }
 }

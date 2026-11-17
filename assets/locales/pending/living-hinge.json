@@ -29,7 +29,8 @@
     "ui.living_hinge.report_kinds": "{run_out} run out, {shortened} shortened, {left_out} left out",
     "ui.living_hinge.report_cut": "Cut length {length}",
     "ui.living_hinge.report_cut_tip": "Along each slot's centre line: what a laser travels when a slot is one kerf wide. The slots' outlines are {outline}.",
-    "ui.living_hinge.report_band": "Across the bend {width}"
+    "ui.living_hinge.report_band": "Across the bend {width}",
+    "ui.living_hinge.report_slow": "{slots} slots: cutting more than {limit} takes a while"
   },
   "ar": {
     "cmd.solid_living_hinge": "مفصل مرن",
@@ -61,7 +62,8 @@
     "ui.living_hinge.report_kinds": "{run_out} ممتدة للحافة، {shortened} مقصّرة، {left_out} محذوفة",
     "ui.living_hinge.report_cut": "طول القطع {length}",
     "ui.living_hinge.report_cut_tip": "على امتداد الخط المركزي لكل شق: ما يقطعه الليزر حين يكون عرض الشق بعرض القطع. محيطات الشقوق {outline}.",
-    "ui.living_hinge.report_band": "عرض منطقة الانحناء {width}"
+    "ui.living_hinge.report_band": "عرض منطقة الانحناء {width}",
+    "ui.living_hinge.report_slow": "{slots} شقًا: قطع أكثر من {limit} يستغرق وقتًا"
   },
   "de": {
     "cmd.solid_living_hinge": "Biegescharnier",
@@ -93,7 +95,8 @@
     "ui.living_hinge.report_kinds": "{run_out} auslaufend, {shortened} gekürzt, {left_out} weggelassen",
     "ui.living_hinge.report_cut": "Schnittlänge {length}",
     "ui.living_hinge.report_cut_tip": "Entlang der Mittellinie jedes Schlitzes: der Weg des Lasers, wenn ein Schlitz eine Schnittfuge breit ist. Die Umrisse der Schlitze messen {outline}.",
-    "ui.living_hinge.report_band": "Quer zur Biegung {width}"
+    "ui.living_hinge.report_band": "Quer zur Biegung {width}",
+    "ui.living_hinge.report_slow": "{slots} Schlitze: mehr als {limit} zu schneiden dauert eine Weile"
   },
   "he": {
     "cmd.solid_living_hinge": "ציר גמיש",
@@ -125,7 +128,8 @@
     "ui.living_hinge.report_kinds": "{run_out} יוצאים לקצה, {shortened} מקוצרים, {left_out} הושמטו",
     "ui.living_hinge.report_cut": "אורך חיתוך {length}",
     "ui.living_hinge.report_cut_tip": "לאורך קו המרכז של כל חריץ: המרחק שהלייזר עובר כשחריץ ברוחב חיתוך אחד. היקפי החריצים הם {outline}.",
-    "ui.living_hinge.report_band": "לרוחב הכיפוף {width}"
+    "ui.living_hinge.report_band": "לרוחב הכיפוף {width}",
+    "ui.living_hinge.report_slow": "{slots} חריצים: חיתוך של יותר מ-{limit} לוקח זמן"
   },
   "ja": {
     "cmd.solid_living_hinge": "リビングヒンジ",
@@ -157,7 +161,8 @@
     "ui.living_hinge.report_kinds": "突き抜け {run_out}、短縮 {shortened}、省略 {left_out}",
     "ui.living_hinge.report_cut": "カット長 {length}",
     "ui.living_hinge.report_cut_tip": "各スロットの中心線に沿った長さ：スロット幅がカーフ 1 本分のときにレーザーが移動する距離です。スロットの輪郭は {outline} です。",
-    "ui.living_hinge.report_band": "曲げ方向の幅 {width}"
+    "ui.living_hinge.report_band": "曲げ方向の幅 {width}",
+    "ui.living_hinge.report_slow": "{slots} 個のスロット：{limit} を超える切り抜きには時間がかかります"
   },
   "ko": {
     "cmd.solid_living_hinge": "리빙 힌지",
@@ -189,7 +194,8 @@
     "ui.living_hinge.report_kinds": "끝까지 {run_out}개, 단축 {shortened}개, 제외 {left_out}개",
     "ui.living_hinge.report_cut": "절단 길이 {length}",
     "ui.living_hinge.report_cut_tip": "각 슬롯의 중심선을 따른 길이: 슬롯 폭이 커프 하나일 때 레이저가 이동하는 거리입니다. 슬롯 윤곽은 {outline}입니다.",
-    "ui.living_hinge.report_band": "굽힘 방향 폭 {width}"
+    "ui.living_hinge.report_band": "굽힘 방향 폭 {width}",
+    "ui.living_hinge.report_slow": "슬롯 {slots}개: {limit}개를 넘게 자르면 시간이 걸립니다"
   },
   "nb": {
     "cmd.solid_living_hinge": "Bøyehengsel",
@@ -221,7 +227,8 @@
     "ui.living_hinge.report_kinds": "{run_out} går ut, {shortened} forkortet, {left_out} utelatt",
     "ui.living_hinge.report_cut": "Kuttlengde {length}",
     "ui.living_hinge.report_cut_tip": "Langs hver spaltes senterlinje: det laseren kjører når en spalte er én snittbredde bred. Spaltenes omriss er {outline}.",
-    "ui.living_hinge.report_band": "På tvers av bøyen {width}"
+    "ui.living_hinge.report_band": "På tvers av bøyen {width}",
+    "ui.living_hinge.report_slow": "{slots} spalter: å skjære mer enn {limit} tar en stund"
   },
   "vi": {
     "cmd.solid_living_hinge": "Bản lề dẻo",
@@ -253,7 +260,8 @@
     "ui.living_hinge.report_kinds": "{run_out} chạy ra mép, {shortened} rút ngắn, {left_out} bỏ qua",
     "ui.living_hinge.report_cut": "Chiều dài cắt {length}",
     "ui.living_hinge.report_cut_tip": "Dọc theo đường tâm của mỗi rãnh: quãng đường laser đi khi rãnh rộng bằng một mạch cắt. Đường viền các rãnh là {outline}.",
-    "ui.living_hinge.report_band": "Bề rộng vùng uốn {width}"
+    "ui.living_hinge.report_band": "Bề rộng vùng uốn {width}",
+    "ui.living_hinge.report_slow": "{slots} rãnh: cắt hơn {limit} rãnh sẽ mất một lúc"
   },
   "zh": {
     "cmd.solid_living_hinge": "活动铰链",
@@ -285,6 +293,7 @@
     "ui.living_hinge.report_kinds": "{run_out} 个贯穿边缘，{shortened} 个缩短，{left_out} 个省略",
     "ui.living_hinge.report_cut": "切割长度 {length}",
     "ui.living_hinge.report_cut_tip": "沿每个槽的中心线：槽宽为一个切缝时激光走过的路程。槽的轮廓长 {outline}。",
-    "ui.living_hinge.report_band": "弯曲区宽度 {width}"
+    "ui.living_hinge.report_band": "弯曲区宽度 {width}",
+    "ui.living_hinge.report_slow": "{slots} 个槽：切割超过 {limit} 个需要一些时间"
   }
 }
