@@ -22,9 +22,12 @@
 //!
 //! # The certificates (one per op, applied to the new and to the old values alike)
 //!
-//! The cone `T` is the new cone's analytic data (placement, base radius, semi-angle; the
-//! retirement leaves them as they were: every state row checks them bit-equal old and new)
-//! and its STEP domain `D`, itself certified by the state certificate: `u` over
+//! The cone `T` is the new cone's analytic data (placement, base radius, semi-angle). A
+//! build row certifies its placement against the inputs' frame by closed form; two old
+//! rows fail it, with an input `Y` of `-1e-300 Y`, which upstream unitizes to zero and
+//! replaces by `Z`. Every other state row checks the data bit-equal old and new, so both
+//! sides answer for the same cone. `T` has the STEP domain `D`, itself certified by the
+//! state certificate: `u` over
 //! `[0, 360]`, the height interval on one nappe (it does not cross the apex height
 //! `-r0 / tan(semi)`), an unbounded cone's from the apex to `SM_INFINITE_PARAMETER` on the
 //! side of the base circle (`v = 0`, the cone's defining radius). Nothing is sampled.
@@ -80,7 +83,9 @@
     clippy::too_many_lines,
     clippy::similar_names,
     clippy::many_single_char_names,
-    clippy::float_cmp
+    clippy::float_cmp,
+    clippy::neg_cmp_op_on_partial_ord,
+    clippy::type_complexity
 )] // test
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -238,7 +243,6 @@ impl CurveData {
 struct State {
     /// type, strings, kind flags, radius, angle, flags, placement: compared bit-exact
     identity: Vec<f64>,
-    canonical: Vec<f64>,
     r0: f64,
     semi: f64,
     bounded: bool,
@@ -279,7 +283,7 @@ fn read_state(r: &mut Rd) -> State {
     let lin = r.n(3);
     let maxdom = r.n(4);
     let apex = r.n(6);
-    let canonical = r.n(7);
+    let _canonical = r.n(7);
     let height = r.n(2);
     let polar = r.f() != 0.0;
     let na = r.f() as usize;
@@ -309,7 +313,6 @@ fn read_state(r: &mut Rd) -> State {
     };
     State {
         identity,
-        canonical,
         r0,
         semi,
         bounded: flags[4] != 0.0,
@@ -1156,6 +1159,7 @@ fn cert_cone_row(
             let mut r = Rd::new(out);
             let s = read_state(&mut r);
             check(r.rest() == 0, "trailing values")?;
+            cert_input_frame(cone_in, &s)?;
             cert_state(&s)
         }
         "copy" | "adjust" | "transform" => {
@@ -1486,10 +1490,78 @@ fn moved_cone_rows_are_proven() {
 }
 
 /// The op label and the new and old verdicts of one row.
+/// A state row's identity (type, strings, kind flags, radius, angle, flags, placement) as
+/// bits, where the side built and the op answered.
+fn state_identity(inputs: &Value, o: &Output) -> Option<Vec<u64>> {
+    let op = inputs["op"].as_str()?;
+    if o.error.is_some() || first(&o.values, "build") != Some(SUCCESS) {
+        return None;
+    }
+    // a build row's frame is certified against the inputs' frame instead
+    // ([`cert_input_frame`])
+    match op {
+        "copy" | "adjust" | "transform" if first(&o.values, "status") == Some(SUCCESS) => {}
+        _ => return None,
+    }
+    let mut r = Rd::new(o.values.get("out")?);
+    if op == "copy" {
+        r.f();
+    }
+    let s = read_state(&mut r);
+    Some(s.identity.iter().map(|x| x.to_bits()).collect())
+}
+
+/// A built cone's placement has the directions the inputs give: `X` along the input `X`,
+/// `Y` along the part of the input `Y` across it (Gram-Schmidt), each axis first scaled by
+/// its largest coordinate so tiny and huge axes are directions. The canonical modes take
+/// the axes `Axis2Placement::new` holds, as the unit passes them. The bound is the
+/// rounding of the two normalisations, amplified by `1 / sin` of the inputs' angle.
+fn cert_input_frame(cone: &Value, s: &State) -> Verdict {
+    let held = matches!(
+        cone["mode"]["kind"].as_str(),
+        Some("canonical_semi" | "canonical" | "cyl_canonical")
+    );
+    let (x, y) = if held {
+        let p = Axis2Placement::new(v3(&cone["origin"]), v3(&cone["x"]), v3(&cone["y"]));
+        (p.x_axis(), p.y_axis())
+    } else {
+        (v3(&cone["x"]), v3(&cone["y"]))
+    };
+    let unit = |v: Vec3| {
+        let w = v * (1.0 / mc(v));
+        w * (1.0 / w.length())
+    };
+    let xd = unit(x);
+    let yu = unit(y);
+    let across = yu - yu.dot(xd) * xd;
+    let sin = across.length();
+    let yd = across * (1.0 / sin);
+    let b = gamma(64) / sin;
+    within(
+        "placement X is not along the inputs' X",
+        (unit(s.x) - xd).length(),
+        b,
+    )?;
+    within(
+        "placement Y is not along the inputs' Y across X",
+        (unit(s.y) - yd).length(),
+        b,
+    )
+}
+
+/// The header's premise: where both sides answer a state row, the cone's analytic data are
+/// bit-equal old and new, so both sides are certified against the same cone `T`.
+fn assert_same_identity(inputs: &Value, new: &Output, old: &Output) {
+    if let (Some(n), Some(o)) = (state_identity(inputs, new), state_identity(inputs, old)) {
+        assert_eq!(n, o, "state identity moved: {inputs}");
+    }
+}
+
 fn certify(unit: &str, inputs: &Value, new: &Output, old: &Output) -> (String, Verdict, Verdict) {
     match unit {
         "surface.cone_p1" => {
             let op = inputs["op"].as_str().unwrap_or("?").to_owned();
+            assert_same_identity(inputs, new, old);
             let ctx = ctx_of(inputs);
             (
                 op,
@@ -1505,6 +1577,7 @@ fn certify(unit: &str, inputs: &Value, new: &Output, old: &Output) -> (String, V
             if inputs.get("common_subdomain").is_some() {
                 op.push_str(" (subdomain)");
             }
+            assert_same_identity(i, new, old);
             let ctx = ctx_of(i);
             let sa = same_angle(new, old);
             (
@@ -1856,7 +1929,7 @@ fn extrusion_curves(out: &Output) -> Result<Vec<(usize, Vec<Vec3>, Vec<f64>)>, F
             cps.push(p);
         }
         let nk = r.f() as usize;
-        out.push((deg, cps, r.n(nk).to_vec()));
+        out.push((deg, cps, r.n(nk)));
     }
     Ok(out)
 }
@@ -2610,7 +2683,6 @@ fn read_state_p2(r: &mut Rd) -> State {
     };
     State {
         identity,
-        canonical: Vec::new(),
         r0,
         semi,
         bounded: flags[4] != 0.0,

@@ -39,7 +39,7 @@ fn on(origin: Point3, axis: Vec3, radius: f64, tan_angle: f64) -> Implicit {
     }
 }
 
-/// `X` of length 0.974 and `Y` of length 0.855, perpendicular (as the n_lib_p2
+/// `X` of length 0.974 and `Y` of length 0.855, perpendicular (as the `n_lib_p2`
 /// `analytic028` row's cylinder).
 fn skew_axes() -> (Point3, Vec3, Vec3) {
     let x = Vec3::new(0.3770377089403243, 0.5669923897893385, 0.6967084152767273);
