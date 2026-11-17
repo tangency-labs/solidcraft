@@ -14,6 +14,7 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
+use solidcore::mass::integrator::gamma;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cone, create_cylinder};
@@ -243,7 +244,9 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// Transposing a swapped face's trims exactly, where they were mirrored through a rounded
 /// matrix (WR-729), moves trim coordinates by up to an ulp and no edge, vertex or surface:
 /// the r 8 cylinder boss, cone boss and pit and 19 degree lean by one last bit each, every
-/// one still within 3.2e-16 relative of its 70-digit reference (`was` is left as it was).
+/// one still within 3.2e-16 relative of its 70-digit reference (`was` is left as it was); the
+/// three that move away from theirs stay within their volume sum's rounding bound
+/// (`transposed_pins_lie_within_their_sums_rounding_of_the_references`).
 ///
 /// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
 /// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
@@ -425,6 +428,70 @@ fn prisms_keep_their_pinned_volumes() {
         12,
     );
     assert_near_closed_form(v, rounded_r8() - 4.0 * (under - 15.0 * 4.0));
+}
+
+/// WR-729 (#17902): the exact trim transpose moves three pins one last bit FARTHER from their
+/// 70-digit references (the r 8 cylinder boss by 5.0e-12, the cone boss by 1.2e-12, the cone pit
+/// by 1.7e-12, MEASURED). Each pinned volume, main's and this branch's, lies within the rounding
+/// bound of the volume's own sum, so the move is a change of rounding, not of the integral:
+///
+/// `brep_volume` adds one term per face (and more for the gaps it closes, #16735) into
+/// `total.volume`. For `m` terms `t_i` that recursive sum is off its exact value by at most
+/// `gamma(m - 1) sum |t_i|` (Higham, Lemma 3.1, `solidcore::mass::integrator::gamma`), before
+/// each term's own error and the inputs' (`L e_in`), which only add. With `n <= m` the face count
+/// and `|v| <= sum |t_i|`, `B = gamma(n - 1) |v|` is at most that bound, so asserting
+/// `|v - exact| <= B` asserts more than the certificate needs. `exact` is the 70-digit reference
+/// (`pins-ref70-gk.py`, tanh-sinh), held here as its nearest double, whose own rounding (half an
+/// ulp) is added to the distance.
+#[test]
+fn transposed_pins_lie_within_their_sums_rounding_of_the_references() {
+    // (feature, pinned volume, main's pin before WR-729, 70-digit reference, its nearest
+    // double, faces)
+    let pins: [(Feature, f64, f64, &str, f64, usize); 3] = [
+        (
+            cylinder_boss,
+            23528.16549340515,
+            23528.165493405155,
+            "23528.1654934051575356764322355",
+            23528.16549340516,
+            9,
+        ),
+        (
+            cone_boss,
+            23501.98555462524,
+            23501.985554625244,
+            "23501.9855546252425920225768740",
+            23501.985554625244,
+            11,
+        ),
+        (
+            cone_pit,
+            23427.54082790698,
+            23427.540827906978,
+            "23427.5408279069781598768686995",
+            23427.540827906978,
+            9,
+        ),
+    ];
+    for (feature, pinned, main, reference, exact, faces) in pins {
+        let (v, n) = rounded_with(feature, 8.0).unwrap();
+        assert_eq!(n, faces, "{reference}");
+        assert!(
+            (v - pinned).abs() <= 1e-14 * pinned,
+            "volume {v:.17}, pinned {pinned:.17}"
+        );
+        let half_ulp = 0.5 * (f64::from_bits(exact.to_bits() + 1) - exact);
+        for (side, x) in [("this branch's", v), ("main's", main)] {
+            let off = (x - exact).abs() + half_ulp;
+            let bound = gamma(u32::try_from(n - 1).unwrap()) * x.abs();
+            println!("{side} {x:.17}: {off:e} off {reference}, sum's rounding bound {bound:e}");
+            assert!(
+                off <= bound,
+                "{side} volume {x:.17} is {off:e} off its reference {reference}, past the \
+                 sum's rounding bound {bound:e}"
+            );
+        }
+    }
 }
 
 /// Walls that lean: kept as the fork keeps them, the boss's with no refusal.
