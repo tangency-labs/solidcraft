@@ -513,24 +513,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     d => d,
                 };
                 let mut pos = order.iter().position(|o| *o == shown).unwrap_or(0);
-                let options = ["One Side", "Two Sides", "Symmetric"];
-                let current = options.get(pos).map_or("", |label| tr(label));
-                let mut restore_focus = false;
-                let trigger = ui_kit::dropdown_menu(ui, "ex_dir", current, |ui| {
-                    for (index, label) in options.iter().enumerate() {
-                        let row = ui.selectable_value(&mut pos, index, tr(label));
-                        crate::scenario::publish_target(&format!("dialog:Direction:{label}"), row.rect);
-                        // Non-pointer activation does not trigger the popup's click-to-close.
-                        if row.clicked() && !row.clicked_by(egui::PointerButton::Primary) {
-                            ui.close();
-                            restore_focus = true;
-                        }
-                    }
-                });
-                if restore_focus {
-                    trigger.request_focus();
-                    ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                }
+                ui_kit::dropdown_with_keyboard_close(ui, "ex_dir", &mut pos, &["One Side", "Two Sides", "Symmetric"]);
                 if pos != order.iter().position(|o| *o == shown).unwrap_or(0) {
                     *direction = match (order.get(pos).copied().unwrap_or(0), reversed) {
                         (0, true) => 1,
