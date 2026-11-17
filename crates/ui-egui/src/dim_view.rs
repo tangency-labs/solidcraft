@@ -173,9 +173,18 @@ impl DimensionDraft {
         }
         if let Some(kind) = solved.sketch.constraints.iter().find(|c| c.param.as_deref() == Some(param)).map(|c| &c.kind)
             && !kind.is_angle()
-            && kind.value().is_some_and(|value| !value.is_finite() || value <= 0.0)
+            && let Some(value) = kind.value()
         {
-            return Err("Enter a dimension greater than zero".into());
+            let allows_zero = matches!(
+                kind,
+                ConstraintKind::Distance { .. }
+                    | ConstraintKind::DistanceX { .. }
+                    | ConstraintKind::DistanceY { .. }
+                    | ConstraintKind::PointLineDistance { .. }
+            );
+            if !value.is_finite() || value < 0.0 || (!allows_zero && value <= 0.0) {
+                return Err(if allows_zero { "Enter a non-negative dimension" } else { "Enter a dimension greater than zero" }.into());
+            }
         }
         Ok(scratch)
     }
@@ -762,17 +771,17 @@ pub fn drag_end() {
 
 /// [`label`] for a dimension drawn as `frame`: an ellipse's minor half-axis is a length, as
 /// it is measured to its axis end, so it has no R.
-pub fn frame_label(frame: &DimFrame, k: &ConstraintKind, expr: Option<&str>, driven: bool, units: &str, decimals: u8) -> String {
-    label_marked(k, !matches!(frame, DimFrame::HalfAxis { .. }), expr, driven, units, decimals)
+pub fn frame_label(frame: &DimFrame, k: &ConstraintKind, expr: Option<&str>, driven: bool, units: &str, decimals: u8, angle_decimals: u8) -> String {
+    label_marked(k, !matches!(frame, DimFrame::HalfAxis { .. }), expr, driven, units, decimals, angle_decimals)
 }
 
 /// The text shown for a dimension: the value (R / Ø for radius and diameter, degrees for
 /// angles), "fx: value" when an expression drives it, in parentheses when driven.
-pub fn label(k: &ConstraintKind, expr: Option<&str>, driven: bool, units: &str, decimals: u8) -> String {
-    label_marked(k, true, expr, driven, units, decimals)
+pub fn label(k: &ConstraintKind, expr: Option<&str>, driven: bool, units: &str, decimals: u8, angle_decimals: u8) -> String {
+    label_marked(k, true, expr, driven, units, decimals, angle_decimals)
 }
 
-fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, driven: bool, units: &str, decimals: u8) -> String {
+fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, driven: bool, units: &str, decimals: u8, angle_decimals: u8) -> String {
     let v = k.value().unwrap_or(0.0);
     // Retain deliberately authored trailing zeros in a four-place inch literal too.
     let authored_four = units == "in"
@@ -784,7 +793,11 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
         });
     let decimals = if authored_four { decimals.max(4) } else { decimals };
     // A length says its unit, as the value inputs and the pointer's coordinates do (#1155).
-    let num = if k.is_angle() { format!("{:.1}°", v.to_degrees()) } else { format!("{} {units}", crate::prefs::length_number(v, units, decimals)) };
+    let num = if k.is_angle() {
+        format!("{:.*}°", usize::from(angle_decimals.min(6)), v.to_degrees())
+    } else {
+        format!("{} {units}", crate::prefs::length_number(v, units, decimals))
+    };
     let num = match k {
         ConstraintKind::Radius { .. } if radius_mark => format!("R{num}"),
         ConstraintKind::Diameter { .. } | ConstraintKind::LinearDiameter { .. } => format!("Ø{num}"),
@@ -920,7 +933,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             crate::prefs::dimension_colour(&app.preferences, c.driven)
         };
         let galley = painter.layout_no_wrap(
-            frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
+            frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals, app.preferences.angle_decimals),
             font.clone(),
             col,
         );
@@ -1827,7 +1840,7 @@ mod tests {
         let c = sk.constraints.iter().find(|c| c.id == id).unwrap();
         assert!(c.driven && c.param.is_none(), "{c:?}");
         assert!(matches!(c.kind, ConstraintKind::Length {value,..} if (value-20.).abs()<1e-6));
-        assert_eq!(label(&c.kind, None, c.driven, "mm", 2), "(20.00 mm)");
+        assert_eq!(label(&c.kind, None, c.driven, "mm", 2, 1), "(20.00 mm)");
         assert!(!editing());
         assert_eq!(h.app.session.doc.to_json(), baseline);
         h.step(&json!({"key":"Escape"})).unwrap();
@@ -2102,37 +2115,76 @@ mod tests {
     #[test]
     fn inch_labels_convert_all_lengths_preserve_four_digits_and_leave_angles_alone() {
         let length = ConstraintKind::Length { l: 0, value: 25.4 };
-        assert_eq!(label(&length, Some("25.4 mm"), false, "in", 2), "1.000 in");
-        assert_eq!(label(&length, Some("1 in"), false, "in", 2), "1.000 in");
-        assert_eq!(label(&length, Some("1.0000 in"), false, "in", 2), "1.0000 in");
+        assert_eq!(label(&length, Some("25.4 mm"), false, "in", 2, 1), "1.000 in");
+        assert_eq!(label(&length, Some("1 in"), false, "in", 2, 1), "1.000 in");
+        assert_eq!(label(&length, Some("1.0000 in"), false, "in", 2, 1), "1.0000 in");
         let radius = ConstraintKind::Radius { c: 0, value: 1.2345 * 25.4 };
-        assert_eq!(label(&radius, Some("1.2345 in"), false, "in", 2), "R1.2345 in");
-        assert_eq!(label(&radius, Some("width / 2"), true, "in", 2), "(fx: R1.2345 in)");
+        assert_eq!(label(&radius, Some("1.2345 in"), false, "in", 2, 1), "R1.2345 in");
+        assert_eq!(label(&radius, Some("width / 2"), true, "in", 2, 1), "(fx: R1.2345 in)");
         // An ellipse's minor half-axis is a length to its axis end: no R.
         let half_axis = DimFrame::HalfAxis { center: Vec2::ZERO, dir: Vec2::Y, len: 8.0 };
         let minor = ConstraintKind::Radius { c: 0, value: 8.0 };
-        assert_eq!(frame_label(&half_axis, &minor, None, false, "mm", 2), "8.00 mm");
-        assert_eq!(frame_label(&half_axis, &minor, Some("width / 2"), true, "mm", 2), "(fx: 8.00 mm)");
+        assert_eq!(frame_label(&half_axis, &minor, None, false, "mm", 2, 1), "8.00 mm");
+        assert_eq!(frame_label(&half_axis, &minor, Some("width / 2"), true, "mm", 2, 1), "(fx: 8.00 mm)");
         let diameter = ConstraintKind::Diameter { c: 0, value: 0.001 * 25.4 };
-        assert_eq!(label(&diameter, None, false, "in", 2), "Ø0.001 in");
+        assert_eq!(label(&diameter, None, false, "in", 2, 1), "Ø0.001 in");
         assert_eq!(crate::prefs::length_number(25.4 * (1.0 + 1e-12), "in", 2), "1.000");
         assert_eq!(crate::prefs::length_number(25.4, "in", 5), "1.00000");
         assert_eq!(crate::prefs::length_number(25.4, "cm", 2), "2.54");
         let angle = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_4, flip: false };
-        assert_eq!(label(&angle, Some("45 deg"), false, "in", 2), "45.0°");
+        assert_eq!(label(&angle, Some("45 deg"), false, "in", 2, 1), "45.0°");
+        // #18231: the label follows the Angle decimals preference.
+        assert_eq!(label(&angle, Some("45 deg"), false, "in", 2, 3), "45.000°");
+        assert_eq!(label(&angle, Some("45 deg"), false, "in", 2, 0), "45°");
     }
 
     #[test]
     fn labels_show_the_value_or_fx() {
         let k = ConstraintKind::Length { l: 0, value: 25.0 };
-        assert_eq!(label(&k, Some("25 mm"), false, "mm", 2), "25.00 mm");
-        assert_eq!(label(&k, Some("width * 2"), false, "mm", 2), "fx: 25.00 mm");
+        assert_eq!(label(&k, Some("25 mm"), false, "mm", 2, 1), "25.00 mm");
+        assert_eq!(label(&k, Some("width * 2"), false, "mm", 2, 1), "fx: 25.00 mm");
         // A value typed with a decimal comma is a plain value too (#1347).
-        assert_eq!(label(&ConstraintKind::Length { l: 0, value: 25.5 }, Some("25,5 mm"), false, "mm", 2), "25.50 mm");
-        assert_eq!(label(&k, None, true, "mm", 2), "(25.00 mm)");
-        assert_eq!(label(&ConstraintKind::Radius { c: 0, value: 5.0 }, Some("5 mm"), false, "mm", 2), "R5.00 mm");
-        assert_eq!(label(&ConstraintKind::Diameter { c: 0, value: 10.0 }, Some("10"), false, "mm", 2), "Ø10.00 mm");
+        assert_eq!(label(&ConstraintKind::Length { l: 0, value: 25.5 }, Some("25,5 mm"), false, "mm", 2, 1), "25.50 mm");
+        assert_eq!(label(&k, None, true, "mm", 2, 1), "(25.00 mm)");
+        assert_eq!(label(&ConstraintKind::Radius { c: 0, value: 5.0 }, Some("5 mm"), false, "mm", 2, 1), "R5.00 mm");
+        assert_eq!(label(&ConstraintKind::Diameter { c: 0, value: 10.0 }, Some("10"), false, "mm", 2, 1), "Ø10.00 mm");
         let a = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_4, flip: false };
-        assert_eq!(label(&a, Some("45 deg"), false, "mm", 2), "45.0°");
+        assert_eq!(label(&a, Some("45 deg"), false, "mm", 2, 1), "45.0°");
+        // The angle label follows Angle decimals, as the Preferences sample does (#18231).
+        let sixty = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_3, flip: false };
+        assert_eq!(label(&sixty, None, false, "mm", 2, 0), "60°");
+        assert_eq!(label(&sixty, None, false, "mm", 2, 3), "60.000°");
+    }
+
+    #[test]
+    fn negative_and_zero_distance_dimensions_are_accepted_in_editor() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [15, 0]})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.step(&json!({"start": "sketch.dimension"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+        h.step(&json!({"click": {"sketch": [15, 0]}})).unwrap();
+        assert!(editing(), "{:?}", h.app.status);
+        h.step(&json!({"text": "-10"})).unwrap();
+        h.frames(2);
+        assert_eq!(EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.draft.as_ref()?.error.clone())), None);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(!editing(), "{:?}", h.app.status);
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        assert!((sk.points[1].pos.x + 10.0).abs() < 1e-6, "p1 should flip to -10: {:?}", sk.points[1].pos);
+
+        // Zero distance is also allowed for point-to-point / offset dimensions.
+        h.app.run("sketch.point", json!({"point": [0, 12]})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 12]}})).unwrap();
+        assert!(editing(), "{:?}", h.app.status);
+        h.step(&json!({"text": "0"})).unwrap();
+        h.frames(2);
+        assert_eq!(EDIT.with(|e| e.borrow().as_ref().and_then(|e| e.draft.as_ref()?.error.clone())), None);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(!editing(), "{:?}", h.app.status);
+        cancel();
     }
 }

@@ -871,6 +871,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
+        roll_over_pass: false,
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),
@@ -880,6 +881,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         fit_edge: None,
         fit_kind: solidcore::blend::fillet_executive::FitKind::Radius,
         fit_setback: -1.0,
+        rollover_adjusting: false,
     };
     // The executive constructor sets this after constructing its SmMerge base.
     executive.intersector.ignore_tangency = true;

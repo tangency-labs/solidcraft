@@ -72,6 +72,32 @@ fn angle(a: Vec3, b: Vec3) -> f64 {
     a.cross(b).length().atan2(a.dot(b))
 }
 
+/// The largest angle (radians) from the pole direction `p` to a point of the great-circle
+/// arc from `a` to `b` (the short way round, normal `m = a x b`): the larger of its ends'
+/// angles, and the angle of the circle's farthest point from `p` where that point lies on
+/// the arc.
+///
+/// The farthest point is the direction of `foot = m (m . p) - p (m . m)` (minus the part of
+/// `p` in the arc's plane), at the angle `pi - atan2(|p . m|, |p x m|)` from `p` (pi less
+/// the angle between `p` and the plane). The angle is taken in that closed form, not as
+/// `angle(p, foot)`: where `p` is (nearly) normal to the plane, every point of the circle
+/// is (nearly) a quarter turn from it, `foot` is the difference of two (nearly) equal terms
+/// and its direction is rounding, so `angle(p, foot)` lands anywhere in `[0, pi]` (pi at the
+/// corner of a rounded box centred on a coordinate plane), while the closed form gives the
+/// quarter turn its arguments say. Whether the point is on the arc is still decided on
+/// `foot`; where its direction is rounding, every point of the circle is within that same
+/// rounding of a quarter turn from `p`, so either answer gives the same angle to it. A
+/// `foot` of exactly zero (`p` normal to the plane) is on the arc: the quarter turn.
+fn farthest_from_pole(p: Vec3, a: Vec3, b: Vec3) -> f64 {
+    let m = a.cross(b);
+    let mut theta = angle(p, a).max(angle(p, b));
+    let foot = m * m.dot(p) - p * m.dot(m);
+    if a.cross(foot).dot(m) >= 0.0 && foot.cross(b).dot(m) >= 0.0 {
+        theta = theta.max(PI - m.dot(p).abs().atan2(p.cross(m).length()));
+    }
+    theta
+}
+
 fn refused(refusal: ExtendRefusal, distance: Option<f64>) -> SolidError {
     SolidError::ExtendRefused {
         operation: OP,
@@ -139,12 +165,7 @@ pub(super) fn ball_extended_sides(
     }
     // the turn round the pole the patch spans, and the third side's farthest point from it
     let lambda = angle(ax, bx);
-    let m = a.cross(b);
-    let foot = m * m.dot(p) - p * m.dot(m);
-    let mut theta = angle(p, a).max(angle(p, b));
-    if foot.length() > 0.0 && a.cross(foot).dot(m) >= 0.0 && foot.cross(b).dot(m) >= 0.0 {
-        theta = theta.max(angle(p, foot));
-    }
+    let theta = farthest_from_pole(p, a, b);
     if !(lambda > 0.0 && lambda < PI && theta > 0.0 && theta < PI) {
         return Err(SolidError::invalid_input(
             OP,
@@ -940,4 +961,56 @@ fn certify_circle_local(s: &BSplineSurface, side: BoxSide, middle: Point2, c: Ve
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #15108: the corner patch of a rounded box centred on `y = 0`, its pole one ulp-ish off
+    /// the normal of its third side's plane. Every point of that side is a quarter turn from
+    /// the pole; `angle(p, foot)` on the rounded `foot` gave pi and the patch was refused.
+    #[test]
+    fn a_pole_normal_to_the_third_side_is_a_quarter_turn_from_it() {
+        let a = Vec3::new(0.0, 0.0, 3.0);
+        let b = Vec3::new(-3.0, 0.0, 0.0);
+        for p in [
+            Vec3::new(0.0, 3.000_000_000_000_001_8, 0.0),
+            Vec3::new(0.0, 3.0, 0.0),
+            Vec3::new(1e-15, 3.0, -2e-15),
+        ] {
+            let theta = farthest_from_pole(p, a, b);
+            assert!((theta - 0.5 * PI).abs() <= 1e-14, "{p:?}: {theta}");
+        }
+    }
+
+    /// A pole tilted a resolved amount off the normal: the closed form, pi/2 plus the tilt
+    /// (the farthest point on the arc lies away from the tilt).
+    #[test]
+    fn a_tilted_pole_is_the_tilt_past_a_quarter_turn() {
+        let a = Vec3::new(0.0, 0.0, 3.0);
+        let b = Vec3::new(-3.0, 0.0, 0.0);
+        for t in [1e-9_f64, 1e-6, 1e-3, 0.3] {
+            // tilted towards (1, 0, -1): the farthest point is (-1, 0, 1) / sqrt 2, inside the arc
+            let p = Vec3::new(t.sin() / 2f64.sqrt(), t.cos(), -t.sin() / 2f64.sqrt()) * 3.0;
+            let theta = farthest_from_pole(p, a, b);
+            assert!((theta - (0.5 * PI + t)).abs() <= 1e-14, "{t}: {theta}");
+        }
+    }
+
+    /// Real defects are still caught: a pole on the third side's great circle, across from a
+    /// point of the side, is a half turn from it (the patch is refused: not under a half
+    /// turn), and a pole whose farthest point is off the arc takes the arc's end.
+    #[test]
+    fn a_pole_on_the_third_sides_circle_is_still_a_half_turn() {
+        let a = Vec3::new(1.0, 0.0, 0.0);
+        let b = Vec3::new(0.0, 1.0, 0.0);
+        let p = Vec3::new(-1.0, -1.0, 0.0);
+        let theta = farthest_from_pole(p, a, b);
+        assert!(theta >= PI, "{theta}");
+        // its farthest point (1, -1, 0) / sqrt 2 is off the arc: the end a, 3/4 of a half turn
+        let q = Vec3::new(-1.0, 1.0, 0.0);
+        let theta = farthest_from_pole(q, a, b);
+        assert!((theta - 0.75 * PI).abs() <= 1e-15, "{theta}");
+    }
 }

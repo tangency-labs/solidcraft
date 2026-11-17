@@ -79,6 +79,7 @@ pub(crate) fn evaluate(doc: &Document, st: &mut ModelState, bodies: &[String], f
         body.source_transform = crate::mat_mul(&transform, &old.source_transform);
         body.imported = old.imported.clone();
         body.names = crate::naming::NameCell::same(old);
+        body.drawn_as_moved(old, &transform);
         moved.push((slot, body));
     }
     for (slot, body) in moved {
