@@ -998,6 +998,8 @@ listed, or is `null`.
 
 ### `ui.prefs` settings
 
+- `show_document_browser` (default false): show the document browser beside open designs; also available in Preferences → Layout → Panels and through the app-bar Show/Hide Documents toggle. Explicit visibility choices from earlier document-browser builds are preserved.
+
 `render_previous_geometry_budget` (Graphics, default false) restores the previous fixed Render preview geometry budget: 512 MiB on 64-bit desktop, 128 MiB elsewhere. With it off, desktop uses the device-based budget.
 
 
@@ -1012,7 +1014,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_components_open` (default false: each component placement in the browser starts closed until it is opened, by its fold arrow, Expand All or Find in Browser; true: every placement starts open, as before #9274)
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
 - `browser_hover_shows_origin` (default true: an Origin plane, axis or point row under the pointer in the browser, the design's or a part's, shows that item in the view, and a hidden one only while the pointer is on its row, its eye and saved visibility unchanged and not pickable, #15658; false: only an origin plane already drawn lights up, as before; Preferences › Design › Origin)
-- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool}` with the value in force, `check_updates` itself stays the person's stored choice, and a request that changes it is refused
+- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool}` with the value in force (any policy adds that object, with `organization` when it names one; `locked` lists what it locks), `check_updates` itself stays the person's stored choice, and a request that changes it is refused
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`

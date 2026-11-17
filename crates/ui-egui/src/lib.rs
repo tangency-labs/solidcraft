@@ -120,6 +120,7 @@ mod kit_gallery_tests;
 #[cfg(test)]
 mod kit_host_tests;
 mod length_input;
+pub mod library;
 mod linked_source;
 pub mod links;
 #[cfg(test)]
@@ -269,6 +270,7 @@ mod round_pick_tests;
 mod rule_editor;
 #[cfg(test)]
 mod rule_editor_tests;
+pub mod safe_graphics;
 pub mod save_job;
 pub mod scenario;
 pub(crate) mod scene_palette;
@@ -509,6 +511,8 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Select the local document library root; unavailable in browser hosts.
+    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
@@ -857,6 +861,17 @@ pub struct SolveApp {
     /// Build bodies' display meshes on the CPU even where the GPU could (safe mode). Read by
     /// [`SolveApp::set_wgpu`].
     pub cpu_meshing: bool,
+    /// This launch runs in safe graphics mode (set by the desktop host after a launch that failed
+    /// to come up or lost its device): ambient occlusion, blur behind panels, studio shading and
+    /// the GPU path tracer stay off whatever the saved settings say, and the view says so in one
+    /// line with a Try full graphics button ([`safe_graphics`]).
+    pub safe_graphics: bool,
+    /// The safe graphics line was closed for this launch.
+    pub safe_graphics_dismissed: bool,
+    /// Try full graphics was clicked: the next start uses full graphics (the line offers a restart).
+    pub safe_graphics_full_next: bool,
+    /// Preferences › Graphics › Start in safe graphics mode, for the next launch only.
+    pub safe_graphics_next: bool,
     pub frame_ms: f64,
     /// The viewport's frame-rate readout ([`frame_rate`]).
     pub frame_rate: frame_rate::FrameRate,
@@ -904,6 +919,7 @@ pub struct SolveApp {
     pub flat_view: dialogs_sheet::FlatView,
     /// The start page.
     pub home: home::HomeState,
+    pub library: library::LibraryState,
     /// The 3D mouse: which device, its reading, and the calibration window.
     pub space_mouse: space_mouse::Input,
     pub file_load: file_load::FileLoad,
@@ -1108,6 +1124,10 @@ impl SolveApp {
             native_file_menu: false,
             header: toolbar::HeaderLayout::DESKTOP,
             cpu_meshing: false,
+            safe_graphics: false,
+            safe_graphics_dismissed: false,
+            safe_graphics_full_next: false,
+            safe_graphics_next: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
             operations: operations::Panel::default(),
@@ -1135,6 +1155,7 @@ impl SolveApp {
             embedded: false,
             embed_editor: false,
             home: home::HomeState::default(),
+            library: library::LibraryState::default(),
             space_mouse: Default::default(),
             file_load: file_load::FileLoad::default(),
             open_meshing: None,
@@ -1241,7 +1262,10 @@ impl SolveApp {
 
     /// Draw the viewport with pipelines [`Self::build_wgpu_split`] made, perhaps on another thread.
     pub fn adopt_wgpu(&mut self, rs: &egui_wgpu::RenderState, built: WgpuBuilt) {
-        self.blur.install(rs, built.blur);
+        // Safe graphics mode draws no blur behind panels: it never gets a device.
+        if safe_graphics::blur(self) {
+            self.blur.install(rs, built.blur);
+        }
         if built.msaa_fallback {
             self.msaa_compatibility = true;
         }
@@ -1269,7 +1293,10 @@ impl SolveApp {
             // Next to the graphics settings: a setup that stops the app is not run again by itself.
             let marker = self.services.graphics_path.as_deref().map(|p| std::path::Path::new(p).with_file_name(render_workspace::SETUP_MARKER));
             self.render_workspace.watch_setup(marker);
-            self.render_workspace.defer_path_host(key, move || solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
+            // Safe graphics mode never sets up the GPU path tracer.
+            if safe_graphics::path_tracer(self) {
+                self.render_workspace.defer_path_host(key, move || solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
+            }
         }
         render_workspace::sync_backend(self);
         ai_connect::tick(self);
@@ -1327,6 +1354,7 @@ impl SolveApp {
             "history_folds": history_folds::prefs(self),
             "recent": self.home.recent,
             "recent_opened_at": self.home.opened_at,
+            "document_library": self.library.prefs(),
             "recent_forgotten": self.home.forgotten,
             "shortcut_box": self.sbox.prefs(),
             "shortcuts": self.keymap.prefs(),
@@ -1407,6 +1435,7 @@ impl SolveApp {
                 .map(|a| a.iter().take(10_000).filter_map(|x| x.as_str().map(str::to_string)).collect())
                 .unwrap_or_default()
         };
+        self.library.load(v.get("document_library"));
         self.tree.collapsed = keys("browser_collapsed");
         self.tree.expanded = keys("browser_expanded");
         history_folds::load_prefs(self, &v);
@@ -1435,6 +1464,12 @@ impl SolveApp {
             }
             self.ui.layout = p.layout;
             self.preferences = p;
+        }
+        // Preserve an explicit choice from document-browser builds predating the preference.
+        if v.get("preferences").and_then(|p| p.get("show_document_browser")).is_none()
+            && let Some(collapsed) = v.get("document_library").and_then(|p| p.get("collapsed")).and_then(Value::as_bool)
+        {
+            self.preferences.show_document_browser = !collapsed;
         }
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
@@ -1515,11 +1550,25 @@ impl SolveApp {
         }
         let params = if matches!(id, "render.start" | "render.preflight") { render_workspace::light::filter_request(self, params)? } else { params };
         let selected_before = self.session.selection.clone();
-        let r = self.session.execute(id, &params).map_err(|e| e.to_string()).and_then(|reply| {
-            panel_runtime::apply_placement_command(self, id, &reply).map_err(solidcraft_engine::panels::commands::error_text)?;
-            render_workspace::apply_command(self, id, &reply)?;
-            Ok(reply)
-        });
+        // File commands may also arrive through shortcuts, scripts, or the control
+        // channel. Protect every open tab here, including after asynchronous pickers.
+        let removes_open_file = matches!(id, "file.move" | "file.trash")
+            && params.get("path").and_then(Value::as_str).is_some_and(|path| documents::uses_file(self, path));
+        let r = if removes_open_file {
+            Err("Close designs using this file before renaming, moving, or trashing it".into())
+        } else {
+            self.session.execute(id, &params).map_err(|e| e.to_string()).and_then(|reply| {
+                panel_runtime::apply_placement_command(self, id, &reply).map_err(solidcraft_engine::panels::commands::error_text)?;
+                render_workspace::apply_command(self, id, &reply)?;
+                Ok(reply)
+            })
+        };
+        // A transfer can persist a destination before reporting a later failure.
+        // Rescan once per attempted file mutation, including partial errors; rejected
+        // open-file removals never reached the filesystem and need no refresh.
+        if !removes_open_file && matches!(id, "file.copy" | "file.move" | "file.trash") {
+            self.library.refresh();
+        }
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
         self.after_command(id, &params, revision, selected_before, r)
     }
@@ -1561,6 +1610,9 @@ impl SolveApp {
         let selection_changed = self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
+            if id == "select.set" {
+                sketch_attachment_ui::selection_picked(self);
+            }
         }
         // Render focus already applies its semantic selection after clearing object picks.
         // A tab switch brings in the other design's own Render selection.
@@ -1612,6 +1664,13 @@ impl SolveApp {
                         tool.hover = None;
                         tool.picks.clear();
                         tool.point_picks.clear();
+                    }
+                }
+                // A drawing inserted with curves kept as drawn that the curve check refuses says so,
+                // as other imports' warnings do (#16190).
+                "sketch.insert_svg" | "sketch.insert_dxf" => {
+                    if let Some(w) = v.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty()) {
+                        self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
                     }
                 }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
@@ -1860,6 +1919,9 @@ impl SolveApp {
                 }
                 if matches!(id, "file.save" | "file.save_as") {
                     history_folds::remember(self);
+                }
+                if matches!(id, "file.save" | "file.save_as") {
+                    self.library.refresh();
                 }
                 if matches!(id, "doc.open" | "file.save" | "file.save_as")
                     && let Some(p) = self.session.path.clone()
@@ -2209,9 +2271,10 @@ impl SolveApp {
             joint_handles::start(self);
             return;
         }
-        // One selected placement moves as a component, the same way as its Browser menu,
-        // retaining the exact instance path and the grounding/rigid-group restrictions.
-        // A selected body, or a component picked in the tree, opens Move/Copy on those bodies.
+        // One selected placement opens Move/Copy on it the same way as its Browser menu (it
+        // moves by its placement), retaining the exact instance path and the grounding and
+        // rigid-group restrictions, and asking nothing about its pending move first. Selected
+        // bodies, or a component picked in the tree, open Move/Copy on those.
         if id == "solid.move"
             && let [solidcraft_engine::Sel::Occurrence { path }] = self.session.selection.as_slice()
         {
@@ -2547,6 +2610,11 @@ impl SolveApp {
             return;
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
+            t.classic = self.preferences.construction_line_classic;
+            if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+                // The classic switch starts at Construction, whatever the palette chose last.
+                t.line_type = 3;
+            }
             let state = crate::open_meshing::session_world(&self.session);
             let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
             if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {
@@ -3030,7 +3098,9 @@ impl SolveApp {
     /// planes (Mirror's plane, Offset Plane, Midplane, the construct tools)? The origin planes are
     /// shown for it, so they can be picked in the view rather than only in the browser (#2581).
     pub fn picking_plane(&self) -> bool {
-        self.picking_sketch_plane() || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
+        self.picking_sketch_plane()
+            || self.tree.redefine.is_some()
+            || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
     }
 
     /// Is the Sketch Project dialog open, picking its geometry? Its pick takes origin planes,
@@ -3870,6 +3940,7 @@ impl SolveApp {
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         plugins::tick(self, ui.ctx(), false);
+        documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
         prefs::prepare_blur(self, ui.ctx());
@@ -3950,6 +4021,7 @@ impl SolveApp {
         if agent_chat::shown(self) {
             agent_chat::settings::dialog(self, ui.ctx());
         }
+        library::panel(self, ui);
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);

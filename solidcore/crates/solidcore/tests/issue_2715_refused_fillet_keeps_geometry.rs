@@ -5,9 +5,10 @@
 //! every surface out (a file of faces without geometry). The steps now take a
 //! `Brep::snapshot`, which keeps the geometry exactly.
 //!
-//! Each case is a refusal the step's own tests pin (the cliff overflow's subtraction,
-//! WR-631; the trim at creases, WR-695; the kept features, #2273). After it the body must
-//! still own every surface, and written and read back have the same faces and volume.
+//! Each case is a refusal the step's own tests pin (the trim at creases, WR-695; the kept
+//! features, #2273; the cliff overflow's subtraction, WR-631, was a third until the trim
+//! replaced it). After it the body must still own every surface, and written and read back
+//! have the same faces and volume.
 
 #![allow(
     clippy::unwrap_used,
@@ -127,12 +128,10 @@ fn edge_between(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> EdgeId {
         .expect("edge")
 }
 
-/// The cliff overflow's flags (as `wr631_cliff_overflow_construction`), with or without
-/// the trim at the creases.
-fn cliff_kernel(trim: bool) -> Kernel {
+/// The cliff overflow's flags (as `wr631_cliff_overflow_construction`).
+fn cliff_kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_overflow_trim_at_creases = trim;
     k
 }
 
@@ -150,45 +149,13 @@ fn refused(k: &mut Kernel, body: &mut Brep, e: EdgeId, r: f64, chamfer: bool) ->
     (info.code, info.comment)
 }
 
-/// `cliff_overflow`'s subtraction refused (#1467's box at r10.01 and r10.02, as
-/// `wr631_cliff_overflow_construction`): the target is put back from the copy taken
-/// before the Boolean.
-#[test]
-fn a_refused_cliff_subtraction_leaves_a_body_that_saves_its_surfaces() {
-    let (a, b) = (Point3::new(0.0, 20.0, 10.0), Point3::new(40.0, 20.0, 10.0));
-    let mut seen = 0;
-    for r in [10.01, 10.02] {
-        let mut k = cliff_kernel(false);
-        let mut body = create_box(&mut k, Point3::ZERO, 40.0, 20.0, 10.0).unwrap();
-        let e = edge_between(&k, &body, a, b);
-        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
-        session
-            .prepare_constant_radius_edges(&mut k, &[e], r, 1, 1, 1.0)
-            .unwrap();
-        let result = session.do_fillet(&mut k);
-        let info = session.error_info().clone();
-        drop(session);
-        if result.is_ok() {
-            continue;
-        }
-        assert_eq!(info.code, FilletErrorType::NoRoom as i32, "r {r}: {info:?}");
-        assert_eq!(
-            info.comment,
-            "Fillet Error: subtracting a cliff overflow's removal region leaves no solid"
-        );
-        assert_left_whole(&mut k, &mut body, 8000.0, &format!("cliff r {r}"));
-        seen += 1;
-    }
-    assert!(seen > 0, "neither radius is refused by the subtraction");
-}
-
 /// `trim_at_creases` refused (`wr696_fit_sizes`'s backed block: a 20 x 10 x 10 block whose
 /// back top edge carries a round of 3, then its front top edge a round of 9, whose rail runs across the
 /// tangent edge onto the back round: `CreaseAcrossTangentEdge`): the target is put back from
 /// the copy taken before the trim, the block with its back round, 2000 - 20 (1 - pi/4) 9.
 #[test]
 fn a_refused_trim_at_creases_leaves_a_body_that_saves_its_surfaces() {
-    let mut k = cliff_kernel(true);
+    let mut k = cliff_kernel();
     let mut body = create_box(&mut k, Point3::ZERO, 20.0, 10.0, 10.0).unwrap();
     let back = edge_between(
         &k,
@@ -218,7 +185,6 @@ fn a_refused_trim_at_creases_leaves_a_body_that_saves_its_surfaces() {
 fn keep_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut fixes = UpstreamFixes::default();
-    fixes.fillet_overflow_trim_at_creases = true;
     fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes = fixes;
     k

@@ -104,6 +104,11 @@ struct ImportState {
     read_bytes: u64,
     files: BTreeSet<PathBuf>,
     design: Vec<u8>,
+    /// The manifest asks for `evaluate@0.1`.
+    evaluate: bool,
+    /// The design staged for `evaluate`, and whether the host has it open.
+    scratch: Vec<u8>,
+    evaluating: bool,
 }
 impl<H: PluginHost> State<H> {
     fn fail(&mut self, error: HostError) -> PluginError {
@@ -426,6 +431,71 @@ impl<H: PluginHost> design::Host for State<H> {
         }
         import.design.extend_from_slice(&bytes);
         Ok(())
+    }
+}
+
+impl<H: PluginHost> State<H> {
+    /// The import, when its manifest asks for `evaluate`.
+    fn evaluation(&mut self) -> std::result::Result<&mut ImportState, PluginError> {
+        self.check()?;
+        match self.import.as_mut() {
+            Some(import) if import.evaluate => Ok(import),
+            _ => Err(wit_error(HostError::PermissionDenied { permission: "evaluate: the manifest does not ask for evaluate@0.1".into() })),
+        }
+    }
+    fn close_evaluation(&mut self) {
+        if let Some(import) = self.import.as_mut()
+            && std::mem::take(&mut import.evaluating)
+        {
+            self.host.evaluate_close();
+        }
+    }
+}
+impl<H: PluginHost> evaluate::Host for State<H> {
+    fn stage(&mut self, bytes: Vec<u8>) -> std::result::Result<(), PluginError> {
+        if bytes.len() > MAX_IMPORT_CHUNK_BYTES {
+            self.check()?;
+            return Err(self.fail(limit("evaluate.stage chunk (at most 1 MiB)")));
+        }
+        if self.evaluation()?.evaluating {
+            self.close_evaluation();
+            if let Some(import) = self.import.as_mut() {
+                import.scratch.clear();
+            }
+        }
+        let import = self.evaluation()?;
+        if import.scratch.len().saturating_add(bytes.len()) > MAX_IMPORT_DESIGN_BYTES {
+            return Err(self.fail(limit("evaluate: a staged design of more than 256 MiB")));
+        }
+        import.scratch.extend_from_slice(&bytes);
+        Ok(())
+    }
+    fn run(&mut self, command: String, args: String) -> std::result::Result<String, PluginError> {
+        if args.len() > MAX_JSON_BYTES || command.len() > 128 {
+            self.check()?;
+            return Err(self.fail(limit("evaluate.run arguments exceed 1 MiB")));
+        }
+        let args: Value =
+            serde_json::from_str(&args).map_err(|e| wit_error(HostError::InvalidInput { field: "args".into(), reason: e.to_string() }))?;
+        if !self.evaluation()?.evaluating {
+            let design = std::mem::take(&mut self.evaluation()?.scratch);
+            // The plugin's own design not opening is an answer about it, not a failed import.
+            self.host.evaluate_open(&design).map_err(wit_error)?;
+            self.evaluation()?.evaluating = true;
+        }
+        let result = self.host.evaluate_run(&command, &args).map_err(wit_error)?;
+        let text = serde_json::to_string(&result).map_err(|e| wit_error(trap(e.to_string())))?;
+        if text.len() > MAX_JSON_BYTES {
+            // Too large to check this way: an answer, not a failed import.
+            return Err(wit_error(limit("evaluate.run result exceeds 1 MiB")));
+        }
+        Ok(text)
+    }
+    fn reset(&mut self) {
+        self.close_evaluation();
+        if let Some(import) = self.import.as_mut() {
+            import.scratch = Vec::new();
+        }
     }
 }
 
@@ -790,6 +860,9 @@ pub(super) fn run_import<H: PluginHost + 'static>(
             read_bytes: 0,
             files: BTreeSet::new(),
             design: Vec::new(),
+            evaluate: manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")),
+            scratch: Vec::new(),
+            evaluating: false,
         };
         Ok((runtime, entry, options, engine, component, import, source::FileInfo { name, size }))
     })();
@@ -853,7 +926,9 @@ pub(super) fn run_import<H: PluginHost + 'static>(
         }
         Ok(Imported { design, report })
     })();
-    (store.into_data().host, outcome)
+    let mut state = store.into_data();
+    state.close_evaluation();
+    (state.host, outcome)
 }
 
 #[cfg(test)]
