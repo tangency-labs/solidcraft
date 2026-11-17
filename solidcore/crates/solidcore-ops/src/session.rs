@@ -7,15 +7,16 @@
 //!   run at once and a long call holds up only the calls on its own bodies: a call waits for a
 //!   body another call holds on that body's own lock. A call that holds two bodies at once
 //!   locks them in one order ([`Body::lock_pair`]), so calls on the same bodies in other orders
-//!   never wait on each other for good. Calls one after another all get the same kernel, so
-//!   they see the state it keeps as one process kernel would (its random draws, caches and
-//!   context); calls side by side see the states of different kernels. At most
+//!   never wait on each other for good. Every call starts from the state a fresh kernel has
+//!   ([`start_clean`]: its random draws from the default seed, no blend station remembered),
+//!   so its result does not depend on the calls before it or on the kernel it is handed. At most
 //!   [`most_idle`] kernels wait between calls, however many once ran side by side. A kernel
 //!   holds no global state and a body's identities are valid only in the kernel that issued
 //!   them, so any kernel takes any body.
 //! - **Process-lifetime state:** the state upstream keeps for the whole process (SMLib's context
-//!   is process-global) is the fillet solver's latched step: the first step a call latches is
-//!   the process's ([`publish_step`]), and every kernel a call takes runs with it.
+//!   is process-global) is the fillet solver's latched step. Every kernel the session makes
+//!   shares the process's ([`STEP`]): the first latch on any of them settles it, and every
+//!   latch after it, on any kernel and in any call, takes it, calls side by side included.
 //! - **Configuration:** the kernel runs with the opt-in fixes the application names
 //!   ([`set_fixes`], by `UpstreamFixes` flag name); which ones is the application's choice, never
 //!   ops'. Everything else about the kernel (its tolerances, context, caches) is the kernel's
@@ -48,7 +49,8 @@ use std::num::NonZeroUsize;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
+use solidcore::blend::fillet_section::definition::StationMemo;
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
 use solidcore::topology::brep::p3::brep_copy;
 use solidcore::{Brep, SolidError};
 
@@ -58,7 +60,10 @@ use crate::{Error, Result};
 
 /// The kernels waiting between calls, the one given back last at the end.
 static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
-/// The fillet solver's step, once a call has latched it: the process's.
+/// The fillet solver's step for the process, settled by the first latch on any of the session's
+/// kernels ([`Kernel::process_fillet_point_step`], which each kernel [`fresh`] makes is handed).
+/// A cell the kernels share, rather than one the session copies into each kernel it takes, so
+/// that a kernel taken before the step was settled still latches the settled step (#18164).
 static STEP: OnceLock<f64> = OnceLock::new();
 static FIXES: Mutex<Option<UpstreamFixes>> = Mutex::new(None);
 
@@ -193,11 +198,13 @@ pub(crate) fn counted<T>(counter: Counter, f: impl FnOnce() -> T) -> (T, u64) {
     (value, grew)
 }
 
-/// A kernel of the session's configuration: the kernel's default options and the fixes the
-/// application named. Every kernel the pool makes is made here, so they are configured alike.
+/// A kernel of the session's configuration: the kernel's default options, the fixes the
+/// application named and the process's fillet step ([`STEP`]). Every kernel the pool makes is
+/// made here, so they are configured alike.
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = current_fixes();
+    k.process_fillet_point_step = Some(&STEP);
     k
 }
 
@@ -209,15 +216,21 @@ fn most_idle() -> usize {
     *MOST.get_or_init(|| std::thread::available_parallelism().map_or(1, NonZeroUsize::get))
 }
 
-/// A kernel for a call: the idle one given back last, or a fresh one when none is idle. It runs
-/// with the process's latched step, once a call has latched one ([`publish_step`]).
+/// A kernel for a call: the idle one given back last, or a fresh one when none is idle.
 fn take() -> Kernel {
     let idle = IDLE.lock().unwrap_or_else(PoisonError::into_inner).pop();
-    let k = idle.unwrap_or_else(fresh);
-    if let Some(&step) = STEP.get() {
-        k.fillet_point_step.set(Some(step));
-    }
-    k
+    idle.unwrap_or_else(fresh)
+}
+
+/// A call starts from the state a fresh kernel has, whatever kernel it was handed and whatever
+/// ran on it before: its random draws start from the default seed, and the stations the blend
+/// definitions solved last are forgotten. A call's result is then the same after any history
+/// and on any kernel of the pool, so calls side by side on several threads give what they give
+/// one after another. (The kernel's other caches never change a result, only its speed, and
+/// stay.)
+fn start_clean(k: &mut Kernel) {
+    k.rng = Rng::new(KernelOptions::default().seed);
+    *k.blend_station_memo.borrow_mut() = StationMemo::default();
 }
 
 /// A call's kernel, fit to use again, back among the idle ones (dropped when [`most_idle`] wait
@@ -234,16 +247,6 @@ fn give_back(k: Kernel) {
     };
     // dropped with no lock held
     drop(surplus);
-}
-
-/// The step the fillet solver latched on `k`, if it did, is the process's from now on: upstream
-/// latches it in a function static, once for the whole process. The first call to latch one
-/// publishes it; a call latching another at the same moment on another kernel keeps its own
-/// for that call only.
-fn publish_step(k: &Kernel) {
-    if let Some(step) = k.fillet_point_step.get() {
-        let _ = STEP.set(step);
-    }
 }
 
 thread_local! {
@@ -431,6 +434,7 @@ fn run_with<T: Answer>(
         return Err(Error::Cancelled);
     }
     let mut k = take();
+    start_clean(&mut k);
     k.fixes = current_fixes();
     k.cancel.clone_from(&token);
     CURRENT.with(|c| c.set(Some(call)));
@@ -473,7 +477,6 @@ fn run_with<T: Answer>(
         let grew = counter(&k.work_counters).saturating_sub(start);
         COUNTED.with(|c| c.set(Some((counter, n.saturating_add(grew)))));
     }
-    publish_step(&k);
     let stopped = STOPPED
         .with(Cell::take)
         .unwrap_or_else(|| token.as_ref().is_some_and(CancelToken::is_cancelled));

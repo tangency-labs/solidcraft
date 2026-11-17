@@ -577,6 +577,34 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
     });
 }
 
+/// Two chamfers that overlap (#18178): a 40 high disc of radius 14.5 with a hole of radius 10 off
+/// centre by 2, so its top ring is 2.5 wide at the narrowest place. A 1.5 chamfer on the outer
+/// circle and on the hole's rim alone each builds, and together their contact lines on the top
+/// cross there (1.5 + 1.5 > 2.5): refused as too large for the faces, not as "not a closed solid".
+#[test]
+fn chamfers_that_overlap_are_too_large_not_a_non_solid() {
+    let ring = || {
+        let disc = make_cylinder([0.0; 3], 14.5, 40.0).unwrap();
+        let hole = make_cylinder([2.0, 0.0, -1.0], 10.0, 42.0).unwrap();
+        boolean(&disc, &hole, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let (outer, rim) = ([-14.5, 0.0, 40.0], [2.0, 10.0, 40.0]);
+    timed("overlap_alone", move || {
+        blend(&ring(), Blend::Chamfer, &[outer], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+        blend(&ring(), Blend::Chamfer, &[rim], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+    });
+    let both = timed("overlap_both", move || {
+        blend(&ring(), Blend::Chamfer, &[outer, rim], &[1.5; 2], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err()
+    });
+    assert!(overlap_refusal(&both), "{both:?}");
+}
+
+/// The refusal of blends whose contact lines on a face they share cross: unsized, or sized with
+/// the bands' reason.
+fn overlap_refusal(e: &Error) -> bool {
+    matches!(e, Error::NoRoom | Error::TooLarge { why: Some(crate::RoomReason::BandsOverlap), .. })
+}
+
 /// The capi's `overflow_goes_first` (fork 241f7ba): R21 on a 20 cube's edge takes all of both faces
 /// that edge lies on, and rounds with it on other edges go after it. With R5 on the corner's other
 /// two edges those edges are gone (the two R5 points flagged) and the result is the R21's alone,
@@ -803,6 +831,44 @@ fn pocket_chamfer_on_a_boolean_body() {
     let v = volume(&Body::from_kernel(b), 1e-8).unwrap();
     let d: f64 = 5.5;
     assert!(rel(v, 21000.0 - (50.0 * d * d + 4.0 / 3.0 * d * d * d)) < 1e-8, "{v}");
+}
+
+/// A Ø20 x 20 cylinder with a Ø2 x 4 blind hole in its top face, and a Ø20 x 5 cap joined on top:
+/// the cap seals the hole into a void inside one solid (tangency-labs/solidcraft#18287). A 2 mm
+/// chamfer or round on the top or the bottom rim keeps the void: two shells, the void's three
+/// faces untouched (4 planes, 2 cylinders, and the chamfer's cone or the round's torus as a
+/// rational spline), and the record validates (the solid's region lists its outer shell first).
+/// Pappus for the rim: the chamfer takes the triangle d²/2, its centroid d/3 in from the rim; the
+/// round takes the spandrel, its centroid (10 - 3π)/(12 - 3π) r in.
+#[test]
+fn a_blend_on_a_cap_that_seals_a_hole_keeps_the_void() {
+    let (big, d) = (10.0, 2.0);
+    let sealed = move || {
+        let body = make_cylinder([0.0; 3], big, 20.0).unwrap();
+        let hole = make_cylinder([-4.0, 0.0, 16.0], 1.0, 4.0).unwrap();
+        let body = boolean(&body, &hole, BooleanOp::Subtract).unwrap().unwrap();
+        let cap = make_cylinder([0.0, 0.0, 20.0], big, 5.0).unwrap();
+        boolean(&body, &cap, BooleanOp::Union).unwrap().unwrap()
+    };
+    let whole = PI * big * big * 25.0 - PI * 4.0;
+    let chamfer_inset = d / 3.0;
+    let round_inset = (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI) * d;
+    for (kind, area, inset) in [(Blend::Chamfer, d * d / 2.0, chamfer_inset), (Blend::Round, spandrel(d), round_inset)] {
+        for z in [25.0, 0.0] {
+            let b = timed("sealed_cap_rim", move || blend(&sealed(), kind, &[[0.0, -big, z]], &[d], TOL, &[], &[], Corners::Filled).unwrap());
+            let v = volume(&b, 1e-10).unwrap();
+            let want = whole - 2.0 * PI * (big - inset) * area;
+            assert!(rel(v, want) < 1e-9, "{kind:?} at z {z}: volume {v}, want {want}");
+            let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{kind:?} at z {z}: record: {e:?}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{kind:?} at z {z}: record: {e}"));
+            assert_eq!(rec.shells.len(), 2, "{kind:?} at z {z}");
+            assert_eq!(rec.regions.iter().filter(|r| r.void).count(), 1, "{kind:?} at z {z}");
+            assert_eq!(counts(&b).unwrap(), [7, 8, 5], "{kind:?} at z {z}");
+            let face = if matches!(kind, Blend::Chamfer) { "cone" } else { "rational_spline" };
+            let surfaces = BTreeMap::from([("cylinder".to_owned(), 2), ("plane".to_owned(), 4), (face.to_owned(), 1)]);
+            assert_eq!(kinds(&rec), surfaces, "{kind:?} at z {z}");
+        }
+    }
 }
 
 /// The corner of r5 rounds at (60, 40, 20) on a 60 x 40 x 20 box, set back 8 and left open: the
