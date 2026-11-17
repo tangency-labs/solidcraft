@@ -73,14 +73,20 @@ fn flag(cmd: &str, p: &Value, key: &str) -> Result<Option<bool>> {
     }
 }
 
-/// The cloud's index in the document, by `cloud`: its id or its name.
+/// The cloud's index in the document, by `cloud`: its id or its name. A number is an id first
+/// and a name only when no cloud has that id; a string is a name first and an id only when no
+/// cloud has that name. A cloud named "2" then never hides the cloud with id 2 from `cloud: 2`.
 fn find_cloud(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
-    let key = match p.get("cloud") {
-        Some(Value::Number(n)) => n.to_string(),
-        Some(Value::String(x)) => x.clone(),
+    let (key, id_first) = match p.get("cloud") {
+        Some(Value::Number(n)) => (n.to_string(), true),
+        Some(Value::String(x)) => (x.clone(), false),
         _ => return Err(bad(cmd, "`cloud` must be an id or name")),
     };
-    s.doc.point_clouds.iter().position(|c| c.id.to_string() == key || c.name == key).ok_or_else(|| bad(cmd, format!("no point cloud `{key}`")))
+    let clouds = &s.doc.point_clouds;
+    let by_id = || clouds.iter().position(|c| c.id.to_string() == key);
+    let by_name = || clouds.iter().position(|c| c.name == key);
+    let found = if id_first { by_id().or_else(by_name) } else { by_name().or_else(by_id) };
+    found.ok_or_else(|| bad(cmd, format!("no point cloud `{key}`")))
 }
 
 /// `faces`: the face indices, each below `count`, without repeats, in the order given.
@@ -91,6 +97,9 @@ fn face_list(cmd: &str, p: &Value, count: usize) -> Result<Option<Vec<usize>>> {
         Some(_) => return Err(bad(cmd, format!("`faces` must be a list of face indices (whole numbers from 0), at most {MAX_FACES}"))),
     };
     let mut out: Vec<usize> = Vec::with_capacity(list.len());
+    // Which faces are in `out` already: one flag per face of the body, so a repeat is found
+    // without searching `out`.
+    let mut taken = vec![false; count];
     for v in list {
         let i = v
             .as_u64()
@@ -99,7 +108,10 @@ fn face_list(cmd: &str, p: &Value, count: usize) -> Result<Option<Vec<usize>>> {
         if i >= count {
             return Err(bad(cmd, format!("`faces`: the body has {count} faces, so there is no face {i}")));
         }
-        if !out.contains(&i) {
+        if let Some(seen) = taken.get_mut(i)
+            && !*seen
+        {
+            *seen = true;
             out.push(i);
         }
     }
@@ -115,10 +127,11 @@ fn sample_step(n: usize, max: usize) -> usize {
     if n <= max || max == 0 { 1 } else { n.div_ceil(max) }
 }
 
-/// How far a 32-bit float coordinate of magnitude `m` may lie from the value it stores: half a
-/// unit in the last place, bounded above by `m` × 2⁻²⁴.
+/// How far a point stored as three 32-bit float coordinates, each of magnitude at most `m`, may
+/// lie from the point it stands for. Each coordinate is off by at most half a unit in the last
+/// place, at most `m` × 2⁻²⁴, so the point is off by at most √3 × `m` × 2⁻²⁴.
 fn f32_precision(m: f64) -> f64 {
-    m.abs() * (1.0 / 16_777_216.0)
+    3.0_f64.sqrt() * m.abs() * (1.0 / 16_777_216.0)
 }
 
 /// One sampled point's outcome.
@@ -472,6 +485,25 @@ mod tests {
         for k in ["mean_abs_mm", "rms_mm", "max_abs_mm", "within_tolerance_fraction", "mean_signed_mm"] {
             assert!(r[k].is_null(), "{k} must be null: {r}");
         }
+    }
+
+    #[test]
+    fn a_number_picks_the_cloud_with_that_id_before_a_cloud_with_that_name() {
+        // The first cloud, 1 mm above the box, is named after the second cloud's id; the
+        // second cloud lies 3 mm above it.
+        let mut s = box_and_cloud("id-first", &[[5.0, 5.0, 11.0]]);
+        s.execute("pointcloud.insert", &json!({"path": ply("id-first-2", &[[5.0, 5.0, 13.0]]), "name": "second"})).unwrap();
+        let second = s.doc.point_clouds[1].id;
+        s.execute("pointcloud.edit", &json!({"cloud": "scan", "name": second.to_string()})).unwrap();
+        let r = s.execute("pointcloud.deviation", &json!({"cloud": second, "body": "Box"})).unwrap();
+        assert_eq!(r["cloud"], json!(second));
+        assert!(close(f(&r, "max_abs_mm"), 3.0), "{r}");
+        // A string is a name first: the first cloud.
+        let r = s.execute("pointcloud.deviation", &json!({"cloud": second.to_string(), "body": "Box"})).unwrap();
+        assert!(close(f(&r, "max_abs_mm"), 1.0), "{r}");
+        // A face listed twice is measured once, and the list keeps its first order.
+        let r = s.execute("pointcloud.deviation", &json!({"cloud": "second", "body": "Box", "faces": [3, 1, 3]})).unwrap();
+        assert_eq!(r["faces"], json!([3, 1]));
     }
 
     #[test]
