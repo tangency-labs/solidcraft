@@ -39,6 +39,7 @@ required-features = ["solver-profiling"]
 craft-plugin = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcore-record = { workspace = true }
+solidcore-ops = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-control = { workspace = true }
 solidcraft-geom = { workspace = true }

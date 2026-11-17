@@ -51,15 +51,18 @@ use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::drawing::centre_line::CentreLine;
 use solidcraft_doc::drawing::centre_mark::CentreMark;
+use solidcraft_doc::drawing::cutting_line::CuttingLine;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
 use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_side};
 use solidcraft_doc::drawing::note::Note;
+use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
 use solidcraft_doc::drawing::view::{Beside, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose};
 use solidcraft_doc::drawing_view::{
     Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
+use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_measure::{self, AngleFrom, LinearDirection, Measured, Reading};
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
 use solidcraft_geom::drawing_view::{Invalid, NamedView, PRESETS, ProjectedSide, Scale};
@@ -72,7 +75,7 @@ use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
 use crate::drawing_view::{
-    CHORD_RANGE, Extents, LeftOut, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, Room, ShownSet, Styles, Unmeasured, ViewSessions,
+    CHORD_RANGE, Extents, LeftOut, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, PreparedBodies, Room, ShownSet, Styles, Unmeasured, ViewSessions,
 };
 use crate::params::bad;
 use crate::schema::drawing_view::{
@@ -80,8 +83,9 @@ use crate::schema::drawing_view::{
     CopyParams, CreateResult, DPI_RANGE, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FlatParams,
     FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams,
     OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ProjectionForParams,
-    ProjectionForResult, ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, StudyPoseParam,
-    StudyStepResult, ToSheetResult, ViewLineParam, ViewMoveParams, ViewMoveResult, ViewResult, ViewSet,
+    ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult,
+    StandardParams, StandardResult, StudyPoseParam, StudyStepResult, ThreadPieceResult, ThreadResult, ToSheetResult, ViewLineParam, ViewMoveParams,
+    ViewMoveResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -112,6 +116,13 @@ const FLAT_CONTRACT: TypedContract<FlatParams> = TypedContract::new();
 /// How far from its parent's centre `drawing.view.projection_for` takes a point, either way, in
 /// paper millimetres: the most two points of one sheet are apart along an axis.
 const MAX_OFFSET_MM: f64 = 2.0 * MAX_SIDE_MM;
+const SECTION: &str = "drawing.view.section";
+const SECTION_CONTRACT: TypedContract<SectionParams> = TypedContract::new();
+
+const STANDARD: &str = "drawing.view.standard";
+const STANDARD_CONTRACT: TypedContract<StandardParams> = TypedContract::new();
+/// The most paper gap `drawing.view.standard` takes between views, in millimetres.
+const MAX_STANDARD_GAP_MM: f64 = 1000.0;
 
 /// How far a new projected view's boundary is from its parent's, in paper millimetres, until a
 /// drawing style gives it.
@@ -122,7 +133,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
     .noundo()
     .contract(&CONTRACT)
     .output(output_schema_for::<SnapshotResult>)
-    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); visual_style?, reference_style?: visible (default), visible_hidden or shaded (drawn as a picture, without its own lines, and not with scene; shaded_visible and shaded_visible_hidden aren't supported yet); reference_hides_model?: false; reference_shown_percent?: 0..100, how far the box grows from the model's towards holding its reference parts, each side on its own (0, the default: the model's box; 100: holds them all); tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh); scene?: true adds the lines as a paper scene of the sheet, hidden lines dashed under the visible ones; source?: {occurrences: [[ids…]]}, the occurrence subtrees drawn ([] the design's own bodies; default every body); hide?: [[ids…]], subtrees left out; at most 1000 paths in each and 4096 ids in all. measure?: up to 100 values to read on the view, each {linear: {along: x|y, from, to}}, {aligned: {from, to}} (model points), {angle: {edge: [a, b], from: horizontal|vertical|[c, d]}} or {radius: {edge}} (an edge as drawing.dimension.add takes it, which the view must see face on), with units?: mm|cm|m|in|ft (default the design's) and decimals?: 0..6 (default 2) for their labels; the reply then has measurements: [{kind, value_mm and paper_mm, or value_rad, label, meaning: projected, foreshortened, status: exact|approximate}]. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), picture? ({pixels: [w, h], dpi, rect_mm} when something is shaded: the boundary's pixel grid at sheet.dpi or 1200, the lower, which dpi gives), source}. Read-only: saves nothing."),
+    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); visual_style?, reference_style?: visible (default), visible_hidden or shaded (drawn as a picture, without its own lines, and not with scene; shaded_visible and shaded_visible_hidden aren't supported yet); reference_hides_model?: false; reference_shown_percent?: 0..100, how far the box grows from the model's towards holding its reference parts, each side on its own (0, the default: the model's box; 100: holds them all); tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while a piece is sampled, as the mesh's are, or bounded past it); scene?: true adds the lines as a paper scene of the sheet, hidden lines dashed under the visible ones; source?: {occurrences: [[ids…]]}, the occurrence subtrees drawn ([] the design's own bodies; default every body); hide?: [[ids…]], subtrees left out; at most 1000 paths in each and 4096 ids in all. measure?: up to 100 values to read on the view, each {linear: {along: x|y, from, to}}, {aligned: {from, to}} (model points), {angle: {edge: [a, b], from: horizontal|vertical|[c, d]}} or {radius: {edge}} (an edge as drawing.dimension.add takes it, which the view must see face on), with units?: mm|cm|m|in|ft (default the design's) and decimals?: 0..6 (default 2) for their labels; the reply then has measurements: [{kind, value_mm and paper_mm, or value_rad, label, meaning: projected, foreshortened, status: exact|approximate}]. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: exact|approximate, provenance: hidden_lines|mesh_projection|hidden_lines_and_mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), picture? ({pixels: [w, h], dpi, rect_mm} when something is shaded: the boundary's pixel grid at sheet.dpi or 1200, the lower, which dpi gives), source}. Read-only: saves nothing."),
     CommandSpec::new(INSPECT, "Inspect Drawing View", crate::checked!("drawing.view.inspect", inspect))
         .icon("inspect")
         .in_drawing()
@@ -130,7 +141,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
-        .params("view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured or no_flat; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged."),
+        .params("view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), exploded (\"assembled\" or {view: id}), pose (\"designed\", {joints: [...]} as saved, in radians and mm, or {study: {id, step}}; with drawn?, skipped? and study? for a position of its own), configuration (\"active\" or {row: id}, with drawn: {id, name} or null, and errors?), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies, not_placed, nothing_chosen, no_exploded_view, not_posed, no_configuration, not_configured, no_flat or cut_away; a flat pattern view's: flat_pattern)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; a view of another configuration evaluates a copy of the design; the design is unchanged."),
     CommandSpec::new(EDIT, "Edit Drawing View", crate::checked!("drawing.view.edit", edit))
         .icon("edit")
         .in_drawing()
@@ -195,6 +206,20 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&FLAT_CONTRACT)
         .output(output_schema_for::<CreateResult>)
         .params("sheet: id or name; body?: a sheet-metal body's name (default the last one made); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); turn?: 0 (default), 90, 180 or 270 degrees counter-clockwise → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?}. The flat pattern as sheet.flat_pattern reports it: its outlines and cut-outs as visible lines, bends up as chain lines (long dash, dot) and bends down as double-chain lines (long dash, two dots), narrow. Refused as sheet.flat_pattern refuses the body. One undo step; no model is evaluated."),
+    CommandSpec::new(SECTION, "Section View", crate::checked!("drawing.view.section", section))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&SECTION_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("parent: a saved view's id; line: {kind: full|half|offset|aligned, points: 2 to 32 [x, y] on the parent's plane in model mm (full 2, half and aligned 3, offset an even number from 4), arrows: left|right, the side of the line walked from its first point that is kept and seen}; place?: {at: [x, y]} (default: where the projected view looking its way would sit, lined up with its parent, its boundary 20 mm past the parent's: away from the arrows in third angle, towards them in first) → {view, sheet: its parent's, scale: its parent's, boundary_mm, letter, outside?}. A view of the parent's model cut along the line, looking the arrows' way; its scale and display settings follow its parent. Only full sections draw their cut so far; the others say \"not supported yet\". One undo step; the design is unchanged."),
+    CommandSpec::new(STANDARD, "Standard Views", crate::checked!("drawing.view.standard", standard))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&STANDARD_CONTRACT)
+        .output(output_schema_for::<StandardResult>)
+        .params("sheet: id or name; view?: the main view's direction, as drawing.view.base takes it (front by default); scale?: \"paper:model\" for all of them (default: the largest ISO 5455 preset at which every one lies inside the sheet's drawing space and off its title block); gap_mm?: the paper gap between neighbouring views, 0 to 1000 (default 20); iso?: an isometric view in the fourth corner (default true) → {view, top, right, iso?, sheet, scale: {text, factor, fitted}, outside?: [those that leave the sheet's drawing space or lie over its title block at a given scale]}. The main view as a base view, its top and right views projected from it and lined up with it on the sides the drawing's projection puts them (above and right in third angle, below and left in first), and an isometric base view in the corner between them, laid out together. One undo step; no model is evaluated."),
 ];
 
 fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
@@ -248,7 +273,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         tangent_edges: settings.tangent_edges == TangentEdges::Show,
         chord_mm,
     };
-    let mut drawn = crate::drawing_view::lines(s, &set, &frame, &asked, CMD)?;
+    let mut drawn = crate::drawing_view::lines(s, &set, &frame, &asked, &mut PreparedBodies::default(), CMD)?;
     styles.leave_shaded_to_pictures(&mut drawn);
     if let Some(max) = request.max_error_mm {
         certify(&drawn, max, scale)?;
@@ -286,12 +311,17 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         extents: extents_result(&extents, None, false),
         boundary_mm: BoxResult { min: boundary.min.into(), max: boundary.max.into() },
         lines: line_results(&set, &drawn),
+        threads: thread_results(&set, &drawn),
         status: LinesStatusResult {
-            lines: "approximate",
-            provenance: "mesh_projection",
+            lines: if drawn.lines.iter().flat_map(|l| &l.pieces).any(|p| matches!(p.accuracy, CurveAccuracy::Sampled { .. })) {
+                "approximate"
+            } else {
+                "exact"
+            },
+            provenance: drawn.made.provenance(),
             chord_mm,
             model_chord_mm: drawn.model_chord_mm,
-            uncertain_pieces: 0,
+            uncertain_pieces: drawn.made.uncertain,
             covered_pieces: drawn.covered,
         },
         stats: drawn.stats.into(),
@@ -471,11 +501,14 @@ fn certify(drawn: &Lines, max: f64, scale: Scale) -> Result<()> {
     if bounded + sampled == 0 {
         return Ok(());
     }
+    let why: Vec<String> = drawn.made.from_mesh.iter().map(|(why, bodies)| format!("{bodies} for {}", why.name())).collect();
+    let mut from_mesh = if why.is_empty() { String::new() } else { format!("; bodies drawn from the mesh: {}", why.join(", ")) };
+    if drawn.made.split_edges > 0 {
+        from_mesh += &format!("; edges drawn from the mesh: {} for split faces", drawn.made.split_edges);
+    }
     Err(bad(
         CMD,
-        format!(
-            "accuracy not met: {bounded} bounded and {sampled} sampled pieces can't certify max_error_mm {max} at scale {scale}; the lines come from the mesh until the exact lines (W06) are used"
-        ),
+        format!("accuracy not met: {bounded} bounded and {sampled} sampled pieces can't certify max_error_mm {max} at scale {scale}{from_mesh}"),
     ))
 }
 
@@ -500,6 +533,24 @@ fn line_results(shown: &ShownSet, drawn: &Lines) -> Vec<LineResult> {
         }
     };
     drawn.lines.iter().map(line).collect()
+}
+
+fn thread_results(shown: &ShownSet, drawn: &Lines) -> Vec<ThreadResult> {
+    let thread = |t: &crate::drawing_view::ThreadLine| {
+        let body = shown.bodies.get(t.shown);
+        let piece = |p: &ThreadPiece| ThreadPieceResult {
+            stroke: if p.stroke == ThreadStroke::Limit { "limit" } else { "root" },
+            visibility: if p.visibility == Visibility::Hidden { "hidden" } else { "visible" },
+            path: vec![PathSegResult(p.seg)],
+        };
+        ThreadResult {
+            occurrence: body.map(|b| b.path.clone()).unwrap_or_default(),
+            body: body.map(|b| b.body.clone()).unwrap_or_default(),
+            reference: t.reference,
+            pieces: t.pieces.iter().map(piece).collect(),
+        }
+    };
+    drawn.threads.iter().map(thread).collect()
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1260,20 +1311,10 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
         let mut staged = Drawing::clone(&record);
         staged.add_views([Arc::new(view.clone())]);
         staged.validate().map_err(|e| bad(PROJECTED, e.to_string()))?;
-        let theirs = crate::drawing_view::on_sheet(s, &staged, parent, PROJECTED)?.boundary;
-        let ours = crate::drawing_view::on_sheet(s, &staged, id, PROJECTED)?.boundary;
-        let half = (ours.max - ours.min) * 0.5;
-        // Past their boundary on the side `sign` says (1: after its max, -1: before its min).
-        let past = |sign: f64, min: f64, max: f64, half: f64| if sign > 0.0 { max + DEFAULT_GAP_MM + half } else { min - DEFAULT_GAP_MM - half };
+        let centre = place_beside(s, &staged, parent, id, beside, PROJECTED)?;
         view.place = match beside {
-            Beside::Side(side) => {
-                let sign = if matches!(side, ProjectedSide::Right | ProjectedSide::Above) { 1.0 } else { -1.0 };
-                ViewPlace::Aligned(past(sign, side.along(theirs.min), side.along(theirs.max), side.along(half)))
-            }
-            Beside::Diagonal(diagonal) => {
-                let (right, up) = diagonal.signs();
-                ViewPlace::At([past(right, theirs.min.x, theirs.max.x, half.x), past(up, theirs.min.y, theirs.max.y, half.y)])
-            }
+            Beside::Side(side) => ViewPlace::Aligned(side.along(centre)),
+            Beside::Diagonal(_) => ViewPlace::At([centre.x, centre.y]),
         };
     }
     s.edit_drawing(PROJECTED, |d| {
@@ -1428,6 +1469,195 @@ fn projection_for(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+fn standard(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: StandardParams = crate::schema::read(STANDARD, p)?;
+    let record = s.drawing(STANDARD)?.clone();
+    let (drawing, reply) = plan_standard(s, &record, request)?;
+    s.edit_drawing(STANDARD, |d| {
+        *d = drawing;
+        Ok(())
+    })?;
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+pub(super) fn first_standard_views(s: &mut Session, drawing: &Drawing) -> Result<Drawing> {
+    let sheet = drawing.sheets.first().ok_or_else(|| bad(STANDARD, "the drawing has no sheet"))?;
+    let request = StandardParams { sheet: ids::encode(sheet.id), view: None, scale: None, gap_mm: None, iso: None };
+    plan_standard(s, drawing, request).map(|(drawing, _)| drawing)
+}
+
+fn plan_standard(s: &mut Session, record: &Drawing, request: StandardParams) -> Result<(Drawing, StandardResult)> {
+    let gap = request.gap_mm.unwrap_or(DEFAULT_GAP_MM);
+    if !(gap.is_finite() && (0.0..=MAX_STANDARD_GAP_MM).contains(&gap)) {
+        return Err(bad(STANDARD, format!("gap_mm is 0 to {MAX_STANDARD_GAP_MM} mm")));
+    }
+    let (sheet, middle) = sheet_named(record, &request.sheet, STANDARD)?;
+    let source = record.sources.first().map(|source| source.id).ok_or_else(|| bad(STANDARD, "the drawing draws no design"))?;
+    let direction = request.view.unwrap_or_default().0;
+    let with_iso = request.iso.unwrap_or(true);
+    let (top_side, right_side) = match record.projection {
+        Projection::Third => (ProjectedSide::Above, ProjectedSide::Right),
+        Projection::First => (ProjectedSide::Below, ProjectedSide::Left),
+    };
+    // Four ids the drawing doesn't have, each new: each staged as a stand-in while the next is found.
+    let mut taken = record.clone();
+    let mut ids = [0u64; 4];
+    for id in &mut ids {
+        *id = taken.allocate_id(&mut s.ids).map_err(|e| bad(STANDARD, e.to_string()))?;
+        taken.add_views([Arc::new(View {
+            id: *id,
+            sheet,
+            kind: ViewKind::Base { source, view: direction },
+            place: ViewPlace::At([0.0, 0.0]),
+            settings: ViewOverrides::default(),
+            reference_shown_percent: 0.0,
+            label: None,
+        })]);
+    }
+    let [main, top, right, iso] = ids;
+    let count = if with_iso { 4 } else { 3 };
+    let made = &ids[..count];
+    let one = Scale::new(1.0, 1.0).map_err(|e| bad(STANDARD, e.to_string()))?;
+    let views = |scale: Scale, at: [Vec2; 4]| -> Vec<View> {
+        let base = |id, view, at: Vec2| View {
+            id,
+            sheet,
+            kind: ViewKind::Base { source, view },
+            place: ViewPlace::At([at.x, at.y]),
+            settings: ViewOverrides { scale: Some(scale), ..ViewOverrides::default() },
+            reference_shown_percent: 0.0,
+            label: None,
+        };
+        let projected = |id, side: ProjectedSide, at: Vec2| View {
+            id,
+            sheet,
+            kind: ViewKind::Projected { parent: main, side },
+            place: ViewPlace::Aligned(side.along(at)),
+            settings: ViewOverrides::default(),
+            reference_shown_percent: 0.0,
+            label: None,
+        };
+        let mut views = vec![base(main, direction, at[0]), projected(top, top_side, at[1]), projected(right, right_side, at[2])];
+        if with_iso {
+            views.push(base(iso, ViewDirection::Named(NamedView::IsoFrontRight), at[3]));
+        }
+        views
+    };
+    let stage = |views: Vec<View>| -> Result<Drawing> {
+        let mut staged = record.clone();
+        staged.add_views(views.into_iter().map(Arc::new));
+        staged.validate().map_err(|e| bad(STANDARD, e.to_string()))?;
+        Ok(staged)
+    };
+    // Measured at 1:1 round the sheet's middle: each view's size, and how far its boundary's middle
+    // is from its centre, both of which scale with it.
+    let staged = stage(views(one, [middle; 4]))?;
+    check_apart(&staged, made.iter().copied(), STANDARD)?;
+    let resolved = staged.resolve_view(main).map_err(|e| bad(STANDARD, e.to_string()))?;
+    check_shows_bodies(&crate::drawing_view::shown_by(&mut ViewSessions::new(s), &resolved), &resolved, STANDARD)?;
+    let (mut size, mut off) = ([Vec2::ZERO; 4], [Vec2::ZERO; 4]);
+    for (i, id) in made.iter().enumerate() {
+        let boundary = crate::drawing_view::on_sheet(s, &staged, *id, STANDARD)?.boundary;
+        let centre = staged.view_centre(*id).map_err(|e| bad(STANDARD, e.to_string()))?;
+        size[i] = boundary.size();
+        off[i] = boundary.center() - centre;
+    }
+    let room = Room::on(crate::drawing_view::sheet(&staged, sheet, STANDARD)?, STANDARD)?;
+    // The group as two columns and two rows, the main view's and the sides', in the order the
+    // projection puts them: the centre each view goes to at `factor`, the group put at `anchor`.
+    let place = |factor: f64, anchor: Anchor| -> [Vec2; 4] {
+        let sized = |i: usize| size[i] * factor;
+        let (main_col, side_col) = (sized(0).x.max(sized(1).x), sized(2).x.max(sized(3).x));
+        let (main_row, side_row) = (sized(0).y.max(sized(2).y), sized(1).y.max(sized(3).y));
+        let min = anchor.corner(room.space, Vec2::new(main_col + gap + side_col, main_row + gap + side_row));
+        let (main_x, side_x) = match right_side {
+            ProjectedSide::Left => (min.x + side_col + gap + main_col / 2.0, min.x + side_col / 2.0),
+            _ => (min.x + main_col / 2.0, min.x + main_col + gap + side_col / 2.0),
+        };
+        let (main_y, side_y) = match top_side {
+            ProjectedSide::Below => (min.y + side_row + gap + main_row / 2.0, min.y + side_row / 2.0),
+            _ => (min.y + main_row / 2.0, min.y + main_row + gap + side_row / 2.0),
+        };
+        // The top and right views sit the gap from the main view's row and column, whatever the
+        // isometric view beside them takes: their near edges on the gap, not centred in theirs.
+        let top_y = match top_side {
+            ProjectedSide::Below => min.y + side_row - sized(1).y / 2.0,
+            _ => min.y + main_row + gap + sized(1).y / 2.0,
+        };
+        let right_x = match right_side {
+            ProjectedSide::Left => min.x + side_col - sized(2).x / 2.0,
+            _ => min.x + main_col + gap + sized(2).x / 2.0,
+        };
+        let middles = [Vec2::new(main_x, main_y), Vec2::new(main_x, top_y), Vec2::new(right_x, main_y), Vec2::new(side_x, side_y)];
+        let mut centres = [Vec2::ZERO; 4];
+        for (i, centre) in centres.iter_mut().enumerate() {
+            *centre = middles[i] - off[i] * factor;
+        }
+        centres
+    };
+    let holds = |staged: &Drawing| -> Result<bool> {
+        for id in made {
+            if !room.holds(&crate::drawing_view::on_sheet(s, staged, *id, STANDARD)?.boundary) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    };
+    let (scale, chosen, fitted) = match request.scale {
+        Some(scale) => (scale.0, stage(views(scale.0, place(scale.0.factor(), Anchor::Middle)))?, false),
+        None => {
+            let mut found = None;
+            'scales: for scale in PRESETS.iter().copied() {
+                for anchor in [Anchor::Middle, Anchor::TopLeft, Anchor::TopRight, Anchor::BottomLeft] {
+                    // A place past the record's limits at a large scale isn't one that fits.
+                    let Ok(staged) = stage(views(scale, place(scale.factor(), anchor))) else { continue };
+                    if holds(&staged)? {
+                        found = Some((scale, staged));
+                        break 'scales;
+                    }
+                }
+            }
+            let (scale, staged) = found.ok_or_else(|| {
+                let presets = format!("from {} to {}", PRESETS.first().map(Scale::to_string).unwrap_or_default(), PRESETS.last().map(Scale::to_string).unwrap_or_default());
+                bad(STANDARD, format!("the views fit the sheet's drawing area, off its title block, at no preset scale {presets}: give a scale, a smaller gap or a larger sheet"))
+            })?;
+            (scale, staged, true)
+        }
+    };
+    let outside = crate::drawing_view::outside(s, &chosen, made, STANDARD)?;
+    let reply = StandardResult {
+        view: ids::encode(main),
+        top: ids::encode(top),
+        right: ids::encode(right),
+        iso: with_iso.then(|| ids::encode(iso)),
+        sheet: ids::encode(sheet),
+        scale: ScaleResult { text: scale.to_string(), factor: scale.factor(), fitted },
+        outside: outside_results(outside),
+        param_warnings: Vec::new(),
+    };
+    Ok((chosen, reply))
+}
+
+/// Where the group of standard views is anchored in the sheet's drawing space.
+#[derive(Clone, Copy)]
+enum Anchor {
+    Middle,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+}
+
+impl Anchor {
+    fn corner(self, space: Aabb2, total: Vec2) -> Vec2 {
+        match self {
+            Self::Middle => space.center() - total * 0.5,
+            Self::TopLeft => Vec2::new(space.min.x, space.max.y - total.y),
+            Self::TopRight => Vec2::new(space.max.x - total.x, space.max.y - total.y),
+            Self::BottomLeft => space.min,
+        }
+    }
+}
+
 fn flat(s: &mut Session, p: &Value) -> Result<Value> {
     let request: FlatParams = crate::schema::read(FLAT, p)?;
     let record = s.drawing(FLAT)?.clone();
@@ -1461,6 +1691,58 @@ fn flat(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     let placed = crate::drawing_view::flat_on_sheet(s.drawing(FLAT)?, id, &Ok(flat), FLAT)?;
     created_at(s, FLAT, id, request.scale.is_none(), placed)
+}
+
+/// Where view `id`, staged in `staged`, goes `beside` its parent, for `cmd`: its centre, moved from
+/// its parent's until its boundary is [`DEFAULT_GAP_MM`] past the parent's, along the free axis
+/// beside it, or along both axes on a diagonal.
+fn place_beside(s: &Session, staged: &Drawing, parent: u64, id: u64, beside: Beside, cmd: &str) -> Result<Vec2> {
+    let theirs = crate::drawing_view::on_sheet(s, staged, parent, cmd)?.boundary;
+    let ours = crate::drawing_view::on_sheet(s, staged, id, cmd)?.boundary;
+    let parent_centre = staged.view_centre(parent).map_err(|e| bad(cmd, e.to_string()))?;
+    let half = (ours.max - ours.min) * 0.5;
+    // Past their boundary on the side `sign` says (1: after its max, -1: before its min).
+    let past = |sign: f64, min: f64, max: f64, half: f64| if sign > 0.0 { max + DEFAULT_GAP_MM + half } else { min - DEFAULT_GAP_MM - half };
+    Ok(match beside {
+        Beside::Side(side) => {
+            let sign = if matches!(side, ProjectedSide::Right | ProjectedSide::Above) { 1.0 } else { -1.0 };
+            side.on_free_axis(parent_centre, past(sign, side.along(theirs.min), side.along(theirs.max), side.along(half)))
+        }
+        Beside::Diagonal(diagonal) => {
+            let (right, up) = diagonal.signs();
+            Vec2::new(past(right, theirs.min.x, theirs.max.x, half.x), past(up, theirs.min.y, theirs.max.y, half.y))
+        }
+    })
+}
+
+fn section(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: SectionParams = crate::schema::read(SECTION, p)?;
+    let record = s.drawing(SECTION)?.clone();
+    let (parent, sheet) = find(&record, request.parent.0, SECTION).map(|v| (v.id, v.sheet))?;
+    record.can_project_from(parent).map_err(|e| bad(SECTION, e.to_string()))?;
+    let points = request.line.points.iter().map(|point| point.0).collect();
+    let line = CuttingLine::new(request.line.kind.0, points, request.line.arrows.0).map_err(|e| bad(SECTION, e.to_string()))?;
+    let side = line.side(record.projection);
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(SECTION, e.to_string()))?;
+    let parent_centre = record.view_centre(parent).map_err(|e| bad(SECTION, e.to_string()))?;
+    // A place lined up with the parent is passed on, for the drawing's own rule to refuse.
+    let place = request.place.map_or(ViewPlace::At([parent_centre.x, parent_centre.y]), |place| place.0);
+    let kind = ViewKind::Section { parent, line };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None };
+    if request.place.is_none() {
+        // Staged on its parent's centre to measure it, then moved along the free axis of the side a
+        // projected view looking its way takes, as `projected` places one.
+        let mut staged = Drawing::clone(&record);
+        staged.add_views([Arc::new(view.clone())]);
+        staged.validate().map_err(|e| bad(SECTION, e.to_string()))?;
+        let centre = place_beside(s, &staged, parent, id, Beside::Side(side), SECTION)?;
+        view.place = ViewPlace::At([centre.x, centre.y]);
+    }
+    s.edit_drawing(SECTION, |d| {
+        d.add_views([Arc::new(view)]);
+        d.give_letter(id).map_err(|e| bad(SECTION, e.to_string()))
+    })?;
+    created(s, SECTION, id, false)
 }
 
 /// The reply for view `id`, just made by `cmd`: its sheet, its scale (`fitted` when worked out),

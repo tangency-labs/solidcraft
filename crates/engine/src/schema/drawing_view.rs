@@ -12,6 +12,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcore_record::Seg2;
+use solidcraft_doc::drawing::cutting_line::{ArrowSide, SectionKind};
 use solidcraft_doc::drawing::view::{Beside, Diagonal, QuarterTurn, ViewPlace};
 use solidcraft_doc::drawing_view::{MAX_JOINT_VALUES, MAX_POSE_JOINTS, TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
@@ -834,6 +835,56 @@ pub struct EditResult {
     pub param_warnings: Vec<String>,
 }
 
+/// What `drawing.view.standard` takes: the sheet, and how its standard views are drawn and spaced.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct StandardParams {
+    /// The sheet, by id or name.
+    #[serde(deserialize_with = "super::drawing_sheet::sheet_ref")]
+    pub sheet: String,
+    /// Which way the main view looks (front when not given); the other two are projected from it.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewParam")]
+    pub view: Option<ViewParam>,
+    /// The scale they are all drawn at (when not given, the largest preset at which all of them lie
+    /// inside the sheet's drawing space and off its title block); saved either way.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ScaleParam")]
+    pub scale: Option<ScaleParam>,
+    /// The paper gap between neighbouring views, 0 to 1000 mm (20 when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub gap_mm: Option<f64>,
+    /// Whether an isometric view goes in the fourth corner (true when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub iso: Option<bool>,
+}
+
+/// What `drawing.view.standard` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct StandardResult {
+    /// The main view, a base view.
+    pub view: String,
+    /// The view above or below it, lined up with it: its top view in the drawing's projection.
+    pub top: String,
+    /// The view beside it, lined up with it: its right view in the drawing's projection.
+    pub right: String,
+    /// The isometric view, a base view of its own, when one was asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iso: Option<String>,
+    pub sheet: String,
+    /// The scale they all draw at.
+    pub scale: ScaleResult,
+    /// Those whose boundary leaves the sheet's drawing space or lies over its title block, at a
+    /// given scale that doesn't fit; none is moved back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<OutsideResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `drawing.view.move_to_sheet` takes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1109,7 +1160,74 @@ pub struct ProjectionForResult {
     pub why: Option<String>,
 }
 
-/// What `drawing.view.base`, `drawing.view.projected`, `drawing.view.auxiliary` and `drawing.view.flat` return.
+/// What `drawing.view.section` takes: its parent, the cutting line drawn across the parent, and
+/// where it sits.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SectionParams {
+    pub parent: ViewIdParam,
+    pub line: CuttingLineParam,
+    /// Where it sits: a point (when not given, where the projected view looking its way would sit,
+    /// lined up with its parent, a gap past the parent's boundary).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlaceParam")]
+    pub place: Option<PlaceParam>,
+}
+
+/// A section view's cutting line, as the drawing saves it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct CuttingLineParam {
+    pub kind: SectionKindParam,
+    /// 2 to 32 points on the parent view's plane, in model millimetres from its origin: full 2, half
+    /// and aligned 3, offset an even number from 4.
+    #[schemars(length(min = 2, max = 32))]
+    pub points: Vec<Point2>,
+    pub arrows: ArrowSideParam,
+}
+
+/// A cutting line's shape.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct SectionKindParam(pub SectionKind);
+
+impl JsonSchema for SectionKindParam {
+    fn schema_name() -> Cow<'static, str> {
+        "SectionKind".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let names: Vec<Value> = SectionKind::ALL.iter().filter_map(|k| serde_json::to_value(k).ok()).collect();
+        json_schema!({
+            "description": "full: one straight cut; half: to the middle, then a square turn away from the arrows; offset: legs the first one's way joined by square steps; aligned: two arms about the middle point.",
+            "type": "string",
+            "enum": names
+        })
+    }
+}
+
+/// The side of a cutting line, walked from its first point, its arrows point to.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct ArrowSideParam(pub ArrowSide);
+
+impl JsonSchema for ArrowSideParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ArrowSide".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let names: Vec<Value> = ArrowSide::ALL.iter().filter_map(|a| serde_json::to_value(a).ok()).collect();
+        json_schema!({
+            "description": "The side of the line, walked from its first point, its arrows point to: the side kept and seen.",
+            "type": "string",
+            "enum": names
+        })
+    }
+}
+
+/// What `drawing.view.base`, `drawing.view.projected`, `drawing.view.auxiliary`, `drawing.view.flat` and
+/// `drawing.view.section` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CreateResult {
     /// The new view.
@@ -1226,6 +1344,29 @@ pub struct LineResult {
     pub pieces: Vec<PieceResult>,
 }
 
+/// One cosmetic thread's lines in a view.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ThreadResult {
+    /// The occurrences that place its body, from the design's root.
+    pub occurrence: Vec<u64>,
+    /// Its body's name in its definition.
+    pub body: String,
+    /// Whether the body is a reference part.
+    pub reference: bool,
+    pub pieces: Vec<ThreadPieceResult>,
+}
+
+/// A run of a thread line at one visibility, in paper millimetres.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ThreadPieceResult {
+    /// `root`: the root diameter's line, drawn thin (a three-quarter arc seen end on); `limit`: the
+    /// line across where the thread stops inside its face.
+    pub stroke: &'static str,
+    /// `visible` or `hidden`.
+    pub visibility: &'static str,
+    pub path: Vec<PathSegResult>,
+}
+
 /// What drew a line: an edge of the body (as `model.edges` numbers them), or a silhouette across
 /// one of its faces.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -1299,14 +1440,15 @@ impl JsonSchema for AccuracyResult {
 /// What a view's lines are and how they were made.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct LinesStatusResult {
-    /// `approximate`: from the meshes, until the exact lines (W06).
+    /// `exact` when no piece is sampled (analytic, or within a proven bound), else `approximate`.
     pub lines: &'static str,
-    /// `mesh_projection`.
+    /// `hidden_lines` (every body drawn from its exact curves and surfaces), `mesh_projection` (every
+    /// body from its mesh) or `hidden_lines_and_mesh_projection`.
     pub provenance: &'static str,
     /// The chord asked for on paper, and of the meshes in model millimetres.
     pub chord_mm: f64,
     pub model_chord_mm: f64,
-    /// Pieces whose visibility couldn't be told (none from the meshes).
+    /// Exact pieces whose visibility couldn't be told, drawn as visible (none from the meshes).
     pub uncertain_pieces: usize,
     /// Pieces drawn where another source lay too.
     pub covered_pieces: usize,
@@ -1349,15 +1491,15 @@ impl JsonSchema for SceneResult {
         "ViewPaperScene".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        paper_scene_schema(generator, &[ObjectKind::View], false)
+        paper_scene_schema::<PathSegResult>(generator, &[ObjectKind::View], false)
     }
 }
 
 /// A paper scene's schema ([`solidcraft_geom::paper::Scene`]): its groups of `kinds`, each holding
 /// strokes, and fills, pictures, text and its fonts too when it is a `whole_sheet`'s.
-pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[ObjectKind], whole_sheet: bool) -> Schema {
+pub(super) fn paper_scene_schema<S: JsonSchema>(generator: &mut SchemaGenerator, kinds: &[ObjectKind], whole_sheet: bool) -> Schema {
     let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2});
-    let segment = generator.subschema_for::<PathSegResult>();
+    let segment = generator.subschema_for::<S>();
     // A dashed stroke's pattern, as `solidcraft_geom::paper::Dashes` checks it; a solid one has none.
     let dashes = json!({
         "type": "object",
@@ -1518,6 +1660,9 @@ pub struct SnapshotResult {
     pub boundary_mm: BoxResult,
     /// Each placed source's lines, in placement order, then edges before silhouettes.
     pub lines: Vec<LineResult>,
+    /// Each cosmetic thread's lines, in placement order: drawn by ISO 6410's convention where the
+    /// view drew the thread's crest, and seen where that crest is seen.
+    pub threads: Vec<ThreadResult>,
     pub status: LinesStatusResult,
     pub stats: LinesStatsResult,
     /// With `scene: true`: the lines as a paper scene of the sheet.

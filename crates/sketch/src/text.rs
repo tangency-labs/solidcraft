@@ -73,19 +73,6 @@ impl Outline {
     }
 }
 
-/// An outline piece as sketch geometry: a quadratic is the conic of rho 0.5, a cubic its control spline. None for
-/// the pieces [`Outline`] doesn't make.
-fn link_geom(seg: Seg2) -> Option<LinkGeom> {
-    match seg {
-        Seg2::Line { a, b } => Some(LinkGeom::Line(a, b)),
-        Seg2::Conic { a, apex, b, .. } => Some(LinkGeom::Conic { a, apex, b, rho: 0.5 }),
-        Seg2::Cubic { p0, p1, p2, p3 } => {
-            Some(LinkGeom::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: false, nurbs: None })
-        }
-        Seg2::Arc { .. } | Seg2::Bezier { .. } => None,
-    }
-}
-
 impl ttf_parser::OutlineBuilder for Outline {
     fn move_to(&mut self, x: f32, y: f32) {
         let p = (self.map)(x, y);
@@ -580,7 +567,7 @@ pub fn text_geometry_styled(
             });
             let mut ob = Outline { loops: Vec::new(), start: origin, cur: origin, map };
             let _ = metrics.face.outline_glyph(gid, &mut ob);
-            out.extend(ob.loops.into_iter().flatten().filter_map(link_geom));
+            out.extend(ob.loops.iter().flatten().filter_map(LinkGeom::from_seg));
             // A font can give a glyph any number of points: stop where the link would be refused anyway.
             if out.len() > MAX_LINK_ENTITIES {
                 return Err(SketchError::TooLarge);
@@ -777,7 +764,7 @@ mod tests {
         ttf_parser::OutlineBuilder::curve_to(&mut ob, 0.0, 10.0, 10.0, 10.0, 10.0, 0.0);
         // A cubic with its controls on the chord is a line.
         ttf_parser::OutlineBuilder::curve_to(&mut ob, 7.0, 0.0, 3.0, 0.0, 0.0, 0.0);
-        let out: Vec<LinkGeom> = ob.loops.into_iter().flatten().filter_map(link_geom).collect();
+        let out: Vec<LinkGeom> = ob.loops.iter().flatten().filter_map(LinkGeom::from_seg).collect();
         assert_eq!(out.len(), 2);
         assert!(matches!(&out[0], LinkGeom::Spline { pts, control: true, degree: 3, .. } if pts.len() == 4));
         assert!(matches!(out[1], LinkGeom::Line(..)));

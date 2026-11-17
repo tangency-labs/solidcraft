@@ -71,8 +71,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DELETE)
         .output(output_schema_for::<SheetsResult>)
         .params(
-            "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions, \
-             balloons, notes, centre marks and centre lines, and the images on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+            "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions, notes, centre marks, centre lines and \
+             balloons, and the images and sheet sketches and fills on it, with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
         ),
 ];
 
@@ -112,6 +112,8 @@ fn listed(on: &OnSheet) -> String {
         kind("note", &on.notes),
         kind("centre mark", &on.centre_marks),
         kind("centre line", &on.centre_lines),
+        kind("sheet sketch", &on.sketches),
+        kind("sheet fill", &on.fills),
     ]
     .into_iter()
     .flatten()
@@ -286,12 +288,16 @@ pub(super) fn contents_delete(cmd: &str, p: &Value, what: &str) -> Result<bool> 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.delete";
     let with_contents = contents_delete(cmd, p, "the sheet goes with everything on it")?;
+    let editing = s.active_sheet_sketch.clone();
     s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         if d.sheets.len() <= 1 {
             return Err(bad(cmd, "a drawing keeps at least one sheet"));
         }
         let Some(sheet) = d.sheets.get(at).cloned() else { return Ok(()) };
+        if editing.as_ref().is_some_and(|entry| entry.drawing == d.id && entry.sheet == sheet.id) {
+            return Err(bad(cmd, "finish or cancel the sheet sketch before deleting its sheet"));
+        }
         let on = d.on_sheet(sheet.id);
         if !on.is_empty() && !with_contents {
             let what = listed(&on);

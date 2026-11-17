@@ -13,6 +13,8 @@
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 use solidcraft_geom::Aabb2;
+use solidcraft_geom::cell::Projection;
+use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::validate_plane;
 
@@ -93,6 +95,14 @@ impl From<CuttingLine> for Stored {
 fn sin_cos(a: Vec2, b: Vec2) -> (f64, f64) {
     let lengths = a.len() * b.len();
     (a.cross(b) / lengths, a.dot(b) / lengths)
+}
+
+impl SectionKind {
+    pub const ALL: [SectionKind; 4] = [SectionKind::Full, SectionKind::Half, SectionKind::Offset, SectionKind::Aligned];
+}
+
+impl ArrowSide {
+    pub const ALL: [ArrowSide; 2] = [ArrowSide::Left, ArrowSide::Right];
 }
 
 impl CuttingLine {
@@ -183,6 +193,28 @@ impl CuttingLine {
         let basis = Plane { origin: parent.origin, x: turned(Vec2::X), y: turned(Vec2::Y) };
         validate_plane(&basis).map_err(|_| DocError::Invalid("a view's basis is finite and orthonormal".into()))?;
         Ok(basis)
+    }
+
+    /// The side of its parent the section view sits on in `projection`: where the projected view
+    /// looking the arrows' way sits, as the projected basis of that side
+    /// ([`solidcraft_geom::drawing_view::projected_basis`]) is [`Self::basis`]. That is away from the
+    /// arrows in third angle and towards them in first. Slanted arrows go by the paper axis nearest
+    /// them, the horizontal one when they are as near both.
+    pub fn side(&self, projection: Projection) -> ProjectedSide {
+        let (_, arrows) = self.first_way();
+        let towards = match (arrows.x.abs() >= arrows.y.abs(), arrows.x > 0.0, arrows.y > 0.0) {
+            (true, true, _) => ProjectedSide::Right,
+            (true, false, _) => ProjectedSide::Left,
+            (false, _, true) => ProjectedSide::Above,
+            (false, _, false) => ProjectedSide::Below,
+        };
+        match (projection, towards) {
+            (Projection::First, side) => side,
+            (Projection::Third, ProjectedSide::Right) => ProjectedSide::Left,
+            (Projection::Third, ProjectedSide::Left) => ProjectedSide::Right,
+            (Projection::Third, ProjectedSide::Above) => ProjectedSide::Below,
+            (Projection::Third, ProjectedSide::Below) => ProjectedSide::Above,
+        }
     }
 
     /// Each segment's cutting plane in the model: through the segment and the parent's normal, its x

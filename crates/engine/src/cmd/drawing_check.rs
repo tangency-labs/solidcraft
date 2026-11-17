@@ -146,9 +146,12 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
             ObjectKind::Dimension => CheckedKind::Dimension,
             ObjectKind::CentreLine => CheckedKind::CentreLine,
             ObjectKind::CentreMark => CheckedKind::CentreMark,
+            ObjectKind::Sketch => CheckedKind::Sketch,
+            ObjectKind::Fill => CheckedKind::Fill,
             ObjectKind::Note => CheckedKind::Note,
             ObjectKind::ViewLabel => CheckedKind::ViewLabel,
             ObjectKind::Balloon => CheckedKind::Balloon,
+            ObjectKind::RevisionTag => CheckedKind::RevisionTag,
             ObjectKind::PartsList | ObjectKind::RevisionTable => CheckedKind::Table,
             // Images are painted with the border and aren't among the objects: read below.
             ObjectKind::SheetImage | ObjectKind::SheetBorder | ObjectKind::DrawingBorder | ObjectKind::TitleBlock => continue,
