@@ -2066,33 +2066,6 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
 
-    /// #18342: Stage 3 of the named case `stage3_sph_swap_one_tol1` (a circle on a swapped
-    /// sphere of revolution, tolerance 1) and of `s3gen0294`. `ClassifyLoops`' seam walk
-    /// finds no OUT/IN entry; the face is now refused as not yet healable
-    /// (`SM_ERR_NOTYET_HEAL_FACE` 1040, `NoLoopTreeRoot` 3), which the healer sets aside,
-    /// where upstream's `SM_ERR` (1001, `NoProbs`) is ignored by the healer.
-    #[test]
-    fn seam_walk_without_an_entry_is_not_yet_healable() {
-        let text = include_str!("../../../../fixtures/heal.face_props/stage3_classify.json");
-        let all: Value = serde_json::from_str(text).unwrap();
-        let c = all["cases"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|c| c["name"] == "stage3_sph_swap_one_tol1")
-            .unwrap();
-        let ci: CaseIn = serde_json::from_value(c["inputs"].clone()).unwrap();
-        let v = rust(&ci).unwrap().values.get("v").cloned().unwrap();
-        // op 0 (Stage 3): its status, then its snapshot (field 1: not_yet_face_type)
-        assert_eq!(v.first(), Some(&1040.0), "status");
-        assert_eq!(v.get(1 + 1), Some(&3.0), "not yet type");
-        // s3gen0294: op 0, then op 1 (Stage 3)
-        let v = stage3_values(294);
-        let stage3 = 1 + SNAP_LEN;
-        assert_eq!(v.get(stage3), Some(&1040.0), "status");
-        assert_eq!(v.get(stage3 + 1 + 1), Some(&3.0), "not yet type");
-    }
-
     /// The values of the Stage 3 script of generated case `s3gen{i}`.
     fn stage3_values(i: usize) -> Vec<f64> {
         let seed = CaseContext::seed_for("heal.face_props/stage3", i);

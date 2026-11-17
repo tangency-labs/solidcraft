@@ -1484,26 +1484,32 @@ mod tests {
         assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![3, 2, 1, 0]));
     }
 
-    /// #18342: a cone face at scale 1e-3 (generated case 381) whose two opposite
-    /// u-isolines coincide within tolerance (1e-9 apart in v) beside a circle. Its seam
-    /// walk finds one isoline crossed once and no OUT/IN entry to start from, so the face
-    /// is unclassified (`NoLoopTreeRoot`, scratch reset to its one interval) instead of an
-    /// `SM_ERR`; `SetProps_Stage3` then refuses it as not yet healable, which is how the
-    /// healer sets it aside (`move_to_not_yet_problems`). Before the 3D end-touch rule the
-    /// walk saw no crossing at all (`NoClassifyZeroCrosscnt`), also not yet healable.
+    /// #18342: a cone face at scale 1e-3 (generated case 381) whose loop 1 crosses the
+    /// U seam once. The bisector pass classifies loops 0 and 2 (loop 0 is crossed once,
+    /// a no-area loop, so the walk is cyclic), then loop 1's pass walks the U seam
+    /// touches: one odd crossing (`In`, `Out`) and no `Out`/`In` entry, so
+    /// `ClassifyLoops` returns `SM_ERR` (1001). WR-268 propagates that status from
+    /// `SetProps_Stage3` instead of reading it as not yet healable, the outcome
+    /// `wr266_public_heal_stage3_failure_does_not_quarantine_the_face` pins for the same
+    /// branch on the flat cylinder. Before the 3D end-touch rule the bisector met loop 0
+    /// at its ends only (`NoClassifyZeroCrosscnt`) and loop 1's pass was never reached.
     #[test]
-    fn coincident_isolines_on_a_small_cone_are_not_yet_healable() {
+    fn a_seam_walk_without_an_entry_on_a_small_cone_is_sm_err() {
         use solidcore::error::heal::HealFailure;
         use solidcore::heal::face_props::HealerOpType;
         let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 381));
         let i = gen_case(&mut rng);
         let out = rust(&i).unwrap();
-        assert_eq!(out.error, None);
+        assert_eq!(out.values.get("status"), Some(&vec![f64::from(SM_ERR)]));
         assert_eq!(
             out.ints.get("classifiable"),
-            Some(&vec![HealNotYetFaceType::NoLoopTreeRoot.code()])
+            Some(&vec![HealNotYetFaceType::NoProbs.code()])
         );
-        assert_eq!(out.ints.get("scratch_size"), Some(&vec![1]));
+        // both ends of the bisector on the seam without an edge use
+        let seam = CrvDirOnFaceType::SeamNoEdgeuse as i64;
+        assert_eq!(out.ints.get("start_stop"), Some(&vec![seam, seam]));
+        // loop 0 crossed once by the bisector: the walk is cyclic
+        assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![0]));
 
         // the healer's view: Stage 3 of the same face, all its loops
         let k = Kernel::default();
@@ -1515,11 +1521,12 @@ mod tests {
         let mut props: FaceProps<H> = FaceProps::for_face(face, fi as u64);
         let r = props.set_props_stage3_mut(&k, &mut b, face, fi as u64, HealerOpType::All);
         let e = r.unwrap_err();
+        assert_eq!(solidcore::error::upstream_status(&e), Some(SM_ERR), "{e:?}");
         assert!(
-            matches!(e.heal_failure(), Some(HealFailure::NotYetHealable)),
+            !matches!(e.heal_failure(), Some(HealFailure::NotYetHealable)),
             "{e:?}"
         );
-        assert!(props.has_not_yet_problems());
+        assert!(!props.has_not_yet_problems());
     }
 
     /// A circular UV trim spans both axes and winds in the requested direction.
