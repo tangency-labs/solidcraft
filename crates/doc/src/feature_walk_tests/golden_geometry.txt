@@ -47,6 +47,7 @@ cone
   moves: axis[0], axis[2], base[0], base[1], base[2]
   placement: cone.x, cone.y, cone.z
 combine
+finger_joint
 pattern_rectangular
   moves: pattern.dir1[0], pattern.dir1[1], pattern.dir2[1], pattern.dir2[2]
 pattern_circular

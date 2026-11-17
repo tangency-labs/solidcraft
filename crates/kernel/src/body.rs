@@ -1508,6 +1508,27 @@ impl Body {
             .collect())
     }
 
+    /// Analytic planar face normals and estimated areas on the trimmed B-rep, in face order.
+    ///
+    /// # Errors
+    /// Returns an error if the body is a mesh or a face cannot be measured.
+    pub fn planar_face_areas(&self) -> Result<Vec<(Vec3, f64)>> {
+        guard("planar face areas", || {
+            if self.is_mesh() {
+                return Err(KernelError::Failed("planar face areas require a B-rep body".into()));
+            }
+            let (body, order) =
+                solidcore_ops::Body::from_record(self.record(), true).map_err(|e| KernelError::Failed(format!("planar face areas: {e}")))?;
+            let mut faces = Vec::new();
+            for index in 0..self.face_count() {
+                let Some(crate::FaceSurface::Plane { normal, .. }) = crate::face_surface(self, index) else { continue };
+                let area = body.face_area(&order, index, 1e-8).map_err(|e| KernelError::Failed(format!("planar face area {index}: {e}")))?;
+                faces.push((normal.vec(), area));
+            }
+            Ok(faces)
+        })
+    }
+
     /// Index of the edge closest to `p` (by polyline distance).
     pub fn nearest_edge(&self, p: Vec3, tol: f64) -> Result<Option<(usize, f64)>> {
         let edges = self.edges(tol)?;

@@ -74,6 +74,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("combine", json!({"type": "combine", "target": "A", "tools": ["B"], "operation": "join"})),
         (
+            "finger_joint",
+            json!({"type": "finger_joint", "bodies": ["A", "B"], "count": 4, "clearance": "joint.clearance",
+                "inverted": true, "edge_offset": "joint.edge_offset"}),
+        ),
+        (
             "pattern_rectangular",
             pattern(
                 json!({"type": "rectangular", "dir1": [1, 0, 0], "count1": "rect.count1", "spacing1": "rect.spacing1", "dir2": [0, 1, 0], "count2": "rect.count2", "spacing2": "rect.spacing2"}),

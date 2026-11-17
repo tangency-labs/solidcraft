@@ -391,6 +391,12 @@ crate::dialog_descriptor::dialog_descriptors! {
                 operation: usize,
                 keep_tools: bool,
             },
+            FingerJoint {
+                count: String,
+                clearance: String,
+                inverted: bool,
+                edge_offset: String,
+            },
             EditParam {
                 name: String,
                 expr: String,
@@ -989,6 +995,10 @@ impl Dialog {
             ),
             "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.finger_joint" => Dialog::new(
+                Kind::FingerJoint { count: "3".into(), clearance: length_default(s, "0"), inverted: false, edge_offset: String::new() },
+                vec![SelInput::new("ui.finger_joint_bodies", BODIES, true)],
+            ),
             "solid.shell" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
                 let mut d = Dialog::new(crate::length_input::defaults(&s.doc, kind), inputs);
@@ -1518,6 +1528,7 @@ impl Dialog {
                 | Kind::Hole { .. }
                 | Kind::Primitive { .. }
                 | Kind::Combine { .. }
+                | Kind::FingerJoint { .. }
                 | Kind::BoundaryFill { .. }
         )
     }
@@ -2953,6 +2964,7 @@ fn title(k: &Kind) -> &'static str {
             _ => "TORUS",
         },
         Kind::Combine { .. } => "COMBINE",
+        Kind::FingerJoint { .. } => "cmd.solid.finger_joint",
         Kind::EditParam { .. } => "EDIT DIMENSION",
         Kind::Rename { .. } => "RENAME",
         Kind::ConfirmDelete { .. } => "DELETE FEATURE",
@@ -6813,6 +6825,25 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 json!({"target": target, "tools": tools, "operation": OPS.get(*operation).copied().unwrap_or("join"), "keep_tools": keep_tools}),
             )
         }
+        Kind::FingerJoint { count, clearance, inverted, edge_offset } => {
+            let bodies = sels(d, 0).body_names();
+            if bodies.len() < 2 || bodies.len() > solidcraft_engine::doc::MAX_FINGER_JOINT_BODIES {
+                return Err(tr("ui.finger_joint_select_bodies").into());
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            if bodies.iter().any(|name| !seen.insert(name)) {
+                return Err(tr("ui.finger_joint_select_different").into());
+            }
+            let count =
+                count.trim().parse::<usize>().ok().filter(|n| (1..=64).contains(n)).ok_or_else(|| tr("ui.finger_joint_invalid_count").to_string())?;
+            if clearance.trim().is_empty() {
+                return Err(tr("ui.finger_joint_enter_clearance").into());
+            }
+            (
+                "solid.finger_joint",
+                json!({"bodies": bodies, "count": count, "clearance": clearance, "inverted": inverted, "edge_offset": edge_offset}),
+            )
+        }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
@@ -8271,6 +8302,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = tools.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            }
+            d
+        }
+        FeatureKind::FingerJoint { bodies, count, clearance, inverted, edge_offset } => {
+            let mut d = Dialog::new(
+                Kind::FingerJoint {
+                    count: count.to_string(),
+                    clearance: clearance.to_string(),
+                    inverted: *inverted,
+                    edge_offset: edge_offset.as_ref().map_or_else(String::new, ToString::to_string),
+                },
+                vec![SelInput::new("ui.finger_joint_bodies", BODIES, true)],
+            );
+            if let Some(input) = d.inputs.first_mut() {
+                input.items = bodies.iter().map(|body| Sel::Body { name: body.to_string() }).collect();
             }
             d
         }
