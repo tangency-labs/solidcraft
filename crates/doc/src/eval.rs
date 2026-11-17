@@ -7595,6 +7595,7 @@ fn centered_extrude(
     sketch: Option<&SolvedSketch>,
     thin: Option<&crate::lineage::ThinWallRoles>,
     two_sided: bool,
+    one_sided_direction: Option<crate::Direction>,
 ) -> Result<Vec<Traced>> {
     if !plane.origin.is_finite()
         || !plane.x.is_finite()
@@ -7617,7 +7618,20 @@ fn centered_extrude(
     } else {
         [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))]
     };
-    let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, thin };
+    // An extrude that spans its sketch plane (symmetric) has no cap on it. One made from a
+    // one-sided extrude knows the way that one went ([`crate::Extent::one_sided_direction`]):
+    // its cap at the end where the old start cap lay, facing the same way, also answers to
+    // `start`, so a reference to `start` picked before still finds that cap and never the
+    // other. Without that record no cap answers to `start`. It spans the plane when its caps
+    // lie on both sides of it, as their roles already say.
+    let spans = caps[0].as_deref() == Some("bottom") && caps[1].as_deref() == Some("top") && !two_sided;
+    let start_name = || Some("start".to_string());
+    let cap_synonyms = match one_sided_direction.filter(|_| spans) {
+        Some(crate::Direction::Positive) => [start_name(), None],
+        Some(crate::Direction::Negative) => [None, start_name()],
+        Some(crate::Direction::Symmetric) | None => [None, None],
+    };
+    let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
     // wire can tilt an otherwise exact planar cap through numeric cancellation.
     // A side drawn in collinear pieces is one face (#1788), and so is a side along one ellipse
@@ -7852,8 +7866,13 @@ fn feature_tools_with_constructor(
                 let mut tools: Vec<Traced> = regions
                     .iter()
                     .map(|r| {
-                        let roles =
-                            crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
+                        let roles = crate::lineage::ProfileRoles {
+                            sketch: Some(&ss),
+                            region: Some(r),
+                            caps: caps.clone(),
+                            cap_synonyms: [None, None],
+                            thin: thin_roles.as_ref(),
+                        };
                         let corner = match extent.corner {
                             Some(c) => c,
                             None => draft_corner_for(&ss, r, len, taper, &mut notes)?,
@@ -7941,7 +7960,16 @@ fn feature_tools_with_constructor(
             let untrimmed = extent.to.is_none() && extent.from.is_none() && !extent.through_all;
             let mut tools = Vec::new();
             for r in &regions {
-                tools.extend(centered_extrude(&ss.plane, r, run_lo + off, run_hi + off, Some(&ss), thin_roles.as_ref(), extent.distance2.is_some())?);
+                tools.extend(centered_extrude(
+                    &ss.plane,
+                    r,
+                    run_lo + off,
+                    run_hi + off,
+                    Some(&ss),
+                    thin_roles.as_ref(),
+                    extent.distance2.is_some(),
+                    extent.one_sided_direction.filter(|_| direction == crate::Direction::Symmetric && extent.distance2.is_none()),
+                )?);
             }
             if let Some(fp) = &from_slope {
                 let shift = off - from;
@@ -10480,7 +10508,7 @@ fn tapered_reach(
             envelopes.push(Traced::unnamed(kernel::extrude_tapered_between(&start_plane, &outer, 0.0, through, 0.0, sign, taper, corner)?));
         } else {
             let (lo, hi) = if sign < 0.0 { (base - through, base) } else { (base, base + through) };
-            envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false)?);
+            envelopes.extend(centered_extrude(&ss.plane, &outer, lo, hi, None, None, false, None)?);
         }
     }
     let cut = match trim_to_curved_face(envelopes, target, face, to, to_offset, &ss.plane, base, base + sign * through) {
@@ -10519,6 +10547,41 @@ fn offset_sheet(target: &ModelBody, face: usize, near: Vec3, travel: Vec3, offse
 /// is long and thin, the prism over it many times the extrude's length, and the extrude starts
 /// at the face's level instead.
 const FROM_SLOPE_LEAST_SINE: f64 = 0.087_155_742_747_658_17;
+
+/// What an edit of extrude `old` into `new` keeps of the way a one-sided extrude went
+/// ([`crate::Extent::one_sided_direction`]); `model` holds `old` as last evaluated. A one-sided
+/// extrude made symmetric records the way it went, read from its caps' names just after it was
+/// built: besides its `start` cap it has a cap named `top` when it went along the sketch normal
+/// and `bottom` when it went against it. A symmetric extrude edited and still symmetric keeps
+/// what it had. Any other edit records nothing, and so does a one-sided extrude whose caps do not
+/// say (one gone, both alike, or the extrude not built): no cap of it will answer to `start`.
+pub fn keep_one_sided_direction(model: &Model, old: &Feature, new: &mut Feature) {
+    let FeatureKind::Extrude { extent: after, .. } = &mut new.kind else { return };
+    let symmetric = |e: &crate::Extent| e.direction == crate::Direction::Symmetric && e.distance2.is_none();
+    let FeatureKind::Extrude { extent: before, .. } = &old.kind else {
+        after.one_sided_direction = None;
+        return;
+    };
+    after.one_sided_direction = if !symmetric(after) {
+        None
+    } else if symmetric(before) {
+        before.one_sided_direction
+    } else if before.distance2.is_some() {
+        None
+    } else {
+        model.result(old.id).filter(|r| !r.skipped && r.error.is_none()).and_then(|r| {
+            let has = |role: &str| {
+                let name = format!("F{}:{role}", old.id);
+                r.state.bodies.iter().any(|b| crate::name_lookup::body_has_face_named(b, &name))
+            };
+            match (has("start"), has("top"), has("bottom")) {
+                (true, true, false) => Some(crate::Direction::Positive),
+                (true, false, true) => Some(crate::Direction::Negative),
+                _ => None,
+            }
+        })
+    };
+}
 
 /// Whether two versions of one extrude start From Object on the same face: the same pick
 /// point, or faces on one plane, each found as its build finds it in `st`, the model before the
@@ -10606,7 +10669,7 @@ fn half_space_traced(input: &Traced, plane: &Plane, positive: bool, cap: &str) -
     // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
     let cap = Some(cap.to_string());
     let caps = if positive { [cap, None] } else { [None, cap] };
-    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
     Ok(Some(Traced::step(part, &[input, &tool])))
 }
 
@@ -13479,7 +13542,7 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
         // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
         let section = Some("section".to_string());
         let caps = if positive { [section, None] } else { [None, section] };
-        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
+        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
         parts.push(Traced::step(part, &[input, &tool]));
     }
     Ok(parts)
