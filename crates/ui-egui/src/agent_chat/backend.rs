@@ -117,6 +117,8 @@ pub enum Event {
     },
     /// Something failed; the backend is still running unless [`Event::Exited`] follows.
     Error(String),
+    /// Something the user should know that is no error: the chat goes on.
+    Notice(String),
     /// It ended; its last error output.
     Exited {
         tail: Vec<String>,

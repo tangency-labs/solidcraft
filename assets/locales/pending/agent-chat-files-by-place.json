@@ -8,7 +8,8 @@
     "ui.agent_chat_paste_past_max": "At most {max} files go in one message; save the picture as a file and attach that instead",
     "ui.ai_auto_attached": "it reads something you attached",
     "ui.agent_chat_reads_warning": "Sending a file or folder by path turns on Claude Code's read tools for this chat: it reads what you send without asking, and asks before reading anything else.",
-    "ui.agent_chat_add_any": "Choose files or folders…"
+    "ui.agent_chat_add_any": "Choose files or folders…",
+    "ui.agent_chat_reads_fresh_session": "Claude Code couldn't carry the earlier conversation over when its read tools came on, so it starts again from this message."
   },
   "ar": {
     "ui.agent_chat_add_folder": "اختر مجلدات…",
@@ -19,7 +20,8 @@
     "ui.agent_chat_paste_past_max": "يُرسل {max} ملفات كحد أقصى في رسالة واحدة؛ احفظ الصورة في ملف وأرفقه بدلًا منها",
     "ui.ai_auto_attached": "يقرأ شيئًا أرفقته",
     "ui.agent_chat_reads_warning": "إرسال ملف أو مجلد بمساره يشغّل أدوات القراءة في Claude Code لهذه المحادثة: يقرأ ما ترسله دون سؤال، ويسأل قبل قراءة أي شيء آخر.",
-    "ui.agent_chat_add_any": "اختر ملفات أو مجلدات…"
+    "ui.agent_chat_add_any": "اختر ملفات أو مجلدات…",
+    "ui.agent_chat_reads_fresh_session": "تعذّر على Claude Code نقل المحادثة السابقة عند تشغيل أدوات القراءة، لذا يبدأ من جديد من هذه الرسالة."
   },
   "de": {
     "ui.agent_chat_add_folder": "Ordner auswählen…",
@@ -30,7 +32,8 @@
     "ui.agent_chat_paste_past_max": "Höchstens {max} Dateien pro Nachricht; speichern Sie das Bild als Datei und hängen Sie diese an",
     "ui.ai_auto_attached": "es liest etwas, das Sie angehängt haben",
     "ui.agent_chat_reads_warning": "Wenn Sie eine Datei oder einen Ordner über den Pfad senden, schaltet das die Lesewerkzeuge von Claude Code für diesen Chat ein: Es liest, was Sie senden, ohne Rückfrage, und fragt, bevor es etwas anderes liest.",
-    "ui.agent_chat_add_any": "Dateien oder Ordner auswählen…"
+    "ui.agent_chat_add_any": "Dateien oder Ordner auswählen…",
+    "ui.agent_chat_reads_fresh_session": "Claude Code konnte das bisherige Gespräch beim Einschalten seiner Lesewerkzeuge nicht übernehmen und beginnt deshalb neu mit dieser Nachricht."
   },
   "he": {
     "ui.agent_chat_add_folder": "בחירת תיקיות…",
@@ -41,7 +44,8 @@
     "ui.agent_chat_paste_past_max": "לכל היותר {max} קבצים בהודעה אחת; יש לשמור את התמונה כקובץ ולצרף אותו במקומה",
     "ui.ai_auto_attached": "הוא קורא משהו שצירפת",
     "ui.agent_chat_reads_warning": "שליחת קובץ או תיקייה לפי נתיב מפעילה את כלי הקריאה של Claude Code בצ׳אט הזה: הוא קורא את מה ששלחת בלי לשאול, ושואל לפני שהוא קורא כל דבר אחר.",
-    "ui.agent_chat_add_any": "בחירת קבצים או תיקיות…"
+    "ui.agent_chat_add_any": "בחירת קבצים או תיקיות…",
+    "ui.agent_chat_reads_fresh_session": "Claude Code לא הצליח להעביר את השיחה הקודמת כשכלי הקריאה שלו הופעלו, ולכן הוא מתחיל מחדש מההודעה הזו."
   },
   "ja": {
     "ui.agent_chat_add_folder": "フォルダーを選択…",
@@ -52,7 +56,8 @@
     "ui.agent_chat_paste_past_max": "1 つのメッセージで送れるファイルは {max} 個までです。画像をファイルとして保存し、そのファイルを添付してください",
     "ui.ai_auto_attached": "添付したものを読み込むため",
     "ui.agent_chat_reads_warning": "パスでファイルやフォルダーを送ると、このチャットで Claude Code の読み取りツールがオンになります。送ったものは確認なしで読み込み、それ以外を読む前には確認します。",
-    "ui.agent_chat_add_any": "ファイルまたはフォルダーを選択…"
+    "ui.agent_chat_add_any": "ファイルまたはフォルダーを選択…",
+    "ui.agent_chat_reads_fresh_session": "読み取りツールをオンにする際に Claude Code がそれまでの会話を引き継げなかったため、このメッセージから新しく始めます。"
   },
   "ko": {
     "ui.agent_chat_add_folder": "폴더 선택…",
@@ -63,7 +68,8 @@
     "ui.agent_chat_paste_past_max": "메시지 하나에는 파일을 최대 {max}개까지 보낼 수 있습니다. 그림을 파일로 저장한 뒤 그 파일을 첨부하세요",
     "ui.ai_auto_attached": "첨부한 항목을 읽음",
     "ui.agent_chat_reads_warning": "경로로 파일이나 폴더를 보내면 이 채팅에서 Claude Code의 읽기 도구가 켜집니다. 보낸 항목은 묻지 않고 읽고, 그 밖의 항목을 읽기 전에는 묻습니다.",
-    "ui.agent_chat_add_any": "파일 또는 폴더 선택…"
+    "ui.agent_chat_add_any": "파일 또는 폴더 선택…",
+    "ui.agent_chat_reads_fresh_session": "읽기 도구를 켜는 동안 Claude Code가 이전 대화를 이어받지 못해 이 메시지부터 새로 시작합니다."
   },
   "vi": {
     "ui.agent_chat_add_folder": "Chọn thư mục…",
@@ -74,7 +80,8 @@
     "ui.agent_chat_paste_past_max": "Tối đa {max} tệp trong một tin nhắn; hãy lưu hình ảnh thành tệp rồi đính kèm tệp đó",
     "ui.ai_auto_attached": "nó đọc thứ bạn đã đính kèm",
     "ui.agent_chat_reads_warning": "Gửi một tệp hoặc thư mục theo đường dẫn sẽ bật các công cụ đọc của Claude Code cho cuộc trò chuyện này: nó đọc những gì bạn gửi mà không hỏi, và hỏi trước khi đọc bất cứ thứ gì khác.",
-    "ui.agent_chat_add_any": "Chọn tệp hoặc thư mục…"
+    "ui.agent_chat_add_any": "Chọn tệp hoặc thư mục…",
+    "ui.agent_chat_reads_fresh_session": "Claude Code không thể chuyển cuộc trò chuyện trước khi bật công cụ đọc, nên bắt đầu lại từ tin nhắn này."
   },
   "zh": {
     "ui.agent_chat_add_folder": "选择文件夹…",
@@ -85,6 +92,7 @@
     "ui.agent_chat_paste_past_max": "一条消息最多发送 {max} 个文件；请把图片另存为文件，再附加该文件",
     "ui.ai_auto_attached": "它读取的是你附加的内容",
     "ui.agent_chat_reads_warning": "按路径发送文件或文件夹会为本次聊天开启 Claude Code 的读取工具：它会直接读取你发送的内容，读取其他任何内容前都会先询问。",
-    "ui.agent_chat_add_any": "选择文件或文件夹…"
+    "ui.agent_chat_add_any": "选择文件或文件夹…",
+    "ui.agent_chat_reads_fresh_session": "开启读取工具时 Claude Code 无法沿用之前的对话，因此从这条消息重新开始。"
   }
 }

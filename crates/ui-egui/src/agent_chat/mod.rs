@@ -1066,6 +1066,7 @@ impl AgentChat {
                 }
                 return Some(Outcome::TurnEnd);
             }
+            Event::Notice(text) => self.notice(text, false),
             Event::Error(e) => {
                 self.notice(e, true);
                 match self.state() {
