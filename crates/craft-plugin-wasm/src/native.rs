@@ -607,7 +607,12 @@ fn check_imports(engine: &Engine, component: &Component) -> Result<Wit> {
         *remaining -= 1;
         note(name)?;
         // Only an import reaches the network; an export named like one is the plugin's own.
-        if import && (name == "fetch" || name.starts_with("wasi:sockets/") || name.starts_with("wasi:http/") || name.starts_with(&format!("{package}/fetch"))) {
+        if import
+            && (name == "fetch"
+                || name.starts_with("wasi:sockets/")
+                || name.starts_with("wasi:http/")
+                || name.starts_with(&format!("{package}/fetch")))
+        {
             return Err(HostError::PermissionDenied { permission: format!("network import is forbidden: {name}") });
         }
         if let ComponentItem::ComponentInstance(instance) = item {
