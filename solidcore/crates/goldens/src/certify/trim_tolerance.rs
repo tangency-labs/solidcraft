@@ -211,16 +211,34 @@ fn trim_bounds(k: &Kernel, b: &Brep, e: EdgeId) -> Vec<Option<f64>> {
     let rec = b.edge(e).expect("edge");
     rec.edgeuses
         .iter()
-        .filter_map(|&eu| use_bound(k, b, e, eu))
+        .filter_map(|&eu| match use_bound(k, b, e, eu) {
+            UseBound::NoTrim => None,
+            UseBound::Open => Some(None),
+            UseBound::Bound(x) => Some(Some(x)),
+        })
         .collect()
 }
 
-/// `B` of the UV trim of `e`'s use `eu` ([`trim_bounds`]): `None` when the use keeps no trim
-/// or the edge no curve, `Some(None)` where the bound is not enclosed.
-fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> Option<Option<f64>> {
+/// `B` of the UV trim of one edge use ([`use_bound`]).
+#[derive(Debug)]
+enum UseBound {
+    /// The use keeps no trim, or the edge no curve.
+    NoTrim,
+    /// The bound is not enclosed.
+    Open,
+    /// The enclosed bound.
+    Bound(f64),
+}
+
+/// `B` of the UV trim of `e`'s use `eu` ([`trim_bounds`]).
+fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> UseBound {
     let rec = b.edge(e).expect("edge");
-    let curve = rec.curve.as_ref()?;
-    let trim = b.edgeuse(eu).expect("edge use").uv_trim_curve.as_ref()?;
+    let Some(curve) = rec.curve.as_ref() else {
+        return UseBound::NoTrim;
+    };
+    let Some(trim) = b.edgeuse(eu).expect("edge use").uv_trim_curve.as_ref() else {
+        return UseBound::NoTrim;
+    };
     let face = eu1::face(b, eu).expect("face").expect("a face");
     let surface = b
         .face(face)
@@ -231,17 +249,19 @@ fn use_bound(k: &Kernel, b: &Brep, e: EdgeId, eu: EdgeuseId) -> Option<Option<f6
     let mut surface = surface.clone_for_evaluation().expect("a copy");
     let _ = surface.set_owner(None);
     let ivl = rec.interval;
-    Some(
-        trim_image_gap_bound(
-            k,
-            &surface,
-            curve,
-            trim,
-            [ivl.min(), ivl.max()],
-            FLOOR * rec.tolerance,
-        )
-        .expect("the bound"),
+    match trim_image_gap_bound(
+        k,
+        &surface,
+        curve,
+        trim,
+        [ivl.min(), ivl.max()],
+        FLOOR * rec.tolerance,
     )
+    .expect("the bound")
+    {
+        Some(x) => UseBound::Bound(x),
+        None => UseBound::Open,
+    }
 }
 
 /// The owner of a value of a geometry record (`topology_brep_mirror::geometry`).
@@ -366,8 +386,8 @@ fn face_trims_covered(k: &Kernel, b: &Brep, f: FaceId) -> Result<f64, String> {
                 continue;
             }
             match use_bound(k, b, e, eu) {
-                None => {}
-                Some(Some(x)) if x <= rec.tolerance => {
+                UseBound::NoTrim => {}
+                UseBound::Bound(x) if x <= rec.tolerance => {
                     any = true;
                     worst = worst.max(x / rec.tolerance);
                 }
@@ -564,7 +584,7 @@ fn certify(unit: &str) -> Tally {
                     };
                     let tol = b.edge(e).expect("edge").tolerance;
                     match use_bound(&k, b, e, eu) {
-                        Some(Some(x)) if x <= tol => {
+                        UseBound::Bound(x) if x <= tol => {
                             tally.trim_values += 1;
                             tally.worst = tally.worst.max(x / tol);
                         }

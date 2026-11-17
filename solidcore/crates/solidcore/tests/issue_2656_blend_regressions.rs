@@ -260,12 +260,19 @@ fn ladder_012_variable_round_runs_on_into_the_upright_round() {
 /// on at y = 35 into the r5 round's end arc), then the upright (60, 40) r2 with its tangent
 /// chain, up the arc and along the seam. The case's invariants: 11 faces, one valid body;
 /// SolidCraft's golden (8ddce9016): 24 edges, 15 vertices. Capped (#2364): 25 edges,
-/// 16 vertices, 47591.482. The volume is the rolling-ball volume
-/// 48000 - (1-pi/4)(25*60 + 9*35 + 4*15) - 4.293342478629 (r3 run-on)
-/// - 1.608436379598 (end arc, Pappus) - 1.158579441504 (end arc under the r3 cut)
-/// - 0.790151961430 (r3/r5 seam) = 47589.771046109 (#18166; piecewise Gauss-Kronrod
-/// quadrature at every boundary change, each piece within 1e-11). It replaces SolidCraft's
-/// measured 47589.770467, which is 1.2e-8 off it.
+/// 16 vertices, 47591.482. The volume is the rolling-ball volume (#18166; each piece by
+/// piecewise Gauss-Kronrod quadrature split at every boundary change, within 1e-11):
+///
+/// ```text
+/// 48000 - (1 - pi/4)(25*60 + 9*35 + 4*15)
+///       - 4.293342478629   r3 run-on
+///       - 1.608436379598   end arc (Pappus)
+///       - 1.158579441504   end arc under the r3 cut
+///       - 0.790151961430   r3/r5 seam
+///       = 47589.771046109
+/// ```
+///
+/// It replaces SolidCraft's measured 47589.770467, which is 1.2e-8 off it.
 #[test]
 fn ladder_021_round_runs_on_into_the_earlier_round() {
     let mut k = solidcraft_kernel();
