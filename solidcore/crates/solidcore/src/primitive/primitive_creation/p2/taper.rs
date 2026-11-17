@@ -463,7 +463,6 @@ fn taper(
                 at,
                 translation,
                 brep_tol,
-                p,
             )?;
             return Ok(Some(CornerRefusal {
                 reason: TaperCornerRefusal::WallCloses,
@@ -640,7 +639,6 @@ const MEETING_HALVINGS: u32 = 100;
 /// lowest fraction whose section has such a junction is halved to, until the bracket is
 /// within the B-rep's tolerance `tol` of the height, and the junction there is moved up by
 /// that fraction of `translation`, the height.
-#[allow(clippy::too_many_arguments)] // the offset method's state
 fn walls_meet(
     k: &Kernel,
     composite: &CompositeCurve,
@@ -649,7 +647,6 @@ fn walls_meet(
     at: Point3,
     translation: Vec3,
     tol: f64,
-    p: bool,
 ) -> Result<Point3> {
     let height = translation.length();
     let mut f_lo = 0.0;
@@ -660,18 +657,14 @@ fn walls_meet(
             break;
         }
         let f = 0.5 * (f_lo + f_hi);
-        let section = ignored(passed_on(
-            composite.create_trimmed_offsets(
-                k,
-                direction,
-                &OffsetParams {
-                    offset_distance: f * params.offset_distance,
-                    ..*params
-                },
-            ),
-            p,
-        )?)?
-        .unwrap_or_default();
+        let section = composite.create_trimmed_offsets(
+            k,
+            direction,
+            &OffsetParams {
+                offset_distance: f * params.offset_distance,
+                ..*params
+            },
+        )?;
         match offset_junction(k, &section, params.xsect_tol_3d)? {
             Some(q) => {
                 f_hi = f;
