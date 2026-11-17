@@ -2372,7 +2372,8 @@ fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
                 && matches!(
                     &built,
                     Err(Error::BlendFailed { status: 1001, phrase, .. })
-                        if phrase == "the faces the rails enclose reach past the rails"
+                        // the kernel's statement, then what the session noted of the step
+                        if phrase.starts_with("the faces the rails enclose reach past the rails")
                 )
             {
                 continue;
