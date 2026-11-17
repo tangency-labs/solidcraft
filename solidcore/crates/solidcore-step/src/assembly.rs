@@ -1645,7 +1645,8 @@ pub fn parabola_curve(vertex: P3, axis: P3, reference: P3, focal: f64, interval:
 
 /// The exact spline of a hyperbola edge over `interval` in the hyperbola's parameter: about
 /// `center`, `axis` its plane's normal, `reference` its major axis (`center + a cosh t x +
-/// b sinh t y`).
+/// b sinh t y`). Its ends and knots are at the hyperbola's parameters; between knots its
+/// parameter is not the hyperbola's (see `topology::hyperbola_curve`).
 pub fn hyperbola_curve(center: P3, axis: P3, reference: P3, radii: [f64; 2], interval: [f64; 2]) -> BCurve {
     crate::topology::hyperbola_curve(&crate::geom::Placement { origin: center, axis, ref_direction: reference }, radii[0], radii[1], interval)
 }

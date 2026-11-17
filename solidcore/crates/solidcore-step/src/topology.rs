@@ -1404,8 +1404,11 @@ pub(crate) fn parabola_curve(position: &Placement, focal: f64, [t0, t1]: [f64; 2
     swept::parabola_spline(position, focal, t0, t1)
 }
 
-/// A hyperbola as the record holds an edge on it: the exact spline over `[t0, t1]`, its
-/// parameter the hyperbola's (`origin + a cosh t x + b sinh t y`, STEP `HYPERBOLA`).
+/// A hyperbola as the record holds an edge on it: the exact spline over `[t0, t1]` of
+/// `origin + a cosh t x + b sinh t y` (STEP `HYPERBOLA`). Its knots, the ends of its rational
+/// quadratic pieces, are at the hyperbola's own parameters, so the edge's interval is the
+/// hyperbola's; between knots its parameter is not the hyperbola's `t` (no rational quadratic
+/// follows cosh and sinh), so an interior `t` is not mapped through it.
 pub(crate) fn hyperbola_curve(position: &Placement, a: f64, b: f64, [t0, t1]: [f64; 2]) -> BCurve {
     swept::hyperbola_spline(position, a, b, t0, t1)
 }
