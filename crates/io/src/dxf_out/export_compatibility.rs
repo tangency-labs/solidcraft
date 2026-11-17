@@ -215,7 +215,7 @@ impl DxfFile<DxfShape> {
     }
 }
 
-pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget) -> Result<String> {
+pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget, units: super::DxfUnits) -> Result<String> {
     if file.layers().len() > budget.layers || file.entities().len() > budget.entities {
         return Err(invalid("stored metadata exceeds the immutable producer plan"));
     }
@@ -265,5 +265,5 @@ pub(super) fn write(file: &DxfFile<DxfShape>, budget: Budget) -> Result<String> 
         .entities()
         .iter()
         .map(|e| Ok(EntityView { layer: file.layer(e.layer())?.name(), shape: e.geometry(), weight: e.weight(), source_text: e.source_text() }));
-    write_drawing_views(layers, entities, Some(budget.bytes), extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), 4)
+    write_drawing_views(layers, entities, Some(budget.bytes), extents.unwrap_or((Vec2::ZERO, Vec2::ZERO)), units)
 }

@@ -2946,3 +2946,28 @@ fn a_menu_taller_than_the_window_scrolls_its_last_rows_into_view() {
     let last_row = crate::scenario::rect_of(&format!("menu:{last}")).unwrap();
     assert!(menu.contains_rect(last_row), "and shows its last row: {last_row:?} in {menu:?}");
 }
+
+/// Export DXF on a sketch writes AutoCAD 2000 with exact curves, or release 12 with chords when the
+/// Design preference asks for it, as Save As DXF did before.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn export_dxf_writes_autocad_2000_or_release_12_by_the_preference() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Outline"})).unwrap();
+    h.app.run("sketch.ellipse", json!({"center": [0, 0], "major": [15, 0], "minor_radius": 8})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let id = h.app.session.doc.features.iter().find(|f| f.name == "Outline").unwrap().id;
+    for r12 in [false, true] {
+        h.app.preferences.sketch_dxf_r12 = r12;
+        let path = h.dir.join(format!("outline-{r12}.dxf"));
+        let chosen = path.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert_eq!((name, extensions), ("Outline.dxf", &["dxf"][..]));
+            Box::pin(std::future::ready(Some(chosen.clone())))
+        }));
+        act(&mut h.app, &Target::Sketch { id }, "Export DXF…");
+        h.settle();
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("r12 {r12}: {error}"));
+        assert_eq!((text.contains("AC1015"), text.contains("ELLIPSE")), (!r12, !r12), "r12 {r12}");
+    }
+}

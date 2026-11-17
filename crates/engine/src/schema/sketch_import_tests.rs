@@ -39,7 +39,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<InsertAirfoilParams>(),
         &["angle", "at", "chord", "flip", "format", "name", "path", "pivot", "plane", "sketch", "text", "tolerance"],
     );
-    assert_keys(input_schema_for::<ExportDxfParams>(), &["join", "layer", "layers", "path", "sketch", "units"]);
+    assert_keys(input_schema_for::<ExportDxfParams>(), &["join", "layer", "layers", "path", "sketch", "units", "version"]);
     assert_keys(input_schema_for::<DrawingBoundsParams>(), &["format", "path", "text"]);
 }
 
@@ -144,6 +144,8 @@ fn strict_keeps_the_handlers_own_refusals() {
         ("sketch.export_dxf", json!({"layers": "all"})),
         ("sketch.export_dxf", json!({"layers": true})),
         ("sketch.export_dxf", json!({"join": "yes"})),
+        ("sketch.export_dxf", json!({"version": "r14"})),
+        ("sketch.export_dxf", json!({"version": "r12", "join": true})),
         ("sketch.drawing_bounds", json!({"text": "0\nEOF\n", "format": "dxf"})),
         ("sketch.drawing_bounds", json!({"text": "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"})),
         // With `text` and no `format` there is no file name to go by, so the drawing is read as
@@ -221,6 +223,12 @@ fn the_types_read_like_the_handler() {
     let export = |p: Value| serde_json::from_value::<ExportDxfParams>(p).is_ok();
     assert!(export(json!({})) && export(json!({"sketch": null, "path": null})) && export(json!({"sketch": "S", "path": ""})));
     assert!(export(json!({"sketch": 3, "path": "a.dxf"})) && !export(json!({"sketch": true})) && !export(json!({"path": 5})));
+    assert!(
+        export(json!({"version": "R12"}))
+            && export(json!({"version": "ac1015"}))
+            && !export(json!({"version": "r14"}))
+            && !export(json!({"version": 12}))
+    );
 }
 
 /// What the schemas take: a drawing from `path` or `text`, and the keys' own shapes.
@@ -498,7 +506,8 @@ fn replies_match_the_output_schema() {
         json!({"units": "IN", "layer": "PART"}),
         json!({"units": "design", "layers": "Roles"}),
         json!({"join": true, "layer": "  "}),
-        json!({"units": null, "layer": null, "layers": null, "join": null}),
+        json!({"units": null, "layer": null, "layers": null, "join": null, "version": null}),
+        json!({"version": "R12", "units": "cm"}),
     ] {
         let r = run(&mut s, "sketch.export_dxf", p);
         matches(output_schema_for::<ExportDxfResult>(), &r);

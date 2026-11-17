@@ -11,7 +11,7 @@ use solidcraft_geom::prelude::*;
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES, bulge_arc};
 // Shared X2 model; the partial reader below consumes the real metadata API.
-use crate::{DxfEntityWeight, DxfFile, DxfLayerId, DxfLinetype, DxfShape, DxfStandardWeight, IoError, Result};
+use crate::{DxfEntityWeight, DxfFile, DxfLayerId, DxfLinetype, DxfShape, DxfStandardWeight, DxfUnits, IoError, Result};
 
 mod source_import;
 mod text_entity;
@@ -65,13 +65,7 @@ fn pairs(text: &str) -> Vec<(i32, String)> {
 fn units_scale(p: &[(i32, String)]) -> f64 {
     // $INSUNITS: 1 in, 2 ft, 4 mm, 5 cm, 6 m, 0 unitless (taken as mm).
     let i = p.iter().position(|(c, v)| *c == 9 && v == "$INSUNITS");
-    match i.and_then(|i| p.get(i + 1)).and_then(|(_, v)| v.parse::<i32>().ok()) {
-        Some(1) => 25.4,
-        Some(2) => 304.8,
-        Some(5) => 10.0,
-        Some(6) => 1000.0,
-        _ => 1.0,
-    }
+    i.and_then(|i| p.get(i + 1)).and_then(|(_, v)| v.parse::<i32>().ok()).and_then(DxfUnits::from_insunits).map_or(1.0, DxfUnits::mm_per_unit)
 }
 
 #[derive(Default)]
@@ -1214,38 +1208,29 @@ fn layered_neutral_table_record(
 fn layered_linetype_definition(record: &Ent, k: f64, types: &mut LayeredLinetypes) -> Result<()> {
     let name = layered_text(record, 2)?.ok_or_else(|| IoError::Invalid("unnamed DXF linetype".into()))?;
     let expected: &[f64] = if name.eq_ignore_ascii_case("DASHED") {
-        &[12.7, -6.35]
+        DxfLinetype::Dashed.pattern_mm()
     } else if name.eq_ignore_ascii_case("HIDDEN") {
-        &[2.0, -1.0]
+        DxfLinetype::Hidden.pattern_mm()
     } else if ["Continuous", "ByLayer", "ByBlock"].iter().any(|known| name.eq_ignore_ascii_case(known)) {
         &[]
     } else {
         return Err(IoError::Invalid("not supported yet: custom DXF linetype".into()));
     };
-    if !expected.is_empty() && k != 1.0 {
-        return Err(IoError::Invalid("not supported yet: non-millimetre patterned DXF linetype".into()));
-    }
     if layered_number(record, 70)?.unwrap_or(0.0) != 0.0
         || layered_required(record, 72)? != 65.0
         || layered_required(record, 73)? != expected.len() as f64
     {
         return Err(IoError::Invalid("not supported yet: noncanonical DXF linetype definition".into()));
     }
-    // Public canonical decimal lengths, not a recomputation whose binary sum
-    // may differ from the decimal field emitted by Out's fixed precision.
-    let total = if name.eq_ignore_ascii_case("DASHED") {
-        19.05
-    } else if name.eq_ignore_ascii_case("HIDDEN") {
-        3.0
-    } else {
-        0.0
-    };
-    if layered_required(record, 40)? != total {
+    // The writer's own lengths: each millimetre length in the file's unit, as `Out::len` writes
+    // it, so a file in any unit compares exactly and a pattern in another unit is refused.
+    let in_file = |mm: f64| crate::dxf_out::written_length(mm / k).ok();
+    if Some(layered_required(record, 40)?) != in_file(crate::dxf_out::pattern_length(expected)) {
         return Err(IoError::Invalid("not supported yet: noncanonical DXF linetype length".into()));
     }
     let mut patterns = record.f.iter().filter(|(code, _)| *code == 49).map(|(_, value)| *value);
     for value in expected {
-        if patterns.next() != Some(*value) {
+        if patterns.next() != in_file(*value) {
             return Err(IoError::Invalid("not supported yet: noncanonical DXF linetype pattern".into()));
         }
     }
@@ -1390,6 +1375,17 @@ fn section(p: &[(i32, String)], start: usize) -> Result<Vec<Ent>> {
         }
     }
     Ok(ents)
+}
+
+/// A release 12 file of `shapes` on layer 0, in millimetres: the plain fixture the readers' tests
+/// start from.
+#[cfg(test)]
+pub(crate) fn test_r12(shapes: &[DxfShape]) -> String {
+    let mut file = DxfFile::new().unwrap();
+    for shape in shapes {
+        file.push(file.default_layer(), shape.clone(), None).unwrap();
+    }
+    crate::write_dxf_file_as(&file, crate::DxfOutput { units: DxfUnits::Millimetres, version: crate::DxfVersion::R12 }).unwrap()
 }
 
 // Wire-format assertions deliberately cover data that is not semantic geometry:
@@ -1546,99 +1542,6 @@ impl Affine {
     }
 }
 
-/// Options for writing an R12-style ASCII DXF.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DxfWriteOptions {
-    /// DXF $INSUNITS: 1 in, 2 ft, 4 mm (default), 5 cm, 6 m.
-    pub insunits: i32,
-    /// Default layer name (default "0").
-    pub layer: String,
-}
-
-impl Default for DxfWriteOptions {
-    fn default() -> Self {
-        DxfWriteOptions { insunits: 4, layer: "0".to_string() }
-    }
-}
-
-/// Write 2D geometry with per-entity layer names as an R12-style ASCII DXF.
-pub fn write_dxf_entities(entities: &[(&str, Geom2)], insunits: i32) -> String {
-    let mut s = String::new();
-    let mut w = |c: i32, v: &str| {
-        s.push_str(&format!("{c}\n{v}\n"));
-    };
-    w(0, "SECTION");
-    w(2, "HEADER");
-    w(9, "$INSUNITS");
-    let insunits_str = insunits.to_string();
-    w(70, &insunits_str);
-    w(0, "ENDSEC");
-    w(0, "SECTION");
-    w(2, "ENTITIES");
-    let f = |x: f64| format!("{x:.9}");
-    for (layer, g) in entities {
-        let lyr = if layer.trim().is_empty() { "0" } else { layer.trim() };
-        match g {
-            Geom2::Point(p) => {
-                w(0, "POINT");
-                w(8, lyr);
-                w(10, &f(p.x));
-                w(20, &f(p.y));
-            }
-            Geom2::Line(a, b) => {
-                w(0, "LINE");
-                w(8, lyr);
-                w(10, &f(a.x));
-                w(20, &f(a.y));
-                w(11, &f(b.x));
-                w(21, &f(b.y));
-            }
-            Geom2::Circle(c, r) => {
-                w(0, "CIRCLE");
-                w(8, lyr);
-                w(10, &f(c.x));
-                w(20, &f(c.y));
-                w(40, &f(*r));
-            }
-            Geom2::Arc { c, a, b } => {
-                w(0, "ARC");
-                w(8, lyr);
-                w(10, &f(c.x));
-                w(20, &f(c.y));
-                w(40, &f(c.dist(*a)));
-                w(50, &f((*a - *c).angle().to_degrees()));
-                w(51, &f((*b - *c).angle().to_degrees()));
-            }
-            Geom2::Text { text, at, height, angle } => {
-                w(0, "TEXT");
-                w(8, lyr);
-                w(10, &f(at.x));
-                w(20, &f(at.y));
-                w(40, &f(*height));
-                w(50, &f(angle.to_degrees()));
-                w(1, &text.replace('\n', " "));
-            }
-            // Free-form curves are written by the caller as polylines (lines).
-            Geom2::Ellipse { .. } | Geom2::Spline { .. } | Geom2::Nurbs { .. } | Geom2::Conic { .. } => {}
-        }
-    }
-    w(0, "ENDSEC");
-    w(0, "EOF");
-    s
-}
-
-/// Write 2D geometry as an R12-style ASCII DXF with options.
-pub fn write_dxf_opts(geom: &[Geom2], opts: &DxfWriteOptions) -> String {
-    let layer = if opts.layer.trim().is_empty() { "0" } else { opts.layer.as_str() };
-    let entities: Vec<(&str, Geom2)> = geom.iter().cloned().map(|g| (layer, g)).collect();
-    write_dxf_entities(&entities, opts.insunits)
-}
-
-/// Write 2D geometry (millimetres) as an R12-style ASCII DXF.
-pub fn write_dxf(geom: &[Geom2]) -> String {
-    write_dxf_opts(geom, &DxfWriteOptions::default())
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1664,7 +1567,7 @@ mod tests {
     /// may panic (solidcraft#469).
     #[test]
     fn hostile_dxf_never_panics() {
-        let good = write_dxf(&[Geom2::Line(Vec2::ZERO, Vec2::new(10.0, 0.0)), Geom2::Circle(Vec2::new(5.0, 5.0), 2.0)]);
+        let good = test_r12(&[DxfShape::Line(Vec2::ZERO, Vec2::new(10.0, 0.0)), DxfShape::Circle { c: Vec2::new(5.0, 5.0), r: 2.0 }]);
         let mut cases: Vec<String> = vec![
             String::new(),
             "0".into(),
@@ -1773,12 +1676,12 @@ mod tests {
 
     #[test]
     fn round_trip_and_polyline_bulges() {
-        let g = vec![
-            Geom2::Line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
-            Geom2::Circle(Vec2::new(5.0, 5.0), 2.0),
-            Geom2::Arc { c: Vec2::ZERO, a: Vec2::new(3.0, 0.0), b: Vec2::new(0.0, 3.0) },
+        let g = [
+            DxfShape::Line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
+            DxfShape::Circle { c: Vec2::new(5.0, 5.0), r: 2.0 },
+            DxfShape::Arc { c: Vec2::ZERO, r: 3.0, a0: 0.0, a1: 90.0 },
         ];
-        let back = read_dxf(&write_dxf(&g)).unwrap();
+        let back = read_dxf(&test_r12(&g)).unwrap();
         assert_eq!(back.len(), 3);
         match &back[2] {
             Geom2::Arc { c, a, b } => {
@@ -1839,29 +1742,6 @@ mod tests {
         assert!(g.is_empty(), "an empty block has no geometry to place");
     }
 
-    #[test]
-    fn write_dxf_opts_and_entities_round_trip() {
-        let geom = vec![Geom2::Line(Vec2::ZERO, Vec2::new(25.4, 0.0)), Geom2::Circle(Vec2::new(12.7, 12.7), 6.35)];
-
-        // Default write_dxf: byte-identical check with write_dxf_opts default
-        let d0 = write_dxf(&geom);
-        let d1 = write_dxf_opts(&geom, &DxfWriteOptions::default());
-        assert_eq!(d0, d1);
-        assert!(d0.contains("\n8\n0\n"));
-        assert!(d0.contains("\n70\n4\n"));
-
-        // Custom layer and inch units (insunits = 1)
-        let opts = DxfWriteOptions { insunits: 1, layer: "CUT".to_string() };
-        let d_inch = write_dxf_opts(&geom, &opts);
-        assert!(d_inch.contains("\n8\nCUT\n"));
-        assert!(d_inch.contains("\n70\n1\n"));
-
-        // Per-entity layers with write_dxf_entities
-        let ents = vec![("OUTLINE", Geom2::Line(Vec2::ZERO, Vec2::new(10.0, 0.0))), ("CUT", Geom2::Circle(Vec2::new(5.0, 5.0), 2.0))];
-        let d_roles = write_dxf_entities(&ents, 4);
-        assert!(d_roles.contains("\n8\nOUTLINE\n"));
-        assert!(d_roles.contains("\n8\nCUT\n"));
-    }
     // X3 partial preparation: raw fields only. Resolving DXF's symbolic weight
     // values into the shared DxfFile model belongs to the later X2/X3 adapter.
     #[test]
@@ -4016,8 +3896,10 @@ mod tests {
         let reread = read_dxf_file(&write_dxf_file(&owned).unwrap()).unwrap();
         assert_eq!(reread.entities()[0].geometry(), owned.entities()[0].geometry());
 
+        // The file's own DASHED pattern is written in inches, so the strict reader takes it back.
         let inches = write_dxf_drawing_units(&[], &entities, 1).unwrap();
-        assert!(read_dxf_file(&inches).unwrap_err().to_string().contains("non-millimetre patterned DXF linetype"));
+        let owned = read_dxf_file(&inches).unwrap();
+        assert!(matches!(owned.entities()[0].geometry(), DxfShape::Polyline { points } if points == &[Vec2::ZERO, Vec2::new(50.8, 0.0)]));
         assert!(matches!(&read_dxf(&inches).unwrap()[..], [Geom2::Line(a, b)] if *a == Vec2::ZERO && *b == Vec2::new(50.8, 0.0)));
 
         let simple_inches = "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n0\n20\n0\n11\n2\n21\n0\n0\nENDSEC\n0\nEOF\n";
@@ -4032,6 +3914,31 @@ mod tests {
         assert_eq!(groups.get(unit_headers[0] + 1), Some(&(70, "4")));
         let reread = read_dxf_file(&written).unwrap();
         assert_eq!(reread.entities()[0].geometry(), normalized.entities()[0].geometry());
+    }
+    #[test]
+    fn dashed_and_hidden_patterns_are_written_and_read_in_the_files_unit() {
+        use crate::{DxfEntity, DxfLayer, DxfShape, write_dxf_drawing_units};
+        let layers = [DxfLayer::new("BEND", 1).dashed(), DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("BACK", 8) }];
+        let entities = [
+            DxfEntity { layer: "BEND".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::new(1.0, 0.0)) },
+            DxfEntity { layer: "BACK".into(), shape: DxfShape::Line(Vec2::ZERO, Vec2::new(0.0, 1.0)) },
+        ];
+        // $INSUNITS and the millimetres in one of its units.
+        for (code, mm) in [(1, 25.4), (2, 304.8), (4, 1.0), (5, 10.0), (6, 1000.0)] {
+            let text = write_dxf_drawing_units(&layers, &entities, code).unwrap();
+            let groups = test_wire_pairs(&text);
+            let dashed = test_wire_table_records(&groups, "LTYPE").into_iter().find(|record| record.contains(&(2, "DASHED".into()))).unwrap();
+            let dashes: Vec<f64> = dashed.iter().filter(|(c, _)| *c == 49).map(|(_, v)| v.parse().unwrap()).collect();
+            assert!((dashes[0] * mm - 12.7).abs() < 1e-6 && (dashes[1] * mm + 6.35).abs() < 1e-6, "{code}: {dashes:?}");
+            let file = read_dxf_file(&text).unwrap_or_else(|error| panic!("{code}: {error}"));
+            assert_eq!((file.effective_linetype(0).unwrap(), file.effective_linetype(1).unwrap()), (DxfLinetype::Dashed, DxfLinetype::Hidden));
+            assert!(matches!(file.entities()[0].geometry(), DxfShape::Line(_, b) if (b.x - mm).abs() < 1e-9));
+        }
+        // A millimetre pattern under an inch header is not the writer's, and is refused.
+        let millimetres = write_dxf_drawing_units(&layers, &entities, 4).unwrap();
+        let mislabelled = millimetres.replacen("$INSUNITS\n 70\n4\n", "$INSUNITS\n 70\n1\n", 1);
+        assert_ne!(mislabelled, millimetres);
+        assert!(read_dxf_file(&mislabelled).unwrap_err().to_string().contains("noncanonical DXF linetype"));
     }
     #[test]
     fn layered_current_r2000_writer_roundtrip_keeps_layer_defaults_and_entity_weights() {

@@ -1764,6 +1764,9 @@ preference_settings! {
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
     /// it did before (the design's, or the first body's for a mesh).
     export_name: String = String::new(), PAGE_DESIGN;
+    /// A sketch's Export DXF writes release 12, with free-form curves as line chords, as
+    /// SolidCraft did before AutoCAD 2000 became the default (off: AutoCAD 2000, every curve exact).
+    sketch_dxf_r12: bool = false, PAGE_DESIGN => check_id_help("prefs.sketch_dxf_r12", "prefs.sketch_dxf_r12_help");
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
