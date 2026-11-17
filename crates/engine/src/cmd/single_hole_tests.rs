@@ -205,6 +205,28 @@ fn a_single_hole_on_another_components_face_starts_on_that_face() {
     assert!((body_volume(&mut s, "Plate") - 6400.0).abs() < 1e-6, "the Plate is not drilled");
 }
 
+/// #17358: a hole of the root that drills only the Block, placed at points exactly on the round
+/// side of the Lid's Rod (r 5, axis along x at y 20, z 17, 2 mm over the Block), starts on the
+/// Rod: between its mesh's vertices the point lies off the mesh, and the Edit Hole dialog seeds
+/// its Face pick where `hole_start` puts the stored point, which must not be the Block's top.
+#[test]
+fn a_hole_at_a_point_on_a_round_face_of_a_body_it_does_not_cut_starts_on_that_face() {
+    for deg in [3.37f64, 7.5, 10.37] {
+        let p = Vec3::new(20.0, 20.0 + 5.0 * deg.to_radians().sin(), 17.0 + 5.0 * deg.to_radians().cos());
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        run(&mut s, "component.create", json!({"name": "Lid"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 40, "base": [0, 20, 17], "axis": "X", "operation": "new", "body_name": "Rod"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let hole = json!({"position": [p.x, p.y, p.z], "direction": [0, 0, -1], "diameter": 1, "depth": 1.5, "participants": ["Block"], "name": "H"});
+        run(&mut s, "solid.hole", hole);
+        let f = s.doc.find_feature("H").unwrap().clone();
+        let start = solidcraft_doc::hole_start(&s.model.state(), &f, p, Vec3::new(0.0, 0.0, -1.0));
+        assert!(start.dist(p) < 0.05, "{deg}°: starts on the Rod at {p:?}, not at {start:?}");
+        assert!((body_volume(&mut s, "Block") - 16_000.0).abs() < 1e-6, "{deg}°: the Block is not drilled");
+    }
+}
+
 /// #5041: a countersunk Ø6.4 hole (Ø13.7, 90°) 0.15 mm from a wall standing on the plate cuts
 /// nothing above the entry face: the countersink's rim (y 29.85) stays clear of the wall (y 30).
 /// 10 faces: bottom, the two L-shaped ends, front and back, the plate top, the wall's front and

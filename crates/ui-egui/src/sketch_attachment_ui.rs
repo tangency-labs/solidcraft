@@ -119,7 +119,7 @@ fn pick(app: &SolveApp, selection: &Sel) -> Option<(Value, String)> {
         Sel::Plane { name } => {
             let known = Plane::named(name).is_some()
                 || app.session.doc.find_feature(name).is_some_and(|feature| matches!(feature.kind, FeatureKind::ConstructionPlane { .. }));
-            known.then(|| (json!(name), name.clone()))
+            known.then(|| (json!(name), app.preferences.origin_plane_names.label(name).to_owned()))
         }
         _ => None,
     }
@@ -143,7 +143,7 @@ pub(crate) fn plane_description(doc: &solidcraft_engine::doc::Document, plane: &
         let base = |b: &PlaneRef| if depth < 8 { describe(doc, b, depth + 1) } else { solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned() };
         match plane {
             PlaneRef::Origin { name } => solidcraft_ui_text::format("sketch_panel.plane_origin", &[("plane", name)]),
-            PlaneRef::Construction { feature } => {
+            PlaneRef::Construction { feature, .. } => {
                 doc.feature(feature.0).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::tr("sketch_panel.plane_fixed").to_owned())
             }
             PlaneRef::Offset { base: b, distance } => {

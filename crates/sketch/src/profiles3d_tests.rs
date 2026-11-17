@@ -157,6 +157,62 @@ fn flat_wire_loops_on_the_sketch_plane_are_listed_once() {
 }
 
 #[test]
+fn a_loop_closed_by_a_drawn_spline_is_a_profile() {
+    // #17296: a 3D spline through 5 points in the plane y = 0, closed by a 3-segment 3D
+    // polyline in the same plane. The spline is sampled into ~100 points; the loop must still be
+    // found (it was refused as soon as one curve was a spline).
+    let v = |x: f64, z: f64| Vec3 { x, y: 0.0, z };
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    // As `sketch.spline3d` and `sketch.line3d` draw them: one wire for the spline, one per segment.
+    let draw = |sk: &mut Sketch, fit: &[Vec3]| sk.add_drawn_wire_in(fit, WireSpace::Component).unwrap();
+    draw(&mut sk, &[v(-40.0, -4.0), v(-20.0, -1.0), v(0.0, 0.0), v(20.0, -1.0), v(40.0, -4.0)]);
+    draw(&mut sk, &[v(40.0, -4.0), v(40.0, -30.0)]);
+    draw(&mut sk, &[v(40.0, -30.0), v(-40.0, -30.0)]);
+    draw(&mut sk, &[v(-40.0, -30.0), v(-40.0, -4.0)]);
+    assert!(sk.wires[0].pts.len() > 64, "the spline is sampled finely: {}", sk.wires[0].pts.len());
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1, "{:?}", ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>());
+    // The issue's 2D twin of this loop patches to 2291.5 mm²; the 80 × 26 rectangle below the
+    // spline's ends is 2080 mm², and the spline bulges up to 4 mm above them.
+    assert!(ps[0].area > 2080.0 + 150.0 && ps[0].area < 2080.0 + 320.0, "area {}", ps[0].area);
+    assert_eq!(ps[0].outer_curves.len(), 4, "{:?}", ps[0].outer_curves);
+    assert!(dist_to_plane(&ps[0].plane, v(0.0, 0.0)) < 1e-6);
+}
+
+#[test]
+fn a_half_disc_closed_by_a_drawn_arc_is_a_profile() {
+    // A 3D arc of radius 10 in the plane y = 5 (start, through, end), closed by a 3D line.
+    let v = |x: f64, z: f64| Vec3 { x, y: 5.0, z };
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    sk.add_drawn_arc_in(&[v(-10.0, 0.0), v(0.0, 10.0), v(10.0, 0.0)], WireSpace::Component).unwrap();
+    sk.add_drawn_wire_in(&[v(10.0, 0.0), v(-10.0, 0.0)], WireSpace::Component).unwrap();
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1, "{:?}", ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>());
+    let half_disc = std::f64::consts::PI * 100.0 / 2.0;
+    assert!((ps[0].area - half_disc).abs() < 0.01 * half_disc, "area {} vs {half_disc}", ps[0].area);
+    assert!(dist_to_plane(&ps[0].plane, v(0.0, 10.0)) < 1e-6);
+}
+
+#[test]
+fn a_closed_wire_whose_quarter_points_line_up_is_a_profile() {
+    // One closed wire in the plane y = 0: a triangle with a zigzag bottom. Its start, quarter,
+    // half and three-quarter points all lie on z = 0, and its ends meet, so the line through its
+    // ends has no direction. A point off that line must still span the wire's plane.
+    let v = |x: f64, z: f64| Vec3 { x, y: 0.0, z };
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let pts = [v(0.0, 0.0), v(5.0, -3.0), v(10.0, 0.0), v(15.0, -3.0), v(20.0, 0.0), v(25.0, -3.0), v(30.0, 0.0), v(15.0, 20.0), v(0.0, 0.0)];
+    sk.wires.push(wire("w", &pts));
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1, "{:?}", ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>());
+    // The 30 × 20 triangle (300 mm²) and three notches of 10 × 3 / 2 below it.
+    assert!((ps[0].area - 345.0).abs() < 1e-6, "area {}", ps[0].area);
+    assert!(dist_to_plane(&ps[0].plane, v(15.0, 20.0)) < 1e-6);
+}
+
+#[test]
 fn nothing_without_3d_wires() {
     let mut sk = Sketch::new();
     let a = sk.add_point(Vec2 { x: 0.0, y: 0.0 }, None).unwrap();

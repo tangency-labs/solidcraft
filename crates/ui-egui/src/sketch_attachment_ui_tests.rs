@@ -557,7 +557,8 @@ fn redefine_panel_takes_a_plane_or_face_picked_in_the_view() {
     let mut h = Harness::new();
     h.app.set_origin_shown(false);
     h.app.session.auto_project = false;
-    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
+    h.app.preferences.origin_plane_names = crate::prefs::OriginPlaneNames::TopFrontRight;
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[-10,-10,0],"body_name":"Block"})).unwrap();
     h.app.run("construct.plane.offset", json!({"base":"XZ","offset":30,"name":"Front30"})).unwrap();
     let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
     h.app.run("sketch.rectangle.two_point", json!({"p0":[20,20],"p1":[30,25]})).unwrap();
@@ -565,6 +566,7 @@ fn redefine_panel_takes_a_plane_or_face_picked_in_the_view() {
     h.call("ui.view", json!({"view":"top"}));
     h.call("ui.view", json!({"view":"fit"}));
     h.settle();
+    assert!(crate::viewport::origin_planes(&h.app).is_empty());
     h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "YZ".into() }];
     crate::browser::redefine_sketch(&mut h.app, sketch);
     h.frames(3);
@@ -574,9 +576,21 @@ fn redefine_panel_takes_a_plane_or_face_picked_in_the_view() {
     h.frames(2);
     assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap(), vec![("sketch.redefine".into(), json!({"sketch":sketch,"plane":"Front30"}))]);
 
+    // Only the open panel reveals the hidden origin. Its XY plane is under the box's top face.
+    let origin = crate::viewport::origin_planes(&h.app);
+    assert_eq!(origin.len(), 3);
+    let (_, _, quad) = origin.into_iter().find(|(name, _, _)| *name == "XY").unwrap();
+    let at = (quad[2].x * 0.5).min(5.0);
+    h.step(&json!({"click":{"world":[at,at,0]}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Plane { name }) if name == "XY"));
+    let draft = h.app.tree.redefine_draft.as_ref().unwrap();
+    assert_eq!(draft.label, "Top");
+    assert_eq!(draft.commands().unwrap()[0].1["plane"], "XY");
+
     h.app.session.selection.clear();
     h.frames(2);
-    h.step(&json!({"click":{"world":[3,4,10]}})).unwrap();
+    h.step(&json!({"click":{"world":[-7,-6,10]}})).unwrap();
     h.frames(2);
     assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Face { body, .. }) if body == "Block"));
     let commands = crate::sketch_attachment_ui::commands(&h.app).expect("the picked face fills the Plane field");
@@ -588,6 +602,7 @@ fn redefine_panel_takes_a_plane_or_face_picked_in_the_view() {
     assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"]["body"], "Block");
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     assert!(h.app.tree.redefine.is_none());
+    assert!(crate::viewport::origin_planes(&h.app).is_empty());
     assert!(h.app.session.model.result(sketch).unwrap().error.is_none());
 }
 
@@ -603,14 +618,14 @@ fn redefine_panel_takes_repeated_explicit_plane_picks() {
     assert!(crate::sketch_attachment_ui::commands(&h.app).is_none(), "opening the panel does not consume its preselection");
 
     // Viewport clicks use select.set even when the selected plane has not changed.
-    h.app.run("select.set", json!({"items":[{"type":"plane","name":"YZ"}]})).unwrap();
+    crate::viewport::select(&mut h.app, Some(solidcraft_engine::Sel::Plane { name: "YZ".into() }), false, false);
     h.frames(2);
     assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "YZ");
 
     h.step(&json!({"widget":"Use XZ plane"})).unwrap();
     h.frames(2);
     assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "XZ");
-    h.app.run("select.set", json!({"items":[{"type":"plane","name":"YZ"}]})).unwrap();
+    crate::viewport::select(&mut h.app, Some(solidcraft_engine::Sel::Plane { name: "YZ".into() }), false, false);
     h.frames(2);
     assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"], "YZ", "a repeated pick replaces the panel button's candidate");
 }
