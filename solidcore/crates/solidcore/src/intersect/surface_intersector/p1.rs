@@ -1516,7 +1516,20 @@ impl<'s> SurfaceIntersector<'s> {
                 }
                 if tangent_start_rank(&start) < tangent_start_rank(&target) {
                     // the new point is the better representative: it takes the
-                    // target's place
+                    // target's place, keeping the target's direction. The sign of
+                    // a tangent sample's direction depends only on the boundary
+                    // that produced it, and `TestPoint` snaps a trace onto a start
+                    // point whose direction opposes the trace: flipping it with
+                    // the representative would let a trace from the contact band's
+                    // edge stop on the cluster after one step, short of the
+                    // contact curve, and the cluster would then go with that stub.
+                    if start.crv_deriv().dot(target.crv_deriv()) < 0.0 {
+                        let p = self.point_mut(id)?;
+                        p.curve_pv[1] = -p.curve_pv[1];
+                        for uv in &mut p.uv_curve_pv {
+                            uv[1] = -uv[1];
+                        }
+                    }
                     if let Some(slot) = self.start_points.get_mut(i) {
                         *slot = id;
                     }
