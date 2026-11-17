@@ -2630,6 +2630,7 @@ fn rod(base: [f64; 3], radius: f64, height: f64) -> Body {
 
 /// The record's vertex nearest `corner`, its distance from the seam (`off_seam` of its
 /// point) and the record's tolerance.
+#[allow(clippy::disallowed_methods)] // the test's own measure, not ops geometry
 fn seam_vertex_gap(r: &Body, corner: [f64; 3], off_seam: impl Fn([f64; 3]) -> f64) -> (f64, f64) {
     let (rec, _) = r.to_record().unwrap();
     let dist = |p: [f64; 3]| (0..3).map(|i| (p[i] - corner[i]).powi(2)).sum::<f64>();
@@ -2651,6 +2652,7 @@ fn seam_vertex_gap(r: &Body, corner: [f64; 3], off_seam: impl Fn([f64; 3]) -> f6
 /// seam's vertex now stays. The join is one valid solid of the two volumes added,
 /// π²·1.8·0.6² + π·0.07²·0.14: they share only part of a face.
 #[test]
+#[allow(clippy::disallowed_methods)] // the test's own measure, not ops geometry
 fn a_boss_overhanging_a_half_torus_flat_face_by_a_tolerance_at_its_seam_joins() {
     all_fixes();
     let want = PI * PI * 1.8 * 0.36 + PI * 0.07 * 0.07 * 0.14;
