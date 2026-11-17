@@ -183,6 +183,11 @@ pub(crate) fn picked_feature(app: &SolveApp) -> Option<u64> {
     })
 }
 
+/// The feature under the pointer (in the 3D view, Browser, or timeline) or picked in the 3D view.
+pub(crate) fn from_view(app: &SolveApp) -> [Option<u64>; 2] {
+    [hovered_feature(app).or(app.viewport.hover_feature), picked_feature(app)]
+}
+
 /// A new face or edge picked in the view scrolls the history shown to the feature that made it,
 /// once per pick; the history stays where it is while the pick does not change.
 pub(crate) fn follow_view_pick(app: &mut SolveApp) {
@@ -1173,8 +1178,8 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     let n = app.session.doc.features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
     let mut bar = bar(app, floating);
-    // The feature that made what is under the cursor or picked in the viewport.
-    let from_view = [hovered_feature(app), picked_feature(app)];
+    // The feature under the cursor (viewport, browser, or timeline) or picked in the viewport.
+    let from_view = from_view(app);
     // Long runs of one component's features show as one chip (`timeline_fold`). The bar shows the
     // edited or picked component's features, after the path to it (`timeline_scope`).
     let strip = crate::timeline_fold::Strip { marker, from_view, floating, accent };
@@ -3941,6 +3946,43 @@ mod tests {
         for (result, warned, what) in cases {
             assert_eq!(super::has_warning(&result), warned, "{what}");
             assert_eq!(super::has_warning(&result), super::warning_text(&result).is_some(), "{what}");
+        }
+    }
+
+    #[test]
+    fn browser_row_hover_highlights_feature_and_sketch_in_timeline() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.ui.show_browser = true;
+            h.app.ui.show_timeline = true;
+            h.app.run("view.history_layout", json!({"dock": if left { "left" } else { "bottom" }})).unwrap();
+            h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+            let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+            h.app.run("sketch.create", json!({"plane":"XY","name":"MySketch"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let sketch = h.app.session.doc.find_feature("MySketch").unwrap().id;
+            h.app.tree.expanded.insert("c0/features".into());
+            h.app.tree.expanded.insert("c0/sketches".into());
+            h.frames(2);
+
+            // Hovering a feature row in the browser sets hover_feature and highlights it in the timeline.
+            let row_feature = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
+            h.step(&json!({"move":[row_feature.x, row_feature.y]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, Some(round), "left={left}");
+            assert_eq!(super::from_view(&h.app), [Some(round), None], "left={left}");
+
+            // Hovering a sketch row in the browser sets hover_feature and highlights it in the timeline.
+            let row_sketch = crate::scenario::handle_at("row:MySketch").unwrap();
+            h.step(&json!({"move":[row_sketch.x, row_sketch.y]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, Some(sketch), "left={left}");
+            assert_eq!(super::from_view(&h.app), [Some(sketch), None], "left={left}");
+
+            // Moving the cursor away clears the timeline highlight.
+            h.step(&json!({"move":[5, 5]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, None, "left={left}");
+            assert_eq!(super::from_view(&h.app), [None, None], "left={left}");
         }
     }
 }

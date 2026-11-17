@@ -64,10 +64,12 @@ const CORNER: [f64; 3] = [3.414_213_56, 32.525_324_7, 2.0];
 /// `SmApiFilletEdges` r 0.5).
 const RIM_REMOVED: f64 = 7.958_672_926_831_696;
 /// What the rim's round removes alone here, as #2176's test pins it: 1.5e-8 less than the
-/// fork's [`RIM_REMOVED`], which (as this before #16735, 7.9586729268771705) includes the
-/// volume integrator's leak through the round's tolerant edges. #2176's test checks the move
-/// is within that leak's bound and independent of the origin.
-const RIM_MEASURED: f64 = 7.958_672_912_139_264;
+/// fork's [`RIM_REMOVED`], which (as this with Runge-Kutta trim pieces before #16735,
+/// 7.9586729268771705) includes the volume integrator's leak through the round's tolerant edges. #2176's test checks the move
+/// is within that leak's bound and independent of the origin. Since the trim pieces integrate
+/// by Gauss-Kronrod (#14460) it is 1.5e-8 less (forced to accuracy 1e-12 Gauss-Kronrod gives it
+/// to 4.6e-13); with Runge-Kutta trim pieces it was 7.958672912139264, 3.0e-10 more.
+const RIM_MEASURED: f64 = 7.958_672_911_836_402;
 
 /// Every opt-in fix on (as in the issue).
 fn kernel() -> Kernel {

@@ -47,6 +47,30 @@ use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
+/// What an imported cubic Bezier curve on `[0, 1]` stands as in the model: its chord, a curve,
+/// or a curve the B-spline curve check refuses.
+pub use solidcore::curve::hermite_curve::CubicStanding;
+
+impl crate::session::Answer for CubicStanding {}
+
+/// [`CubicStanding`] of the cubic Bezier curve through `points` on `[0, 1]`, the curve a profile
+/// cubic is built as: its chord where the whole curve (bounded by the larger distance of its
+/// inner control points from the finite chord, the convex hull property) lies within the model's
+/// zone tolerance of it, else whether the B-spline curve check passes it
+/// ([`solidcore::curve::hermite_curve::classify_cubic`]).
+///
+/// # Errors
+/// [`Error::Argument`] if a coordinate is not finite or exceeds the coordinate bound; those of
+/// the session.
+pub fn classify_cubic(points: [[f64; 3]; 4]) -> Result<CubicStanding> {
+    if !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    run("classify_cubic", |k| {
+        solidcore::curve::hermite_curve::classify_cubic(k, points.map(point))
+    })
+}
+
 /// Which end of a curve a blend meets, and how ([`blend_curve`]).
 pub use solidcore::curve::blend::{Contact, End};
 
@@ -1167,6 +1191,32 @@ mod tests {
         [10.0, 10.0, 0.0],
         [0.0, 10.0, 0.0],
     ];
+
+    #[test]
+    fn a_cubic_is_its_chord_only_within_the_zone_tolerance() {
+        // Chord 10 along x; the zone tolerance is 1e-5.
+        let off = |y: f64| [[0., 0., 0.], [3., y, 0.], [7., 0., 0.], [10., 0., 0.]];
+        let class = |p| classify_cubic(p).unwrap();
+        assert_eq!(class(off(0.)), CubicStanding::Chord);
+        assert_eq!(class(off(0.9e-5)), CubicStanding::Chord);
+        assert_eq!(class(off(1.1e-5)), CubicStanding::Curve);
+        assert_eq!(class(off(2.)), CubicStanding::Curve);
+        // A point is its own chord.
+        assert_eq!(class([[1., 2., 3.]; 4]), CubicStanding::Chord);
+        // Inner control points almost on the start, 0.002 off a chord of 100: the speed
+        // there falls below the check's tolerance (#16190).
+        assert_eq!(
+            class([
+                [0., 0., 0.],
+                [0.001, 0.002, 0.],
+                [0.002, 0.001, 0.],
+                [0., 100., 0.]
+            ]),
+            CubicStanding::Refused
+        );
+        assert!(classify_cubic([[f64::NAN, 0., 0.]; 4]).is_err());
+        assert!(classify_cubic([[f64::INFINITY, 0., 0.]; 4]).is_err());
+    }
 
     #[test]
     fn a_cubic_through_four_points_is_clamped_on_its_end_points() {

@@ -1615,6 +1615,13 @@ impl SolveApp {
                         tool.point_picks.clear();
                     }
                 }
+                // A drawing inserted with curves kept as drawn that the curve check refuses says so,
+                // as other imports' warnings do (#16190).
+                "sketch.insert_svg" | "sketch.insert_dxf" => {
+                    if let Some(w) = v.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty()) {
+                        self.set_status(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")), false);
+                    }
+                }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {
@@ -2549,6 +2556,11 @@ impl SolveApp {
             return;
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
+            t.classic = self.preferences.construction_line_classic;
+            if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+                // The classic switch starts at Construction, whatever the palette chose last.
+                t.line_type = 3;
+            }
             let state = crate::open_meshing::session_world(&self.session);
             let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
             if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {

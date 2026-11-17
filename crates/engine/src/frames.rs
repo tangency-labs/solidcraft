@@ -87,7 +87,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         // A mirror keeps the placement its bodies were picked at (`cmd::features::placed_bodies`);
         // its plane is in the active component, where the copies go.
         "solid.mirror" => &[("plane", HerePlane)],
-        "solid.split_body" => &[("plane", Plane), ("bodies", Body), ("body", Body)],
+        "solid.split_body" => &[("plane", Plane), ("tool", Picks), ("bodies", Body), ("body", Body)],
         "plastic.boss" | "plastic.snap_fit" | "plastic.rest" => {
             &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
         }
