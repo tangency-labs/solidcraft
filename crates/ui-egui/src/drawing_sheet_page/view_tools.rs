@@ -12,7 +12,7 @@ use solidcraft_theme::Tokens;
 use super::{HOVER_BAND, OnScreen};
 use crate::{
     SolveApp, drawing_workspace,
-    ui_kit::{self, BackingTooltipExt as _, Container, Surface, toast},
+    ui_kit::{self, BackingTooltipExt as _, Container, toast},
 };
 
 #[derive(Default)]
@@ -184,51 +184,39 @@ impl Canvas<'_> {
         );
         let can_project = self.drawing.can_project_from(object.object).is_ok();
         let ctx = self.painter.ctx();
-        let container = Container::new(ctx, Surface::Popup);
-        let response = container
-            .area(egui::Id::unique("drawing_view_selection_card"))
-            .movable(false)
-            .pivot(Align2::CENTER_BOTTOM)
-            .fixed_pos(pos2(r.center().x.clamp(self.free.left(), self.free.right()), r.top() - t.space_8))
-            .constrain_to(self.free)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                container
-                    .edge_frame(t.panel)
-                    .stroke(t.control_border_stroke(t.control_border))
-                    .corner_radius(t.radius_md)
-                    .inner_margin(t.space_4)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(name).strong().color(t.accent));
-                            ui.separator();
-                            for (action, icon, label, enabled) in [
-                                ("edit", "rename", tr("ui.drawing_panel.edit"), true),
-                                ("project", "drawing_projected_view", tr("ui.drawing_view_selection.project"), can_project),
-                                ("section", "drawing_section_view", tr("ui.drawing_view_selection.section"), false),
-                                ("delete", "delete", tr("ui.drawing_view_selection.delete"), true),
-                            ] {
-                                let response = ui
-                                    .add_enabled_ui(enabled, |ui| {
-                                        let size = ui_kit::row_height();
-                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-                                        ui_kit::icon_button_at(ui, rect, icon, label)
-                                    })
-                                    .inner;
-                                crate::scenario::publish_target(&format!("drawing:view_selection:{action}"), response.rect);
-                                if !enabled {
-                                    response.clone().backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
-                                }
-                                if response.clicked() {
-                                    return Some(action);
-                                }
-                            }
-                            None
+        let anchor = pos2(r.center().x.clamp(self.free.left(), self.free.right()), r.top() - t.space_8);
+        let response = Container::selection_card(ctx, egui::Id::unique("drawing_view_selection_card"), anchor, self.free, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_2;
+                ui.add_space(t.space_4);
+                ui_kit::workspace_chip(ui, &name);
+                ui.separator();
+                for (action, icon, label, enabled) in [
+                    ("edit", "edit", tr("ui.drawing_panel.edit"), true),
+                    ("project", "plus", tr("ui.drawing_view_selection.project"), can_project),
+                    ("section", "drawing_section_view", tr("ui.drawing_view_selection.section"), false),
+                    ("delete", "delete", tr("ui.drawing_view_selection.delete"), true),
+                ] {
+                    let response = ui
+                        .add_enabled_ui(enabled, |ui| {
+                            let size = t.control_height - t.space_2;
+                            let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+                            ui_kit::icon_button_at(ui, rect, icon, label)
                         })
-                        .inner
-                    })
-                    .inner
-            });
+                        .inner;
+                    crate::scenario::publish_target(&format!("drawing:view_selection:{action}"), response.rect);
+                    if response.clicked() {
+                        return Some(action);
+                    }
+                    if !enabled {
+                        response.backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
+                    }
+                }
+                ui.add_space(t.space_4);
+                None
+            })
+            .inner
+        });
         match response.inner {
             Some("edit") => drawing_workspace::edit_object(app, "view", object.object),
             Some("project") => {
