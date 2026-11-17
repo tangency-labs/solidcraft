@@ -211,11 +211,30 @@ fn opening_makes_the_plan_mesh_of_a_part_placed_many_times_once_for_its_copies()
     let copies: Vec<_> = world.bodies.iter().filter(|b| b.placed_definition().is_some()).collect();
     assert_eq!(copies.len(), 3);
     assert!(copies.iter().all(|b| !b.plan_mesh_in_place_made(q)));
-    let before = solidcraft_engine::doc::display_quality::current();
-    solidcraft_engine::doc::display_quality::set_current(q);
-    crate::open_meshing::warm(copies[0], true, false, &repeated);
-    solidcraft_engine::doc::display_quality::set_current(before);
+    crate::open_meshing::warm(copies[0], true, false, &repeated, q);
     assert!(copies.iter().all(|b| b.plan_mesh_in_place_made(q)), "every copy's is its part's, made once");
+}
+
+/// While a design opens, a copy of a part placed many times that is shown before the part's other
+/// copies is still drawn as an instance, as opening counted it, and not planned on the window's
+/// thread: counted over the bodies shown so far, it was the part's only copy.
+#[test]
+fn a_copy_shown_before_its_parts_other_copies_is_still_drawn_as_an_instance() {
+    let mut s = solidcraft_engine::Session::default();
+    let part = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap()["component"].clone();
+    s.execute("solid.cylinder", &json!({"base":[0,0,0],"radius":5,"height":20})).unwrap();
+    s.execute("component.activate", &json!({"component":0})).unwrap();
+    for k in 1..=3 {
+        s.execute("occurrence.copy", &json!({"component":part,"translate":[0,40 * k,0]})).unwrap();
+    }
+    let mut app = SolveApp::new(s, crate::Services::default());
+    let world = app.session.world_state().unwrap();
+    let first = world.bodies.iter().position(|b| b.placed_definition().is_some()).unwrap();
+    crate::open_meshing::start(&mut app, None);
+    crate::open_meshing::show_only(&mut app, &[first]);
+    let shown = crate::open_meshing::shown_world(&app);
+    assert_eq!(shown.bodies.len(), 1, "one copy shown so far");
+    assert!(repeated_copy(&app, &shown.bodies[0]), "drawn as an instance of its part, as opening counted it");
 }
 
 fn wireframe_cylinder() -> SolveApp {

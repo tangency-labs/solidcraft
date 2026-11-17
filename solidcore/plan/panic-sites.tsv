@@ -3,6 +3,7 @@
 # SolidError (checked arithmetic, .get(), a length check) and drop its row. `proven` marks
 # a site that cannot panic, with the reason; it is exempt from the ratchet.
 file	fn	pattern	n	status	code	reason
+crates/solidcore-cadir/src/lib.rs	tolerance	f64::clamp	1	proven	clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE)	constant bounds MIN_TOLERANCE (1e-7) <= MAX_FIT_TOLERANCE (1.0)
 crates/solidcore-step/src/eval.rs	BSplineSurface::point	with_capacity	1	proven	Vec::with_capacity(nu)	nu = points.len(), already in memory
 crates/solidcore-step/src/eval.rs	expanded	with_capacity	1	proven	Vec::with_capacity(total)	total == points + degree + 1 with degree < points, checked just above: at most twice the points, already in memory
 crates/solidcore-step/src/read.rs	Reader::bspline_surface	with_capacity	1	proven	Vec::with_capacity(rows.len().min(MAX_CTRL))	rows.len() of rows already in memory, and at most MAX_CTRL
