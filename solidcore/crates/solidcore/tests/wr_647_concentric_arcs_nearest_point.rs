@@ -21,6 +21,9 @@ use solidcore::curve::curve::p8::CurveIntersectOptions;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
 use solidcore::math::Point3;
+use solidcore::nurbs::b_spline_curve::p1::{
+    BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+};
 use solidcore::primitive::api_curves::create_arc;
 use solidcore::Kernel;
 
@@ -170,37 +173,90 @@ fn an_arc_and_its_shorter_copy_coincide_over_the_copy() {
     }
 }
 
-/// Two equal arcs (r 5, 0..180 degrees) whose centres are `e` apart along x cross once, at
-/// x = e / 2, y = sqrt(25 - e^2 / 4) (closed form), at an angle of about e / 5 radians, so
-/// they stay within the tolerance over a stretch about the crossing whose ends lie inside
-/// both arcs. `GlobalCurveIntersect` gives that crossing as one point, not a range.
-#[test]
-fn wr_647_equal_arcs_a_little_apart_cross_at_one_point() {
+/// The cubic Bezier from (-1, 0) to (1, 0) with inner control points (-1/3, 0.2) and
+/// (1/3, -0.2), rotated by `angle` about the origin and moved by `shift` (y, at the curve's
+/// start; minus at its end, linear in between): a B-spline, so `GlobalCurveIntersect`
+/// takes its general solver, not the analytic one.
+fn cubic(angle: f64, shift: f64) -> Curve {
+    let (c, s) = (angle.cos(), angle.sin());
+    let raw = [
+        (-1.0, 0.0),
+        (-1.0 / 3.0, 0.2),
+        (1.0 / 3.0, -0.2),
+        (1.0, 0.0),
+    ];
+    let control: Vec<Point3> = raw
+        .iter()
+        .enumerate()
+        .map(|(i, &(x, y))| {
+            // a Bezier reproduces a linear function from equally spaced control values
+            let dy = shift * (1.0 - 2.0 * i as f64 / 3.0);
+            Point3::new(c * x - s * y, s * x + c * y + dy, 0.0)
+        })
+        .collect();
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 3,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &[4, 4],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+fn intersect(a: &Curve, b: &Curve) -> Vec<Solution<H>> {
     let k = Kernel::default();
-    for e in [1e-4, 1e-3] {
-        let a = Curve::from(create_arc(Point3::new(0.0, 0.0, 0.0), 5.0, 0.0, 180.0).unwrap());
-        let b = Curve::from(create_arc(Point3::new(e, 0.0, 0.0), 5.0, 0.0, 180.0).unwrap());
-        let (ia, ib) = (a.natural_interval(), b.natural_interval());
-        let sols = a
-            .global_curve_intersect(
-                &k,
-                &ia,
-                &b,
-                &ib,
-                TOL,
-                &CurveIntersectOptions::<H>::default(),
-            )
-            .unwrap();
-        let all = sols.as_slice();
-        assert_eq!(all.len(), 1, "e {e}: {all:?}");
+    let (ia, ib) = (a.natural_interval(), b.natural_interval());
+    a.global_curve_intersect(&k, &ia, b, &ib, TOL, &CurveIntersectOptions::<H>::default())
+        .unwrap()
+        .as_slice()
+        .to_vec()
+}
+
+/// The cubic and its copy rotated by `angle` about the origin, the curve's midpoint
+/// (t = 1/2: x = 0 and y = 0 by the control points' odd symmetry), cross there and nowhere
+/// else (the curve meets each circle about the origin at two opposite points, which the
+/// small rotation does not bring together). Their separation is about `angle` times the
+/// distance from the origin, so they stay within the tolerance for about TOL / `angle`
+/// either side of it, inside both curves (which end at distance 1). The answer is that one
+/// crossing point, at the origin; upstream returns the stretch as a coincidence range.
+#[test]
+fn wr_647_cubics_crossing_at_a_small_angle_meet_at_one_point() {
+    let k = Kernel::default();
+    for angle in [1e-4, 2e-5] {
+        let (a, b) = (cubic(0.0, 0.0), cubic(angle, 0.0));
+        let all = intersect(&a, &b);
+        assert_eq!(all.len(), 1, "angle {angle}: {all:?}");
         let s = &all[0];
-        assert_eq!(s.solution_type, SolutionType::SingleValue, "e {e}: {s:?}");
-        let want = Point3::new(e / 2.0, (25.0 - e * e / 4.0).sqrt(), 0.0);
+        assert_eq!(
+            s.solution_type,
+            SolutionType::SingleValue,
+            "angle {angle}: {s:?}"
+        );
         let p = a.evaluate_point(&k, s.start.parameters[0]).unwrap();
         let q = b.evaluate_point(&k, s.start.parameters[1]).unwrap();
+        let origin = Point3::new(0.0, 0.0, 0.0);
         assert!(
-            p.distance(want) <= TOL && q.distance(want) <= TOL,
-            "e {e}: {p:?} {q:?}"
+            p.distance(origin) <= TOL && q.distance(origin) <= TOL,
+            "angle {angle}: {p:?} {q:?}"
         );
     }
+}
+
+/// The cubic and a copy moved by 4e-6 up at its start and down at its end (a fitted copy's
+/// tolerance-scale error that changes sides, closed form: the copy is the cubic plus the
+/// linear shift). The curves lie on each other end to end: one coincidence range, though
+/// the separation changes sides inside it, because the range ends where the curves stop.
+#[test]
+fn wr_647_a_copy_changing_sides_within_tolerance_stays_a_range() {
+    let (a, b) = (cubic(0.0, 0.0), cubic(0.0, 4e-6));
+    let all = intersect(&a, &b);
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!(all[0].solution_type, SolutionType::RangeOfValues, "{all:?}");
 }
