@@ -25,8 +25,8 @@ mod solidcraft_fixes;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
-    arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_sheet,
-    loft_to_point, planar_faces, project_curves, revolve, screw_sweep, sweep_placed,
+    arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, join_profile_arcs, loft,
+    loft_sheet, loft_to_point, planar_faces, project_curves, revolve, screw_sweep, sweep_placed,
     sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame,
     SweepRoute, Verdict,
 };
@@ -580,6 +580,97 @@ fn faces(b: &Body) -> usize {
 
 /// The tolerance arcs are joined to here.
 const JOIN: f64 = 1e-6;
+
+#[test]
+fn joining_profile_arcs_preserves_a_single_circles_seam() {
+    let profile = vec![arc5([1.0, 0.0, 0.0], 0.7, 0.7 + TAU)];
+    assert_eq!(join_profile_arcs(&profile).unwrap(), profile);
+}
+
+#[test]
+fn joining_profile_arcs_preserves_nurbs_data() {
+    let profile = vec![
+        Curve::Nurbs {
+            degree: 2,
+            points: vec![
+                [0.0, 0.0, 0.0, 1.0],
+                [2.0, 3.0, 0.0, 0.5],
+                [4.0, 0.0, 0.0, 1.0],
+            ],
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        },
+        line([4.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+    ];
+    assert_eq!(join_profile_arcs(&profile).unwrap(), profile);
+}
+
+#[test]
+fn joining_profile_arcs_keeps_closed_loops_separate() {
+    // Both separated and coincident loops keep their own complete turn.
+    for x in [0.0, 20.0] {
+        let mut second = halves();
+        for c in &mut second {
+            if let Curve::Arc { center, .. } = c {
+                center[0] = x;
+            }
+        }
+        let profile = [halves(), second].concat();
+        let expected = vec![
+            circle([0.0; 3], Z, [1.0, 0.0, 0.0], 5.0),
+            circle([x, 0.0, 0.0], Z, [1.0, 0.0, 0.0], 5.0),
+        ];
+        assert_eq!(join_profile_arcs(&profile).unwrap(), expected);
+    }
+}
+
+#[test]
+fn joining_profile_arcs_preserves_circles_that_drift_between_pieces() {
+    let tol = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let profile: Vec<_> = (0..6)
+        .map(|i| Curve::Arc {
+            center: [0.9 * tol * f64::from(i), 0.0, 0.0],
+            axis: Z,
+            reference: [1.0, 0.0, 0.0],
+            radius: 1.0,
+            start: 0.5 * f64::from(i),
+            end: 0.5 * f64::from(i + 1),
+        })
+        .collect();
+    assert_eq!(join_profile_arcs(&profile).unwrap(), profile);
+}
+
+#[test]
+fn an_uncertified_wraparound_join_keeps_the_original_profile_order() {
+    // Valid arcs with identical definitions can have an accumulated-angle error bound
+    // larger than the zone tolerance. An optional join must leave that profile alone.
+    let start: f64 = 999_999.0;
+    let radius = 100_000.0;
+    let arc = |a, b| Curve::Arc {
+        center: [0.0; 3],
+        axis: Z,
+        reference: [1.0, 0.0, 0.0],
+        radius,
+        start: a,
+        end: b,
+    };
+    let arcs = vec![arc(start, start + 0.25), arc(start + 0.25, start + 0.5)];
+    let tol = solidcore_ops::sweep::zone_tolerance().unwrap();
+    assert!(join_arcs(&arcs, Join::Open, tol).is_err());
+    let point = |t: f64| [radius * t.cos(), radius * t.sin(), 0.0];
+    let profile = vec![
+        arcs[1].clone(),
+        line(point(start + 0.5), point(start)),
+        arcs[0].clone(),
+    ];
+    for i in 0..profile.len() {
+        assert!(
+            curves_meet(&profile[i], &profile[(i + 1) % profile.len()], tol)
+                .unwrap()
+                .is_yes()
+        );
+    }
+    assert_eq!(join_profile_arcs(&profile).unwrap(), profile);
+}
 
 #[test]
 fn a_circle_in_pieces_joins_into_one_circle_that_sweeps_one_wall() {

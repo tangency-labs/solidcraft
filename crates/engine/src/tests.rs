@@ -966,6 +966,46 @@ fn revolve_a_spherical_shell_off_the_origin() {
 }
 
 #[test]
+fn a_revolved_arc_split_by_a_handle_path_keeps_one_face_and_takes_its_round() {
+    // #18537: the open leg cuts the pot profile into two arcs on the same circle.
+    // Revolving them as separate faces introduced a boundary through the handle junction.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": true, "name": "Pot"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [66.14378277661477, 0]], "ids": ["base"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0, 75], "start": [66.14378277661477, 0], "end": [0, 175], "id": "round"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 175], [0, 0]], "ids": ["axis"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 250], [40, 250]], "ids": ["top"]}));
+    run(
+        &mut s,
+        "sketch.arc.center_point",
+        json!({
+            "center": [40, 190], "start": [40, 250], "end": [95.4327719506772, 167.0389940580946], "clockwise": true, "id": "bend"
+        }),
+    );
+    run(&mut s, "sketch.line", json!({"points": [[95.4327719506772, 167.0389940580946], [57.308972344637716, 75]], "ids": ["leg"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.model.state().sketches[0].profiles[0].outer_curves.iter().filter(|id| *id == "round").count(), 2);
+    run(&mut s, "solid.revolve", json!({"sketch": "Pot", "profiles": [{"curves": ["base", "round", "axis"]}], "axis": {"curve": "axis"}}));
+    let faces = run(&mut s, "model.faces", json!({"body": "Body1"}));
+    let names: Vec<&str> = faces["faces"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), 2, "one spherical face and the bottom plane: {names:?}");
+    assert!(names.contains(&"F2:side:round") && names.contains(&"F2:side:base"), "{names:?}");
+    // Sphere R100 minus its bottom cap of height 25.
+    let want = 4.0 / 3.0 * PI * 100.0f64.powi(3) - PI * 25.0f64.powi(2) * (100.0 - 25.0 / 3.0);
+    assert!(rel(volume(&mut s), want) < 5e-4);
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "flip": "y", "name": "Handle"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 250], "radius": 17.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch": "Handle", "path_sketch": "Pot", "path": ["top", "bend", "leg"], "operation": "join"}));
+    let before = volume(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [[81.4, 17.5, 133.1]], "radius": 15}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["body_count"], 1);
+    assert_eq!(measured["bodies"][0]["closed"], true);
+    assert!(measured["total"]["volume_mm3"].as_f64().unwrap() > before, "the concave junction round adds material");
+}
+
+#[test]
 fn extrude_of_adjacent_profiles_has_whole_edges() {
     // A holder from two regions of one sketch (a disc and the ring around it, both cut off by a
     // chord): the chord used to stay split where the inner circle met it, leaving vertices right
