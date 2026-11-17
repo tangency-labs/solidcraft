@@ -1325,6 +1325,582 @@ fn perforate_toolbar_opens_without_running_empty_parameters() {
     }
 }
 
+/// A fresh folded plate with one or two opposite bends, used only by Bend Slots UI tests.
+fn bend_slots_plate(mode: crate::ui_kit::LayoutMode, two: bool) -> SolveApp {
+    let mut app = plate(mode);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let edges = if two { json!([[50, 0, 2.5], [50, 60, 2.5]]) } else { json!([[50, 0, 2.5]]) };
+    app.run("sheet.flange", json!({"edges": edges, "height": 20, "angle": 45, "position": "outside"})).unwrap();
+    app
+}
+
+#[test]
+fn bend_slots_toolbar_snapshots_remaining_edges_in_the_standard_picker() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut app = bend_slots_plate(mode, false);
+        let before = app.session.doc.features.len();
+        app.start("sheet.bend_slots");
+        let dialog = app.dialog.as_ref().expect("Bend Slots opens its dialog");
+        assert!(dialog.previews());
+        assert_eq!(app.session.doc.features.len(), before);
+        assert_eq!(dialog.inputs.len(), 1);
+        assert_eq!(dialog.inputs[0].label, "Edges");
+        assert_eq!(dialog.inputs[0].accept, EDGES | FACES, "the same picker mask as Chamfer");
+        assert!(dialog.inputs[0].multi);
+        assert!(matches!(dialog.inputs[0].items.as_slice(), [Sel::Edge { .. }]));
+        let Sel::Edge { index, .. } = &dialog.inputs[0].items[0] else { panic!("expected Edge selection") };
+        let source = app.session.model.state();
+        let body = source.body(&source.sheets[0].body).unwrap();
+        assert!(matches!(body.body.record().edges[*index].curve, solidcore_record::brep::Curve::Line { .. }));
+        let command = apply_commands(&app, dialog).unwrap().remove(0);
+        assert_eq!(command.0, "sheet.bend_slots");
+        for (key, value) in [
+            ("slot_length", "7 mm"),
+            ("slot_width", "1 mm"),
+            ("bridge", "3 mm"),
+            ("end_margin", "2 mm"),
+            ("corner_radius", "3 mm"),
+            ("profile", "rounded"),
+        ] {
+            assert_eq!(command.1[key], value, "{key} default");
+        }
+        assert_eq!(command.1["reliefs"], true);
+        assert_eq!(command.1["edges"].as_array().unwrap().len(), 1);
+        assert!(command.1.get("bends").is_none(), "the picker passes exact edge indices");
+        assert!(command.1.get("relief_depth").is_none());
+        let mut dialog = dialog.clone();
+        dialog.inputs[0].items.clear();
+        assert!(apply_commands(&app, &dialog).is_err(), "Clear never means all bends");
+        let ctx = crate::fonts::test_context();
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            if let Kind::Sheet(k) = &mut dialog.kind {
+                rows(&mut app, ui, k, &mut dialog.inputs);
+            }
+        });
+        let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
+        for label in [
+            "Slot length",
+            "Slot and throat height",
+            "Bridge between slots",
+            "Minimum end bridge",
+            "End profile",
+            "Relief entry radius",
+            "Relief depth",
+        ] {
+            assert!(texts.contains(&label), "missing control: {label}");
+        }
+        assert!(!texts.contains(&"All bends") && !texts.contains(&"Bend 1"));
+    }
+}
+
+#[test]
+fn bend_slots_edit_restores_dimensions_and_only_its_saved_edges() {
+    let mut app = bend_slots_plate(crate::ui_kit::LayoutMode::Docked, true);
+    let body = app.session.model.state().sheets[0].body.clone();
+    let tag = app.session.model.state().sheets[0].flanges[0].tag.clone();
+    app.run(
+        "sheet.bend_slots",
+        json!({"body": body, "bends": [tag], "slot_length": "8 mm", "slot_width": "1.2 mm",
+        "bridge": "4 mm", "end_margin": "3 mm", "corner_radius": "2 mm", "relief_depth": "4 mm", "profile": "rectangular", "reliefs": true}),
+    )
+    .unwrap();
+    let feature = app.session.doc.features.last().unwrap().id;
+    // Real Edit Feature picks on the model immediately before the edited feature.
+    let position = app.session.doc.features.iter().position(|f| f.id == feature).unwrap();
+    app.run("timeline.roll_to", json!({"position": position})).unwrap();
+    let dialog = edit_dialog(&app, feature, None).expect("Bend Slots can be edited");
+    assert_eq!(dialog.inputs[0].items.len(), 1, "the other remaining bend is not added on edit");
+    let commands = apply_commands(&app, &dialog).unwrap();
+    assert_eq!(commands[0].0, "timeline.redefine");
+    let params = &commands[0].1["params"];
+    for (key, value) in [
+        ("body", body.as_str()),
+        ("slot_length", "8 mm"),
+        ("slot_width", "1.2 mm"),
+        ("bridge", "4 mm"),
+        ("end_margin", "3 mm"),
+        ("corner_radius", "2 mm"),
+        ("relief_depth", "4 mm"),
+        ("profile", "rectangular"),
+    ] {
+        assert_eq!(params[key], value, "{key} restored");
+    }
+    let source = bend_slot_source(&app.session, Some(&body)).unwrap();
+    let edge = params["edges"][0].as_u64().unwrap() as usize;
+    assert!(source.edges.iter().any(|(index, source)| *index == edge && source == &tag));
+    assert!(params.get("bends").is_none());
+    assert_eq!(params["reliefs"], true);
+}
+
+#[test]
+fn bend_slots_new_tool_excludes_earlier_treatment_and_does_not_repopulate_after_clear() {
+    let mut app = bend_slots_plate(crate::ui_kit::LayoutMode::Docked, true);
+    let state = app.session.model.state();
+    let body = state.sheets[0].body.clone();
+    let first = state.sheets[0].flanges[0].tag.clone();
+    let second = state.sheets[0].flanges[1].tag.clone();
+    app.run("sheet.bend_slots", json!({"body": body, "bends": [first]})).unwrap();
+    // Even a whole-face preselection does not append already treated bend edges.
+    app.session.selection = vec![face_sel(&app.session, Vec3::new(50.0, 30.0, 2.5)).unwrap()];
+    app.start("sheet.bend_slots");
+    let mut dialog = app.dialog.clone().unwrap();
+    assert_eq!(dialog.inputs[0].items.len(), 1);
+    let source = bend_slot_source(&app.session, Some(&body)).unwrap();
+    let Sel::Edge { index, .. } = &dialog.inputs[0].items[0] else { panic!("edge representative") };
+    assert!(source.edges.iter().any(|(edge, tag)| edge == index && tag == &second));
+    dialog.inputs[0].items.clear();
+    let ctx = crate::fonts::test_context();
+    crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        if let Kind::Sheet(k) = &mut dialog.kind {
+            rows(&mut app, ui, k, &mut dialog.inputs);
+        }
+    });
+    assert!(dialog.inputs[0].items.is_empty(), "defaults are an opening snapshot, never a live selection");
+    assert!(apply_commands(&app, &dialog).is_err());
+}
+
+#[test]
+fn bend_slots_real_edge_pairs_deduplicate_and_unrelated_edges_are_refused() {
+    let mut app = bend_slots_plate(crate::ui_kit::LayoutMode::Docked, false);
+    app.start("sheet.bend_slots");
+    let mut dialog = app.dialog.clone().unwrap();
+    let source = bend_slot_source(&app.session, None).unwrap();
+    let tag = source.available[0].clone();
+    let pair: Vec<_> = source.edges.iter().filter(|(_, source)| source == &tag).take(2).map(|(index, _)| *index).collect();
+    assert_eq!(pair.len(), 2, "both boundaries of one bend are real pick targets");
+    let world = crate::open_meshing::session_world(&app.session);
+    let mesh = world.body(&source.world).unwrap().mesh();
+    let edge_pick = |index: usize| Sel::Edge { body: source.world.clone(), index, point: crate::selection::polyline_mid(&mesh.edges[index]) };
+    dialog.inputs[0].items = pair.iter().map(|index| edge_pick(*index)).collect();
+    let commands = apply_commands(&app, &dialog).unwrap();
+    assert_eq!(commands[0].1["edges"].as_array().unwrap().len(), 2);
+    let own = app.session.model.state();
+    let face = own.body(&source.own).unwrap().body.record().edges[pair[0]].uses[0].face as usize;
+    let mut face_dialog = dialog.clone();
+    face_dialog.inputs[0].items = vec![Sel::Face { body: source.world.clone(), index: face, point: Vec3::ZERO }];
+    let from_face = apply_commands(&app, &face_dialog).unwrap();
+    assert!(!from_face[0].1["edges"].as_array().unwrap().is_empty(), "a picked face contributes its eligible real edges");
+    assert!(
+        from_face[0].1["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|edge| { source.edges.iter().any(|(index, source)| *index == edge.as_u64().unwrap() as usize && source == &tag) })
+    );
+    let unrelated = (0..mesh.edges.len()).find(|index| !source.edges.iter().any(|(edge, _)| edge == index)).unwrap();
+    let mut invalid = dialog.clone();
+    invalid.inputs[0].items = vec![edge_pick(unrelated)];
+    assert!(apply_commands(&app, &invalid).unwrap_err().contains("does not identify one bend"));
+    run_all(&mut app, commands);
+    let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.features.last().unwrap().kind else { panic!("native feature") };
+    assert_eq!(bends.len(), 1);
+    assert_eq!(bends[0].tag(), tag);
+}
+
+#[test]
+fn bend_slots_missing_saved_edges_require_explicit_selection_review() {
+    let mut app = bend_slots_plate(crate::ui_kit::LayoutMode::Docked, false);
+    app.run("sheet.bend_slots", json!({})).unwrap();
+    let mut kind = app.session.doc.features.last().unwrap().kind.clone();
+    let FeatureKind::SheetBendSlots { bends, .. } = &mut kind else { panic!("native feature") };
+    bends[0].index = 99;
+    app.run("timeline.roll_to", json!({"position": app.session.doc.features.len() - 1})).unwrap();
+    let (kind, inputs, extra) = for_feature(&app, &kind).unwrap();
+    let mut dialog = Dialog::new(kind, inputs);
+    dialog.extra = extra;
+    assert_eq!(bend_slots_unresolved(&dialog, 0), 1);
+    assert!(apply_commands(&app, &dialog).unwrap_err().contains("unavailable"));
+    dialog.take_box(&app.session, Vec::new(), true);
+    assert_eq!(bend_slots_unresolved(&dialog, 0), 1, "an empty additive marquee does not review missing references");
+    let source = bend_slot_source(&app.session, None).unwrap();
+    dialog.pick(&app.session, source.representatives(&app.session, &source.available)[0].clone());
+    assert_eq!(bend_slots_unresolved(&dialog, 0), 0);
+    assert!(apply_commands(&app, &dialog).is_ok());
+}
+
+#[test]
+fn bend_slots_changed_producer_count_requires_review_even_when_the_saved_tag_still_exists() {
+    let mut app = bend_slots_plate(crate::ui_kit::LayoutMode::Docked, true);
+    app.run("sheet.bend_slots", json!({})).unwrap();
+    let mut kind = app.session.doc.features.last().unwrap().kind.clone();
+    let FeatureKind::SheetBendSlots { bends, .. } = &mut kind else { panic!("native feature") };
+    assert_eq!(bends[0].producer_bend_count, Some(2));
+    let review_tag = bends[0].tag();
+    bends[0].producer_bend_count = Some(3);
+    app.run("timeline.roll_to", json!({"position": app.session.doc.features.len() - 1})).unwrap();
+    let source = bend_slot_source(&app.session, None).unwrap();
+    assert!(source.edges.iter().any(|(_, tag)| tag == &review_tag), "the old ordinal tag still has a real edge");
+    assert_eq!(app.session.model.state().sheets[0].flanges.len(), 2, "the guard checks raw source topology, not mapped boundaries");
+    let (kind, inputs, extra) = for_feature(&app, &kind).unwrap();
+    let mut dialog = Dialog::new(kind, inputs);
+    dialog.extra = extra;
+    assert_eq!(dialog.inputs[0].items.len(), 1, "only the unchanged saved reference is restored");
+    assert_eq!(bend_slots_unresolved(&dialog, 0), 1);
+    assert!(apply_commands(&app, &dialog).unwrap_err().contains("unavailable"), "Apply cannot recapture the new count without review");
+    dialog.take_box(&app.session, Vec::new(), true);
+    assert_eq!(bend_slots_unresolved(&dialog, 0), 1);
+    let replacement = source.representatives(&app.session, &[review_tag]);
+    dialog.pick(&app.session, replacement[0].clone());
+    assert_eq!(bend_slots_unresolved(&dialog, 0), 0);
+    assert_eq!(apply_commands(&app, &dialog).unwrap()[0].1["edges"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn bend_slots_unfolded_picker_requests_refold_without_inventing_edges() {
+    let mut app = bend_slots_plate(crate::ui_kit::LayoutMode::Docked, false);
+    app.run("sheet.unfold", json!({})).unwrap();
+    app.start("sheet.bend_slots");
+    let dialog = app.dialog.as_ref().unwrap();
+    assert!(dialog.inputs[0].items.is_empty());
+    assert!(matches!(dialog.kind, Kind::Sheet(Sm::BendSlots { note: Some("ui.bend_slots_refold"), .. })));
+    assert!(apply_commands(&app, dialog).is_err());
+}
+
+/// Click the standard selection chip's actual Clear control, including an unresolved saved
+/// reference with no current edge representative. This is the same shared row as Chamfer.
+fn clear_bend_slots_selection(app: &SolveApp, dialog: &mut Dialog) {
+    let ctx = crate::fonts::test_context();
+    let draw = |dialog: &mut Dialog, events| {
+        crate::test_support::frame(&ctx, egui::RawInput { events, ..Default::default() }, |ui| {
+            crate::dialogs::input_rows_range(dialog, ui, &app.session, Default::default(), 0..1);
+        });
+    };
+    draw(dialog, vec![]);
+    draw(dialog, vec![]);
+    let at = crate::scenario::handle_at("dialog:clear:Edges").expect("the standard chip offers Clear");
+    draw(dialog, crate::test_support::pointer(at, true));
+    draw(dialog, crate::test_support::pointer(at, false));
+}
+
+#[test]
+fn bend_slots_missing_source_certificate_stays_unresolved_until_explicit_review() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut app = bend_slots_plate(mode, false);
+        app.run("sheet.bend_slots", json!({})).unwrap();
+        let feature = app.session.doc.features.last().unwrap().id;
+        let mut saved = app.session.doc.features.last().unwrap().kind.clone();
+        let FeatureKind::SheetBendSlots { bends, .. } = &mut saved else { panic!("native feature") };
+        assert!(bends[0].source_certificate.is_some());
+        bends[0].source_certificate = None;
+        app.run("timeline.roll_to", json!({"position": app.session.doc.features.len() - 1})).unwrap();
+        std::sync::Arc::make_mut(&mut app.session.doc).feature_mut(feature).unwrap().kind = saved;
+        let mut dialog = edit_dialog(&app, feature, None).unwrap();
+        assert!(dialog.inputs[0].items.is_empty(), "a present ordinal alone is not a source identity");
+        assert_eq!(bend_slots_unresolved(&dialog, 0), 1);
+        assert!(apply_commands(&app, &dialog).unwrap_err().contains("unavailable"));
+        clear_bend_slots_selection(&app, &mut dialog);
+        assert!(dialog.inputs[0].items.is_empty());
+        assert_eq!(bend_slots_unresolved(&dialog, 0), 0);
+        assert!(apply_commands(&app, &dialog).unwrap_err().contains("Select bend edges"), "Clear does not repopulate or recapture");
+        let source = bend_slot_source(&app.session, None).unwrap();
+        dialog.pick(&app.session, source.representatives(&app.session, &source.available)[0].clone());
+        let commands = apply_commands(&app, &dialog).expect("an explicit replacement reviews the current source");
+        run_all(&mut app, commands);
+        let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.feature(feature).unwrap().kind else { panic!("native feature") };
+        assert!(bends[0].source_certificate.is_some());
+    }
+}
+
+#[test]
+fn bend_slots_same_count_source_reorder_or_replacement_requires_editor_review() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        for edges in [json!([[50, 60, 2.5], [50, 0, 2.5]]), json!([[0, 30, 2.5], [100, 30, 2.5]])] {
+            let mut app = bend_slots_plate(mode, true);
+            let state = app.session.model.state();
+            let body = state.sheets[0].body.clone();
+            let tag = state.sheets[0].flanges[0].tag.clone();
+            app.run("sheet.bend_slots", json!({"body": body, "bends": [tag]})).unwrap();
+            let feature = app.session.doc.features.last().unwrap().id;
+            let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.features.last().unwrap().kind else { panic!("native feature") };
+            let saved = bends[0].clone();
+            let count = app.session.doc.features.len();
+            app.run("timeline.roll_to", json!({"position": count - 1})).unwrap();
+            app.run(
+                "timeline.redefine",
+                json!({"feature": saved.feature.0, "command": "sheet.flange",
+                    "params": {"body": body, "type": "edge", "edges": edges, "height": 20, "angle": 45, "position": "outside"}}),
+            )
+            .unwrap();
+            let source = bend_slot_source(&app.session, Some(&body)).unwrap();
+            assert_eq!(app.session.model.state().sheets[0].flanges.len(), 2);
+            assert!(source.edges.iter().any(|(_, candidate)| candidate == &tag), "the ordinal still maps to a real edge");
+            let mut dialog = edit_dialog(&app, feature, None).unwrap();
+            assert!(dialog.inputs[0].items.is_empty(), "do not restore the different source at the same ordinal");
+            assert_eq!(bend_slots_unresolved(&dialog, 0), 1);
+            assert!(apply_commands(&app, &dialog).unwrap_err().contains("unavailable"));
+            dialog.take_box(&app.session, Vec::new(), true);
+            assert_eq!(bend_slots_unresolved(&dialog, 0), 1, "an empty additive marquee is not review");
+            dialog.pick(&app.session, source.representatives(&app.session, std::slice::from_ref(&tag))[0].clone());
+            let commands = apply_commands(&app, &dialog).unwrap();
+            run_all(&mut app, commands);
+            assert_eq!(app.session.doc.features.len(), count, "review edits the same native feature");
+            let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.feature(feature).unwrap().kind else { panic!("native feature") };
+            assert_eq!(bends[0].tag(), tag);
+            assert_eq!(bends[0].producer_bend_count, Some(2));
+            assert!(bends[0].source_certificate.is_some());
+            assert_ne!(bends[0].source_certificate, saved.source_certificate, "the explicit review captures the new source");
+        }
+    }
+}
+
+#[test]
+fn bend_slots_editor_rechecks_untouched_sources_before_apply_and_clear_stays_empty() {
+    let mut app = bend_slots_plate(crate::ui_kit::LayoutMode::Docked, true);
+    app.run("sheet.bend_slots", json!({})).unwrap();
+    let feature = app.session.doc.features.last().unwrap().id;
+    app.run("timeline.roll_to", json!({"position": app.session.doc.features.len() - 1})).unwrap();
+    let mut dialog = edit_dialog(&app, feature, None).unwrap();
+    assert_eq!(dialog.inputs[0].items.len(), 2);
+    assert!(apply_commands(&app, &dialog).is_ok());
+    let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.feature(feature).unwrap().kind else { panic!("native feature") };
+    let producer = bends[0].feature.0;
+    app.run(
+        "timeline.redefine",
+        json!({"feature": producer, "command": "sheet.flange",
+            "params": {"type": "edge", "edges": [[50,60,2.5],[50,0,2.5]], "height":20,"angle":45,"position":"outside"}}),
+    )
+    .unwrap();
+    assert!(apply_commands(&app, &dialog).unwrap_err().contains("unavailable"), "Apply does not recapture after a mid-dialog source change");
+    clear_bend_slots_selection(&app, &mut dialog);
+    assert!(dialog.inputs[0].items.is_empty());
+    assert!(matches!(&dialog.kind, Kind::Sheet(Sm::BendSlots { restored_refs, .. }) if restored_refs.is_empty()));
+    assert!(apply_commands(&app, &dialog).unwrap_err().contains("Select bend edges"));
+    let source = bend_slot_source(&app.session, None).unwrap();
+    dialog.pick(&app.session, source.representatives(&app.session, &source.available)[0].clone());
+    assert!(apply_commands(&app, &dialog).is_ok());
+}
+
+#[test]
+fn bend_slots_removing_a_saved_chip_item_is_explicit_selection_review() {
+    let mut app = bend_slots_plate(crate::ui_kit::LayoutMode::Floating, true);
+    app.run("sheet.bend_slots", json!({})).unwrap();
+    let feature = app.session.doc.features.last().unwrap().id;
+    app.run("timeline.roll_to", json!({"position": app.session.doc.features.len() - 1})).unwrap();
+    let mut dialog = edit_dialog(&app, feature, None).unwrap();
+    dialog.remove_listed(&app.session, 0, &Sel::Body { name: "Missing".into() });
+    assert!(matches!(&dialog.kind, Kind::Sheet(Sm::BendSlots { restored_refs, .. }) if !restored_refs.is_empty()), "a no-op removal is not review");
+    let removed = dialog.inputs[0].items[0].clone();
+    dialog.remove_listed(&app.session, 0, &removed);
+    assert_eq!(dialog.inputs[0].items.len(), 1);
+    assert!(matches!(&dialog.kind, Kind::Sheet(Sm::BendSlots { restored_refs, .. }) if restored_refs.len() == 1));
+    let commands = apply_commands(&app, &dialog).unwrap();
+    run_all(&mut app, commands);
+    let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.feature(feature).unwrap().kind else { panic!("native feature") };
+    assert_eq!(bends.len(), 1);
+    assert!(bends[0].source_certificate.is_some());
+}
+
+#[test]
+fn bend_slots_valid_editor_preserves_profiles_reliefs_and_saved_selection_in_both_layouts() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        for profile in ["rounded", "rectangular"] {
+            for reliefs in [true, false] {
+                let mut app = bend_slots_plate(mode, true);
+                let tag = app.session.model.state().sheets[0].flanges[0].tag.clone();
+                app.run("sheet.bend_slots", json!({"bends":[tag],"profile":profile,"reliefs":reliefs})).unwrap();
+                let feature = app.session.doc.features.last().unwrap().id;
+                let FeatureKind::SheetBendSlots { bends: saved, .. } = &app.session.doc.features.last().unwrap().kind else {
+                    panic!("native feature")
+                };
+                let saved = saved.clone();
+                app.run("timeline.roll_to", json!({"position": app.session.doc.features.len() - 1})).unwrap();
+                let mut dialog = edit_dialog(&app, feature, None).unwrap();
+                assert_eq!(dialog.inputs[0].items.len(), 1);
+                assert_eq!(bend_slots_unresolved(&dialog, 0), 0);
+                if let Kind::Sheet(Sm::BendSlots { slot_length, .. }) = &mut dialog.kind {
+                    *slot_length = "8 mm".into();
+                }
+                let commands = apply_commands(&app, &dialog).unwrap();
+                assert_eq!(commands[0].1["params"]["profile"], profile);
+                assert_eq!(commands[0].1["params"]["reliefs"], reliefs);
+                run_all(&mut app, commands);
+                let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.feature(feature).unwrap().kind else { panic!("native feature") };
+                assert_eq!(bends, &saved, "changing a dimension retains the certified source selection");
+            }
+        }
+    }
+}
+
+#[test]
+fn bend_slots_new_selection_is_captured_at_open_or_pick_and_not_refreshed_after_a_source_edit() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        for manual in [false, true] {
+            let mut app = bend_slots_plate(mode, true);
+            let producer = app.session.doc.features.last().unwrap().id;
+            let count = app.session.doc.features.len();
+            app.start("sheet.bend_slots");
+            let mut dialog = app.dialog.take().unwrap();
+            if manual {
+                clear_bend_slots_selection(&app, &mut dialog);
+                let source = bend_slot_source(&app.session, None).unwrap();
+                dialog.pick(&app.session, source.representatives(&app.session, &source.available)[0].clone());
+            }
+            let Kind::Sheet(Sm::BendSlots { restored_refs, .. }) = &dialog.kind else { panic!("Bend Slots dialog") };
+            assert_eq!(restored_refs.len(), if manual { 1 } else { 2 });
+            assert!(restored_refs.iter().all(|reference| reference.source_certificate.is_some()));
+            assert!(apply_commands(&app, &dialog).is_ok());
+            app.run(
+                "timeline.redefine",
+                json!({"feature": producer, "command": "sheet.flange",
+                    "params": {"type":"edge","edges":[[50,60,2.5],[50,0,2.5]],"height":20,"angle":45,"position":"outside"}}),
+            )
+            .unwrap();
+            assert!(
+                apply_commands(&app, &dialog).unwrap_err().contains("unavailable"),
+                "an untouched default or manual pick cannot adopt a new source"
+            );
+            let ctx = crate::fonts::test_context();
+            crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                if let Kind::Sheet(kind) = &mut dialog.kind {
+                    rows(&mut app, ui, kind, &mut dialog.inputs);
+                }
+            });
+            assert!(apply_commands(&app, &dialog).unwrap_err().contains("unavailable"), "a repaint cannot refresh the captured identity");
+            clear_bend_slots_selection(&app, &mut dialog);
+            let source = bend_slot_source(&app.session, None).unwrap();
+            dialog.pick(&app.session, source.representatives(&app.session, &source.available)[0].clone());
+            let commands = apply_commands(&app, &dialog).unwrap();
+            run_all(&mut app, commands);
+            assert_eq!(app.session.doc.features.len(), count + 1);
+            let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.features.last().unwrap().kind else { panic!("native feature") };
+            assert_eq!(bends.len(), 1);
+            assert!(bends[0].source_certificate.is_some());
+        }
+    }
+}
+
+#[test]
+fn bend_slots_paints_reuse_validation_but_metadata_only_producer_changes_refuse_the_selection() {
+    let mut app = bend_slots_plate(crate::ui_kit::LayoutMode::Floating, true);
+    let producer = app.session.doc.features.last().unwrap().id;
+    app.start("sheet.bend_slots");
+    let dialog = app.dialog.as_ref().unwrap().clone();
+    let cloned = dialog.clone();
+    let (Kind::Sheet(Sm::BendSlots { restored_refs: a, source, .. }), Kind::Sheet(Sm::BendSlots { restored_refs: b, .. })) =
+        (&dialog.kind, &cloned.kind)
+    else {
+        panic!("Bend Slots dialogs")
+    };
+    assert!(std::sync::Arc::ptr_eq(a, b), "paint-time dialog clones share the immutable source certificates");
+    let source = source.borrow().as_ref().unwrap().clone();
+    assert!(apply_commands(&app, &dialog).is_ok());
+    let first = source.validation.borrow().as_ref().unwrap().resolved.clone();
+    let ctx = crate::fonts::test_context();
+    for _ in 0..4 {
+        crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| crate::dialogs::show(&mut app, ui.ctx()));
+        assert!(apply_commands(&app, &dialog).is_ok());
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &source.validation.borrow().as_ref().unwrap().resolved),
+            "ordinary paints reuse one source check instead of reconstructing the source graph"
+        );
+    }
+    let geometry = app.session.model.state();
+    let revision = app.session.revision;
+    // Naming metadata is authoritative even when the display/model cache and revision have
+    // not changed. Reversing the same two names must not let the old ordinal retarget.
+    std::sync::Arc::make_mut(&mut app.session.doc).feature_mut(producer).unwrap().edge_names.reverse();
+    assert_eq!(app.session.revision, revision);
+    assert!(std::sync::Arc::ptr_eq(&geometry, &app.session.model.state()));
+    assert!(apply_commands(&app, &dialog).unwrap_err().contains("unavailable"));
+    let changed = source.validation.borrow().as_ref().unwrap().resolved.clone();
+    assert!(!std::sync::Arc::ptr_eq(&first, &changed), "document identity invalidates the geometry-only cache");
+    assert!(changed.iter().any(Option::is_none));
+}
+
+#[test]
+fn bend_slots_remembers_sizes_and_modes_but_captures_the_new_remaining_selection() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut h = crate::scenario::Harness::new();
+        h.app = bend_slots_plate(mode, true);
+        h.app.preferences.remember_dialog_values = true;
+        h.app.start("sheet.bend_slots");
+        let mut dialog = h.app.dialog.take().unwrap();
+        clear_bend_slots_selection(&h.app, &mut dialog);
+        let source = bend_slot_source(&h.app.session, None).unwrap();
+        let first = source.available[0].clone();
+        let second = source.available[1].clone();
+        dialog.pick(&h.app.session, source.representatives(&h.app.session, std::slice::from_ref(&first))[0].clone());
+        if let Kind::Sheet(Sm::BendSlots { slot_length, slot_width, bridge, profile, reliefs, .. }) = &mut dialog.kind {
+            *slot_length = "8 mm".into();
+            *slot_width = "1.2 mm".into();
+            *bridge = "4 mm".into();
+            *profile = 1;
+            *reliefs = false;
+        }
+        h.app.dialog = Some(dialog);
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "the first application remembers its authored settings");
+        assert!(!h.app.remembered_commands.is_empty());
+        h.app.start("sheet.bend_slots");
+        let dialog = h.app.dialog.as_ref().unwrap();
+        assert_eq!(dialog.inputs[0].items.len(), 1);
+        let Kind::Sheet(Sm::BendSlots { slot_length, slot_width, bridge, profile, reliefs, restored_refs, .. }) = &dialog.kind else {
+            panic!("Bend Slots dialog")
+        };
+        assert_eq!((slot_length.as_str(), slot_width.as_str(), bridge.as_str()), ("8 mm", "1.2 mm", "4 mm"));
+        assert_eq!(*profile, 1);
+        assert!(!reliefs);
+        assert_eq!(restored_refs.len(), 1);
+        assert_eq!(restored_refs[0].tag(), second, "the new tool captures the untreated bend rather than recalling the previous selection");
+        assert_ne!(restored_refs[0].tag(), first);
+        assert!(apply_commands(&h.app, dialog).is_ok());
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none());
+        let FeatureKind::SheetBendSlots { bends, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("native feature") };
+        assert_eq!(bends.len(), 1);
+        assert_eq!(bends[0].tag(), second);
+    }
+}
+
+#[test]
+fn bend_slots_converted_editor_restores_the_certified_child_after_a_flat_frame_change() {
+    let mut session = Session::default();
+    for (command, params) in [
+        ("parameters.add", json!({"name":"span","expression":"80 mm"})),
+        ("sketch.create", json!({"plane":"YZ","name":"Channel section"})),
+        ("sketch.line", json!({"points":[[0,0],[75,0],[75,20],[73,20],[73,2],[2,2],[2,20],[0,20]],"closed":true})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance":"span","body_name":"Channel blank"})),
+        ("sheet.convert", json!({"body":"Channel blank","face":[40,37.5,0],"bends":[[40,0,0],[40,75,0]]})),
+    ] {
+        session.execute(command, &params).unwrap();
+    }
+    let mut app = SolveApp::new(session, Services::default());
+    let before = app.session.model.state();
+    let before_sheet = &before.sheets[0];
+    let first = before_sheet.flanges.iter().find(|flange| flange.source_path == [0]).unwrap().tag.clone();
+    let before_x = before_sheet.frame.x;
+    app.run("sheet.bend_slots", json!({"bends":[first],"reliefs":false})).unwrap();
+    let feature = app.session.doc.features.last().unwrap().id;
+    let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.features.last().unwrap().kind else { panic!("native feature") };
+    let saved = bends[0].clone();
+    app.run("parameters.change", json!({"name":"span","expression":"70 mm"})).unwrap();
+    app.run("timeline.roll_to", json!({"position": app.session.doc.features.len() - 1})).unwrap();
+    let current = app.session.model.state();
+    let sheet = &current.sheets[0];
+    assert!(before_x.dot(sheet.frame.x).abs() < 1e-6, "the fixture rotates its flat frame through90 degrees");
+    let resolved = app.session.doc.resolve_bend_slot_reference(sheet, &saved).unwrap();
+    assert_eq!(sheet.flanges.iter().find(|flange| flange.tag == resolved).unwrap().source_path, vec![0]);
+    let dialog = edit_dialog(&app, feature, None).unwrap();
+    assert_eq!(bend_slots_unresolved(&dialog, 0), 0);
+    assert_eq!(dialog.inputs[0].items.len(), 1);
+    let source = bend_slot_source(&app.session, None).unwrap();
+    let Sel::Edge { index, .. } = &dialog.inputs[0].items[0] else { panic!("edge representative") };
+    assert!(
+        source.edges.iter().any(|(edge, tag)| edge == index && tag == &resolved),
+        "restore uses the resolved current tag, never the historical index"
+    );
+    let commands = apply_commands(&app, &dialog).unwrap();
+    run_all(&mut app, commands);
+    let FeatureKind::SheetBendSlots { bends, .. } = &app.session.doc.feature(feature).unwrap().kind else { panic!("native feature") };
+    assert_eq!(bends.len(), 1);
+    assert_eq!(bends[0].source_certificate, saved.source_certificate, "editing keeps the same certified physical child");
+}
+
 #[test]
 fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
     for face in [false, true] {

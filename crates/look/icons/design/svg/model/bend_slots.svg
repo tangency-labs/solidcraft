@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Bend Slots</title>
+  <path d="M6 30L32 45.01L32 49.01L6 34Z" fill="#b8c3cf"/>
+  <path d="M58 30L32 45.01L32 49.01L58 34Z" fill="#8e9faf"/>
+  <path d="M32 14.99L58 30L32 45.01L6 30Z" fill="#e2e8ef"/>
+  <path d="M32 14.99L58 30L58 34L32 49.01L6 34L6 30Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 30L32 45.01L58 30" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 45.01L32 49.01" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.48 20.22L21.21 21.22C20.71 21.51 20.71 21.98 21.21 22.27C21.93 22.68 21.93 23.35 21.21 23.77C20.49 24.18 19.33 24.18 18.61 23.77C18.11 23.48 17.29 23.48 16.79 23.77L15.06 22.77Z" fill="#ffffff"/>
+  <path d="M19.48 20.22L21.21 21.22C20.71 21.51 20.71 21.98 21.21 22.27C21.93 22.68 21.93 23.35 21.21 23.77C20.49 24.18 19.33 24.18 18.61 23.77C18.11 23.48 17.29 23.48 16.79 23.77L15.06 22.77Z" fill="none" stroke="#ffffff" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48.94 37.23L47.21 36.23C46.71 36.52 45.89 36.52 45.39 36.23C44.67 35.81 43.51 35.81 42.79 36.23C42.07 36.64 42.07 37.31 42.79 37.73C43.29 38.02 43.29 38.49 42.79 38.78L44.52 39.78Z" fill="#ffffff"/>
+  <path d="M48.94 37.23L47.21 36.23C46.71 36.52 45.89 36.52 45.39 36.23C44.67 35.81 43.51 35.81 42.79 36.23C42.07 36.64 42.07 37.31 42.79 37.73C43.29 38.02 43.29 38.49 42.79 38.78L44.52 39.78Z" fill="none" stroke="#ffffff" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47.21 36.23L42.79 38.78L42.79 42.78L47.21 40.23Z" fill="#ffffff"/>
+  <path d="M47.21 36.23L42.79 38.78L42.79 42.78L47.21 40.23Z" fill="none" stroke="#ffffff" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <defs><clipPath id="bend_slots_top"><path d="M32 14.99L58 30L32 45.01L6 30Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#bend_slots_top)">
+  <path d="M19.48 20.22L21.21 21.22C20.71 21.51 20.71 21.98 21.21 22.27C21.93 22.68 21.93 23.35 21.21 23.77C20.49 24.18 19.33 24.18 18.61 23.77C18.11 23.48 17.29 23.48 16.79 23.77L15.06 22.77Z" fill="#236ead"/>
+  <path d="M48.94 37.23L47.21 36.23C46.71 36.52 45.89 36.52 45.39 36.23C44.67 35.81 43.51 35.81 42.79 36.23C42.07 36.64 42.07 37.31 42.79 37.73C43.29 38.02 43.29 38.49 42.79 38.78L44.52 39.78Z" fill="#236ead"/>
+  <path d="M26.37 25.25L30.7 27.75C31.42 28.16 31.42 28.83 30.7 29.25C29.98 29.66 28.82 29.66 28.1 29.25L23.77 26.75C23.05 26.33 23.05 25.66 23.77 25.25C24.48 24.83 25.65 24.83 26.37 25.25Z" fill="#236ead"/>
+  <path d="M35.9 30.75L40.23 33.25C40.95 33.67 40.95 34.34 40.23 34.75C39.52 35.17 38.35 35.17 37.63 34.75L33.3 32.25C32.58 31.84 32.58 31.16 33.3 30.75C34.02 30.33 35.18 30.33 35.9 30.75Z" fill="#236ead"/>
+  </g>
+</svg>

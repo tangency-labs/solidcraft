@@ -10651,6 +10651,7 @@ fn eval_feature_kind(
         | FeatureKind::SheetFlange { .. }
         | FeatureKind::SheetHem { .. }
         | FeatureKind::SheetPerforate { .. }
+        | FeatureKind::SheetBendSlots { .. }
         | FeatureKind::SheetFold { .. }
         | FeatureKind::SheetPath { .. }
         | FeatureKind::SheetUnfold { .. }

@@ -8,6 +8,8 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
   sketch, or an edge flange from a part edge.
 - [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
 - **Fold** (`sheet.fold`) bends the sheet along a sketch line.
+- **Bend Slots** (`sheet.bend_slots`) cuts a row of slots along selected bends, with optional
+  end reliefs whose throats have the same height as the slots.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
 - **Convert** (`sheet.convert`) turns a plate of constant thickness into sheet metal, or, with
   bend edges, a solid or a shelled body.
@@ -38,6 +40,31 @@ its flat size and a table of bends to export as DXF or CSV.
 <video src="../media/sheet-metal/flat.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Create Flat Pattern: the tray laid flat with its two bend lines, flat size and bend table"></video>
 
 ## Rules and tools
+
+### Bend Slots
+
+On **SHEET METAL → CREATE**, open **Bend Slots**. The **Edges** selector preselects the bends
+that earlier Bend Slots features have not treated. This happens once when the tool opens.
+The saved feature keeps those bends: if an earlier feature later releases another bend, the
+later feature does not add that bend. Clear the selector and pick edges in the folded model
+to choose different bends. Picking more than one edge of a bend still selects that bend once.
+
+Set the slot length, slot and throat height, bridge and end margin. **Rounded** gives the
+closed ends semicircular caps; **Rectangular** gives them square ends. End reliefs share the
+slot height and have a separate entry corner radius. Their depth follows that radius unless
+you give a depth. A zero entry radius with a positive depth also makes rectangular relief
+entries. Disable end reliefs to keep only the closed slots.
+
+The feature stays in the timeline. Edit its existing expressions or its edge selection to
+rebuild from the current sheet, folded or flat. Saved source identities are checked before
+their bend indices are used. A changed or unavailable source asks for explicit reselection
+instead of silently cutting a different bend. The first implementation supports uninterrupted
+straight bends and exact line/arc boundaries. It refuses intersecting cuts, insufficient
+bridges and unsupported material records. Put Bend Slots before pockets, edge bores or
+perforation fields. A successful model is not a qualification of manual bend force or
+material strength; make a manufacturing coupon for the chosen material and process.
+
+### Sheet metal rules
 
 A rule is saved in its design, and a new design starts with only the default steel rule. To use
 the same rules in every design, keep them as **personal rules**, saved in your profile: open

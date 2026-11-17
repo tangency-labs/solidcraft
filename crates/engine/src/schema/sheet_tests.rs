@@ -2,10 +2,10 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use super::{
-    BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
-    ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams, FlatPatternResult,
-    FoldParams, FoldPoints, FoldPosition, HeightFromParam, HemParams, PathFlangeParams, PerforateParams, PerforationPattern, ReliefShapeParam,
-    SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
+    BendSlotEdges, BendSlotSelection, BendSlotsParams, BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam,
+    DxfLayersParam, DxfNoteHeight, DxfTextParam, ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition,
+    FlangeTypeParam, FlatPatternParams, FlatPatternResult, FoldParams, FoldPoints, FoldPosition, HeightFromParam, HemParams, PathFlangeParams,
+    PerforateParams, PerforationPattern, ReliefShapeParam, SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -43,6 +43,22 @@ fn sheet() -> Session {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<BendSlotsParams>(),
+        &keys(&[
+            "bends",
+            "body",
+            "bridge",
+            "corner_radius",
+            "edges",
+            "end_margin",
+            "profile",
+            "relief_depth",
+            "reliefs",
+            "slot_length",
+            "slot_width",
+        ]),
+    );
     assert_keys(
         input_schema_for::<FlangeParams>(),
         &keys(&[
@@ -83,6 +99,39 @@ fn schemas_and_the_key_check_agree() {
 
 fn parse<T: DeserializeOwned>(v: Value) -> Option<T> {
     serde_json::from_value(v).ok()
+}
+
+#[test]
+fn bend_slots_contract_bounds_and_validates_persistent_selections() {
+    for (value, accepted) in [
+        (json!([0, 1, 1]), true),
+        (json!([]), false),
+        (json!(vec![0; 1001]), false),
+        (json!([-1]), false),
+        (json!([1.5]), false),
+        (json!(["1"]), false),
+        (json!([u64::from(u32::MAX) + 1]), false),
+        (json!(null), false),
+    ] {
+        assert_eq!(takes::<BendSlotEdges>(&value), accepted, "{value}");
+        assert_eq!(parse::<BendSlotEdges>(value.clone()).map(|edges| edges.0), crate::cmd::bend_slot_edges(&value).ok(), "{value}");
+    }
+    assert!(takes::<BendSlotSelection>(&json!([])));
+    assert!(takes::<BendSlotSelection>(&json!(["F12.0", "F12.1"])));
+    assert!(!takes::<BendSlotSelection>(&json!(["F12.0", "F12.0"])));
+    assert!(!takes::<BendSlotSelection>(&json!((1..=65).map(|id| format!("F{id}.0")).collect::<Vec<_>>())));
+    assert!(!takes::<BendSlotSelection>(&json!([1])));
+    assert!(!takes::<BendSlotSelection>(&json!("F12.0")));
+    for tag in ["F0.0", "F01.0", "F1.00", "F1", "F1.0.1", "F1.-1"] {
+        assert!(parse::<BendSlotSelection>(json!([tag])).is_none(), "{tag}");
+    }
+    assert!(takes::<BendSlotsParams>(&json!({})));
+    assert!(takes::<BendSlotsParams>(&json!({"edges": [0, 1]})));
+    assert!(!takes::<BendSlotsParams>(&json!({"edges": []})));
+    assert!(!takes::<BendSlotsParams>(&json!({"edges": null})));
+    assert!(takes::<BendSlotsParams>(&json!({"profile": "rectangular", "reliefs": false, "relief_depth": "4 mm"})));
+    assert!(!takes::<BendSlotsParams>(&json!({"profile": "round"})));
+    assert!(!takes::<BendSlotsParams>(&json!({"slot_length": true})));
 }
 
 /// Whether `T` accepts `v` and its schema agrees.

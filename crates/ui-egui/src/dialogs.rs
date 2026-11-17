@@ -1225,7 +1225,13 @@ impl Dialog {
         // Pre-selection: what is selected now becomes the input (first input that takes it); a
         // face or edge stands for its body where bodies are wanted. (Edit Text's selection is the
         // text it edits, not its path.)
-        let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
+        let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_) | Kind::Sheet(crate::dialogs_sheet::Sm::BendSlots { .. })) {
+            // Bend Slots starts with one explicit current edge per untreated bend. A selected
+            // body only chooses the target; it must not append every edge of a picked face.
+            &[]
+        } else {
+            &s.selection
+        };
         for sel in preselection {
             if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
                 continue;
@@ -2011,6 +2017,7 @@ impl Dialog {
             let picked = self.inputs.get(self.active).and_then(|i| i.items.first());
             crate::primitive_placement::picked(s, cmd, at, &mut self.extra, picked);
         }
+        crate::dialogs_sheet::bend_slots_selection_changed(s, self);
     }
 
     /// Box selection result: replace (or add to) the active input.
@@ -2091,6 +2098,7 @@ impl Dialog {
         }
         // A marquee that took something is the pick a waiting pick field waited for (#10428).
         if accepted {
+            crate::dialogs_sheet::bend_slots_selection_changed(s, self);
             self.awaiting_pick = false;
             self.pick_refused = None;
         }
@@ -2167,6 +2175,7 @@ impl Dialog {
             gone.extend(seeds);
         }
         let Some(inp) = self.inputs.get_mut(i) else { return };
+        let before = inp.items.len();
         match (shell_chain, item, state.as_ref()) {
             (true, Sel::Face { body, index, .. }, Some(st)) => {
                 let model = st.body(body);
@@ -2184,8 +2193,12 @@ impl Dialog {
             }
         }
         let empty = inp.items.is_empty();
+        let changed = inp.items.len() != before;
         if empty && self.listed == Some(i) {
             self.listed = None;
+        }
+        if changed {
+            crate::dialogs_sheet::bend_slots_selection_changed(s, self);
         }
         if i == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
             self.profile_selection_changed = true;
@@ -3452,14 +3465,17 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
+        let unavailable = crate::dialogs_sheet::bend_slots_unresolved(d, i);
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active && !text_focus;
                 // A chip: "↖ Select" (outlined) while empty, "N selected" (filled) once picked.
                 let custom_axis = i == 1 && inp.items.is_empty() && stored_revolve_axis(&d.kind).is_some();
-                let filled = !inp.items.is_empty() || custom_axis || stored_reference.is_some();
+                let filled = !inp.items.is_empty() || custom_axis || stored_reference.is_some() || unavailable > 0;
                 let text = if filled {
-                    RichText::new(if stored_reference.is_some() && matches!(d.kind, Kind::Section { .. }) {
+                    RichText::new(if unavailable > 0 {
+                        solidcraft_ui_text::format("ui.bend_slots_unavailable_count", &[("count", &unavailable.to_string())])
+                    } else if stored_reference.is_some() && matches!(d.kind, Kind::Section { .. }) {
                         solidcraft_ui_text::tr("ui.viewport_status_section_plane").into()
                     } else if stored_reference.is_some() && matches!(d.kind, Kind::OffsetPlane { .. }) {
                         solidcraft_ui_text::tr("sketch_panel.plane_fixed").into()
@@ -3511,7 +3527,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     activate = Some(i);
                     surrender_keyboard_focus(ui);
                 }
-                if !inp.items.is_empty() || stored_reference.is_some() {
+                if !inp.items.is_empty() || stored_reference.is_some() || unavailable > 0 {
                     let rect = egui::Rect::from_center_size(
                         egui::pos2(chip_rect.right() - t.space_24 / 2.0, chip_rect.center().y),
                         vec2(t.space_24, t.space_24),
@@ -3594,6 +3610,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         d.active = i;
         d.awaiting_pick = true;
         d.pick_refused = None;
+        crate::dialogs_sheet::bend_slots_selection_changed(s, d);
     }
     d.sync_thread(s);
 }
@@ -4716,7 +4733,8 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::ViewDxf { .. }
             | Kind::SketchModify(_)
             | Kind::Sheet(
-                crate::dialogs_sheet::Sm::Perforate { .. }
+                crate::dialogs_sheet::Sm::BendSlots { .. }
+                    | crate::dialogs_sheet::Sm::Perforate { .. }
                     | crate::dialogs_sheet::Sm::Hem { .. }
                     | crate::dialogs_sheet::Sm::Fold { .. }
                     | crate::dialogs_sheet::Sm::Path { .. }
@@ -4822,6 +4840,23 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         ) => *direction = *fresh,
         (Kind::Sheet(crate::dialogs_sheet::Sm::Flange { own, .. }), Kind::Sheet(crate::dialogs_sheet::Sm::Flange { own: fresh, .. })) => {
             *own = fresh.clone();
+        }
+        (
+            Kind::Sheet(crate::dialogs_sheet::Sm::BendSlots { body, unresolved, restored_refs, note, source, .. }),
+            Kind::Sheet(crate::dialogs_sheet::Sm::BendSlots {
+                body: fresh_body,
+                unresolved: fresh_unresolved,
+                restored_refs: fresh_refs,
+                note: fresh_note,
+                source: fresh_source,
+                ..
+            }),
+        ) => {
+            *body = fresh_body.clone();
+            *unresolved = fresh_unresolved.clone();
+            *restored_refs = fresh_refs.clone();
+            *note = *fresh_note;
+            *source = fresh_source.clone();
         }
         (Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook, .. }), Kind::Plastic(crate::dialogs_plastic::Pl::SnapFit { hook: fresh, .. })) => {
             *hook = *fresh;

@@ -45,6 +45,7 @@ pub mod limits;
 pub mod math;
 pub mod topology;
 
+pub mod bend_slots;
 pub mod blend;
 pub mod boolean;
 pub mod cell_grid;

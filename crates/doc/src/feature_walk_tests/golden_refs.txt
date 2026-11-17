@@ -149,6 +149,9 @@ sheet_flange
   remap_bodies: body
 sheet_hem
   remap_bodies: body
+sheet_bend_slots
+  remap_refs: bends[0].feature
+  remap_bodies: body
 sheet_perforate
   sketches: [1]
   remap_refs: sketch

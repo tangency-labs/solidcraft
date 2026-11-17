@@ -643,6 +643,7 @@ pub(super) fn sheet_eval(
                 };
                 let name = new_name(st, f, k);
                 let mut sh = sheet::base_flange(&name, &r.name, &rv, plane, region);
+                sh.source_feature = f.id;
                 // The sketch's lines name the base panel's edges.
                 sh.base_curves = ss
                     .sketch
@@ -688,7 +689,8 @@ pub(super) fn sheet_eval(
             };
             // Mirroring the sketch swaps the material side too.
             let name = new_name(st, f, 0);
-            let sh = sheet::contour_flange_path(&name, &r.name, &rv, &plane, &segs, w, *flip != *reverse)?;
+            let mut sh = sheet::contour_flange_path(&name, &r.name, &rv, &plane, &segs, w, *flip != *reverse)?;
+            sh.source_feature = f.id;
             let solid = sh.solid()?;
             st.bodies.push(ModelBody::new(name, solid, f.id));
             st.sheets.push(sh);
@@ -740,10 +742,14 @@ pub(super) fn sheet_eval(
             let points: Vec<Vec3> = edges.iter().map(|e| e.point.0).collect();
             let picks = sheet_picks(sh, f, &points, warning);
             let mut each = Vec::with_capacity(edges.len());
+            let mut source_paths = Vec::new();
             for (k, (e, pick)) in edges.iter().zip(picks).enumerate() {
                 let (height, angle) = own.get(k).copied().unwrap_or((h, a));
                 if e.segments.is_empty() {
                     each.push(sheet::EdgeFlange::at(pick, height, angle, from));
+                    let named =
+                        f.edge_names.get(k).filter(|name| !name.is_empty()).is_some_and(|name| sh.bend_slot_named_edge_is_unique(name, e.point.0));
+                    source_paths.push(if named { vec![k as u32] } else { Vec::new() });
                     continue;
                 }
                 // A segmented edge makes one flange per run of segments that share an angle, a
@@ -865,10 +871,16 @@ pub(super) fn sheet_eval(
                 }
                 for (span_from, span_to, height, angle, side) in runs {
                     each.push(sheet::EdgeFlange { pick, height, angle, from, span: (span_from, span_to), flip: Some(side) });
+                    source_paths.push(Vec::new());
                 }
             }
             let n0 = sh.flanges.len();
-            let (_, notes) = sh.add_flanges_each(&each, rr, position, *flip, relief)?;
+            let (made, notes) = sh.add_flanges_each(&each, rr, position, *flip, relief)?;
+            for (index, path) in made.into_iter().zip(source_paths) {
+                if let Some(flange) = sh.flanges.get_mut(index) {
+                    flange.source_path = path;
+                }
+            }
             if !notes.is_empty() {
                 let notes = notes.join("; ");
                 *warning = Some(match warning.take() {
@@ -952,6 +964,44 @@ pub(super) fn sheet_eval(
             sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline });
             Ok(())
         }
+        FeatureKind::SheetBendSlots { body, bends, slot_length, slot_width, bridge, end_margin, corner_radius, relief_depth, profile, reliefs } => {
+            if bends.len() > solidcore_ops::bend_slots::MAX_BENDS {
+                return Err(DocError::Invalid("bend slots select at most 64 bends".into()));
+            }
+            let i = match body {
+                Some(_) => sheet_for(st, body, None)?,
+                None => st.sheets.len().checked_sub(1).ok_or_else(|| DocError::Invalid("there is no sheet metal body".into()))?,
+            };
+            let corner_radius = val(vals, corner_radius, Kind::Length)?;
+            let depth = match relief_depth {
+                Some(value) => val(vals, value, Kind::Length)?,
+                None => corner_radius,
+            };
+            let options = solidcore_ops::bend_slots::BendSlotOptions {
+                slot_length: val(vals, slot_length, Kind::Length)?,
+                slot_width: val(vals, slot_width, Kind::Length)?,
+                bridge: val(vals, bridge, Kind::Length)?,
+                end_margin: val(vals, end_margin, Kind::Length)?,
+                corner_radius,
+                relief_depth: depth,
+                rounded: *profile == crate::SheetBendSlotProfile::Rounded,
+                reliefs: *reliefs,
+            };
+            let mut updated = st.sheets.get(i).cloned().ok_or_else(|| DocError::Invalid("sheet".into()))?;
+            if bends.is_empty() {
+                return Err(DocError::Invalid("bend slots: saved bend source identities are missing; review and reselect the bend edges".into()));
+            }
+            let tags = bends.iter().map(|bend| doc.resolve_bend_slot_reference(&updated, bend)).collect::<Result<Vec<_>>>()?;
+            updated.add_bend_slots(&tags, &options)?;
+            let original = std::mem::replace(st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?, updated);
+            if let Err(error) = rebuild_sheet(st, i) {
+                if let Some(sheet) = st.sheets.get_mut(i) {
+                    *sheet = original;
+                }
+                return Err(error);
+            }
+            Ok(())
+        }
         FeatureKind::SheetHem { edges, length, gap, flip, body } => {
             let i = sheet_for(st, body, edges.first().copied().map(Vec3::from))?;
             let l = val(vals, length, Kind::Length)?;
@@ -1029,26 +1079,52 @@ pub(super) fn sheet_eval(
             // The bend edges by name where they have one: a name that no longer finds its edge
             // fails the conversion, asking for the edge to be picked again.
             let mut picks = Vec::with_capacity(bends.len());
+            let mut certified_inputs = true;
             for (i, p) in bends.iter().enumerate() {
                 let name = f.edge_names.get(i).filter(|n| !n.is_empty());
                 picks.push(match name {
                     Some(n) => {
                         let hit = crate::naming::locate_edge(&mb, n, p.0).map_err(|_| DocError::reselect(n.as_str()))?;
+                        certified_inputs &= hit.verified
+                            && crate::naming::edge_names(&mb).get(hit.edge).is_some_and(|actual| crate::persistent_name::same_edge(actual, n));
                         if let Some(note) = hit.note(n) {
                             append_warning(warning, note);
                         }
                         hit.point
                     }
-                    None => p.0,
+                    None => {
+                        certified_inputs = false;
+                        p.0
+                    }
                 });
             }
+            certified_inputs &= f.face_names.first().is_some_and(|name| {
+                crate::name_lookup::locate_on(&mb, name, face.0)
+                    .is_some_and(|hit| hit.verified && crate::naming::face_names(&mb).get(hit.face) == Some(name))
+            });
             let placement = doc.component_transform(doc.model_body_component(&mb));
             let body_to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
             let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &values, face.0, &picks, &body_to_world)?;
             for note in notes {
                 append_warning(warning, note);
             }
+            sh.source_feature = f.id;
+            let unique = sh
+                .flanges
+                .iter()
+                .filter_map(|flange| match flange.source_path.as_slice() {
+                    [input] => Some(*input),
+                    _ => None,
+                })
+                .collect::<std::collections::BTreeSet<_>>();
+            // Keep the conversion's established BFS tags for existing downstream CAD names.
+            // Bend Slots resolves its separate certified child path to the current legacy tag.
             tag_flanges(&mut sh, 0, f.id);
+            if !certified_inputs || unique.len() != sh.flanges.len() {
+                for flange in &mut sh.flanges {
+                    flange.source_path.clear();
+                }
+            }
             put_sheet(st, sh)
         }
         FeatureKind::SheetConvert { body, face, rule, .. } => {
@@ -1097,6 +1173,7 @@ pub(super) fn sheet_eval(
             let r = doc.sheet_rule(rule.as_deref());
             let rv = doc.rule_values_at(vals, &r, Some(t))?;
             let mut sh = sheet::base_flange(body, &r.name, &rv, plane, Region2 { outer: region.outer.clone(), holes: Vec::new() });
+            sh.source_feature = f.id;
             sh.holes = region.holes.iter().map(|h| Region2 { outer: h.ccw(), holes: Vec::new() }).collect();
             let mut work = sheet::FlatWork::new();
             for (pocket, z0, z1) in recesses.pockets {
