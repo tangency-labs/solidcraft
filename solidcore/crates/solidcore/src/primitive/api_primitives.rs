@@ -1063,20 +1063,11 @@ mod tests {
         let mut k = Kernel::default();
         // (1, 1): edges 0 and 1 of face 1 meet at a corner, where the reference curve
         // point lies on the boundary curve, so the blend surface's `GetSampleValues`
-        // fails: the gap to the reference projects to a zero UV direction, whose
-        // `Unitize` fails. Upstream drops that status and skins samples the failure left
-        // unset; the fork passes it on (`SER( pDSDef->GetSampleValues(..) )`,
-        // tangency-labs/smlib 21dcf69, WR-663), so no blend surface is made.
-        for (edge2_index, face2_index, has_face, failing) in [
-            (
-                3,
-                2,
-                false,
-                "surface::surface::p8::Surface::create_blend_surface",
-            ),
-            (2, 2, true, ""),
-            (1, 1, false, "geom::vector2d::Vec2::unitize"),
-        ] {
+        // fails. Upstream drops that status and skins samples the failure left unset; the
+        // fork passes it on (`SER( pDSDef->GetSampleValues(..) )`, tangency-labs/smlib
+        // 21dcf69, WR-663), so no blend surface is made.
+        let mut failures = Vec::new();
+        for (edge2_index, face2_index, has_face) in [(3, 2, false), (2, 2, true), (1, 1, false)] {
             let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
             let edges = crate::topology::brep::p1::edges(&brep, None).unwrap();
             let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
@@ -1094,8 +1085,7 @@ mod tests {
                 // `CreateBlendPrimitive` drops the edge-use overload's status and returns
                 // success with no face, the box unchanged; the fork returns the failure
                 // (c8f6a31, `SER( CreateBlendPrimitive(pEdgeuse1, ..) )`)
-                let e = blend.unwrap_err();
-                assert_eq!(e.operation(), failing, "{e:?}");
+                failures.push(blend.unwrap_err().operation());
                 continue;
             }
             let face = blend.unwrap().expect("a blend face");
@@ -1104,6 +1094,15 @@ mod tests {
             assert!(after_faces.contains(&face));
             assert!(brep.face(face).unwrap().surface.is_some());
         }
+        // both fail in the blend surface's `GetSampleValues`: (3, 2) where the gap to the
+        // reference projects to a zero UV direction, (1, 1) at the corner
+        assert_eq!(
+            failures,
+            [
+                "geom::vector2d::Vec2::unitize",
+                "surface::surface::p6::DerivSurfDefinition::sample_values"
+            ]
+        );
 
         // Missing edge/face association remains an error, not success/None.
         let mut brep = create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0).unwrap();
