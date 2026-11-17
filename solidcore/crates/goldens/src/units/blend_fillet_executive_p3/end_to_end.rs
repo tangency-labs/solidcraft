@@ -1853,7 +1853,7 @@ mod tests {
 pub(super) mod round_definition_proof {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use solidcore::kernel::Kernel;
-    use solidcore::mass::enclosure::{enclose_face_area, enclose_volume};
+    use solidcore::mass::enclosure::{enclose_face_area_relative, enclose_volume};
     use solidcore::mass::integrator::properties::{
         brep_mass_properties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
     };
@@ -1893,19 +1893,14 @@ pub(super) mod round_definition_proof {
         blends
     }
 
-    /// `sum A_f d_f` bounded above: each face's area certified ([`enclose_face_area`],
-    /// refined until it is within 1% of its upper end or its budget is spent; the band holds
-    /// either way), each product and the sum rounded up.
+    /// `sum A_f d_f` bounded above: each face's area certified
+    /// ([`enclose_face_area_relative`], refined in one pass until it is within 1% of its
+    /// upper end or its budget is spent; the band holds either way), each product and the
+    /// sum rounded up.
     fn spread(k: &Kernel, b: &mut Brep, blends: &[(FaceId, f64)]) -> f64 {
         let mut sum = 0.0_f64;
         for &(f, d) in blends {
-            let mut a = enclose_face_area(k, b, &[f], f64::MAX).unwrap();
-            for _ in 0..3 {
-                if a.width() <= 1e-2 * a.hi {
-                    break;
-                }
-                a = enclose_face_area(k, b, &[f], 1e-2 * a.hi).unwrap();
-            }
+            let a = enclose_face_area_relative(k, b, &[f], 1e-2).unwrap();
             sum = (sum + (a.hi * d).next_up()).next_up();
         }
         sum

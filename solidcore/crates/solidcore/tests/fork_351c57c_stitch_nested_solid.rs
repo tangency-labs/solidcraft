@@ -12,13 +12,17 @@
     clippy::indexing_slicing
 )] // test helpers
 
+use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::heal::stitch::p2::stitch_into_solid;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
-use solidcore::math::Point2;
+use solidcore::math::{Point2, Point3, PI};
+use solidcore::primitive::api_primitives::create_cylinder;
+use solidcore::query::face::p1::calculate_shell_bounding_box;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p1 as bp1;
@@ -27,6 +31,7 @@ use solidcore::topology::brep::p3::new_brep;
 use solidcore::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
 use solidcore::topology::brep_cache::{arena_identity, CacheObject};
 use solidcore::topology::topology_traverser::Marks;
+use solidcore::topology::{edge, vertex};
 use solidcore::{Brep, Kernel};
 
 /// Adds the six faces of the cube of half side `h` centred on the origin to `b`, each a
@@ -97,4 +102,66 @@ fn nested_solid_makes_the_cavity_void() {
     assert_eq!(flags.iter().filter(|&&v| v).count(), 2);
     let v = volume(&k, &mut b);
     assert!((v - 936.0).abs() <= 1e-6 * 936.0, "volume {v}");
+}
+
+/// A Ø20 x 20 cylinder with a Ø2 x 4 blind hole in its top face and a Ø20 x 5 cylinder joined
+/// on top, which seals the hole into a cavity (tangency-labs/solidcraft#18287), rounded with r 2
+/// on its bottom rim. The round opens the solid and its stitch closes it again; the split that
+/// closes it gives the outside to a new region, and the solid's region kept the cavity's shell
+/// ahead of the one enclosing it (WR-18287). The solid's region lists the outer shell (20 wide)
+/// first, then the cavity's (2 wide), and the volume is the body's less the round's ring
+/// (Pappus: the spandrel (1 - pi/4) r^2, its centroid (10 - 3 pi)/(12 - 3 pi) r in from the rim).
+#[test]
+fn a_round_on_a_solid_with_a_cavity_keeps_the_outer_shell_first() {
+    let mut k = Kernel::default();
+    let origin = |x: f64, z: f64| Point3::new(x, 0.0, z);
+    let body = create_cylinder(&mut k, origin(0.0, 0.0), 10.0, 20.0).unwrap();
+    let hole = create_cylinder(&mut k, origin(-4.0, 16.0), 1.0, 4.0).unwrap();
+    let cap = create_cylinder(&mut k, origin(0.0, 20.0), 10.0, 5.0).unwrap();
+    let body = boolean_difference(&mut k, body, hole).unwrap();
+    let mut b = boolean_union(&mut k, body, cap).unwrap();
+    // the bottom rim: the one edge whose ends lie at z = 0
+    let rim: Vec<_> = b
+        .edges()
+        .ids()
+        .filter(|&e| {
+            let (s, t) = edge::start_end_vertices(&b, e).unwrap();
+            [s, t]
+                .iter()
+                .all(|v| vertex::point(&b, v.unwrap()).unwrap().z.abs() < 1e-9)
+        })
+        .collect();
+    assert_eq!(rim.len(), 1);
+    let r = 2.0;
+    fillet_edges(&mut k, &mut b, &rim, r, 1, 1, 1.0).unwrap();
+
+    let regions = bp1::regions(&b, None).unwrap();
+    let void: Vec<bool> = regions
+        .iter()
+        .map(|&g| b.region(g).unwrap().is_void != 0)
+        .collect();
+    assert_eq!(void.iter().filter(|&&v| v).count(), 2, "{void:?}");
+    let material = regions
+        .iter()
+        .find(|&&g| b.region(g).unwrap().is_void == 0)
+        .unwrap();
+    let widths: Vec<f64> = b
+        .region(*material)
+        .unwrap()
+        .shells
+        .clone()
+        .into_iter()
+        .map(|s| {
+            calculate_shell_bounding_box(&mut k, &b, s, true)
+                .unwrap()
+                .size()
+                .x
+                .round()
+        })
+        .collect();
+    assert_eq!(widths, [20.0, 2.0]);
+    let inset = (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI) * r;
+    let want = PI * 100.0 * 25.0 - PI * 4.0 - 2.0 * PI * (10.0 - inset) * (1.0 - PI / 4.0) * r * r;
+    let v = volume(&k, &mut b);
+    assert!((v - want).abs() <= 1e-6 * want, "volume {v}, want {want}");
 }

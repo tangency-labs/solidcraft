@@ -30,7 +30,8 @@ use crate::{KernelError, Result, record};
 impl Body {
     /// A surface body: some shell does not close (an edge bounds a face on one side only).
     pub fn is_surface(&self) -> bool {
-        !self.is_mesh() && self.record().edges.iter().any(|e| e.uses.len() == 1)
+        // Topology only: a placed copy answers from its part's record without moving its own.
+        !self.is_mesh() && self.record.topology().edges.iter().any(|e| e.uses.len() == 1)
     }
 
     /// The number of open boundary edges, read from exact topology. A face's periodic seam
