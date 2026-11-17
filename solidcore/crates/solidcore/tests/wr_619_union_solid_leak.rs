@@ -9,13 +9,21 @@
 //! `wr_614_coincident_strip_crossing.rs` derives for d <= 1e-5. The union's WR-619 guard
 //! (`boolean/merge/p4.rs`, refusing a union whose face deletion leaves no solid region) then
 //! has no leak to refuse and leaves the union as it is.
+//!
+//! A union that still leaks is refused: tangency-labs/solidcraft#16350's wider A with a
+//! pocket beside the crossing, at d = 5e-6, deletes faces until neither solid is left (0 solid
+//! regions, volume 0). A union of two non-empty solids contains each of them, so a result with
+//! no solid region is wrong whatever its faces; the guard refuses it with
+//! `BooleanFailure::SolidLeaks` instead of returning it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
-use solidcore::boolean::api_brep::boolean_union;
+use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
+use solidcore::error::boolean::BooleanFailure;
+use solidcore::error::Reason;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
@@ -109,4 +117,52 @@ fn wr_619_guard_leaves_an_ordinary_union_alone() {
     assert_eq!(p1::edges(&u, None).unwrap().len(), 24, "edges");
     assert_eq!(solid_regions(&u), 1);
     assert!(is_manifold_solid(&u).unwrap());
+}
+
+/// tangency-labs/solidcraft#16350's pocketed case: A = [-2, 10] x [16, 20] x [0, 4] less the
+/// pocket [2, 3] x [19, 21] x `cut` (a hole in A's face y = 20 for (0.5, 3.5), a notch in its
+/// outer loop for (2, 5)), B a 4 x 4 x `h` box turned atan(0.1) about z and placed at z0 as in
+/// `operands`, its corner edge `d` below y = 20.
+fn pocketed_operands(k: &mut Kernel, cut: (f64, f64), z0: f64, h: f64, d: f64) -> (Brep, Brep) {
+    let a = create_box(k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
+    let p = create_box(k, Point3::new(2.0, 19.0, cut.0), 1.0, 2.0, cut.1 - cut.0).unwrap();
+    let a = boolean_difference(k, a, p).unwrap();
+    let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), SIDE, SIDE, h).unwrap();
+    api_rotate(
+        k,
+        Some(TransformObject::Brep(&mut b)),
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        SLOPE.atan().to_degrees(),
+    )
+    .unwrap();
+    let half = d / SLOPE;
+    let shift = Vec3::new((2.0 - half) - half, 20.0 - d, z0);
+    api_translate(k, Some(TransformObject::Brep(&mut b)), shift).unwrap();
+    (a, b)
+}
+
+/// The #16350 unions at d = 5e-6 delete faces between a solid and the outside until no solid
+/// region is left. Without the guard they return that region-less body; with it they are
+/// refused, naming a face the deletion would have removed.
+#[test]
+fn wr_619_union_leaking_both_solids_is_refused() {
+    for (cut, z0, h) in [((0.5, 3.5), 1.0, 2.0), ((2.0, 5.0), 2.5, 1.0)] {
+        let mut k = Kernel::default();
+        let (a, b) = pocketed_operands(&mut k, cut, z0, h, 5e-6);
+        let e = match boolean_union(&mut k, a, b) {
+            Ok(u) => panic!(
+                "pocket {cut:?}: union returned a body with {} solid regions",
+                solid_regions(&u)
+            ),
+            Err(e) => e,
+        };
+        assert!(
+            matches!(
+                e.failure().map(|f| &f.reason),
+                Some(Reason::Boolean(BooleanFailure::SolidLeaks { .. }))
+            ),
+            "pocket {cut:?}: {e:?}"
+        );
+    }
 }
