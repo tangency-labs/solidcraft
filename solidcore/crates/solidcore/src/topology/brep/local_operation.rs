@@ -1824,8 +1824,15 @@ fn classify_edge_crossing(
     // the cut's effect on the edge, by the lengths it removes and keeps (a cut exactly
     // at an end rounds a hair inside the interval: the length model, not the sign of
     // one rounding, decides). A suggested bounds-the-face edge is not accepted here
-    // either: the length model reads the same ends the band sampled.
+    // either: the length model reads the same ends the band sampled. The length rule is
+    // exact for a line; a bent curve can cross the cut between the sampled ends, and
+    // its untouched claim takes the whole-edge no-crossing certificate (issue #18536
+    // review) — a narrower claim than tolerance clearance — and without one it goes to
+    // the clip path below, where the certificate decides or the operation refuses
+    // typed
     if !bounds_face && (1.0 - width) * chord <= tolerance {
+        // the cut trims off no part of the edge the model resolves (the clip is at its
+        // very end, or the whole edge is clear of it): the edge is untouched
         // the cut trims off no part of the edge the model resolves (the clip is at its
         // very end, or the whole edge is clear of it): the edge is untouched
         return Ok(clear);
@@ -1903,6 +1910,19 @@ fn refusal(why: ReconstructionRefusal) -> SolidError {
 /// `x` clamped to `[0, 1]`.
 fn unit_clamp(x: f64) -> f64 {
     x.clamp(0.0, 1.0)
+}
+
+/// The projection `t` into the span `[lo, hi]` (issue #13622's endpoint-rounding
+/// rule: a cut rounding a hair outside an end clamps to that end, and the length
+/// model decides, not the sign of one rounding). A non-finite projection or
+/// crossed/NaN bounds gives `None`: the caller refuses typed instead of building
+/// on a guess, and the clamp here provably cannot panic on what it accepts
+/// (`lo <= hi`, all finite — `plan/panic-sites.tsv`, `projection_into_span`).
+fn projection_into_span(t: f64, lo: f64, hi: f64) -> Option<f64> {
+    if !(t.is_finite() && lo.is_finite() && hi.is_finite() && lo <= hi) {
+        return None;
+    }
+    Some(t.clamp(lo, hi))
 }
 
 /// The chord of `curve` over `[t0, t1]`: the distance between its evaluated ends, the
@@ -3058,7 +3078,9 @@ fn validate_completed_boundary(
                     fault: BoundaryFault::ClipOutsideRegion { edge: e },
                 }));
             };
-            let Ok(clearance::endpoint_contact::ContactProof::Proved(_)) = contact_proof(
+            // a cancelled run is a cancellation, never a refusal: the certificate's
+            // failure outside cancellation is the boundary fault it names
+            match contact_proof(
                 k,
                 &ContactProofRequest {
                     curve: &curve,
@@ -3069,11 +3091,15 @@ fn validate_completed_boundary(
                     tolerance,
                     edge: e,
                 },
-            ) else {
-                return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
-                    fault: BoundaryFault::ClipOutsideRegion { edge: e },
-                }));
-            };
+            ) {
+                Ok(clearance::endpoint_contact::ContactProof::Proved(_)) => {}
+                Err(err) if err.is_cancelled() => return Err(err),
+                Ok(_) | Err(_) => {
+                    return Err(refusal(ReconstructionRefusal::BoundaryInvalid {
+                        fault: BoundaryFault::ClipOutsideRegion { edge: e },
+                    }));
+                }
+            }
         }
     }
     Ok(())
@@ -3513,7 +3539,14 @@ fn reconstruct_crossed_boundaries(
                     // length model decides, not the sign of one rounding (issue
                     // #13622's endpoint-rounding rule), and the distance check below
                     // keeps the clip on the curve
-                    let t = t.clamp(interval.min(), interval.max());
+                    let (lo, hi) = (interval.min(), interval.max());
+                    // the projection rounds a hair outside the span at an end: the
+                    // length model decides, not the sign of one rounding (issue
+                    // #13622's endpoint-rounding rule), and the distance check below
+                    // keeps the clip on the curve
+                    let Some(t) = projection_into_span(t, lo, hi) else {
+                        return Err(refusal(ReconstructionRefusal::ClipUncertified { edge: e }));
+                    };
                     let at = curve.evaluate_point(k, t)?;
                     if at.distance(*p) <= tolerance {
                         found.push((*p, t));
@@ -6903,6 +6936,24 @@ mod tests {
             crossing.proof.is_some(),
             "the endpoint contact at the end is certified"
         );
+    }
+
+    /// The clip projection's span clamp (issue #13622's endpoint-rounding rule): a
+    /// cut rounding a hair outside an end clamps to that end — the length model
+    /// decides, not the sign of one rounding — while a non-finite projection or
+    /// crossed/NaN bounds is refused (`None` here, typed at the caller), never
+    /// clamped into a valid-looking endpoint.
+    #[test]
+    fn a_projection_clamps_to_the_span_and_invalid_input_is_refused() {
+        assert_eq!(projection_into_span(0.5, 0.0, 1.0), Some(0.5));
+        assert_eq!(projection_into_span(-1.0e-12, 0.0, 1.0), Some(0.0));
+        assert_eq!(projection_into_span(1.0 + 1.0e-12, 0.0, 1.0), Some(1.0));
+        assert_eq!(projection_into_span(f64::NAN, 0.0, 1.0), None);
+        assert_eq!(projection_into_span(f64::INFINITY, 0.0, 1.0), None);
+        assert_eq!(projection_into_span(f64::NEG_INFINITY, 0.0, 1.0), None);
+        assert_eq!(projection_into_span(0.5, f64::NAN, 1.0), None);
+        assert_eq!(projection_into_span(0.5, 0.0, f64::NAN), None);
+        assert_eq!(projection_into_span(0.5, 1.0, 0.0), None);
     }
 
     /// The endpoint-rounding rule's other side (issue #13622): a displacement beyond

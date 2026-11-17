@@ -1045,6 +1045,7 @@ crates/solidcore/src/sweep/topology_sweep/store.rs	body_pair_mut	split_at	1	prov
 crates/solidcore/src/topology.rs	Brep::add_loop	with_capacity	1	open	Vec::with_capacity(edges.len())	
 crates/solidcore/src/topology.rs	Brep::end_surface_owner_cleared	Vec::remove	1	open	remove(i)	
 crates/solidcore/src/topology/brep/local_operation.rs	local_operation	with_capacity	1	open	Vec::with_capacity(all_faces.len())	
+crates/solidcore/src/topology/brep/local_operation.rs	projection_into_span	f64::clamp	1	proven	clamp(lo, hi)	lo <= hi and all finite: the guard just above refuses !(t.is_finite() && lo.is_finite() && hi.is_finite() && lo <= hi) with None, and the caller refuses typed ClipUncertified
 crates/solidcore/src/topology/brep/p1.rs	Brep::fix_region_order	rotate	1	proven	rotate_left(pos)	pos is position() in the same region order Vec
 crates/solidcore/src/topology/brep/p1.rs	Brep::set_region_list_head	rotate	1	proven	rotate_left(pos)	pos is position() in the same region order Vec
 crates/solidcore/src/topology/brep/p1.rs	create_corner_blend	Vec::insert	1	proven	insert(2 - ii, Curve::from(top_curve))	ii is in 0..2 and all four parallel Vecs have at least two entries
