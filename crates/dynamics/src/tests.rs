@@ -420,6 +420,34 @@ fn joint_values_read_the_relative_motion() {
 }
 
 #[test]
+fn scalar_joint_reports_count_turns_between_coarse_output_samples() {
+    for (kind, angle) in [(JointKind::Revolute, 0), (JointKind::Cylindrical, 0), (JointKind::Planar, 2)] {
+        for rate in [-5.0 * TAU, 5.0 * TAU] {
+            let mut body = Body::at_rest(1.0, Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO);
+            body.orientation = Quat::from_axis_angle(Vec3::Z, 0.4);
+            body.angular_velocity = Vec3::Z * rate;
+            let model = Model {
+                bodies: vec![body],
+                joints: vec![Joint { kind, a: Marker::ground(Vec3::ZERO, Vec3::Z, Vec3::X), b: Marker::new(Some(0), Vec3::ZERO, Vec3::Z, Vec3::X) }],
+                gravity: Vec3::ZERO,
+                ..Model::default()
+            };
+            // Each output interval spans two turns; only accepted-step tracking can count them.
+            let trajectory = ok(simulate(&model, &Settings::rk4(1.2, 0.001, 0.4)));
+            assert_eq!(trajectory.samples.len(), 4);
+            for sample in &trajectory.samples {
+                let expected = 0.4 + rate * sample.time;
+                let joint = &sample.joints[0];
+                assert!((joint.values[angle] - expected).abs() < 1e-6, "{kind:?} at {}: {:?} vs {expected}", sample.time, joint.values);
+                assert!((joint.rates[angle] - rate).abs() < 1e-9, "{kind:?}: {:?}", joint.rates);
+                let x = sample.bodies[0].orientation.rotate(Vec3::X);
+                assert!(x.dist(Vec3::new(expected.cos(), expected.sin(), 0.0)) < 1e-6, "{kind:?}: {x:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn inconsistent_start_is_projected_onto_the_joints() {
     // The pendulum's body starts 2 mm off its hinge and moving across it.
     let mut model = pendulum(100.0, 0.3, 0.0, 40.0);

@@ -74,8 +74,11 @@ pub struct SimulateResult {
     pub samples: Vec<SimulationSample>,
     /// Integration steps taken.
     pub steps: usize,
-    /// The largest joint error at a sample, mm.
-    pub max_constraint_error_mm: f64,
+    /// Maximum absolute constraint-equation residual at output samples.
+    /// Translation equations use mm. Angular links use radians, and axis alignment
+    /// equations use dimensionless residuals.
+    #[serde(alias = "max_constraint_error_mm")]
+    pub max_constraint_error: f64,
     /// Joint equations that repeat others (a planar linkage of revolutes).
     pub redundant_equations: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

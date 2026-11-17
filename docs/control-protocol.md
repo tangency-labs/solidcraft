@@ -533,8 +533,9 @@ sock.sendall((json.dumps({"id": 1, "method": "ui.inspect", "params": {}, "token"
 The channel is untrusted input. A request line may be at most 16 MiB; a longer one is answered
 with `{"ok": false, "error": "request too large"}` and the connection is closed, as are
 connections that send eight lines that are not JSON. At most 16 connections are served at once
-(further ones get `{"ok": false, "error": "too many connections"}`), at most 64 queued requests
-run per frame so a flood cannot starve drawing, and a request that the UI thread has not
+(further ones get `{"ok": false, "error": "too many connections"}` and are closed, their request
+unrun; the app reads what they sent first, so the refusal is not lost to a reset), at most 64
+queued requests run per frame so a flood cannot starve drawing, and a request that the UI thread has not
 answered within 60 seconds (3600 seconds for `engine.batch`) is replied to with
 `{"ok": false, "running": true, "error": "timeout: … is still running …"}`. The same 16 MiB line
 limit applies to the MCP server.
@@ -709,7 +710,10 @@ evaluating the model or changing the design, undo history or view revision. It r
 (`surface_analysis`, `section`, or the legacy independent `continuity`), `kind`, source `command`, structured `setting`, `has_key`
 and a `clear: {command, params}` request that can be executed unchanged. Settings retain numbers:
 lengths use millimetres, Draft's `angle_deg` uses degrees, directions are normalised, and
-Continuity's `edge_count` counts the seams currently kept for shading. Labels and units are
+Continuity's `edge_count` counts the seams currently kept for shading. Section's slot is there
+while a section plane is on show: its `setting` is the first plane on show (`origin_mm`,
+`normal`) and the section's `hatch`; with every plane hidden, the Analysis folder hidden, or the
+section undone away it gives up the slot, and its `clear` takes every plane out. Labels and units are
 formatted by clients. `engine.describe {command: "view.status_items"}` exposes both schemas.
 
 By default, surface analyses, including Continuity, share one slot; successful replacement keeps that
@@ -763,6 +767,58 @@ sends it a line whenever the active design changes (#6985):
   second `control.subscribe` on a subscribed connection is refused with `already subscribed`;
   ask `document.revision` for the design now. A `control.subscribe` that timed out or failed did
   not subscribe the connection: send it again.
+
+### Example: driving a hinge and reading its angle (#17909)
+
+A local tool can set a joint's value and read it back, including after someone moves the joint
+in the window. This example uses the repository's hinge fixture,
+`apps/solidcraft-cli/tests/corpus/joints-hinge.solidcraft`. It has two leaves, `LeafA` (grounded)
+and `LeafB`, joined by a revolute joint named `Hinge`. Open the fixture by its full path (the first
+request carries the connection's [token](#token)), then give the hinge limits of 0 to 90°:
+
+```text
+{"id":1,"method":"engine.execute","params":{"command":"doc.open","params":{"path":"/path/to/solidcraft/apps/solidcraft-cli/tests/corpus/joints-hinge.solidcraft"}},"token":"…"}
+{"id":2,"method":"engine.execute","params":{"command":"joint.limits","params":{"joint":"Hinge","min":0,"max":90}}}
+```
+
+To be told when the angle changes, subscribe first. Every change to the design, such as a drive
+from this tool or OK in Drive Joints in the window, is then followed by a `design.changed` line:
+
+```text
+{"id":3,"method":"control.subscribe"}
+→ {"id":3,"ok":true,"result":{"document_id":"…","revision":7}}
+```
+
+Drive the hinge with `joint.drive`. `value` is in degrees, or it can be an expression such as
+`"45 deg"`. `quiet: true` leaves out the solver's degrees-of-freedom report. The reply gives the
+value the joint ended at:
+
+```text
+{"id":4,"method":"engine.execute","params":{"command":"joint.drive","params":{"joint":"Hinge","value":45,"quiet":true}}}
+→ {"id":4,"ok":true,"result":{"joint":1,"moved":true,"values":[{"name":"angle","value":45.0,"unit":"deg","limits":[0.0,90.0]}],"requested":[{"name":"angle","value":45.0,"unit":"deg","limits":[0.0,90.0]}],"stopped_by_contact":null,"stopped_by_loop":null,"conflicts":[],"errors":[]}}
+{"event":"design.changed","params":{"document_id":"…","revision":8}}
+```
+
+A value outside the limits is clamped to them. `held` then says which value ended up somewhere
+other than requested, and why:
+
+```text
+{"id":5,"method":"engine.execute","params":{"command":"joint.drive","params":{"joint":"Hinge","value":120,"quiet":true}}}
+→ {"id":5,"ok":true,"result":{"joint":1,"moved":true,"values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}],"requested":[{"name":"angle","value":120.0,"unit":"deg","limits":[0.0,90.0]}],"held":[{"name":"angle","requested":120.0,"value":90.0,"unit":"deg","why":"angle is held to its limits, 0 to 90 deg"}],"stopped_by_contact":null,"stopped_by_loop":null,"conflicts":[],"errors":[]}}
+```
+
+`joint.inspect` only reads the design, so it adds no undo step. Use it to read the angle at any
+time, for example after a `design.changed` line. The joint's `values` hold the angle (other fields
+left out here):
+
+```text
+{"id":6,"method":"engine.execute","params":{"command":"joint.inspect","params":{"joint":"Hinge"}}}
+→ {"id":6,"ok":true,"result":{"joints":[{"id":1,"name":"Hinge","type":"revolute","dofs":["angle"],"values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}],…}]}}
+```
+
+While Drive Joints is open in the window, its preview does not change the design. `joint.inspect`
+still reads the last value set, and no event is sent until the dialog's OK stores the new angle.
+The joint id `1` comes from the fixture. The revisions are only examples.
 
 ### Slow commands and the window (#1989)
 
@@ -872,17 +928,17 @@ no box selection.
 | `ui.icon_audit` | `reset?`, `stop?` | `reset: true` enables collection on the UI thread and clears previous requests; returns `{requested: [{name, master, placeholder}]}` sorted by requested id. Each read drains names collected since the previous read/reset. Collection stays enabled until `stop: true` (which returns pending names before disabling it). Includes aliases, variable/table ids and cached paints. |
 | `ui.menuPick` | `item`: id or label | runs an item of the open menu or of any of its flyouts, as clicking it does; a row that only opens a flyout is refused |
 | `ui.selectOther` | `x?`, `y?`, `pick?`, `add?`, `hover?`, `close?` | Select Other: with a point, list compatible hidden and visible geometry near the pointer by default (as holding the left button does; disable `select_other_hidden` for the original visible-only list); the popup fits the available window space and scrolls only for overflow; `pick`: select row `pick` (`add`: as Shift-click; with a dialog open, into its active input); `hover`: light a row up; without: the open list (`open`, `at`, `total`: everything under the cursor, `rows`: label, icon, sel, at most 20 per kind, nearest first) |
-| `ui.rename` | `text?`, `commit?` (default true) | finishes the rename box a Rename item opened |
+| `ui.rename` | `text?`, `commit?` (default true) | finishes the rename box a Rename item opened; a refused name is the error and the box stays open |
 | `ui.selection` | | the selection, the open dialog's inputs, the hovered item, and the active sketch's drawn dimensions (`dimensions`: id and text centre, `dimension_selected`, `dimension_editing`), and finished sketches' dimensions shown in the model view (`shown_dimensions`: sketch, id and text centre; a double-click there edits the value) |
 | `ui.worldToScreen` | `points`: `[[x, y, z]…]` world points | their screen points |
 | `ui.triad` | | screen points of the 3D sketch move triad's handles (`x`, `y`, `z`, `plane`) |
 | `ui.sketchToScreen` | `points`: `[[x, y]…]` in active-sketch coordinates | their screen points (null when behind the camera) |
 | `ui.dialogInput` | `index` | what clicking an input's Select chip does: picks go to that input |
 | `ui.at` | `world: [x,y,z]` \| `sketch: [x,y]` \| `plane: "XY"` \| `axis: "Z"` \| `dimension: "d1"` (its value text) \| `handle: "arrow"` (a manipulator handle, see `scenario::publish_handle`) | the screen point (a scenario step's target; see `crates/ui-egui/src/scenario.rs`) |
-| `ui.pick` | `pixels?: [[x,y]…]`, `rays?: [{origin, dir}…]`, `frame?: "window"\|"model"`, `width?`, `height?`, `edges?` (default true), `edge_px?` (default 6), `all?`, `include_ghosted?` | read-only geometry under each pixel or ray (#6304): one entry per input, `null` where nothing is hit — body, face index, exact world `point` and outward `normal`, `depth`, `occurrence`/`component` for placed parts, `edge`/`vertex` within `edge_px` of a pixel, `section_cap: true` on a cut face. `window` pixels are physical pixels of a window screenshot; `model` pixels are pixels of a `ui.render` of `width`×`height` (default 960×600), so it works headless. As `view.pick` through `engine.execute`/`engine.batch`. See `crates/ui-egui/src/view_pick.rs` |
-| `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>` (the button alone: `button:<command id>`; a drop-down row: `dropdown:<command id>`, highlighted `dropdown_hot:<command id>`, its pin `dropdown_pin:<command id>`; Customize Toolbar's check boxes `customize:<command id>`), ribbon tabs `tab:<name>` (MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL, WELDMENTS; contextual SKETCH; workspace RENDER), the toolbar menu button `ribbon:add_tab`, the hint when every tab is hidden `ribbon:tabs_hidden`, Preferences tab check boxes `prefs:toolbar_tab:<NAME>`, panel labels `panel:<tab>:<panel>` (also `ribbon:section:<TAB>:<SECTION>`), document overflow list `tab:overflow`, workspace column `ribbon:workspace`, command-search launcher `ribbon:search`, browser rows `row:<label>`, where each row's depth puts it `indent:<label>`, and fold arrows `fold:<label>`, manipulator handles; signed-axis tips `axis_view:z`, `axis_view:-y`; optional cube facets `navigation_cube:top`, `navigation_cube:top_front_right`, controls `navigation_cube:control:home` (and other actions), plus signed-axis aliases for visible cube faces; Preferences navigator picker `prefs:navigator`, options `prefs:navigator:Signed axes` and `prefs:navigator:Cube`; in the Motion Study dialog, where the chart puts its first and last step `motion:chart_start` and `motion:chart_end`, the Check collisions button `motion:check` and each collision found `motion:collision:<n>`; with Placement handles on, the move marker of an open placement dialog `<tool>:position` and its ring `<tool>:rotate` (`rest`, `boss`, `snap_fit`; `primitive:position` for Box, Cylinder, Cone, Sphere, Torus and Coil, which have no ring); with `hole_moves` on, a Single hole's markers `hole:<n>` |
+| `ui.pick` | `pixels?: [[x,y]…]`, `rays?: [{origin, dir}…]`, `frame?: "window"\|"model"`, `width?`, `height?`, `edges?` (default true), `edge_px?` (default 6), `all?`, `include_ghosted?` | read-only geometry under each pixel or ray (#6304): one entry per input, `null` where nothing is hit — body, face index, exact world `point` and outward `normal`, `depth`, `occurrence`/`component` for placed parts, `edge`/`vertex` within `edge_px` of a pixel, `section_cap: true` and the `section_plane` (its id in `inspect.section`) on a cut face. `window` pixels are physical pixels of a window screenshot; `model` pixels are pixels of a `ui.render` of `width`×`height` (default 960×600), without needing a window screenshot. Both pixel frames require the app's control channel; they are unavailable through `solidcraft-cli mcp --headless`. As `view.pick` through `engine.execute`/`engine.batch` when connected to the app. Without the app (`solidcraft-cli exec`, `run`, `mcp --headless`) the engine's `view.pick` answers `rays` (and `all`) with the same fields, decided on the bodies' exact faces, edges and vertices (`edge`/`vertex` name the one a ray passes through), and refuses `pixels`. See `crates/ui-egui/src/view_pick.rs` and `crates/engine/src/cmd/view_pick.rs` |
+| `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>` (the button alone: `button:<command id>`; a drop-down row: `dropdown:<command id>`, highlighted `dropdown_hot:<command id>`, its pin `dropdown_pin:<command id>`; Customize Toolbar's check boxes `customize:<command id>`), ribbon tabs `tab:<name>` (MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL, WELDMENTS; contextual SKETCH; workspace RENDER), the toolbar menu button `ribbon:add_tab`, the hint when every tab is hidden `ribbon:tabs_hidden`, Preferences tab check boxes `prefs:toolbar_tab:<NAME>`, panel labels `panel:<tab>:<panel>` (also `ribbon:section:<TAB>:<SECTION>`), document overflow list `tab:overflow`, workspace column `ribbon:workspace`, command-search launcher `ribbon:search`, browser rows `row:<label>`, where each row's depth puts it `indent:<label>`, and fold arrows `fold:<label>` (a Section Analysis plane's row is `row:Section <id>` and its eye `eye:Section <id>`, by its `inspect.section` id, in every language), manipulator handles; signed-axis tips `axis_view:z`, `axis_view:-y`; the custom navigator's controls `navigator:control:home` (and other actions); Preferences navigator picker `prefs:navigator`, options `prefs:navigator:Signed axes` and `prefs:navigator:Custom`; in the Motion Study dialog, where the chart puts its first and last step `motion:chart_start` and `motion:chart_end`, the Check collisions button `motion:check` and each collision found `motion:collision:<n>`; with Placement handles on, the move marker of an open placement dialog `<tool>:position` and its ring `<tool>:rotate` (`rest`, `boss`, `snap_fit`; `primitive:position` for Box, Cylinder, Cone, Sphere, Torus and Coil, which have no ring); with `hole_moves` on, a Single hole's markers `hole:<n>` |
 | `ui.editFolder` | `folder` (id or name) | Edit Holes on a History folder that holds holes only: one Hole dialog, filled in from its first hole, whose OK gives every hole in the folder the fields changed there. Replies as `ui.start` does |
-| `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode). Replies as `ui.start` does, with the history `marker` |
+| `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode). Items without an edit dialog show a status message naming their kind and saying there is nothing to edit; no command palette opens. Replies as `ui.start` does, with `dialog: null` for these items and the restored history `marker` |
 | `ui.scroll` | `x`, `y`, `delta?`, `ctrl?`, `unit?`: `point` \| `line` | wheel zoom at the cursor. `ctrl: true` replays a Ctrl+wheel pinch (Ctrl held and the wheel in points); `unit` selects the wheel unit and defaults to points with `ctrl` and lines without it. `delta` is in points either way. Invalid units or coordinates outside the finite screen-coordinate range are rejected before queuing input |
 | `ui.key` | `key` (egui key name, `Enter`, `Escape`…), `cmd?`, `ctrl?`, `shift?`, `alt?`, `pressed?` | By default, press and release, then release modifiers. With `pressed: true` or `false`, send only that edge; modifiers remain as given. `cmd` retains the legacy primary-modifier alias unless `ctrl` is explicit: `cmd:true, ctrl:false` sends physical Command, and both true sends Control+Command. `ui.move` can change modifiers between edges. |
 | `ui.text` | `text` | typed text |
@@ -945,6 +1001,8 @@ listed, or is `null`.
 
 ### `ui.prefs` settings
 
+- `show_document_browser` (default false): show the document browser beside open designs; also available in Preferences → Layout → Panels and through the app-bar Show/Hide Documents toggle. Explicit visibility choices from earlier document-browser builds are preserved.
+
 `render_previous_geometry_budget` (Graphics, default false) restores the previous fixed Render preview geometry budget: 512 MiB on 64-bit desktop, 128 MiB elsewhere. With it off, desktop uses the device-based budget.
 
 
@@ -954,13 +1012,21 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
 - `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre).
+- `browser_arrow_keys` (default true: while the Browser has the keyboard, which a click on one of its rows gives it and a click elsewhere takes back, Up/Down move the selection through its rows, Left/Right fold or unfold the row, Enter opens it and F2 renames it, and the plain arrows do not turn the view; false: the arrows always turn the view, as before #17931; the Browser also lets them go while its name editor is open)
 - `browser_bodies_folders` (`several` (default): a component with one body and no groups lists it straight under the component in the browser, without a Bodies folder; `always`; `never`: components list their bodies and groups straight under them, and the folder's menu items are on the component's menu; the design's own Bodies folder, and one hidden with its eye, always show; #4217)
 - `browser_components_open` (default false: each component placement in the browser starts closed until it is opened, by its fold arrow, Expand All or Find in Browser; true: every placement starts open, as before #9274)
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
-- `check_updates` (default true; [updates](book/src/guide/updates.md))
+- `browser_hover_shows_origin` (default true: an Origin plane, axis or point row under the pointer in the browser, the design's or a part's, shows that item in the view, and a hidden one only while the pointer is on its row, its eye and saved visibility unchanged and not pickable, #15658; false: only an origin plane already drawn lights up, as before; Preferences › Design › Origin)
+- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool}` with the value in force (any policy adds that object, with `organization` when it names one; `locked` lists what it locks), `check_updates` itself stays the person's stored choice, and a request that changes it is refused
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
+- `design_reopen_views` (default false: a design opens with only its Model view; true opens it with the views it had when it was last closed)
+- `design_reuse_views` (default true: opening a sheet, sketch or workspace that a view already shows activates that view; false makes a new view each time)
+- `design_sub_tab_render` (default true: Render and Animate open as views of their design; false: they replace the current view)
+- `design_sub_tab_sheets` (default true: a drawing sheet opens as a view of its design; false: it replaces the current view)
+- `design_sub_tab_sketches` (default true: editing a sketch opens it as a view of its design and Finish Sketch returns to the previous view; false: the sketch is edited in the current view)
+- `design_views_as_tabs` (default false: each design keeps one tab, with a view switcher menu while it has more than one view; true: a design's views are tabs inside its tab)
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dimension_colour` (`null` (default) or `[r, g, b]` numbers 0…255: the colour a sketch dimension draws its lines, arrows and value in; null uses the theme's dimension colours. Selection, hover and conflicts keep their own colours, #14121)
 - `dimension_input` (`view` (default): a sketch dimension's value is typed in a box on the dimension; `window`: placing a dimension with the Dimension tool, or double-clicking one, opens a small window at it with the value field (handle `dimwin:value`), arrows that step the value (`dimwin:up`, `dimwin:down`), a check (`dimwin:ok`, also Enter) and a cross (`dimwin:cancel`, also Esc), #7246)
@@ -971,6 +1037,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `export_name` (string, default empty: each export offers the design's name, or a mesh its body's; otherwise the name File › Export and Save As Mesh offer, with `{design}`, `{body}` (the exported body's name) and the design properties (`{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}`) replaced; [export file names](book/src/guide/files.md#export-file-names))
 - `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
+- `extrude_custom_distance` (string, default `10 mm`: the length a new Extrude starts at when `extrude_start` is `custom`; any length expression, and one that doesn't read as a length gives the fixed 10)
+- `extrude_last_distance` (string, default empty: the distance, in mm, the last new extrude was applied with; set by the app, kept when defaults are restored, read by `extrude_start` `last_used`)
+- `extrude_start` (`fixed` (default: a new Extrude opens at 10 in the design's unit, as before), `last_used` (the distance of the last new extrude applied, not through-all or to-object extents; 10 until there is one), `custom` (`extrude_custom_distance`); editing an extrude keeps its own distance)
 - `fillet_legacy_radius` (default false: a new Solid Fillet opens at the radius the tool ships with, 2 mm, shown in the design's units ("0.07874 in" in an inch design); true: it opens at the number 2 read in the design's units ("2 in"), as before, #12418)
 - `forget_stand_up: true` (action: forget all remembered stand-up answers; also available beside the memory checkbox in Preferences › Design)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
@@ -991,7 +1060,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `keep_hover_while_navigating` (default true: the face under the pointer keeps its highlight while the view moves under it; off: the highlight goes off while the view moves, as before, #2130)
 - `keep_unsaved_also_asks` (default true; web app, with `keep_unsaved_in_browser` on: the browser's "leave site?" box still appears when the tab closes with unsaved work; off, it appears only while a copy isn't current yet, #10220)
 - `keep_unsaved_in_browser` (default false; web app: each open design's unsaved changes are kept current in the browser's private storage, and the next visit offers them back in a "Restore unsaved design?" window with Restore, Open saved version and Discard; off, nothing is kept, #10220)
-- `keep_work_on_tab_switch` (default false: each design tab keeps its open dialog or tool, with what was picked and typed in it, and its toolbar tab while another design is shown, and has them back when it is shown again; off, a switch cancels them and shows MODEL, #9360)
+- `keep_work_on_tab_switch` (default false: each design tab keeps its open dialog or tool, with what was picked and typed in it, and its toolbar tab while another design is shown, and has them back when it is shown again; off, a switch cancels them and `remember_toolbar_tab` decides the toolbar tab, #9360)
 - `language` (`en`, `ar`, `ja`, `de`, `fr`, `he`, `ko`, `ms`, `ru`, `uk`, `zh`; see [localization](localization.md))
 - `length_decimals`
 - `line_drag_draws_one` (default false: in the Line tool, a press, a drag and the release draw one line from the press to the release and end there, snapping as clicks do; clicks still chain, and a drag under 24 points is a click; off, a drag places a point where it is let go, #7247)
@@ -1007,24 +1076,28 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `msaa`
 - `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `maya`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
-- `navigator_arrows` (default true: the custom view navigator has the cube's orbit and roll arrows around its body; also `view.navigator {arrows}`)
-- `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
-- `navigator_home` (default true: the custom view navigator has the cube's Home button beside it; also `view.navigator {home}`)
-- `navigator_style` (`axes` (default), `cube`, `custom`: the body chosen with `view.navigator`, the cube until one is chosen)
-- `navigator_texture` (`themed` (default): the custom view navigator in the cube's colours; `modeled`: in its body's own appearance and edge colour)
+- `navigator_arrows` (default true: the custom view navigator has orbit and roll arrows around its body; also `view.navigator {arrows}`)
+- `navigator_fit` (default false: a view chosen on a view navigator also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
+- `navigator_home` (default true: the custom view navigator has a Home button beside it; also `view.navigator {home}`)
+- `navigator_style` (`axes` (default), `custom`: the body chosen with `view.navigator`, the signed axes until one is chosen; a value this version doesn't know loads as `axes`)
+- `navigator_texture` (`themed` (default): the custom view navigator in the theme's navigator colours; `modeled`: in its body's own appearance and edge colour)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
 - `orbit_cursor_wrap` (default true: an orbit drag that reaches the edge of the view moves the cursor to the opposite edge and keeps turning)
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
+- `origin_axes_across_view` (default false: short axes as before; opt in through Preferences → Design → Origin or the bottom bar's Display menu. The command `view.origin_axes_across_view {enabled: bool}` sets the same preference. When true, the X, Y and Z origin axes run through the origin to the edges of the view, both ways, #11123; away from the origin they are picked only in an open sketch or by a dialog input that takes axes, after anything else under the pointer, and not where a body hides them; false: short axes from the origin, solid then dashed, as before)
 - `origin_plane_names` (`xyz` (default) or `top_front_right`: the browser, dialogs and lists call the origin planes Top, Front and Right; their ids, commands and saved designs keep XY, XZ and YZ)
 - `pan_reverse_x` (default false: horizontal scrolling pans the other way)
 - `pan_reverse_y` (default false: vertical scrolling pans the other way)
 - `parameters_apply_live` (default true: the Parameters dialog applies an expression when its field is left; false: edits wait for Apply or OK, which set them together in one rebuild and one undo step)
+- `pencil_mode` (web app, default false: a pen tap adds or removes a model or sketch item, a pen double-tap selects its whole body or sketch, and a pen tap in empty space clears the selection; finger touches that start in the view don't click there, and a finger double-tap on a planar face starts a sketch on it)
 - `perspective_fov` (Perspective view's vertical field of view in radians, 0.2618…1.5708 (15°…90°), default 0.6; when it changes, the camera's distance scales so the view keeps its size)
 - `placement_handles` (default false: handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil that move it across the model and turn it where it can turn)
+- `plugin_grants` (default `{}`): approved command groups and named folder grants by plugin id, at most 256 ids, four groups and 32 folders each; `plugin.install` validates and stores its optional `approve` object, and `plugin.remove` deletes the record. Approval folders use `{name, path, read, write}`; stored folder grants use `folder` for the local path. Omitting `approve` grants nothing, including on replacement; explicit approvals replace the set, dropping stale grants. Package permissions still limit every run. Stored grants and removal survive closing or resetting Preferences. `dry_run: true` validates and describes the package without writing files or grants.
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
 - `remember_stand_up` (default true: reuse the stand-up or Leave it answer per SHA-256 of the original file bytes, at most 500 answers with oldest-first eviction; false restores asking on every open)
+- `remember_toolbar_tab` (default true: each design tab comes back on the toolbar tab it showed when it was left, with its contextual tab and the tab a sketch returns to, also when `keep_work_on_tab_switch` is off; a new design starts on MODEL, and a tab no longer shown falls back as usual; false: a switch shows MODEL unless `keep_work_on_tab_switch` keeps the tab, as before)
 - `render_legacy_memory_admission` (Graphics, default false): Use previous render memory checks. True skips native available-RAM/cgroup fit refusals for future CPU/GPU admissions; shared/host software limits, device limits, checked allocation and all held reservations remain enforced. It is a machine preference, not saved image quality. The CLI equivalent is `solidcraft-cli render --legacy-memory-admission`.
 - `reuse_imports` (default true: reopen unchanged STEP and IGES files using the local saved-model cache; false imports each time). `doc.open {reuse_import: false}` bypasses reading and writing this cache for one open; its reply includes `import_reused` and `content_sha256`. `file.import_cache_clear {}` removes cached imports and returns `{removed}`, keeping stand-up answers. `SOLIDCRAFT_IMPORT_CACHE_DIR` overrides the default `imports` folder under SolidCraft's per-user data folder; `SOLIDCRAFT_NO_MODEL_CACHE` also bypasses import reuse.
 - `ribbon_menus_follow_hover` (default false). Click a ribbon panel label to open its menu. Hover another panel label to switch, or move outside the ribbon and open menu to close it.
@@ -1033,7 +1106,10 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `save_prompt_one_at_a_time` (default false: closing several tabs or quitting with more than one unsaved design asks once, in one "Save changes to N designs?" list; true restores one "Save changes?" prompt per design, #11680)
 - `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in Shaded with hidden edges, including Fillet inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)
+- `show_design_view_switcher` (default false: a design tab shows no view switcher until the design has a second view the user opened, and editing a sketch or opening Render stays in the view shown; true: every design tab shows its view switcher (handle `tab:switcher`), even with one view, and a sketch or Render opens a view of its own as in 0.43.0; `design_views_as_tabs` true overrides it)
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
+- `sign_saved_designs` (default false: every save from the app adds a GnuPG OpenPGP signature to the design's provenance; `file.save`'s `sign` is accepted only from the app's own Save, because a script or agent must not make GnuPG sign with the user's keyring; the key may be on a smartcard, where GnuPG uses it and asks for its PIN; [signing](formats/cose-provenance.md))
+- `signing_key` (string, default empty: the GnuPG key a signed save uses, a fingerprint or user id; empty asks GnuPG for its default signing key)
 - `sketch_auto_dimensions` (default false: each shape drawn in a sketch gets all its dimensions at the sizes drawn, as `sketch.draw.dimensioned` with `as_drawn`; typed values win)
 - `sketch_auto_locate` (default false; with `sketch_auto_dimensions`, new shapes are also placed from the sketch origin until fully constrained, as `sketch.draw.dimensioned` with `locate`)
 - `sketch_conflict_colour` (default true: while the open sketch's constraints conflict, the curves and points a failing constraint holds are drawn in the theme's `sketch_conflict` colour too, not only its glyph or dimension; false: only the glyphs and dimensions are red, in `error`, as before, #7244)
@@ -1042,6 +1118,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sketch_mirror_auto_line` (default true: opening Sketch Mirror uses the only preselected straight construction line of the active sketch as its reference; unselected lines do not count; false keeps manual reference selection)
 - `sketch_open_look_at` (default true: creating or editing a sketch turns the view to face it; false leaves the view as it is, and Look At faces the sketch when asked)
 - `sketch_recent_snap` (default false: while drawing, the cursor snaps where the horizontal guide of one recent circle or arc centre or straight-edge midpoint meets the vertical guide of another; a free coordinate, with no constraint and no construction geometry. Off: those guides stay visual and the cursor does not move. The references come from `sketch_tracking_guides`, #8694)
+- `sketch_square_rectangles` (default false: Shift held while drawing a Two-Point or Center Rectangle prefers a line midpoint, as it always has. True: it makes the rectangle a square instead, the second corner going to the larger of the two distances from the first, and adds an Equal constraint between two sides so one dimension defines it, unless both a width and a height are typed, which then win; #18114)
 - `sketch_snap_to_visible_grid` (default true: a point in a sketch snaps to the crossings of the lines the grid draws when the pointer means one, and to the finer lattice between them otherwise; false: the point snaps to the finer lattice only, as before, #7114)
 - `sketch_state_icons` (default true: a sketch's icon in History and the browser takes the colour of its solve state, `sketch` under constrained, `sketch_fixed` fully constrained, `error` while its constraints conflict, and its tooltip names the state; false: every sketch row's icon and tooltip as before, #7245)
 - `sketch_tab_always` (default false: the SKETCH tab stays in the ribbon right after MODEL while no sketch is open; a tool in its CREATE or REFERENCE section then opens Create Sketch, on the selected plane or planar face or else on the plane picked next, and starts in the new sketch, #7904)
@@ -1062,13 +1139,16 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)
 - `trackpad_zoom_modifier` (`off` default, `cmd`, `alt`, or `ctrl`: hold this key alone for vertical scroll to zoom)
+- `trusted_signing_keys` (string, default empty: fingerprints of signing keys whose signatures the app shows as verified, separated by commas; spaces inside a fingerprint, as `gpg --fingerprint` prints them, are ignored; any other valid signature is shown in grey with its fingerprint and names no user id; a user id inside a file is not proof)
 - `ui_font` (an installed font family or a font file for the interface; empty for the built-in font; a `Family-Weight.ttf` file also takes its heavier sibling files for bold text, see [interface fonts](fonts.md))
 - `ui_scale`
 - `up_axis` (`z`, `y`)
+- `verify_opened_designs` (default false: opening a design verifies its signature and reports it, `doc.open {verify: true}`; off: opening does not read every payload again, and `file.verify` checks on request)
 - `view_confirm_corner` (default false: while a dialog or a sketch is open, a check and a cross at the view's top right, handles `view:confirm:ok` and `view:confirm:cancel`, do what the dialog's OK and Cancel do, or Finish Sketch and Cancel Sketch; the axis view or cube moves down below them, #6709)
 - `viewport_theme` (`theme` (default: the theme's own), `light`, `dark`: the 3D view in the Light or Dark theme's colours whatever the window uses, #4146)
 - `wheel_zoom_speed` (0.25 to 4, default 1: how far each wheel step zooms; the 3D mouse keeps its own speed)
 - `window_system` (Linux: `auto` (default: XWayland whenever there is an X display, native Wayland on niri and Hyprland), `wayland`, `x11`; saved in `graphics.json`, applies at the next start; `SOLIDCRAFT_WAYLAND` overrides it)
+- `windows_smooth_window_drag` (Windows only, default false: true draws nothing while the window is dragged by its title bar, so the window follows the pointer smoothly; animations and progress pause and the picture catches up when the drag ends; false keeps drawing during the drag, every move step rendering a frame, as the window moved before; applies at once; on other systems it is not listed and setting it is an error)
 - `zoom_reverse`
 - `zoom_stop_at_model` (default false: the 3D mouse and navigation bridge stop zoom at the surface in the middle of the view; drag-zoom holds its press point; independent of `zoom_to_cursor`)
 - `zoom_to_cursor`
@@ -1168,57 +1248,42 @@ channel; see [mcp.md](mcp.md).
 {"id":5,"method":"ui.screenshot","params":{"path":"/tmp/part.png"}}
 ```
 
-Preferences → Navigation → View navigator offers **Signed axes** (the original default),
-**Cube** and **Custom**; a right-click anywhere on the navigator offers the same three. This choice is
-saved independently of the mouse preset. The control channel selects it with
-`ui.prefs {"navigator_style":"axes"}`, `"cube"` or `"custom"`. Existing settings without this field
-keep signed axes. Signed-axis tips choose principal views; clicking an aligned tip again reverses
-the view.
+Preferences → Navigation → View navigator offers **Signed axes** (the default) and **Custom**; a
+right-click anywhere on the navigator offers the same two. This choice is saved independently of
+the mouse preset. The control channel selects it with `ui.prefs {"navigator_style":"axes"}` or
+`"custom"`. A saved style this version doesn't know loads as signed axes; `ui.prefs` and
+`view.navigator` refuse one with an error. Existing settings without this field keep signed
+axes. Signed-axis tips choose principal views; clicking an aligned tip again reverses the view.
 
-Custom draws a body in place of the cube, at the cube's size; a click on one of its faces looks
-straight at it, and with `navigator_fit` on it also frames the model, as the cube does. Picking
-Custom from the navigator's menu opens the Custom View Navigator panel, with OK and Cancel: pick
-the body in the view, then its texture (`themed`: the cube's colours; `modeled`: the body's own
-appearance and the view's edge colour) and whether the cube's rotation arrows and Home button go
-around it. The navigator previews the panel's choices while it is open. OK runs
-`view.navigator`, which scripts and `engine.execute` run too without opening anything:
+Custom draws a body in place of the signed axes; a click on one of its faces looks straight at it,
+and with `navigator_fit` on it also frames the model. Picking Custom from the navigator's menu
+opens the Custom View Navigator panel, with OK and Cancel: pick the body in the view, then its
+texture (`themed`: the theme's navigator colours; `modeled`: the body's own appearance and the
+view's edge colour) and whether the rotation arrows and Home button go around it. The navigator
+previews the panel's choices while it is open. OK runs `view.navigator`, which scripts and
+`engine.execute` run too without opening anything:
 `{"style": "custom", "body": "Body1", "texture": "modeled", "arrows": true, "home": false}` (any
-subset; `"body": null` goes back to the cube) returns the whole navigator. A body over 10,000
-triangles is refused, and so is a long or flat one: measured across the axes and the diagonals,
-its thinnest width must be at least a fifth of its widest. The body is kept as a snapshot with the
-preferences and in settings profiles (`settings.profile.*`, as `view_gizmo`), so it stays across
-runs and designs and travels with an exported profile.
+subset; `"body": null` goes back to the signed axes) returns the whole navigator. A body over
+10,000 triangles is refused, and so is a long or flat one: measured across the axes and the
+diagonals, its thinnest width must be at least a fifth of its widest. The body is kept as a
+snapshot with the preferences and in settings profiles (`settings.profile.*`, as `view_gizmo`), so
+it stays across runs and designs and travels with an exported profile.
 
 Hold Shift during an orbit gesture to snap to the nearest standard or diagonal view. This applies to
 right-drag, the Orbit navigation tool, and dragging either view navigator. Under the default preset,
-Shift+middle also orbits with snapping; middle alone pans. Cube faces choose principal views,
-and corners choose isometric views. The middle of each cube edge belongs to its face. Face names
-follow the up-axis preference; the small X/Y/Z triad shows world axes. Clicking the same face keeps that view.
-The inward-pointing arrows orbit by 90 degrees; the curved arrows at the upper right roll the
-view by 90 degrees. The Home button at the upper left returns to isometric and the lower-right circle
-fits the model.
+Shift+middle also orbits with snapping; middle alone pans. The custom navigator's inward-pointing
+arrows orbit by 90 degrees; the curved arrows at the upper right roll the view by 90 degrees, and
+its Home button at the upper left returns to isometric. View changes ease through intermediate
+orientations when Navigation animated view changes is enabled (the default), at the configured
+animation speed.
 
-The cube is subdued while idle. Hovering its area brightens the cube and navigation bar and
-reveals the surrounding controls; the picked face or corner gets a pale blue fill and
-blue outline. Moving away restores the subdued state. Navigation-bar controls also brighten
-when hovered or when a navigation tool is active.
-
-The cube has six face targets and eight corner targets, with no edge targets. Corner picking
-regions lie on the six flat faces, preserving sharp corners with no permanent subdivision
-lines. Hovering a corner highlights its parts on the adjacent visible faces together.
-
-The cube widget occupies a compact 112-point square in the viewport corner. A straight-on
-cube face is approximately 55 points wide; painting and picking scale together. Face labels
-are stretched vertically. View clicks ease through intermediate orientations when Navigation
-animated view changes is enabled (the default), at the configured animation speed.
-
-The cube runs `view.navigate` through the command engine. Programmatic callers pass `camera`
+`view.navigate` runs through the command engine. Programmatic callers pass `camera`
 and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
 `down`, `clockwise`, `counterclockwise`, `home`, `fit`). `fit: true` with a `direction` or a
 turn asks for the whole model to be framed from the new direction as well, as `home` does. The
 result contains `camera` and `fit`; UI callers apply the camera with their animation
 preference, without editing the design. The Navigation preference `navigator_fit` (off by
-default) makes every view chosen on the cube or on the axis gizmo frame the model this way:
+default) makes every view chosen on a view navigator frame the model this way:
 looking at its middle from the one distance that fits its bounding sphere, which Home then shares.
 
 Shift-orbit snapping includes 45-degree edge views and isometric corner views, with a

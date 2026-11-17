@@ -77,7 +77,7 @@ fn shown_features(app: &SolveApp, compact: bool) -> usize {
     if !compact && app.dialog.as_ref().is_some_and(|d| d.editing.is_some()) { app.session.doc.marker.unwrap_or(n) } else { n }
 }
 
-pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &[u64], depth: usize, acts: &mut Actions) {
+pub(super) fn rows(app: &mut SolveApp, rows: &mut Rows<'_>, component: u64, path: &[u64], depth: usize, acts: &mut Actions) {
     // Compact history: every feature of the component, sketches too, in history order with the
     // marker, in place of the timeline.
     let compact = app.preferences.history_in_browser;
@@ -105,7 +105,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     // nothing, so its mark is not worked out: in a long tree of placements of a part with a long
     // history, every folder's mark scanned the design's whole history on every frame (#6083).
     // With the model, only the folder's own features are read (#14850).
-    let (status, tip) = if open || !ui.is_rect_visible(row_rect(ui)) {
+    let (status, tip) = if open || !rows.next_visible() {
         (None, None)
     } else {
         #[cfg(test)]
@@ -113,7 +113,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         match current_model(app) {
             Some(model) => {
                 let worst = model.folder_status(app, component, compact);
-                (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_message(app, id)))
+                (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_tip(app, id)))
             }
             None => {
                 let ids: Vec<u64> = app
@@ -128,10 +128,10 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
             }
         }
     };
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(&key),
-        &Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() },
+    let r = node_row(
+        rows,
+        Spec { key: &key, ..Default::default() },
+        Row { depth, fold: Some(open), icon: "folder", label, status, status_tip: tip.as_ref(), ..Default::default() },
     );
     if r.fold || r.clicked {
         toggle(app, &key, compact);
@@ -166,19 +166,19 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     };
     // Only the rows in view, and one either side, are built; the others only take their place
     // (#14850). One order key buffer serves every row passed over.
-    let mut window = Window::new(ui);
+    let mut window = Window::new(rows.ui());
     let mut key = String::new();
     if !compact {
         for index in indices.into_iter().take_while(|&index| index < shown) {
             if window.builds() {
-                window.catch_up(ui);
-                let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index), None);
-                window.catch_up(ui);
+                window.catch_up(rows.ui());
+                let _ = feature_row(app, rows, acts, &here, index, depth + 1, None, mark(app, index), None);
+                window.catch_up(rows.ui());
             } else {
-                pass_over(app, ui, &here, index, &mut window, &mut key);
+                pass_over(app, rows, &here, index, &mut window, &mut key);
             }
         }
-        window.catch_up(ui);
+        window.catch_up(rows.ui());
         return;
     }
     let n = app.session.doc.features.len();
@@ -191,7 +191,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     let mut slots: Vec<(f32, usize)> = Vec::new();
     // Where dragged rows can be dropped, as in the History at the left: these slots and one
     // before the marker, each with the folder the rows join (#9565).
-    let drag_id = ui.scope_id().with(("sc_browser_history_drag", &scope));
+    let drag_id = rows.ui().scope_id().with(("sc_browser_history_drag", &scope));
     let mut dragged = app.tree.content.current_mut().feature_drags.get(&drag_id).cloned();
     let mut drops: Vec<DropSlot> = Vec::new();
     let mut marker_resp = None;
@@ -201,9 +201,9 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         if marker_resp.is_none() && index >= marker {
             drops.push(drop);
             // The marker row is always built: its drag must not lose its row.
-            window.catch_up(ui);
-            marker_resp = Some(marker_row(app, ui, depth + 1));
-            window.catch_up(ui);
+            window.catch_up(rows.ui());
+            marker_resp = Some(marker_row(app, rows.ui(), depth + 1));
+            window.catch_up(rows.ui());
         }
         slots.push((window.top, global(row.slot)));
         drops.push(DropSlot { y: window.top, ..drop });
@@ -211,13 +211,13 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         // row without sketches listed under it has none.
         let fold = row.listed.iter().any(|listed| !listed.reference).then(|| is_open(app, &crate::timeline_left::sketches_key(row.feature), false));
         if window.builds() {
-            window.catch_up(ui);
-            if feature_row(app, ui, acts, &here, index, depth + 1, fold, mark(app, index), Some(&mut dragged)) {
+            window.catch_up(rows.ui());
+            if feature_row(app, rows, acts, &here, index, depth + 1, fold, mark(app, index), Some(&mut dragged)) {
                 toggle(app, &crate::timeline_left::sketches_key(row.feature), false);
             }
-            window.catch_up(ui);
+            window.catch_up(rows.ui());
         } else {
-            pass_over(app, ui, &here, index, &mut window, &mut key);
+            pass_over(app, rows, &here, index, &mut window, &mut key);
         }
         if fold != Some(true) {
             continue;
@@ -225,11 +225,11 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         for listed in row.listed.iter().filter(|listed| !listed.reference) {
             let index = global(listed.index);
             if window.builds() {
-                window.catch_up(ui);
-                let _ = feature_row(app, ui, acts, &here, index, depth + 2, None, mark(app, index), Some(&mut dragged));
-                window.catch_up(ui);
+                window.catch_up(rows.ui());
+                let _ = feature_row(app, rows, acts, &here, index, depth + 2, None, mark(app, index), Some(&mut dragged));
+                window.catch_up(rows.ui());
             } else {
-                pass_over(app, ui, &here, index, &mut window, &mut key);
+                pass_over(app, rows, &here, index, &mut window, &mut key);
             }
         }
     }
@@ -237,14 +237,15 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     if marker_resp.is_none() {
         drops.push(DropSlot { y: window.top, position: end, feature: None });
     }
-    window.catch_up(ui);
-    let resp = marker_resp.unwrap_or_else(|| marker_row(app, ui, depth + 1));
+    window.catch_up(rows.ui());
+    let resp = marker_resp.unwrap_or_else(|| marker_row(app, rows.ui(), depth + 1));
     if !plan.rows.is_empty() {
-        slots.push((ui.cursor().min.y, end));
-        drops.push(DropSlot { y: ui.cursor().min.y, position: end, feature: None });
+        let bottom = rows.ui().cursor().min.y;
+        slots.push((bottom, end));
+        drops.push(DropSlot { y: bottom, position: end, feature: None });
     }
-    drag_marker(app, ui, &resp, &slots, marker);
-    drag_rows(app, ui, &plan, drag_id, dragged, &drops, resp.rect.center().y);
+    drag_marker(app, rows.ui(), &resp, &slots, marker);
+    drag_rows(app, rows.ui(), &plan, drag_id, dragged, &drops, resp.rect.center().y);
 }
 
 /// The Browser's model of the design as it is now: `None` while it is missing or made for
@@ -307,13 +308,14 @@ impl Window {
 
 /// A feature row out of view, passed over: it takes its place, its order key is remembered (so a
 /// Shift range across it is whole), and a reveal waiting for it scrolls to where it is.
-fn pass_over(app: &mut SolveApp, ui: &egui::Ui, here: &Here, index: usize, window: &mut Window, key: &mut String) {
+fn pass_over(app: &mut SolveApp, rows: &mut Rows<'_>, here: &Here, index: usize, window: &mut Window, key: &mut String) {
     let Some(id) = app.session.doc.features.get(index).map(|f| f.id) else { return };
-    let rect = window.pass(ui);
+    let rect = window.pass(rows.ui());
     write_order_key(here, id, key);
     app.tree.remember(key);
+    rows.pass(node_id(key), Selectable::Yes(0));
     if app.tree.reveal_feature.is_some() || app.tree.timeline_reveal.is_some() {
-        acknowledge_reveals(app, ui, here.path, id, rect);
+        acknowledge_reveals(app, rows.ui(), here.path, id, rect);
     }
 }
 
@@ -359,7 +361,7 @@ fn acknowledge_reveals(app: &mut SolveApp, ui: &egui::Ui, path: &[u64], id: u64,
 #[allow(clippy::too_many_arguments)]
 pub(super) fn body_rows(
     app: &mut SolveApp,
-    ui: &mut egui::Ui,
+    rows: &mut Rows<'_>,
     acts: &mut Actions,
     component: u64,
     path: &[u64],
@@ -370,18 +372,17 @@ pub(super) fn body_rows(
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
     let here = Here { component, path, scope: &scope, body_row: Some(body_row) };
     let from_view = acts.lit.features_from_view(app);
-    // A feature that built several bodies is listed under each: its rows need ids of their own.
-    ui.push_id(("body_features", body_row), |ui| {
-        for id in features {
-            let position = match current_model(app) {
-                Some(model) => model.position(&app.session, *id),
-                None => app.session.doc.features.iter().position(|f| f.id == *id),
-            };
-            let Some(index) = position else { continue };
-            let mark = if from_view.contains(&Some(*id)) { Mark::Here } else { Mark::None };
-            let _ = feature_row(app, ui, acts, &here, index, depth, None, mark, None);
-        }
-    });
+    // A feature that built several bodies is listed under each: its rows' keys are their own
+    // (`<body row>/s:<id>`), and so are their ids.
+    for id in features {
+        let position = match current_model(app) {
+            Some(model) => model.position(&app.session, *id),
+            None => app.session.doc.features.iter().position(|f| f.id == *id),
+        };
+        let Some(index) = position else { continue };
+        let mark = if from_view.contains(&Some(*id)) { Mark::Here } else { Mark::None };
+        let _ = feature_row(app, rows, acts, &here, index, depth, None, mark, None);
+    }
 }
 
 /// A place in the browser's History where dragged rows can land: its height, the timeline
@@ -438,7 +439,7 @@ fn lit_by_selection(app: &SolveApp) -> BTreeSet<u64> {
 #[allow(clippy::too_many_arguments)]
 fn feature_row(
     app: &mut SolveApp,
-    ui: &mut egui::Ui,
+    rows: &mut Rows<'_>,
     acts: &mut Actions,
     here: &Here,
     index: usize,
@@ -460,8 +461,9 @@ fn feature_row(
     // selected in the tree, as NX marks the feature of a picked face; the session's selection
     // stays the face or edge.
     let [_, picked] = acts.lit.features_from_view(app);
-    let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && picked == Some(id);
-    let selected = app.session.selection.contains(&Sel::Feature { id }) || by_geometry;
+    let chosen = app.session.selection.iter().any(|s| crate::timeline::feature_of_sel(&app.session.doc, s) == Some(id));
+    let by_geometry = !chosen && picked == Some(id);
+    let selected = chosen || by_geometry;
     let mut order_key = String::new();
     write_order_key(here, id, &mut order_key);
     app.tree.remember(&order_key);
@@ -475,13 +477,13 @@ fn feature_row(
         Some(model) => model.status(app, id),
         None => crate::timeline::feature_status(app, id),
     };
-    let tip = status.and_then(|_| crate::timeline::feature_message(app, id));
+    let tip = status.and_then(|_| crate::timeline::feature_tip(app, id));
     // A cut feature has a dashed outline until Paste moves it.
     let cut = app.cut.features.contains(&id);
-    let r = draw_row(
-        ui,
-        ui.scope_id().with(("browser_feature", id)),
-        &Row {
+    let r = node_row(
+        rows,
+        Spec { key: &order_key, item: true, ..Default::default() },
+        Row {
             depth,
             fold,
             eye,
@@ -495,7 +497,7 @@ fn feature_row(
             action,
             mark,
             status,
-            tip: tip.as_deref(),
+            status_tip: tip.as_ref(),
             ..Default::default()
         },
     );
@@ -517,21 +519,21 @@ fn feature_row(
     let scope = here.scope;
     if let Some(rect) = r.rect {
         crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
-        acknowledge_reveals(app, ui, path, id, rect);
+        acknowledge_reveals(app, rows.ui(), path, id, rect);
     }
     if r.slow_rename {
-        click_select(app, ui, order_key, Some(Sel::Feature { id }));
-        start_inline_rename(app, crate::context_menu::RenameWhat::Feature(id), &r);
+        click_select(app, r.how.as_ref(), Some(Sel::Feature { id }));
+        start_inline_rename(app, crate::context_menu::RenameWhat::Feature(id), r.name_at());
     } else if r.double {
         // Inside a placement, the feature's component is active while it is edited, and the one
         // active before comes back when the editor ends (#12720).
         app.edit_feature_in(id, Some((component, path)));
-    } else if r.clicked && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
+    } else if r.clicked && !crate::timeline::pick_feature_into_dialog(app, id, rows.ui().input(|i| i.modifiers)) {
         // An open dialog whose active input takes features (a pattern, the chat's picker) gets the
         // row, as in the other History layouts (#13170).
-        click_select(app, ui, order_key, Some(Sel::Feature { id }));
+        click_select(app, r.how.as_ref(), Some(Sel::Feature { id }));
     }
-    inline_rename(app, ui, &r, &label);
+    inline_rename(app, rows.ui(), r.name_at(), &label);
     if r.hovered {
         acts.hover_feature = Some(id);
         acts.hovered = true;
@@ -657,7 +659,7 @@ mod tests {
                 semantic_content::begin(&mut h.app, ui.ctx());
                 semantic_content::render_scope(&mut h.app, ui, ContentOwner::BROWSER, ContentRequest::Browser { shrink_height: false }, |app, ui| {
                     let mut actions = Actions::default();
-                    rows(app, ui, 0, &[], 0, &mut actions);
+                    present(app, ui, &mut actions, (false, true), |app, panel, actions| rows(app, panel, 0, &[], 0, actions));
                     actions
                 });
                 semantic_content::finalize(&mut h.app, ui.ctx());
@@ -697,8 +699,7 @@ mod tests {
                     prepare_model(app);
                     let mut actions = Actions::default();
                     let scrolled = egui::ScrollArea::vertical().max_height(300.0).vertical_scroll_offset(offset).show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        rows(app, ui, 0, &[], 0, &mut actions);
+                        present(app, ui, &mut actions, (false, true), |app, panel, actions| rows(app, panel, 0, &[], 0, actions));
                     });
                     height = scrolled.content_size.y;
                     actions
@@ -1002,6 +1003,26 @@ mod tests {
         assert!(item.enabled);
         crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
         assert_eq!(app.session.selection, [Sel::Feature { id: feature }]);
+    }
+
+    #[test]
+    fn an_offset_plane_is_one_selection_in_the_features_the_history_and_the_view() {
+        let mut h = Harness::new();
+        let plane = h.app.run("construct.plane.offset", json!({"base":"XY","offset":31,"name":"Shelf"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(2);
+        let doc = h.app.session.doc.clone();
+        // A Features row or History icon picks the feature: the view lights the plane by name.
+        assert_eq!(crate::viewport::displayed_selection(&h.app, &Sel::Feature { id: plane }), [Sel::Plane { name: "Shelf".into() }]);
+        // The plane picked in the view (or the Construction row) is that same feature in the lists.
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &Sel::Plane { name: "Shelf".into() }), Some(plane));
+        h.app.session.selection = vec![Sel::Plane { name: "Shelf".into() }];
+        h.frames(2);
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &h.app.session.selection[0]), Some(plane));
+        // The plane picked in the view is also what a drag, Copy or Delete from its row acts on.
+        assert_eq!(crate::timeline::selected_feature_ids(&h.app), [plane]);
+        assert_eq!(crate::timeline_left::drag_features(&mut h.app, plane, true), [plane]);
+        // An origin plane is no feature, and an unknown name maps to nothing.
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &Sel::Plane { name: "XY".into() }), None);
     }
 
     #[test]
@@ -1940,5 +1961,46 @@ mod tests {
         assert!(h.app.session.selection.is_empty(), "hovering sketch doesn't select");
         h.step(&json!({"move":[5, 5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
+    }
+
+    #[test]
+    fn timeline_hover_marks_feature_and_sketch_in_browser() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.ui.show_timeline = true;
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"MySketch"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.doc.find_feature("MySketch").unwrap().id;
+        h.app.tree.expanded.insert("c0/features".into());
+        h.app.tree.expanded.insert("c0/sketches".into());
+        h.frames(2);
+
+        // Hovering a feature on the timeline sets hover_feature and marks the feature in the browser.
+        let item_feature = crate::scenario::handle_at("timeline:Round").unwrap();
+        h.step(&json!({"move":[item_feature.x, item_feature.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [Some(round), None]);
+
+        // Hovering a sketch on the timeline sets hover_feature and marks the sketch in the browser.
+        let item_sketch = crate::scenario::handle_at("timeline:MySketch").unwrap();
+        h.step(&json!({"move":[item_sketch.x, item_sketch.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(sketch));
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [Some(sketch), None]);
+        let sketches = entries(&h.app, 0, "sketches");
+        let sketch_entry = sketches.iter().find(|e| e.key == sketch.to_string()).unwrap();
+        assert_eq!(lit.row(&h.app, sketch_entry), (false, crate::ui_kit::Mark::Here));
+
+        // Moving the cursor away clears the hover and the browser marks.
+        h.step(&json!({"move":[5, 5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, None);
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [None, None]);
+        assert_eq!(lit.row(&h.app, sketch_entry), (false, crate::ui_kit::Mark::None));
     }
 }

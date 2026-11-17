@@ -10,9 +10,11 @@ workspace = true
 
 [dependencies]
 solidcraft-viewport = { workspace = true }
+solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
 solidcore-tess = { workspace = true }
 solidcraft-color = { workspace = true }
+solidcraft-display-units = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }

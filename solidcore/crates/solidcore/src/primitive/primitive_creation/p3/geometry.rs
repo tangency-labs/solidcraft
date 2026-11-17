@@ -20,7 +20,7 @@
 //! are returned instead (`SER`). The path's unused normal is not computed.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
-use crate::curve::curve::p3::compute_crvs_normal;
+use crate::curve::curve::p3::{compute_crvs_normal, compute_crvs_normal_written};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -47,6 +47,56 @@ pub(super) fn bspline(curve: &Curve) -> Option<BSplineCurve> {
         CurveKind::Hyperbola(c) => Some(c.base().clone()),
         _ => None,
     }
+}
+
+/// The curve as `(SmBSplineCurve*)curve` reaches it: its B-spline with the NURB that
+/// `GetOrCreateGwNurbPointer` makes when missing. A line or conic builds its NURB lazily
+/// here, where upstream's `SmLine` and `SmEllipse` are `SmBSplineCurve`s that hold one, so
+/// [`bspline`]'s copy of the bare base would have none. The caller's owner and context are
+/// kept for the analytic generation; `MakeNurb`'s ordinary status is ignored, as
+/// `GetOrCreateGwNurbPointer` ignores it, and `Unported` propagates. `None` for a kind that
+/// is not a B-spline.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from `MakeNurb`.
+pub(in crate::primitive::primitive_creation) fn bspline_with_nurb(
+    kernel: &Kernel,
+    curve: &Curve,
+) -> Result<Option<BSplineCurve>> {
+    let Some(base) = bspline(curve) else {
+        return Ok(None);
+    };
+    if base.gw_nurb().is_some() {
+        return Ok(Some(base));
+    }
+    Ok(Some(match curve.kind() {
+        CurveKind::Line(line) => {
+            let mut line = line.clone();
+            ignore_status(line.make_nurb_owned(curve.owner()))?;
+            line.base().clone()
+        }
+        CurveKind::Ellipse(ellipse) => {
+            let mut ellipse = ellipse.clone();
+            ignore_status(ellipse.make_nurb_owned_with_edge_tol(
+                kernel,
+                curve.owner(),
+                curve.owner_zone_tol_3d(),
+            ))?;
+            ellipse.base().clone()
+        }
+        CurveKind::Parabola(parabola) => {
+            let mut parabola = parabola.clone();
+            ignore_status(parabola.make_nurb(curve.owner()))?;
+            parabola.base().clone()
+        }
+        CurveKind::Hyperbola(hyperbola) => {
+            let mut hyperbola = hyperbola.clone();
+            ignore_status(hyperbola.make_nurb(curve.owner()))?;
+            hyperbola.base().clone()
+        }
+        _ => base,
+    }))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -307,10 +357,12 @@ pub fn prepare_curve_sweep(
     let mut orientation = None;
     if options.orient_profile_perpendicular_to_path {
         let as_curves: Vec<_> = profiles.iter().cloned().map(Curve::from).collect();
-        let mut normal = match compute_crvs_normal(k, &as_curves) {
-            Ok(normal) => normal,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(e) if e.upstream_status() == Some(1001) => {
+        // Only `SM_ERR` takes the fallback; any other status keeps the normal
+        // `ComputeCrvsNormal` wrote ((0, 0, 1) for a zero normal), as upstream and the
+        // fork test `== SM_ERR` here
+        let (written, status) = compute_crvs_normal_written(k, &as_curves)?;
+        let mut normal = match status {
+            Some(e) if e.upstream_status() == Some(1001) => {
                 let first = profiles
                     .first()
                     .ok_or_else(|| SolidError::primitive_failed(OP, "no profiles to sweep"))?;
@@ -326,7 +378,7 @@ pub fn prepare_curve_sweep(
                         .unwrap_or(Vec3::UNDEF),
                 )
             }
-            Err(error) => return Err(error),
+            _ => written,
         };
         // The fork no longer computes the path's normal (unused, and a straight path has
         // none; c8f6a31).

@@ -11,6 +11,7 @@
 //! where the assembly is, at rest; the design does not move.
 
 use std::collections::BTreeMap;
+use std::f64::consts::TAU;
 
 use serde_json::Value;
 use solidcore_record::Vec3;
@@ -45,7 +46,9 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Simulate Motion",
          gravity?: [x,y,z] mm/s² (default [0,0,-9806.65]) → groups: [{group, occurrences, mass_kg}] (the moving rigid groups, as \
          assembly.mass_properties finds them), joints: [ids] and links: [indices] simulated, samples: [{time, groups: [{group, \
          origin, x, y, z}] (each moving group's frame, world mm), joints: [{joint, values}] (deg and mm), energy: {kinetic, \
-         potential} (J)}], steps, max_constraint_error_mm, redundant_equations, warnings. Starts where the assembly is, at rest, \
+         potential} (J)}], steps, max_constraint_error (the maximum absolute equation residual at output samples, \
+         in mm for translations, radians for angular links and dimensionless for axis alignment), redundant_equations, warnings. \
+         Starts where the assembly is, at rest, \
          every body at its material's density; revolute, slider, cylindrical, planar, ball and rigid joints between rigid groups, \
          and gear, rack-and-pinion and screw links; a joint inside one rigid group or between fixed groups is left out. Read-only: \
          the design does not move",
@@ -77,6 +80,8 @@ pub(crate) struct Mapping {
     bodies: BTreeMap<usize, Placed>,
     /// The joints simulated: (id, kind), in solver order.
     joints: Vec<(u64, JointKind)>,
+    /// Effective document values, including the initial angular branch (radians and mm).
+    initial_values: BTreeMap<u64, Vec<f64>>,
     links: Vec<usize>,
     groups: Vec<SimulatedGroup>,
     warnings: Vec<String>,
@@ -98,7 +103,14 @@ pub(crate) fn model_of(s: &Session, gravity: Vec3) -> Result<(Model, Mapping)> {
     let mass = assembly(&doc, &state)?;
     let group_of: BTreeMap<u64, usize> = mass.occurrences.iter().map(|o| (o.occurrence, o.group)).collect();
     let mut model = Model { gravity, ..Model::default() };
-    let mut map = Mapping { bodies: BTreeMap::new(), joints: Vec::new(), links: Vec::new(), groups: Vec::new(), warnings: mass.warnings.clone() };
+    let mut map = Mapping {
+        bodies: BTreeMap::new(),
+        joints: Vec::new(),
+        initial_values: joints::joint_values(&doc.assembly),
+        links: Vec::new(),
+        groups: Vec::new(),
+        warnings: mass.warnings.clone(),
+    };
     for g in &mass.groups {
         if g.fixed {
             continue;
@@ -173,7 +185,7 @@ pub(crate) fn model_of(s: &Session, gravity: Vec3) -> Result<(Model, Mapping)> {
             joints::resolve_origin(&doc, &state, o).map_err(|e| bad(CMD, format!("joint `{}`: its origin is lost ({e})", j.name)))
         };
         let (fa, fb) = (resolve(&j.a)?, resolve(&j.b)?);
-        let wa = mat_mul(&joints::occurrence_world(&doc, j.a.occurrence), &fa);
+        let wa = mat_mul(&joints::occurrence_world(&doc, j.a.occurrence), &j.offset_frame_a(fa));
         let unmate = mat_inverse(&joints::flip_of(j)).ok_or_else(|| bad(CMD, format!("joint `{}`: its offset can't be undone", j.name)))?;
         let wb = mat_mul(&mat_mul(&joints::occurrence_world(&doc, j.b.occurrence), &fb), &unmate);
         simulated.insert(j.id, model.joints.len());
@@ -223,13 +235,16 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, format!("the run would return more than {MAX_OUTPUT} numbers: take a longer output_interval")));
     }
     let traj = dyn_::simulate(&model, &settings).map_err(|e| bad(CMD, e.to_string()))?;
+    let first = traj.samples.first().ok_or_else(|| bad(CMD, "the simulation returned no samples"))?;
+    let mut ball_near = BTreeMap::new();
+    let samples = traj.samples.iter().map(|smp| sample(&map, smp, first, &mut ball_near)).collect::<Result<Vec<_>>>()?;
     let out = SimulateResult {
         groups: map.groups.clone(),
         joints: map.joints.iter().map(|(id, _)| *id).collect(),
         links: map.links.clone(),
-        samples: traj.samples.iter().map(|smp| sample(&map, smp)).collect(),
+        samples,
         steps: traj.stats.steps,
-        max_constraint_error_mm: traj.stats.max_constraint_error,
+        max_constraint_error: traj.stats.max_constraint_error,
         redundant_equations: traj.stats.redundant_equations,
         warnings: map.warnings.clone(),
         param_warnings: Vec::new(),
@@ -237,7 +252,7 @@ fn run(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(out).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-fn sample(map: &Mapping, s: &dyn_::Sample) -> SimulationSample {
+fn sample(map: &Mapping, s: &dyn_::Sample, first: &dyn_::Sample, ball_near: &mut BTreeMap<u64, [f64; 3]>) -> Result<SimulationSample> {
     let v = |v: Vec3| [v.x, v.y, v.z];
     let groups = map
         .bodies
@@ -253,18 +268,59 @@ fn sample(map: &Mapping, s: &dyn_::Sample) -> SimulationSample {
     let joints = map
         .joints
         .iter()
-        .zip(&s.joints)
-        .map(|((id, kind), j)| JointValues {
-            joint: *id,
-            values: j.values.iter().enumerate().map(|(i, x)| if kind.is_angle(i) { x.to_degrees() } else { *x }).collect(),
+        .enumerate()
+        .map(|(at, (id, kind))| {
+            let invalid = || bad(CMD, format!("the simulation returned invalid values for joint {id}"));
+            let j = s.joints.get(at).ok_or_else(invalid)?;
+            let initial = map.initial_values.get(id).ok_or_else(invalid)?;
+            if j.values.len() != kind.dofs().len() {
+                return Err(invalid());
+            }
+            let values = if *kind == JointKind::Ball {
+                let [x, y, z] = j.values.as_slice() else { return Err(invalid()) };
+                let near = match ball_near.get(id) {
+                    Some(near) => *near,
+                    None => {
+                        let [a, b, c] = initial.as_slice() else { return Err(invalid()) };
+                        [*a, *b, *c]
+                    }
+                };
+                // Euler angles have no unique winding. Follow the nearest branch at each
+                // returned orientation, beginning with the design's own yaw, pitch and roll.
+                let values = joints::ball_values_from_rotation_vector(Vec3::new(*x, *y, *z), near).ok_or_else(invalid)?;
+                let reported: Vec<f64> = values.into_iter().map(f64::to_degrees).collect();
+                if !reported.iter().all(|value| value.is_finite()) {
+                    return Err(invalid());
+                }
+                ball_near.insert(*id, values);
+                reported
+            } else {
+                j.values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, value)| {
+                        let reported = if kind.is_angle(i) {
+                            let start = initial.get(i).ok_or_else(invalid)?;
+                            let first = first.joints.get(at).and_then(|j| j.values.get(i)).ok_or_else(invalid)?;
+                            // The solver counts turns at integration steps. Restore only the
+                            // document's initial whole-turn branch, using a constant offset.
+                            (value + TAU * ((start - first) / TAU).round()).to_degrees()
+                        } else {
+                            *value
+                        };
+                        if reported.is_finite() { Ok(reported) } else { Err(invalid()) }
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            };
+            Ok(JointValues { joint: *id, values })
         })
-        .collect();
-    SimulationSample {
+        .collect::<Result<Vec<_>>>()?;
+    Ok(SimulationSample {
         time: s.time,
         groups,
         joints,
         energy: SimulationEnergy { kinetic: s.energy.kinetic * 1e-6, potential: s.energy.gravity * 1e-6 },
-    }
+    })
 }
 
 #[cfg(test)]

@@ -33,6 +33,7 @@ profile" tag. Source today: Design page (`prefs/design.rs`).
 |---|---|---|---|---|---|---|
 | Origin plane names | Segmented: "XY . XZ . YZ" / "Top . Front . Right" | `Prefs.origin_plane_names` (`OriginPlaneNames`: Xyz, TopFrontRight) | Xyz | none | none | Moves from Interface. |
 | Hide the Origin folder in new designs | Checkbox | `Prefs.hide_origin` | `false` | none | none | |
+| Origin axes across the whole view | Checkbox | `Prefs.origin_axes_across_view` | `false` | "Draw the X, Y and Z origin axes through the origin to the edges of the view, in both directions. Off: short axes at the origin." | none | Off by default: short solid-then-dashed axes. Also available in the bottom bar's Display menu. |
 
 ## Linked designs
 

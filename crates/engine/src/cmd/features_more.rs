@@ -48,19 +48,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("rib")
         .contract(&RIB_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane, or across the curves when normal); depth? (default: to the next face); flip?: bool (fill to the other side); direction?: in_plane|normal (grow across the sketch plane, the default, or along its normal)"),
+        .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane, or across the curves when normal); depth? (default: to the next face); flip?: bool (fill to the other side); direction?: in_plane|normal (grow across the sketch plane, the default, or along its normal); extend?: bool (run the curves' open ends on to the body; default false)"),
     CommandSpec::new("solid.web", "Web", crate::checked!("solid.web", web))
         .at("SOLID", "CREATE")
         .icon("web")
         .contract(&RIB_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal"),
+        .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal; extend?: bool (default false)"),
     CommandSpec::new("solid.emboss", "Emboss", crate::checked!("solid.emboss", emboss))
         .at("SOLID", "CREATE")
         .icon("emboss")
         .contract(&EMBOSS_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete exterior cylindrical wall (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
+        .params("sketch, profiles?; depth; mode?: emboss|deboss; targets?; face?: world point [x,y,z] selecting a planar or complete cylindrical wall, outside or a bore (inferred when exactly one supported tangent cylinder matches the selected profiles)"),
     CommandSpec::new("solid.replace_face", "Replace Face", crate::checked!("solid.replace_face", replace_face))
         .contract(&REPLACE_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
@@ -197,7 +197,9 @@ fn rib_like(s: &mut Session, p: &Value, cmd: &str, web: bool) -> Result<Value> {
         Some("normal") => true,
         Some(o) => return Err(bad(cmd, format!("unknown direction `{o}` (in_plane or normal)"))),
     };
-    add_feature(s, p, FeatureKind::Rib { sketch: SketchId(sketch), curves, thickness, depth, flip, web, normal })
+    // Opt-in (#13019): without `extend` a rib ends where its curves end, as before.
+    let extend = bool_(p, "extend").unwrap_or(false);
+    add_feature(s, p, FeatureKind::Rib { sketch: SketchId(sketch), curves, thickness, depth, flip, web, normal, extend })
 }
 
 fn rib(s: &mut Session, p: &Value) -> Result<Value> {
@@ -291,7 +293,7 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
                 targets = vec![name.to_owned()];
                 Some(face)
             }
-            _ => return Err(bad(cmd, "only planar faces and complete exterior cylindrical walls support emboss")),
+            _ => return Err(bad(cmd, "only planar faces and complete cylindrical walls, outside or a bore, support emboss")),
         }
     } else {
         let inferred = infer_emboss_selection(s, sketch, &profiles, &depth, deboss, &targets)?;

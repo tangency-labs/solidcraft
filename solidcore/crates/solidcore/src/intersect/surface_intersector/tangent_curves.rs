@@ -163,7 +163,7 @@ fn covers_crossing(
 
 /// Removes curve `ii` from the five output arrays (`delete pC; RemoveAt(ii)` and the
 /// guarded `RemoveAt`s of the associated arrays).
-fn remove_curve(out: &mut TsectCurves, ii: usize) {
+pub(super) fn remove_curve(out: &mut TsectCurves, ii: usize) {
     if ii < out.curves_3d.len() {
         out.curves_3d.remove(ii);
     }

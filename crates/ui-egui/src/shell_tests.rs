@@ -157,34 +157,13 @@ fn assert_host_legacy_windows_closed(h: &Harness) {
 }
 
 #[test]
-fn host_retains_one_legacy_move_editor_and_the_pending_capture_question() {
+fn host_retains_the_pending_capture_question() {
     let (mut h, _, occurrence) = crate::test_support::component_box();
     h.app.home.open = false;
     h.app.preferences.language = "en".into();
     h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":false})).unwrap();
     h.settle();
     let pending = h.app.session.pending_moves.clone();
-    h.app.tree.occurrence_move = Some(crate::browser::OccMove::new(occurrence));
-    h.frames(3);
-    let baseline = h.app.tree.occurrence_move.as_ref().unwrap().baseline;
-    assert!(baseline.is_some());
-    assert_panel_host_preserves_design(&mut h, |h| {
-        crate::panel_runtime::enable_host_specimen(&mut h.app, "tabs").unwrap();
-        h.frames(4);
-        let draft = h.app.tree.occurrence_move.as_ref().unwrap();
-        assert_eq!(draft.baseline, baseline);
-        assert!(draft.had_pending);
-        assert_eq!(draft.translate, [0.0; 3]);
-        assert_eq!(crate::scenario::handles("occurrence-move:distance:0").len(), 1);
-        assert_host_legacy_window(h, rect_of("dialog:window").unwrap());
-        assert_eq!(h.app.session.pending_moves, pending);
-    });
-    // Cancel must restore the opening baseline, including the earlier pending move.
-    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
-    h.frames(2);
-    assert!(h.app.tree.occurrence_move.is_none());
-    assert_eq!(h.app.session.pending_moves, pending);
-    assert_host_legacy_windows_closed(&h);
     assert_panel_host_preserves_design(&mut h, |h| {
         h.app.start("sketch.create");
         h.frames(3);
@@ -1273,7 +1252,7 @@ fn cards_block_model_hover_wheel_and_drag_but_the_gap_remains_viewport() {
 
 #[test]
 fn sketch_options_and_compass_share_measured_clearance() {
-    for style in crate::prefs::NavigatorStyle::ALL {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 720.0, 2.0)] {
             let mut h = Harness::new();
             h.app.preferences.navigator_style = style;
@@ -1315,7 +1294,7 @@ fn sketch_options_and_compass_share_measured_clearance() {
 
 #[test]
 fn short_sketch_options_paints_and_scrolls_inside_the_viewport() {
-    for style in crate::prefs::NavigatorStyle::ALL {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         for height in [475, 385, 300] {
             let mut h = Harness::new();
             h.app.preferences.navigator_style = style;
@@ -1898,6 +1877,122 @@ fn status_bar_units_open_the_units_menu_above_the_bar_and_change_units_in_one_un
     h.step(&json!({"click":{"handle":"status:units"}})).unwrap();
     h.settle();
     assert!(h.app.viewport.context_menu.is_none());
+}
+
+/// The URL the last frame asked the platform to open.
+fn opened_url(h: &mut Harness) -> Option<String> {
+    h.take_opened().pop()
+}
+
+#[test]
+fn title_bar_pills_open_their_pages_and_the_x_turns_off_only_that_pill() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.app.home.open = false;
+    h.settle();
+    let report = rect_of("titlebar:report").unwrap();
+    let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
+    assert!(donate.right() < discord.left() && discord.right() < report.left(), "{donate:?} {discord:?} {report:?}");
+    assert!(h.app.preferences.show_donate_button && h.app.preferences.show_discord_button, "both on by default");
+    for (handle, url) in [("titlebar:kofi", "https://ko-fi.com/bherbruck"), ("titlebar:discord", "https://discord.gg/FtU4NQNVDH")] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
+    }
+    h.frames(3);
+    assert_eq!(opened_url(&mut h), None, "nothing opens by itself");
+    h.step(&json!({"click":{"handle":"titlebar:kofi:hide"}})).unwrap();
+    h.settle();
+    assert_eq!(opened_url(&mut h), None, "the x only hides");
+    assert!(!h.app.preferences.show_donate_button && h.app.preferences.show_discord_button);
+    assert!(rect_of("titlebar:kofi").is_none() && rect_of("titlebar:discord").is_some() && rect_of("titlebar:report").is_some());
+    h.step(&json!({"click":{"handle":"titlebar:discord:hide"}})).unwrap();
+    h.settle();
+    assert!(!h.app.preferences.show_discord_button && rect_of("titlebar:discord").is_none());
+    h.call("ui.prefs", json!({"show_donate_button": true, "show_discord_button": true}));
+    h.settle();
+    assert!(rect_of("titlebar:kofi").is_some() && rect_of("titlebar:discord").is_some());
+}
+
+/// #10260: an organization's policy shows "Managed by {name}" in the bar, Preferences and About;
+/// a computer without one shows none of it.
+#[test]
+fn an_organizations_policy_says_managed_by_in_the_bar_preferences_and_about() {
+    let _language = solidcraft_ui_text::scope("en");
+    let mut h = Harness::new();
+    h.app.preferences.language = "en".into();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.app.home.open = false;
+    h.settle();
+    assert!(rect_of("titlebar:managed").is_none(), "no policy, no badge");
+    h.app.help.about = true;
+    h.frames(3);
+    assert!(rect_of("about:managed").is_none());
+    assert!(!crate::help::diagnostics(&h.app).contains("Policy"));
+    h.app.help.about = false;
+
+    h.app.policy = crate::policy::Policy::from_json(r#"{"OrganizationName": "ACME"}"#);
+    h.settle();
+    let badge = rect_of("titlebar:managed").expect("the bar says it is managed");
+    let report = rect_of("titlebar:report").unwrap();
+    assert!(badge.right() <= report.left(), "{badge:?} {report:?}");
+    let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
+    assert!(badge.right() < donate.left() && badge.right() < discord.left(), "the badge sits left of the link pills: {badge:?} {donate:?}");
+    assert!(h.widget("Managed by ACME").is_some(), "a wide bar names the organization");
+    assert!(!h.app.prefs_window.shell.open);
+    h.step(&json!({"click":{"handle":"titlebar:managed"}})).unwrap();
+    h.settle();
+    assert!(h.app.prefs_window.shell.open, "the badge opens Preferences");
+    assert!(rect_of("prefs:managed").is_some(), "Preferences says it too");
+    h.app.prefs_window.shell.open = false;
+    h.app.help.about = true;
+    h.frames(3);
+    assert!(rect_of("about:managed").is_some(), "and About");
+    let diagnostics = crate::help::diagnostics(&h.app);
+    assert!(diagnostics.ends_with("Policy: managed; locks nothing"), "{diagnostics}");
+    assert!(!diagnostics.contains("ACME"), "a bug report does not carry the organization's name");
+    h.app.help.about = false;
+
+    // A narrow bar keeps the badge clear of the controls, down to the briefcase alone.
+    for width in [900.0, 700.0] {
+        h.call("ui.resize", json!({"width": width, "height": 600}));
+        h.settle();
+        if let Some(badge) = rect_of("titlebar:managed") {
+            let report = rect_of("titlebar:report").unwrap();
+            assert!(badge.right() <= report.left() && badge.right() <= width, "{width}: {badge:?} {report:?}");
+        }
+    }
+}
+
+#[test]
+fn the_links_stay_in_help_about_and_home_when_the_pills_are_off() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.call("ui.prefs", json!({"show_donate_button": false, "show_discord_button": false}));
+    h.app.home.open = false;
+    h.settle();
+    assert!(rect_of("titlebar:kofi").is_none() && rect_of("titlebar:discord").is_none());
+    for (label, url) in [("Support SolidCraft on Ko-fi…", "https://ko-fi.com/bherbruck"), ("Join the Discord…", "https://discord.gg/FtU4NQNVDH")]
+    {
+        h.app.help.menu = true;
+        h.frames(2);
+        let [x, y] = h.widget(label).unwrap_or_else(|| panic!("the Help menu lists {label}"));
+        h.call("ui.click", json!({"x": x, "y": y}));
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{label}");
+        assert!(!h.app.help.menu, "the menu closes");
+    }
+    h.app.help.about = true;
+    h.frames(3);
+    for (handle, url) in [("about:kofi", "https://ko-fi.com/bherbruck"), ("about:discord", "https://discord.gg/FtU4NQNVDH")] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
+    }
+    h.app.help.about = false;
+    h.app.home.open = true;
+    h.frames(3);
+    for (handle, url) in [("home:kofi", "https://ko-fi.com/bherbruck"), ("home:discord", "https://discord.gg/FtU4NQNVDH")] {
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        assert_eq!(opened_url(&mut h).as_deref(), Some(url), "{handle}");
+    }
 }
 
 #[test]

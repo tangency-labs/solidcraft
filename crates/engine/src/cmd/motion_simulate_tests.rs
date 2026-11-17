@@ -40,6 +40,159 @@ fn frame(s: &mut Session) {
     part(s, "Frame", true, [200.0, 20.0, 20.0], [-50.0, 10.0, 0.0]);
 }
 
+/// A joint whose frames and moving cube's centre are at the world origin.
+fn joint_at(kind: &str, values: &[f64]) -> (Session, u64) {
+    let mut s = Session::default();
+    frame(&mut s);
+    part(&mut s, "Ball", false, [10.0; 3], [-5.0; 3]);
+    let joint = run(
+        &mut s,
+        "joint.create",
+        json!({"type":kind, "name":"Test joint", "flip":true,
+               "a":{"occurrence":"Frame", "point":[0,0,0], "z":[0,0,1], "x":[1,0,0]},
+               "b":{"occurrence":"Ball", "point":[0,0,0], "z":[0,0,1], "x":[1,0,0]}}),
+    )["joint"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "joint.drive", json!({"joint":joint, "values":values}));
+    (s, joint)
+}
+
+fn check_stationary_ball(values: [f64; 3], expected_axes: [[f64; 3]; 3]) {
+    let (mut s, joint) = joint_at("ball", &values);
+    let listed = run(&mut s, "joint.list", json!({}));
+    let listed = listed["joints"].as_array().unwrap().iter().find(|j| j["id"] == joint).unwrap();
+    for (i, value) in values.iter().enumerate() {
+        assert!((num(&listed["values"][i]["value"]) - value).abs() < 1e-8, "{listed}");
+    }
+    let (doc, model, pending, undo) = (s.doc.clone(), s.model.state(), s.pending_moves.clone(), s.undo.len());
+    let r = run(&mut s, "motion.simulate", json!({"duration":0.002, "output_interval":0.001, "gravity":[0,0,0]}));
+    assert_eq!(r["joints"], json!([joint]));
+    assert_eq!(r["samples"].as_array().map(Vec::len), Some(3));
+    for sample in r["samples"].as_array().unwrap() {
+        let pose = &sample["groups"][0];
+        for i in 0..3 {
+            assert!(num(&pose["origin"][i]).abs() < 1e-8, "{pose}");
+        }
+        for (key, expected) in ["x", "y", "z"].into_iter().zip(expected_axes) {
+            for (i, want) in expected.iter().enumerate() {
+                assert!((num(&pose[key][i]) - want).abs() < 1e-8, "{values:?}: {pose}");
+            }
+        }
+        // Report the document's yaw, pitch and roll coordinates.
+        assert_eq!(sample["joints"][0]["joint"], joint);
+        for (i, want) in values.iter().enumerate() {
+            assert!((num(&sample["joints"][0]["values"][i]) - want).abs() < 1e-6, "{values:?}: {sample}");
+        }
+    }
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "simulation replaced the document");
+    assert!(std::sync::Arc::ptr_eq(&model, &s.model.state()), "simulation replaced the model");
+    assert_eq!(s.pending_moves, pending);
+    assert_eq!(s.undo.len(), undo);
+}
+
+#[test]
+fn a_ball_joint_reports_its_z_turn_in_joint_list_coordinates() {
+    // A right-handed 90° turn about Z is yaw=90, pitch=roll=0 in joint.list.
+    check_stationary_ball([90.0, 0.0, 0.0], [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
+}
+
+#[test]
+fn ball_joint_reports_preserve_negative_pitch_and_whole_turn_branches() {
+    // Pure X and Y turns also need the document's Z-Y-Z coordinates.
+    check_stationary_ball([-90.0, 90.0, 90.0], [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]]);
+    check_stationary_ball([0.0, 90.0, 0.0], [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]);
+    // Keep the branch the design started on, including either Euler singularity.
+    for values in [[20.0_f64, -40.0, 10.0], [450.0, 30.0, -390.0], [450.0, 0.0, -360.0], [35.0, 180.0, -25.0]] {
+        let radians = values.map(f64::to_radians);
+        let pose = solidcraft_doc::joints::motion(solidcraft_doc::joints::JointKind::Ball, &radians);
+        let axes = [0, 1, 2].map(|col| [pose[col][0], pose[col][1], pose[col][2]]);
+        check_stationary_ball(values, axes);
+    }
+}
+
+#[test]
+fn ball_reporting_refuses_degrees_that_would_overflow() {
+    let (s, joint) = joint_at("ball", &[0.0; 3]);
+    let (model, mut map) = super::model_of(&s, solidcore_record::Vec3::ZERO).unwrap();
+    let trajectory = solidcraft_dynamics::simulate(&model, &solidcraft_dynamics::Settings::rk4(0.001, 0.001, 0.001)).unwrap();
+    let first = &trajectory.samples[0];
+    // The reusable inverse can return finite radians whose degree representation overflows.
+    // Inject that internal branch directly; public joint commands already bound their values.
+    map.initial_values.insert(joint, vec![f64::MAX / 4.0, 0.0, 0.0]);
+    let mut near = std::collections::BTreeMap::new();
+    let error = super::sample(&map, first, first, &mut near).unwrap_err().to_string();
+    assert!(error.contains("invalid values") && error.contains(&joint.to_string()), "{error}");
+    assert!(near.is_empty(), "a rejected sample must not update the Ball branch");
+}
+
+#[test]
+fn scalar_joint_reports_preserve_the_initial_whole_turn() {
+    for (kind, values, origin) in [
+        ("revolute", vec![450.0], [0.0, 0.0, 0.0]),
+        ("cylindrical", vec![450.0, 12.0], [0.0, 0.0, 12.0]),
+        ("planar", vec![5.0, -7.0, 450.0], [5.0, -7.0, 0.0]),
+    ] {
+        let (mut s, joint) = joint_at(kind, &values);
+        let listed = run(&mut s, "joint.list", json!({}));
+        let listed = listed["joints"].as_array().unwrap().iter().find(|j| j["id"] == joint).unwrap();
+        for (i, want) in values.iter().enumerate() {
+            assert!((num(&listed["values"][i]["value"]) - want).abs() < 1e-8, "{kind}: {listed}");
+        }
+        let (doc, model, pending, undo) = (s.doc.clone(), s.model.state(), s.pending_moves.clone(), s.undo.len());
+        let r = run(&mut s, "motion.simulate", json!({"duration":0.002, "output_interval":0.001, "gravity":[0,0,0]}));
+        for sample in r["samples"].as_array().unwrap() {
+            let pose = &sample["groups"][0];
+            for (key, want) in ["origin", "x", "y", "z"].into_iter().zip([origin, [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]) {
+                for (i, want) in want.iter().enumerate() {
+                    assert!((num(&pose[key][i]) - want).abs() < 1e-8, "{kind}: {pose}");
+                }
+            }
+            assert_eq!(sample["joints"][0]["joint"], joint);
+            for (i, want) in values.iter().enumerate() {
+                assert!((num(&sample["joints"][0]["values"][i]) - want).abs() < 1e-6, "{kind}: {sample}");
+            }
+        }
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+        assert!(std::sync::Arc::ptr_eq(&model, &s.model.state()));
+        assert_eq!(s.pending_moves, pending);
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
+#[test]
+fn simulation_keeps_the_joint_lateral_offsets_and_mate_transform() {
+    let (mut s, joint) = joint_at("revolute", &[0.0]);
+    run(&mut s, "joint.edit", json!({"joint":joint, "offset_x":12, "offset_y":-7, "offset":5, "angle":30}));
+    let listed = run(&mut s, "joint.list", json!({}));
+    let listed = listed["joints"].as_array().unwrap().iter().find(|j| j["id"] == joint).unwrap();
+    assert_eq!(listed["offset_xy"], json!([12.0, -7.0]));
+    assert_eq!(listed["frame_a"]["origin"], json!([12.0, -7.0, 0.0]));
+    let (doc, model, pending, undo) = (s.doc.clone(), s.model.state(), s.pending_moves.clone(), s.undo.len());
+    let occurrence = s.doc.occurrences.iter().find(|o| !o.grounded).unwrap().id;
+    let placed = solidcraft_doc::joints::occurrence_world(&s.doc, occurrence);
+    let (sin, cos) = 30.0_f64.to_radians().sin_cos();
+    let expected = [[cos, sin, 0.0], [-sin, cos, 0.0], [0.0, 0.0, 1.0], [12.0, -7.0, 5.0]];
+    for (col, want) in expected.iter().enumerate() {
+        for (i, want) in want.iter().enumerate() {
+            assert!((placed[col][i] - want).abs() < 1e-8, "fixture placement: {placed:?}");
+        }
+    }
+    let r = run(&mut s, "motion.simulate", json!({"duration":0.002, "output_interval":0.001, "gravity":[0,0,0]}));
+    for sample in r["samples"].as_array().unwrap() {
+        let pose = &sample["groups"][0];
+        for (key, want) in ["x", "y", "z", "origin"].into_iter().zip(expected) {
+            for (i, want) in want.iter().enumerate() {
+                assert!((num(&pose[key][i]) - want).abs() < 1e-8, "simulation moved a correctly placed joint: {pose}");
+            }
+        }
+    }
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    assert!(std::sync::Arc::ptr_eq(&model, &s.model.state()));
+    assert_eq!(s.pending_moves, pending);
+    assert_eq!(s.undo.len(), undo);
+}
+
 /// The compound pendulum's period at small amplitude `a` (rad): 2π√(I_pivot / (m g d)), with
 /// I_pivot = m(10² + 100²)/12 + m·50², d = 50, lengthened by a²/16.
 fn bar_period(a: f64) -> f64 {
@@ -84,7 +237,17 @@ fn a_bar_on_a_hinge_swings_at_the_compound_pendulum_period() {
     // The amplitude holds (no energy lost) and the hinge holds.
     let peak = r["samples"].as_array().unwrap().iter().map(|x| joint_value(x, 0).abs()).fold(0.0, f64::max);
     assert!((peak - 2.0).abs() < 1e-3, "{peak}");
-    assert!(num(&r["max_constraint_error_mm"]) < 1e-8);
+    assert!(num(&r["max_constraint_error"]) < 1e-8);
+    // Saved replies using the previous field name remain readable.
+    let mut legacy = r.clone();
+    let fields = legacy.as_object_mut().unwrap();
+    let residual = fields.remove("max_constraint_error").unwrap();
+    fields.insert("max_constraint_error_mm".into(), residual);
+    let decoded: super::SimulateResult = serde_json::from_value(legacy).unwrap();
+    assert_eq!(decoded.max_constraint_error, num(&r["max_constraint_error"]));
+    let encoded = serde_json::to_value(decoded).unwrap();
+    assert!(encoded.get("max_constraint_error").is_some());
+    assert!(encoded.get("max_constraint_error_mm").is_none());
     // The bar's frame (its component's origin, at the world origin) lies on the hinge axis, so
     // it turns there without moving.
     let pose = &r["samples"][1000]["groups"][0];

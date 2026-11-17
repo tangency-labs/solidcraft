@@ -1,5 +1,6 @@
 //! Contracts and result types for the commands in `cmd/sketch_canvas.rs`: `canvas.insert`,
-//! `canvas.decal`, `canvas.edit`, `canvas.calibrate`, `canvas.straighten` and `canvas.delete`.
+//! `canvas.decal`, `canvas.edit`, `canvas.calibrate`, `canvas.straighten` and `canvas.delete`, and
+//! for `canvas.to_sketch` in `cmd/canvas_sketch.rs`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether an image can be read, a canvas exists
@@ -15,6 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 
 use super::check::whole;
+use super::frame::SketchSolve;
 use super::motion::require;
 use super::types::{LengthExpr, Point2, Point3};
 use crate::params;
@@ -240,6 +242,32 @@ pub struct CanvasDeleteParams {
     pub canvas: Option<CanvasRef>,
 }
 
+/// Trace a canvas or decal image into a new sketch lying exactly on its plane: the drawing is
+/// told from the background, its outlines become lines and cubic splines, and its holes stay
+/// holes. The picture is read at up to 512 pixels on a side, at most 40 megapixels.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CanvasToSketchParams {
+    /// The canvas, by id or name. Default: the last canvas in the design.
+    // `null` is the same as leaving it out, as `pick` in `cmd/canvas_sketch.rs` reads it, so the
+    // schema says so too.
+    #[serde(default, deserialize_with = "absent_or", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "canvas_or_absent")]
+    pub canvas: Option<CanvasRef>,
+    /// The new sketch's name. Default: `<the canvas's name> sketch`.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// A key that is left out, `null`, or parses as `T`: `null` is the same as leaving it out, as
+/// `pick` in `cmd/canvas_sketch.rs` reads a canvas.
+fn absent_or<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        given => T::deserialize(given).map(Some).map_err(D::Error::custom),
+    }
+}
+
 /// A key that, once given (`null` included), must parse as `T`, as the handlers read it.
 fn some<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
     T::deserialize(d).map(Some)
@@ -266,6 +294,14 @@ impl JsonSchema for CanvasRef {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({"description": "A canvas's id (a number) or its name.", "type": ["number", "string"]})
     }
+}
+
+/// `canvas.to_sketch`'s `canvas`: a canvas reference, or `null` for the last canvas of the design.
+fn canvas_or_absent(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "A canvas's id (a number) or its name; null is the last canvas in the design.",
+        "type": ["number", "string", "null"]
+    })
 }
 
 /// An image width in mm: above 0 and below 1e7, as `cmd/sketch_canvas.rs` requires.
@@ -377,21 +413,30 @@ impl JsonSchema for CanvasPlane {
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let point = generator.subschema_for::<Point3>();
-        json_schema!({
-            "description": "A plane: XY, XZ or YZ (or Top, Front or Right; any case), a construction plane's name or feature id, a picked planar face {\"face\": [x, y, z], \"body\"?, \"index\"?, \"path\"?, \"fixed\"?}, or an explicit plane {\"origin\"?, \"x_dir\", \"y_dir\"}: two directions [x, y, z] that aren't parallel and an origin in mm, numbers only (default: the origin).",
-            "anyOf": [
-                {"type": "string"},
-                {"type": "integer", "minimum": 0, "maximum": u64::MAX},
-                face_pick(&point),
-                {
-                    "type": "object",
-                    "properties": {"origin": {"anyOf": [point, {"type": "null"}]}, "x_dir": point, "y_dir": point},
-                    "required": ["x_dir", "y_dir"],
-                    "not": {"required": ["face"]}
-                }
-            ]
-        })
+        plane_schema(
+            &point,
+            json!({"anyOf": [point, {"type": "null"}]}),
+            "A plane: XY, XZ or YZ (or Top, Front or Right; any case), a construction plane's name or feature id, a picked planar face {\"face\": [x, y, z], \"body\"?, \"index\"?, \"path\"?, \"fixed\"?}, or an explicit plane {\"origin\"?, \"x_dir\", \"y_dir\"}: two directions [x, y, z] that aren't parallel and an origin in mm, numbers only (default: the origin).",
+        )
     }
+}
+
+/// The schema of a plane with the given `origin` schema and description.
+pub(super) fn plane_schema(point: &Schema, origin: Value, description: &str) -> Schema {
+    json_schema!({
+        "description": description,
+        "anyOf": [
+            {"type": "string"},
+            {"type": "integer", "minimum": 0, "maximum": u64::MAX},
+            face_pick(point),
+            {
+                "type": "object",
+                "properties": {"origin": origin, "x_dir": point, "y_dir": point},
+                "required": ["x_dir", "y_dir"],
+                "not": {"required": ["face"]}
+            }
+        ]
+    })
 }
 
 /// The face of `canvas.decal`, as the handler reads it: a point on the face, or a picked face
@@ -525,6 +570,28 @@ pub struct CanvasStraightened {
 pub struct CanvasDeleted {
     /// The id the canvas had.
     pub deleted: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `canvas.to_sketch` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CanvasTraced {
+    /// The new sketch's feature id.
+    pub sketch: u64,
+    /// Its name.
+    pub name: String,
+    /// The canvas that was traced, by id.
+    pub canvas: u64,
+    /// How many curves the sketch was given.
+    pub curves: usize,
+    /// How many outlines the image held.
+    pub outlines: usize,
+    /// How many of them were holes.
+    pub holes: usize,
+    /// The sketch's solve: `{solved, dof}`; null when it was not solved again.
+    pub info: Option<SketchSolve>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
