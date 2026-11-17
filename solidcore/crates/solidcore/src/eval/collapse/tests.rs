@@ -780,3 +780,209 @@ fn a_partial_bound_of_a_net_whose_points_overflow_is_refused() {
         Err(EvalError::Unevaluable(m)) if m.contains("not finite")
     ));
 }
+
+// ---- A pcurve past a rational net (`pcurve_onto_knots`) ----
+
+/// A rounded corner of a STEP part (#15999): a rational patch of degree 3 along u (knots
+/// `u[0]` ×4, `u[1]`, `u[2]` ×4) and 2 along v (one span on [0, 1], a quadratic arc), its
+/// five rows `rows[i]` in metres as the file writes them, here in mm, `weights[i]` along v.
+struct Corner {
+    u: [f64; 3],
+    rows: [[[f64; 3]; 3]; 5],
+    weights: [[f64; 3]; 5],
+}
+
+impl Corner {
+    fn surface(&self) -> EvalSurface {
+        let [a, b, c] = self.u;
+        let mut ctrl = Vec::new();
+        for j in 0..3 {
+            for (row, w) in self.rows.iter().zip(&self.weights) {
+                let p = row[j].map(|x| 1000.0 * x);
+                ctrl.push([w[j] * p[0], w[j] * p[1], w[j] * p[2], w[j]]);
+            }
+        }
+        EvalSurface::nurbs(
+            [3, 2],
+            [
+                vec![a, a, a, a, b, c, c, c, c],
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            ],
+            [5, 3],
+            ctrl,
+        )
+    }
+
+    /// The point at `(u, v)`, `u` on the range and `v` anywhere: the patch's one span along v
+    /// continued past it (its Bernstein form), by de Boor along u on each column.
+    fn continued(&self, u: f64, v: f64) -> Vec3 {
+        let [a, b, c] = self.u;
+        let knots = [a, a, a, a, b, c, c, c, c];
+        let k = if u < b { 3 } else { 4 };
+        let mut h = [0.0f64; 4];
+        let bern = [(1.0 - v) * (1.0 - v), 2.0 * v * (1.0 - v), v * v];
+        for (j, bj) in bern.iter().enumerate() {
+            let mut d: Vec<[f64; 4]> = (k - 3..=k)
+                .map(|i| {
+                    let (p, w) = (self.rows[i][j].map(|x| 1000.0 * x), self.weights[i][j]);
+                    [w * p[0], w * p[1], w * p[2], w]
+                })
+                .collect();
+            for r in 1..=3 {
+                for jj in (r..=3).rev() {
+                    let i = k - 3 + jj;
+                    let t = (u - knots[i]) / (knots[i + 4 - r] - knots[i]);
+                    for e in 0..4 {
+                        d[jj][e] = (1.0 - t) * d[jj - 1][e] + t * d[jj][e];
+                    }
+                }
+            }
+            for e in 0..4 {
+                h[e] += bj * d[3][e];
+            }
+        }
+        Vec3::new(h[0], h[1], h[2]) * (1.0 / h[3])
+    }
+}
+
+/// Faces #1492 and #1527 of the part in #15999 (`Part Studio 1 - U-Basis rechts.step`).
+fn corners() -> [Corner; 2] {
+    [
+        Corner {
+            u: [
+                4.11996825544492e-18,
+                0.00251056122308457,
+                0.00502112244616914,
+            ],
+            rows: [
+                [
+                    [0.0095184968375232, -0.00986179878491862, 0.0134614064833007],
+                    [0.00984547792923133, -0.0105042605347972, 0.0134871606368189],
+                    [0.00993553687231624, -0.0105705161938981, 0.0127745340970221],
+                ],
+                [
+                    [0.00897867388977568, -0.0102463642058592, 0.0134188881743844],
+                    [0.00936996294472618, -0.0107379916504237, 0.0133681247951212],
+                    [0.00927460906300522, -0.0109053022311392, 0.0127460470296204],
+                ],
+                [
+                    [0.0080222599860908, -0.0112868486692588, 0.0137696671002265],
+                    [0.00825309201170418, -0.0114502503599108, 0.0134946237875554],
+                    [0.00809036813975832, -0.0117513433342993, 0.0132894503045143],
+                ],
+                [
+                    [0.00721215723437218, -0.0125213092646158, 0.0144252957625912],
+                    [0.00721049190656136, -0.0125934604247244, 0.0143424012975383],
+                    [0.00720882656029216, -0.0126656116150791, 0.0142595068556948],
+                ],
+                [
+                    [0.00683262629400762, -0.0131389917691748, 0.0147602487171921],
+                    [0.00683262629400761, -0.0131389917691748, 0.0147602487171921],
+                    [0.00683262629400761, -0.0131389917691748, 0.0147602487171921],
+                ],
+            ],
+            weights: [
+                [1.0, 0.742673477355744, 1.0],
+                [1.0, 0.792863107677938, 1.0],
+                [1.0, 0.940123873307597, 1.0],
+                [1.0, 0.999999999980117, 1.0],
+                [1.0, 1.0, 1.0],
+            ],
+        },
+        Corner {
+            u: [0.0260020748241999, 0.0289898331189168, 0.0319775914136337],
+            rows: [
+                [
+                    [0.00964600585684235, 0.0141999999999938, 0.0134707936396788],
+                    [0.00934382669159065, 0.0133434884416167, 0.01345010055111],
+                    [0.00925313175592443, 0.0132615384615327, 0.0143503289281726],
+                ],
+                [
+                    [0.0105235219186991, 0.0138640752829399, 0.0135308855311016],
+                    [0.0101604417047262, 0.0130699498274284, 0.0135269754561354],
+                    [0.0101348711266899, 0.0129514541077582, 0.0143912141505575],
+                ],
+                [
+                    [0.0122359098322075, 0.0129963238459051, 0.0134577370854064],
+                    [0.011783139391092, 0.0123590672770896, 0.0135169243785278],
+                    [0.0118605844965322, 0.0121504527806829, 0.0142672032412564],
+                ],
+                [
+                    [0.0137210539020434, 0.0118849769714294, 0.013100487137082],
+                    [0.0133258875385779, 0.0113457831363959, 0.0132066760081018],
+                    [0.0133651304708384, 0.0111245941273494, 0.013845191154838],
+                ],
+                [
+                    [0.0144232612793709, 0.0112683970776079, 0.0128683621841344],
+                    [0.0140589970531455, 0.0107713989527169, 0.0129887750694204],
+                    [0.014078199200318, 0.0105554434562535, 0.0135780028069607],
+                ],
+            ],
+            weights: [
+                [1.0, 0.740161731980124, 1.0],
+                [1.0, 0.754618828405926, 1.0],
+                [1.0, 0.790554928957286, 1.0],
+                [1.0, 0.828478792294795, 1.0],
+                [1.0, 0.846911961456441, 1.0],
+            ],
+        },
+    ]
+}
+
+/// The trims SMLib makes for these corners start 0.0079 and 0.0066 past v = 0 (about 9 µm
+/// on the part, inside the file's 0.02 mm). Each is put on the patch with a certified bound
+/// on the surface's move: no smaller than the move measured along the trim, and within twice
+/// it (the bound adds what moving along v does to the rows' weights across).
+#[test]
+fn a_pcurve_past_a_rational_net_is_put_on_it_within_the_tolerance() {
+    for (corner, past) in corners()
+        .iter()
+        .zip([0.007903823091784556, 0.006605362236920265])
+    {
+        let s = corner.surface();
+        let [a, _, c] = corner.u;
+        let pc = Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[a, -past], [c, 0.0]],
+        };
+        let onto = pcurve_onto_knots(&s, &pc, 0.02).unwrap().unwrap();
+        assert_eq!(
+            onto.pcurve,
+            Curve2::Spline {
+                knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![[a, 0.0], [c, 0.0]],
+            }
+        );
+        let moved = (0..=200)
+            .map(|k| {
+                let t = f64::from(k) / 200.0;
+                let (u, v) = (a + t * (c - a), -past * (1.0 - t));
+                (corner.continued(u, v) - corner.continued(u, 0.0)).len()
+            })
+            .fold(0.0, f64::max);
+        assert!(moved > 0.008, "{moved}");
+        assert!(
+            moved <= onto.displacement && onto.displacement <= 2.0 * moved,
+            "measured {moved}, bound {}",
+            onto.displacement
+        );
+        assert!(onto.displacement <= 0.02);
+    }
+}
+
+/// A pcurve past both of a rational net's ranges is refused: the move across is not bounded
+/// there.
+#[test]
+fn a_pcurve_past_both_ranges_of_a_rational_net_is_refused() {
+    let corner = &corners()[0];
+    let s = corner.surface();
+    let [a, _, c] = corner.u;
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[a - 1e-6, -1e-3], [c, 0.5]],
+    };
+    assert!(matches!(
+        pcurve_onto_knots(&s, &pc, 0.02),
+        Err(EvalError::Unevaluable(_))
+    ));
+}
