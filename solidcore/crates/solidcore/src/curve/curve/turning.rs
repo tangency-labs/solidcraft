@@ -517,11 +517,15 @@ fn bspline_pieces(
             knots.get(hs_all.len()).ok_or_else(short)?,
         );
         let kv = nl.knot_vector()?;
-        if lo < d0 {
-            spans.push((kv.find_span(p, lo, Side::Left)?, lo, d0, MAX_DEPTH));
+        // Only the part of `[lo, hi]` itself: one lying wholly past the domain does not
+        // take in the stretch between it and the domain, where the weight may have a zero.
+        let (a, b) = (lo, hi.min(d0));
+        if a < b {
+            spans.push((kv.find_span(p, lo, Side::Left)?, a, b, MAX_DEPTH));
         }
-        if hi > d1 {
-            spans.push((kv.find_span(p, hi, Side::Left)?, d1, hi, MAX_DEPTH));
+        let (a, b) = (lo.max(d1), hi);
+        if a < b {
+            spans.push((kv.find_span(p, hi, Side::Left)?, a, b, MAX_DEPTH));
         }
     }
     // Taken from the end: reversed, so the pieces keep the spans' order.
