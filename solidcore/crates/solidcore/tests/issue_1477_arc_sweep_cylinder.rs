@@ -428,6 +428,54 @@ fn the_cylinder(b: &Brep) -> (Axis2Placement, f64) {
     *one
 }
 
+/// Review r2 of SolidCraft #17462: a short arc that really lies in a plane tilted by `tilt`
+/// about its chord stays within the arc zero of the plane square to the sweep, but the
+/// circle squared to the sweep keeps the fit's radius about the projected centre and so
+/// misses it by about `r tilt² / 2` across: 4.4e-5 for r 88, 4.4e-3 (and no manifold
+/// solid) at a tilt of 1e-2. A short `distance` lets the caller's `distance * tilt` check
+/// pass. These keep the fit's frame, as upstream: the profile is on the cylinder's base
+/// edge.
+#[test]
+fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
+    for (r, span, tilt, distance) in [
+        (88.0, 0.005, 1e-3_f64, 0.005),
+        (1000.0, 0.05, 2e-4, 0.04),
+        (88.0, 0.005, 1e-2, 0.0005),
+        (50.0, 10.0, 2e-7, 5.0),
+    ] {
+        let case = format!("r {r} span {span} tilt {tilt:e} distance {distance}");
+        let mut k = Kernel::default();
+        k.fixes.linear_sweep_arc_is_cylinder = true;
+        let (s, c) = (tilt.sin(), tilt.cos());
+        let frame = Axis2Placement::new(Vec3::ZERO, Vec3::new(c, 0.0, -s), Vec3::Y);
+        let arc = circle(&k, &frame, r, 0.0, span);
+        let ends = arc.ends(&k).unwrap();
+        let chord = seg(ends.end, ends.start);
+        let b = create_linear_sweep(&mut k, &[Some(&arc), Some(&chord)], Vec3::Z, distance, true)
+            .unwrap();
+        assert!(
+            is_manifold_solid(&b).unwrap(),
+            "{case}: not a manifold solid"
+        );
+        let (placement, radius) = the_cylinder(&b);
+        let axis = placement.z_axis();
+        for i in 0..=8 {
+            let u = (span * f64::from(i) / 8.0).to_radians();
+            let p = frame.x_axis() * (r * u.cos()) + frame.y_axis() * (r * u.sin());
+            let off = (p - placement.origin()).cross(axis).length() - radius;
+            assert!(
+                off.abs() < 1e-9,
+                "{case}: {p:?} is {off:e} off the cylinder"
+            );
+            let along = (p - placement.origin()).dot(axis);
+            assert!(
+                along.abs() < 1e-9,
+                "{case}: {p:?} is {along:e} off the base edge's plane"
+            );
+        }
+    }
+}
+
 /// The cubic Bezier of a 0.005 degree arc of radius 88.3 about (-8.19, 145.98) at z = -53,
 /// its two inner control points an ulp or two off that plane, as a profile placed there by
 /// a transform holds them (SolidCraft #17462: 0.008 mm of a spline).

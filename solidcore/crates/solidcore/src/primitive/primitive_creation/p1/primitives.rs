@@ -44,9 +44,11 @@
 //! Not upstream (SolidCraft #17462): a cylinder [`PrimitiveCreation::create_linear_sweep`]
 //! makes from an arc within the B-rep's tolerance of square to the sweep has the sweep
 //! direction as its axis and its origin in the profile's plane (`square_to_sweep`), not
-//! the arc fit's normal, which a very short arc leaves off the sweep, when the convex
-//! hull of the profile's control points lies within the arc zero of that plane; a
-//! profile that really leans across the sweep keeps the fit's frame, as upstream.
+//! the arc fit's normal, which a very short arc leaves off the sweep, when the squared
+//! circle is certified to stay within the arc zero of the profile: the convex hull of the
+//! profile's control points close to that plane, and the circle's in-plane change,
+//! `r (t² + |xa ya| / cx + ...)`, within what is left. Otherwise the fit's frame stays,
+//! as upstream.
 //! Not upstream (WR-596, opt-in `Kernel::fixes.box_face_failures_propagate`; the fork's
 //! tangency-labs/smlib 0df62c8, 35008b1, 449c81c): [`PrimitiveCreation::create_box`]
 //! returns each face's and the stitch's status and skips sides of zero extent, as the
@@ -1112,25 +1114,44 @@ fn arc_sweep_cylinder(
 
 /// Not upstream (#17462): turn an arc's frame, already within the B-rep's tolerance of
 /// square to the sweep, exactly square to it, so the cylinder swept from it is the
-/// translation surface the sweep defines, when the profile curve itself lies in a plane
-/// square to the sweep. The frame of a short arc fitted from a planar curve is
-/// ill-conditioned: a few hundredths of a degree of arc leave its normal up to `5e-8` off
-/// the plane's, and a cylinder on that normal leans across the sweep, its far edge
-/// `distance` times that off the swept curve and its rows no translates of each other.
+/// translation surface the sweep defines, when that squared circle is certified to stay on
+/// the profile. The frame of a short arc fitted from a planar curve is ill-conditioned: a
+/// few hundredths of a degree of arc leave its normal up to `5e-8` off the plane's, and a
+/// cylinder on that normal leans across the sweep, its far edge `distance` times that off
+/// the swept curve and its rows no translates of each other.
 ///
-/// The frame is squared only when the convex hull of the curve's control points
-/// ([`Curve::piece_hull_points`], each widened by its coordinates' error bound) lies within
-/// `zero` (the arc zero the curve was fitted to) of the plane square to the sweep through
-/// the curve's start: then the tilt is the fit's rounding, not the profile's. A profile
-/// that really leans across the sweep (up to `2 r` times the tilt over a whole circle,
-/// which the caller's `distance * tilt` check does not bound), or whose kind has no
-/// certain hull, keeps the fit's frame, as upstream. Z becomes `sweep_dir` (or its
-/// negation, keeping the frame's sense, so the arc's angles still run the same way), X the
-/// old X's component across it, and the origin moves along the new axis into that plane.
-/// A frame already exactly square is left as it is.
+/// Z becomes `sweep_dir` (or its negation `a`, keeping the frame's sense, so the arc's
+/// angles still run the same way), X the old X's component across it, normalised, and the
+/// origin moves along `a` into the plane `P` square to it through the curve's start. The
+/// squared circle `C'` keeps the radius `r` and the angles of the fit's circle `C`. A point
+/// `p` of the profile is then off `C'` by at most its offset along `a` from `P` plus the
+/// in-plane distance between `C'(u)` and the projection of `C(u)` into `P`, on top of the
+/// profile's own distance from `C` that the fit already accepted. Both terms must be
+/// within `zero`, the arc zero the curve was fitted to, together:
+///
+/// - Along `a`: the convex hull of the curve's control points
+///   ([`Curve::piece_hull_points`]) holds the curve, so the largest offset of a hull point
+///   from `P` bounds it. Each point and the reference point `q` carry a coordinate error
+///   bound `e`, `e_q`, worth `(e + e_q) * s` along `a` with `s = |ax| + |ay| + |az|`; the
+///   subtraction and the dot product round by at most `γ₄ (|p|∞ + |q|∞) s`, `γ₄ ≤ 4 ε`.
+///   A profile that really leans across the sweep (up to `2 r` times the tilt over a whole
+///   circle, which the caller's `distance * tilt` check does not bound) fails here.
+/// - In `P`: with `xa = X·a`, `ya = Y·a` (`xa² + ya² = t²`, `t = |Z × a|`), the projections
+///   of `X` and `Y` into `P` are `X_p` (length `cx = √(1 − xa²)`, along X') and `Y_p`, whose
+///   components along X' and Y' are `m = −xa·ya / cx` and `n`, `n² = 1 − ya² − m²`. Then
+///   `|C'(u) − proj C(u)| = r |cos u (X' − X_p) + sin u (Y' − Y_p)|
+///   ≤ r (|X' − X_p| + |Y' − Y_p|) ≤ r ((1 − cx) + |m| + (1 − n))
+///   ≤ r (xa² + |m| + ya² + m²) = r (t² + |m| + m²)`, using `1 − √(1 − w) ≤ w`. A short arc
+///   tilted about its chord stays within `zero` of `P` along `a` while missing `C'` by about
+///   `r t² / 2` across it, so this term is checked on its own. It is computed with a few
+///   operations on numbers below 1 and `r`, so `(1 + 16 ε)` covers its rounding.
+///
+/// A frame that fails either bound, or whose curve's kind has no certain hull, keeps the
+/// fit's frame, as upstream. A frame already exactly square is left as it is.
 fn square_to_sweep(
     frame: &mut Axis2Placement,
     curve: &Curve,
+    radius: f64,
     sweep_dir: Vec3,
     zero: f64,
 ) -> Result<()> {
@@ -1146,16 +1167,29 @@ fn square_to_sweep(
     let Some(hull) = curve.piece_hull_points(&curve.natural_interval()) else {
         return Ok(());
     };
-    let Some(&(on_plane, _)) = hull.first() else {
+    let Some(&(on_plane, e_q)) = hull.first() else {
         return Ok(());
     };
-    // An error of `e` in each coordinate moves a point along the axis by at most
-    // `e * (|ax| + |ay| + |az|)`.
     let spread = axis.x.abs() + axis.y.abs() + axis.z.abs();
-    let flat = hull
-        .iter()
-        .all(|&(p, e)| (p - on_plane).dot(axis).abs() + e * spread <= zero);
-    if !flat {
+    let max_abs = |p: Vec3| p.x.abs().max(p.y.abs()).max(p.z.abs());
+    let gamma4 = 4.0 * f64::EPSILON;
+    let mut axial = 0.0_f64;
+    for &(p, e) in &hull {
+        let off = (p - on_plane).dot(axis).abs()
+            + (e + e_q) * spread
+            + gamma4 * (max_abs(p) + max_abs(on_plane)) * spread;
+        // A NaN keeps the fit's frame.
+        if off.is_nan() || off > zero {
+            return Ok(());
+        }
+        axial = axial.max(off);
+    }
+    let (xa, ya) = (frame.x_axis().dot(axis), frame.y_axis().dot(axis));
+    let t2 = xa * xa + ya * ya;
+    let cx = (1.0 - xa * xa).sqrt();
+    let m = (xa * ya).abs() / cx;
+    let across = radius.abs() * (t2 + m + m * m) * (1.0 + 16.0 * f64::EPSILON);
+    if across.is_nan() || axial + across > zero {
         return Ok(());
     }
     let origin = frame.origin();
@@ -1246,7 +1280,7 @@ impl PrimitiveCreation {
                         && angle > 360.0 - brep.tolerance()
                         && distance * frame.z_axis().cross(sweep_dir).length() <= brep.tolerance()
                     {
-                        square_to_sweep(&mut frame, curve, sweep_dir, arc_zero(k, curve)?)?;
+                        square_to_sweep(&mut frame, curve, radius, sweep_dir, arc_zero(k, curve)?)?;
                         if sweep_dir.dot(frame.z_axis()) < 0.0 {
                             frame.rotate_about_axis_at_point(
                                 180.0 * core::f64::consts::PI / 180.0,
@@ -1276,7 +1310,7 @@ impl PrimitiveCreation {
                         && angle <= 360.0 - brep.tolerance()
                         && distance * frame.z_axis().cross(sweep_dir).length() <= brep.tolerance()
                     {
-                        square_to_sweep(&mut frame, curve, sweep_dir, arc_zero(k, curve)?)?;
+                        square_to_sweep(&mut frame, curve, radius, sweep_dir, arc_zero(k, curve)?)?;
                         if let Some(cylinder) =
                             arc_sweep_cylinder(k, frame, radius, (start, end), sweep_dir, distance)?
                         {
