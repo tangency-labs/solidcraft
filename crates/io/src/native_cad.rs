@@ -99,7 +99,14 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
     }
     warnings.extend(read.failures.iter().map(|f| format!("{}: not imported: {}", label(&f.body), f.message)));
     let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
-    let tree = vec![StepNode { name: product.to_string(), transform: identity, bodies: (0..bodies.len()).collect(), children: Vec::new() }];
+    let tree = vec![StepNode {
+        name: product.to_string(),
+        transform: identity,
+        bodies: (0..bodies.len()).collect(),
+        items: Vec::new(),
+        left_out: Vec::new(),
+        children: Vec::new(),
+    }];
     ImportRecords { bodies, tree, warnings, system: system.to_string() }
 }
 
