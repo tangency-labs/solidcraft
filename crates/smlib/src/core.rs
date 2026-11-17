@@ -110,6 +110,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_proto_topology_statuses_pass_on = true;
     f.fillet_statuses_pass_on = true;
     f.fillet_rail_trim_at_near_knot = true;
+    f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
     f.fillet_exact_round_classes = true;
     f.surface_continuity_checks_last_v_knot = true;
