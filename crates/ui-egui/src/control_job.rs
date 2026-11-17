@@ -528,7 +528,7 @@ impl SolveApp {
     /// How far the plugin running as the agent's command says it is, in per cent, once it says.
     pub(crate) fn agent_plugin_percent(&self) -> Option<usize> {
         match self.control_job.as_ref().map(|j| &j.work) {
-            Some(Work::Plugin { progress, .. }) => progress.item().map(|(_, done, total)| if total == 0 { 0 } else { done * 100 / total }),
+            Some(Work::Plugin { progress, .. }) => progress.item().map(|(_, done, total)| done.saturating_mul(100).checked_div(total).unwrap_or(0)),
             _ => None,
         }
     }

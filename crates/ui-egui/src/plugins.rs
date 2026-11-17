@@ -224,7 +224,7 @@ impl From<solidcraft_engine::plugin::HostLimits> for LimitInputs {
 }
 /// Seconds as the minutes the page shows: whole minutes, or a decimal for part of one.
 fn job_minutes(seconds: u64) -> String {
-    if seconds % 60 == 0 { (seconds / 60).to_string() } else { format!("{}", seconds as f64 / 60.0) }
+    if seconds.is_multiple_of(60) { (seconds / 60).to_string() } else { format!("{}", seconds as f64 / 60.0) }
 }
 pub(crate) fn host_limits(p: &crate::prefs::Prefs) -> solidcraft_engine::plugin::HostLimits {
     solidcraft_engine::plugin::HostLimits {
