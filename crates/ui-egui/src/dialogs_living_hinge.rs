@@ -7,7 +7,8 @@ use crate::{
     ui_kit::{BackingTooltipExt as _, choice_row, expr_row},
 };
 use serde_json::{Map, Value, json};
-use solidcraft_engine::Sel;
+use solidcore_record::living_hinge::HingeClip;
+use solidcraft_engine::{Sel, doc::FeatureKind};
 
 const CMD: &str = "solid.living_hinge";
 /// The clip choices, in the order of the Clip row.
@@ -125,4 +126,102 @@ pub fn commands(app: &SolveApp, h: &LivingHinge, inputs: &[SelInput], extra: &Ma
         }
     }
     Ok(vec![(CMD.into(), args)])
+}
+
+/// The bend-axis choice of a stored angle: 0 along X, 1 along Y, else 2 (at that angle).
+fn axis_of(angle: &str) -> usize {
+    match angle.trim().trim_end_matches("deg").trim().parse::<f64>() {
+        Ok(a) if a.abs() < 1e-9 => 0,
+        Ok(a) if (a - 90.).abs() < 1e-9 => 1,
+        _ => 2,
+    }
+}
+
+/// The dialog of a saved Living Hinge, for Edit Feature: the stored values as typed, the sketch's
+/// profiles and the plate picked again, a typed anchor kept as it was.
+pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
+    let FeatureKind::LivingHinge { sketch, profiles, slot_length, bridge, row_spacing, slot_width, angle, anchor, clip, margin, targets } = kind
+    else {
+        return None;
+    };
+    let (_, mut inputs) = start(app, CMD)?;
+    let d = LivingHinge::default();
+    let angle = angle.as_deref().map_or_else(|| "0 deg".to_string(), str::to_string);
+    let h = LivingHinge {
+        axis: axis_of(&angle),
+        angle,
+        slot_length: slot_length.as_str().into(),
+        bridge: bridge.as_str().into(),
+        row_spacing: row_spacing.as_str().into(),
+        slot_width: slot_width.as_deref().map_or(d.slot_width, str::to_string),
+        clip: match clip {
+            HingeClip::RunOut => 0,
+            HingeClip::Shorten => 1,
+            HingeClip::Whole => 2,
+        },
+        margin: margin.as_deref().map_or(d.margin, str::to_string),
+    };
+    let st = crate::open_meshing::session_world(&app.session);
+    let indices = st.sketch(sketch.0).map(|ss| crate::dialogs::profile_indices(ss, profiles)).unwrap_or_default();
+    if let Some(input) = inputs.get_mut(0) {
+        input.items = indices.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
+    }
+    if let Some(input) = inputs.get_mut(1) {
+        input.items = targets.iter().map(|name| Sel::Body { name: name.0.clone() }).collect();
+    }
+    let mut extra = Map::new();
+    if let Some(anchor) = anchor {
+        extra.insert("anchor".into(), crate::dialogs::pt_expr(anchor));
+    }
+    Some((Kind::LivingHinge(h), inputs, extra))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Services;
+    use solidcraft_engine::Session;
+
+    #[test]
+    fn living_hinge_axis_of_a_stored_angle() {
+        assert_eq!(axis_of("0 deg"), 0);
+        assert_eq!(axis_of("0"), 0);
+        assert_eq!(axis_of("90 deg"), 1);
+        assert_eq!(axis_of("45 deg"), 2);
+        assert_eq!(axis_of("a + 1 deg"), 2);
+    }
+
+    /// Edit Feature fills the dialog from the saved hinge, and OK sends the same values back.
+    #[test]
+    fn living_hinge_edit_feature_refills_the_dialog() {
+        let mut s = Session::default();
+        let run = |s: &mut Session, id: &str, p: Value| {
+            s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+        };
+        run(&mut s, "solid.box", json!({"length": 120, "width": 80, "height": 3, "body_name": "Wall"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 3, "name": "HingeArea"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [80, 80]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "solid.living_hinge",
+            json!({"sketch": "HingeArea", "slot_length": "22 mm", "bridge": "4 mm", "row_spacing": "2 mm", "angle": "90 deg",
+                "clip": "whole", "margin": "1 mm", "targets": ["Wall"], "name": "Hinge"}),
+        );
+        let app = SolveApp::new(s, Services::default());
+        let kind = app.session.doc.find_feature("Hinge").unwrap().kind.clone();
+        let (Kind::LivingHinge(h), inputs, extra) = for_feature(&app, &kind).unwrap() else { panic!("not a living hinge") };
+        assert_eq!((h.axis, h.clip), (1, 2), "{h:?}");
+        assert_eq!((h.slot_length.as_str(), h.bridge.as_str(), h.row_spacing.as_str()), ("22 mm", "4 mm", "2 mm"));
+        assert_eq!((h.slot_width.as_str(), h.margin.as_str()), ("0.2 mm", "1 mm"));
+        assert!(!inputs[0].items.is_empty(), "the area's profiles are picked");
+        assert_eq!(crate::selection::items(&inputs, 1).body_names(), vec!["Wall".to_string()]);
+        assert!(!extra.contains_key("anchor"));
+        let cmds = commands(&app, &h, &inputs, &extra).unwrap();
+        let args = &cmds[0].1;
+        assert_eq!((args["angle"].as_str(), args["clip"].as_str()), (Some("90 deg"), Some("whole")), "{args}");
+        assert_eq!(args["targets"], json!(["Wall"]), "{args}");
+        // Other features are not a living hinge.
+        assert!(for_feature(&app, &app.session.doc.find_feature("HingeArea").unwrap().kind.clone()).is_none());
+    }
 }
