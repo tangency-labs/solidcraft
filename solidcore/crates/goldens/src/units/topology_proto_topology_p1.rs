@@ -3319,8 +3319,11 @@ fn run_proto(
                 let pt = rd.vec();
                 match d {
                     Some(d) if !skip => {
+                        // (no absorbed hull here, so the move never fails)
                         if let Some(x) = r.mgr.vertex_def_mut(d) {
-                            x.set_position(pt);
+                            if x.set_position(k, pt).is_err() {
+                                skip = true;
+                            }
                         }
                     }
                     _ => skip = true,
