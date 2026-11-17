@@ -515,12 +515,14 @@ fn a_profile_field_keeps_profiles_from_several_sketches() {
     }
     h.app.run("select.clear", json!({})).unwrap();
     let mut make = entry("make", "edit", json!([]));
-    make.input_schema = json!({"type":"object","properties":{"profiles":{"type":"array","x-solidcraft-selection":{"version":1,"accept":["profile"]}}}});
+    make.input_schema =
+        json!({"type":"object","properties":{"profiles":{"type":"array","x-solidcraft-selection":{"version":1,"accept":["profile"]}}}});
     h.app.plugin_menu.listed = vec![listed("shapes", vec![make])];
     h.app.plugin_menu.loaded = true;
     open_entry(&mut h.app, 0, 0);
     h.frames(2);
-    let sketches: Vec<u64> = h.app.session.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })).map(|f| f.id).collect();
+    let sketches: Vec<u64> =
+        h.app.session.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })).map(|f| f.id).collect();
     assert_eq!(sketches.len(), 2);
     for sketch in &sketches {
         let session = h.app.session.scratch();
