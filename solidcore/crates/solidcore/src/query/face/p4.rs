@@ -69,6 +69,12 @@
 //!   touch list (odd length),
 //!   an empty seam classification read at its first or last interval, a loop without
 //!   loop use.
+//! - **Cyclic walk without an entry (solidcore-native, #18342).** When a walk that
+//!   starts on a seam finds touches but no OUT/IN pair to start from, the face is left
+//!   unclassified ([`HealNotYetFaceType::NoLoopTreeRoot`], scratch reset), as the walk's
+//!   own depth-zero check does for a wrong first entry; upstream returns `SM_ERR`, which
+//!   healers ignore, so the face kept incomplete Stage 3 props instead of being set
+//!   aside as not yet healable.
 //! - No recursion ([`Looptree::find_item`] bounds its own).
 
 use std::collections::BTreeSet;
@@ -849,6 +855,14 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
             stack.push(NO_VERTEX_POLE);
         }
 
+        // solidcore-native (#18342): a cyclic walk with touches but no OUT/IN entry has no
+        // outside starting state, as the depth-zero check of the walk below finds for a
+        // wrong first entry: the face is unclassified (NoLoopTreeRoot), not an SM_ERR.
+        if cyclic_walk && inc_indx.is_none() && done_size != 0 {
+            out.classifiable = HealNotYetFaceType::NoLoopTreeRoot;
+            scratch.reset(k, &ResetOptions::default())?;
+            return Ok(());
+        }
         let Some(inc_indx) = inc_indx.filter(|_| done_size != 0) else {
             // unexpected empty DoneTouchDirList or invalid lIncIndx
             return Err(SolidError::query_failed(

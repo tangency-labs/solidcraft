@@ -44,7 +44,8 @@
 //!   inside the interval at a 3D distance of at least the pair intersection tolerance
 //!   (and more than the curve's scaled zero) from the end's point; such a parameter goes
 //!   on to the 3D tests (an interior point). Without a curve, or when that distance,
-//!   tolerance or scaled zero cannot be computed, upstream's snap stands (no new error).
+//!   tolerance or scaled zero cannot be computed, upstream's snap stands (no new error;
+//!   unported, cancelled and uncertified still propagate).
 //!   Upstream snaps on the parameter alone, which on a fast-parametrised curve (a loop
 //!   bisector over an infinite cylinder's ±1234567 axial range) merged two edge
 //!   crossings 3.5e-3 apart and lost a loop crossing (#18342).
@@ -619,7 +620,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     param,
                     param_obj_zone_tol_3d,
                     IntervalPosition::End,
-                )
+                )?
             {
                 out.index = i;
                 out.position = IntervalPosition::End;
@@ -636,7 +637,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     param,
                     param_obj_zone_tol_3d,
                     IntervalPosition::Start,
-                )
+                )?
             {
                 out.index = i;
                 out.position = IntervalPosition::Start;
@@ -753,9 +754,12 @@ impl<O: ClassObject> CurveClassification<O> {
     /// its evaluation cannot tell points apart. Such a point is classified by the 3D
     /// tests that follow instead of being snapped.
     ///
-    /// Infallible: without a classification curve, or when a tolerance, point or
-    /// scaled zero cannot be computed, it answers `false` and upstream's parameter
-    /// snap stands, as upstream needed none of them to snap.
+    /// Without a classification curve, or when a tolerance, point or scaled zero cannot
+    /// be computed, it answers `false` and upstream's parameter snap stands, as upstream
+    /// needed none of them to snap: a failure of this extra measurement is never a new
+    /// error of `FindInterval`. The exceptions propagate, as elsewhere in this file: an
+    /// unported callee, a cancellation or a certification refusal
+    /// (`SolidError::is_unported_or_cancelled`) is never answered for.
     ///
     /// A parameter tolerance alone cannot tell points apart on a fast-parametrised
     /// curve: a loop bisector across an infinite cylinder spans the ±1234567 sentinel
@@ -770,16 +774,16 @@ impl<O: ClassObject> CurveClassification<O> {
         param: f64,
         param_obj_zone_tol_3d: f64,
         end: IntervalPosition,
-    ) -> bool {
+    ) -> Result<bool> {
         let ivl = test.interval;
         // only a parameter strictly inside the interval can become an interior point
         if !(param > ivl.min() && param < ivl.max()) {
-            return false;
+            return Ok(false);
         }
         // a classification without a resolvable curve has no 3D separation to measure:
         // keep upstream's parameter snap (which needs no curve)
         let Some(curve) = self.curve().and_then(|c| geometry.curve(c)) else {
-            return false;
+            return Ok(false);
         };
         let (end_param, end_pc) = if end == IntervalPosition::Start {
             (ivl.min(), &test.start)
@@ -808,7 +812,11 @@ impl<O: ClassObject> CurveClassification<O> {
             // points are not told apart by its evaluation
             Ok(dist > scaled_zero_of_curve(k, curve)?)
         };
-        measured().unwrap_or(false)
+        match measured() {
+            Ok(distinct) => Ok(distinct),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
+            Err(_) => Ok(false),
+        }
     }
 
     /// The point classification at curve parameter `param`

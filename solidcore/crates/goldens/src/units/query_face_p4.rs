@@ -1484,6 +1484,44 @@ mod tests {
         assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![3, 2, 1, 0]));
     }
 
+    /// #18342: a cone face at scale 1e-3 (generated case 381) whose two opposite
+    /// u-isolines coincide within tolerance (1e-9 apart in v) beside a circle. Its seam
+    /// walk finds one isoline crossed once and no OUT/IN entry to start from, so the face
+    /// is unclassified (`NoLoopTreeRoot`, scratch reset to its one interval) instead of an
+    /// `SM_ERR`; `SetProps_Stage3` then refuses it as not yet healable, which is how the
+    /// healer sets it aside (`move_to_not_yet_problems`). Before the 3D end-touch rule the
+    /// walk saw no crossing at all (`NoClassifyZeroCrosscnt`), also not yet healable.
+    #[test]
+    fn coincident_isolines_on_a_small_cone_are_not_yet_healable() {
+        use solidcore::error::heal::HealFailure;
+        use solidcore::heal::face_props::HealerOpType;
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 381));
+        let i = gen_case(&mut rng);
+        let out = rust(&i).unwrap();
+        assert_eq!(out.error, None);
+        assert_eq!(
+            out.ints.get("classifiable"),
+            Some(&vec![HealNotYetFaceType::NoLoopTreeRoot.code()])
+        );
+        assert_eq!(out.ints.get("scratch_size"), Some(&vec![1]));
+
+        // the healer's view: Stage 3 of the same face, all its loops
+        let k = Kernel::default();
+        let (mut b, _) = own_brep(&i.brep, i.validate_only, i.init_gaps)
+            .unwrap()
+            .unwrap();
+        let fi = i.face as usize % b.faces().len();
+        let face = FaceId::from_index(u32::try_from(fi).unwrap());
+        let mut props: FaceProps<H> = FaceProps::for_face(face, fi as u64);
+        let r = props.set_props_stage3_mut(&k, &mut b, face, fi as u64, HealerOpType::All);
+        let e = r.unwrap_err();
+        assert!(
+            matches!(e.heal_failure(), Some(HealFailure::NotYetHealable)),
+            "{e:?}"
+        );
+        assert!(props.has_not_yet_problems());
+    }
+
     /// A circular UV trim spans both axes and winds in the requested direction.
     #[test]
     fn circular_trims_keep_their_uv_bounds_and_orientation() {

@@ -79,7 +79,8 @@
 //!   whose point is at least the face's intersection tolerance and more than the curve's
 //!   scaled zero from that end stays inside (`distinct_end_type`), as `FindInterval` keeps
 //!   such points off an interval end (part 3). When a point or the scaled zero cannot be
-//!   computed, upstream's type stands (no new error).
+//!   computed, upstream's type stands (no new error; unported, cancelled and uncertified
+//!   still propagate).
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
@@ -774,8 +775,10 @@ fn ccw_angle(v: Vec2) -> Result<f64> {
 /// face's intersection tolerance) and more than the curve's scaled zero away. Upstream
 /// compares the curve parameter with a tolerance mapped into the surface's UV space, which
 /// marks a crossing far from the curve's end as an end touch when the curve parameter is
-/// much finer than the UV one (the loop bisector over the sentinel range). Infallible: when
-/// a point or the scaled zero cannot be computed, `ty` stands.
+/// much finer than the UV one (the loop bisector over the sentinel range). When a point or
+/// the scaled zero cannot be computed, `ty` stands (this extra measurement adds no new
+/// error), except that an unported callee, a cancellation or a certification refusal
+/// (`SolidError::is_unported_or_cancelled`) propagates.
 fn distinct_end_type(
     k: &Kernel,
     curve: &Curve,
@@ -783,14 +786,14 @@ fn distinct_end_type(
     param: f64,
     ty: ExtentPointType,
     tol_3d: f64,
-) -> ExtentPointType {
+) -> Result<ExtentPointType> {
     let end = match ty {
         ExtentPointType::Start => ivl.min(),
         ExtentPointType::End => ivl.max(),
-        _ => return ty,
+        _ => return Ok(ty),
     };
     if !(param > ivl.min() && param < ivl.max()) {
-        return ty;
+        return Ok(ty);
     }
     let distinct = || -> Result<bool> {
         let dist = curve
@@ -798,10 +801,10 @@ fn distinct_end_type(
             .distance(curve.evaluate_point(k, end)?);
         Ok(dist >= tol_3d && dist > scaled_zero_of_curve(k, curve)?)
     };
-    if distinct().unwrap_or(false) {
-        ExtentPointType::Inside
-    } else {
-        ty
+    match distinct() {
+        Ok(true) => Ok(ExtentPointType::Inside),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Ok(false) | Err(_) => Ok(ty),
     }
 }
 
@@ -1582,7 +1585,7 @@ impl<O: ClassObject> CurveClassification<O> {
             first_touch.param,
             crv_classification_interval.classify_point(first_touch.param, first_zone_tol_2d),
             face_xsect_tol_3d,
-        );
+        )?;
         let mut touch_last_type = distinct_end_type(
             k,
             classify_crv,
@@ -1590,7 +1593,7 @@ impl<O: ClassObject> CurveClassification<O> {
             last_touch.param,
             crv_classification_interval.classify_point(last_touch.param, last_zone_tol_2d),
             face_xsect_tol_3d,
-        );
+        )?;
 
         // check state - stored params must be on or inside the interval
         if touch_1st_type == ExtentPointType::Outside || touch_last_type == ExtentPointType::Outside
@@ -2444,4 +2447,45 @@ struct TouchContext<'a, O, G> {
     crv_classification_interval: Extent1d,
     /// `lCrvClassification_IvlCnt`.
     ivl_cnt: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::line::Line;
+
+    /// #18342: on a line 2 469 134 long over [0, 1] (a loop bisector across an infinite
+    /// cylinder's ±1234567 axial sentinel range), `distinct_end_type` keeps the `Start` or
+    /// `End` type of a genuine end touch (1e-9 in 3D, below the face's intersection
+    /// tolerance, or at the end parameter itself) and turns only a touch 3.5e-3 away in 3D
+    /// into `Inside`; other types pass through.
+    #[test]
+    fn distinct_end_type_keeps_genuine_end_touches() {
+        let k = Kernel::default();
+        let curve = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 1_234_567.0),
+            Point3::new(0.0, 0.0, -1_234_567.0),
+            3,
+        ));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let tol = 1e-7;
+        let len = 2_469_134.0;
+        let ty = |param: f64, ty: ExtentPointType| {
+            distinct_end_type(&k, &curve, &ivl, param, ty, tol).expect("type")
+        };
+        use ExtentPointType::{Both, End, Inside, Start};
+        // genuine end touches: close in 3D, or exactly on the end
+        assert_eq!(ty(1e-9 / len, Start), Start);
+        assert_eq!(ty(1.0 - 1e-9 / len, End), End);
+        assert_eq!(ty(0.0, Start), Start);
+        assert_eq!(ty(1.0, End), End);
+        // just below the tolerance in 3D still an end touch
+        assert_eq!(ty(0.9 * tol / len, Start), Start);
+        // 3D-distinct from the end: inside
+        assert_eq!(ty(3.538e-3 / len, Start), Inside);
+        assert_eq!(ty(1.0 - 3.538e-3 / len, End), Inside);
+        // other types are never changed
+        assert_eq!(ty(3.538e-3 / len, Both), Both);
+        assert_eq!(ty(0.5, Inside), Inside);
+    }
 }
