@@ -75,7 +75,7 @@ fn ribbon_shows_pressed(app: &SolveApp, id: &str) -> bool {
 pub(crate) const PILL_HEIGHT: f32 = 22.0;
 
 /// An application-bar pill for something on offer (Update) at the right of `span` (the bar's free
-/// space): accent-filled, with `icon` and the first of `labels` that fits (the icon alone when
+/// space): accent-filled (outlined on the bar when `quiet`, for a notice such as Managed by), with `icon` and the first of `labels` that fits (the icon alone when
 /// none does or `labeled` is false). Every label but the last also leaves `keep` points of the
 /// span free (for the document tabs). None when even the icon doesn't fit: it never covers the
 /// bar's other buttons. `handle` names it for scenarios.
@@ -87,6 +87,7 @@ pub(crate) fn offer_pill(
     keep: f32,
     icon: &str,
     handle: &str,
+    quiet: bool,
 ) -> Option<(Rect, egui::Response)> {
     let t = Tokens::get();
     let font = FontId::proportional(t.font_label);
@@ -108,9 +109,14 @@ pub(crate) fn offer_pill(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &name));
     crate::scenario::publish_target(handle, rect);
     let hot = response.hovered() || response.has_focus();
-    let fill = if hot { t.app_bar_hover_button } else { t.accent };
     let radius = PILL_HEIGHT / 2.0 * f32::from(t.radius_xl) / 10.0;
-    ui.painter().rect_filled(rect, radius, fill);
+    if hot {
+        ui.painter().rect_filled(rect, radius, t.app_bar_hover_button);
+    } else if quiet {
+        ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
+    } else {
+        ui.painter().rect_filled(rect, radius, t.accent);
+    }
     if response.has_focus() {
         ui.painter().rect_stroke(rect.expand(2.0), Tokens::outset_radius(radius, 2.0), Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Outside);
     }
@@ -316,9 +322,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // shortcut_box::show draws the one search editor wherever this rectangle is.
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
             }
-            // A newer release: its Update button stays before the right cluster.
+            // A newer release: its Update button stays before the right cluster, and the
+            // organization's Managed by badge left of it and of the link pills.
             let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
-            let tabs_end = update.map_or(out.controls_left, |u| u.left()) - 8.0;
+            let badge_right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
+            let badge_span = Rect::from_min_max(out.offer.min, pos2(badge_right.max(out.offer.min.x), out.offer.max.y));
+            let badge = crate::policy::badge(app, ui, badge_span, out.offer_labeled);
+            let tabs_end = badge.or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
