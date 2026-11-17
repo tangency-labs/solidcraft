@@ -426,9 +426,9 @@ mod tests {
     }
 
     /// Two plate pairs of different thickness in one feature: each joint is laid out with its own
-    /// defaults (tab width 3 × its tab plate's thickness, end distance the tab width), for the
-    /// skips and the cut alike. Bottom 160 × 100 × 6; Thin 6 and Thick 10 thick, 120 long, 60
-    /// high, two tabs each, clearance 0.1: Thin gains 2 × 18 × 6 × 6, Thick 2 × 30 × 10 × 6, Bottom
+    /// default tab width (3 × its tab plate's thickness), for the skips and the cut alike. Bottom
+    /// 160 × 100 × 6; Thin 6 and Thick 10 thick, 120 long, 60 high, two tabs each 10 from the
+    /// ends, clearance 0.1: Thin gains 2 × 18 × 6 × 6, Thick 2 × 30 × 10 × 6, Bottom
     /// loses 2 × 18.2 × 6.2 × 6 + 2 × 30.2 × 10.2 × 6.
     #[test]
     fn tab_slot_apply_lays_out_each_pair_by_its_own_thickness() {
@@ -447,6 +447,7 @@ mod tests {
             "slot_plates": [{"key": 3, "body": "Bottom"}],
             "clearance": "0.1",
             "count": "2",
+            "end_distance": "10",
         }))
         .unwrap();
         let mut warning = None;
