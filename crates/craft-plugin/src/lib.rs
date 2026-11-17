@@ -512,7 +512,9 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     }
     match entry.kind {
         EntryKind::Command if !entry.extensions.is_empty() => Err(invalid(format!("{field}.extensions"), "only an importer claims file extensions")),
-        EntryKind::Importer if entry.job => Err(invalid(format!("{field}.job"), "an import already runs as a long job; only a command is declared one")),
+        EntryKind::Importer if entry.job => {
+            Err(invalid(format!("{field}.job"), "an import already runs as a long job; only a command is declared one"))
+        }
         EntryKind::Command => Ok(()),
         EntryKind::Importer => {
             let mut seen = BTreeSet::new();
