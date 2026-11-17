@@ -195,7 +195,14 @@ impl crate::Document {
                 c.name, ss.name
             ))
         })?;
-        Ok(corners.map(|p| ss.plane.to_world(p)))
+        // The sketch's points are in its component's frame; the world is where that component's
+        // occurrence puts it, as for the canvas's own plane.
+        let m = self.component_transform(self.feature(anchor.sketch).map_or(c.component, |f| f.component));
+        let placed = |p: Vec2| {
+            let w = ss.plane.to_world(p);
+            if crate::is_identity(&m) { w } else { crate::apply_point(&m, w) }
+        };
+        Ok(corners.map(placed))
     }
 }
 

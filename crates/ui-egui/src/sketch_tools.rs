@@ -1039,6 +1039,18 @@ fn active_sketch(app: &SolveApp) -> Option<u64> {
     app.session.active_sketch
 }
 
+/// Does an image placed at `at` on `plane` (as Canvas and Decal send it) lie on the plane of the
+/// sketch being edited? A named plane must face the same way too; a face's plane is checked again
+/// by the engine, which refuses to frame an image off the sketch's plane.
+fn on_open_sketch_plane(app: &SolveApp, plane: &Value, at: Vec3) -> bool {
+    let world = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = app.session.active_sketch.and_then(|id| world.sketch(id)) else { return false };
+    let (n, o) = (ss.plane.normal(), ss.plane.origin);
+    let through = (at - o).dot(n).abs() <= 1e-6 * (1.0 + (at - o).len());
+    let facing = plane.as_str().is_none_or(|name| crate::dialogs::plane_by_name(&app.session, name).is_some_and(|pl| pl.normal().cross(n).len() < 1e-9));
+    through && facing
+}
+
 /// A click with Project. An edge, face, vertex or other sketch entity projects as itself.
 /// The centre of a hole is none of those — the opening has no triangles — so the ray is
 /// tested against hole openings and the rim's edges are projected. Anything else is said
@@ -1304,15 +1316,22 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 ))
             });
             let Some((plane, at)) = target else { return };
-            let p = if decal {
+            // On the plane of the sketch being edited, the image follows a construction rectangle
+            // drawn around it in that sketch (#18405); the preference keeps the old, free image.
+            let frame = app.preferences.frame_images_in_sketch && on_open_sketch_plane(app, &plane, at);
+            let mut p = if decal {
                 json!({"path": path, "face": if plane.get("face").is_some() { plane } else { Value::Null }})
             } else {
                 json!({"path": path, "plane": plane, "at": [at.x, at.y, at.z]})
             };
+            if let (true, Some(o)) = (frame, p.as_object_mut()) {
+                o.insert("frame".into(), json!(true));
+            }
             if let Ok(v) = app.run(cmd, p) {
                 IMAGE.with(|i| *i.borrow_mut() = None);
                 app.tool = None;
-                if let Some(id) = v["canvas"].as_u64() {
+                // A framed image is placed and sized by its rectangle's constraints, not the card.
+                if let Some(id) = v["canvas"].as_u64().filter(|_| v.get("frame").is_none()) {
                     app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(app, id, false));
                 }
             }

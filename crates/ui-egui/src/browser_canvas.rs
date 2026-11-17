@@ -77,6 +77,19 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| ui_kit::length_field(ui, &mut m.distance, &units, decimals));
                     m.distance = m.distance.clamp(0.001, 1e6);
                 }
+            } else if c.anchor.is_some() {
+                // Its sketch's points place, turn and size it: only its look is edited here.
+                ui_kit::text(ui, solidcraft_ui_text::tr("browser.canvas_anchored"), ui_kit::Text::Note("canvas_anchored"));
+                let (mut op, mut flip) = (c.opacity, c.flip);
+                let mut changed =
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default())).changed();
+                if ui_kit::checkbox_row(ui, "flip", solidcraft_ui_text::tr_label("Flip"), flip) {
+                    flip = !flip;
+                    changed = true;
+                }
+                if changed {
+                    edit = Some(json!({ "canvas": name, "opacity": op, "flip": flip }));
+                }
             } else {
                 let (mut x, mut y, mut w, mut ang, mut op, mut flip) = (c.center.x, c.center.y, c.width, c.angle.to_degrees(), c.opacity, c.flip);
                 let mut changed = false;
