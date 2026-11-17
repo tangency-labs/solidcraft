@@ -7392,7 +7392,12 @@ fn centered_extrude(
     } else {
         [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))]
     };
-    let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, thin };
+    // An extrude that spans its sketch plane (symmetric) has no cap on it, so its low cap, which
+    // faces the way the start cap of a one-sided extrude does, also answers to `start`: a
+    // reference to `start` picked before the direction became symmetric still finds a cap.
+    let spans = !two_sided && lo < -1e-6 * (1.0 + lo.abs()) && hi > 1e-6 * (1.0 + hi.abs());
+    let cap_synonyms = [spans.then(|| "start".to_string()), None];
+    let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
     // wire can tilt an otherwise exact planar cap through numeric cancellation.
     // A side drawn in collinear pieces is one face (#1788), and so is a side along one ellipse
@@ -7628,7 +7633,11 @@ fn feature_tools_with_constructor(
                     .iter()
                     .map(|r| {
                         let roles =
-                            crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
+                            crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r),
+                            caps: caps.clone(),
+                            cap_synonyms: [None, None],
+                            thin: thin_roles.as_ref(),
+                        };
                         let corner = match extent.corner {
                             Some(c) => c,
                             None => draft_corner_for(&ss, r, len, taper, &mut notes)?,
@@ -10381,7 +10390,7 @@ fn half_space_traced(input: &Traced, plane: &Plane, positive: bool, cap: &str) -
     // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
     let cap = Some(cap.to_string());
     let caps = if positive { [cap, None] } else { [None, cap] };
-    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
     Ok(Some(Traced::step(part, &[input, &tool])))
 }
 
@@ -13236,7 +13245,7 @@ fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
         // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
         let section = Some("section".to_string());
         let caps = if positive { [section, None] } else { [None, section] };
-        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
+        let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, cap_synonyms: [None, None], thin: None }.tool(tool, None);
         parts.push(Traced::step(part, &[input, &tool]));
     }
     Ok(parts)
