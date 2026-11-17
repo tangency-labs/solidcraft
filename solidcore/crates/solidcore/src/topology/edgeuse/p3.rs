@@ -84,7 +84,13 @@
 //!   without the edge/edge term, capped by the edge tolerance (`fit_tolerance`).
 //!   A tolerance raised to cover a gap so never loosens a trim fitted later. The
 //!   fillet's solver takes its approximation tolerance from the same value
-//!   (`blend::fillet_executive` `SetFilletParameters`).
+//!   (`blend::fillet_executive` `SetFilletParameters`). The edge is told apart by its
+//!   tolerance's value, not by what set it: a tolerance another operation set inside
+//!   `(max(def, face tolerance), zone_tol3d(gain * g)]` takes the same tighter fit,
+//!   which is never above the edge tolerance. Where the healer's edge/edge term
+//!   dominated, the fit is below the tolerance the edge had before the raise. Cost: each
+//!   call walks the edge's faces and, above that baseline with no gap cached, computes
+//!   the uses' edge/face gaps without caching them.
 //! - **Passed-on statuses (WR-663).** The statuses the fork passes on
 //!   (tangency-labs/smlib 666242b: `CreateUVTrimCurve`'s box, seam transforms, 2D
 //!   conversions, trims, end evaluations and drops, `NormalizedEvaluate`;
