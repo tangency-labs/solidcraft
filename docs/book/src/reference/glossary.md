@@ -565,7 +565,7 @@ in the room in front of the wearer.
 SolidCraft shows the design in one through OpenXR and moves it with the headset's hand
 controllers (`docs/vr.md`).
 
-- **In SolidCraft:** the `vr_headset` preference (Preferences › VR headset › Start in VR), `--vr`,
+- **In SolidCraft:** the `vr_headset` preference (Preferences › XR › Start in VR), `--vr`,
   `SOLIDCRAFT_VR`; the `vr.*` catalogue entries.
 - **Don't use:** VR glasses, HMD (in labels).
 - **Elsewhere:** head-mounted display, VR goggles, XR headset.

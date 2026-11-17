@@ -375,7 +375,7 @@ pub const PAGES: &[&str] = &[
     "Tools",
     "Navigation",
     "3D mouse",
-    "VR headset",
+    "XR",
     "Shortcuts",
     "Assistant",
     "Plugins",
@@ -390,7 +390,7 @@ pub const PAGE_SKETCH: usize = 6;
 pub const PAGE_TOOLS: usize = 7;
 pub const PAGE_NAVIGATION: usize = 8;
 pub const PAGE_MOUSE3D: usize = 9;
-pub const PAGE_VR: usize = 10;
+pub const PAGE_XR: usize = 10;
 pub const PAGE_SHORTCUTS: usize = 11;
 pub const PAGE_ASSISTANT: usize = 12;
 pub const PAGE_PLUGINS: usize = 13;
@@ -492,10 +492,10 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         icon: ui_kit::Icon::Kit("prefs_vr"),
         label: "prefs.structure.vr",
         group: None,
-        handle: "prefs:page:VR headset",
+        handle: "prefs:page:XR",
         scroll: true,
-        draw: page_draw::<PAGE_VR>,
-        defaults: page_defaults::<PAGE_VR>,
+        draw: page_draw::<PAGE_XR>,
+        defaults: page_defaults::<PAGE_XR>,
     }),
     prefs_window::Page::Host(prefs_window::HostPage {
         icon: ui_kit::Icon::Kit("prefs_shortcuts"),
@@ -1213,7 +1213,7 @@ preference_settings! {
     graphics_adapter: String = String::new(), PAGE_GRAPHICS;
     /// Start in VR from the next start (#2172, docs/vr.md). Off by default: the app starts
     /// as it always has, with no VR software touched.
-    vr_headset: bool = false, PAGE_VR => check_id("prefs.vr_headset");
+    vr_headset: bool = false, PAGE_XR => check_id("prefs.vr_headset");
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
     /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).
@@ -2525,7 +2525,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
                 save_graphics(app);
             }
         }
-        PAGE_VR => {
+        PAGE_XR => {
             if StartupGraphics::of(&app.preferences) != graphics {
                 save_graphics(app);
             }
@@ -2995,7 +2995,7 @@ fn refuse_unavailable_preferences(p: &serde_json::Value, available: bool) -> Res
     Ok(())
 }
 
-/// VR (`vr_headset`, Preferences › VR headset) exists where the desktop app has it: Windows and
+/// VR (`vr_headset`, Preferences › XR) exists where the desktop app has it: Windows and
 /// Linux. Elsewhere `ui.prefs` neither lists nor sets it.
 pub const VR_AVAILABLE: bool = cfg!(any(target_os = "windows", target_os = "linux"));
 
@@ -3354,7 +3354,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
-        PAGE_VR => vr::show(app, ui),
+        PAGE_XR => vr::show(app, ui),
         _ => {}
     }
 }
@@ -7290,7 +7290,7 @@ mod tests {
                 "Tools",
                 "Navigation",
                 "3D mouse",
-                "VR headset",
+                "XR",
                 "Shortcuts",
                 "Assistant",
                 "Plugins"
@@ -9849,7 +9849,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Preferences › VR headset › Start in VR (#2172): off by default and in settings saved
+    /// Preferences › XR › Start in VR (#2172): off by default and in settings saved
     /// before it existed; `ui.prefs` saves the choice in `graphics.json` beside the other settings
     /// for the next start, refuses what is not a yes or no, and Cancel and the page's Restore
     /// Defaults take it back, in the file too. The row shows only where the host has VR, with
@@ -9890,7 +9890,7 @@ mod tests {
         );
 
         // The page: the row only where the host has VR, with the host's words under it.
-        h.call("ui.prefs", json!({"open": "VR headset"}));
+        h.call("ui.prefs", json!({"open": "XR"}));
         h.frames(2);
         assert!(crate::scenario::handle_at("prefs:vr_headset").is_none(), "no VR on this host: no row");
         h.app.services.vr_status = Some("Showing in the headset: Test headset on Test runtime.".into());
@@ -9911,7 +9911,7 @@ mod tests {
         // The page's Restore Defaults turns it off again; another page's leaves it.
         super::defaults(&mut h.app, super::PAGE_GRAPHICS);
         assert!(h.app.preferences.vr_headset, "Graphics' Restore Defaults leaves it");
-        super::defaults(&mut h.app, super::PAGE_VR);
+        super::defaults(&mut h.app, super::PAGE_XR);
         assert!(!h.app.preferences.vr_headset);
         assert_eq!(saved()["vr"], false);
         let _ = std::fs::remove_dir_all(&dir);

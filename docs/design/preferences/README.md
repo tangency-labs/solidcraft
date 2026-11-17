@@ -21,7 +21,7 @@ the settings-profile switcher.
 Pages: [General](pages/general.md), [Appearance](pages/appearance.md), [Layout](pages/layout.md),
 [Graphics](pages/graphics.md), [Design](pages/design.md), [Sketch](pages/sketch.md),
 [Tools](pages/tools.md), [Navigation](pages/navigation.md), [3D mouse](pages/mouse3d.md),
-[VR headset](pages/vr.md), [Shortcuts](pages/shortcuts.md), [Assistant](pages/assistant.md), [Plugins](pages/plugins.md).
+[XR](pages/xr.md), [Shortcuts](pages/shortcuts.md), [Assistant](pages/assistant.md), [Plugins](pages/plugins.md).
 
 ## Page structure: 9 pages become 12, in four headings
 
@@ -33,7 +33,7 @@ a profile switcher card at its foot on every page.
 | (none) | General |
 | Look | Appearance, Layout, Graphics |
 | Work | Design, Sketch, Tools |
-| Input | Navigation, 3D mouse, VR headset, Shortcuts |
+| Input | Navigation, 3D mouse, XR, Shortcuts |
 | Extend | Assistant, Plugins |
 
 Today's pages (`PAGES` in `crates/ui-egui/src/prefs.rs`): General, Interface, Design, Navigation,

@@ -1,6 +1,6 @@
 //! Whether this computer has OpenXR, found without loading anything: the loader library and a
 //! registered OpenXR runtime are looked up as files and settings, so asking starts no VR software
-//! (a run that does not start VR must not touch it). Preferences › VR headset says what it finds.
+//! (a run that does not start VR must not touch it). Preferences › XR says what it finds.
 
 use std::path::{Path, PathBuf};
 

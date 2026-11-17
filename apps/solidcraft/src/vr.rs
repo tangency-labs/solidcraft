@@ -1,5 +1,5 @@
 //! VR (#2172, docs/vr.md): the design as a thing in the room, held, turned and scaled with the
-//! controllers. Asked for with `--vr`, `SOLIDCRAFT_VR=1` or Preferences › VR headset ([`wanted`]),
+//! controllers. Asked for with `--vr`, `SOLIDCRAFT_VR=1` or Preferences › XR ([`wanted`]),
 //! because the runtime creates the Vulkan device the window then draws with. Off, none of it runs.
 //!
 //! The window on the desktop goes on as ever, so whoever sits at it sees and drives the same
@@ -766,7 +766,7 @@ fn mark_bytes(vertices: &[Vertex]) -> Vec<u8> {
 pub const VR_ENV: &str = "SOLIDCRAFT_VR";
 
 /// Whether a start should try VR: the command line's `--vr`, else `SOLIDCRAFT_VR`, else
-/// `graphics.json`'s `vr` (Preferences › VR headset › Start in VR). The environment can also say no (`0`, `off`)
+/// `graphics.json`'s `vr` (Preferences › XR › Start in VR). The environment can also say no (`0`, `off`)
 /// to a saved yes. Anything else it holds is ignored, and the saved choice stands.
 pub fn wanted(flag: bool, env: Option<&str>, saved: Option<&serde_json::Value>) -> bool {
     if flag {
@@ -780,7 +780,7 @@ pub fn wanted(flag: bool, env: Option<&str>, saved: Option<&serde_json::Value>) 
     saved.and_then(|v| v.get("vr")).and_then(serde_json::Value::as_bool).unwrap_or(false)
 }
 
-/// What VR is doing, for Preferences › VR headset and the status line.
+/// What VR is doing, for Preferences › XR and the status line.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
     /// Not asked for in this run: what was found of OpenXR, without starting any VR software.

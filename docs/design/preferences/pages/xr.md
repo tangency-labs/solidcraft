@@ -1,7 +1,8 @@
-# VR headset
+# XR
 
 No board: the page was added with the VR viewer (#2172, `docs/vr.md`) as a proposal, open to
-feedback. Heading: Input, after the 3D mouse: like a 3D mouse, few people have a headset, and VR
+feedback. Named XR, not VR: VR is its only setting for now, and AR or other XR features would go
+on the same page. Heading: Input, after the 3D mouse: like a 3D mouse, few people have a headset, and VR
 will need many settings, so they get a page of their own rather than rows on another. With it
 the page list no longer fits the window's height and scrolls. Subtitle "Show the design in a VR headset and
 work on it with the controllers." No "In profile" tag (the headset stays on this computer). Source:

@@ -535,7 +535,7 @@ pub struct Services {
     /// Adapter names and descriptive labels from the desktop renderer's chosen backends.
     pub graphics_adapters: Vec<(String, String)>,
     /// The host can show the design in a VR headset (#2172): what this run is doing about it, in
-    /// words for Preferences › VR headset, where the setting for the next start is then offered.
+    /// words for Preferences › XR, where the setting for the next start is then offered.
     /// `None`: this host has no VR (the browser, macOS), and the page says what VR needs.
     pub vr_status: Option<String>,
     /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
