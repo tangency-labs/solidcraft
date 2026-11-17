@@ -278,8 +278,8 @@ fn refuse_singular_offset(
 
 /// Not upstream (#18239): refuses an inset of `wall` of the closed solid `original` (its
 /// faces `open` left open) where two of its planar faces face each other across material
-/// no more than twice the wall apart, so that their offsets meet or cross (a square boss
-/// inset by half its width or more): the material between them has no offset left, a change
+/// exactly twice the wall apart, so that their offsets meet on one plane (a square boss
+/// inset by exactly half its width): the material between them has no offset left, a change
 /// of topology the offset does not make, while the body still has a cavity elsewhere (an
 /// inset that leaves no cavity at all is the shell's empty-cavity refusal, WR-454). It is
 /// [`OffsetFailure::WallsMeetAcross`], in the class of a round's collapse, naming half the
@@ -287,8 +287,10 @@ fn refuse_singular_offset(
 ///
 /// Two faces qualify when their inward normals are opposite to within the B-rep's tolerance
 /// over the faces' extent, the second lies ahead of the first along its inward normal by a
-/// gap `g` with `tolerance < g <= 2 wall + tolerance`, and an interior point of one projects
-/// strictly inside the other (`face_classify_uv`), so the faces overlap across the gap, and a
+/// gap `g` with `tolerance < g` and `|g - 2 wall| <= tolerance` (where the insets cross, as
+/// across a rib or floor thinner than two walls, the offset leaves that material solid), and
+/// an interior point of one projects strictly inside the other (`face_classify_uv`), so the
+/// faces overlap across the gap, and a
 /// planar face shares an edge with each and has its interior strictly between their planes:
 /// the cap of the protrusion the two bound, both its edges with them convex (a floor between
 /// a recess and a cut below it has no such cap, and its shell builds). The
@@ -389,7 +391,9 @@ fn refuse_meeting_planar_insets(
                 continue;
             }
             let gap = (pb - pa).dot(ma);
-            if !(gap > tolerance && gap <= 2.0 * wall + tolerance) {
+            // the two insets land on one plane: where they cross instead (a rib or floor
+            // thinner than two walls) the offset leaves that material solid and builds
+            if !(gap > tolerance && (gap - 2.0 * wall).abs() <= tolerance) {
                 continue;
             }
             if narrowest.is_some_and(|(_, g)| g <= gap) || !capped(i, j, pa, ma, gap) {

@@ -101,7 +101,7 @@ pub enum OffsetFailure {
         radius: f64,
     },
     /// The inset of `face` by `distance` meets the inset of a planar face opposite it across
-    /// material no more than twice the distance away (a square boss inset by half its width):
+    /// material exactly twice the distance away (a square boss inset by half its width):
     /// the material between them has no offset left, a change of topology the offset does not
     /// make. `largest` is half the narrowest such width: the largest wall that fits (#18239).
     WallsMeetAcross {
