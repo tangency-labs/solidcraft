@@ -123,8 +123,12 @@ pub enum Target {
     PointCloud {
         id: u64,
     },
-    /// The Section Analysis in the browser's Analysis folder.
-    Section,
+    /// A plane of the Section Analysis in the browser's Analysis folder (its id).
+    Section {
+        plane: u64,
+    },
+    /// The browser's Analysis folder.
+    Analysis,
     /// A component's Bodies, Sketches or Construction folder, under the design (`scope` `c0`)
     /// or a placement (`o:<path>`).
     Folder {
@@ -198,6 +202,11 @@ pub struct MenuState {
     pub over_geometry: bool,
     /// The plane under the cursor when the viewport menu opened: it offers a sketch on it.
     pub plane: Option<String>,
+    /// The section plane whose cut face was under the cursor when the viewport menu opened: it
+    /// offers to turn it off.
+    pub section_plane: Option<u64>,
+    /// The face under the cursor when the viewport menu opened: Section View cuts on its plane.
+    pub face: Option<Sel>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
     /// them).
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
@@ -379,7 +388,8 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::ViewGizmo => crate::view_gizmo::menu_items(app),
-        Target::Section => crate::browser::section_items(app),
+        Target::Section { plane } => crate::browser::section_items(app, *plane),
+        Target::Analysis => crate::browser::analysis_items(app),
         Target::Joint { id } => joint_items(app, *id),
         Target::Link { index } => link_items(app, *index),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
@@ -600,6 +610,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let exists = feature.is_some();
     let sketch = feature.and_then(|f| crate::timeline::TimelineKind::of(&f.kind).profile_sketch());
     let suppressed = feature.is_some_and(|f| f.suppressed);
+    let targets = crate::timeline::menu_targets(app, id);
     vec![
         act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
         act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
@@ -610,7 +621,12 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("timeline.roll_to", "Roll Back Here", "rollback").with(json!({"feature":id})).on(exists),
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(exists && crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(exists && crate::edit_clipboard::something_to_copy(app)),
-        act("ui.delete", "Delete", "delete").key("Del").with(json!({"items": [{"type": "feature", "id": id}]})).on(exists),
+        // The selected features when the row is among them, as Copy and Cut and both History
+        // layouts' Delete act on (#5005).
+        act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
+            .key("Del")
+            .with(json!({"items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>()}))
+            .on(exists),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists),
     ]
@@ -630,6 +646,13 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     // Everything under the cursor, for what lies beneath something else.
     if app.menu.over_geometry {
         v.push(act("ui.selectOther", "Select Other…", "select").key("Hold click"));
+        v.push(Item::sep());
+    }
+    // A section's cut face: edit its plane, or turn it off (the whole section when it has only
+    // that one).
+    if let Some(plane) = app.menu.section_plane.filter(|id| app.session.section.iter().any(|c| c.id == *id)) {
+        v.push(act("ui.editSectionView", "Edit Section View", "section").with(json!({ "plane": plane })));
+        v.push(act("ui.sectionViewOff", "Turn Off Section View", "section").with(json!({ "plane": plane })));
         v.push(Item::sep());
     }
     if app.session.active_sketch.is_some() {
@@ -662,9 +685,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "view.normal_to", "Normal to Selection").with(json!({"camera": app.cam})));
             v.push(Item::sep());
         }
-        let planar =
-            sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
-        let one_flat = planar && matches!(sel.as_slice(), [Sel::Face { .. }]);
+        let planar = |s: &&Sel| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some());
+        let one_flat = matches!(sel.as_slice(), [face] if planar(&face));
         // A curved face, or several faces, have no one plane to sketch on, offset or extrude from;
         // Press Pull offsets them.
         if one_flat {
@@ -680,9 +702,17 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
-        v.push(act("ui.lookAt", "Look At", "lookat").on(planar));
+        v.push(act("ui.lookAt", "Look At", "lookat").on(sel.iter().any(|s| planar(&s))));
         let marked = matches!(sel.as_slice(), [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
+        // The face right-clicked (else the last planar one selected) starts a section on its
+        // plane, or its plane joins the one on show.
+        let same_face =
+            |a: &Sel, b: &Sel| matches!((a, b), (Sel::Face { body, index, .. }, Sel::Face { body: b2, index: i2, .. }) if body == b2 && index == i2);
+        let under = app.menu.face.as_ref().filter(|f| sel.iter().any(|s| same_face(s, f)));
+        if let Some(face) = under.map_or_else(|| sel.iter().rev().find(planar), |f| Some(f).filter(planar)) {
+            v.push(act("ui.sectionView", "Section View", "section").with(json!({ "face": face })));
+        }
         v.push(Item::sep());
         v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
         v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": [face] })));
@@ -750,9 +780,6 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
         v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
         v.push(Item::sep());
-        if app.session.section.is_some() {
-            v.push(act("ui.unsection", "Remove Section", "section"));
-        }
         v.push(act("ui.origin", if app.origin_shown() { "Hide Origin" } else { "Show Origin" }, "origin"));
         return v;
     }
@@ -847,6 +874,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         })
         .collect();
     let sketches = if selected.contains(&id.to_string()) { selected } else { vec![id.to_string()] };
+    let targets = crate::timeline::menu_targets(app, id);
     let parts = !app.session.doc.components.is_empty();
     let mut items = vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
@@ -859,7 +887,11 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
-        act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
+        // The selected features when this sketch is among them, as Cut and Copy take the
+        // selection and the feature menus' Delete does.
+        act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
+            .key("Del")
+            .with(json!({ "items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>() })),
         act("ui.rename", "Rename", "rename").key("F2").with(json!({ "feature": id })),
         crate::browser::sketches_to_parts_item(sketches).on(parts && !editing),
         Item::sep(),
@@ -1785,12 +1817,25 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.tangentChain" => tangent_chain(app),
         "ui.origin" => app.set_origin_shown(!app.origin_shown()),
         "ui.clear" => drop(app.run("select.clear", json!({}))),
-        "ui.unsection" => {
-            app.tree.hidden_section = None;
-            drop(app.run("inspect.section", json!({"clear": true})));
+        "ui.unsection" => drop(app.run("inspect.section", json!({"clear": true}))),
+        "ui.analysisVisible" => crate::browser::set_analysis_shown(app, app.session.section_folder.is_some()),
+        "ui.sectionView" => {
+            if let Some(face) = p.get("face").and_then(|f| serde_json::from_value::<Sel>(f.clone()).ok()) {
+                section_view(app, face);
+            }
         }
-        "ui.editSection" => crate::dialogs::edit_section(app),
-        "ui.sectionVisible" => crate::browser::set_section_shown(app, p.get("visible").and_then(Value::as_bool).unwrap_or(true)),
+        // Removing a section's last plane turns it off.
+        "ui.sectionViewOff" | "ui.removeSectionPlane" => {
+            if let Some(id) = p.get("plane").and_then(Value::as_u64) {
+                drop(app.run("inspect.section", json!({ "remove": id })));
+            }
+        }
+        "ui.editSection" | "ui.editSectionView" => crate::dialogs::edit_section_plane(app, p.get("plane").and_then(Value::as_u64)),
+        "ui.sectionVisible" => {
+            if let Some(id) = p.get("plane").and_then(Value::as_u64) {
+                crate::browser::set_section_shown(app, id, p.get("visible").and_then(Value::as_bool).unwrap_or(true));
+            }
+        }
         "ui.fit" => app.animate_view("fit"),
         "ui.home" => app.animate_view("home"),
         // One command for the whole selection: all fixed unless all already are.
@@ -2105,6 +2150,27 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
     app.set_status(message, false);
 }
 
+/// Section View on a face: the Section Analysis dialog on the face's plane (its outward normal,
+/// unflipped, so a positive distance cuts into the part). With a section on (its planes shown or
+/// hidden) the plane joins it, keeping the section's hatch: at 0 it hides nothing more, and moved in it cuts away its
+/// own side as well, the other planes' cuts staying.
+fn section_view(app: &mut SolveApp, face: Sel) {
+    let adding = !app.session.section.is_empty() || !app.session.section_hidden.is_empty();
+    let section_hatch = app.session.section_hatch;
+    app.start_section_edit();
+    if let Some(d) = app.dialog.as_mut()
+        && let crate::dialogs::Kind::Section { add, flip, hatch, .. } = &mut d.kind
+    {
+        (*add, *flip) = (adding, false);
+        if adding {
+            *hatch = section_hatch;
+        }
+        if let Some(plane) = d.inputs.first_mut() {
+            plane.items = vec![face];
+        }
+    }
+}
+
 /// Delete what is selected: sketch entities, features, and bodies (a Remove feature).
 pub fn delete(app: &mut SolveApp) {
     crate::delete::delete_selection(app);
@@ -2374,6 +2440,9 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     app.menu.picked = None;
     let before = app.session.selection.clone();
     app.menu.over_geometry = app.viewport.hover.is_some();
+    app.menu.section_plane = crate::view_pick::section_plane_at(app, at).map(|c| c.id);
+    app.menu.face =
+        app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).map(|(_, sel)| sel).filter(|s| matches!(s, Sel::Face { .. }));
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
     app.menu.plane = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).and_then(|(_, sel)| match sel {
         Sel::Plane { name } => Some(name),
@@ -2496,8 +2565,9 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         }
         Target::Canvas { id } => doc.canvases.iter().any(|c| c.id == *id),
         Target::PointCloud { id } => doc.point_clouds.iter().any(|c| c.id == *id),
-        // Shown or hidden, the browser lists it.
-        Target::Section => app.session.section.is_some() || app.tree.hidden_section.is_some(),
+        // Shown or hidden, the browser lists it, in the Analysis folder while it has any plane.
+        Target::Section { plane } => app.session.section.iter().chain(&app.session.section_hidden).any(|c| c.id == *plane),
+        Target::Analysis => !app.session.section.is_empty() || !app.session.section_hidden.is_empty(),
     };
     if found {
         return Ok(());

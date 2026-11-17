@@ -2742,12 +2742,12 @@ fn finish_pattern(
     p: &Value,
     features: Vec<solidcraft_doc::FeatureId>,
     pattern: solidcraft_doc::PatternKind,
-    bodies: Vec<String>,
+    (bodies, placements): (Vec<String>, Vec<Vec<u64>>),
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
     if comps.is_empty() {
         let copied = bodies.clone();
-        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() })?;
+        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect(), placements })?;
         // The pattern is added either way: when it made no copies (the feature failed to
         // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
         // and they keep no look, as before.
@@ -2774,21 +2774,27 @@ fn finish_pattern(
     Ok(json!({"occurrences": made}))
 }
 
+/// The bodies a pattern copies and the placement each was picked at.
+type PatternBodies = (Vec<String>, Vec<Vec<u64>>);
+
 /// What a pattern copies: features (replayed), bodies (`bodies: [names]`), or components
-/// (`components: [names]`, placed again as occurrences).
-fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, Vec<String>)> {
+/// (`components: [names]`, placed again as occurrences). A body may be named as a placement of
+/// its part shows it (its world name, as the view and the Browser name it): it is copied where
+/// that placement shows it, as a mirror copies it.
+fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, PatternBodies)> {
     if !string_list(cmd, p, "components")?.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok((Vec::new(), (Vec::new(), Vec::new())));
     }
     let bodies = string_list(cmd, p, "bodies")?;
     if bodies.is_empty() {
-        return Ok((source_features(s, p, cmd)?, Vec::new()));
+        return Ok((source_features(s, p, cmd)?, (Vec::new(), Vec::new())));
     }
+    let (bodies, placements) = placed_bodies(s, bodies, cmd)?;
     let st = s.model.state();
     if let Some(b) = bodies.iter().find(|b| st.body(b).is_none()) {
         return Err(bad(cmd, format!("no body `{b}`")));
     }
-    Ok((Vec::new(), bodies))
+    Ok((Vec::new(), (bodies, placements)))
 }
 
 fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3963,13 +3969,64 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
     let st = s.model.state();
     let Some(ss) = st.sketch(sketch) else { return Vec::new() };
     let mut ends: Vec<usize> = Vec::new();
+    // An arc's centre (a filleted corner's, say) is geometry of the arc, not a hole site, unless a
+    // circle is centred there too.
+    let circle_centres: Vec<usize> = ss
+        .sketch
+        .curves
+        .iter()
+        .filter_map(|c| match &c.kind {
+            solidcraft_sketch::CurveKind::Circle { c, .. } => Some(*c),
+            _ => None,
+        })
+        .collect();
     for c in &ss.sketch.curves {
         match &c.kind {
             solidcraft_sketch::CurveKind::Circle { .. } => {}
-            solidcraft_sketch::CurveKind::Arc { a, b, .. } | solidcraft_sketch::CurveKind::Line { a, b } => ends.extend([*a, *b]),
+            solidcraft_sketch::CurveKind::Arc { c, a, b } => {
+                ends.extend([*a, *b]);
+                if !circle_centres.contains(c) {
+                    ends.push(*c);
+                }
+            }
+            solidcraft_sketch::CurveKind::Line { a, b } => ends.extend([*a, *b]),
             solidcraft_sketch::CurveKind::Ellipse { m, .. } => ends.push(*m),
             solidcraft_sketch::CurveKind::Spline { pts, .. } => ends.extend(pts.iter().copied()),
             solidcraft_sketch::CurveKind::Conic { a, b, apex, .. } => ends.extend([*a, *b, *apex]),
+        }
+    }
+    // A construction rectangle's centre sits at the midpoint of its construction diagonal: it is
+    // the rectangle's reference geometry, not a hole site. It counts as that only when the diagonal
+    // closes a rectangle: each of its ends has exactly two other lines, the four reach the same two
+    // corners, and every line at any of the four corners (the edges and both diagonals) is
+    // construction.
+    let lines: Vec<(&solidcraft_sketch::Curve, [usize; 2])> = ss
+        .sketch
+        .curves
+        .iter()
+        .filter_map(|c| match &c.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } => Some((c, [*a, *b])),
+            _ => None,
+        })
+        .collect();
+    let at = |v: usize| lines.iter().filter(move |(_, e)| e.contains(&v));
+    let construction_rectangle_centre = |l: usize| -> bool {
+        let Some(diag) = ss.sketch.curves.get(l) else { return false };
+        let solidcraft_sketch::CurveKind::Line { a, b } = &diag.kind else { return false };
+        let (a, b) = (*a, *b);
+        let far = |v: usize| -> Vec<usize> {
+            let mut f: Vec<usize> = at(v).filter(|(_, e)| *e != [a, b] && *e != [b, a]).map(|(_, e)| if e[0] == v { e[1] } else { e[0] }).collect();
+            f.sort_unstable();
+            f
+        };
+        let (fa, fb) = (far(a), far(b));
+        fa.len() == 2 && fa == fb && !fa.contains(&a) && !fa.contains(&b) && [a, b, fa[0], fa[1]].iter().all(|&v| at(v).all(|(c, _)| c.construction))
+    };
+    for con in &ss.sketch.constraints {
+        if let solidcraft_sketch::ConstraintKind::Midpoint { p, l } = &con.kind
+            && construction_rectangle_centre(*l)
+        {
+            ends.push(*p);
         }
     }
     ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()

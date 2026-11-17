@@ -1702,6 +1702,7 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                     copy_at_end2: false,
                 },
                 bodies: Vec::new(),
+                placements: Vec::new(),
             },
             None,
         )
@@ -1755,6 +1756,7 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     copy_at_end2: false,
                 },
                 bodies: Vec::new(),
+                placements: Vec::new(),
             },
             None,
         )
