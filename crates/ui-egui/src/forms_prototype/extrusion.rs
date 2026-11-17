@@ -881,8 +881,12 @@ mod tests {
         let _delay = delayed_feedback(&mut app);
         app.now = 10.3;
         poll(&mut app);
-        let proj =
-            Proj { cam: app.cam, vp: app.cam.view_proj(900.0 / 700.0, 20.0), rect: egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0)) };
+        let proj = Proj {
+            cam: app.cam,
+            vp: app.cam.view_proj(900.0 / 700.0, 20.0),
+            rect: egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0)),
+            bounds: None,
+        };
         scene_submitted(&mut app, &proj);
         let first_timing = inspect(&app)["timing"].clone();
         assert_eq!(first_timing["samples"][0]["requested_s"], 10.0);

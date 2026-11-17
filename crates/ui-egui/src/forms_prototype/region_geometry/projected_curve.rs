@@ -470,6 +470,7 @@ mod tests {
             cam: Camera::default(),
             vp: Mat4([[0.02, 0.0, 0.0, 0.0], [0.0, -0.02, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [-1.0, 1.0, 0.0, 1.0]]),
             rect: egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0)),
+            bounds: None,
         }
     }
     #[test]
@@ -787,6 +788,7 @@ mod tests {
             cam: Camera::default(),
             vp: Mat4::IDENTITY,
             rect: egui::Rect::from_min_max(pos2(10.0, 20.0), pos2(810.0, 620.0)),
+            bounds: None,
         };
         let controls = [HPoint::weighted(Vec3::new(-0.5, 0.5, 1.0), 2.0), HPoint::weighted(Vec3::new(0.5, -0.5, 2.0), 1.0)];
         let projected = project_controls(&proj, &controls).unwrap().unwrap();

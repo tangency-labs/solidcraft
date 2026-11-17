@@ -94,12 +94,10 @@ fn cylinder() -> Surface {
 
 /// The kernel of these rounds, with the result-invariant shortcuts `on` or off.
 fn kernel(on: bool) -> Kernel {
-    let mut k = Kernel {
+    Kernel {
         memoize_curve_caches: on,
         ..Kernel::default()
-    };
-    k.fixes.fillet_round_as_definition = true;
-    k
+    }
 }
 
 /// The root round on the plate `[-wx, wx] x [-wy, wy]`: (round, bound, spans).

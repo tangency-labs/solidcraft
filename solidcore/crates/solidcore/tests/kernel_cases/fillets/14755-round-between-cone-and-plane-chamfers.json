@@ -1,0 +1,86 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  20.62159062730128,
+                  -9.0,
+                  7.5
+                ],
+                [
+                  14.25455317926873,
+                  -4.669872981077807,
+                  5.9985832371232246e-15
+                ]
+              ],
+              "index": 6
+            }
+          ],
+          "points": [
+            [
+              17.452210762518515,
+              -6.829739030601948,
+              3.740997735318891
+            ]
+          ],
+          "tolerance": 7.156635890680856
+        },
+        "kind": "round",
+        "sizes": [
+          5.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "14755-round-between-cone-and-plane-chamfers",
+  "expected": {
+    "body_count": 1,
+    "method": "Before the round: the cylinder above z = 7.5, pi 22.5^2 * 22.5, and for 0 <= z <= 7.5 the union of the disc of radius R = 15 + z and the rectangle 0 <= x <= 110, |y| <= w = 9 - (7.5 - z)/sqrt 3, of area pi R^2 + 220 w - (w sqrt(R^2 - w^2) + R^2 asin(w/R)); integrated over z: 53539.065837879. The round: the ball's centre at height c is 5 from the cone and 5 from the plane chamfer, at rho = c + 15 + 5 sqrt 2 from the axis with y = -9 - (2/sqrt 3)(5 + (c - 7.5)/2). The round is the points outside the part between the planes z = 0 and z = 7.5 it ends on, within 5 of both faces and no nearer than 5 to that curve. Its slice at height z lies between the circle rho = R, the line y = -w and the envelope (the points 5 from the curve), from the contact on the cone (the centre at c = z - 5/sqrt 2, its foot at the centre's angle) up to the line, where the envelope touches at the plane's contact (c = z - 5/2). Its area is the integral over y of the envelope's x less the circle's, with y = -w - s^2 (y_contact + w) to take out the envelope's square root at the line, and the volume its integral over z, both by Gauss-Legendre (16 and 32 points agree to 1e-14): 8.784903411. Total 53547.850741290. The same integral gives the rounds that built before (R3 3.425023667, R4 5.846500923, R4.5 7.254899330, R8 20.164317308), each within 1e-3 mm^3 of the body built. The tolerance is the volume measure's own. body_count 1",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#14755"
+    ],
+    "tolerance": {
+      "rel": 1e-07
+    },
+    "volume_mm3": 53547.85074129,
+    "what": "a cylinder r22.5 from z = 0 to 30 about the z axis, joined with a bar (0 <= x <= 110, |y| <= 9, 0 <= z <= 7.5); the cylinder's bottom rim chamfered 7.5 (the cone rho = 15 + z up to z = 7.5), then the bar's two bottom long edges chamfered 7.5 up the wall at 30 degrees to it (the planes |y| = 9 - (7.5 - z)/sqrt 3). The concave edge where the cone meets the plane chamfer of the y < 0 side, from (14.2546, -4.6699, 0) to (20.6216, -9, 7.5), rounded R5 must give one closed solid, as it does at R4.5 and R8: the round ends on the bottom face's plane and on the bar's top face's plane, both at a slant to its sections"
+  },
+  "expressible": true,
+  "gallery_note": "the cone is kept as a B-spline arc round its axis; the section at the edge's lower end is solved on the cone itself, so the round reaches both its rails' ends on the bottom face's plane",
+  "operation_expressible": true,
+  "records": "14755-round-between-cone-and-plane-chamfers.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b2"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#14755"
+  ],
+  "ungraded": [],
+  "what": "a cylinder r22.5 from z = 0 to 30 about the z axis, joined with a bar (0 <= x <= 110, |y| <= 9, 0 <= z <= 7.5); the cylinder's bottom rim chamfered 7.5 (the cone rho = 15 + z up to z = 7.5), then the bar's two bottom long edges chamfered 7.5 up the wall at 30 degrees to it (the planes |y| = 9 - (7.5 - z)/sqrt 3). The concave edge where the cone meets the plane chamfer of the y < 0 side, from (14.2546, -4.6699, 0) to (20.6216, -9, 7.5), rounded R5 must give one closed solid, as it does at R4.5 and R8: the round ends on the bottom face's plane and on the bar's top face's plane, both at a slant to its sections",
+  "why_not": []
+}

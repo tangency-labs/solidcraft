@@ -1594,6 +1594,7 @@ mod tests {
             cam: Camera::default(),
             vp: Mat4([[0.02, 0.0, 0.0, 0.0], [0.0, -0.02, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [-1.0, 1.0, 0.0, 1.0]]),
             rect: Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0)),
+            bounds: None,
         }
     }
     fn region(crossing: bool, a: [f32; 2], b: [f32; 2]) -> BoxSel {

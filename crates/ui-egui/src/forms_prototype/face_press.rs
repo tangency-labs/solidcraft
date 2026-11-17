@@ -390,6 +390,7 @@ mod jobs {
             && gesture.projection.cam == projection.cam
             && gesture.projection.vp == projection.vp
             && gesture.projection.rect == projection.rect
+            && gesture.projection.bounds == projection.bounds
             && app.viewport.rect == Some(projection.rect)
             && gesture.query.is_current(app)
             && match &gesture.intent {

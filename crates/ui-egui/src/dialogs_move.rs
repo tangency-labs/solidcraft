@@ -33,6 +33,11 @@ pub const POINT_TO_POINT: usize = 3;
 pub const POINT_TO_POSITION: usize = 4;
 const POINTS: crate::selection::Accept = VERTICES | FACES | EDGES | ORIGIN | SNAP_POINTS;
 
+/// What Move/Copy moves, one kind at a time (the Object row). More kinds can follow these.
+pub const OBJECTS: [&str; 2] = ["Components", "Bodies"];
+pub const OBJECT_COMPONENTS: usize = 0;
+pub const OBJECT_BODIES: usize = 1;
+
 /// A fresh Move dialog of a type (all values zero).
 pub fn kind(mode: usize, doc: &solidcraft_engine::doc::Document) -> Kind {
     let z = || crate::length_input::default(doc, "0");
@@ -40,9 +45,9 @@ pub fn kind(mode: usize, doc: &solidcraft_engine::doc::Document) -> Kind {
     Kind::Move { mode, x: z(), y: z(), z: z(), rx: a(), ry: a(), rz: a(), angle: a() }
 }
 
-/// The selection inputs of a move type (the bodies first).
+/// The selection inputs of a move type (what moves first: bodies or components, see [`object`]).
 pub fn inputs(mode: usize) -> Vec<SelInput> {
-    let mut v = vec![SelInput::new("Bodies", BODIES, true)];
+    let mut v = vec![SelInput::new("Selection", BODIES, true)];
     match mode {
         FREE => v.push(SelInput::new("Pivot", POINTS, false)),
         ROTATE => v.push(SelInput::new("Axis", AXIS_PICKS, false)),
@@ -56,8 +61,23 @@ pub fn inputs(mode: usize) -> Vec<SelInput> {
     v
 }
 
-/// The Move Type row (above the inputs); switching keeps the bodies and the move made so far
-/// (`chain`), and starts the new type's values at zero.
+/// The Object row (above Selection). Object follows what is picked, and choosing it turns the
+/// picks into that kind ([`switch_object`]). An edited Move feature moves bodies alone.
+pub fn object_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
+    if !matches!(d.kind, Kind::Move { .. }) || d.editing.is_some() {
+        return;
+    }
+    one_kind(app, d);
+    let current = object(d);
+    let mut o = current;
+    choice_row(ui, "Object", "move_object", &mut o, &OBJECTS);
+    if o != current {
+        switch_object(app, d, o);
+    }
+}
+
+/// The Move Type row (below Selection, above the type's own picks). Switching keeps the picks and
+/// the move made so far (`chain`), and starts the new type's values at zero.
 pub fn type_row(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
     let Kind::Move { mode, .. } = d.kind else { return };
     let mut m = mode;
@@ -88,6 +108,144 @@ fn switch_type(app: &SolveApp, d: &mut Dialog, m: usize) {
     d.active = if bodies_empty(d) { 0 } else { 1.min(d.inputs.len() - 1) };
 }
 
+/// What the dialog moves ([`OBJECTS`]): an edited Move feature moves bodies.
+pub(crate) fn object(d: &Dialog) -> usize {
+    if d.editing.is_some() {
+        return OBJECT_BODIES;
+    }
+    d.extra.get("object").and_then(Value::as_u64).map_or(OBJECT_BODIES, |o| (o as usize).min(OBJECTS.len() - 1))
+}
+
+fn set_object(d: &mut Dialog, o: usize) {
+    d.extra.insert("object".into(), json!(o));
+}
+
+/// One kind moves at a time, and Object follows what is picked; with nothing picked yet it
+/// starts from the view's pick mode. Opened on components and bodies together, the components
+/// win: each body becomes the component it is in (so several bodies of one component are that
+/// one component), and a body outside every component drops out. Once one kind is picked, the
+/// other is refused ([`admit`]).
+fn one_kind(app: &SolveApp, d: &mut Dialog) {
+    let unset = !d.extra.contains_key("object");
+    let picks = items(d, 0);
+    let components = picks.iter().any(|s| matches!(s, Sel::Occurrence { .. }));
+    let bodies = picks.iter().any(|s| matches!(s, Sel::Body { .. }));
+    match (components, bodies) {
+        (true, false) => set_object(d, OBJECT_COMPONENTS),
+        (false, true) => set_object(d, OBJECT_BODIES),
+        (true, true) if unset || object(d) == OBJECT_COMPONENTS => {
+            to_components(&app.session, d);
+            set_object(d, OBJECT_COMPONENTS);
+        }
+        (true, true) => {
+            if let Some(input) = d.inputs.first_mut() {
+                input.items.retain(|s| !matches!(s, Sel::Occurrence { .. }));
+            }
+        }
+        (false, false) if unset => set_object(d, if app.picks_components() { OBJECT_COMPONENTS } else { OBJECT_BODIES }),
+        (false, false) => {}
+    }
+}
+
+/// What a pick into Selection becomes, or `None` when it is refused (it still lights on hover):
+/// one kind moves at a time. With components picked, a body stands for the component it is in,
+/// and a body outside every component is refused. With bodies picked, a component is refused,
+/// unless it holds one of them: then the whole component moves, so the picks become components
+/// and the ones inside it give way to it. Anything is taken while nothing is picked.
+pub(crate) fn admit(s: &solidcraft_engine::Session, d: &mut Dialog, sel: Sel) -> Option<Sel> {
+    if !matches!(d.kind, Kind::Move { .. }) || d.active != 0 || d.editing.is_some() {
+        return Some(sel);
+    }
+    let picks = items(d, 0);
+    if picks.is_empty() {
+        return Some(sel);
+    }
+    let components = picks.iter().any(|p| matches!(p, Sel::Occurrence { .. }));
+    match sel {
+        Sel::Occurrence { path } if !components => {
+            // The body's whole placement path: a pick of a nested component keeps only part of it.
+            let holds_a_pick = picks.iter().any(|p| match p {
+                Sel::Body { name } => crate::dialogs::body_placement_path(s, name).is_some_and(|owner| owner.starts_with(&path)),
+                _ => false,
+            });
+            if !holds_a_pick {
+                return None;
+            }
+            // The bodies it holds give way to it; the others become the components they are in.
+            if let Some(input) = d.inputs.first_mut() {
+                input.items.retain(|p| {
+                    !matches!(p, Sel::Body { name } if crate::dialogs::body_placement_path(s, name).is_some_and(|owner| owner.starts_with(&path)))
+                });
+            }
+            to_components(s, d);
+            set_object(d, OBJECT_COMPONENTS);
+            if let Some(input) = d.inputs.first_mut() {
+                input.items.retain(|p| !matches!(p, Sel::Occurrence { path: inner } if inner.starts_with(&path)));
+            }
+            Some(Sel::Occurrence { path })
+        }
+        Sel::Body { name } if components => crate::dialogs::occurrence_path_of_body(s, &name).map(|path| Sel::Occurrence { path }),
+        other => Some(other),
+    }
+}
+
+/// Whether `s` is picked in the open Move/Copy dialog's Selection: the Browser shows it selected,
+/// and a click on its row takes it out of the move.
+pub(crate) fn picked(app: &SolveApp, s: &Sel) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }) && items(d, 0).contains(s))
+}
+
+/// Object chosen in its row: the picks become that kind.
+fn switch_object(app: &SolveApp, d: &mut Dialog, o: usize) {
+    if o == OBJECT_COMPONENTS {
+        to_components(&app.session, d);
+    } else {
+        to_bodies(app, d);
+    }
+    set_object(d, o);
+    d.error = None;
+}
+
+/// The picks as components: a body stands for the component it is in, once for all its bodies,
+/// and a component inside another picked one moves with it. A body outside every component drops
+/// out.
+fn to_components(session: &solidcraft_engine::Session, d: &mut Dialog) {
+    let Some(input) = d.inputs.first_mut() else { return };
+    let mut paths: Vec<Vec<u64>> = Vec::new();
+    for s in &input.items {
+        let path = match s {
+            Sel::Occurrence { path } => Some(path.clone()),
+            Sel::Body { name } => crate::dialogs::occurrence_path_of_body(session, name),
+            _ => None,
+        };
+        if let Some(path) = path.filter(|p| !p.is_empty() && !paths.contains(p)) {
+            paths.push(path);
+        }
+    }
+    let outer: Vec<Vec<u64>> = paths.iter().filter(|p| !paths.iter().any(|q| q.len() < p.len() && p.starts_with(q))).cloned().collect();
+    input.items = outer.into_iter().map(|path| Sel::Occurrence { path }).collect();
+}
+
+/// The picks as bodies: a component stands for the bodies it places.
+fn to_bodies(app: &SolveApp, d: &mut Dialog) {
+    let Some(input) = d.inputs.first_mut() else { return };
+    let mut out: Vec<Sel> = Vec::new();
+    for s in &input.items {
+        let names = match s {
+            Sel::Body { name } => vec![name.clone()],
+            Sel::Occurrence { path } => app.session.occurrence_bodies(path, true).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        for name in names {
+            let body = Sel::Body { name };
+            if !out.contains(&body) {
+                out.push(body);
+            }
+        }
+    }
+    input.items = out;
+}
+
 fn bodies_empty(d: &Dialog) -> bool {
     d.inputs.first().is_none_or(|i| i.items.is_empty())
 }
@@ -109,6 +267,16 @@ pub(crate) fn chained(app: &SolveApp) -> Option<(Vec<String>, Mat)> {
         (None, c) => c?,
     };
     (!is_identity(&m)).then(|| (bodies_of(app, d), m))
+}
+
+/// Whether the preview draws the bodies a Move dialog moves as a layer the GPU moves
+/// (`move_preview`), and shows it: the layer then draws them, in their own look and outlined as
+/// picked, in place of the highlight, so a change of the move builds no triangles (#17804).
+pub(crate) fn drawn_as_layer(app: &SolveApp) -> bool {
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }))
+        && app.preview.active
+        && !app.preview.rolled_back
+        && app.preview.layer_shown().is_some()
 }
 
 /// Whether the triad is being dragged in a Move dialog (`drag` keeps the values it began from).
@@ -175,9 +343,20 @@ fn bodies_of(app: &SolveApp, d: &Dialog) -> Vec<String> {
     out
 }
 
-/// Whether Create Copy is ticked.
+/// Whether Create Copy is ticked. A move opened on a pasted component never copies it.
 fn copies(d: &Dialog) -> bool {
-    d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false)
+    !pasted(d) && d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// Whether Move/Copy was opened to place a component just pasted: Create Copy is not offered.
+pub(crate) fn pasted(d: &Dialog) -> bool {
+    d.extra.get("pasted").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// The bodies the open Move/Copy dialog moves (those picked, and those of the components
+/// picked): they keep their own look, outlined as selected, throughout the move.
+pub(crate) fn moved_bodies(app: &SolveApp) -> Vec<String> {
+    app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Move { .. })).map(|d| bodies_of(app, d)).unwrap_or_default()
 }
 
 /// Whether a Move dialog takes the components picked (not their bodies) into its bodies input: a
@@ -188,11 +367,11 @@ pub(crate) fn picks_components(app: &SolveApp) -> bool {
     app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }) && d.active == 0 && d.editing.is_none())
 }
 
-/// What a click picks in a Move dialog: with the component pick mode on, the component a body
+/// What a click picks in a Move dialog: with Object on Components, the component a body
 /// belongs to (copied as a component with Create Copy, see `targets`), otherwise the pick as it was.
 pub(crate) fn component_pick(app: &SolveApp, hit: &crate::viewport::Hit, sel: Sel) -> Sel {
     let (crate::viewport::Hit::Face { body, .. }, Sel::Body { .. }) = (hit, &sel) else { return sel };
-    if app.ui.pick_components && picks_components(app) {
+    if picks_components(app) && app.dialog.as_ref().is_some_and(|d| object(d) == OBJECT_COMPONENTS) {
         let occurrence = crate::viewport::component_selection(app, body);
         if matches!(occurrence, Sel::Occurrence { .. }) {
             return occurrence;
@@ -229,10 +408,183 @@ pub(crate) fn add_body_click(app: &mut SolveApp, hits: &[crate::viewport::Hit], 
     body.is_some()
 }
 
+/// Whether Capture All Positions is ticked (it is at first): OK captures every component move
+/// still pending, these and any made before, as the Capture Position command does.
+fn captures(d: &Dialog) -> bool {
+    d.extra.get("capture").and_then(Value::as_bool).unwrap_or(true)
+}
+
+/// The components picked without Create Copy, which move by their placement
+/// (`occurrence.move`) rather than by a Move feature on their bodies, as their exact
+/// placements. A component inside another picked one moves with it, so it is left out. An
+/// edited Move feature moves bodies only.
+pub(crate) fn placements(d: &Dialog) -> Vec<Vec<u64>> {
+    placement_paths(items(d, 0), copies(d), d.editing.is_some())
+}
+
+/// [`placements`] from the Bodies picks, whether Create Copy is ticked, and whether a Move feature
+/// is being edited. A shared child reached through two copies of its parent is one occurrence,
+/// moved once: each `occurrence.move` would move it again.
+pub(crate) fn placement_paths(picks: &[Sel], copy: bool, editing: bool) -> Vec<Vec<u64>> {
+    if copy || editing {
+        return Vec::new();
+    }
+    let paths: Vec<&Vec<u64>> = picks
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Occurrence { path } if !path.is_empty() => Some(path),
+            _ => None,
+        })
+        .collect();
+    let mut out: Vec<Vec<u64>> = Vec::new();
+    for p in &paths {
+        let inside_another = paths.iter().any(|q| q.len() < p.len() && p.starts_with(q));
+        let same_occurrence = out.iter().any(|q| q.last() == p.last());
+        if !inside_another && !same_occurrence {
+            out.push((*p).clone());
+        }
+    }
+    out
+}
+
+/// The row-major 3x4 matrix `occurrence.move` takes for the rigid move `m`.
+fn matrix_rows(m: &Mat) -> Vec<f64> {
+    (0..3).flat_map(|r| (0..4).map(move |c| m[c][r])).collect()
+}
+
+/// What OK runs. Each component picked without Create Copy moves by its placement: captured
+/// when Capture All Positions is ticked, which then captures the other pending moves too, and
+/// pending when it is not. The bodies picked (or, with Create Copy, the bodies and components)
+/// move by solid.move. Empty when only components are picked, nothing moved them and nothing is
+/// left to capture: OK then just closes.
+pub fn commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
+    let p = params(app, d)?;
+    let places = placements(d);
+    let mut out = Vec::new();
+    if !places.is_empty() {
+        let m = transform(app, &p)?;
+        let capture = captures(d);
+        // Captured by the move itself, so one Undo takes it back to where it was. Capturing it
+        // afterwards would leave Undo with it pending where it was moved to.
+        let mut moved = Vec::new();
+        if !is_identity(&m) {
+            let matrix = matrix_rows(&m);
+            for path in &places {
+                let Some(&occurrence) = path.last() else { continue };
+                moved.push(occurrence);
+                out.push((
+                    "occurrence.move".to_string(),
+                    json!({ "occurrence": occurrence, "path": path, "space": "world", "matrix": matrix, "tolerance": 1e-6, "capture": capture }),
+                ));
+            }
+        }
+        // Capture All Positions: the components moved before, and not captured, too.
+        if capture && app.session.pending_moves.keys().any(|id| !moved.contains(id)) {
+            out.push(("component.capture_position".to_string(), json!({})));
+        }
+    }
+    let moves_bodies = p.get("bodies").and_then(Value::as_array).is_some_and(|b| !b.is_empty()) || p.get("occurrences").is_some();
+    if moves_bodies || places.is_empty() {
+        out.push(("solid.move".to_string(), p));
+    }
+    Ok(out)
+}
+
+/// What the preview draws. The components that move by their placement are drawn as their
+/// bodies moved, which is where the placement move will put them: one solid.move of every moved
+/// body, which the fast move preview draws (`move_preview`) without evaluating the design. What
+/// is hidden is left out of the preview (it still moves on OK), so hiding a body or a component
+/// while it moves hides it; with everything hidden there is nothing to preview.
+pub(crate) fn preview(app: &SolveApp, d: &Dialog, cmds: &mut Vec<(String, Value)>) {
+    if !placements(d).is_empty() {
+        let Some(m) = params(app, d).ok().and_then(|p| transform(app, &p).ok()) else { return };
+        *cmds = vec![("solid.move".to_string(), with_transform(json!({ "bodies": bodies_of(app, d) }), &m))];
+    }
+    for (id, p) in cmds.iter_mut() {
+        if id != "solid.move" {
+            continue;
+        }
+        if let Some(bodies) = p.get_mut("bodies").and_then(Value::as_array_mut) {
+            bodies.retain(|b| b.as_str().is_some_and(|name| app.body_visible(name)));
+        }
+        if let Some(paths) = p.get_mut("occurrences").and_then(Value::as_array_mut) {
+            paths.retain(|path| {
+                let path: Vec<u64> = path.as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+                app.session.occurrence_visible(&path)
+            });
+        }
+    }
+    cmds.retain(|(id, p)| {
+        id != "solid.move"
+            || p.get("bodies").and_then(Value::as_array).is_some_and(|b| !b.is_empty())
+            || p.get("occurrences").and_then(Value::as_array).is_some_and(|o| !o.is_empty())
+    });
+}
+
+/// The picked components whose positions are pending (moved, not captured yet): Revert Position
+/// puts just these back.
+pub(crate) fn revertible(app: &SolveApp, d: &Dialog) -> Vec<u64> {
+    placements(d).iter().filter_map(|path| path.last().copied()).filter(|id| app.session.pending_moves.contains_key(id)).collect()
+}
+
+/// Whether OK has nothing to run (see [`commands`]).
+pub(crate) fn nothing_to_run(app: &SolveApp, d: &Dialog) -> bool {
+    matches!(d.kind, Kind::Move { .. }) && commands(app, d).is_ok_and(|c| c.is_empty())
+}
+
+/// Move/Copy opened on one component (from its Browser menu, the ribbon with it selected, or a
+/// pasted design: `pasted`, which offers no Create Copy), which then moves by its placement.
+pub(crate) fn open_on_occurrence(app: &mut SolveApp, path: Vec<u64>, pasted: bool) {
+    if path.is_empty() {
+        return;
+    }
+    crate::dialogs::cancel(app);
+    app.tool = None;
+    let Some(mut d) = crate::dialogs::Dialog::for_command(app, "solid.move") else { return };
+    if let Some(input) = d.inputs.first_mut() {
+        input.items = vec![Sel::Occurrence { path }];
+    }
+    // Selection has the focus, as when the dialog opens from the ribbon.
+    d.active = 0;
+    if pasted {
+        d.extra.insert("pasted".into(), json!(true));
+        d.extra.remove("copy");
+    }
+    set_object(&mut d, OBJECT_COMPONENTS);
+    let _ = app.session.execute("select.clear", &json!({}));
+    app.dialog = Some(d);
+}
+
+/// The component placement the open Move/Copy dialog moves, if it moves one.
+#[cfg(test)]
+pub(crate) fn moving(app: &SolveApp) -> Option<Vec<u64>> {
+    app.dialog.as_ref().filter(|d| matches!(d.kind, Kind::Move { .. })).and_then(|d| placements(d).into_iter().next())
+}
+
+/// The exact placement of an occurrence when the caller names none: its first one.
+pub(crate) fn first_path(app: &SolveApp, occurrence: u64) -> Vec<u64> {
+    let doc = &app.session.doc;
+    let Some(o) = doc.occurrences.iter().find(|o| o.id == occurrence) else { return Vec::new() };
+    let mut path = doc.first_path(o.parent);
+    path.push(occurrence);
+    path
+}
+
+/// Whether a component that moves by its placement is a shared child: its definition is placed
+/// in more than one copy of its parent, so the move applies to every copy.
+pub(crate) fn moves_shared(app: &SolveApp, d: &Dialog) -> bool {
+    placements(d).iter().any(|path| path.len() > 1 && app.session.occurrence_scope_count(path).is_ok_and(|n| n > 1))
+}
+
 /// What the move moves and copies, as solid.move takes them: the bodies, and with Create Copy the
-/// components picked (copied as components, see `occurrences`).
+/// components picked (copied as components, see `occurrences`). Without Create Copy a picked
+/// component moves by its placement instead ([`placements`]), except in an edited Move feature,
+/// which moves its bodies.
 fn targets(app: &SolveApp, d: &Dialog) -> (Vec<String>, Vec<Vec<u64>>) {
     if !copies(d) {
+        if d.editing.is_none() {
+            return (items(d, 0).body_names(), Vec::new());
+        }
         return (bodies_of(app, d), Vec::new());
     }
     let components = items(d, 0)
@@ -506,6 +858,7 @@ fn with_transform(mut p: Value, m: &Mat) -> Value {
         o.remove("axis");
         o.remove("angle");
         o.remove("origin");
+        o.remove("about");
     }
     if th.abs() > 1e-12 {
         p["origin"] = json!([mm(0.0), mm(0.0), mm(0.0)]);
@@ -519,7 +872,7 @@ fn with_transform(mut p: Value, m: &Mat) -> Value {
 fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
     let Kind::Move { mode, x, y, z, rx, ry, rz, angle } = &d.kind else { return Err("not a move".into()) };
     let (bodies, components) = targets(app, d);
-    if bodies.is_empty() && components.is_empty() {
+    if bodies.is_empty() && components.is_empty() && placements(d).is_empty() {
         return Err("select bodies first".into());
     }
     let need_point = |i: usize, what: &str| sel_point(app, d, items(d, i).first()).ok_or(format!("select {what} first"));
@@ -565,6 +918,11 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
             p["origin"] = num(o);
             p["axis"] = json!([a.x, a.y, a.z]);
             p["angle"] = json!(angle);
+            // A body's edge or round face is kept as a reference, so the turn follows it when an
+            // earlier step moves the body (#17974).
+            if let Some(about) = items(d, 1).first().and_then(turn_about) {
+                p["about"] = about;
+            }
         }
         POINT_TO_POINT => {
             let (from, to) = match (need_point(1, "the point to move from"), need_point(2, "the point to move to")) {
@@ -593,6 +951,15 @@ fn axis_line(app: &SolveApp, d: &Dialog, s: &Sel) -> Option<(Vec3, Vec3)> {
     match chain(d) {
         Some(c) if on_moved(&bodies_of(app, d), s) => Some((apply_point(&c, o), apply_vector(&c, a))),
         _ => Some((o, a)),
+    }
+}
+
+/// A picked body edge or face as the reference a Rotate's `about` keeps (#17974).
+fn turn_about(s: &Sel) -> Option<Value> {
+    match s {
+        Sel::Edge { body, point, .. } if !body.is_empty() => Some(json!({"edge": [point.x, point.y, point.z], "body": body})),
+        Sel::Face { body, point, .. } if !body.is_empty() => Some(json!({"face": [point.x, point.y, point.z], "body": body})),
+        _ => None,
     }
 }
 
@@ -762,7 +1129,7 @@ pub fn for_feature(
     feature: &solidcraft_engine::doc::FeatureKind,
     frame: &solidcraft_engine::doc::Mat,
 ) {
-    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy } = feature else { return };
+    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, .. } = feature else { return };
     let mut translate = translate.clone();
     let mut origin = origin.clone();
     let mut axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);

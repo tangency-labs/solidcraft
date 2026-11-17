@@ -56,30 +56,49 @@
 //!   solution combination evaluates the other curve inside its trimmed interval
 //!   (`sIvl2.Evaluate(0.38)`), as upstream. `bIsDegenerate` keeps its value from one
 //!   range solution to the next when the classification is skipped.
-//! - **Statuses passed on (WR-663).** With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
-//!   fork (tangency-labs/smlib 8311f8e): `GlobalCurveIntersect`'s refinement, interval
+//! - **Statuses passed on (WR-663).** The statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e):`GlobalCurveIntersect`'s refinement, interval
 //!   trims, combine and cull evaluations and range classification, and the evaluations of
 //!   its consistency check (which the port otherwise leaves out: it only warns).
+//! - **Contacts at curve ends (WR-455).** After the global solve's refinement, a point
+//!   solution whose contact runs on to an end of either curve's interval moves to that
+//!   end (`sm_MoveContactsToCurveEnds`, the fork's tangency-labs/smlib@51eefa5), so a
+//!   tangential contact is not placed inside the curve. Upstream leaves it inside. Not for
+//!   a self intersection, where the stretch test would compare the curve with itself.
+//!   A failed evaluation or solve in the move leaves the solution where it is. The
+//!   stretch test is certified, not sampled as the fork's: the curves stay within
+//!   tolerance along the parameter path between the two contacts by a Lipschitz bound
+//!   from the curves' own data ([`curves_stay_within`], [`Curve::speed_bound`]); a
+//!   stretch it cannot certify (a curve kind with no speed bound, at most 4096 halved
+//!   pieces) keeps the solution where upstream puts it, and so does a stretch a coincident
+//!   range solution overlaps (the range already reports that contact; the point beside it
+//!   is left for the later passes to combine with it). After a move the solutions are sorted
+//!   again on the first parameter, which the later passes assume; a move landing exactly on a
+//!   contact another solution names is dropped instead (the contact is not reported
+//!   twice).
 
 use crate::curve::curve::p1::refine_cc_solutions;
-use crate::curve::curve::p2::{at, CciGlobalSolver, Curve};
-use crate::curve::curve::p4::{analytic_curve_intersect, point_or_pass_on, AnalyticOperand};
-use crate::curve::curve::p5::make_curve_cache_with_zone_tol;
+use crate::curve::curve::p2::{at, CciGlobalSolver, Curve, CurveKind};
+use crate::curve::curve::p4::{analytic_curve_intersect, AnalyticOperand};
+use crate::curve::curve::p5::{make_curve_cache_with_zone_tol, memoized_cache_top_box};
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{ignore_or_pass_on, ignored_or_pass_on, Result, SolidError};
+use crate::error::{native_failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{
     Branch, GlobalSolve, SolutionRequested, SolveRequest, SolverOperation, MAX_SOLVER_TREES,
 };
 use crate::geom::solution_array::{
     OperandObject, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType,
 };
-use crate::geom::tol::{are_same, scaled_zero2, ScaledZero};
+use crate::geom::tol::{are_parallel, are_same, scaled_zero2, ScaledZero};
 use crate::geom::tree::Tree;
+use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, min4, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
-use crate::nurbs::b_spline_curve::ProjectionType;
+use crate::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
+use crate::nurbs::math::gamma;
+use crate::nurbs::nurbs_crv::{crv_accel_bound, crv_point_error, crv_speed_bound};
 
 const OP_GCI: &str = "curve::curve::p8::Curve::global_curve_intersect";
 
@@ -157,12 +176,15 @@ impl<'a, O: SolutionObject> Named<'a, O> {
     }
 }
 
-/// `sm_MoveContactsToCurveEnds` (the fork's tangency-labs/smlib@601d804, opt-in
-/// [`UpstreamFixes::curve_contacts_at_curve_ends`](crate::kernel::UpstreamFixes::curve_contacts_at_curve_ends),
-/// WR-455): a point solution whose contact runs on to an end of either curve's interval
-/// is at that end. It moves there when that end lies within `dist_tol` of the other
-/// curve and the two curves stay within `dist_tol` of each other over the whole stretch
-/// between the end and the solution, measured on each curve.
+/// `sm_MoveContactsToCurveEnds` (the fork's tangency-labs/smlib@51eefa5, WR-455): a
+/// point solution whose contact runs on to an end of either curve's interval is at that
+/// end. It moves there when that end lies within `dist_tol` of the other
+/// curve and the two curves are certified to stay within `dist_tol` of each other over
+/// the whole stretch between the solution and the end ([`curves_stay_within`]; the fork
+/// samples the stretch instead), and no range solution overlaps that stretch
+/// (`crosses_a_range`). After a move the solutions are sorted on the first parameter;
+/// one that would land exactly on a contact another solution names (a point or a range
+/// end) is dropped instead, so the contact is not reported twice.
 fn move_contacts_to_curve_ends<O: SolutionObject>(
     k: &Kernel,
     curve: &Curve,
@@ -172,6 +194,8 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
     dist_tol: f64,
     sols: &mut SolutionArray<O>,
 ) -> Result<()> {
+    let mut moved_any = Vec::new();
+    let mut named_twice = Vec::new();
     for ii in 0..sols.len() {
         let mut sol = sol_at(sols, ii)?;
         if sol.solution_type != SolutionType::SingleValue {
@@ -179,7 +203,9 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
         }
         let t1 = sol.start.parameters[0];
         let t2 = sol.start.parameters[1];
+        // set once the solution has moved, or is dropped as a contact already named
         let mut moved = false;
+        let mut twice = false;
         // which 0: an end of this curve, dropped to the other; 1: an end of the other,
         // dropped to this
         for which in 0..2 {
@@ -204,8 +230,14 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                 if end_t == sol_on_end {
                     continue; // already there
                 }
-                let end_pt = end_curve.evaluate_point(k, end_t)?;
-                let dropped = drop_curve.drop_point(
+                // A failure on the way (an end past an unclamped curve's knots, a
+                // failed solve) leaves the solution where upstream leaves it: this
+                // pass only refines solutions already found, so it never fails the
+                // intersection. Errors with no upstream status still propagate.
+                let Some(end_pt) = native_failure(end_curve.evaluate_point(k, end_t))? else {
+                    continue;
+                };
+                let Some(dropped) = native_failure(drop_curve.drop_point(
                     k,
                     drop_ivl,
                     end_pt,
@@ -213,75 +245,408 @@ fn move_contacts_to_curve_ends<O: SolutionObject>(
                     dist_tol,
                     Some(sol_on_drop),
                     SolverOperation::Minimize,
-                )?;
+                ))?
+                else {
+                    continue;
+                };
                 if !dropped.success || dropped.distance.is_nan() || dropped.distance > dist_tol {
                     continue;
                 }
                 let drop_t = dropped.parameter;
-                // the curves within tolerance of one another over the whole stretch, on
-                // each curve (one way alone passes a closed curve's whole turn against the
-                // one point of a line it touches at its start)
-                let mut stretch = Extent1d::from_value(end_t);
-                stretch.add_value(sol_on_end);
-                let mut drop_stretch = Extent1d::from_value(drop_t);
-                drop_stretch.add_value(sol_on_drop);
-                let (drop_at_min, drop_at_max) = if end_t < sol_on_end {
-                    (drop_t, sol_on_drop)
-                } else {
-                    (sol_on_drop, drop_t)
-                };
-                let gap = end_curve.curve_max_distance_between(
-                    k,
-                    &stretch,
-                    drop_curve,
-                    drop_at_min,
-                    drop_at_max,
-                    0,
-                    Some(dist_tol),
-                )?;
-                if gap.distance.is_nan() || gap.distance > dist_tol {
+                // A range solution overlapping the stretch (in either curve's parameter)
+                // already reports that contact as a coincidence. Moving the point across
+                // it onto the range's far end would drop the point there as named twice,
+                // losing where the contact goes on past the range; the solution stays
+                // where upstream puts it, for the later passes to combine with the range.
+                // Point solutions on the stretch do not block: the stretch is certified
+                // within tolerance, so they are the same contact and move to the same end.
+                if crosses_a_range(
+                    sols,
+                    ii,
+                    &named_twice,
+                    which,
+                    [sol_on_end, end_t],
+                    [sol_on_drop, drop_t],
+                ) {
                     continue;
                 }
-                let (end_at_min, end_at_max) = if drop_t < sol_on_drop {
-                    (end_t, sol_on_end)
-                } else {
-                    (sol_on_end, end_t)
-                };
-                let gap = drop_curve.curve_max_distance_between(
+                // The curves within tolerance of one another over the whole stretch from
+                // the solution to the end, certified along a parameter path between the
+                // two contacts ([`curves_stay_within`]; a path monotone in
+                // both parameters covers both stretches, so each point of either stretch
+                // has a point of the other within tolerance). Not certified (a curve kind
+                // without a speed bound, a point too far, the piece budget spent): the
+                // solution stays where upstream puts it.
+                let Some(within) = native_failure(curves_stay_within(
                     k,
-                    &drop_stretch,
                     end_curve,
-                    end_at_min,
-                    end_at_max,
-                    0,
-                    Some(dist_tol),
-                )?;
-                if gap.distance.is_nan() || gap.distance > dist_tol {
+                    drop_curve,
+                    [sol_on_end, sol_on_drop],
+                    [end_t, drop_t],
+                    dist_tol,
+                ))?
+                else {
+                    continue;
+                };
+                if !within {
                     continue;
                 }
-                sol.start.parameters[0] = if which == 0 { end_t } else { drop_t };
-                sol.start.parameters[1] = if which == 0 { drop_t } else { end_t };
+                let at = if which == 0 {
+                    [end_t, drop_t]
+                } else {
+                    [drop_t, end_t]
+                };
+                // A contact another solution already names (a point, or an end of a
+                // range): the moved solution is that contact again and is dropped, so
+                // the later passes do not report it twice (a short range turned into
+                // points at its ends beside a point moved onto one of them).
+                let named = sols.as_slice().iter().enumerate().any(|(jj, o)| {
+                    jj != ii
+                        && !named_twice.contains(&jj)
+                        && (o.start.parameters[..2] == at
+                            || (o.solution_type == SolutionType::RangeOfValues
+                                && o.end.parameters[..2] == at))
+                });
+                if named {
+                    moved = true;
+                    twice = true;
+                    continue;
+                }
+                sol.start.parameters[0] = at[0];
+                sol.start.parameters[1] = at[1];
                 sol.start.solution_value = dropped.distance;
                 put_at(sols, ii, &sol)?;
                 moved = true;
             }
         }
+        if twice {
+            named_twice.push(ii);
+        } else if moved {
+            moved_any.push(ii);
+        }
     }
+    // The later passes expect the solutions in first-parameter order (the global solver
+    // adds them so, `SM_SK_BY_FIRST_PARAMETER`; phase 1 merges each with the last kept
+    // one and `cull_spurious_points` compares neighbours). After a move the solutions
+    // are sorted again on the first parameter (stable, so equal ones keep their order).
+    // Solutions dropped as a contact named twice are taken out. Without a move nothing
+    // is reordered: the solutions stay as refined, as upstream leaves them.
+    if moved_any.is_empty() && named_twice.is_empty() {
+        return Ok(());
+    }
+    let order = sorted_without(sols.as_slice(), &named_twice, |s| s.start.parameters[0]);
+    for (i, s) in order.iter().enumerate() {
+        put_at(sols, i, s)?;
+    }
+    sols.set_size(order.len());
     Ok(())
 }
 
-/// Runs `sm_RefineCCSolutions` on `sols` (status ignored; passed on with the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], as the fork,
-/// tangency-labs/smlib 8311f8e).
+/// Whether a range solution other than `ii` (and those in `gone`) overlaps the stretch of a
+/// move of solution `ii`: its parameter interval on the end curve (parameter index `which`)
+/// meets the open stretch `end_stretch`, or its interval on the drop curve (the other index)
+/// meets `drop_stretch`. The open stretch is shrunk at both ends by their scaled zero, as
+/// upstream's `SM_IS_BETWEEN`, so a range only touching the stretch's start or end (the same
+/// parameter to the kernel's zero) does not overlap it. A NaN parameter overlaps (the move is
+/// refused).
+fn crosses_a_range<O: SolutionObject>(
+    sols: &SolutionArray<O>,
+    ii: usize,
+    gone: &[usize],
+    which: usize,
+    end_stretch: [f64; 2],
+    drop_stretch: [f64; 2],
+) -> bool {
+    let end_idx = which.min(1);
+    let drop_idx = 1 - end_idx;
+    // `[a, b]` meets the open stretch shrunk by its ends' scaled zero; a NaN meets
+    // (`f64::min` and `max` would drop it)
+    let meets = |[s, e]: [f64; 2], a: f64, b: f64| {
+        if [s, e, a, b].iter().any(|v| v.is_nan()) {
+            return true;
+        }
+        let z = scaled_zero2(&s, &e);
+        let (lo, hi) = (s.min(e) + z, s.max(e) - z);
+        let (a, b) = (a.min(b), a.max(b));
+        !(b <= lo || a >= hi)
+    };
+    sols.as_slice().iter().enumerate().any(|(jj, o)| {
+        if jj == ii || gone.contains(&jj) || o.solution_type != SolutionType::RangeOfValues {
+            return false;
+        }
+        [(end_idx, end_stretch), (drop_idx, drop_stretch)]
+            .into_iter()
+            .any(|(i, stretch)| {
+                let (Some(&a), Some(&b)) = (o.start.parameters.get(i), o.end.parameters.get(i))
+                else {
+                    return true;
+                };
+                meets(stretch, a, b)
+            })
+    })
+}
+
+/// `all` without the entries at `gone`, sorted on `key` (stable: entries with equal keys
+/// keep their order; `f64::total_cmp`, so the order is total).
+fn sorted_without<T: Copy>(all: &[T], gone: &[usize], key: impl Fn(&T) -> f64) -> Vec<T> {
+    let mut order: Vec<T> = all
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !gone.contains(i))
+        .map(|(_, s)| *s)
+        .collect();
+    order.sort_by(|a, b| key(a).total_cmp(&key(b)));
+    order
+}
+
+/// Most path pieces [`curves_stay_within`] bounds before it gives up (no certificate).
+const PATH_PIECES: usize = 4096;
+
+/// A point of the parameter path of [`curves_stay_within`]: the path fraction, the two
+/// parameters, and bounds above and below on the exact distance of the curves there.
+#[derive(Clone, Copy)]
+struct PathNode {
+    l: f64,
+    t: [f64; 2],
+    above: f64,
+    below: f64,
+}
+
+/// Not upstream: whether curves `a` and `b` stay within `tol` of each other along a
+/// parameter path from `(a, b)` parameters `from` to `to` that is continuous and monotone
+/// in both parameters (so it covers both stretches), certified (no sampled acceptance):
+///
+/// * the path is piecewise straight between nodes. It starts as one piece from `from` to
+///   `to`; a piece is halved at the midpoint of its path fraction, the new node putting
+///   `a` at that fraction of its stretch and `b` at the point of the piece's `b` stretch
+///   nearest to it ([`Curve::drop_point`], clamped between the neighbours' parameters, the
+///   straight path's parameter when the solve fails). Any `b` parameter between the
+///   neighbours' keeps the path monotone, so the solve only steers which path is bounded;
+///   every acceptance is the bounds below;
+/// * the speeds of both curves are bounded over the stretches the path runs on
+///   ([`Curve::speed_bound`], from the curves' own data);
+/// * on a piece of the path between nodes `n0` and `n1`, the distance is at most
+///   `(f0 + f1) / 2 + L / 2` with `f0`, `f1` bounds above at the nodes and `L = s_a
+///   |Δt_a| + s_b |Δt_b|` its Lipschitz bound over the piece (a function of Lipschitz
+///   constant `L` on a unit interval with end values `f0`, `f1` stays below that tent);
+/// * when both curves are C1 over the piece's stretches, with acceleration bounds `A_a`,
+///   `A_b` there ([`Curve::accel_bound`]), also at most `max(f0, f1) + M2 / 8` with
+///   `M2 = A_a Δt_a^2 + A_b Δt_b^2` (second order): on the piece, `D(λ) = a(t_a(λ)) - b(t_b(λ))` for `λ` in
+///   `[0, 1]` has `D' ` continuous and `|D''| = |a'' Δt_a^2 - b'' Δt_b^2| <= M2` wherever
+///   it exists, so `E = D - L` with `L` the chord from `D(0)` to `D(1)` vanishes at both
+///   ends and `E(λ) = -∫ G(λ, μ) E''(μ) dμ` with the Green's function `G >= 0`, `∫ G dμ =
+///   λ (1 - λ) / 2`; hence `|E| <= M2 / 8` (the norm of an integral is at most the
+///   integral of the norm) and `|D| <= |L| + |E| <= max(|D(0)|, |D(1)|) + M2 / 8` (a norm
+///   is convex). The piece is accepted when either bound is within `tol`; the second
+///   shrinks four times per halving where the first shrinks twice, so near-tolerance
+///   stretches certify in few pieces;
+/// * a node's bound above is its computed distance widened by `γ_6` (the distance's own
+///   roundings) plus twice the two points' coordinate error bounds
+///   ([`Curve::point_error_bound`]; a norm is within `√3 < 2` times a coordinate's);
+/// * pieces are halved (an explicit stack, left half first) until either bound, widened
+///   by `γ_4`, is within `tol`. The nodes are evaluated at rounded parameters (clamped to
+///   the stretches, `b`'s to its neighbours'); `a`'s rounding keeps them monotone along
+///   the path, so the pieces between actual nodes still form a path monotone in both
+///   parameters, from `from` to `to` exactly.
+///
+/// `Ok(false)`, meaning not certified, when a curve kind has no speed bound, a number is
+/// not finite, a node is certainly farther than `tol` (its bound below exceeds it), or
+/// [`PATH_PIECES`] pieces were halved without a certificate. A NaN never certifies (every
+/// acceptance is a `<=` comparison).
+///
+/// # Errors
+///
+/// Those of the curves' point evaluations, and those of the nearest-point solves that
+/// carry no upstream status.
+pub fn curves_stay_within(
+    k: &Kernel,
+    a: &Curve,
+    b: &Curve,
+    from: [f64; 2],
+    to: [f64; 2],
+    tol: f64,
+) -> Result<bool> {
+    let [s0, s1] = from;
+    let [e0, e1] = to;
+    if !([s0, s1, e0, e1, tol].iter().all(|v| v.is_finite()) && tol >= 0.0) {
+        return Ok(false);
+    }
+    let ivl = [
+        Extent1d::from_min_max(s0.min(e0), s0.max(e0)),
+        Extent1d::from_min_max(s1.min(e1), s1.max(e1)),
+    ];
+    let (Some(speed_a), Some(speed_b)) = (a.speed_bound(&ivl[0]), b.speed_bound(&ivl[1])) else {
+        return Ok(false);
+    };
+    let along = |l: f64, s: f64, e: f64, i: &Extent1d| {
+        if l >= 1.0 {
+            e
+        } else {
+            (s + l * (e - s)).max(i.min()).min(i.max())
+        }
+    };
+    let node = |l: f64, t: [f64; 2]| -> Result<Option<PathNode>> {
+        let pa = a.evaluate_point(k, t[0])?;
+        let pb = b.evaluate_point(k, t[1])?;
+        let (Some(ea), Some(eb)) = (a.point_error_bound(t[0]), b.point_error_bound(t[1])) else {
+            return Ok(None);
+        };
+        let d = pa.distance(pb);
+        let err = 2.0 * (ea + eb);
+        let above = d * (1.0 + gamma(6)) + err;
+        let below = d * (1.0 - gamma(6)) - err;
+        Ok((above.is_finite() && below.is_finite()).then_some(PathNode { l, t, above, below }))
+    };
+    let (Some(first), Some(last)) = (node(0.0, [s0, s1])?, node(1.0, [e0, e1])?) else {
+        return Ok(false);
+    };
+    let mut stack = vec![(first, last)];
+    let mut pieces = 0_usize;
+    while let Some((n0, n1)) = stack.pop() {
+        if n0.below > tol || n1.below > tol {
+            return Ok(false);
+        }
+        let lip = (speed_a * (n1.t[0] - n0.t[0]).abs() + speed_b * (n1.t[1] - n0.t[1]).abs())
+            * (1.0 + gamma(4));
+        let bound = (0.5 * (n0.above + n1.above) + 0.5 * lip) * (1.0 + gamma(4));
+        if bound <= tol {
+            continue;
+        }
+        // second order, when both curves are C1 over the piece's own stretches (a piece
+        // holding a knot where a curve is only C0 keeps the first-order bound; halving
+        // shrinks such pieces around the knot)
+        let span = |x: f64, y: f64| Extent1d::from_min_max(x.min(y), x.max(y));
+        let [ta0, tb0] = n0.t;
+        let [ta1, tb1] = n1.t;
+        let second = a
+            .accel_bound(&span(ta0, ta1))
+            .zip(b.accel_bound(&span(tb0, tb1)))
+            .map(|(acc_a, acc_b)| {
+                // the squares, products and sum round five times; the max and sum twice more
+                let (da, db) = (ta1 - ta0, tb1 - tb0);
+                let m2 = (acc_a * da * da + acc_b * db * db) * (1.0 + gamma(8));
+                (n0.above.max(n1.above) + 0.125 * m2) * (1.0 + gamma(4))
+            });
+        if second.is_some_and(|s| s <= tol) {
+            continue;
+        }
+        pieces += 1;
+        let mid = 0.5 * (n0.l + n1.l);
+        if pieces > PATH_PIECES || !(n0.l < mid && mid < n1.l) {
+            return Ok(false);
+        }
+        // the new node: `a` at the path fraction, `b` at the point of its piece stretch
+        // nearest to it (any parameter between the neighbours' keeps the path monotone,
+        // so the choice only steers the bounds; a failed solve takes the straight path's)
+        let ta = along(mid, s0, e0, &ivl[0]);
+        let piece_b = span(tb0, tb1);
+        let straight = along(mid, s1, e1, &ivl[1])
+            .max(piece_b.min())
+            .min(piece_b.max());
+        let tb = match native_failure(b.drop_point(
+            k,
+            &piece_b,
+            a.evaluate_point(k, ta)?,
+            None,
+            tol,
+            Some(straight),
+            SolverOperation::Minimize,
+        ))? {
+            Some(d) if d.success && d.parameter.is_finite() => {
+                d.parameter.max(piece_b.min()).min(piece_b.max())
+            }
+            _ => straight,
+        };
+        let Some(nm) = node(mid, [ta, tb])? else {
+            return Ok(false);
+        };
+        stack.push((nm, n1));
+        stack.push((n0, nm));
+    }
+    Ok(true)
+}
+
+/// The B-spline speed bound of [`Curve::speed_bound`]: `None` when evaluation past the
+/// natural interval is enabled and `interval` leaves it (the curve is not clamped there).
+fn b_spline_speed_bound(c: &BSplineCurve, interval: &Extent1d) -> Option<f64> {
+    let cur = c.nurb_ref().ok()?;
+    if c.is_out_of_bounds_enabled() {
+        let (lo, hi) = cur.param_bounds();
+        if !(lo <= interval.min() && interval.max() <= hi) {
+            return None;
+        }
+    }
+    crv_speed_bound(cur, interval)
+}
+
+impl Curve {
+    /// Not upstream: an upper bound on the speed `|c'(t)|` of [`Curve::evaluate_point`]
+    /// for every `t` in `interval`, from the curve's own data (no sampling): the control
+    /// points of a B-spline and of the kinds evaluated through one (ellipse, circle,
+    /// hyperbola, parabola; [`crv_speed_bound`](crate::nurbs::nurbs_crv)), the power basis
+    /// of a Hermite curve, the affine map of a line. `None`, meaning no certified bound,
+    /// for the other kinds and where those bounds give none.
+    #[must_use]
+    pub fn speed_bound(&self, interval: &Extent1d) -> Option<f64> {
+        match self.kind() {
+            CurveKind::BSpline(c) => b_spline_speed_bound(c, interval),
+            CurveKind::Ellipse(c) => b_spline_speed_bound(c.base(), interval),
+            CurveKind::Hyperbola(c) => b_spline_speed_bound(c.base(), interval),
+            CurveKind::Parabola(c) => b_spline_speed_bound(c.base(), interval),
+            CurveKind::Hermite(c) => c.speed_bound(interval),
+            CurveKind::Line(c) => c.speed_bound(),
+            _ => None,
+        }
+    }
+
+    /// Not upstream: an upper bound on the acceleration `|c''(t)|` of
+    /// [`Curve::evaluate_point`] wherever it exists in `interval`, for a curve whose
+    /// derivative is continuous over `interval` (no sampling): the control points of a
+    /// B-spline and of the kinds evaluated through one, polynomial or rational
+    /// ([`crv_accel_bound`](crate::nurbs::nurbs_crv)), the power basis of a Hermite
+    /// curve, and `0` for a line (affine in its parameter, see [`Line`]'s speed bound).
+    /// `None`, meaning no certified bound (in particular a curve that is not C1 over
+    /// `interval`), for the other kinds and where those bounds give none.
+    #[must_use]
+    pub fn accel_bound(&self, interval: &Extent1d) -> Option<f64> {
+        let spline = |c: &BSplineCurve| crv_accel_bound(c.nurb_ref().ok()?, interval);
+        match self.kind() {
+            CurveKind::BSpline(c) => spline(c),
+            CurveKind::Ellipse(c) => spline(c.base()),
+            CurveKind::Hyperbola(c) => spline(c.base()),
+            CurveKind::Parabola(c) => spline(c.base()),
+            CurveKind::Hermite(c) => c.accel_bound(interval),
+            CurveKind::Line(_) => Some(0.0),
+            _ => None,
+        }
+    }
+
+    /// Not upstream: a bound on the error of each coordinate of the point
+    /// [`Curve::evaluate_point`] returns at `t`, for the kinds [`Curve::speed_bound`]
+    /// bounds; `None` for the others.
+    #[must_use]
+    pub fn point_error_bound(&self, t: f64) -> Option<f64> {
+        let spline = |c: &BSplineCurve| crv_point_error(c.nurb_ref().ok()?);
+        match self.kind() {
+            CurveKind::BSpline(c) => spline(c),
+            CurveKind::Ellipse(c) => spline(c.base()),
+            CurveKind::Hyperbola(c) => spline(c.base()),
+            CurveKind::Parabola(c) => spline(c.base()),
+            CurveKind::Hermite(c) => c.point_error(t),
+            CurveKind::Line(c) => c.point_error(t),
+            _ => None,
+        }
+    }
+}
+
+/// Runs `sm_RefineCCSolutions` on `sols` (status ignored upstream; passed on as the
+/// fork, tangency-labs/smlib 8311f8e).
 fn refine<O: SolutionObject>(
     k: &Kernel,
     sols: &mut SolutionArray<O>,
     named: &Named<'_, O>,
 ) -> Result<()> {
-    ignore_or_pass_on(
-        refine_cc_solutions(k, sols, |o| named.curve_of(o)),
-        k.fixes.query_statuses_pass_on,
-    )
+    refine_cc_solutions(k, sols, |o| named.curve_of(o))
 }
 
 /// The analytic curve of a cache (`GetAnalyticCurve`), copied out of the cache.
@@ -290,6 +655,15 @@ fn cache_analytic<O: SolutionObject>(
     cache: &mut CurveCache<O>,
 ) -> Result<Option<Curve>> {
     Ok(cache.analytic_curve(k)?.cloned())
+}
+
+/// The top box of the tree of the cache [`build_cache`] would return for `curve` at
+/// `zone_tol_3d`, read from the curve's memo when it holds that build (not upstream,
+/// #14453); `None` when it does not, or the tree has no top node. A memo hit copies the
+/// tree with every box as it is ([`crate::geom::tree::Tree::retag_curve_tree`]), so this
+/// is the box the tree of that cache has.
+fn memoized_top_box(k: &Kernel, curve: &Curve, zone_tol_3d: Option<f64>) -> Option<Extent3d> {
+    memoized_cache_top_box(k, curve, zone_tol_3d.or_else(|| curve.owner_zone_tol_3d()))
 }
 
 /// The cache tree (`GetTree`, `NER`).
@@ -401,6 +775,8 @@ impl Curve {
             &mut None,
             &mut None,
             [None, None],
+            0.0,
+            true,
         )
     }
 
@@ -439,6 +815,7 @@ impl Curve {
             cache1,
             cache2,
             [None, None],
+            0.0,
         )
     }
 
@@ -451,7 +828,10 @@ impl Curve {
     /// before the body reaches it, and a `None` tolerance builds as that method does.
     /// A populated slot must also match its supplied owner tolerance. These hints
     /// govern the two intersection-tree slots only; nested coincidence and drop
-    /// routines retain their existing curve-owner context.
+    /// routines retain their existing curve-owner context. Coplanar circles, or a circle
+    /// and a line in its plane, overlapping past touching by less than `contact_tol` touch
+    /// at one point (WR-787, #15429, #14599; [`analytic_curve_intersect`]); zero keeps
+    /// upstream's crossings.
     ///
     /// # Errors
     ///
@@ -467,6 +847,7 @@ impl Curve {
         cache1: &mut Option<CurveCache<O>>,
         cache2: &mut Option<CurveCache<O>>,
         zone_tols: [Option<f64>; 2],
+        contact_tol: f64,
     ) -> Result<SolutionArray<O>> {
         if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
             let own = operand_handles(self, other);
@@ -486,6 +867,7 @@ impl Curve {
                     &mut None,
                     &mut None,
                     zone_tols,
+                    contact_tol,
                 )?
                 .without_objects());
         }
@@ -499,6 +881,8 @@ impl Curve {
             cache1,
             cache2,
             zone_tols,
+            contact_tol,
+            false,
         )
     }
 
@@ -541,6 +925,8 @@ impl Curve {
                 cache1,
                 cache2,
                 [None, None],
+                0.0,
+                false,
             )?
             .without_objects())
     }
@@ -549,7 +935,10 @@ impl Curve {
     /// the cache slots of [`Curve::global_curve_intersect_cached`]. `zone_tols` are the
     /// zone tolerances the caller resolved for the curves' owners, used only where a
     /// slot's cache is built ([`build_cache`]); `None` preserves the corresponding
-    /// curve's recorded owner tolerance.
+    /// curve's recorded owner tolerance. `own_slots`: true only when the slots are the
+    /// callee's locals, dropped on return; the top-box return (#14453) skips filling
+    /// them. A caller's kept slots (`false`) are filled as before, wherever the
+    /// intersection needs the caches.
     fn global_curve_intersect_body<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -561,6 +950,8 @@ impl Curve {
         cache1_slot: &mut Option<CurveCache<O>>,
         cache2_slot: &mut Option<CurveCache<O>>,
         zone_tols: [Option<f64>; 2],
+        contact_tol: f64,
+        own_slots: bool,
     ) -> Result<SolutionArray<O>> {
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
@@ -588,6 +979,7 @@ impl Curve {
                 AnalyticOperand::Curve(other),
                 other_interval,
                 dist_tol,
+                contact_tol,
                 h_this,
                 h_other,
             )?;
@@ -603,6 +995,24 @@ impl Curve {
             // exit when Line/Line solutions are complete
             if !needs_more_intersections {
                 return Ok(sols);
+            }
+        }
+
+        // Not upstream (#14453): two curves whose memoised caches' top boxes are apart
+        // have no intersection, the same test as below on the same boxes, read from the
+        // memo without copying the caches into this call's own slots (a boolean asks
+        // this for every pair of proto edges, nearly all apart); a caller's kept slots
+        // are filled as before
+        if own_slots && !same_curve && cache1_slot.is_none() && cache2_slot.is_none() {
+            if let (Some(root1), Some(root2)) = (
+                memoized_top_box(k, self, zone_tols[0]),
+                memoized_top_box(k, other, zone_tols[1]),
+            ) {
+                let mut bbox = root1;
+                bbox.expand_absolute(dist_tol);
+                if bbox.are_disjoint(&root2, 0.0) {
+                    return Ok(sols);
+                }
             }
         }
 
@@ -685,6 +1095,7 @@ impl Curve {
                     AnalyticOperand::Curve(a2),
                     other_interval,
                     dist_tol,
+                    contact_tol,
                     a1_handle,
                     a2_handle,
                 )?;
@@ -854,6 +1265,14 @@ impl Curve {
             }
 
             if !needs_more_work {
+                self.drop_ranges_of_tangencies(
+                    k,
+                    &mut sols,
+                    other,
+                    interval,
+                    other_interval,
+                    dist_tol,
+                )?;
                 return Ok(sols);
             }
         }
@@ -878,11 +1297,8 @@ impl Curve {
 
             // when solution starts at ivl1.min and stops short of ivl1.max
             if are_same(ivl1.min(), s0) && e0 < ivl1.max() {
-                // trim ivl1 to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl1.set_min_max(e0, ivl1.max()),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // trim ivl1 to remove solution range (status ignored upstream)
+                ivl1.set_min_max(e0, ivl1.max())?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl1.length().abs() < EFF_ZERO {
@@ -893,11 +1309,8 @@ impl Curve {
 
             // when solution ends at ivl1.max and starts after ivl1.min
             if are_same(ivl1.max(), e0) && ivl1.min() < s0 {
-                // trim ivl1 to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl1.set_min_max(ivl1.min(), s0),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // trim ivl1 to remove solution range (status ignored upstream)
+                ivl1.set_min_max(ivl1.min(), s0)?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl1.length().abs() < EFF_ZERO {
@@ -912,11 +1325,8 @@ impl Curve {
 
             // when solution starts at ivl2.min and stops short of ivl2.max
             if are_same(ivl2.min(), ivl_tmp.min()) && ivl_tmp.max() < ivl2.max() {
-                // trim ivl2 to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl2.set_min_max(ivl_tmp.max(), ivl2.max()),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // trim ivl2 to remove solution range (status ignored upstream)
+                ivl2.set_min_max(ivl_tmp.max(), ivl2.max())?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl2.length().abs() < EFF_ZERO {
@@ -927,11 +1337,9 @@ impl Curve {
 
             // when solution ends at ivl2.max and starts after ivl2.min
             if are_same(ivl2.max(), ivl_tmp.max()) && ivl2.min() < ivl_tmp.min() {
-                // trim (upstream: sIvl1) to remove solution range (status ignored)
-                ignore_or_pass_on(
-                    ivl1.set_min_max(ivl2.min(), ivl_tmp.min()),
-                    k.fixes.query_statuses_pass_on,
-                )?;
+                // trim (upstream: sIvl1) to remove solution range (status ignored
+                // upstream)
+                ivl1.set_min_max(ivl2.min(), ivl_tmp.min())?;
 
                 // for zero length regions - curve is entirely coincident - no more work
                 if ivl2.length().abs() < EFF_ZERO {
@@ -978,7 +1386,16 @@ impl Curve {
 
         // Refine Range solutions.
         refine(k, &mut sols, &named)?;
-        if k.fixes.curve_contacts_at_curve_ends {
+        // Not upstream (#18064): a range with exact ends on the flank of a tangency is no
+        // coincidence. Dropped before the contacts move to the curve ends, as a range
+        // there would stop the flank's point solutions moving to the touch past it.
+        self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval, dist_tol)?;
+        let self_intersect = core::ptr::eq(tree1, tree2);
+        // Not for a self intersection: there the "other" curve is this curve, so the
+        // stretch test compares the curve with itself and always passes, and the move
+        // would carry a real self intersection (a closed curve's seam) onto the trivial
+        // diagonal, where it is dropped below.
+        if !self_intersect {
             move_contacts_to_curve_ends(
                 k,
                 self,
@@ -993,7 +1410,6 @@ impl Curve {
         // Now sort through the intersections looking for cases to combine, split, or
         // convert from 'coincident maybe' intervals to point intersections.
 
-        let self_intersect = core::ptr::eq(tree1, tree2);
         if self_intersect {
             // Remove all self intersections from beginning of list
             while let Some(curr) = sols.get(0) {
@@ -1135,11 +1551,9 @@ impl Curve {
         // For SMLib intersection consistency upstream evaluates each pair of
         // consecutive point solutions (not across a seam) and only warns when they lie
         // within tolerance; the port leaves that out. The fork passes on the statuses
-        // of those evaluations (tangency-labs/smlib 8311f8e), so with the opt-in fix
-        // they are made and a failure is returned.
-        if k.fixes.query_statuses_pass_on {
-            self.consistency_evaluations(k, &sols, other)?;
-        }
+        // of those evaluations (tangency-labs/smlib 8311f8e), so they are made and a
+        // failure is returned.
+        self.consistency_evaluations(k, &sols, other)?;
 
         // Check adjacent point solutions: a 'precise' solution with a not-so-good
         // solution very close may be an artifact of the local intersector; when the
@@ -1244,11 +1658,10 @@ impl Curve {
 
         // for point solutions only
         if curr.solution_type == SolutionType::SingleValue {
-            // evaluate solution points (statuses ignored)
-            // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib
-            // 8311f8e)
-            let pt1 = point_or_pass_on(k, self, cs0)?;
-            let pt2 = point_or_pass_on(k, self, le0)?;
+            // evaluate solution points (statuses ignored upstream; passed on as the
+            // fork, tangency-labs/smlib 8311f8e)
+            let pt1 = self.evaluate_point(k, cs0)?;
+            let pt2 = self.evaluate_point(k, le0)?;
             let dist2 = pt1.distance_squared(pt2);
 
             // combine solutions when points are close enough together
@@ -1673,18 +2086,20 @@ impl Curve {
                 let curve_b = named.curve_of(sol_a.objects[1]).ok_or_else(|| {
                     SolidError::curve_missing(OP_GCI, "a solution's second curve")
                 })?;
-                let pt_a = point_or_pass_on(k, curve_a, param_a1)?;
-                let pt_b = point_or_pass_on(k, curve_b, param_b1)?;
+                // (statuses ignored upstream; passed on as the fork, tangency-labs/smlib
+                // 8311f8e)
+                let pt_a = curve_a.evaluate_point(k, param_a1)?;
+                let pt_b = curve_b.evaluate_point(k, param_b1)?;
                 let dist1 = pt_a.distance(pt_b);
 
-                let pt_a = point_or_pass_on(k, curve_a, param_a2)?;
-                let pt_b = point_or_pass_on(k, curve_b, param_b2)?;
+                let pt_a = curve_a.evaluate_point(k, param_a2)?;
+                let pt_b = curve_b.evaluate_point(k, param_b2)?;
                 let dist2 = pt_a.distance(pt_b);
 
                 let t = (param_a1 + param_a2) / 2.0;
-                let pt_a = point_or_pass_on(k, curve_a, t)?;
+                let pt_a = curve_a.evaluate_point(k, t)?;
                 let t = (param_b1 + param_b2) / 2.0;
-                let pt_b = point_or_pass_on(k, curve_b, t)?;
+                let pt_b = curve_b.evaluate_point(k, t)?;
                 let dist_mid = pt_a.distance(pt_b);
 
                 if dist1 < dist2 && dist_mid < dist2 {
@@ -1711,6 +2126,176 @@ impl Curve {
                     done = false;
                     break;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Not upstream (#18064): removes from `sols` each range solution that is the flank
+    /// of a tangency, not a stretch where the two curves coincide.
+    ///
+    /// Two curves in contact of high order (a curve ending on an arc it is tangent to,
+    /// apart as the fourth power of the distance from the touch) stay within the scaled
+    /// zero of each other for a while beside the touching point, so the solve can report
+    /// a range there whose two ends are both exact intersections; upstream keeps such a
+    /// range as a coincidence (`classify_ranges`), and the curves are then cut at its
+    /// far end, which is no event on either curve. Phase 2 (`cull_ranges_near_points`)
+    /// discards a range beside a point solution for the same reason, but only when it is
+    /// shorter than a thousandth of the domain.
+    ///
+    /// A range is such a flank when both its ends are exact to the scaled zero and a
+    /// touching point lies beyond one end on both curves (a point solution, or the
+    /// point where an end of each curve's interval meets the other's within the scaled
+    /// zero), where the two curves are tangent, and from which the gap grows faster
+    /// than linearly up to the range's far end: the gap at the touch is no larger than
+    /// at this curve's midpoint between it and the far end (dropped onto the other
+    /// curve), and the gap there is less than half the far end's. The gap of a tangency
+    /// grows at least as the square of the distance from the touch, so at the midpoint
+    /// it is at most a quarter of the far end's, and growth that is linear or slower is
+    /// no tangency.
+    ///
+    /// Three things tell such a flank from a coincidence, whose gap along the range is
+    /// only the rounding of the evaluations and says nothing of growth:
+    /// - the range stops short of the touch (its near end lies farther than the scaled
+    ///   zero from the touch on this curve): a coincidence through a point where the
+    ///   curves meet reaches that point, as the gap is zero all along it;
+    /// - its far end lies off the ends of both curves' intervals (farther than the scaled
+    ///   zero from each), so the range ends where the curves part, not where one of them
+    ///   stops (a seam edge along its surface's seam curve, a cone's edge along its
+    ///   ruling);
+    /// - the far end's two parameters give points within the scaled zero of each other,
+    ///   as an exact end does, and the gap at the midpoint is larger than at the touch.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    fn drop_ranges_of_tangencies<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        sols: &mut SolutionArray<O>,
+        other: &Self,
+        interval: &Extent1d,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+    ) -> Result<()> {
+        let gap_at = |a: f64, b: f64| -> Result<f64> {
+            Ok(self
+                .evaluate_point(k, a)?
+                .distance(other.evaluate_point(k, b)?))
+        };
+        // where the ends of the two intervals meet: touching points the solve need not
+        // report
+        let mut touches: Vec<[f64; 2]> = Vec::new();
+        for a in [interval.min(), interval.max()] {
+            for b in [other_interval.min(), other_interval.max()] {
+                let p = self.evaluate_point(k, a)?;
+                if gap_at(a, b)? < EFF_ZERO * (1.0 + p.max_dimension()) {
+                    touches.push([a, b]);
+                }
+            }
+        }
+        // the ends of each curve's interval, where a coincidence of the two can stop
+        let self_ends = [
+            self.evaluate_point(k, interval.min())?,
+            self.evaluate_point(k, interval.max())?,
+        ];
+        let other_ends = [
+            other.evaluate_point(k, other_interval.min())?,
+            other.evaluate_point(k, other_interval.max())?,
+        ];
+        let tangent_at =
+            |c: &Self, t: f64| -> Result<Vec3> { Ok(at(&c.evaluate(k, t, 1, true, true)?, 1)) };
+        let mut ii = 0;
+        while ii < sols.len() {
+            let range = sol_at(sols, ii)?;
+            if range.solution_type != SolutionType::RangeOfValues {
+                ii += 1;
+                continue;
+            }
+            let pnt = self.evaluate_point(k, range.start.parameters[0])?;
+            let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
+            if range.start.solution_value >= scaled_zero || range.end.solution_value >= scaled_zero
+            {
+                ii += 1;
+                continue;
+            }
+            let ends = [
+                [range.start.parameters[0], range.start.parameters[1]],
+                [range.end.parameters[0], range.end.parameters[1]],
+            ];
+            let mut candidates = touches.clone();
+            for s in sols.as_slice() {
+                if s.solution_type == SolutionType::SingleValue {
+                    candidates.push([s.start.parameters[0], s.start.parameters[1]]);
+                }
+            }
+            let mut flank = false;
+            for touch in candidates {
+                for (near, far) in [(ends[0], ends[1]), (ends[1], ends[0])] {
+                    // the touch lies beyond the near end, away from the far end, on both
+                    let beyond = touch
+                        .iter()
+                        .zip(near.iter())
+                        .zip(far.iter())
+                        .all(|((t, n), f)| (t - n) * (f - n) <= 0.0 && (t - f).abs() > 0.0);
+                    if !beyond {
+                        continue;
+                    }
+                    // the curves part at the far end within both of them
+                    let far_self = self.evaluate_point(k, far[0])?;
+                    let far_other = other.evaluate_point(k, far[1])?;
+                    let parts_inside = self_ends
+                        .iter()
+                        .all(|e| e.distance(far_self) >= scaled_zero)
+                        && other_ends
+                            .iter()
+                            .all(|e| e.distance(far_other) >= scaled_zero);
+                    // the range stops short of the touch
+                    let short_of_touch = self
+                        .evaluate_point(k, touch[0])?
+                        .distance(self.evaluate_point(k, near[0])?)
+                        >= scaled_zero;
+                    // and they are tangent at the touch
+                    let tangent = are_parallel(
+                        tangent_at(self, touch[0])?,
+                        tangent_at(other, touch[1])?,
+                        None,
+                    );
+                    if !parts_inside || !short_of_touch || !tangent {
+                        continue;
+                    }
+                    let g_touch = gap_at(touch[0], touch[1])?;
+                    // this curve's midpoint between the touch and the far end, dropped onto
+                    // the other curve between them
+                    let mut span = Extent1d::from_value(touch[1]);
+                    span.add_value(far[1]);
+                    let mid = self.evaluate_point(k, (touch[0] + far[0]) / 2.0)?;
+                    let dropped = other.drop_point(
+                        k,
+                        &span,
+                        mid,
+                        None,
+                        dist_tol,
+                        Some(span.mid()),
+                        SolverOperation::Minimize,
+                    )?;
+                    if !dropped.success {
+                        continue;
+                    }
+                    let g_mid = mid.distance(other.evaluate_point(k, dropped.parameter)?);
+                    let g_far = gap_at(far[0], far[1])?;
+                    if g_far < scaled_zero && g_touch < g_mid && 2.0 * g_mid < g_far {
+                        flank = true;
+                    }
+                }
+                if flank {
+                    break;
+                }
+            }
+            if flank {
+                sols.remove_at(ii, 1);
+            } else {
+                ii += 1;
             }
         }
         Ok(())
@@ -1788,13 +2373,9 @@ impl Curve {
             // for nonDegenerate intervals
             if !small_interval {
                 // if GapVector is diverging over length of solution range change
-                // solution to a tangent point intersection (status ignored)
-                // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-                let (deg, point) = ignored_or_pass_on(
-                    self.classify_intersecting_range_solution(k, other, &curr),
-                    k.fixes.query_statuses_pass_on,
-                )?
-                .unwrap_or((false, None));
+                // solution to a tangent point intersection (status ignored upstream;
+                // passed on as the fork, tangency-labs/smlib 8311f8e)
+                let (deg, point) = self.classify_intersecting_range_solution(k, other, &curr)?;
                 is_degenerate = deg;
                 if let Some(p) = point {
                     curr.start.solution_value = p.solution_value;
@@ -1864,6 +2445,29 @@ mod tests {
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
 
+    /// After a move the solutions are in first-parameter order again, so the merge and
+    /// cull passes after the move see each next to its neighbours, whether or not the
+    /// refined solutions were sorted before.
+    #[test]
+    fn moved_contacts_go_back_into_first_parameter_order() {
+        let key = |s: &(f64, u8)| s.0;
+        // the solution at 0.2 moved to an end at 0.9, past the one at 0.5
+        let all = [(0.1, 0), (0.9, 1), (0.5, 2), (1.0, 3)];
+        let order = sorted_without(&all, &[], key);
+        assert_eq!(order, vec![(0.1, 0), (0.5, 2), (0.9, 1), (1.0, 3)]);
+        // equal keys keep their order
+        let all = [(0.0, 0), (0.4, 1), (0.6, 2), (0.0, 3)];
+        let order = sorted_without(&all, &[], key);
+        assert_eq!(order, vec![(0.0, 0), (0.0, 3), (0.4, 1), (0.6, 2)]);
+        // unmoved solutions out of order (refinement can swap close ones) are sorted too
+        let all = [(0.3, 0), (0.2, 1), (2.0, 2), (0.6, 3)];
+        let order = sorted_without(&all, &[], key);
+        assert_eq!(order, vec![(0.2, 1), (0.3, 0), (0.6, 3), (2.0, 2)]);
+        // a contact named twice is taken out; an index out of range removes nothing
+        let order = sorted_without(&all, &[0, 9], key);
+        assert_eq!(order, vec![(0.2, 1), (0.6, 3), (2.0, 2)]);
+    }
+
     #[derive(Debug, Clone, Copy, PartialEq)]
     struct H(u8);
 
@@ -1903,6 +2507,87 @@ mod tests {
         Extent1d::from_min_max(0.0, 1.0)
     }
 
+    /// A solution `[t0, t1]` (a point) or `[t0, t1]..[e0, e1]` (a range).
+    fn sol(kind: SolutionType, start: [f64; 2], end: [f64; 2]) -> Solution<H> {
+        let mut s = Solution::new();
+        s.solution_type = kind;
+        s.num_variables = 2;
+        s.start.parameters[..2].copy_from_slice(&start);
+        s.end.parameters[..2].copy_from_slice(&end);
+        s
+    }
+
+    /// A point contact beside a coincident range is not moved across that range onto the
+    /// curve end the range already reaches (where it would be dropped as named twice): the
+    /// contact stays where the solve put it, for the later passes to combine with the range.
+    /// The offset rows `overlap_pc_extrudeHoles1_f*_k0.37_out_rnd` lost such points (the
+    /// curves coincide from the start to the point) and built unsound bodies reported as
+    /// success. A lone contact with the same stretch still moves, and so does a chain of
+    /// point contacts along one tangential stretch (b27's sliver round): they all land on the
+    /// end, and the later ones are dropped as named twice.
+    #[test]
+    fn a_contact_beside_a_coincident_range_is_not_moved_across_it() {
+        let k = Kernel::default();
+        // identical over t in [0, 0.5], apart past it
+        let a = polyline(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]);
+        let b = polyline(&[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 1.0, 0.0]]);
+        let tol = 1e-3;
+        let range = sol(SolutionType::RangeOfValues, [0.0, 0.0], [0.48, 0.48]);
+        let point = sol(SolutionType::SingleValue, [0.5, 0.5], [0.0, 0.0]);
+        let mut sols = SolutionArray::new();
+        sols.add(&range);
+        sols.add(&point);
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut sols).unwrap();
+        assert_eq!(sols.len(), 2, "the point is kept");
+        let kept = sols.get(1).unwrap();
+        assert_eq!(kept.solution_type, SolutionType::SingleValue);
+        assert_eq!(kept.start.parameters[..2], [0.5, 0.5], "and not moved");
+        assert_eq!(sols.get(0).unwrap().end.parameters[..2], [0.48, 0.48]);
+
+        // the same point alone: its contact runs on to the start of both curves (certified),
+        // so it moves there
+        let mut alone = SolutionArray::new();
+        alone.add(&point);
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut alone).unwrap();
+        assert_eq!(alone.len(), 1);
+        assert_eq!(alone.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
+
+        // a chain of points on one stretch: all move to the start, one is kept
+        let mut chain = SolutionArray::new();
+        for t in [0.1, 0.3, 0.5] {
+            chain.add(&sol(SolutionType::SingleValue, [t, t], [0.0, 0.0]));
+        }
+        move_contacts_to_curve_ends(&k, &a, &unit(), &b, &unit(), tol, &mut chain).unwrap();
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain.get(0).unwrap().start.parameters[..2], [0.0, 0.0]);
+
+        let crosses = |others: &[Solution<H>], gone: &[usize]| {
+            let mut s = SolutionArray::new();
+            s.add(&point);
+            for o in others {
+                s.add(o);
+            }
+            crosses_a_range(&s, 0, gone, 0, [0.5, 0.0], [0.5, 0.0])
+        };
+        // a range only touching the stretch's end, or to the kernel's zero, does not block
+        let touching = sol(SolutionType::RangeOfValues, [0.5, 0.5], [0.52, 0.52]);
+        let at_zero = sol(SolutionType::RangeOfValues, [0.5 - 1e-13, 0.6], [0.7, 0.7]);
+        assert!(!crosses(&[touching, at_zero], &[]));
+        // nor does a point inside it
+        assert!(!crosses(
+            &[sol(SolutionType::SingleValue, [0.2, 0.2], [0.0, 0.0])],
+            &[]
+        ));
+        // a range inside the stretch in the drop curve's parameter only blocks it
+        let inside_drop = sol(SolutionType::RangeOfValues, [0.9, 0.2], [0.95, 0.25]);
+        assert!(crosses(&[inside_drop], &[]));
+        // ... unless it is already dropped
+        assert!(!crosses(&[inside_drop], &[1]));
+        // NaN refuses
+        let nan = sol(SolutionType::RangeOfValues, [f64::NAN, 0.9], [0.95, 0.95]);
+        assert!(crosses(&[nan], &[]));
+    }
+
     #[test]
     fn helpers() {
         assert!(is_between(0.5, 0.0, 1.0));
@@ -1920,6 +2605,82 @@ mod tests {
             Ok(s) => assert!(s.is_empty()),
             Err(e) => assert!(e.is_unported()),
         }
+    }
+
+    /// With the memo on, a pair whose caches the memo holds is answered from their trees'
+    /// top boxes (#14453), and those are the boxes of fresh builds' trees, bit for bit: a
+    /// pair apart gives no solutions, and a crossing pair the solutions of the memo off,
+    /// call after call.
+    #[test]
+    fn memoised_top_boxes_answer_as_fresh_caches() {
+        let on = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        let a = polyline(&[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]]);
+        let far = polyline(&[[0.0, 50.0, 0.0], [1.0, 51.0, 0.0], [2.0, 50.0, 0.0]]);
+        let across = polyline(&[[0.0, 0.2, 0.0], [1.0, 0.1, 0.0], [2.0, 0.3, 0.0]]);
+        assert!(
+            memoized_top_box(&on, &a, None).is_none(),
+            "nothing memoised yet"
+        );
+        for b in [&far, &across] {
+            let fresh = a.global_curve_intersect(&off, &unit(), b, &unit(), 1e-6, &opts());
+            for _ in 0..3 {
+                let memo = a.global_curve_intersect(&on, &unit(), b, &unit(), 1e-6, &opts());
+                assert_eq!(format!("{memo:?}"), format!("{fresh:?}"));
+            }
+            for c in [&a, b] {
+                let built = build_cache::<H>(&off, c, Some(H(0)), None).unwrap();
+                let tree = built.tree().unwrap();
+                let top = tree.node(tree.top_node().unwrap()).unwrap().bbox;
+                assert_eq!(memoized_top_box(&on, c, None), Some(top));
+            }
+        }
+        let apart = a.global_curve_intersect(&on, &unit(), &far, &unit(), 1e-6, &opts());
+        assert!(apart.unwrap().is_empty());
+        assert!(
+            memoized_top_box(&off, &a, None).is_none(),
+            "the memo off reads nothing"
+        );
+    }
+
+    /// The cached forms fill a kept slot when the curves' memoised top boxes are apart (the
+    /// top-box return is only for the uncached form, whose slots are its own), and give the
+    /// uncached solutions.
+    #[test]
+    fn kept_slots_are_filled_when_the_top_boxes_are_apart() {
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let a = polyline(&[[0.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 0.0, 0.0]]);
+        let far = polyline(&[[0.0, 50.0, 0.0], [1.0, 51.0, 0.0], [2.0, 50.0, 0.0]]);
+        // the uncached form builds and memoises both curves' caches
+        let fresh = a.global_curve_intersect(&k, &unit(), &far, &unit(), 1e-6, &opts());
+        assert!(memoized_top_box(&k, &a, None).is_some());
+        assert!(memoized_top_box(&k, &far, None).is_some());
+        let (mut slot_a, mut slot_b) = (None, None);
+        let kept = a.global_curve_intersect_cached(
+            &k,
+            &unit(),
+            &far,
+            &unit(),
+            1e-6,
+            &opts(),
+            &mut slot_a,
+            &mut slot_b,
+        );
+        assert_eq!(format!("{kept:?}"), format!("{fresh:?}"));
+        assert!(kept.unwrap().is_empty());
+        assert!(
+            slot_a.is_some() && slot_b.is_some(),
+            "the kept slots are filled"
+        );
     }
 
     #[test]

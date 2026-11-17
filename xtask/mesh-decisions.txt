@@ -7,7 +7,7 @@
 crates/doc/src/appearance.rs:nearest_face picks the face nearest a point by the display mesh's triangles
 crates/doc/src/eval.rs:blend_edges_on finds a blend's edges on the display mesh
 crates/doc/src/eval.rs:edge_refs turns edge picks into references through the display mesh
-crates/doc/src/eval.rs:eval_feature places features by the display mesh (faces, edges, nearness)
+crates/doc/src/eval.rs:eval_feature_kind places features by the display mesh (faces, edges, nearness)
 crates/doc/src/eval.rs:face_plane finds a sketch's face plane again on a mesh
 crates/doc/src/eval.rs:face_samples takes a point on each face from its mesh triangles
 crates/doc/src/eval.rs:faces_near finds the faces near a point by the display mesh
@@ -26,7 +26,6 @@ crates/doc/src/eval.rs:unrecorded_touches finds touching pieces by a mesh
 crates/doc/src/eval_more.rs:FaceSlice::outline finds the wall an outline runs along by mesh triangles
 crates/doc/src/eval_more.rs:FaceSlice::recesses finds a plate's recesses by mesh triangles
 crates/doc/src/eval_more.rs:body_under picks the body under a plastic feature's point by the display mesh
-crates/doc/src/eval_more.rs:on_sheet_material decides whether a point touches a sheet by the display mesh
 crates/doc/src/eval_more.rs:planar_normal_at finds the planar face through a point by a mesh
 crates/doc/src/eval_more.rs:plastic_eval places plastic features by a mesh
 crates/doc/src/eval_more.rs:rib_tool runs a rib to the body by the display mesh
@@ -109,7 +108,6 @@ crates/engine/src/cmd/features.rs:edge_points turns edge references into points 
 crates/engine/src/cmd/features_more.rs:emboss places an emboss by the display mesh
 crates/engine/src/cmd/features_more.rs:snap_point snaps a feature's point by the display mesh
 crates/engine/src/cmd/joints.rs:cam_profile samples a cam's picked edges from the display mesh
-crates/engine/src/cmd/measure_sel.rs:closest measures closest points on mesh triangles
 crates/engine/src/cmd/measure_sel.rs:describe measures a selection on the display mesh
 crates/engine/src/cmd/measure_sel.rs:face_slot finds a slot from mesh triangles
 crates/engine/src/cmd/measure_sel.rs:face_tris reads a face's mesh triangles for measuring
@@ -129,11 +127,9 @@ crates/kernel/src/blend_smlib.rs:imp::resolve resolves edge picks for SMLib by a
 crates/kernel/src/body.rs:Body::faces gives face areas and centroids from a mesh
 crates/kernel/src/body.rs:Body::meets decides whether bodies meet by meshes
 crates/kernel/src/body.rs:Body::meets_each decides whether tools meet a body by meshes
-crates/kernel/src/distance.rs:DistanceShape::on_face decides whether a point lies on a face by its mesh
 crates/kernel/src/helix.rs:sweep_helix_mesh models a thread as a triangle mesh for faceted booleans
 crates/kernel/src/intersection.rs:meeting_edges samples meeting edges from a mesh
 crates/kernel/src/lip.rs:face_at picks the planar face at a point by a mesh
-crates/kernel/src/measure.rs:measure counts a B-rep body's merged topology on a mesh
 crates/kernel/src/offset_backend.rs:face_points takes a point per face from mesh triangles
 crates/kernel/src/offset_backend.rs:faces_under picks the face under each point by the nearest mesh triangle
 crates/kernel/src/offset_backend.rs:with_offsets tags offset faces by a mesh
@@ -152,4 +148,3 @@ crates/kernel/src/surfaces.rs:nearest_face picks the face nearest a point by mes
 crates/kernel/src/topo.rs:cylinder_end_at finds a cylinder's end circle by a mesh
 crates/kernel/src/topo.rs:cylinder_extent measures a cylindrical face's extent and side from mesh normals
 crates/kernel/src/topo.rs:cylinder_face_at finds the cylindrical face at a point by a mesh
-crates/kernel/src/topo.rs:merged_topology counts merged topology from a mesh

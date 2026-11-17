@@ -9,14 +9,14 @@
   Per-machine install with a setup wizard: Welcome, install folder (Program Files\SolidCraft by
   default; an update keeps the installed folder and skips this page), Ready, progress, and a Finish page with a ticked "Launch
   SolidCraft" box. Installs a Start Menu shortcut, solidcraft-cli (and adds its folder to the system PATH), the licence files (including
-  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft` and pre-rename `.solvecraft`), and offers it under
+  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft`), and offers it under
   "Open with" for STEP, IGES, 3MF and STL. `msiexec /qn` installs silently.
   Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <!-- Never change the UpgradeCode: it is what lets a new MSI replace every earlier install,
-       including those from before the SolveCraft -> SolidCraft rename (docs/compatibility.md). -->
+       including those from before the product was renamed (docs/compatibility.md). -->
   <Package
       Name="SolidCraft"
       Manufacturer="SolidCraft contributors"
@@ -33,9 +33,8 @@
          every update (#9366). This relies on the component rules: a component keeps its GUID and
          its files keep their names and folder; a file that moves or is renamed gets a new
          component. The Start menu shortcut is part of the SolidcraftApp component and is not
-         advertised, so removing the old product leaves it in place, and its file name differs
-         from the advertised shortcut of older releases, whose removal deletes that name (see
-         StartMenuShortcut). -->
+         advertised, so removing the old product leaves it in place (see StartMenuShortcut for the
+         one upgrade path that still loses it). -->
     <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallExecute"
         DowngradeErrorMessage="A newer version of SolidCraft is already installed." />
     <!-- With the old files still in place during the install, the default rules ("o": replace
@@ -60,9 +59,9 @@
     <StandardDirectory Id="ProgramMenuFolder" />
 
     <!-- An upgrade installs where the user put the previous version (written by SolidcraftApp). -->
-    <!-- Since the rename the folder and this key say SolidCraft. A pre-rename install recorded
-         Software\SolveCraft, which isn't read: its upgrade (same UpgradeCode) removes the old
-         folder and installs into Program Files\SolidCraft (docs/compatibility.md). -->
+    <!-- A pre-rename install recorded a different key, which isn't read: its upgrade (same
+         UpgradeCode) removes the old folder and installs into Program Files\SolidCraft
+         (docs/compatibility.md). -->
     <Property Id="INSTALLFOLDER">
       <RegistrySearch Id="PreviousInstallFolder" Root="HKLM" Key="Software\SolidCraft" Name="InstallDir" Type="raw" />
     </Property>
@@ -95,26 +94,23 @@
 
   <Fragment>
     <ComponentGroup Id="SolidcraftFiles" Directory="INSTALLFOLDER">
-      <!-- A new GUID with the rename: the key file changed from solvecraft.exe to solidcraft.exe.
-           The UpgradeCode above is unchanged, so this MSI major-upgrades a pre-rename install. -->
+      <!-- A new GUID with the rename: the key file changed name. The UpgradeCode above is
+           unchanged, so this MSI major-upgrades a pre-rename install. -->
       <Component Id="SolidcraftApp" Guid="A379D509-D776-4B34-A3A4-71FBF5724971">
         <File Id="SolidcraftExe" Source="$(var.BinDir)\solidcraft.exe" KeyPath="yes">
-          <!-- The file is "SolidCraft CAD.lnk", not the "SolidCraft.lnk" of the releases before
-               #9366 (0.30.1 and earlier), and that name must never change again. Those releases
-               advertised the shortcut, and an advertised shortcut is removed with its feature, by
-               file name: when the old product is removed after this one is installed
-               (afterInstallExecute), its ShortcutRemove would delete a new "SolidCraft.lnk" too,
-               leaving no Start menu entry. A different name leaves the old removal only its own
-               file. The cost is that the Start menu entry reads "SolidCraft CAD". Keeping
-               "SolidCraft" would need either a custom action that rewrites the shortcut after
-               RemoveExistingProducts, or DisplayResourceDll plus a new string resource in
-               solidcraft.exe, which writes a localized name into the shared Programs folder's
-               desktop.ini; both are more to get wrong than a file name. Renaming it later would
-               orphan this file: the component stays installed through an update, so the old
-               product never removes it. -->
-          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft CAD"
+          <!-- The shortcut is "SolidCraft.lnk" again. Releases 0.30.1 and earlier advertised their
+               shortcut, and an advertised shortcut is removed with its feature, by file name: when
+               the old product is removed after this one is installed (afterInstallExecute), its
+               ShortcutRemove deletes "SolidCraft.lnk" and nothing recreates it. So upgrading
+               straight from 0.30.1 or older can leave no Start menu entry until the user reinstalls
+               or repairs. We accept that: those releases are many versions old. Later releases
+               write a non-advertised shortcut of this name, which the old removal does not touch,
+               and an update keeps it in place. 0.42 shipped it as "SolidCraft CAD"; the RemoveFile
+               below deletes that leftover so an install or upgrade does not leave two entries. -->
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft"
               Description="SolidCraft parametric 3D CAD" WorkingDirectory="INSTALLFOLDER" Advertise="no" />
         </File>
+        <RemoveFile Id="RemoveStartMenuShortcutCad" Directory="ProgramMenuFolder" Name="SolidCraft CAD.lnk" On="both" />
 
         <!-- .sc: SolidCraft's own format; SolidCraft is its default app. -->
         <ProgId Id="Solidcraft.Design" Description="SolidCraft Design" Icon="SolidcraftExe" IconIndex="0">
@@ -123,12 +119,10 @@
           </Extension>
         </ProgId>
         <!-- Compatibility shim (docs/compatibility.md): designs saved as .solidcraft (before .sc)
-             and as .solvecraft (before the rename) open as the same ProgId. Registered by hand: a
+             open as the same ProgId. Registered by hand: a
              second Extension under one ProgId would write its open verb twice (WIX0091). -->
         <RegistryValue Root="HKLM" Key="Software\Classes\.solidcraft" Value="Solidcraft.Design" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\.solidcraft" Name="Content Type" Value="application/x-solidcraft" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.solvecraft" Value="Solidcraft.Design" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.solvecraft" Name="Content Type" Value="application/x-solvecraft" Type="string" />
         <!-- STEP, IGES and meshes: offered under "Open with", never forced as the default. -->
         <ProgId Id="Solidcraft.Model" Description="3D model" Icon="SolidcraftExe" IconIndex="0" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Solidcraft.Model\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
@@ -144,7 +138,6 @@
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".sc" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".solidcraft" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".solvecraft" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".step" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".stp" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".igs" Value="" Type="string" />
@@ -160,10 +153,6 @@
         <!-- The install folder on the system PATH, so MCP clients and shells find `solidcraft-cli` by name;
              removed again on uninstall. -->
         <Environment Id="SolidcraftPath" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last" System="yes" Permanent="no" />
-      </Component>
-      <!-- Compatibility shim (docs/compatibility.md): the old CLI name, forwarding to solidcraft-cli. -->
-      <Component Id="SolidcraftCliAlias">
-        <File Id="SolvecraftCliAliasExe" Source="$(var.BinDir)\solvecraft-cli.exe" KeyPath="yes" />
       </Component>
       <!-- Several unversioned files: an explicit GUID (WIX0367). -->
       <Component Id="SolidcraftLicences" Guid="CDEDEE8D-4BE9-4872-A2EA-EE623A6C7E91">

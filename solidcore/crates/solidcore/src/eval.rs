@@ -33,6 +33,7 @@ pub mod planar_tensor;
 pub mod pole;
 pub mod ray_spline;
 pub mod ray_tensor;
+pub mod ruling;
 pub mod sphere;
 pub mod spline;
 pub mod surface;
@@ -40,7 +41,7 @@ pub mod surface_plan;
 pub mod uv;
 pub mod vec;
 
-pub use collapse::Collapse;
+pub use collapse::{Collapse, OntoKnots};
 pub use curve::{CurveEval, CurveJet};
 pub use geometry::{Curve, Curve2, Frame, Surface};
 pub use spline::{

@@ -361,6 +361,7 @@ impl RegionDrag {
             && self.projection.cam == proj.cam
             && self.projection.vp == proj.vp
             && self.projection.rect == proj.rect
+            && self.projection.bounds == proj.bounds
             && app.viewport.rect == Some(proj.rect)
     }
 }

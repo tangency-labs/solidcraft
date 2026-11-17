@@ -2,8 +2,8 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, Effect, Entry, FileGrant, HostLimits, Limits, MAX_COMPONENT_BYTES, MAX_JSON_BYTES, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest,
-    RuntimeManifest, valid_id,
+    API, Effect, Entry, EntryKind, FileGrant, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
+    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
 };
 use craft_plugin::{CommandSchema, HostError, PluginHost};
 use serde_json::{Value, json};
@@ -23,13 +23,35 @@ fn error(s: impl Into<String>) -> EngineError {
     EngineError::Other(format!("plugin: {}", s.into()))
 }
 
+/// Approved permissions, stored by plugin id outside the design.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Grants {
+    /// Exact manifest and component approved at install. Legacy records require re-approval.
+    #[serde(default)]
+    pub package_hash: Option<String>,
+    #[serde(default)]
+    pub command_groups: BTreeSet<String>,
+    #[serde(default)]
+    pub folders: Vec<FileGrant>,
+    /// Memory, in MiB, the user let this package use above the app's ceiling for plugins: what
+    /// its manifest asks for, approved at install. Bound to `package_hash` like the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mib: Option<usize>,
+    /// An importer may read the other files in the folder of the file it opens (its manifest's
+    /// `input_folder`), approved at install.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub input_folder: bool,
+}
+
 /// Trusted host state, never loaded from a design or supplied by guest code.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AppState {
     pub packages: BTreeMap<String, String>,
+    pub grants: BTreeMap<String, Grants>,
+    /// Adapter folder grants for the active call; runtime calls use the package's approved grants.
     pub file_grants: Vec<FileGrant>,
-    /// Sensitive command groups ([`COMMAND_GROUPS`]) the user granted. A plugin calls a grouped
-    /// command only when its manifest asks for the group too.
+    /// Legacy embedding state. Runtime permissions come exclusively from grants bound to package hashes.
     pub command_groups: BTreeSet<String>,
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
@@ -56,6 +78,12 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
     let manifest = craft_plugin::parse_manifest_for(text, folder, "SolidCraft")?;
     let refuse = |field: &str, reason: String| -> EngineError { HostError::InvalidManifest { field: field.into(), reason }.into() };
     if let Some(runtime) = &manifest.runtime {
+        for entry in &runtime.entries {
+            let id = format!("{}.{}", manifest.id, entry.name);
+            if crate::find_command(&id).is_some() {
+                return Err(refuse("runtime.entries", format!("entry `{id}` conflicts with a SolidCraft command")));
+            }
+        }
         if let Some(group) = runtime.permissions.command_groups.iter().find(|g| !COMMAND_GROUPS.contains(&g.as_str())) {
             return Err(refuse(
                 "runtime.permissions.command_groups",
@@ -84,7 +112,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 /// - `file`: reads or writes files (save, export, import, insert from a file, libraries);
 /// - `doc`: opens, creates, recovers or switches designs;
 /// - `app`: app settings, the window and diagnostics, outside any design;
-/// - `plugin`: inspects or runs plugins.
+/// - `plugin`: reviews, installs, removes, inspects or runs plugins.
 pub const COMMAND_GROUPS: &[&str] = &["app", "doc", "file", "plugin"];
 
 /// Commands outside the `file.` family that read or write files.
@@ -138,24 +166,51 @@ pub fn read_package(path: &str) -> Result<Package> {
     let manifest = parse_manifest(&bytes, folder)?;
     let component = if let Some(runtime) = &manifest.runtime {
         let module_path = dir.join(&runtime.module);
-        solidcraft_io::vfs::read(&module_path.to_string_lossy(), MAX_COMPONENT_BYTES).map_err(|e| error(e.to_string()))?
+        solidcraft_io::vfs::read(&module_path.to_string_lossy(), runtime.max_component_bytes()).map_err(|e| error(e.to_string()))?
     } else {
         Vec::new()
     };
+    Ok(Package { manifest, approval: package_hash(&bytes, &component), component })
+}
+
+/// The ceilings a package runs under: the app's, raised to the memory the user approved for this
+/// exact manifest and component at install. A grant for another package hash raises nothing.
+pub fn host_limits_for(session: &Session, id: &str, approval: &str) -> HostLimits {
+    let mut limits = session.plugin_limits;
+    if let Some(memory) =
+        session.plugin_state.grants.get(id).filter(|grants| grants.package_hash.as_deref() == Some(approval)).and_then(|grants| grants.memory_mib)
+    {
+        limits.max_memory_mib = limits.max_memory_mib.max(memory.min(MAX_MEMORY_MIB));
+    }
+    limits
+}
+
+/// The most files and folders one plugin folder holds; install and removal both stop there.
+pub(super) const MAX_FILES: usize = 1024;
+
+pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     let mut digest = Sha256::new();
     digest.update(b"solidcraft-plugin-approval-v1\0");
-    digest.update((bytes.len() as u64).to_le_bytes());
-    digest.update(&bytes);
-    digest.update(&component);
-    Ok(Package { manifest, approval: format!("{:x}", digest.finalize()), component })
+    digest.update((manifest.len() as u64).to_le_bytes());
+    digest.update(manifest);
+    digest.update(component);
+    format!("{:x}", digest.finalize())
 }
 
 pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
     }
+    if let Some(grants) = session.plugin_state.grants.get(&package.manifest.id)
+        && grants.package_hash.as_deref() != Some(package.approval.as_str())
+    {
+        return Err(HostError::PermissionDenied {
+            permission: "stored plugin grants need re-approval for this manifest and component; install and review again".into(),
+        }
+        .into());
+    }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
-    session.plugin_limits.check(&rt.limits)?;
+    host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
     if !rt.entries.iter().any(|e| e.name == entry) {
         return Err(error("unknown entry"));
     }
@@ -163,8 +218,12 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     {
         // What this call may reach: the groups both the manifest asks for and the user granted,
         // and for `file` commands the granted folders the manifest may both read and write.
-        let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&session.plugin_state.command_groups).cloned().collect();
-        let host = SolidCraftHost { session: session.scratch(), transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new() };
+        let grants = session.plugin_state.grants.get(&package.manifest.id).cloned().unwrap_or_default();
+        let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
+        let mut scratch = session.scratch();
+        scratch.plugin_state.file_grants = grants.folders;
+        let host =
+            SolidCraftHost { session: scratch, transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new(), evaluation: None };
         let file_folders = host
             .granted_folders()
             .into_iter()
@@ -192,7 +251,14 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
     }
 }
 
+mod import;
 pub mod install;
+#[cfg(not(target_arch = "wasm32"))]
+mod package;
+#[cfg(not(target_arch = "wasm32"))]
+pub use package::{remove, store_grants, validate_grants};
+
+pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
 #[cfg(test)]
 mod tests;
 
@@ -205,8 +271,33 @@ pub struct SolidCraftHost {
     groups: BTreeSet<String>,
     /// The file scope of a granted `file` command; every other command has none.
     file_folders: Vec<PathBuf>,
+    /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
+    evaluation: Option<Box<Session>>,
 }
+
+/// The commands an importer may run on its own design to check it: they read the model, and
+/// `timeline.roll_to` moves only that private session's marker.
+pub const EVALUATE_COMMANDS: &[&str] = &["document.inspect", "inspect.measure", "model.edges", "model.faces", "timeline.roll_to"];
 impl PluginHost for SolidCraftHost {
+    fn evaluate_open(&mut self, design: &[u8]) -> craft_plugin::Result<()> {
+        let doc = solidcraft_io::read_design(design)
+            .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("SolidCraft can't read this design: {e}") })?;
+        let validation = self.session.validation();
+        // No file reaches this session: not a font, not a linked design.
+        let opened = solidcraft_io::vfs::scoped(Some(Default::default()), || Session::opened_at_validating(doc, None, None, validation));
+        self.evaluation = Some(Box::new(opened));
+        Ok(())
+    }
+    fn evaluate_run(&mut self, command: &str, args: &Value) -> craft_plugin::Result<Value> {
+        if !EVALUATE_COMMANDS.contains(&command) {
+            return Err(HostError::PermissionDenied { permission: format!("evaluate: {command} is not one of {}", EVALUATE_COMMANDS.join(", ")) });
+        }
+        let s = self.evaluation.as_mut().ok_or_else(|| HostError::InvalidInput { field: "evaluate".into(), reason: "no design is open".into() })?;
+        Ok(solidcraft_io::vfs::scoped(Some(Default::default()), || s.execute(command, args)).unwrap_or_else(|e| json!({"error": e.to_string()})))
+    }
+    fn evaluate_close(&mut self) {
+        self.evaluation = None;
+    }
     fn command_catalog(&self) -> Vec<CommandSchema> {
         crate::command_specs()
             .iter()
@@ -358,7 +449,7 @@ pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
     let Some(path) = s.plugin_state.packages.get(package) else { return Ok(None) };
     let package = read_package(path)?;
     let Some(runtime) = package.manifest.runtime else { return Ok(None) };
-    let Some(entry) = runtime.entries.iter().find(|e| e.name == name) else { return Ok(None) };
+    let Some(entry) = runtime.entries.iter().find(|e| e.name == name && e.kind == EntryKind::Command) else { return Ok(None) };
     Ok(Some(json!({"id":id,"label":name,"params":"approval, params: declared entry inputs",
         "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
             "approval":{"type":"string"},"params":entry.input_schema}},

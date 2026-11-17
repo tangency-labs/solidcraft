@@ -1411,7 +1411,8 @@ fn viewport_frame(app: &SolveApp, proj: &Proj, ppp: f32, key: u64) -> Frame {
         turned_depth: Some(proj.vp.turned_depth_f32()),
         back: app.cam.back().to_f32(),
         size_px: [rect.width() * ppp, rect.height() * ppp],
-        clip: [0.0; 4],
+        clip: [[0.0; 4]; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
+        clip_hatch: [0; solidcraft_viewport_gpu::view::MAX_SECTION_PLANES],
         cap: [0.0; 4],
         images: Vec::new(),
         clouds: Vec::new(),
@@ -2824,8 +2825,12 @@ mod tests {
         camera.fov = 0.0;
         camera.target = Vec3::ZERO;
         camera.distance = 700.0 / (2.0 * 60.0 * 0.4);
-        let projection =
-            Proj { cam: camera, vp: camera.view_proj(900.0 / 700.0, 20.0), rect: egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0)) };
+        let projection = Proj {
+            cam: camera,
+            vp: camera.view_proj(900.0 / 700.0, 20.0),
+            rect: egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(900.0, 700.0)),
+            bounds: None,
+        };
         let position = projection.to_screen(curve.at(0.3).unwrap()).unwrap();
         (app, source, edge, projection, position)
     }

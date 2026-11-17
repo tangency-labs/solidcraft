@@ -1841,7 +1841,7 @@ mod tests {
             ..Default::default()
         };
         let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(800.0, 600.0));
-        Proj { cam, vp: cam.view_proj(f64::from(rect.width() / rect.height()), 100.0), rect }
+        Proj { cam, vp: cam.view_proj(f64::from(rect.width() / rect.height()), 100.0), rect, bounds: None }
     }
     fn quad(y: f64, left: f64, right: f64) -> Mesh {
         Mesh {

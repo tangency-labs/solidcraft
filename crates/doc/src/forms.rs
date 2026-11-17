@@ -1586,9 +1586,11 @@ mod tests {
                 bodies: vec!["Support".into()],
                 translate: ["7".into(), "-4".into(), "9".into()],
                 rotate_axis: Some(Vec3::X.into()),
+                rotate_about: None,
                 origin: None,
                 angle: Some("90 deg".into()),
                 copy: false,
+                copy_frames: vec![],
             },
             None,
         )
@@ -1759,9 +1761,11 @@ mod tests {
                 bodies: vec!["Support".into()],
                 translate: ["7".into(), "-4".into(), "9".into()],
                 rotate_axis: Some(Vec3::X.into()),
+                rotate_about: None,
                 origin: None,
                 angle: Some("90 deg".into()),
                 copy: false,
+                copy_frames: vec![],
             },
             None,
         )

@@ -128,7 +128,7 @@ impl std::fmt::Display for Error {
                     write!(f, " at the edge at ({x:.3}, {y:.3}, {z:.3})")?;
                 }
                 if let Some(why) = why {
-                    write!(f, ": {}", why.words())?;
+                    write!(f, ": {}", why.words_for(*kind))?;
                 }
                 write!(f, "; the largest {} that fits is {size}", kind.word())
             }
@@ -190,6 +190,14 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Names this crate's fix set ([`trace::fixes`]) to solidcore-ops' session, so the calls the
+/// app makes through solidcore-ops run with the fixes its modelling runs with. An application
+/// calls it once as it starts; it is also done before this crate's first kernel call. Calling
+/// it again does nothing.
+pub fn start() {
+    core::start();
+}
 
 /// Where failing calls leave their inputs for replay ([`core::dump`]); `None` turns that off.
 pub fn set_dump_dir(dir: Option<&Path>) {

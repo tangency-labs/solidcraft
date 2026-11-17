@@ -37,6 +37,15 @@ pub struct ToggleVisibilityParams {}
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ToggleVisibilityResult {}
 
+/// `ui.dialog_ok` takes nothing: it runs OK in the app's open dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DialogOkParams {}
+
+/// Never produced: headless calls are refused, and the app runs OK in its own dialog.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DialogOkResult {}
+
 /// `edit.repeat` takes no parameters: it starts the last tool with its defaults.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -348,15 +357,15 @@ impl JsonSchema for FolderId {
     }
 }
 
-/// A feature's new name, as `timeline.rename` reads `name`: text that is 1 to 128 bytes long once
-/// the whitespace around it is trimmed.
+/// A feature's new name, as `timeline.rename` reads `name`: text that is 1 to 128 characters long
+/// once the whitespace around it is trimmed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewName(pub String);
 
 impl<'de> Deserialize<'de> for NewName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(s) if !s.trim().is_empty() && s.trim().len() <= 128 => Ok(NewName(s)),
+            Value::String(s) if !s.trim().is_empty() && s.trim().chars().count() <= 128 => Ok(NewName(s)),
             _ => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
         }
     }
@@ -368,7 +377,7 @@ impl JsonSchema for NewName {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Text with something in it besides whitespace, at most 128 bytes long once the whitespace around it is trimmed (the bytes of its UTF-8, so fewer characters when some are not ASCII).",
+            "description": "Text with something in it besides whitespace, at most 128 characters long once the whitespace around it is trimmed.",
             "type": "string",
             "pattern": not_blank_pattern()
         })
@@ -992,14 +1001,14 @@ impl JsonSchema for JointList {
 }
 
 /// A new folder's name as `timeline.group` reads `name`: text, which once the whitespace around
-/// it is trimmed is at most 128 bytes long. Nothing left means the default name.
+/// it is trimmed is at most 128 characters long. Nothing left means the default name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FolderName(pub String);
 
 impl<'de> Deserialize<'de> for FolderName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(s) if s.trim().len() > 128 => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
+            Value::String(s) if s.trim().chars().count() > 128 => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
             Value::String(s) => Ok(FolderName(s)),
             // The handler reads a name that isn't text as absent, so the folder gets the default
             // name: a call that works today, left alone here.
@@ -1014,7 +1023,7 @@ impl JsonSchema for FolderName {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Text at most 128 bytes long once the whitespace around it is trimmed (the bytes of its UTF-8, so fewer characters when some are not ASCII). Blank text means the default name. Anything but text is read as no name.",
+            "description": "Text at most 128 characters long once the whitespace around it is trimmed. Blank text means the default name. Anything but text is read as no name.",
             "type": "string"
         })
     }
@@ -1540,11 +1549,11 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        AssistantParams, CheckpointParams, CheckpointResult, FeatureKeys, FeatureRef, FeatureSelection, FolderId, FolderIds, MarkerPosition, NewName,
-        PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SetFields, TimelineComputeAllParams, TimelineComputeAllResult,
-        TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams, TimelineEditResult,
-        TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineRenameParams, TimelineRenameResult, TimelineRollToParams,
-        TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult, ToggleVisibilityParams, UndoParams, UndoResult,
+        AssistantParams, CheckpointParams, CheckpointResult, DialogOkParams, FeatureKeys, FeatureRef, FeatureSelection, FolderId, FolderIds,
+        MarkerPosition, NewName, PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SetFields, TimelineComputeAllParams,
+        TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams,
+        TimelineEditResult, TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineRenameParams, TimelineRenameResult,
+        TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult, ToggleVisibilityParams, UndoParams, UndoResult,
     };
     use super::{
         TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
@@ -1561,6 +1570,7 @@ mod tests {
         assert_keys(input_schema_for::<AssistantParams>(), &[]);
         assert_keys(input_schema_for::<PaletteParams>(), &[]);
         assert_keys(input_schema_for::<ToggleVisibilityParams>(), &[]);
+        assert_keys(input_schema_for::<DialogOkParams>(), &[]);
         assert_keys(input_schema_for::<UndoParams>(), &[]);
         assert_keys(input_schema_for::<RedoParams>(), &[]);
         assert_keys(input_schema_for::<CheckpointParams>(), &[]);
