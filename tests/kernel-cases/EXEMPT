@@ -356,6 +356,7 @@ select.all                        the selection
 select.clear                      the selection
 select.filter                     the selection
 select.mode                       the selection: engine cmd/edit_tests.rs, ui-egui selection_mode_tests.rs
+select.parallel_edges             the selection; crates/engine/src/cmd/edit_tests.rs
 select.same_look                  the selection
 select.set                        the selection
 select.sharp_edges                the selection; crates/engine/src/cmd/edit_tests.rs
