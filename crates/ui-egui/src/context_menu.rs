@@ -604,32 +604,46 @@ fn feature_and_sketch(app: &SolveApp, f: Option<u64>) -> (Option<u64>, Option<u6
 }
 
 /// A browser feature row's menu: the timeline's feature actions, so the browser alone is enough
-/// to edit, suppress and roll back.
+/// to edit, suppress and roll back. On several selected features an entry acts on them all or
+/// cannot be used ([`crate::timeline::MenuRule`]).
 fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let feature = app.session.doc.feature(id);
     let exists = feature.is_some();
     let sketch = feature.and_then(|f| crate::timeline::TimelineKind::of(&f.kind).profile_sketch());
     let suppressed = feature.is_some_and(|f| f.suppressed);
     let targets = crate::timeline::menu_targets(app, id);
-    vec![
-        act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
-        act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
-        act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists),
-        act("timeline.suppress", if suppressed { "Unsuppress" } else { "Suppress" }, "suppress")
-            .with(json!({"feature":id, "suppressed": !suppressed}))
-            .on(exists),
-        act("timeline.roll_to", "Roll Back Here", "rollback").with(json!({"feature":id})).on(exists),
-        act("ui.cut", "Cut", "cut").key("Ctrl+X").on(exists && crate::edit_clipboard::can_cut(app)),
-        act("ui.copy", "Copy", "copy").key("Ctrl+C").on(exists && crate::edit_clipboard::something_to_copy(app)),
+    let rule = crate::timeline::menu_rule(app, id);
+    // Suppress for every selected feature, in the single entry's place.
+    let suppress = match crate::timeline::suppress_selected(app, id).filter(|_| rule.many) {
+        Some((label, params)) => act("timeline.suppress", &label, "suppress").with(params),
+        None => act("timeline.suppress", if suppressed { "Unsuppress" } else { "Suppress" }, "suppress")
+            .with(json!({"feature":id, "suppressed": !suppressed})),
+    };
+    // Every selected feature is found, the row's own first.
+    let find = if rule.many { json!({"feature": id, "features": targets}) } else { json!({"feature": id}) };
+    let one = |item: Item| rule.one(item);
+    [
+        one(act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists)),
+        one(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some())),
+        one(act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists)),
+        Some(suppress.on(exists)),
+        one(act("timeline.roll_to", "Roll Back Here", "rollback").with(json!({"feature":id})).on(exists)),
+        Some(act("ui.cut", "Cut", "cut").key("Ctrl+X").on(exists && crate::edit_clipboard::can_cut(app))),
+        Some(act("ui.copy", "Copy", "copy").key("Ctrl+C").on(exists && crate::edit_clipboard::something_to_copy(app))),
         // The selected features when the row is among them, as Copy and Cut and both History
         // layouts' Delete act on (#5005).
-        act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
-            .key("Del")
-            .with(json!({"items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>()}))
-            .on(exists),
-        Item::sep(),
-        act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists),
+        Some(
+            act("ui.delete", &crate::timeline::delete_label(targets.len()), "delete")
+                .key("Del")
+                .with(json!({"items": targets.iter().map(|id| json!({"type": "feature", "id": id})).collect::<Vec<_>>()}))
+                .on(exists),
+        ),
+        Some(Item::sep()),
+        Some(act("ui.findTimeline", "Find in Timeline", "rollback").with(find).on(exists)),
     ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// The canvas menus put Repeat on
@@ -1587,6 +1601,13 @@ fn id_of(p: &Value, k: &str) -> Option<u64> {
     p.get(k).and_then(Value::as_u64)
 }
 
+/// The ids in the list `k` of a menu item's parameters; `None` without a list or with an empty
+/// one.
+fn ids_of(p: &Value, k: &str) -> Option<Vec<u64>> {
+    let ids: Vec<u64> = p.get(k)?.as_array()?.iter().filter_map(Value::as_u64).collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
 /// Run a menu item (what a click on it does). `at` places a rename box.
 pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
     if !item.enabled || item.is_sep() || item.is_heading() {
@@ -1772,8 +1793,10 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 // Selected first: the rows above the body stay marked until the selection changes.
                 let _ = app.run("select.set", json!({"items": [{"type": "body", "name": b}]}));
                 crate::browser::reveal_body(app, b);
+            } else if let Some(features) = ids_of(&p, "features") {
+                crate::timeline::find_in_browser(app, &features);
             } else if let Some(f) = id_of(&p, "feature") {
-                crate::timeline::find_in_browser(app, f);
+                crate::timeline::find_in_browser(app, &[f]);
             }
         }
         "ui.copyMessage" => {
@@ -1808,7 +1831,18 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                         crate::browser::reveal_feature(app, f, body);
                     }
                 }
-                let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
+                // Every selected feature stays selected and has its folders opened; the timeline
+                // scrolls to `f`, the row the menu was opened on.
+                let all = ids_of(&p, "features").unwrap_or_else(|| vec![f]);
+                for other in all.iter().filter(|other| **other != f) {
+                    if app.preferences.history_in_browser {
+                        crate::browser::reveal_in_history(app, *other);
+                    } else {
+                        crate::timeline_left::reveal_feature(app, *other);
+                    }
+                }
+                let items: Vec<Value> = all.iter().map(|id| json!({"type": "feature", "id": id})).collect();
+                let _ = app.run("select.set", json!({ "items": items }));
                 crate::browser::request_timeline_reveal(app, f);
                 let panel = if app.preferences.history_in_browser { "browser" } else { "history" };
                 crate::browser::reveal_shared_panel(app, panel);

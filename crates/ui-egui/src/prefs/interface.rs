@@ -543,6 +543,18 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "history_steps_component",
                 );
             });
+            // What a feature's menu does with several selected features, in a row of its own for
+            // the same reason.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
+                layout_check(
+                    ui,
+                    app.tr("prefs.feature_menus_act_on_selection"),
+                    app.tr("prefs.feature_menus_act_on_selection_note"),
+                    &mut app.preferences.feature_menus_act_on_selection,
+                    "feature_menus_act_on_selection",
+                );
+            });
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {

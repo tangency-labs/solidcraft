@@ -441,11 +441,54 @@ pub(crate) fn selected_feature_ids(app: &SolveApp) -> Vec<u64> {
     doc.features.iter().filter(|feature| picked.contains(&feature.id)).map(|feature| feature.id).collect()
 }
 
-/// What Copy and Delete in a feature's menu act on: the selected features when the
-/// right-clicked one is among them, else that feature alone.
+/// What a feature's menu acts on: the selected features when the right-clicked one is among
+/// them, else that feature alone. A right-click outside the selection selects that feature
+/// first, so in the app these are the selected features.
 pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
     let selected = selected_feature_ids(app);
     if selected.contains(&id) { selected } else { vec![id] }
+}
+
+/// How a feature's menu treats several selected features, in the History bar, the vertical
+/// History and the Browser: an entry acts on all of them or cannot be used. Off in
+/// Preferences › Layout gives the menus as they were, where some entries act on the
+/// right-clicked feature alone.
+pub(crate) struct MenuRule {
+    /// The menu acts on several selected features under the rule.
+    pub many: bool,
+    /// Whether an entry that takes one feature (Edit Feature, Rename, Roll back) is in the menu.
+    one_shown: bool,
+    /// Why such an entry is off, when it is.
+    one_off: Option<String>,
+}
+
+/// The [`MenuRule`] of the menu opened on feature `id`.
+pub(crate) fn menu_rule(app: &SolveApp, id: u64) -> MenuRule {
+    let many = app.preferences.feature_menus_act_on_selection && menu_targets(app, id).len() > 1;
+    // Off with a reason, not left out: the entries below keep their places when the selection
+    // grows, and the menu says why. `one_shown: !many` leaves them out instead.
+    MenuRule { many, one_shown: true, one_off: many.then(|| solidcraft_ui_text::tr("timeline.select_one_feature").to_string()) }
+}
+
+impl MenuRule {
+    /// An entry that takes one feature, as this menu has it: `None` when it is left out.
+    pub(crate) fn one(&self, item: Item) -> Option<Item> {
+        self.one_shown.then(|| item.off_because(self.one_off.clone()))
+    }
+
+    /// The same entry as a row of the vertical History's menu: `row` draws it, enabled or not
+    /// as it is told, and the reason goes on its hover. `None` when it is left out.
+    pub(crate) fn one_row(&self, row: impl FnOnce(bool) -> egui::Response) -> Option<egui::Response> {
+        use crate::ui_kit::BackingTooltipExt as _;
+        if !self.one_shown {
+            return None;
+        }
+        let row = row(self.one_off.is_none());
+        Some(match &self.one_off {
+            Some(why) => row.backing_on_hover_text(why.as_str()),
+            None => row,
+        })
+    }
 }
 
 /// Delete's label in a feature's menu: how many features it deletes when that is more than one.
@@ -466,11 +509,12 @@ pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
     }
 }
 
-/// Suppress in a feature's menu, in both timelines, when it acts on several selected features:
-/// its label, saying how many, and `timeline.suppress`'s parameters, one undo step for them all.
-/// It unsuppresses them when all of them are suppressed, else suppresses them all (#16245).
-/// `None` when the menu acts on one feature. It is an extra entry: the feature's own Suppress
-/// entry stays and acts on that feature alone.
+/// Suppress in a feature's menu, in both timelines and the Browser, when it acts on several
+/// selected features: its label, saying how many, and `timeline.suppress`'s parameters, one undo
+/// step for them all. It unsuppresses them when all of them are suppressed, else suppresses them
+/// all (#16245). `None` when the menu acts on one feature. Under the [`MenuRule`] it takes the
+/// place of the feature's own Suppress entry; with the rule off it is an extra entry beside it
+/// in both timelines.
 pub(crate) fn suppress_selected(app: &SolveApp, id: u64) -> Option<(String, Value)> {
     let targets = menu_targets(app, id);
     if targets.len() < 2 {
@@ -522,40 +566,47 @@ pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, 
 pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let doc = &app.session.doc;
     let (Some(feature), Some(index)) = (doc.feature(id), doc.feature_index(id)) else { return Vec::new() };
-    let mut v = vec![Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id }))];
+    let rule = menu_rule(app, id);
+    let mut v: Vec<Item> = rule.one(Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id }))).into_iter().collect();
     if matches!(feature.kind, FeatureKind::Sketch { .. }) {
-        v.extend(
-            crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().filter(|item| item.id == "ui.redefineSketch"),
-        );
+        let redefine =
+            crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().filter(|item| item.id == "ui.redefineSketch");
+        v.extend(redefine.filter_map(|item| rule.one(item)));
     }
     if let Some(sketch) = TimelineKind::of(&feature.kind).profile_sketch() {
-        v.push(Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 })));
+        v.extend(rule.one(Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 }))));
     }
     // Its own message, not a literal: no catalog held the literal, so the item stayed English
     // in every language (#8301).
     let suppress = if feature.suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
     let targets = menu_targets(app, id);
     let parent = crate::timeline_folders::group_parent(&doc.timeline_groups, &targets);
-    v.extend([
-        Item::action("ui.rename", "Rename", "rename").with(json!({ "feature": id, "dialog": true })),
-        // A new folder of the selected features, or of this one when it isn't selected.
+    v.extend(rule.one(Item::action("ui.rename", "Rename", "rename").with(json!({ "feature": id, "dialog": true }))));
+    // A new folder of the selected features, or of this one when it isn't selected.
+    v.push(
         Item::action("ui.groupFeatures", "Group Features", "feature_group")
             .with(json!({ "features": targets, "parent": parent }))
             .off_because(app.session.group_refusal(&targets, parent)),
-        Item::action("timeline.suppress", solidcraft_ui_text::tr(suppress), "suppress").with(json!({ "feature": id })),
-    ]);
-    // An extra entry for the selection; the one above still acts on this feature alone.
+    );
+    // On several selected features the entry for them all takes this one's place. With the
+    // rule off it is an extra entry, and this one still acts on this feature alone.
+    if !rule.many {
+        v.push(Item::action("timeline.suppress", solidcraft_ui_text::tr(suppress), "suppress").with(json!({ "feature": id })));
+    }
     if let Some((label, params)) = suppress_selected(app, id) {
         v.push(Item::action("timeline.suppress", &label, "suppress").with(params));
     }
+    v.extend(rule.one(Item::action("timeline.roll_to", "Roll History Marker Here", "rollback").with(json!({ "feature": id }))));
+    // What every selected feature made, under the rule.
+    let find = if rule.many { json!({ "features": targets }) } else { json!({ "feature": id }) };
     v.extend([
-        Item::action("timeline.roll_to", "Roll History Marker Here", "rollback").with(json!({ "feature": id })),
-        Item::action("ui.findBrowser", "Find in Browser", "list").with(json!({ "feature": id })),
+        Item::action("ui.findBrowser", "Find in Browser", "list").with(find),
         Item::sep(),
-        Item::action("timeline.copy", "Copy", "copy").with(json!({ "features": menu_targets(app, id) })),
+        Item::action("timeline.copy", "Copy", "copy").with(json!({ "features": targets })),
         Item::action("timeline.paste", "Paste", "paste").with(json!({})).on_if(!app.session.clipboard.is_empty()),
     ]);
-    if feature_message(app, id).is_some() {
+    // One feature's message: not offered for several.
+    if !rule.many && feature_message(app, id).is_some() {
         let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
         let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
         v.push(Item::action("ui.copyMessage", label, "copy").with(json!({ "feature": id })));
@@ -789,8 +840,12 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
     out.join(" ")
 }
 
-/// Copy Error Message (or Copy Warning Message) in the menu of a feature that has one.
+/// Copy Error Message (or Copy Warning Message) in the menu of a feature that has one. It is
+/// one feature's message, so the [`MenuRule`] leaves it out for several selected features.
 pub(crate) fn message_button(app: &SolveApp, ui: &mut egui::Ui, id: u64) {
+    if menu_rule(app, id).many {
+        return;
+    }
     let Some(text) = feature_message(app, id) else { return };
     let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
     let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
@@ -810,7 +865,9 @@ pub(crate) fn sketch_plane_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64
     else {
         return;
     };
-    let response = crate::ui_kit::menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
+    // It takes one sketch: off, or left out, for several selected features.
+    let row = |enabled| crate::ui_kit::menu::button_enabled(ui, &item.label, &item.icon, item.enabled && enabled);
+    let Some(response) = menu_rule(app, id).one_row(row) else { return };
     if response.clicked() {
         crate::context_menu::run_item(app, &item, response.rect.center());
         ui.close();
@@ -1395,17 +1452,22 @@ impl history_bar::Contents for BarSteps<'_> {
     }
 }
 
-/// Select what a feature made, so the browser shows it. While the browser's rows start closed
-/// (Preferences › Layout), its first body is also found there, as Find in Browser on a body
+/// Select what the features `ids` made, so the browser shows it: each one's bodies, or the
+/// feature itself when it made none. While the browser's rows start closed
+/// (Preferences › Layout), the first body is also found there, as Find in Browser on a body
 /// does: the rows down to it open.
-pub(crate) fn find_in_browser(app: &mut SolveApp, id: u64) {
+pub(crate) fn find_in_browser(app: &mut SolveApp, ids: &[u64]) {
     let st = crate::open_meshing::session_world(&app.session);
-    let bodies: Vec<String> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
-    let items: Vec<serde_json::Value> = if bodies.is_empty() {
-        vec![json!({"type": "feature", "id": id})]
-    } else {
-        bodies.iter().map(|name| json!({"type": "body", "name": name})).collect()
-    };
+    let mut bodies: Vec<String> = Vec::new();
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    for id in ids {
+        let made: Vec<String> = st.bodies.iter().filter(|b| b.feature == *id).map(|b| b.name.clone()).collect();
+        if made.is_empty() {
+            items.push(json!({"type": "feature", "id": id}));
+        }
+        items.extend(made.iter().map(|name| json!({"type": "body", "name": name})));
+        bodies.extend(made);
+    }
     let _ = app.run("select.set", json!({ "items": items }));
     if !crate::browser::rows_start_open(app)
         && let Some(first) = bodies.first()

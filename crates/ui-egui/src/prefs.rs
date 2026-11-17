@@ -1525,6 +1525,11 @@ preference_settings! {
     /// A History folder whose features are all of one kind (Holes, say) shows their icon instead of
     /// the folder icon, in both Histories. Off by default: every folder shows the folder icon.
     history_folder_kind_icon: bool = false, PAGE_LAYOUT;
+    /// With several features selected, an entry of a feature's menu (History bar, vertical
+    /// History, Browser) acts on all of them or cannot be used. Off: the menus as they were, where
+    /// Edit, Rename, Suppress, Roll back, Find and Copy Message act on the right-clicked feature
+    /// alone.
+    feature_menus_act_on_selection: bool = true, PAGE_LAYOUT;
     /// The History controls (First, Back, Forward, Last) step through the features the bottom bar
     /// shows: one component's while it shows one (#11430). Off: they step through every feature of
     /// the design, as they did before.
@@ -7164,6 +7169,7 @@ mod tests {
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
             ("history_folder_kind_icon", json!(true), PAGE_LAYOUT),
+            ("feature_menus_act_on_selection", json!(false), PAGE_LAYOUT),
             ("history_group_joints", json!(true), PAGE_LAYOUT),
             ("history_bar_groups", json!(true), PAGE_LAYOUT),
             ("color_vision", json!("protan"), PAGE_APPEARANCE),
