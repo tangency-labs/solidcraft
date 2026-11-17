@@ -86,7 +86,7 @@ impl Placement {
         Some((at, Some(beside), request))
     }
 
-    pub(super) fn fields(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn fields(&mut self, ui: &mut egui::Ui, source: &str) {
         let tr = solidcraft_ui_text::tr;
         ui_kit::section_heading(ui, tr("ui.drawing_panel.orientation"));
         ui_kit::text(
@@ -94,6 +94,9 @@ impl Placement {
             tr(if self.parent.is_some() { "ui.drawing_placement.projected" } else { "ui.drawing_placement.base" }),
             ui_kit::Text::Note("drawing_placement"),
         );
+        if self.parent.is_none() {
+            ui_kit::text(ui, tr("ui.drawing_panel.face_pick"), ui_kit::Text::Note("base_view_face_pick"));
+        }
         ui.add_enabled_ui(self.parent.is_none(), |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (index, (orientation, label)) in ORIENTATIONS.iter().enumerate() {
@@ -105,10 +108,20 @@ impl Placement {
                     }
                 }
             });
+            ui.add_enabled_ui(false, |ui| {
+                ui_kit::choice_row(ui, tr("ui.drawing_panel.saved_view"), "base_view_saved", &mut 0, &[tr("ui.drawing_panel.none")]);
+            });
+            ui_kit::section_heading(ui, tr("ui.drawing_panel.view"));
+            ui.add_enabled_ui(false, |ui| {
+                ui_kit::choice_row(ui, tr("ui.drawing_panel.model"), "base_view_model", &mut 0, &[source]);
+            });
             ui_kit::choice_row(ui, tr("ui.scale"), "base_view_scale", &mut self.scale, &SCALES);
             let styles = ["ui.drawing_panel.visible", "ui.drawing_panel.hidden"].map(tr);
             ui_kit::choice_row(ui, tr("ui.drawing_panel.visual_style"), "base_view_style", &mut self.style, &styles);
         });
+        if self.parent.is_none() {
+            super::panels::pending(ui, tr("ui.drawing_panel.standard_views"));
+        }
     }
 
     fn update_preview(&mut self, app: &SolveApp, ctx: &egui::Context, mut params: Value) {

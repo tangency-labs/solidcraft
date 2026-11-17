@@ -72,7 +72,7 @@ fn segments(ui: &mut egui::Ui, label: &str, mut selected: usize, options: &[&str
     });
 }
 
-fn pending(ui: &mut egui::Ui, label: &str) {
+pub(super) fn pending(ui: &mut egui::Ui, label: &str) {
     ui_kit::button(ui, label, ui_kit::Button::Enabled(false)).backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
 }
 
