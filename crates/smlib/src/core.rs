@@ -94,7 +94,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.fillet_knife_edge_rounds = true;
-    f.proto_edge_splits_at_captured_vertices = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
     f.box_face_failures_propagate = true;
@@ -130,7 +129,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.closed_smooth_pole_tangent_limit = true;
     // Held back: see `HELD_BACK`.
     f.fillet_round_ends_on_outline = false;
-    f.fillet_chamfer_corner = true;
     f.brep_ray_classifies_current_trims = true;
     f
 }

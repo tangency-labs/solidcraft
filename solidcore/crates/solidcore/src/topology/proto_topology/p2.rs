@@ -87,7 +87,7 @@
 //!   twice the proto vertex's containment radius instead, which is at least the capture
 //!   distance (0.01 in the Boolean), so it absorbed real closed curves (a circle of radius
 //!   1e-3) and replaced upstream's `2 * m_dTol` test instead of adding to it.
-//! - **Opt-in fix (WR-579, #1517).** With `Kernel::fixes.proto_edge_splits_at_captured_vertices`,
+//! - **Not upstream (WR-579, #1517).**
 //!   [`ProtoTopologyManager::resolve_proto_edge`] splits a proto edge from a proto vertex
 //!   back to itself whose curve ends find two of its definitions at each other definition
 //!   of that proto vertex lying on the curve, then resolves the proto vertex (the SMLib
@@ -2688,18 +2688,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let ends = int_curve.ends(k)?;
                 let (pt0, pt1) = (ends.start, ends.end);
 
-                // Not upstream (WR-579, #1517; opt-in, the fork's tangency-labs/smlib@9eec159):
+                // Not upstream (WR-579, #1517; the fork's tangency-labs/smlib@9eec159):
                 // a curve joining two of the proto vertex's definitions is split at each
                 // other definition of it that lies on the curve.
-                let mut joins_two = None;
-                if k.fixes.proto_edge_splits_at_captured_vertices {
+                let joins_two = {
                     let start = self.pv_live(start)?;
                     let vd0 = self.closest_vertex_definition(start, pt0)?;
                     let vd1 = self.closest_vertex_definition(start, pt1)?;
-                    if vd0 != vd1 {
-                        joins_two = Some((start, vd0, vd1));
-                    }
-                }
+                    (vd0 != vd1).then_some((start, vd0, vd1))
+                };
                 let dist = pt0.distance(pt1);
                 if let Some((start, vd0, vd1)) = joins_two {
                     self.split_at_captured_vertex_definitions(
@@ -2932,11 +2929,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(deleted)
     }
 
-    /// Not upstream (WR-579, #1517; opt-in `proto_edge_splits_at_captured_vertices`, the
-    /// fork's tangency-labs/smlib@9eec159): the proto edge `pe` from `start` back to
-    /// itself, whose curve ends `ends` find the two definitions `joined`, is split at
-    /// each other definition of `start` that lies on its curve, then `start` is
-    /// resolved. The capture ball holds the curve's ends and a third definition as one
+    /// Not upstream (WR-579, #1517; the fork's tangency-labs/smlib@9eec159): the proto
+    /// edge `pe` from `start` back to itself, whose curve ends `ends` find the two
+    /// definitions `joined`, is split at each other definition of `start` that lies on
+    /// its curve, then `start` is resolved. The capture ball holds the curve's ends and a third definition as one
     /// place, the definitions stay three vertices: kept whole, the edge ran past the
     /// third one, a vertex of its own face (two tubes a hair apart end to end).
     ///

@@ -693,8 +693,6 @@ pub struct UpstreamFixes {
     pub fillet_statuses_pass_on: bool,
     /// A boolean vertex takes its position from the intersection curve that crosses its edge most steeply (WR-410, #1059).
     pub boolean_vertex_by_best_crossing: bool,
-    /// `SmProtoEdge::Resolve` splits a proto edge from a proto vertex back to itself whose curve ends find two of its vertex definitions at each other definition of that proto vertex lying on the curve (`DropPoint` within the larger of the two tolerances, farther than twice it from both ends), then resolves the proto vertex; upstream keeps the edge whole past that third vertex, a vertex of its own face, and the merge fails (`SM_ERR`; two equal tubes a hair apart end to end) (WR-579, #1517; the fork's tangency-labs/smlib@9eec159).
-    pub proto_edge_splits_at_captured_vertices: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057). Curved pieces only: a straight interval along a straight edge is always classified, by a certificate on its two ends (the distance is affine along it), with or without this flag.
     pub classify_edge_interval: bool,
     /// `MakeEdgeInFaceWithVU` grows each end vertex's tolerance to twice its gap to the new edge's end (only if larger), after `RefreshTolerance` keeps it as it was, so `AssertValid` does not refuse the edge (WR-469, #870; a solidcore-only fix, not in the SolidCraft fork at tangency-labs/smlib@26cc451, whose `MakeEdgeInFaceWithVU` ends with `RefreshTolerance` only; `plan/upstream-issues/WR-469--make-edge-in-face-vertex-tolerance-gap.md`).
@@ -767,34 +765,6 @@ pub struct UpstreamFixes {
     pub closed_smooth_pole_tangent_limit: bool,
     /// With `fillet_exact_round_classes` (which it builds on), a lone constant round bigger than the wall it rolls on ends on the body's outline instead of being built on the wall continued past its rim and cut from the body. Where the round's rail runs past a rim of its face (a convex, not tangent edge of the face that runs the filleted edge's whole length) and the ball rolling on the continued face passes inside that rim by more than the body's tolerance (so the round would take material beyond the face), the ball touches the rim instead: it stays tangent to the other face and its section passes through the rim. Where that ball would land on the other face past that face's own rim, it touches both rims, its section the arc through them. The solver rolls the ball on the surface tangent to it along each rim it touches, in place of the face: the face's plane turned about a straight rim, or the wall's cylinder leaned into the cone through a circular rim (both keep the face's parameterization along the rim), so the round is built as a round as tall as its wall, exactly (a cylinder or a torus). Decided in the round's section ([`crate::blend::fillet_outline::outline_supports`]) for a round along a straight edge between two planes, or along a circular edge between a plane square to its axis and a coaxial cylinder; any other round is left to the cliff overflow. A 100 x 100 x 10 plate rounded r 90 on a top edge keeps 86 577.030 mm³, and the round never takes the whole plate: past r = 505 its section runs from the bottom edge to the far top edge. Off: the round on the continued wall, as before (WR-730, #2541; solidcore-native, no fork commit).
     pub fillet_round_ends_on_outline: bool,
-    /// Chamfers meeting at a vertex where every edge is chamfered, each chamfer a plane
-    /// between two planes, are closed by the chamfer planes themselves, exactly: the blend
-    /// corner's chamfer event ([`crate::blend::blend_corner::chamfer`]), in place of the
-    /// pinned 3x3 corner's chamfer branch (`SmFilletConvexNxNCorner` with `SetChamfer`,
-    /// convex and concave alike). The corner type is the session's
-    /// (`FilletSession::set_chamfer_corner`): the Mitre (the default), where each chamfer
-    /// runs on to the others and three of them meet at the point M of their 3x3 solve,
-    /// pairwise along the exact lines from the rails' crossings to M, with no corner face;
-    /// or the Facet, one plane through the rails' crossings whose edges are the chamfers'
-    /// end sections, exact lines in their planes. A mitre point outside the corner (a
-    /// chamfer much wider than the others) is refused with `FilletErrorType::NoRoom`,
-    /// naming the largest size of that chamfer that keeps it inside, less the fit margin,
-    /// as the refusal's fit; the facet is refused there too, its plane leaving the
-    /// chamfers. Four or more chamfers whose crossings lie in one plane build the facet
-    /// (their mitre is refused, naming why); where their crossings are not in one plane the
-    /// corner is a patch, whichever type was asked: the chamfers stop at their crossings and
-    /// n bilinear quadrilaterals round the crossings' centroid close the skew polygon of
-    /// their end sections, G0 to each other and to each chamfer (at four, the one bilinear
-    /// patch of the crossings), within the crossings' convex hull and so in the corner.
-    /// Chamfer planes so nearly coplanar that the points where they
-    /// meet are not determined to the part's rounding are refused with
-    /// `FilletErrorType::CornerUnsupported`, naming that. The pinned corner marches the
-    /// mitre's edges as surface intersections, refuses a mitre of four or more chamfers with
-    /// no reason, and builds its corner face as a Coons patch where the chamfers are unequal
-    /// (WR-716, #2345; own design, smlib#89's brief, the owner's answers on #2345). For the
-    /// port in progress only: at parity it becomes the default and the pinned corner's
-    /// chamfer branch is deleted (WR-716's retirement plan).
-    pub fillet_chamfer_corner: bool,
     /// A B-rep point classification (`query::brep::ray`, `SmBrep::ClassifyPoint` and
     /// its ray casts) while the body is being edited builds the face's trimmed-surface
     /// tree with the face's current trims implanted, where upstream's

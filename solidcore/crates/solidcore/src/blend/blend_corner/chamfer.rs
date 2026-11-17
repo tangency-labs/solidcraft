@@ -80,8 +80,7 @@
 //! | [`create_chamfer_patch`]     | the facet's face or the corner patch's faces            |
 //! | `MakeTopology`               | the 3x3 corner's (`make_convex_nxn_corner_topology`): the bevel's for the Mitre, the ring's for the Facet and the corner patch |
 //!
-//! Deviations: not a port. Opt-in: `Kernel::fixes.fillet_chamfer_corner` (WR-716). No
-//! recursion.
+//! Deviations: not a port (WR-716). No recursion.
 
 use super::{foot_on_surface, swept::fmt_g, BlendChamferCorner};
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;

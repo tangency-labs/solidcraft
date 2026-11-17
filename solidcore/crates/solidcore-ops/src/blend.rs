@@ -117,8 +117,7 @@ pub enum Turn {
 }
 
 /// How chamfers close a corner where every edge at a vertex is chamfered between planes (the
-/// kernel's blend corner, `solidcore::blend::blend_corner::chamfer`, under the kernel's
-/// `fillet_chamfer_corner` fix).
+/// kernel's blend corner, `solidcore::blend::blend_corner::chamfer`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ChamferCorner {
     /// The chamfer planes run on until they meet: what ops builds without asking (a corner the
@@ -1392,8 +1391,7 @@ pub fn blend(
 /// The errors of [`blend`], including [`Error::Argument`] for an absent index or an entity
 /// in the supplied order that does not belong to the body, for [`Turn::Swept`] with a blend
 /// other than [`Blend::Round`], and for [`ChamferCorner::Facet`] with one other than
-/// [`Blend::Chamfer`]; [`Error::Unsupported`] for the Facet without the kernel's
-/// `fillet_chamfer_corner` fix. A swept turn the kernel does not build is refused as it
+/// [`Blend::Chamfer`]. A swept turn the kernel does not build is refused as it
 /// classifies it: [`Error::NoRoom`] at a sharp concave side edge (no radius of the rounds
 /// passes it), [`Error::CornerUnsupported`] where the blend corner does not build one yet.
 pub fn blend_ordered(
@@ -1496,13 +1494,6 @@ fn blend_on_body(
     options: BlendOptions,
 ) -> solidcore::Result<Result<Blended>> {
     let turn = options.turn;
-    // the Facet is the kernel's blend corner's, under its fix: refused, not built as the
-    // Mitre, without it
-    if options.chamfer_corner == ChamferCorner::Facet && !k.fixes.fillet_chamfer_corner {
-        return Ok(Err(Error::Unsupported(
-            "the chamfered corner needs the kernel's fillet_chamfer_corner fix",
-        )));
-    }
     let edge_order = order.map_or_else(|| b.edge_list(), |o| o.edges.as_slice());
     let picked = match each_once(edge_order, edges) {
         Ok(p) => p,
