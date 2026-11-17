@@ -128,3 +128,36 @@ fn the_agent_example_cuts_what_the_design_says() {
     assert!((reply["open_area_mm2"].as_f64().unwrap() - 354.104690).abs() < 1e-5, "{reply}");
     assert!((volume(&s) - 27737.685930).abs() < 1e-5, "{}", volume(&s));
 }
+
+/// Slots shorter than the bridges are still cut (design 6.9), with the warning of design 3.1.
+#[test]
+fn slots_shorter_than_the_bridges_are_cut_with_a_warning() {
+    let mut s = wall();
+    let before = volume(&s);
+    let reply = hinge(&mut s, json!({"slot_length": 10, "bridge": 12, "row_spacing": 3})).unwrap();
+    assert!(reply["slots"].as_u64().is_some_and(|n| n > 0), "{reply}");
+    assert!(reply["whole"].as_u64().is_some_and(|n| n > 0), "{reply}");
+    assert!(reply["warning"].as_str().is_some_and(|w| w.contains("no longer than the bridges")), "{reply}");
+    assert!(volume(&s) < before - 1.0, "{before} -> {}", volume(&s));
+}
+
+/// Cuts a hinge over whole 3 mm plates of 40 x 60, 60 x 60 and 100 x 60 and prints what it took.
+/// Run by hand, on a quiet machine: `cargo test --profile ci -p solidcraft-engine living_hinge_speed -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing: run by hand"]
+fn living_hinge_speed() {
+    for length in [40.0, 60.0, 100.0] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": length, "width": 60, "height": 3, "body_name": "Wall"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 3, "name": "HingeArea"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [length, 60]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let t = std::time::Instant::now();
+        let r = hinge(&mut s, json!({})).unwrap_or_else(|e| panic!("{length} x 60: {e}"));
+        let secs = t.elapsed().as_secs_f64();
+        eprintln!(
+            "{length} x 60: {} slots in {} rows cut in {secs:.2} s; warning {:?}; feature ms {:?}",
+            r["slots"], r["rows"], r["warning"], r["ms"]
+        );
+    }
+}
