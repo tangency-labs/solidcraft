@@ -876,6 +876,98 @@ mod tests {
         assert!(close(bx.min().z, -1.709407713716475), "{}", bx.min().z);
     }
 
+    /// A degree 2 B-spline with `knots`, control points `pts` and weights `w` (`None`:
+    /// non-rational), evaluating past its knots.
+    fn out_of_bounds_quadratic(pts: &[[f64; 3]], w: Option<&[f64]>, knots: Vec<f64>) -> Curve {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let pw = pts
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let wi = w.and_then(|w| w.get(i).copied());
+                match wi {
+                    Some(wi) => CPoint::new(p[0] * wi, p[1] * wi, p[2] * wi, wi),
+                    None => CPoint::new(p[0], p[1], p[2], NOW),
+                }
+            })
+            .collect();
+        let nl = NlCurve::new(pw, 2, knots).unwrap();
+        let mut b = BSplineCurve::from_nurb(nl, 3, false);
+        b.set_out_of_bounds_enabled(true);
+        Curve::from(b)
+    }
+
+    /// (#17987) With out-of-bounds evaluation enabled, a B-spline over an interval past
+    /// its knots is its first or last polynomial piece extended, and its box reaches that
+    /// extension's extremes, each given in closed form:
+    ///
+    /// - the clamped quadratic (0,0,0), (1,0,1), (2,0,1.2) on [0, 1] has `z = 2t - 0.8t^2`;
+    ///   over [0, 2] z is greatest, 1.25, at t = 1.25, past the last knot (the box held
+    ///   only z(1) = 1.2 before);
+    /// - the same points reversed peak at t = -0.25, before the first knot, over [-1, 1];
+    /// - two spans (knots 0, 0, 0, 1, 2, 2, 2) with `x = t`: on [0, 1] `z = 1 - t - t^2`,
+    ///   greatest, 1.25, at t = -0.5; on [1, 2] `z = -1 - 3s + s^2` (`s = t - 1`), least,
+    ///   -3.25, at t = 2.5. Over [-1, 3] each extension takes its own span's polynomial.
+    #[test]
+    fn b_spline_box_past_its_knots_reaches_the_extrapolated_extremes() {
+        let k = Kernel::default();
+        let close = |got: f64, want: f64| (got - want).abs() <= 8.0 * f64::EPSILON * want.abs();
+        let clamped = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let c = out_of_bounds_quadratic(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 1.0], [2.0, 0.0, 1.2]],
+            None,
+            clamped.clone(),
+        );
+        let bx = c
+            .calculate_tight_bounding_box(&k, &Extent1d::from_min_max(0.0, 2.0))
+            .unwrap();
+        assert!(close(bx.max().z, 1.25), "{}", bx.max().z);
+        let c = out_of_bounds_quadratic(
+            &[[2.0, 0.0, 1.2], [1.0, 0.0, 1.0], [0.0, 0.0, 0.0]],
+            None,
+            clamped,
+        );
+        let bx = c
+            .calculate_tight_bounding_box(&k, &Extent1d::from_min_max(-1.0, 1.0))
+            .unwrap();
+        assert!(close(bx.max().z, 1.25), "{}", bx.max().z);
+        let c = out_of_bounds_quadratic(
+            &[
+                [0.0, 0.0, 1.0],
+                [0.5, 0.0, 0.5],
+                [1.5, 0.0, -2.5],
+                [2.0, 0.0, -3.0],
+            ],
+            None,
+            vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0],
+        );
+        let bx = c
+            .calculate_tight_bounding_box(&k, &Extent1d::from_min_max(-1.0, 3.0))
+            .unwrap();
+        assert!(close(bx.max().z, 1.25), "{}", bx.max().z);
+        assert!(close(bx.min().z, -3.25), "{}", bx.min().z);
+    }
+
+    /// (#17987) A rational extension whose weight is not positive is refused, as a stored
+    /// weight that is not positive is: the quadratic with weights 1, 3, 1 on [0, 1] has
+    /// `w = 1 + 4t - 4t^2`, zero at t = (1 + sqrt 2) / 2, so over [0, 2] it has a pole.
+    #[test]
+    fn a_rational_extension_through_a_pole_is_refused() {
+        let c = out_of_bounds_quadratic(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 1.0], [2.0, 0.0, 0.0]],
+            Some(&[1.0, 3.0, 1.0]),
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        let mut pt = crate::geom::vector3d::Vec3::UNDEF;
+        let r = c.add_turning_points(
+            &Kernel::default(),
+            &Extent1d::from_min_max(0.0, 2.0),
+            &mut pt,
+            &mut |_| {},
+        );
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+    }
+
     /// A rational quadratic in two Bezier segments (knots 0, 0, 0, 1, 1, 2, 2, 2). Over
     /// [0, 1] z is 5 at both ends and `5 + dz` at the middle control point, with weights
     /// `wa`, `wb`, `wa`; over [1, 2] it falls to 1 with weights `wa`. x and y vary on both.
