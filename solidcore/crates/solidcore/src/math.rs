@@ -273,6 +273,30 @@ impl Transform {
         }
     }
 
+    /// The axis-aligned box around the eight corners of the box `lo`..`hi` mapped by
+    /// [`Self::transform_point`]: it holds the image of every point of the box, and for a
+    /// map that turns it is larger than the image itself. An empty box (`lo` above `hi` on
+    /// any axis) maps to itself.
+    #[must_use]
+    pub fn moved_box(&self, lo: Point3, hi: Point3) -> (Point3, Point3) {
+        if lo.x > hi.x || lo.y > hi.y || lo.z > hi.z {
+            return (lo, hi);
+        }
+        let mut min = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut max = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for i in 0..8 {
+            let corner = Point3::new(
+                if i & 1 == 0 { lo.x } else { hi.x },
+                if i & 2 == 0 { lo.y } else { hi.y },
+                if i & 4 == 0 { lo.z } else { hi.z },
+            );
+            let p = self.transform_point(corner);
+            min = Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
+            max = Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
+        }
+        (min, max)
+    }
+
     /// The rigid placement `p` as a transform: its axes' images and its origin (the
     /// z axis as the placement derives it).
     #[must_use]
@@ -662,6 +686,26 @@ mod tests {
         map.transform_points(&mut points);
         assert_eq!(points, [[14.0, 18.0, 33.0], [23.0, 15.0, 36.0]]);
         map.transform_points(&mut []);
+    }
+
+    #[test]
+    fn a_moved_box_holds_its_moved_corners_and_an_empty_box_stays_empty() {
+        // A quarter turn about z, then a move by (10, 20, 30): x goes to y, y to -x.
+        let map = Transform {
+            m: [
+                [0.0, 1.0, 0.0, 0.0],
+                [-1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [10.0, 20.0, 30.0, 1.0],
+            ],
+        };
+        let (lo, hi) = map.moved_box(Point3::new(0.0, 0.0, 0.0), Point3::new(1.0, 2.0, 3.0));
+        assert_eq!(
+            (lo, hi),
+            (Point3::new(8.0, 20.0, 30.0), Point3::new(10.0, 21.0, 33.0))
+        );
+        let empty = (Point3::new(1.0, 0.0, 0.0), Point3::new(0.0, 1.0, 1.0));
+        assert_eq!(map.moved_box(empty.0, empty.1), empty);
     }
 
     #[test]
