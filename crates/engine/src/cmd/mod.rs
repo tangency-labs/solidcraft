@@ -82,6 +82,8 @@ pub use component_link::resolve_design_links;
 mod config;
 mod design_link;
 mod file;
+mod file_library;
+pub(crate) use file_library::uses_file as file_library_uses_file;
 mod frame;
 mod frame_end_cap;
 pub(crate) mod inspect;
@@ -101,6 +103,7 @@ mod notes;
 mod parts;
 mod plugin;
 mod point_cloud;
+mod point_cloud_deviation;
 mod script;
 mod section;
 mod selection;
@@ -365,6 +368,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_canvas::COMMANDS.iter());
     v.extend(canvas_sketch::COMMANDS.iter());
     v.extend(point_cloud::COMMANDS.iter());
+    v.extend(point_cloud_deviation::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());
@@ -406,6 +410,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(file_library::COMMANDS.iter());
     v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
@@ -475,12 +480,16 @@ pub(crate) fn did_you_mean(id: &str) -> String {
     }
 }
 
+/// The longest name the "did you mean" search compares, in bytes: a body name of 128 characters
+/// (up to 512 bytes) still gets its suggestion, and a longer text costs no edit-distance work.
+const MAX_SUGGESTED_NAME_BYTES: usize = 512;
+
 /// "no body `name`", and the closest of `bodies` when it is near enough to be a typo or another
 /// case of the same name (`b` for `B`): `no body `Bdy`; did you mean `Body`?` (#9740).
 pub(crate) fn no_body<'a>(name: &str, bodies: impl IntoIterator<Item = &'a str>) -> String {
     let want = name.to_lowercase();
     let near = (want.chars().count() / 3).max(1);
-    let closest = (want.len() <= 256)
+    let closest = (want.len() <= MAX_SUGGESTED_NAME_BYTES)
         .then(|| bodies.into_iter().map(|b| (edit_distance(&want, &b.to_lowercase()), b)).filter(|(d, _)| *d <= near).min_by_key(|(d, _)| *d))
         .flatten();
     match closest {

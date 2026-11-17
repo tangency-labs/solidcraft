@@ -65,6 +65,34 @@ fn capability_refusals_are_plain_and_name_solidcraft() {
     assert!(old.contains("was built for solidcraft:plugin@1.0.0") && old.contains("update the plugin"), "{old}");
 }
 #[test]
+fn an_importer_checks_its_own_design_apart_from_the_open_one() {
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        evaluation: None,
+    };
+    let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
+    made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+    host.evaluate_open(&solidcraft_io::write_design(&made.doc)).unwrap();
+    let measured = host.evaluate_run("inspect.measure", &json!({})).unwrap();
+    assert_eq!(measured["bodies"].as_array().map(Vec::len), Some(1), "{measured}");
+    assert!(host.evaluate_run("document.inspect", &json!({})).unwrap()["timeline"].is_array());
+    // A command that fails is an answer; a command outside the list is refused.
+    let missing = host.evaluate_run("model.edges", &json!({"body":"No such body"})).unwrap();
+    assert!(missing["error"].is_string(), "{missing}");
+    for refused in ["solid.box", "file.export_stl", "doc.open", "plugin.install"] {
+        assert!(matches!(host.evaluate_run(refused, &json!({})), Err(HostError::PermissionDenied { .. })), "{refused}");
+    }
+    assert!(host.session.doc.features.is_empty(), "the open design is untouched");
+    host.evaluate_close();
+    assert!(host.evaluate_run("inspect.measure", &json!({})).is_err(), "nothing stays open");
+    assert!(matches!(host.evaluate_open(b"not a design"), Err(HostError::InvalidInput { .. })));
+}
+
+#[test]
 fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     let host = SolidCraftHost {
         session: Session::default(),
@@ -72,6 +100,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         sketch_exits: Vec::new(),
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        evaluation: None,
     };
     let catalog = host.command_catalog();
     let built = crate::command_specs().into_iter().filter(|c| c.planned.is_none()).count();
@@ -119,6 +148,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         sketch_exits: Vec::new(),
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        evaluation: None,
     };
     host.begin_transaction().unwrap();
     s_box(&mut host);
@@ -627,8 +657,14 @@ mod native {
                     });
                     assert_eq!(std::fs::read(&target).unwrap(), b"private contents");
                 }
-                let host =
-                    SolidCraftHost { session: s, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+                let host = SolidCraftHost {
+                    session: s,
+                    transaction: None,
+                    sketch_exits: Vec::new(),
+                    groups: BTreeSet::new(),
+                    file_folders: Vec::new(),
+                    evaluation: None,
+                };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
                     assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
                 });
@@ -908,6 +944,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         sketch_exits: Vec::new(),
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        evaluation: None,
     };
     let catalog = host.command_catalog();
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
@@ -933,7 +970,8 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true },
         FileGrant { name: "hidden".into(), folder: root.join(".hidden"), read: true, write: false },
     ];
-    let host = SolidCraftHost { session, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+    let host =
+        SolidCraftHost { session, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new(), evaluation: None };
     solidcraft_io::vfs::scoped(None, || {
         for write in [false, true] {
             assert!(host.authorize_file_path(&root.join("public.txt"), write).is_ok());

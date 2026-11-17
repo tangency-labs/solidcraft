@@ -421,6 +421,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     } else if matches!(d.kind, Kind::PatternRect { .. }) {
         // Each direction's pick shows in its own group, with its quantity and spacing (#9634).
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+    } else if matches!(d.kind, Kind::Move { .. }) {
+        // Object (above), Selection, then the Move Type and its own picks.
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+        crate::dialogs_move::type_row(app, d, ui);
+        let n = d.inputs.len();
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..n);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -543,10 +549,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if crate::op_auto::op_row(ui, "ex_op", operation) {
                 *auto_op = false;
             }
-            // Join takes the bodies to join in Target Bodies (#17657). A body picked there is a
+            // Join and Cut take their bodies in Target Bodies. A body picked there is a
             // choice by hand, so Extrude's automatic operation stops changing it.
-            set_join_targets(&mut d.inputs, &mut d.active, *operation == 1);
-            if d.inputs.iter().any(|i| i.label == JOIN_TARGETS && !i.items.is_empty()) {
+            set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, *operation);
+            if d.inputs.iter().any(|i| i.label == EXTRUDE_TARGETS && !i.items.is_empty()) {
                 *auto_op = false;
             }
             ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
@@ -895,6 +901,13 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
+    // Move/Copy of a component without Create Copy moves its placement (`dialogs_move::placements`).
+    let placing = !crate::dialogs_move::placements(d).is_empty();
+    let shared = placing && crate::dialogs_move::moves_shared(app, d);
+    // A component just pasted is placed, not copied.
+    let pasted = crate::dialogs_move::pasted(d);
+    // Picked components moved earlier and not captured: Revert Position puts just them back.
+    let revertible = if placing { crate::dialogs_move::revertible(app, d) } else { Vec::new() };
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -953,11 +966,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Mirror => {
             // Feature replay retains the source operation; Join is for body copies.
             if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
+                let mut picked = false;
                 form_row(ui, "Operation", |ui| {
                     let mut op = usize::from(d.extra.get("combine").and_then(Value::as_bool).unwrap_or(false));
-                    ui_kit::segmented(ui, &mut op, &["New Body", "Join"], Default::default());
+                    picked = ui_kit::segmented(ui, &mut op, &["New Body", "Join"], Default::default());
                     d.extra.insert("combine".into(), json!(op == 1));
                 });
+                // Picked by hand: the preview's own choice, when it comes in, does not replace it.
+                if picked {
+                    crate::preview::mirror_operation_picked(app, d);
+                }
             }
         }
         Kind::OffsetPlane { offset } => {
@@ -986,7 +1004,13 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
-        Kind::Split | Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::Construct { t: None, .. } => {}
+        Kind::Split
+        | Kind::ReplaceFace
+        | Kind::Remove
+        | Kind::Midplane
+        | Kind::ChatContext
+        | Kind::PluginPick { .. }
+        | Kind::Construct { t: None, .. } => {}
         Kind::Rib { thickness, depth, flip, normal, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
@@ -1114,7 +1138,25 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         k @ Kind::Move { .. } => {
             enter |= crate::dialogs_move::rows(ui, k);
-            extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
+            if shared {
+                ui_kit::text(
+                    ui,
+                    solidcraft_ui_text::tr_label("This child is shared. Position changes apply to every copy of its parent."),
+                    ui_kit::Text::Note("shared"),
+                );
+            }
+            if placing {
+                // Ticked at first, as the Browser's move captured.
+                d.extra.entry("capture").or_insert(json!(true));
+                let capture = ("Capture All Positions", "capture");
+                let options: &[(&str, &str)] = if pasted { &[capture] } else { &[("Create Copy", "copy"), capture] };
+                extra_options(ui, "move_options", &mut d.extra, options);
+                if !revertible.is_empty() && ui_kit::button(ui, tr("Revert Position"), ui_kit::Button::Normal).clicked() {
+                    let _ = app.run("component.revert_position", json!({ "occurrences": revertible }));
+                }
+            } else {
+                extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
+            }
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
             let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());

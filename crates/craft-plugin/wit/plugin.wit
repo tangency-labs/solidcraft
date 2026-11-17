@@ -3,7 +3,8 @@ package craft:plugin@0.1.0;
 // Capabilities are sets of the interfaces in this file. A plugin names the ones it needs in its
 // manifest's `capabilities` list:
 // - `commands@0.1`: types, commands, log, control, files, clock and entry (world `command-plugin`);
-// - `formats@0.1`: types, log, control, clock, source, design and importer (world `importer-plugin`).
+// - `formats@0.1`: types, log, control, clock, source, design and importer (world `importer-plugin`);
+// - `evaluate@0.1`: with `formats`, evaluate, so an importer can check its result.
 // Later capabilities (ui, viewport, storage) arrive as their own interfaces. While the version is
 // 0.x, a minor version may break the one before it.
 // App commands and their schemas are data; this world never names app types.
@@ -67,6 +68,22 @@ interface design {
     use types.{plugin-error};
     write: func(bytes: list<u8>) -> result<_, plugin-error>;
 }
+// An importer checks its own result in the app (capability `evaluate@0.1`). It stages a design
+// file it made; the app opens it in a private session, apart from every open design and every
+// file, and runs read-only commands on it. Nothing here reaches the user's designs or files.
+interface evaluate {
+    use types.{json, plugin-error};
+    // Appends at most 1 MiB to the staged design (256 MiB in all). Staging after a run starts a
+    // new design.
+    stage: func(bytes: list<u8>) -> result<_, plugin-error>;
+    // Runs one command on the staged design, opening it on the first run. The app names the
+    // commands it allows (SolidCraft: document.inspect, inspect.measure, model.edges, model.faces
+    // and timeline.roll_to). A command that fails returns {"error": "..."}; a design the app
+    // can't open fails the call.
+    run: func(command: string, args: json) -> result<json, plugin-error>;
+    // Discards the staged design and its session.
+    reset: func();
+}
 // What an importer exports: its manifest's importer entries, called by name.
 interface importer {
     use types.{json, plugin-error};
@@ -89,5 +106,6 @@ world importer-plugin {
     import clock;
     import source;
     import design;
+    import evaluate;
     export importer;
 }

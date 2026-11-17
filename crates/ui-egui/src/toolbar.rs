@@ -75,7 +75,7 @@ fn ribbon_shows_pressed(app: &SolveApp, id: &str) -> bool {
 pub(crate) const PILL_HEIGHT: f32 = 22.0;
 
 /// An application-bar pill for something on offer (Update) at the right of `span` (the bar's free
-/// space): accent-filled, with `icon` and the first of `labels` that fits (the icon alone when
+/// space): accent-filled (outlined on the bar when `quiet`, for a notice such as Managed by), with `icon` and the first of `labels` that fits (the icon alone when
 /// none does or `labeled` is false). Every label but the last also leaves `keep` points of the
 /// span free (for the document tabs). None when even the icon doesn't fit: it never covers the
 /// bar's other buttons. `handle` names it for scenarios.
@@ -87,6 +87,7 @@ pub(crate) fn offer_pill(
     keep: f32,
     icon: &str,
     handle: &str,
+    quiet: bool,
 ) -> Option<(Rect, egui::Response)> {
     let t = Tokens::get();
     let font = FontId::proportional(t.font_label);
@@ -108,9 +109,14 @@ pub(crate) fn offer_pill(
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &name));
     crate::scenario::publish_target(handle, rect);
     let hot = response.hovered() || response.has_focus();
-    let fill = if hot { t.app_bar_hover_button } else { t.accent };
     let radius = PILL_HEIGHT / 2.0 * f32::from(t.radius_xl) / 10.0;
-    ui.painter().rect_filled(rect, radius, fill);
+    if hot {
+        ui.painter().rect_filled(rect, radius, t.app_bar_hover_button);
+    } else if quiet {
+        ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
+    } else {
+        ui.painter().rect_filled(rect, radius, t.accent);
+    }
     if response.has_focus() {
         ui.painter().rect_stroke(rect.expand(2.0), Tokens::outset_radius(radius, 2.0), Stroke::new(1.0, t.app_bar_text), egui::StrokeKind::Outside);
     }
@@ -238,6 +244,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let bar = app_bar::AppBar {
                 mark: &|painter, at| solidcraft_look::glyphs::brand_mark(painter, at),
                 name: "SolidCraft",
+                leading: (crate::library::available(app) && !app.home.open).then_some(vec2(26.0, 26.0)),
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
@@ -266,6 +273,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
+            if let Some(rect) = out.leading {
+                crate::library::app_bar_toggle(app, ui, rect);
+            }
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
@@ -316,9 +326,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // shortcut_box::show draws the one search editor wherever this rectangle is.
                 ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
             }
-            // A newer release: its Update button stays before the right cluster.
+            // A newer release: its Update button stays before the right cluster, and the
+            // organization's Managed by badge left of it and of the link pills.
             let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
-            let tabs_end = update.map_or(out.controls_left, |u| u.left()) - 8.0;
+            let badge_right = update.map_or(out.controls_left, |u| u.left().min(out.controls_left)) - 6.0;
+            let badge_span = Rect::from_min_max(out.offer.min, pos2(badge_right.max(out.offer.min.x), out.offer.max.y));
+            let badge = crate::policy::badge(app, ui, badge_span, out.offer_labeled);
+            let tabs_end = badge.or(update).map_or(out.controls_left, |u| u.left()) - 8.0;
             // Narrow title bars can fit only part of the tab strip. Its hit regions must not
             // extend into the persistent report and window controls.
             let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
@@ -1953,7 +1967,9 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
     }
     if let Some((id, br)) = start {
         // The exact pinned command, without replacing its family's remembered ribbon choice.
-        app.start_pinned(id, Some(br));
+        if !end_running_tool(app, id) {
+            app.start_pinned(id, Some(br));
+        }
     }
     if let Some((at, id)) = menu {
         crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
@@ -2399,17 +2415,30 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::checkbox(ui, &label, &mut app.ui.lasso_select);
 }
 
-/// A click on the lit button of the sketch tool that is running ends the tool, as a toggle does,
-/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
-/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
-/// the tool was ended. A persistent analysis button already turns its analysis off its own way.
-fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
-    if !app.preferences.ribbon_click_ends_tool || persistent_available(app, id) || !app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+/// Ends the active sketch tool or dialog when `id` is its command, as `Esc` does.
+/// Returns whether anything was closed.
+pub(crate) fn end_running_command(app: &mut SolveApp, id: &str) -> bool {
+    if persistent_available(app, id) {
         return false;
     }
-    crate::dim_view::cancel();
-    app.tool = None;
-    true
+    if app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+        crate::dim_view::cancel();
+        app.tool = None;
+        return true;
+    }
+    if app.dialog.as_ref().and_then(|d| d.command()) == Some(id) {
+        crate::dialogs::cancel(app);
+        return true;
+    }
+    false
+}
+
+/// A click on the lit button of the tool or dialog that is running ends it, as a toggle does,
+/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
+/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
+/// it was ended. A persistent analysis button already turns its analysis off its own way.
+fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
+    app.preferences.ribbon_click_ends_tool && end_running_command(app, id)
 }
 
 /// Two Esc presses within this many seconds finish the open sketch.
@@ -4331,6 +4360,21 @@ mod dropdown_toggle_tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"));
+        // A second click on a dialog command's button (Extrude) also closes it when enabled.
+        h.app.preferences.ribbon_click_ends_tool = true;
+        h.app.finish_sketch();
+        h.settle();
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert!(h.app.dialog.is_none(), "second click closes the extrude dialog");
+        h.app.preferences.ribbon_click_ends_tool = false;
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
     }
 
     /// A tool pinned into the Finish Sketch group, the one at the ribbon's right edge, shows

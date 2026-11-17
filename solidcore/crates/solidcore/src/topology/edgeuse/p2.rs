@@ -922,9 +922,10 @@ pub struct EdgeuseSide {
 /// `SmEdgeuse::IsEdgeuseSideInSurface(lSmpCount, pOptPeriodicU, pOptPeriodicV,
 /// pOptOnNaturalBoundary)`: drops `smp_count` points of the edge curve (in edge use
 /// order) onto the face's surface and classifies them against the natural UV domain's
-/// sides (to twice the surface zone tolerance mapped to UV in U and in V). A sample off
-/// every side answers `true` at once. Otherwise the edge use runs along a side: a
-/// degenerate edge (its sample box below twice the zone tolerance) is `true`, and else
+/// sides (to twice the surface zone tolerance mapped to UV in U and in V; not upstream: a
+/// periodic side, a seam, to the edge's own tolerance, docs/booleans.md "Seams and poles").
+/// A sample off every side answers `true` at once. Otherwise the edge use runs along a
+/// side: a degenerate edge (its sample box below twice the zone tolerance) is `true`, and else
 /// the UV steps must run the way that side's inside requires (all but one of them;
 /// for a periodic side without UV trim curve either way). An edge use without face,
 /// surface or edge is `true`. `periodic_u` / `periodic_v` override
@@ -1003,6 +1004,7 @@ pub fn is_edgeuse_side_in_surface(
     // Tol = 3d Surface Zone Tol mapped for each sample point to 2d through the surface
     // function
     let surf_zone_tol_3d = zone_tol_3d(k, surface)?;
+    let edge_tol_3d = edge_rec.tolerance;
 
     // for every sample point - check for Edgeuse point on Surface boundary whose inside
     // direction points out of the Surface domain
@@ -1060,16 +1062,23 @@ pub fn is_edgeuse_side_in_surface(
             None => return Ok(out),
         }
 
-        // Tol  2d mapping of Surface ZoneTol3d
-        let tol_2d_u = map_to_2d_dir(k, surf_zone_tol_3d, uv_drop_point, u_dir, surface)?;
-        let tol_2d_v = map_to_2d_dir(k, surf_zone_tol_3d, uv_drop_point, v_dir, surface)?;
+        // Tol  2d mapping of Surface ZoneTol3d (not upstream: a periodic side is a seam,
+        // which bounds no material, so the edge runs along it only within the edge's own
+        // tolerance; docs/booleans.md, "Seams and poles")
+        let side_tol_3d = |periodic: bool| {
+            if periodic {
+                edge_tol_3d
+            } else {
+                2.0 * surf_zone_tol_3d
+            }
+        };
+        let tol_2d_u = map_to_2d_dir(k, side_tol_3d(periodic_u), uv_drop_point, u_dir, surface)?;
+        let tol_2d_v = map_to_2d_dir(k, side_tol_3d(periodic_v), uv_drop_point, v_dir, surface)?;
 
         // classify sUVPoint - to XSectTol3d numerical tolerances mapped to 2d (diff in U
         // and V directions)
-        let uv_loc_u =
-            uv_domain.point_boundaries(uv_drop_point, 2.0 * tol_2d_u) & (SS_UMIN | SS_UMAX);
-        let uv_loc_v =
-            uv_domain.point_boundaries(uv_drop_point, 2.0 * tol_2d_v) & (SS_VMIN | SS_VMAX);
+        let uv_loc_u = uv_domain.point_boundaries(uv_drop_point, tol_2d_u) & (SS_UMIN | SS_UMAX);
+        let uv_loc_v = uv_domain.point_boundaries(uv_drop_point, tol_2d_v) & (SS_VMIN | SS_VMAX);
         let uv_loc = uv_loc_u | uv_loc_v;
 
         // save the drop and classify data per sample point

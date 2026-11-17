@@ -3720,7 +3720,7 @@
   "render.cpu_body_choose": "اختر جسمًا",
   "render.cpu_body_filter": "تصفية الأجسام بالاسم",
   "render.cpu_body_filter_more": "ضيّق التصفية لرؤية المزيد من الأجسام.",
-  "render.cpu_body_missing": "أحد أهداف الانعكاس مفقود أو مخفي أو ملتبس أو اسمه أطول من 128 بايت. اختره مرة أخرى.",
+  "render.cpu_body_missing": "أحد أهداف الانعكاس مفقود أو مخفي أو ملتبس أو اسمه أطول من 512 بايت. اختره مرة أخرى.",
   "render.cpu_budget": "ملف موارد CPU",
   "render.cpu_budget_bodies": "سقف الأجسام",
   "render.cpu_budget_compact": "مضغوط (الحدود القديمة)",
