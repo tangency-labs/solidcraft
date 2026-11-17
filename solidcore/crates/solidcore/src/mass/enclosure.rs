@@ -286,6 +286,38 @@ pub fn enclose_face_area(
     w.refine(|e| e.hi - e.lo <= width, |_, _| false)
 }
 
+/// An enclosure of the total area of the faces `faces` of `b` at most `rel` of its own
+/// magnitude wide ([`EnclosureStop::Reached`]), or else the narrowest one refinement gives
+/// ([`EnclosureStop::Budget`], [`EnclosureStop::Exhausted`]), as [`enclose_face_area`]
+/// refines it. The width asked follows the enclosure as it narrows, in one refinement: no
+/// rough first enclosure is needed to size it, and no cell is evaluated twice.
+///
+/// # Errors
+///
+/// Those of [`enclose_face_area`]; [`SolidError::InvalidInput`] for a `rel` that is not
+/// positive.
+pub fn enclose_face_area_relative(
+    k: &Kernel,
+    b: &mut Brep,
+    faces: &[FaceId],
+    rel: f64,
+) -> Result<VolumeEnclosure> {
+    if rel.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return Err(SolidError::invalid_input(OP, "rel not positive"));
+    }
+    if faces.is_empty() {
+        return Err(SolidError::invalid_input(OP, "no faces"));
+    }
+    let mut w = Work::over(k, b, Quantity::Area, Some(faces))?;
+    w.refine(within(rel), |_, _| false)
+}
+
+/// Whether an enclosure is at most `rel` of its own magnitude wide (false for NaN ends, so
+/// refinement goes on to its budget).
+fn within(rel: f64) -> impl Fn(Ivl) -> bool {
+    move |e: Ivl| e.hi - e.lo <= rel * e.mag()
+}
+
 /// A certified enclosure `[lo, hi]` of one mass property.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Bounds {
@@ -356,8 +388,14 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
     let half = 0.5 * bbox.size().length();
     let mut short = None;
     let mut cells = 0;
-    let mut run = |b: &mut Brep, q: Quantity, width: f64| -> Result<(Ivl, EnclosureStop)> {
-        let e = enclose_quantity(k, b, q, width)?;
+    // `width`: an absolute width; `None`: `rel` of the quantity's own magnitude, the width
+    // asked following the enclosure as it narrows in one refinement (no rough first
+    // enclosure sizes it, and no cell is evaluated twice)
+    let mut run = |b: &mut Brep, q: Quantity, width: Option<f64>| -> Result<(Ivl, EnclosureStop)> {
+        let e = match width {
+            Some(width) => enclose_quantity(k, b, q, width)?,
+            None => Work::with(k, b, q)?.refine(within(rel), |_, _| false)?,
+        };
         cells += e.counts.cells;
         Ok((Ivl::new(e.lo, e.hi), e.stop))
     };
@@ -366,24 +404,10 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
             short = Some((q, stop));
         }
     };
-    // a quantity `rel` of its own size wide: a first rough enclosure (its few cells' ranges,
-    // far wider than the value) sets the width asked of the next, until one is that narrow
-    // (a later one's size is the value's to its width, so the third settles it)
-    let mut relative = |b: &mut Brep, q: Quantity| -> Result<(Ivl, EnclosureStop)> {
-        let mut e = run(b, q, f64::MAX)?;
-        for _ in 0..3 {
-            let width = rel * e.0.mag();
-            if e.0.hi - e.0.lo <= width || e.1 != EnclosureStop::Reached {
-                break;
-            }
-            e = run(b, q, width)?;
-        }
-        Ok(e)
-    };
-    let (area, stop) = relative(b, Quantity::Area)?;
+    let (area, stop) = run(b, Quantity::Area, None)?;
     note(Quantity::Area, stop);
     let vol_q = Quantity::Moment { x: 0, y: 0, z: 0 };
-    let (volume, stop) = relative(b, vol_q)?;
+    let (volume, stop) = run(b, vol_q, None)?;
     note(vol_q, stop);
     if volume.lo.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
         return Err(SolidError::invalid_input(
@@ -410,7 +434,7 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
     let mut first = [IZ; 3];
     for (i, m) in first.iter_mut().enumerate() {
         let q = powers(&[i]);
-        let (e, stop) = run(b, q, scale(1))?;
+        let (e, stop) = run(b, q, Some(scale(1)))?;
         note(q, stop);
         *m = e;
     }
@@ -418,7 +442,7 @@ pub fn enclose_mass_properties(k: &Kernel, b: &mut Brep, rel: f64) -> Result<Mas
     let mut second = [[IZ; 3]; 3];
     for (i, j) in [(0, 0), (1, 1), (2, 2), (1, 2), (2, 0), (0, 1)] {
         let q = powers(&[i, j]);
-        let (e, stop) = run(b, q, scale(2))?;
+        let (e, stop) = run(b, q, Some(scale(2)))?;
         note(q, stop);
         set2(&mut second, i, j, e);
         set2(&mut second, j, i, e);

@@ -37,8 +37,8 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
-    enclose_face_area, enclose_mass_properties, enclose_volume, volume_sign, Bounds,
-    VolumeEnclosure, VolumeSign, CELL_BUDGET,
+    enclose_face_area, enclose_face_area_relative, enclose_mass_properties, enclose_volume,
+    volume_sign, Bounds, VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box, create_sphere};
@@ -293,6 +293,35 @@ fn face_areas_are_enclosed_one_face_at_a_time() {
         "{twice:?} {once:?}"
     );
     assert!(enclose_face_area(&k, &mut b, &[], 1.0).is_err());
+}
+
+/// `enclose_face_area_relative` on a sphere's faces of radius 2: one refinement holds the
+/// exact area `16 pi` and ends at most `rel` of its upper end wide; a `rel` that is not
+/// positive (or NaN) and no faces are refused.
+#[test]
+fn a_face_area_is_enclosed_relative_to_itself_in_one_refinement() {
+    let mut k = Kernel::default();
+    let mut s = create_sphere(&mut k, Point3::new(1.0, -2.0, 0.5), 2.0).unwrap();
+    let all = faces(&s, None).unwrap();
+    let exact = 16.0 * PI;
+    for rel in [1e-1, 1e-2] {
+        let e = enclose_face_area_relative(&k, &mut s, &all, rel).unwrap();
+        assert_eq!(e.stop, EnclosureStop::Reached, "{rel}: {e:?}");
+        assert!(e.width() <= rel * e.hi, "{rel}: {e:?}");
+        // about ten ulps of rounding in the closed form's pi and product
+        let slack = 16.0 * f64::EPSILON * exact;
+        assert!(
+            e.lo - slack <= exact && exact <= e.hi + slack,
+            "{rel}: {e:?}"
+        );
+    }
+    for rel in [0.0, -1.0, f64::NAN] {
+        assert!(
+            enclose_face_area_relative(&k, &mut s, &all, rel).is_err(),
+            "{rel}"
+        );
+    }
+    assert!(enclose_face_area_relative(&k, &mut s, &[], 1e-2).is_err());
 }
 
 #[test]
