@@ -7310,14 +7310,12 @@ pub(crate) fn sketch_curve_axis(app: &SolveApp, sel: &Sel, profile_sketch: Optio
     if !origin.is_finite() || !dir.is_finite() {
         return Err(AXIS_PICK.into());
     }
-    let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
-    if same {
-        Ok(json!(id))
-    } else if let Some(owner) = sketch.filter(|owner| Some(*owner) != profile_sketch) {
-        Ok(json!({"sketch": owner, "curve": id}))
-    } else {
-        Ok(json!({"origin": pt(origin), "dir": pt(dir)}))
+    let owner = if profile_sketch.is_some() { picks_sketch(app, std::slice::from_ref(sel), None) } else { *sketch };
+    if let Some(owner) = owner.filter(|owner| Some(*owner) != profile_sketch) {
+        return Ok(json!({"sketch": owner, "curve": id}));
     }
+    let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
+    if same { Ok(json!(id)) } else { Ok(json!({"origin": pt(origin), "dir": pt(dir)})) }
 }
 
 /// The shared axis-pick serializer for Revolve and Coil. Sketch lines keep their owner so
@@ -7749,7 +7747,7 @@ pub(crate) fn model_axis_sel(s: &Session, g: &solidcraft_engine::doc::construct:
 }
 
 /// Refill the same axis selection for Revolve and Coil when editing a feature.
-fn axis_reference_pick(s: &Session, axis: &AxisRef, profile_sketch: Option<u64>) -> Option<Sel> {
+pub(crate) fn axis_reference_pick(s: &Session, axis: &AxisRef, profile_sketch: Option<u64>) -> Option<Sel> {
     match axis {
         AxisRef::World { axis } => Some(Sel::Axis { name: axis.to_ascii_uppercase() }),
         AxisRef::SketchAxis { axis } => Some(Sel::Axis { name: axis.to_ascii_lowercase() }),

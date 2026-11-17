@@ -308,7 +308,8 @@ pub struct CoilParams {
     #[schemars(with = "CoilAxis")]
     pub axis: Option<CoilAxis>,
     /// Climb in the opposite direction along the axis, independently of `clockwise`. Default: false.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "super::features::reversed_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
     pub reversed: Option<bool>,
     /// Where around the axis the section starts. Default: 0. Refused with `sketch`.
     #[serde(default)]

@@ -1633,6 +1633,27 @@ fn coil_and_revolve_keep_the_owner_of_a_picked_sketch_line() {
 }
 
 #[test]
+fn coil_and_revolve_keep_the_owner_of_a_collinear_axis() {
+    let mut h = Harness::new();
+    let owner = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,10],[0,0]],"construction":true})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let profile = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[0,10]],"construction":true})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[2,2],"p1":[4,4]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    for command in ["solid.coil", "solid.revolve"] {
+        let mut d = Dialog::for_command(&h.app, command).unwrap();
+        d.inputs[0].items = vec![Sel::Profile { sketch: profile, index: 0 }];
+        for (sketch, expected) in [(owner, json!({"sketch":owner,"curve":"l1"})), (profile, json!("l1"))] {
+            d.inputs[1].items = vec![Sel::SketchCurve { sketch: Some(sketch), id: "l1".into() }];
+            let commands = apply_commands(&h.app, &d).unwrap();
+            assert_eq!(commands[0].1["axis"], expected, "{command}");
+        }
+    }
+}
+
+#[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();

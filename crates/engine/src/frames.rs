@@ -968,9 +968,9 @@ fn map_local_with_input(
                 Axis => {
                     // A name, including a component origin key (`o:…/origin/X`), passes
                     // through untouched so the command keeps its persistent reference.
-                    // An axis can also be a bare direction; map it as a direction, including
-                    // the {x, y, z} spelling, before considering reference objects.
-                    if vec3(v).is_some() {
+                    // Coil takes a bare direction in either vector form. Use its parser to
+                    // distinguish an object direction from a saved axis reference.
+                    if vec3(v).is_some() || (id == "solid.coil" && v.is_object() && crate::cmd::axis_dir_form(v).is_ok()) {
                         m.dir(v)
                     } else if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();

@@ -176,6 +176,25 @@ fn box_frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
     Some((side(n), n))
 }
 
+fn coil_reference_frame(app: &SolveApp, value: &Value) -> Option<(Vec3, Vec3)> {
+    use solidcraft_engine::doc::{AxisRef, construct};
+    let s = &app.session;
+    let reference = solidcraft_engine::view::coil_axis_reference(s, value)?;
+    match &reference {
+        AxisRef::Line { origin, .. } => {
+            let origin = s.doc.eval_point(origin).ok()?;
+            let direction = serde_json::from_value::<solidcraft_engine::schema::AxisDir>(value.get("dir")?.clone()).ok()?;
+            Some((origin, direction.0))
+        }
+        AxisRef::Model { geo } => construct::model_axis_in(Some(&s.doc), &crate::open_meshing::session_world(s), geo, 0).ok(),
+        AxisRef::Construction { name } => {
+            let geo = construct::GeoRef::Axis { name: name.clone() };
+            construct::model_axis_in(Some(&s.doc), &crate::open_meshing::session_world(s), &geo, 0).ok()
+        }
+        _ => crate::dialogs::axis_of(app, &crate::dialogs::axis_reference_pick(s, &reference, None)?),
+    }
+}
+
 fn frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
     let Kind::Primitive { cmd, at, .. } = &d.kind else { return None };
     let axis = || {
@@ -186,13 +205,12 @@ fn frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
             .unwrap_or(Vec3::Z)
     };
     if *cmd == "solid.coil" {
-        let named = d
-            .extra
-            .get("axis")
-            .and_then(Value::as_str)
-            .filter(|name| !matches!(name.trim().to_ascii_uppercase().as_str(), "X" | "Y" | "Z"))
-            .and_then(|name| crate::dialogs::axis_of(app, &Sel::Axis { name: name.into() }));
-        let picked = d.inputs.get(1).and_then(|input| input.items.first()).and_then(|sel| crate::dialogs::axis_of(app, sel)).or(named);
+        let picked = d
+            .inputs
+            .get(1)
+            .and_then(|input| input.items.first())
+            .and_then(|sel| crate::dialogs::axis_of(app, sel))
+            .or_else(|| d.extra.get("axis").and_then(|axis| coil_reference_frame(app, axis)));
         let (origin, direction) = picked.unwrap_or_else(|| {
             let origin = d
                 .extra

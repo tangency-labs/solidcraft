@@ -4774,8 +4774,9 @@ fn joined_tools_limit() -> usize {
 /// The recipe of a tool a primitive or coil feature `f` builds: its definition and the values it
 /// uses fix it.
 fn tool_recipe(doc: &Document, f: &Feature, vals: &BTreeMap<String, Value>) -> Option<u64> {
-    // A cylinder placed by reference edges stands on the model, not on its definition alone.
-    if !hole_references(f).is_empty() {
+    // A cylinder placed by reference edges or a Coil on a referenced axis reads model geometry
+    // outside its own definition. The same definition may build a different tool.
+    if !hole_references(f).is_empty() || matches!(f.kind, FeatureKind::Coil { axis_ref: Some(_), .. }) {
         return None;
     }
     Some(fingerprint(doc, 0, f, vals, false, &ImportDigests::default()))
@@ -8152,8 +8153,9 @@ fn feature_tools_with_constructor(
                 return Err(DocError::Invalid("a coil's `profiles` need a `sketch`".into()));
             }
             if let Some(sk) = sketch {
-                let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
-                let regions = select_profiles(ss, profiles)?;
+                let stored = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
+                let ss = sketch_in_feature_frame(doc, stored, f.component)?;
+                let regions = select_profiles(&ss, profiles)?;
                 if regions.iter().any(|r| !r.holes.is_empty()) {
                     return Err(DocError::Invalid("a coil from a sketch takes a profile without holes".into()));
                 }

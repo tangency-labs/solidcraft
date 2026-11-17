@@ -187,9 +187,12 @@ fn coil_reverse_contract_is_independent_of_clockwise() {
         }
     }
     assert!(serde_json::from_value::<CoilParams>(coil()).unwrap().reversed.is_none());
-    assert!(serde_json::from_value::<CoilParams>(with(&coil(), "reversed", json!(null))).unwrap().reversed.is_none());
-    for value in [json!("true"), json!(1), json!([])] {
-        assert!(serde_json::from_value::<CoilParams>(with(&coil(), "reversed", value)).is_err());
+    for value in [json!(null), json!("true"), json!(1), json!([])] {
+        let p = with(&coil(), "reversed", value);
+        assert!(serde_json::from_value::<CoilParams>(p.clone()).is_err(), "{p}");
+        assert!(!conforms(schema.as_value(), schema.as_value(), &p), "{p}");
+        let messages: Vec<String> = crate::schema::issues("solid.coil", &p).into_iter().map(|issue| issue.message).collect();
+        assert_eq!(messages, ["`reversed` must be true or false"], "{p}");
     }
 }
 
@@ -251,6 +254,7 @@ fn strict_keeps_todays_errors() {
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "base": [1, 2]})),
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "axis": null})),
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "axis": [0, 0, 0]})),
+        ("solid.coil", with(&coil(), "reversed", json!(null))),
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "profiles": [0]})),
         ("solid.coil", json!({"diameter": 40, "section_size": 4, "revolutions": 2, "pitch": 8, "operation": "glue"})),
         ("solid.coil", json!({"sketch": "Nope", "revolutions": 2, "pitch": 8})),

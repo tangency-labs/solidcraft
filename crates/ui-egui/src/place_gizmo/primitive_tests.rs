@@ -410,6 +410,25 @@ fn coil_marker_follows_the_typed_axis_instead_of_the_placement_face() {
 }
 
 #[test]
+fn coil_marker_follows_typed_axis_references() {
+    let mut h = plate();
+    h.app.run("solid.cylinder", json!({"radius": 5, "height": 10, "axis": "Y", "base": [100, 0, 0], "body_name": "Shaft"})).unwrap();
+    start(&mut h, "solid.coil");
+    let d = h.app.dialog.as_mut().unwrap();
+    if let Kind::Primitive { at, .. } = &mut d.kind {
+        *at = Some((Vec3::new(20.0, 30.0, 10.0), Some(Vec3::Z)));
+    }
+    for (axis, base) in [
+        (json!({"type":"world","axis":"Y"}), Vec3::ZERO),
+        (json!({"dir":[0,2,0]}), Vec3::ZERO),
+        (json!({"face":[105,3,0],"body":"Shaft"}), Vec3::new(100.0, 0.0, 0.0)),
+    ] {
+        h.app.dialog.as_mut().unwrap().extra.insert("axis".into(), axis);
+        assert_eq!(frame(&h.app, h.app.dialog.as_ref().unwrap()), Some((base, Vec3::Y)));
+    }
+}
+
+#[test]
 fn marker_stands_a_new_coil_on_the_face() {
     let mut h = plate();
     start(&mut h, "solid.coil");

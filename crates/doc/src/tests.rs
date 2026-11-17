@@ -905,6 +905,40 @@ fn a_coil_follows_its_sketch() {
 }
 
 #[test]
+fn a_coil_uses_the_profile_plane_in_its_own_component_frame() {
+    let mut doc = Document::new("coil between components");
+    let owner = doc.add_component(Some("Profile part"), 0).unwrap();
+    let consumer = doc.add_component(Some("Coil part"), 0).unwrap();
+    for (component, z) in [(owner, 7.0), (consumer, 3.0)] {
+        doc.occurrences.iter_mut().find(|o| o.component == component).unwrap().transform = rigid(Vec3::new(0., 0., z), Vec3::ZERO, Vec3::Z, 0.);
+    }
+    let mut section = Sketch::new();
+    section.add_circle(Vec2::new(20., 0.), 1., None, None).unwrap();
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "YZ".into() }, sketch: section }, None).unwrap();
+    doc.feature_mut(sketch).unwrap().component = owner;
+    add_in(
+        &mut doc,
+        consumer,
+        "Coil",
+        serde_json::json!({
+            "type": "coil", "base": ["0", "0", "0"], "sketch": sketch,
+            "axis_ref": {"type": "sketch_axis", "axis": "y"}, "pitch": "8", "turns": "2", "operation": "new_body"
+        }),
+    );
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    no_errors(&model);
+    let state = model.state();
+    let body = state.bodies.first().unwrap();
+    assert_eq!(body.component, consumer);
+    let bounds = body.body.exact_bounds().unwrap();
+    // The profile centre starts 4 mm above the consumer origin. Its 1 mm radius and two
+    // turns of 8 mm give a Z extent of 3–21 mm in the consumer's frame.
+    assert!((bounds.min.z - 3.).abs() < 1e-6 && (bounds.max.z - 21.).abs() < 1e-6, "{bounds:?}");
+}
+
+#[test]
 fn box_fillet_cut_timeline() {
     let (mut doc, _) = plate_doc();
     doc.add_feature(

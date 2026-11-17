@@ -3800,7 +3800,7 @@ impl Visibility {
     }
 }
 
-/// A saved camera (orbit camera: target, yaw, pitch, distance; `fov` 0 for orthographic).
+/// A saved orbit camera; roll and up default to the original Z-up view for older designs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct NamedView {
     #[serde(default)]
@@ -3811,6 +3811,10 @@ pub struct NamedView {
     pub distance: f64,
     #[serde(default)]
     pub fov: f64,
+    #[serde(default)]
+    pub roll: f64,
+    #[serde(default)]
+    pub up: solidcraft_viewport::UpAxis,
 }
 
 /// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a
