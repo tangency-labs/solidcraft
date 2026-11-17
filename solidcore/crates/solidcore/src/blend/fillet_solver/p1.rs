@@ -704,6 +704,11 @@ pub struct FilletSolver {
     /// surface before the trace ([`crate::blend::fillet_tangent_rollover`]); the rails are made
     /// on it.
     pub rolled_faces: [Option<FaceId>; 2],
+    /// Not upstream (solidcore-native, #18411): whether `rolled_faces` was decided in closed
+    /// form ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]), so the
+    /// acceptance after the trace, which proves a rollover the ball's sections only proposed,
+    /// is not taken again.
+    pub rolled_in_closed_form: bool,
     /// Not upstream (solidcore-native, #15767): how a base surface that closes on itself bounds
     /// the plane solves ([`SeamDomain`]): wrapped across its seam while the ball's section
     /// (`ball_section_at`) is solved, extended past it (as upstream) for every other solve, the
@@ -755,6 +760,7 @@ impl FilletSolver {
             g1_knots: Vec::new(),
             detached: Vec::new(),
             rolled_faces: [None, None],
+            rolled_in_closed_form: false,
             seam_domain: SeamDomain::Extended,
             chamfer: None,
             law_corner_pieces: Vec::new(),

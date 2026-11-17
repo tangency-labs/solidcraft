@@ -10,7 +10,7 @@
 //!
 //! | Rust                                     | Upstream |
 //! |------------------------------------------|----------|
-//! | `FilletSession::roll_over_tangent_edges` | none     |
+//! | `FilletSession::roll_over_tangent_edges`, `rounds_apart` (private) | none |
 //! | `rails_wholly_past`, `sides_wholly_off`, `carried` (private) | none (the tangent case `ProcessFullRollOver` refuses as "Unimplemented Tangent Rollover Case") |
 //! | `is_ball_at`, `offset_proved_regular`, `nurb_offset_unfolded` (private) | none |
 //! | `SessionObjects::rolled_rails_on_their_faces`, `rail_within_face`, `rail_clear_of` (private) | none |
@@ -46,7 +46,7 @@ use crate::math::{Point2, Point3, EFF_ZERO};
 use crate::surface::offset_surface::SS_UNKNOWN;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p4 as face_p4;
-use crate::topology::{edge, Brep, EdgeId, FaceId};
+use crate::topology::{edge, Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "blend::fillet_executive::session::tangent_rollover";
 
@@ -80,8 +80,11 @@ impl FilletSession<'_> {
     /// lies on. A lone round is decided in closed form, along a straight edge between faces each
     /// a plane or a circular cylinder parallel to it only ([`tangent_rollover_supports`]); each
     /// round of a blend of several, such as one of a
-    /// chain, from its ball's sections ([`rails_wholly_past`]). A rail that lies past the edge
-    /// only partway is left to the rollover recovery after the trace (`ProcessRollOver`).
+    /// chain, from its ball's sections ([`rails_wholly_past`]). A round of several whose edge
+    /// meets no other round's edge (#18411: both long rims of a pocket) has nothing of another
+    /// round at its ends, and the closed form decides it as a lone round where it finds a
+    /// rollover; elsewhere its sections do. A rail that lies past the edge only partway is left
+    /// to the rollover recovery after the trace (`ProcessRollOver`).
     ///
     /// # Errors
     /// Those of the topology queries, of [`tangent_rollover_supports`] and of
@@ -97,20 +100,25 @@ impl FilletSession<'_> {
                 _ => None,
             })
             .collect();
-        for id in ids {
+        let apart = self.rounds_apart(&ids)?;
+        for (id, apart) in ids.into_iter().zip(apart) {
             let Some(inputs) = self.rollover_inputs(id)? else {
                 continue;
             };
-            let rollovers = if lone {
-                tangent_rollover_supports(
+            let mut rollovers = [None, None];
+            let mut closed_form = false;
+            if lone || apart {
+                rollovers = tangent_rollover_supports(
                     k,
                     &mut *self.objects.target,
                     inputs.edge,
                     inputs.faces,
                     inputs.offsets,
                     inputs.tangency,
-                )?
-            } else {
+                )?;
+                closed_form = lone || rollovers.iter().any(Option::is_some);
+            }
+            if !closed_form {
                 let Some(solver) = self
                     .objects
                     .solvers
@@ -119,15 +127,58 @@ impl FilletSession<'_> {
                 else {
                     return Err(stage_failed());
                 };
-                rails_wholly_past(k, &mut *self.objects.target, solver, &inputs)?
-            };
+                rollovers = rails_wholly_past(k, &mut *self.objects.target, solver, &inputs)?;
+            }
             for (rail, rollover) in rollovers.into_iter().enumerate() {
                 if let Some(rollover) = rollover {
                     self.roll_rail_over(k, id, rail, rollover)?;
                 }
             }
+            self.objects
+                .solver_mut(id)?
+                .base_mut()
+                .rolled_in_closed_form = closed_form;
         }
         Ok(())
+    }
+
+    /// For each solver of `ids`, whether its round's edge shares no vertex with another one's:
+    /// `false` for all where a solver has no edge.
+    ///
+    /// # Errors
+    /// Those of the topology queries.
+    fn rounds_apart(&self, ids: &[FilletSolverId]) -> Result<Vec<bool>> {
+        let target = &*self.objects.target;
+        let mut ends: Vec<Vec<VertexId>> = Vec::with_capacity(ids.len());
+        for &id in ids {
+            let base = self.objects.solver(id)?.base();
+            let Some(edge) = base
+                .edgeuses
+                .into_iter()
+                .flatten()
+                .next()
+                .map(|u| eu1::edge(target, u))
+                .transpose()?
+                .flatten()
+            else {
+                return Ok(vec![false; ids.len()]);
+            };
+            ends.push(
+                edge::vertices(target, edge, None)?
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+            );
+        }
+        Ok(ends
+            .iter()
+            .enumerate()
+            .map(|(i, own)| {
+                ends.iter()
+                    .enumerate()
+                    .all(|(j, other)| i == j || own.iter().all(|v| !other.contains(v)))
+            })
+            .collect())
     }
 
     /// The edge, faces, offsets and tangency of solver `id` when it is a constant round of
@@ -940,8 +991,9 @@ impl SessionObjects<'_> {
     /// trace ([`rails_wholly_past`]) lies on the face beyond, proved on the rail as traced and
     /// trimmed ([`rail_within_face`]): the acceptance of that rollover, which the sections
     /// [`rails_wholly_past`] solves only propose. `false` where a rail is not proved so, also
-    /// where its proof fails ([`probe`]). A lone round's rollover, decided in closed form
-    /// ([`tangent_rollover_supports`]), is not taken again here.
+    /// where its proof fails ([`probe`]). A rollover decided in closed form
+    /// ([`tangent_rollover_supports`], `FilletSolver::rolled_in_closed_form`) is not taken
+    /// again here.
     ///
     /// # Errors
     /// [`SolidError::Unported`] and a cancellation from the proofs; those of the lookups.
@@ -949,16 +1001,17 @@ impl SessionObjects<'_> {
         &mut self,
         k: &Kernel,
         id: FilletSolverId,
-        lone: bool,
     ) -> Result<bool> {
-        if lone {
-            return Ok(true);
-        }
-        let (rolled, geoms, fit) = {
+        let (rolled, closed_form, geoms, fit) = {
             let base = self.solver(id)?.base();
-            (base.rolled_faces, base.fillet_geoms(), base.approx_tol_3d)
+            (
+                base.rolled_faces,
+                base.rolled_in_closed_form,
+                base.fillet_geoms(),
+                base.approx_tol_3d,
+            )
         };
-        if rolled.iter().all(Option::is_none) {
+        if closed_form || rolled.iter().all(Option::is_none) {
             return Ok(true);
         }
         for g in geoms {
