@@ -35,8 +35,11 @@ that people may change. SolidCraft reads them and does not apply them yet.
 
 ## The templates
 
-`packaging/windows/policies/` in the source holds the administrative template: `solidcraft.admx`
-and its English text, `en-US/solidcraft.adml`. The policies appear in the **SolidCraft** folder.
+Each release has `solidcraft-<version>-windows-policy-templates.zip`, listed in
+`SHA256SUMS.txt`. It holds the administrative template, `solidcraft.admx`, and its English text,
+`en-US/solidcraft.adml` (they are also in `packaging/windows/policies/` in the source). Take the
+zip from the release you deploy: it holds the policies that version reads. The policies appear in
+the **SolidCraft** folder.
 
 **Group Policy.** Copy `solidcraft.admx` into `PolicyDefinitions` and `solidcraft.adml` into
 `PolicyDefinitions\en-US`, on one computer (`%SystemRoot%\PolicyDefinitions`) or in the domain's

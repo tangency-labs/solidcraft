@@ -227,6 +227,20 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// pocket and r 1.9 hole by one more last bit; the prisms and the r 1.9 hole are back on
 /// their figures from before.)
 ///
+/// Since the trim pieces integrate by Gauss-Kronrod (#14460) every figure, `was` and pinned,
+/// is that integrator's: forced to accuracy 1e-11 and 1e-12 it gives each pinned volume to
+/// 7.6e-15 relative, and the earlier Runge-Kutta trim pieces forced to 1e-12 agree with that to
+/// 7.8e-16. The Runge-Kutta figures at 1e-7 were 8.4e-12 to 4.5e-11 off. The prisms, the
+/// r 1.9 boss and hole and the pocket astride the contact line move by nothing in #16735's
+/// gap closure here, and the prism boss and pocket differ by exactly their two prisms' 160.
+/// The comparisons above are of the Runge-Kutta figures. With these the prism boss is 3.8e-7
+/// above the fork's (no longer bit for bit), the pocket astride the contact line 1.05e-6
+/// below the fork's 5e8c9c1 figure, and the r 1.9 boss and hole move by -2.0e-7 and +3.5e-7,
+/// onto their closed forms to within the rounding of the offsets quoted above (about 1e-8).
+/// Summing each Gauss-Kronrod rule about its centre value (exact on a constant integrand)
+/// moved the r 8 cylinder boss, cone boss and 19 degree lean, and the prism boss and r 1.9
+/// boss (`was` too: the gap closure moves neither), by one last bit each.
+///
 /// `was` is the figure before `brep_volume` closed the tolerant edges' gaps (#16735); where it
 /// differs, the move is checked to be that integrator's leak (`support/volume_leak.rs`).
 fn assert_pinned(feature: Feature, r: f64, was: f64, volume: f64, faces: usize) {
@@ -287,14 +301,32 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
-    assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 23528.16549376938, 9);
-    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 23402.50178777836, 9);
-    assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 24031.84334806833, 9);
+    assert_pinned(
+        cylinder_boss,
+        8.0,
+        23528.165527389272,
+        23528.165493405155,
+        9,
+    );
+    assert_pinned(
+        cylinder_hole,
+        8.0,
+        23402.501834781691,
+        23402.501787261564,
+        9,
+    );
+    assert_pinned(
+        cylinder_boss,
+        1.9,
+        24031.843347866372,
+        24031.843347866372,
+        9,
+    );
     assert_pinned(
         cylinder_hole,
         1.9,
-        23906.179641369188,
-        23906.179641369188,
+        23906.179641722782,
+        23906.179641722782,
         9,
     );
 }
@@ -302,12 +334,12 @@ fn cylinders_keep_their_pinned_volumes() {
 /// Planar walls: each crease is an exact section.
 #[test]
 fn prisms_keep_their_pinned_volumes() {
-    assert_pinned(prism_boss, 8.0, 23549.896259768986, 23549.896259768986, 12);
+    assert_pinned(prism_boss, 8.0, 23549.89626015013, 23549.89626015013, 12);
     assert_pinned(
         prism_pocket,
         8.0,
-        23389.896259952173,
-        23389.896259952173,
+        23389.896260150133,
+        23389.896260150133,
         12,
     );
 }
@@ -315,8 +347,8 @@ fn prisms_keep_their_pinned_volumes() {
 /// Walls that lean: kept as the fork keeps them, the boss's with no refusal.
 #[test]
 fn cones_keep_their_pinned_volumes() {
-    assert_pinned(cone_boss, 8.0, 23501.985588856085, 23501.98555487197, 11);
-    assert_pinned(cone_pit, 8.0, 23427.54088939281, 23427.54082824641, 9);
+    assert_pinned(cone_boss, 8.0, 23501.985588609361, 23501.985554625244, 11);
+    assert_pinned(cone_pit, 8.0, 23427.54088905338, 23427.540827906978, 9);
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -335,7 +367,7 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.0)?;
         boolean_union(k, block, c)
     }
-    assert_pinned(lean_19, 8.0, 23486.59179069601, 23486.59175105623, 11);
+    assert_pinned(lean_19, 8.0, 23486.591790262424, 23486.591750622647, 11);
     for steep in [lean_30 as Feature, lean_45] {
         assert!(rounded_with(steep, 8.0).is_err());
     }
@@ -431,8 +463,8 @@ fn a_boss_astride_the_contact_line_is_refused_as_the_fork() {
     assert!(rounded_with(astride, 8.0).is_err());
 }
 
-/// A pocket astride the contact line stands, as the fork. This figure is
-/// the fork's at 5e8c9c1: this round is a cliff overflow, trimmed at its creases since step 6
+/// A pocket astride the contact line stands, as the fork. Its figure was the fork's at
+/// 5e8c9c1 (with Runge-Kutta trim pieces; now 1.05e-6 below it, see [`assert_pinned`]): this round is a cliff overflow, trimmed at its creases since step 6
 /// (WR-695), which runs none of keep features (23371.292359325398 at eb883ad).
 #[test]
 fn a_pocket_astride_the_contact_line_matches_the_fork() {
@@ -440,7 +472,7 @@ fn a_pocket_astride_the_contact_line_matches_the_fork() {
         let c = create_box(k, Point3::new(18.0, 6.0, 15.0), 4.0, 4.0, 6.0)?;
         boolean_difference(k, block, c)
     }
-    assert_pinned(astride, 8.0, 23371.292359915951, 23371.292359915951, 12);
+    assert_pinned(astride, 8.0, 23371.292358869621, 23371.292358869621, 12);
 }
 
 // ---- Work ----
