@@ -128,9 +128,9 @@ pub(crate) fn derive(b: &ModelBody, o: &NamingOrigin, lineage: &Lineage) -> Opti
 fn built_by_unnamed_tool(face: &FaceProv, operands: &[OperandNames]) -> bool {
     !face.origins.is_empty()
         && face.origins.iter().all(|origin| match *origin {
-            FaceOrigin::Face { operand, face } => operands
-                .get(operand)
-                .is_some_and(|op| matches!(op.operand, Operand::Made(roles) if roles.get(face).is_none_or(Vec::is_empty))),
+            FaceOrigin::Face { operand, face } => {
+                operands.get(operand).is_some_and(|op| matches!(op.operand, Operand::Made(roles) if roles.get(face).is_none_or(Vec::is_empty)))
+            }
             _ => false,
         })
 }
