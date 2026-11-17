@@ -513,7 +513,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     d => d,
                 };
                 let mut pos = order.iter().position(|o| *o == shown).unwrap_or(0);
-                combo(ui, "ex_dir", &["One Side", "Two Sides", "Symmetric"], &mut pos);
+                ui_kit::dropdown_with_keyboard_close(ui, "ex_dir", &mut pos, &["One Side", "Two Sides", "Symmetric"]);
                 if pos != order.iter().position(|o| *o == shown).unwrap_or(0) {
                     *direction = match (order.get(pos).copied().unwrap_or(0), reversed) {
                         (0, true) => 1,
