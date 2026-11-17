@@ -74,8 +74,15 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
-            let (part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
-            (Arc::new(part), Some(read))
+            // AP242 triangles (#3924): a mesh body, as STL and 3MF bring in.
+            if ex.get(*item).is_some_and(super::tessellated::is_item) {
+                let body = super::tessellated::read(ex, *item, units.units.len).map_err(|msg| Failure { read: true, msg })?;
+                let closed = body.is_closed_mesh();
+                (Arc::new(Part { body, closed, file_faces: 0, face_origin: Vec::new(), refused: None }), Some(Vec::new()))
+            } else {
+                let (part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
+                (Arc::new(part), Some(read))
+            }
         }
     };
     let body = solidcraft_profile::scope("import", "step.place", || placed(&part.body, &job.placement))
