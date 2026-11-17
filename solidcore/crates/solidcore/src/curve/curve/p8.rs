@@ -2686,7 +2686,10 @@ impl Curve {
                 let q1 = self.evaluate_point(k, touch[0])?;
                 let q2 = other.evaluate_point(k, touch[1])?;
                 let zero_here = EFF_ZERO * (1.0 + max2(q1.max_dimension(), q2.max_dimension()));
-                if !(q1.distance(q2) <= zero_here) {
+                if !matches!(
+                    q1.distance(q2).partial_cmp(&zero_here),
+                    Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+                ) {
                     let across = self.across_tangent(k, touch[0], q2 - q1)?;
                     let tangent = at(&self.evaluate(k, touch[0], 1, false, true)?, 1);
                     let side = across.length();
@@ -2720,13 +2723,21 @@ impl Curve {
                 }
                 let d1 = self.evaluate(k, touch[0], 2, false, true)?;
                 let d2 = other.evaluate(k, touch[1], 2, false, true)?;
-                let (Some(&p1), Some(&t1), Some(&a1), Some(&p2), Some(&t2), Some(&a2)) =
-                    (d1.first(), d1.get(1), d1.get(2), d2.first(), d2.get(1), d2.get(2))
-                else {
+                let (Some(&p1), Some(&t1), Some(&a1), Some(&p2), Some(&t2), Some(&a2)) = (
+                    d1.first(),
+                    d1.get(1),
+                    d1.get(2),
+                    d2.first(),
+                    d2.get(1),
+                    d2.get(2),
+                ) else {
                     continue;
                 };
                 let meet_zero = EFF_ZERO * (1.0 + max2(p1.max_dimension(), p2.max_dimension()));
-                if !(p1.distance(p2) <= meet_zero) {
+                if !matches!(
+                    p1.distance(p2).partial_cmp(&meet_zero),
+                    Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+                ) {
                     continue;
                 }
                 // a curve against itself nearest where it folds back onto itself (the
@@ -2746,7 +2757,7 @@ impl Curve {
                 // more than the scaled zero over the stretch is no parting either.
                 let curvature = |t: Vec3, a: Vec3| -> Option<Vec3> {
                     let speed2 = t.dot(t);
-                    if !(speed2 > EFF_ZERO) {
+                    if speed2.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater) {
                         return None;
                     }
                     let u = t * (1.0 / speed2.sqrt());

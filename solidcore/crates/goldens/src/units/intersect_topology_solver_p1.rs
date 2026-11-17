@@ -1498,9 +1498,8 @@ mod tests {
         let cases = Runner.cases(&ctx).unwrap();
         let case = cases.iter().find(|c| c.name == "gen2408").unwrap();
         let op: OpIn = case.parse().unwrap();
-        let objects = match &op {
-            OpIn::Local { objects, .. } | OpIn::Trees { objects, .. } => objects,
-            _ => panic!("gen2408 solves between objects"),
+        let (OpIn::Local { objects, .. } | OpIn::Trees { objects, .. }) = &op else {
+            panic!("gen2408 solves between objects")
         };
         let out = rust(&op).unwrap();
         assert_eq!(out.ints["status"], vec![0]);
