@@ -69,3 +69,7 @@ blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	0	90	line-trim	3.244
 blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	0	92	line-trim	6.7110773147151596e-12	4e-5
 blend.fillet_executive_p3	real-box-fillet4v-r3-shell-closed	0	93	line-trim	2.9279922131758326e-07	1e-5
 blend.fillet_executive_p1	remove_topo_edges_mouse_two_struts	0	v2	invalid-input	-	3.6303537369170957
+blend.fillet_executive_p3	stubs4-coons_01_03_29-e0-r0.5	0	19	blend-surface	9.171832023335658e-6	4e-5
+blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	0	42	blend-surface	3.728639867721419e-6	5.781816090334979e-5
+blend.fillet_executive_p3	stubs4-delete-edge-bottle-e8-r0.1	0	47	blend-surface	2.8876436781797284e-5	5.781816090334979e-5
+blend.fillet_executive_p3	sweep5-letter_g-e1-r1.0	0	34	blend-surface	2.729757716401051e-6	1.3486320938540036e-4

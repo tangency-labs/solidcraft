@@ -55,6 +55,9 @@ const ROWS: &str = include_str!("trim_tolerance_rows.jsonl");
 /// - `no-estimate`: the trim's image could not be sampled;
 /// - `face-bound-loose`: an edge whose B-rep keeps no UV trim, whose face-gap enclosure
 ///   exceeds the new tolerance.
+/// - `blend-surface`: an edge with a trim on a procedural blend surface, which has no exact
+///   NURBS net, so no enclosure (`fillet_executive_p3`'s coons, bottle and letter-g cases;
+///   the sampled gaps, over every trim of the edge, at most 50 % of the new tolerance);
 /// - `line-trim`: a plane's UV trim that is a line, which [`trim_image_gap_bound`] does not
 ///   enclose (a line's evaluation rounding moves its parameter, see there):
 ///   `real-box-fillet1v/4v-r3-shell-closed`, whose tolerances halve (`2e-5 -> 1e-5`,
@@ -91,6 +94,9 @@ fn open_entries(unit: &str) -> std::collections::BTreeSet<(String, usize, String
 /// Each class is a proof checked here:
 /// - `rounding`: the value moved by at most two units in the last place: EQUAL (a
 ///   reordered sum's rounding, far below anything the case measures);
+/// - `quadrature`: a mass property that moved by at most 1e-13 of itself: EQUAL, MEASURED
+///   rather than proved (the integration over the faces sums its pieces in another order
+///   once a trim is refit; `stubs4-delete-edge-bottle-e8-r0.1`, 8.2e-15 and 1.6e-15);
 /// - `padding`: a box coordinate padded by an edge's tolerance (`query.brep`'s tight box
 ///   expanded by its entities' tolerances): it moved inward by exactly a moved edge's
 ///   `o - n` (to four units in the last place), that edge certified as every other;
@@ -469,8 +475,9 @@ struct Tally {
     open: usize,
     /// Raised edges: every trim's `B` within the new tolerance, one above the old.
     raised: usize,
-    /// [`OTHER`] values: `rounding`, `padding`, `trim` and `domain`.
+    /// [`OTHER`] values: `rounding`, `quadrature`, `padding`, `trim` and `domain`.
     rounding: usize,
+    quadrature: usize,
     padding: usize,
     trim_values: usize,
     domain: usize,
@@ -537,6 +544,9 @@ fn certify(unit: &str) -> Tally {
             other_seen.insert(entry);
             match class.as_str() {
                 "rounding" if ulps(*old, *new) <= 2.0 => tally.rounding += 1,
+                "quadrature" if (new - old).abs() <= 1e-13 * old.abs().max(new.abs()) => {
+                    tally.quadrature += 1;
+                }
                 "padding"
                     if row.entities.iter().any(|e| {
                         e.1 && e.4 < e.3
@@ -694,7 +704,7 @@ macro_rules! certified_units {
             #[test]
             fn $name() {
                 let t = certify($unit);
-                assert!(t.values + t.rounding + t.padding + t.trim_values + t.domain > 0, "{t:?}");
+                assert!(t.values + t.rounding + t.quadrature + t.padding + t.trim_values + t.domain > 0, "{t:?}");
             }
         )*
     };
