@@ -62,7 +62,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("import")
         .contract(&INSERT_STEP_CONTRACT)
         .output(output_schema_for::<StepInserted>)
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move); envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); flatten?: bool (default false; true: every solid comes in as a body of the import's own component, with no subcomponents, occurrences or joints: a part placed several times is one body per placement where the file places it, and, as no component says which part a body belongs to, its name is prefixed with the outermost named part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an exporter's `… STEP translator …`) giving way to its nearest named product's); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it, its translation column (entries 4, 8 and 12) numbers or length expressions: one that names a parameter is kept, and the import follows the parameter when it changes (a grounded one stays); a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move); envelope?: \"box\" (also add the import's envelope, a hidden box around every body it placed, in its component, as solid.bounding_solid with `component` makes it → envelope: the body; inspect.clearance and inspect.interference check it instead of the parts with `envelopes: true`)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -281,6 +281,11 @@ struct StepOptions {
     folder: bool,
     /// A FreeCAD file's feature history is rebuilt as features (else only its solids come in).
     history: bool,
+    /// `flatten: true` (`file.insert_step` only): every solid a body of the import's component,
+    /// with no components below it and no joints (`import::Tree::StepFlat`), and bodies named
+    /// after their part where the file gives them a placeholder. `false` (the default) keeps the
+    /// file's assembly structure.
+    flatten: bool,
 }
 
 fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
@@ -316,7 +321,7 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
             }
         },
     };
-    Ok(StepOptions { y_up, names, folder, history })
+    Ok(StepOptions { y_up, names, folder, history, flatten: false })
 }
 
 /// Which way is up in a STEP or IGES file, from the program its header names: `("y", name)` for
@@ -423,7 +428,12 @@ fn add_read_step(
     let unchanged = matches!(&sf.kind, solidcraft_doc::FeatureKind::Import { step, .. } if step.as_bytes() == bytes);
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
-    let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &sf.invisible, &cname, import::Tree::Step(&sf.import))?;
+    let (body_names, tree) = if options.flatten {
+        (solidcraft_io::flat_body_names(&sf.import, &sf.body_names), import::Tree::StepFlat(&sf.import))
+    } else {
+        (sf.body_names, import::Tree::Step(&sf.import))
+    };
+    let (id, placed) = import::add_in_component(s, sf.kind, &fname, body_names, &sf.invisible, &cname, tree)?;
     let content_sha256 = unchanged
         .then(|| {
             s.model.state().bodies.iter().filter(|b| b.feature == id).find_map(|b| {
@@ -775,10 +785,15 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
     if !solidcraft_io::is_step_path(path) {
         return Err(bad(cmd, "only STEP, IGES, FreeCAD and Rhino files (.step, .stp, .igs, .iges, .fcstd, .3dm) can be inserted"));
     }
-    let options = step_options(p, cmd)?;
+    let mut options = step_options(p, cmd)?;
     // The translation column may be length expressions that name parameters (#8192): the
     // occurrence keeps them and follows them.
     let mut kept = [None, None, None];
+    options.flatten = match p.get("flatten") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(flatten)) => *flatten,
+        Some(_) => return Err(bad(cmd, crate::schema::insert_step::FLATTEN_MESSAGE)),
+    };
     let placement = match p.get("matrix") {
         None | Some(Value::Null) => None,
         Some(m) => {
@@ -1222,6 +1237,17 @@ fn read_kicad_env_name(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, del
 
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = path_arg(p, "doc.open")?;
+    // A file SolidCraft does not read itself opens with the installed importer that claims its
+    // extension; `format` picks an importer even for a file SolidCraft reads.
+    let format = str_(p, "format");
+    if format.is_some() || !reads_natively(path) {
+        if let Some(importer) = crate::plugin::importer_for(s, path, format)? {
+            let options = p.get("options").filter(|o| !o.is_null()).cloned().unwrap_or_else(|| json!({}));
+            return reply(OpenResult::Imported(crate::plugin::import_file(s, &importer, path, &options)?));
+        }
+    } else if p.get("options").is_some_and(|v| !v.is_null()) {
+        return Err(bad("doc.open", "`options` applies to files an importer plugin opens"));
+    }
     if !solidcraft_io::is_step_path(path) && p.get("names").is_some_and(|v| !v.is_null()) {
         return Err(bad("doc.open", "`names` applies to STEP and IGES files only"));
     }
@@ -1339,6 +1365,15 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let saved = if solidcraft_io::has_design_provenance(path) { None } else { saved };
     let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
     opened_design(s, opened, path, read_only, disk, verify, None)
+}
+
+/// SolidCraft opens this file with its own readers (a design, drawing, CAD, mesh or point cloud file).
+fn reads_natively(path: &str) -> bool {
+    let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    super::drawing_import_command(path).is_some()
+        || solidcraft_io::is_kicad_path(path)
+        || solidcraft_io::formats::open_extensions(true).iter().any(|e| e.eq_ignore_ascii_case(&extension))
+        || matches!(extension.as_str(), "sc" | "solidcraft" | "json")
 }
 
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.

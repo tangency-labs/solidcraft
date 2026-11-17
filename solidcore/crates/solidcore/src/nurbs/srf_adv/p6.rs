@@ -27,6 +27,14 @@
 //!   piece is upstream's, and so is one of a closed trajectory whose z vectors were
 //!   corrected to close: they also turn by the spread closing gap, which the method's
 //!   rate omits.
+//! - Not upstream (#18117): a closed trajectory's z vectors are corrected to close by
+//!   spreading the closing angle evenly along it ([`create_b_vectors_closing`]), not by
+//!   upstream's backward averages, which put the whole turn into the last few samples, and
+//!   the end sections of such a closed chain take their rate from the samples on both
+//!   sides of the closure, one central difference for both. Upstream's one-sided ends
+//!   and crowded turn left the swept surface creased across its closure (its normal
+//!   turning by about a degree there along a line swept round a closed 3D spline), so its
+//!   offsets did not meet there.
 //! - Out-params become return values (the swept surface; the patches with the center
 //!   point and normal); the `NL_STACKS` arguments have no counterpart. The optional
 //!   arguments of `N_CreateSweepScale` (`curZ`, `curS`, `tflg`, `tc`, `deg`, `dir`,
@@ -635,15 +643,33 @@ fn sweep_scale(
             placed_at += 1;
 
             if jj == 0 || jj == np {
-                // The finite difference's neighbours in the frame chain.
-                let prev = match k1.checked_sub(1) {
-                    Some(k0) => Some((at(&zl_vecs, k0, OP)?, at(&tt, k0, OP)?)),
-                    None => None,
-                };
-                let next = if k1 + 1 < zl_vecs.len() {
-                    Some((at(&zl_vecs, k1 + 1, OP)?, at(&tt, k1 + 1, OP)?))
+                // The finite difference's neighbours in the frame chain. (Not upstream,
+                // #18117) a chain corrected to close ends on its first sample, so across the
+                // closure each end's neighbour is the other end's: both ends take one rate,
+                // and the surface meets itself there as smoothly as along it, where upstream
+                // differences each end on its own side.
+                let wrap = if closing {
+                    let last = zl_vecs.len().checked_sub(1).ok_or_else(|| oob(OP))?;
+                    let period = at(&tt, last, OP)? - at(&tt, 0, OP)?;
+                    Some((last, period))
                 } else {
                     None
+                };
+                let prev = match (k1.checked_sub(1), wrap) {
+                    (Some(k0), _) => Some((at(&zl_vecs, k0, OP)?, at(&tt, k0, OP)?)),
+                    (None, Some((last, period))) if last > 1 => {
+                        Some((at(&zl_vecs, last - 1, OP)?, at(&tt, last - 1, OP)? - period))
+                    }
+                    (None, _) => None,
+                };
+                let next = match wrap {
+                    _ if k1 + 1 < zl_vecs.len() => {
+                        Some((at(&zl_vecs, k1 + 1, OP)?, at(&tt, k1 + 1, OP)?))
+                    }
+                    Some((last, period)) if last > 1 => {
+                        Some((at(&zl_vecs, 1, OP)?, at(&tt, 1, OP)? + period))
+                    }
+                    _ => None,
                 };
                 // (not upstream, #16959) a neighbour past this piece's parameter range
                 // lies on the next piece, whose frame can turn at another rate: there the

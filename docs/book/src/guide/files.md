@@ -248,6 +248,15 @@ points up (+Z), a positive angle lowers the leading edge: the usual washout at t
 ]}
 ```
 
+## Opening a file while SolidCraft runs
+
+Opening a design from your file manager, or with `solidcraft part.sc`, while SolidCraft is already
+running opens it in that window, as File > Open does, and no second app starts. The two launches
+talk through a socket in your settings folder (a named pipe on Windows) that only you can reach;
+nothing listens on the network, and only file paths are sent. If the running window does not answer
+within a moment, the new launch starts normally. `solidcraft --new-instance part.sc` always starts
+a separate app.
+
 ## Large files
 
 SolidCraft opens STEP, IGES and the other CAD files it imports up to **512 MB**, and design files

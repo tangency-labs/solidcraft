@@ -102,6 +102,72 @@ pub fn is_placement(m: &Mat) -> bool {
         && (m[3][3] - 1.0).abs() < 1e-9
 }
 
+/// Capture a sketch's foreign construction plane in its author's frame. A new choice replaces
+/// any previous capture; root sketches and references inside their own component stay live.
+pub fn capture_sketch_plane_placement(doc: &Document, plane: &mut PlaneRef, author: u64, frame: &Mat) -> Result<()> {
+    let mut current = plane;
+    for _ in 0..=64 {
+        match current {
+            PlaneRef::Construction { feature, placement } => {
+                let source = doc.feature(feature.0).ok_or_else(|| DocError::Unknown(format!("construction plane {feature}")))?;
+                if !matches!(source.kind, FeatureKind::ConstructionPlane { .. }) {
+                    return Err(DocError::Invalid(format!("feature {feature} is not a construction plane")));
+                }
+                if author == 0 || source.component == author {
+                    *placement = None;
+                    return Ok(());
+                }
+                let source_frame = doc.component_transform(source.component);
+                if !is_placement(frame) || !is_placement(&source_frame) {
+                    return Err(DocError::Invalid("invalid construction plane capture frame".into()));
+                }
+                let inverse = mat_inverse(frame).ok_or_else(|| DocError::Invalid("sketch author placement cannot be inverted".into()))?;
+                let captured = mat_mul(&inverse, &source_frame);
+                if !is_placement(&captured) {
+                    return Err(DocError::Invalid("invalid captured construction plane placement".into()));
+                }
+                *placement = Some(captured);
+                return Ok(());
+            }
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
+                current = base
+            }
+            _ => return Ok(()),
+        }
+    }
+    Err(DocError::Invalid("construction plane nesting exceeds 64".into()))
+}
+
+/// Re-express a captured construction plane when its author or source definition changes
+/// coordinate frames. Occurrence motion leaves the captured relationship alone.
+pub fn reframe_plane_placements(plane: &mut PlaneRef, author: &Mat, source: impl Fn(u64) -> Mat) -> Result<()> {
+    let mut current = plane;
+    for _ in 0..=64 {
+        match current {
+            PlaneRef::Construction { feature, placement } => {
+                if let Some(saved) = placement {
+                    let from = source(feature.0);
+                    if !is_placement(author) || !is_placement(&from) || !is_placement(saved) {
+                        return Err(DocError::Invalid("invalid construction plane frame change".into()));
+                    }
+                    let inverse = mat_inverse(&from).ok_or_else(|| DocError::Invalid("construction plane source frame cannot be inverted".into()))?;
+                    let next = mat_mul(&mat_mul(author, saved), &inverse);
+                    if !is_placement(&next) {
+                        return Err(DocError::Invalid("invalid reframed construction plane placement".into()));
+                    }
+                    *saved = next;
+                }
+                return Ok(());
+            }
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
+                current = base
+            }
+            _ => return Ok(()),
+        }
+    }
+    Err(DocError::Invalid("construction plane nesting exceeds 64".into()))
+}
+
 /// A rigid transform: rotation by `angle` about `axis` through `origin`, then a translation.
 pub fn rigid(translate: Vec3, origin: Vec3, axis: Vec3, angle: f64) -> Mat {
     let k = axis.normalized().unwrap_or(Vec3::Z);

@@ -119,7 +119,6 @@ pub(crate) fn begin(app: &mut SolveApp, occurrence: u64) -> bool {
     }
     crate::dialogs::cancel(app);
     app.tool = None;
-    app.tree.occurrence_move = None;
     app.viewport.nav = None;
     app.viewport.primary_nav = None;
     app.home.open = false;
@@ -982,10 +981,12 @@ mod tests {
         crate::prefs::set(&mut h.app, &json!({"assembly_move_handles":false})).unwrap();
         h.frames(2);
         assert!(h.app.viewport.joint_handles.is_none());
+        // Move/Copy takes the selection into its own picks, so the placement is read first.
+        let selected = selected_path(&h.app).unwrap();
         for context in [false, true] {
-            h.app.tree.occurrence_move = None;
+            crate::dialogs::cancel(&mut h.app);
             if context {
-                let path = selected_path(&h.app).unwrap();
+                let path = selected.clone();
                 let item = crate::context_menu::items(&h.app, &crate::context_menu::Target::Occurrence { path })
                     .into_iter()
                     .find(|item| item.id == "ui.moveOccurrence" && item.enabled)
@@ -996,12 +997,14 @@ mod tests {
             }
             h.frames(2);
             assert!(h.app.viewport.joint_handles.is_none());
-            assert!(h.app.tree.occurrence_move.is_some());
+            assert!(crate::dialogs_move::moving(&h.app).is_some(), "Move/Copy opens on the component");
             assert_eq!(h.app.session.doc.to_json(), before);
             assert_eq!(h.app.session.undo.len(), undo);
         }
-        h.app.tree.occurrence_move = None;
+        crate::dialogs::cancel(&mut h.app);
         crate::prefs::set(&mut h.app, &json!({"assembly_move_handles":true})).unwrap();
+        crate::dialogs::cancel(&mut h.app);
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": selected}]})).unwrap();
         h.app.start("occurrence.move");
         h.frames(2);
         assert!(visible(&h.app));

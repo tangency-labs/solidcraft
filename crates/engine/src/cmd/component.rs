@@ -271,7 +271,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("ground")
         .contract(&GROUND_CONTRACT)
         .output(output_schema_for::<GroundResult>)
-        .params("occurrence; grounded?: bool (default toggles)"),
+        .params("occurrence; grounded?: bool (default toggles) → grounded; transform: placement within its parent; moved: names of occurrences whose world placement changed; errors, conflicts: joint issues in the assembly solve"),
     CommandSpec::new("occurrence.reparent", "Move to Component", reparent::reparent).icon("move").params(
         "occurrence; path?: exact placement; parent: component id or name (0 or \"root\" for the design); parent_path?: the parent's \
          placement to place it by (default: its only one, else the active one; every instance of the parent gets it). The placement \
@@ -588,6 +588,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     }
     reply(ListResult {
         active: s.active_component,
+        active_path: s.active_occurrence_path.clone().unwrap_or_default(),
         components: out,
         pending_moves: s.pending_moves.keys().copied().collect(),
         param_warnings: Vec::new(),
@@ -597,8 +598,10 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.rename";
     let id = component(s, p, "component", cmd)?;
-    let name =
-        str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    let name = str_(p, "name")
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && n.chars().count() <= 128)
+        .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     let st = s.model.state();
     let placed = s.doc.body_frames_with_source(&st);
     let d = s.doc_mut();
@@ -625,15 +628,52 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if id == 0 {
         return Err(bad(cmd, "the design itself can't be deleted"));
     }
+    let imported = imported_bodies_within(s, id);
     let removed = s.doc_mut().remove_component_tree(id).map_err(|e| match e {
         solidcraft_doc::DocError::Invalid(msg) => bad(cmd, msg),
         e => e.into(),
     })?;
+    let d = s.doc_mut();
+    for (feature, made, skipped) in imported {
+        let Some(f) = d.feature_mut(feature) else { continue };
+        // The bodies left keep the names they have now, though a skipped one had a name first.
+        f.pin_body_names(&made, &[]);
+        if let FeatureKind::Import { skip, .. } = &mut f.kind {
+            skip.extend(skipped);
+            skip.sort_unstable();
+            skip.dedup();
+        }
+    }
     let gone = removed.components;
     if gone.contains(&s.active_component) {
         s.active_component = 0;
     }
     reply(DeleteResult { deleted: gone, features: removed.features, param_warnings: Vec::new() })
+}
+
+/// The bodies of the component tree `root` that an Import feature outside it builds (#17578): an
+/// inserted STEP assembly's Import sits in the assembly's own component and builds every part's
+/// bodies there, so deleting a part's component deletes no feature of its own. For each such
+/// Import: its id, the names of the bodies it builds now (in the order it builds them), and the
+/// file's body indices of those inside `root`, for its `skip` list.
+fn imported_bodies_within(s: &Session, root: u64) -> Vec<(u64, Vec<String>, Vec<u64>)> {
+    let doc = &s.doc;
+    let inside = |c: u64| doc.component_within(c, root);
+    doc.features
+        .iter()
+        .filter(|f| matches!(f.kind, FeatureKind::Import { .. }) && !inside(f.component))
+        .filter_map(|f| {
+            let made: Vec<String> = s.model.result(f.id)?.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect();
+            let slots = f.body_name_slots(made.len());
+            let skipped: Vec<u64> = slots
+                .iter()
+                .zip(&made)
+                .filter(|(_, name)| doc.body_components.get(*name).is_some_and(|c| inside(*c)))
+                .map(|(k, _)| *k as u64)
+                .collect();
+            (!skipped.is_empty()).then_some((f.id, made, skipped))
+        })
+        .collect()
 }
 
 fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1115,7 +1155,21 @@ fn ground(s: &mut Session, p: &Value) -> Result<Value> {
     let o = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id).ok_or_else(|| bad(cmd, "occurrence"))?;
     o.grounded = want.unwrap_or(!o.grounded);
     let g = o.grounded;
-    reply(GroundResult { occurrence: id, grounded: g, param_warnings: Vec::new() })
+    let before = super::motion::positions(s);
+    // Even a repeated grounded:false request must report existing joint issues. Use the normal
+    // refresh loop so features that read a changed placement are evaluated before the reply.
+    s.joints_settled = None;
+    let solved = s.refresh_with_joint_report().unwrap_or_default();
+    let moved = super::motion::moved(&before, &super::motion::positions(s)).map(|(name, _)| name.clone()).collect();
+    let transform = s.doc.occurrences.iter().find(|o| o.id == id).ok_or_else(|| bad(cmd, "occurrence"))?.transform;
+    reply(GroundResult {
+        occurrence: id,
+        grounded: g,
+        transform,
+        moved,
+        solved: super::joints::solve_report(&solved, &json!({"quiet": true})),
+        param_warnings: Vec::new(),
+    })
 }
 
 fn capture(s: &mut Session, _p: &Value) -> Result<Value> {

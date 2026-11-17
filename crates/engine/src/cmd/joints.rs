@@ -335,7 +335,7 @@ fn response_analysis(p: &Value) -> joints::Analysis {
 }
 
 /// A solve's answer; `quiet: true` in the command's params leaves out the per-occurrence lists.
-fn solve_report(sol: &joints::Solution, p: &Value) -> SolveReport {
+pub(super) fn solve_report(sol: &joints::Solution, p: &Value) -> SolveReport {
     let problems = |list: &[(u64, String, String)]| -> Vec<JointProblem> {
         list.iter().map(|(joint, name, why)| JointProblem { joint: *joint, name: name.clone(), why: why.clone() }).collect()
     };
@@ -608,7 +608,7 @@ fn plane_side(s: &Session, name: &str, occurrence: u64, cmd: &str) -> Result<sol
     let st = s.model.state();
     if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
         if matches!(c.geom, solidcraft_doc::construct::ConstructGeom::Plane(_)) {
-            return Ok(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into() });
+            return Ok(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into(), placement: None });
         }
         return Err(bad(cmd, format!("`{trimmed}` is not a construction plane")));
     }
@@ -677,9 +677,11 @@ fn origin_from_name(s: &Session, name: &str, occurrence: Option<u64>, cmd: &str)
             if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map(|o| o.id).unwrap_or(0) }
         });
         let snap = match &c.geom {
-            solidcraft_doc::construct::ConstructGeom::Plane(_) => {
-                Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into() }), pick: None, x: None }
-            }
+            solidcraft_doc::construct::ConstructGeom::Plane(_) => Snap::Plane {
+                plane: Box::new(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into(), placement: None }),
+                pick: None,
+                x: None,
+            },
             solidcraft_doc::construct::ConstructGeom::Axis { .. } => {
                 Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::construction(name_trim.to_string())), pick: None, x: None }
             }
@@ -2194,6 +2196,22 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     edit_joint(s, p, true)
 }
 
+/// The new name `p` gives joint `id` in an edit, if it changes it. A new name over 128 characters
+/// is refused before anything changes, as the other renames refuse it, in the name of the command
+/// `called`; the joint's own name (joint.create takes any) is kept whatever its length, spaces
+/// round it or not, and a blank one changes nothing.
+fn edited_name(s: &Session, id: u64, p: &Value, called: &str) -> Result<Option<String>> {
+    let Some(n) = str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) else { return Ok(None) };
+    let own = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.name.trim());
+    if own == Some(n) {
+        return Ok(None);
+    }
+    if n.chars().count() > 128 {
+        return Err(bad(called, "`name` must be at most 128 characters"));
+    }
+    Ok(Some(n.to_string()))
+}
+
 /// joint.edit's change, also run by `assembly.constraint.edit`. `plain`: a change of kind makes a
 /// constraint a plain joint (joint.edit); the constraint command keeps the rule it has just set.
 pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Value> {
@@ -2213,6 +2231,7 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         Some(v) => Some(value(s, v, true, cmd)?),
         None => None,
     };
+    let name = edited_name(s, id, p, if plain { cmd } else { "assembly.constraint.edit" })?;
     // The sides, read as joint.create reads them; a side left out keeps its place.
     let a = p.get("a").map(|v| origin_param(s, Some(v), cmd)).transpose()?;
     let b = p.get("b").map(|v| origin_param(s, Some(v), cmd)).transpose()?;
@@ -2283,8 +2302,8 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
     if let Some(f) = bool_(p, "flip") {
         j.flip = f;
     }
-    if let Some(n) = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128) {
-        j.name = n.to_string();
+    if let Some(n) = name {
+        j.name = n;
     }
     if let Some(x) = bool_(p, "suppressed") {
         suppress_joints(s.doc_mut(), &[id], x);

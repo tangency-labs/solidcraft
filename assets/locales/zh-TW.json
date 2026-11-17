@@ -3338,7 +3338,7 @@
   "render.cpu_body_choose": "選擇實體",
   "render.cpu_body_filter": "按名稱篩選實體",
   "render.cpu_body_filter_more": "請縮小篩選範圍以顯示更多實體。",
-  "render.cpu_body_missing": "反射目標不存在、已隱藏、名稱有歧義或超過128字節。請重新選擇。",
+  "render.cpu_body_missing": "反射目標不存在、已隱藏、名稱有歧義或超過512字節。請重新選擇。",
   "render.cpu_budget": "CPU 資源配置",
   "render.cpu_budget_bodies": "實體數上限",
   "render.cpu_budget_compact": "緊湊型（舊版限制）",
