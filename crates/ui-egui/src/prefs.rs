@@ -9729,20 +9729,24 @@ mod tests {
     }
 
     /// #17689: the tolerance heal is on by default, a saved choice reads back as saved, and the
-    /// preference reaches the kernel, which every STEP read and Repair consult. (The preference
-    /// off is not applied here: the kernel's switch is the process's, which tests beside this
-    /// one read; `with_the_heal_preference_off_a_failing_part_stays_as_read` and
-    /// `repair_without_heal_first_is_the_repair_before_the_heal` test the off path.)
+    /// preference reaches the kernel, which every STEP read and Repair consult: set off, the
+    /// kernel stops healing; set on, it heals again. (The kernel's switch is the process's: the
+    /// test holds it, as every test that turns it does.)
     #[test]
     fn heal_tolerance_defects_is_on_by_default_and_reaches_the_kernel() {
         use serde_json::json;
+        use solidcraft_engine::kernel;
+        let _held = kernel::heal_preference_for_tests(true);
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         assert!(app.preferences.heal_tolerance_defects, "on by default");
         assert!(!super::lenient(&json!({"heal_tolerance_defects": false})).heal_tolerance_defects, "off reads back as saved");
         assert!(super::lenient(&json!({})).heal_tolerance_defects);
+        let out = super::set(&mut app, &json!({"heal_tolerance_defects": false})).unwrap();
+        assert_eq!(out["heal_tolerance_defects"], false);
+        assert!(!kernel::heals_tolerance_defects(), "off: the kernel stops healing");
         let out = super::set(&mut app, &json!({"heal_tolerance_defects": true})).unwrap();
         assert_eq!(out["heal_tolerance_defects"], true);
-        assert!(solidcraft_engine::kernel::heals_tolerance_defects(), "the kernel heals as the preference says");
+        assert!(kernel::heals_tolerance_defects(), "on: the kernel heals again");
     }
 
     /// The validation mode is once per feature by default; set by name or by the command, the

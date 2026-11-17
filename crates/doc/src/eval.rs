@@ -1589,6 +1589,9 @@ pub struct Model {
     frame_bodies: Arc<std::sync::Mutex<FrameBodies>>,
     /// When SMLib's check runs on the features this model evaluates ([`Model::set_validation`]).
     validation: kernel::Validation,
+    /// The last `evaluate` ran with the tolerance heal preference off
+    /// ([`kernel::heals_tolerance_defects`]; [`Model::heals`]).
+    heal_off: bool,
     /// Inputs proven to describe placement-independent geometry, and the state they produced.
     placement_inputs: Option<placement_reuse::Inputs>,
     /// All evaluated features use supported local inputs; computed with the existing owner index.
@@ -1631,6 +1634,10 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
     rolled_back.hash(&mut h);
     vals.get(DESIGN_LEN).map(|v| v.v.to_bits()).hash(&mut h);
     hash_feature_json(f, steps, &mut h);
+    // An import read, and a Repair evaluated, with the tolerance heal off are other results.
+    if steps.heal_off && matches!(f.kind, FeatureKind::Import { .. } | FeatureKind::Repair { .. }) {
+        ("tolerance heal", "off").hash(&mut h);
+    }
     // An import whose checks healed its parts is the healed import ([`ImportDigests::heals`]).
     if let Some(heals) = steps.heals(f.id) {
         heals.digest().hash(&mut h);
@@ -1662,6 +1669,10 @@ struct ImportDigests {
     /// text they were read from: the import is then its healed bodies, and its fingerprint (and
     /// so every fingerprint after it) says so. Kept while the feature's text is the same.
     heals: std::collections::HashMap<u64, (u64, Arc<kernel::ImportHeals>)>,
+    /// Evaluated with the tolerance heal preference off: imports and Repair features say so in
+    /// their fingerprints ([`fingerprint`]), so turning the preference either way evaluates them
+    /// again. Nothing is added with it on, so the fingerprints saved before it stand.
+    heal_off: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1681,15 +1692,15 @@ impl MeshDigest {
 }
 
 impl ImportDigests {
-    fn of(doc: &Document, known: &ImportDigests) -> ImportDigests {
-        let mut out = ImportDigests::default();
+    fn of(doc: &Document, known: &ImportDigests, heal: bool) -> ImportDigests {
+        let mut out = ImportDigests { heal_off: !heal, ..ImportDigests::default() };
         for f in &doc.features {
             match &f.kind {
                 FeatureKind::Import { step, .. } => {
                     let digest = known.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
                     out.steps.insert(f.id, (step.clone(), digest));
                     // Kept while the heal preference is on: off, the import is its parts as read.
-                    if let Some(heals) = known.heals.get(&f.id).filter(|(of, _)| *of == digest && kernel::heals_tolerance_defects()) {
+                    if let Some(heals) = known.heals.get(&f.id).filter(|(of, _)| *of == digest && heal) {
                         out.heals.insert(f.id, heals.clone());
                     }
                 }
@@ -3316,7 +3327,16 @@ impl Model {
     /// the next [`Model::evaluate`] brings them up to date ([`Model::is_stale`]). Returns
     /// whether an evaluation is owed to such heals: settled now or by an earlier call, and not
     /// evaluated since (a caller that could not evaluate then is asked again).
+    ///
+    /// With the tolerance heal preference off ([`kernel::heals_tolerance_defects`]), a run that
+    /// healed (begun while it was on) is not taken, nor what it found: the import is marked stale
+    /// and evaluation owed, which reads it again as read.
     pub fn settle_import_checks(&mut self) -> bool {
+        self.settle_import_checks_under(kernel::heals_tolerance_defects())
+    }
+
+    /// [`Self::settle_import_checks`] with the heal preference given.
+    pub(crate) fn settle_import_checks_under(&mut self, heal: bool) -> bool {
         let (found, told) = (&mut self.import_notices, &mut self.told_imports);
         let digests = &mut self.import_digests;
         let mut stale_from: Option<usize> = None;
@@ -3330,10 +3350,17 @@ impl Model {
             // with the heals the model already has, and is not news.
             let heals = run.heals();
             let known = heals.as_ref().is_some_and(|h| digests.heals(r.id).is_some_and(|k| k.digest() == h.digest()));
-            // With the heal preference off, a run that healed (begun while it was on) is not taken.
+            // With the heal preference off, a run that healed (begun while it was on) is not taken,
+            // nor its notes (the heal's note over the part as read): the run is dropped, so no
+            // view of the report shows them, and the import is read again.
+            if heals.is_some() && !known && !heal {
+                let as_read = kernel::ImportReport { checks: Default::default(), ..(**report).clone() };
+                r.import_report = (!as_read.issues.is_empty()).then(|| Arc::new(as_read));
+                stale_from = Some(stale_from.map_or(i, |s| s.min(i)));
+                continue;
+            }
             if let Some(heals) = heals
                 && !known
-                && kernel::heals_tolerance_defects()
                 && let Some((_, text)) = digests.steps.get(&r.id)
             {
                 digests.heals.insert(r.id, (*text, heals));
@@ -3506,7 +3533,7 @@ impl Model {
         }
         // The fingerprints from the first stored sketch on.
         let vals = evaluation_values(doc).0;
-        let steps = ImportDigests::of(doc, &self.import_digests);
+        let steps = ImportDigests::of(doc, &self.import_digests, self.heals());
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev_fp = first.checked_sub(1).and_then(|i| self.results.get(i)).map_or(0, |r| r.fingerprint);
         for (i, f) in doc.features.iter().enumerate().skip(first) {
@@ -3560,7 +3587,8 @@ impl Model {
             return false;
         }
         let vals = evaluation_values(doc).0;
-        let steps = ImportDigests::of(doc, &self.import_digests);
+        // as the next evaluation would fingerprint them: under the preference as it is now
+        let steps = ImportDigests::of(doc, &self.import_digests, kernel::heals_tolerance_defects());
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev = 0;
         // The model each feature starts from (which components the bodies it names are in).
@@ -3592,6 +3620,14 @@ impl Model {
     /// When SMLib's check runs on the features this model evaluates.
     pub fn validation(&self) -> kernel::Validation {
         self.validation
+    }
+
+    /// Whether this model's results were evaluated with the tolerance heal preference on
+    /// ([`kernel::heals_tolerance_defects`]): an import's failing parts healed, Repair healing
+    /// first. A model evaluated with it off holds other results: a saved one is not taken up
+    /// with the preference on, nor the reverse.
+    pub fn heals(&self) -> bool {
+        !self.heal_off
     }
 
     /// Check the features evaluated from now on under `validation` ([`kernel::Validation`]):
@@ -3627,11 +3663,14 @@ impl Model {
         let mut restored = 0;
         let marker = doc.marker.unwrap_or(usize::MAX);
         let validation = self.validation;
-        let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(kernel::heals_tolerance_defects());
+        // read once: the context, the fingerprints and the model's record agree
+        let heal = kernel::heals_tolerance_defects();
+        self.heal_off = !heal;
+        let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
-        self.import_digests = ImportDigests::of(doc, &self.import_digests);
+        self.import_digests = ImportDigests::of(doc, &self.import_digests, heal);
         let primed = self.primed.as_ref().filter(|(context, _)| !self.no_cache && *context == ctx).map(|(_, results)| results.clone());
         // Each feature's component, for `Document::legacy_body_component` on every body after
         // every feature without searching the timeline for each (the first feature with an id).
@@ -4278,7 +4317,7 @@ impl Model {
     pub(crate) fn refingerprint_from(&mut self, doc: &Document, start: usize) {
         self.placement_inputs = None;
         self.fingerprinted = None;
-        self.import_digests = ImportDigests::of(doc, &self.import_digests);
+        self.import_digests = ImportDigests::of(doc, &self.import_digests, self.heals());
         let start = start.min(self.results.len()).min(doc.features.len());
         if start == self.results.len().min(doc.features.len()) {
             return;

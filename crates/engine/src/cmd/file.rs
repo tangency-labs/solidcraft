@@ -504,6 +504,16 @@ fn next_group_name(doc: &Document) -> String {
     (1..=doc.timeline_groups.len() + 1).map(|n| format!("Group #{n}")).find(|name| !taken(name)).unwrap_or_else(|| "Group".into())
 }
 
+/// The options of a STEP `doc.open` that change the imported design, as the import cache keys
+/// them ([`solidcraft_io::ImportCache::key`]).
+fn import_key_options(options: &StepOptions) -> Value {
+    let mut key = json!({"y_up": options.y_up, "names": format!("{:?}", options.names), "folder": options.folder});
+    if !solidcraft_kernel::heals_tolerance_defects() {
+        key["tolerance_heal"] = json!(false);
+    }
+    key
+}
+
 /// Cache only a fresh open, never a live design, insert, or later edit. Read the source once:
 /// the bytes hashed here are exactly the bytes imported on a miss.
 fn open_step(
@@ -522,12 +532,9 @@ fn open_step(
     let cache = cache.filter(|_| reuse && !solidcraft_io::is_native_cad_path(path) && solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     // Every `doc.open` option that changes the imported design is in the key: a reused import is
-    // the one this open asks for.
-    let key = solidcraft_io::ImportCache::key(
-        &bytes,
-        path,
-        &json!({"y_up": options.y_up, "names": format!("{:?}", options.names), "folder": options.folder}),
-    );
+    // the one this open asks for. The tolerance heal preference too, named only when it is off
+    // (the default on keeps the keys written before it).
+    let key = solidcraft_io::ImportCache::key(&bytes, path, &import_key_options(&options));
     let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
     if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
         let mut fresh = Session::opened_validating(doc, Some(&saved), validation);
@@ -3906,6 +3913,41 @@ mod tests {
             assert_eq!(display(&cold), expected);
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A model saved with the tolerance heal preference one way is not reused with it the other
+    /// way, in both directions: its imports were healed or read as they are, and its Repair healed
+    /// first or not. The model is evaluated again instead. The import cache key differs only when
+    /// the preference is off, so keys written with it on (the default) stay valid.
+    #[test]
+    fn a_model_saved_with_the_heal_preference_one_way_is_not_reused_the_other_way() {
+        let saved_with = |on: bool| {
+            let _pref = solidcraft_kernel::heal_preference_for_tests(on);
+            let mut s = Session::new(Document::new("Heal preference"));
+            s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+            assert_eq!(s.model.heals(), on, "the model keeps the setting it was evaluated with");
+            let (saved, _) = s.model.saved_now(&s.doc).unwrap();
+            (s.doc.clone(), saved)
+        };
+        let adopted = |doc: &std::sync::Arc<Document>, saved: &solidcraft_doc::SavedModel, on: bool| {
+            let _pref = solidcraft_kernel::heal_preference_for_tests(on);
+            Session::saved_model(doc, Some(saved)).map(|m| m.heals())
+        };
+        let (off_doc, off) = saved_with(false);
+        let (on_doc, on) = saved_with(true);
+        assert_eq!(adopted(&off_doc, &off, false), Some(false), "saved off, opened off: reused, still off");
+        assert_eq!(adopted(&off_doc, &off, true), None, "saved off, opened on: evaluated again, so the parts heal");
+        assert_eq!(adopted(&on_doc, &on, true), Some(true), "saved on, opened on: reused");
+        assert_eq!(adopted(&on_doc, &on, false), None, "saved on, opened off: evaluated again, Repair without the heal");
+
+        let options = step_options(&json!({}), "file.open").unwrap();
+        let key = |on: bool| {
+            let _pref = solidcraft_kernel::heal_preference_for_tests(on);
+            import_key_options(&options)
+        };
+        assert!(key(true).get("tolerance_heal").is_none(), "on: the key as before the preference");
+        assert_eq!(key(false)["tolerance_heal"], json!(false));
+        assert_ne!(key(false), key(true));
     }
 
     /// #9170: a design holding a mesh body (an inserted STL) keeps its saved model and opens from

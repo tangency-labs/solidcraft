@@ -42,6 +42,30 @@ pub fn set_heals_tolerance_defects(on: bool) {
     HEALS.store(on, Ordering::Relaxed);
 }
 
+/// Holds the tolerance heal preference for a test that turns it ([`heal_preference_for_tests`]):
+/// tests holding one run one at a time, and the preference is on again when it drops.
+#[doc(hidden)]
+pub struct HealPreferenceForTests {
+    _held: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for HealPreferenceForTests {
+    fn drop(&mut self) {
+        set_heals_tolerance_defects(true);
+    }
+}
+
+/// For tests that turn the process-wide preference: waits for any other such test, then sets
+/// the preference to `on` (turn it again with [`set_heals_tolerance_defects`] while held). Under
+/// nextest each test is its own process; under `cargo test` this keeps such tests apart.
+#[doc(hidden)]
+pub fn heal_preference_for_tests(on: bool) -> HealPreferenceForTests {
+    static HELD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let held = HELD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    set_heals_tolerance_defects(on);
+    HealPreferenceForTests { _held: held }
+}
+
 /// What [`heal_tolerance_defects`] did.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ToleranceHeal {

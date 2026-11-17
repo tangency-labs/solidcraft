@@ -441,7 +441,7 @@ impl Model {
             });
             // Evaluated with the tolerance heal off: recorded only then, so the models saved
             // with it on (the default) are as before.
-            if !kernel::heals_tolerance_defects()
+            if !self.heals()
                 && let Some(out) = records.as_object_mut()
             {
                 out.insert("tolerance_heal".into(), json!(false));
@@ -1027,11 +1027,11 @@ impl Model {
             return Err(bad("saved model: features"));
         }
         let (vals, param_errors) = evaluation_values(doc);
-        let import_digests = ImportDigests::of(doc, &ImportDigests::default());
-        let marker = doc.marker.unwrap_or(usize::MAX);
         // As `evaluate` digests the context under the mode, so the next evaluation reuses these.
         // And under the tolerance heal preference it was evaluated with (on when not recorded).
         let heal = records.get("tolerance_heal").and_then(Json::as_bool).unwrap_or(true);
+        let import_digests = ImportDigests::of(doc, &ImportDigests::default(), heal);
+        let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let mut before = Arc::new(ModelState::default());
         // Whether `before` is the state before the feature: one the file left out only stands in.
@@ -1096,7 +1096,7 @@ impl Model {
             }
             results.push(result);
         }
-        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, ..Model::default() };
+        let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, heal_off: !heal, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
         // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
