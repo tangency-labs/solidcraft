@@ -1386,6 +1386,10 @@ impl Curve {
 
         // Refine Range solutions.
         refine(k, &mut sols, &named)?;
+        // Not upstream (#18064): a range with exact ends on the flank of a tangency is no
+        // coincidence. Dropped before the contacts move to the curve ends, as a range
+        // there would stop the flank's point solutions moving to the touch past it.
+        self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval, dist_tol)?;
         let self_intersect = core::ptr::eq(tree1, tree2);
         // Not for a self intersection: there the "other" curve is this curve, so the
         // stretch test compares the curve with itself and always passes, and the move
@@ -1538,10 +1542,6 @@ impl Curve {
             };
             sols.set_size(last_index.wrapping_add(1));
         }
-
-        // Not upstream (#18064): a range with exact ends on the flank of a tangency is no
-        // coincidence
-        self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval, dist_tol)?;
 
         // Phase 2: remove coincident segments which include or are adjacent to point
         // intersections (nearly tangent intersecting curves often lie within a

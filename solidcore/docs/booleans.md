@@ -459,7 +459,10 @@ What the port does today:
   the two curves' interval ends meet) at which the curves are tangent, when the range stops short
   of the touch and its far end, exact, lies off the ends of both curves: the touch is the
   intersection. A coincidence through the touch reaches it, and one that ends where a curve ends
-  is not a flank; along a coincidence the gap is rounding and shows no growth either way.
+  is not a flank; along a coincidence the gap is rounding and shows no growth either way. The
+  range is dropped before point contacts move to the curve ends (`move_contacts_to_curve_ends`),
+  which leaves a point whose stretch to the end crosses a range where it is: the flank's points
+  on the far side of the range then move to the touch.
 - **A line a hair inside a circle.** A line in a circle's plane, δ inside the circle, crosses
   it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
   `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below
