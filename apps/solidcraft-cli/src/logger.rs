@@ -15,7 +15,9 @@ struct Stderr {
 
 impl Log for Stderr {
     fn enabled(&self, m: &Metadata) -> bool {
-        m.level() <= if m.target().starts_with("solidcraft") { self.ours } else { self.others }
+        let target = m.target();
+        let ours = target.starts_with("solidcraft") || target == "craft_plugin_wasm" || target.starts_with("craft_plugin_wasm::");
+        m.level() <= if ours { self.ours } else { self.others }
     }
 
     fn log(&self, r: &Record) {

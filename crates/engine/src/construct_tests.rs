@@ -922,6 +922,32 @@ fn offset_plane_through_a_point_follows_the_point() {
     assert!(s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 5, "through": {"vertex": [0, 0, 0]}})).is_err());
 }
 
+#[test]
+fn offset_plane_redefine_maps_world_geometry_into_its_owning_component() {
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","translate":[20,30,40],"axis":[0,1,0],"angle":"90 deg"}));
+    let base = json!({"origin":[0,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]});
+    let made = run(&mut s, "construct.plane.offset", json!({"base":base,"offset":5,"name":"Side"}));
+    let id = made["feature"].as_u64().unwrap();
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base: saved, .. } } = s.doc.feature(id).unwrap().kind.clone() else {
+        panic!("offset plane");
+    };
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "timeline.redefine", json!({"feature":id,"command":"CONSTRUCT.PLANE.OFFSET","params":{"base":base,"offset":9}}));
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base: edited, .. } } = &s.doc.feature(id).unwrap().kind else {
+        panic!("offset plane");
+    };
+    assert_eq!(edited, &saved, "the explicit base returns to the feature's local frame");
+    assert!(near(plane(&s, "Side").origin, Vec3::X * 9.));
+    assert!(near(plane(&s, "Side").normal(), Vec3::X));
+    run(&mut s, "timeline.redefine", json!({"feature":id,"command":"construct.plane.offset","params":{"base":base,"through":{"point":[17,20,30]}}}));
+    assert!(near(plane(&s, "Side").origin, Vec3::X * 17.));
+    assert!(near(plane(&s, "Side").normal(), Vec3::X));
+    assert_eq!(s.active_component, 0);
+}
+
 /// Hiding the placement a component is shown at hides its construction geometry too, as it
 /// hides its bodies and sketches.
 #[test]
@@ -1181,4 +1207,22 @@ fn snapped_centres_and_middles_follow_the_model() {
     // A snap point of something with none of that kind is refused when it is built.
     let bad = s.execute("construct.point.vertex", &json!({"point": snap(json!({"type": "origin"}), "middle", [0.0, 0.0, 0.0])}));
     assert!(bad.is_err() || construction_points(&s).len() == 2, "{bad:?}");
+}
+
+/// #6959: a turn about a given `origin` carries the constructions built on the body about that
+/// origin too, not about the world origin, so they stay on the body.
+#[test]
+fn construction_on_a_body_turned_about_an_origin_turns_about_it_too() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Pin"}));
+    run(&mut s, "construct.axis.through_cylinder", json!({"face": {"face": [5, 0, 10]}, "name": "PinAxis"}));
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [5, 0, 20]}, "name": "PinTop"}));
+    // A quarter turn about Y through the top centre (0, 0, 20): that centre stays put and the
+    // axis lies along X at height 20. About the world origin the top would go to (20, 0, 0).
+    run(&mut s, "solid.move", json!({"bodies": ["Pin"], "origin": [0, 0, 20], "axis": [0, 1, 0], "angle": "90 deg"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(near(point(&s, "PinTop"), Vec3::new(0.0, 0.0, 20.0)), "{:?}", point(&s, "PinTop"));
+    let (o, d) = axis(&s, "PinAxis");
+    assert!(parallel(d, Vec3::X) && on_line(o, d, Vec3::new(-20.0, 0.0, 20.0)), "{o:?} {d:?}");
 }

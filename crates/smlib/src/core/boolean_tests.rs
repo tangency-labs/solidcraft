@@ -215,7 +215,7 @@ cases!(
 /// A `w` x `h` planar sheet on z = 0 from `(x, y)`, solidcore's `CreateRectangle`.
 fn rectangle(x: f64, y: f64, w: f64, h: f64) -> Body {
     let frame = Axis2Placement::new(Vec3::new(x, y, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
-    run("create_rectangle", |k| create_rectangle(k, 0.0, w, h, &frame)).map(Body::new).unwrap()
+    run("create_rectangle", |k| create_rectangle(k, 0.0, w, h, &frame)).map(Body::from_kernel).unwrap()
 }
 
 fn area(b: &Body) -> f64 {

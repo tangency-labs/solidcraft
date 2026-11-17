@@ -18,6 +18,8 @@
     clippy::indexing_slicing
 )]
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -72,16 +74,29 @@ fn peg() -> (f64, usize) {
     let front_top = nearest_edge(&k, &b, Point3::new(20.0, 0.0, 10.0));
     fillet_edges(&mut k, &mut b, &[front_top], 1.0, 1, 1, 1.0).unwrap();
     let before = volume(&k, &mut b);
+    let mut part = b.clone_standing_for_self().unwrap();
     let arc = nearest_edge(&k, &b, Point3::new(32.0, 8.0, 10.0));
     let chain = nearest_edge(&k, &b, Point3::new(38.0, 0.3, 9.5));
     fillet_edges(&mut k, &mut b, &[arc, chain], 1.0, 1, 1, 1.0).unwrap();
-    (volume(&k, &mut b) - before, b.faces().ids().count())
+    let after = volume(&k, &mut b);
+    // the 4.29958 added before `brep_volume` closed tolerant edges' gaps (#16735), to its
+    // five decimals: the move checked within the two bodies' old leak bounds
+    volume_leak::assert_difference_moved_by_the_old_leak(
+        &k,
+        &mut part,
+        &mut b,
+        -4.29958,
+        before - after,
+        1e-8,
+    );
+    (after - before, b.faces().ids().count())
 }
 
 #[test]
 fn arc_round_from_a_tangent_point_adds_the_concave_material() {
-    // the concave round adds 4.29958 (r 1), as without WR-603's start direction
+    // the concave round adds 4.29958 (r 1), as without WR-603's start direction; 4.29953
+    // since `brep_volume` closes tolerant edges' gaps (#16735)
     let (added, faces) = peg();
     assert_eq!(faces, 10);
-    assert!((added - 4.29958).abs() < 1e-5, "{added}");
+    assert!((added - 4.29953).abs() < 1e-5, "{added}");
 }

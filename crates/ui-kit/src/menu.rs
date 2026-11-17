@@ -1,6 +1,6 @@
 //! Menus share one popup surface and one row painter. Command dispatch stays with callers.
+use crate::{BackingTooltipExt as _, icons, type_face::RichTextExt as _};
 use crate::{Container, Icon, Surface};
-use crate::{icons, type_face::RichTextExt as _};
 use egui::{Color32, FontId, Rect, Response, Sense, Stroke, TextureId, Ui, pos2, vec2};
 use serde::Serialize;
 use serde_json::Value;
@@ -101,6 +101,19 @@ pub struct Item {
     /// Why the entry is off: shown on hover, and in the control channel's report.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tip: Option<String>,
+}
+
+/// Share of a menu row's width the note on the right may take before it is elided, so that a
+/// long file name cannot cover the label beside it (#17302).
+const KEY_ROOM: f32 = 0.5;
+
+/// Lays out the note on the right of a menu row, elided to `room` points.
+fn laid_out_key(painter: &egui::Painter, text: &str, room: f32, t: &Tokens) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple(solidcraft_ui_text::tr_label(text).to_string(), FontId::monospace(t.font_small), t.text_dim, room);
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    job.wrap.overflow_character = Some('\u{2026}');
+    painter.layout_job(job)
 }
 
 impl Item {
@@ -480,8 +493,16 @@ impl<'a> MenuItem<'a> {
             ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(self.shortcut).to_string(), FontId::monospace(t.font_small), t.form_dim).size().x
                 + t.space_8
         };
-        (t.space_16 * 2.0 + t.space_8 + t.space_2 + label.size().x + shortcut + t.space_8 + trailing + if self.submenu { t.space_16 } else { 0.0 })
-            .ceil()
+        (t.space_16 * 2.0
+            + t.space_8
+            + t.space_2
+            + label.size().x
+            + shortcut
+            + t.space_8
+            + trailing
+            + if self.submenu { t.space_16 } else { 0.0 }
+            + Self::trailing_check_width(self.icon, self.checked.is_some()))
+        .ceil()
     }
 
     /// The row for a menu entry, `lit` when it is chosen with the keys or its flyout is open. A
@@ -502,6 +523,11 @@ impl<'a> MenuItem<'a> {
         }
     }
 
+    pub(crate) fn trailing_check_width(icon: Icon<'_>, checkable: bool) -> f32 {
+        let t = Tokens::get();
+        if !icon.is_blank() && checkable { t.space_16 + t.space_8 } else { 0.0 }
+    }
+
     pub fn show(&self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
         let icon_column = if self.large { t.space_16 * 2.0 + t.space_8 } else { t.control_height };
@@ -516,7 +542,8 @@ impl<'a> MenuItem<'a> {
                 ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(self.label).to_string(), FontId::proportional(t.font_label), t.form_ink);
             let shortcut = ui.painter().layout_no_wrap(self.shortcut.to_string(), FontId::monospace(t.font_small), t.form_dim);
             let trailing = if self.submenu { t.space_16 } else { 0.0 };
-            (icon_column + t.space_2 + label.size().x + shortcut.size().x + t.space_24 + trailing).min(ui.available_width())
+            let check = Self::trailing_check_width(self.icon, self.checked.is_some());
+            (icon_column + t.space_2 + label.size().x + shortcut.size().x + t.space_24 + trailing + check).min(ui.available_width())
         } else {
             ui.available_width()
         };
@@ -563,7 +590,7 @@ impl<'a> MenuItem<'a> {
         let icon_size = if large { t.space_16 * 2.0 } else { t.space_16 };
         let icon_column = if large { icon_size + t.space_8 } else { t.control_height };
         let icon = Rect::from_center_size(pos2(r.left() + icon_column / 2.0, r.center().y), vec2(icon_size, icon_size));
-        if let Some(on) = self.checked {
+        if let Some(on) = self.checked.filter(|_| self.icon.is_blank()) {
             if on {
                 super::checks::paint_check_glyph(&painter, icon, false, t.form_primary);
             }
@@ -586,10 +613,32 @@ impl<'a> MenuItem<'a> {
             ));
             right -= t.space_16;
         }
+        let check_width = Self::trailing_check_width(self.icon, self.checked.is_some());
+        if check_width > 0.0 {
+            if self.checked == Some(true) {
+                let check = Rect::from_center_size(pos2(right - t.space_8, r.center().y), vec2(t.space_16, t.space_16));
+                super::checks::paint_check_glyph(&painter, check, false, t.form_primary);
+            }
+            right -= check_width;
+        }
         if !self.shortcut.is_empty() {
-            let key = painter.layout_no_wrap(solidcraft_ui_text::tr_label(self.shortcut).to_string(), FontId::monospace(t.font_small), dim);
+            // The note on the right is a file name for Insert Design's list, and it used to be
+            // laid out with no width at all: a long name grew leftwards over the row's label
+            // (#17302). Cap it to a share of the row and elide what does not fit.
+            let room = (r.width() * KEY_ROOM).max(0.0);
+            let whole = solidcraft_ui_text::tr_label(self.shortcut).to_string();
+            let untruncated = painter.layout_no_wrap(whole.clone(), FontId::monospace(t.font_small), dim);
+            let fits = untruncated.size().x <= room + 0.5;
+            let key = if fits { untruncated } else { laid_out_key(&painter, self.shortcut, room, &t) };
             painter.galley(pos2(right - key.size().x, r.center().y - key.size().y / 2.0), key.clone(), dim);
             right -= key.size().x + t.space_8;
+            // Cutting the note short can leave two rows that look the same: design names are free
+            // text, and two file names can differ only past the ellipsis. A row that had to cut its
+            // note says the whole name on hover, so the choice is not blind. `Item::tip` is not
+            // used for this: it is the reason a row is off, and a row can be off and elided at once.
+            if !fits && enabled {
+                response.clone().backing_on_hover_text(whole);
+            }
         }
         let left = r.left() + icon_column + t.space_2;
         if large {
@@ -600,6 +649,7 @@ impl<'a> MenuItem<'a> {
                 let mut text_ui = ui.new_child(egui::UiBuilder::new().id_salt(response.id.with("large_label")).max_rect(text_rect));
                 egui::ScrollArea::horizontal()
                     .auto_shrink([false, false])
+                    .min_scrolled_width(0.0)
                     .max_width(text_rect.width())
                     .max_height(text_rect.height())
                     .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, mouse_wheel: true, ..egui::scroll_area::ScrollSource::NONE })
@@ -931,6 +981,24 @@ mod tests {
     use crate::test_support::{key, pointer};
 
     #[test]
+    fn checkable_menu_rows_keep_their_icon_in_both_states() {
+        const HOST: TextureId = TextureId::User(7);
+        let ctx = crate::test_support::context();
+        let item = Item { icon: ItemIcon::texture(HOST), ..Item::action("id", "Label", "") };
+        for (checked, large) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut row = MenuItem::new(&item.id, &item.label, item.icon.as_icon());
+                row.checked = Some(checked);
+                row.large = large;
+                row.show(ui);
+            });
+            output.textures_delta.clear();
+            assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == HOST)));
+            assert_eq!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Path(_))), checked);
+        }
+    }
+
+    #[test]
     fn a_menu_row_draws_a_hosts_texture_and_an_item_still_reads_as_its_kit_name() {
         const HOST: TextureId = TextureId::User(7);
         let item = Item { icon: ItemIcon::texture(HOST), ..Item::action("id", "Label", "") };
@@ -951,7 +1019,7 @@ mod tests {
         let ctx = crate::test_support::context();
         let label = "A very long command name with all of its words visible";
         for (large, limited) in [(true, false), (true, true), (false, true)] {
-            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
                 let mut item = MenuItem::new("long_command", label, "");
                 item.shortcut = "Ctrl+Shift+X";
                 let width = if limited { 220.0 } else { item.large_width(ui, 26.0) };
@@ -967,6 +1035,114 @@ mod tests {
             assert_eq!(text.galley.elided, !large, "only the original view truncates at a limited width");
             assert_eq!(text.galley.rows.len(), 1, "the row height and typography stay fixed");
             assert_eq!(text.galley.job.sections[0].format.font_id.size, Tokens::get().font_label);
+        }
+    }
+
+    #[test]
+    fn a_large_menu_label_can_scroll_to_its_end_in_a_narrow_text_slot() {
+        let ctx = crate::test_support::context();
+        let label = "A command with a long name and a reachable final word";
+        let mut label_right = 0.0;
+        let mut clip_right = 0.0;
+        let mut label_left = 0.0;
+        let mut clip_left = 0.0;
+        for frame in 0..40 {
+            let mut events = vec![egui::Event::PointerMoved(pos2(65.0, 20.0))];
+            if (2..12).contains(&frame) {
+                events.push(egui::Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(-1000.0, 0.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                });
+            }
+            let input = egui::RawInput { events, time: Some(f64::from(frame) / 60.0), ..Default::default() };
+            let output = crate::test_support::raw_frame(&ctx, input, |ui| {
+                let item = MenuItem::new("narrow_command", label, "");
+                let rect = Rect::from_min_size(egui::Pos2::ZERO, vec2(100.0, 40.0));
+                let response = ui.interact(rect, ui.scope_id().with("narrow_command"), Sense::click());
+                item.paint_large(ui, rect, &response, 0.0);
+                assert!(!response.clicked(), "scrolling must not activate the command");
+            });
+            for clipped in &output.shapes {
+                crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape
+                        && text.galley.job.text == label
+                    {
+                        label_left = text.pos.x;
+                        label_right = text.pos.x + text.galley.size().x;
+                        clip_left = clipped.clip_rect.left();
+                        clip_right = clipped.clip_rect.right();
+                    }
+                });
+            }
+        }
+        assert!(clip_right - clip_left < 64.0, "exercise a slot narrower than egui's default minimum");
+        assert!(label_left < clip_left, "the label moved horizontally");
+        assert!(label_right <= clip_right + 1.0, "the final word is reachable: label ends at {label_right}, slot ends at {clip_right}");
+    }
+
+    #[test]
+    fn a_long_note_on_the_right_of_a_row_is_elided_and_leaves_the_label_its_share() {
+        const ROOM: f32 = 120.0;
+        let ctx = crate::test_support::context();
+        let mut medidas = None;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let t = Tokens::get();
+            let painter = ui.painter().clone();
+            medidas =
+                Some((laid_out_key(&painter, "Topcraft_Messschieber_Unterteil_final_v3.sc", ROOM, &t), laid_out_key(&painter, "plate.sc", ROOM, &t)));
+        });
+        output.textures_delta.clear();
+        let (key, short) = medidas.expect("the row laid the note out");
+        assert!(key.elided, "a name wider than its room must be elided");
+        assert!(key.size().x <= ROOM + 0.5, "elided note is {} wide, room is {ROOM}", key.size().x);
+        assert!(!short.elided && short.size().x < ROOM, "a short note keeps its whole text");
+    }
+
+    /// A note that did not fit is cut short, so the row says the whole name on hover; a note that
+    /// fits is drawn whole and adds no hover. Two designs whose file names differ past the ellipsis
+    /// cannot be told apart by the row alone, which is what the hover is for.
+    #[test]
+    fn a_cut_short_note_says_its_whole_name_on_hover() {
+        let long = "Topcraft_Messschieber_Unterteil_final_v3.sc";
+        for (note, hovered) in [(long, true), ("plate.sc", false)] {
+            let ctx = crate::test_support::context();
+            ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+            let row = Rect::from_min_size(egui::Pos2::ZERO, vec2(240.0, 24.0));
+            let at = row.center();
+            let mut texts = Vec::new();
+            for frame in 0..4 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(260.0, 40.0))),
+                    events: if frame == 0 { vec![egui::Event::PointerMoved(at)] } else { Vec::new() },
+                    time: Some(f64::from(frame)),
+                    ..Default::default()
+                };
+                let mut output = ctx.run_ui(input, |ui| {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(row), |ui| {
+                        let mut item = MenuItem::new("id", "Design", "");
+                        item.shortcut = note;
+                        item.show(ui);
+                    });
+                });
+                output.textures_delta.clear();
+                let tips: Vec<Rect> = ctx.memory(|m| {
+                    m.areas()
+                        .visible_layer_ids()
+                        .into_iter()
+                        .filter(|layer| layer.order == egui::Order::Tooltip)
+                        .filter_map(|layer| m.area_rect(layer.id))
+                        .collect()
+                });
+                texts = crate::test_support::text_shapes(&output)
+                    .filter(|text| tips.iter().any(|tip| tip.contains(text.pos)))
+                    .map(|text| text.galley.job.text.to_owned())
+                    .collect();
+            }
+            let want: Vec<String> = if hovered { vec![note.to_owned()] } else { Vec::new() };
+            assert_eq!(texts, want, "the hover of a row noted {note}");
         }
     }
 

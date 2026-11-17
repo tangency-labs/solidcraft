@@ -20,7 +20,6 @@
 //! [`Error::Unsupported`] too.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::PoisonError;
 
 use solidcore::EntityRef;
 use solidcore::SolidError;
@@ -61,8 +60,7 @@ use super::{Body, answer};
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
 
 /// Why solidcore refuses the 3x2 mixed-convexity corner whose rails cross
-/// (`fixes.fillet_refuse_mixed_corner_crossing_rails`, [`MIXED_CORNER_RAILS_CROSS`]): it builds no
-/// corner for it yet.
+/// ([`MIXED_CORNER_RAILS_CROSS`]): it builds no corner for it yet.
 pub(crate) const MIXED_CORNER_UNSUPPORTED: &str = "a fillet corner where a convex and a concave round leave the vertex along one \
 tangent, so that their contact lines cross before the corner (https://github.com/tangency-labs/solidcore/issues/2256)";
 use solidcore::topology::brep::p3::brep_copy;
@@ -75,8 +73,12 @@ const INVALID_INPUT: i32 = 1007;
 
 /// An SMLib status as the capi passes it on (`status`, smlib_shim.h): solidcore's upstream
 /// status codes as they are; its refusals of code it has not ported as not supported; a refusal
-/// solidcore-ops types as that refusal ([`Error::Refused`]); the rest as solidcore's text.
+/// or a blend failure solidcore-ops types as that ([`Error::Refused`]: an offset refused with
+/// its reason, a blend failed with the kernel's statement of why); the rest as solidcore's text.
 pub(super) fn status(e: SolidError) -> Error {
+    if let Some(failed) = solidcore_ops::blend::failure(&e) {
+        return Error::Refused(failed);
+    }
     match e {
         SolidError::Upstream { code, .. } => Error::Status(code),
         e if stands_for_status(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
@@ -96,9 +98,9 @@ pub(super) fn status(e: SolidError) -> Error {
 /// returned (`Upstream` before solidcore described it), whether or not it names an entity. A
 /// B-spline method's (`NurbsFailure::BSpline`); an intersection or classification, primitive
 /// (extrusion, revolution, skin, taper), mass-property, healing, geometry-utility, query,
-/// topology or surface routine's; and a sweep, curve, offset or blend routine's that replaced a
-/// status (a railed loft's, a length bracket's and an offset's refusals replaced none and pass on
-/// otherwise). `tests::status_sites_only_shrink` counts the sites that make a status, a set that only shrinks.
+/// topology or surface routine's; and a sweep, curve or offset routine's that replaced a status
+/// (a railed loft's, a length bracket's and an offset's refusals replaced none and pass on
+/// otherwise). A blend routine's is solidcore-ops' blend failure ([`status`]). `tests::status_sites_only_shrink` counts the sites that make a status, a set that only shrinks.
 fn stands_for_status(e: &SolidError) -> bool {
     matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_)))
         || e.intersect_failure().is_some()
@@ -112,7 +114,6 @@ fn stands_for_status(e: &SolidError) -> bool {
         || e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
         || e.surface_failure().is_some()
         || e.offset_failure().is_some_and(|o| o.replaces_upstream_status())
-        || e.blend_failure().is_some_and(|b| b.replaces_upstream_status())
 }
 
 /// A failure of the Boolean engine (which slice, sweep and the other users of the merge engine
@@ -316,10 +317,21 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// failure. `replaced`: the session marks the corners' patches for another patch to replace,
 /// so a setback named is only what solidcore's corner needs. A failure that is no refusal of
 /// the blend, including one solidcore itself types as not supported or not ported, passes on
-/// as solidcore's ([`status`]). A sized refusal's point is read once the session lets the body
-/// go ([`solidcore_ops::blend::SessionRefusal::on`]).
+/// as solidcore's ([`session_status`]). A sized refusal's point is read once the session lets
+/// the body go ([`solidcore_ops::blend::SessionRefusal::on`]).
 fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool, replaced: bool, chamfer: bool) -> Result<SessionRefusal> {
-    solidcore_ops::blend::session_refusal(s, e, SessionCall { corner, patches: replaced, chamfer }).map_err(status)
+    solidcore_ops::blend::session_refusal(s, e, SessionCall { corner, patches: replaced, chamfer }).map_err(|e| session_status(s, e))
+}
+
+/// [`status`] for a failure `e` of the session `s`: a blend failure says, after solidcore's
+/// statement of it, what the session noted of the step that failed
+/// ([`solidcore_ops::blend::session_failure`]), since the statement alone ("the fillet body is
+/// not built") is the same for every step. Any other error is as [`status`] gives it.
+fn session_status(s: &FilletSession<'_>, e: SolidError) -> Error {
+    match solidcore_ops::blend::session_failure(s, &e) {
+        Some(failed) => Error::Refused(failed),
+        None => status(e),
+    }
 }
 
 /// An ops refusal of the session ([`blend_failure`]) as SolidCraft's error, its fields as they are.
@@ -329,7 +341,6 @@ fn refusal(r: Refusal) -> Error {
         Refusal::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
         Refusal::NoRoom => Error::NoRoom,
         Refusal::CornerUnsupported => Error::CornerUnsupported,
-        Refusal::RailLeavesFace(_) => Error::Unsupported,
     }
 }
 
@@ -589,14 +600,14 @@ pub(super) fn finish(k: &mut Kernel, mut b: Brep, solid_in: bool) -> solidcore::
 
 /// Runs `f` on a copy of `body` (`brep_copy`).
 pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kernel, Brep) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     super::run_on(call, &[("brep", body)], |k| {
-        let c = brep_copy(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        let c = brep_copy(k, &body.kernel())?;
         f(k, c)
     })?
-    .map(Body::new)
+    .map(Body::from_kernel)
 }
 
 /// What [`blend`] does with the picked corners' patches.
@@ -661,7 +672,7 @@ fn overflow_first(
         e.err().unwrap_or(Error::Unsupported)
     }
     let mut fresh = {
-        let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let g = body.kernel();
         brep_copy(k, &g)?
     };
     let again = match pick_edges(k, &fresh, points, tolerance)? {
@@ -918,7 +929,21 @@ fn blend_call(
         // overflow their faces across cliffs and others fit, the overflowing ones are built
         // first, on a fresh copy, and the others then round what is left of their edges. An edge
         // the overflow removes whole is gone (`dropped`); one it cuts keeps the rest.
-        let may_go_first = OVERFLOW_GOES_FIRST && back.is_empty() && open == Corners::Filled && picked.len() > 1;
+        // Where two picks meet at a vertex that is there only for splits of the faces beside
+        // them on their own surfaces, the blend runs through it as along one edge: those splits
+        // are taken out before the construction, as ops' blend does (#16654).
+        let through =
+            if back.is_empty() && open == Corners::Filled { solidcore_ops::blend::without_splits_at_picks(k, &w, &picked, &each)? } else { None };
+        let merged = through.is_some();
+        let (picked, each) = match through {
+            Some((clean, picks, kept)) => {
+                w = clean;
+                let sizes: Vec<f64> = kept.iter().map(|&i| each.get(i).copied().unwrap_or(0.0)).collect();
+                (picks, sizes)
+            }
+            None => (picked, each),
+        };
+        let may_go_first = OVERFLOW_GOES_FIRST && !merged && back.is_empty() && open == Corners::Filled && picked.len() > 1;
         let (mut stopped, mut mitred) = (None, Vec::new());
         let first = may_go_first.then_some(OverflowFirst { classify_only: false, stopped: &mut stopped, mitred: Some(&mut mitred) });
         let done = blend_edges_stopping(k, &mut w, &picked, &each, section, None, &back, (open == Corners::Open).then_some(&mut patches), first)?;
@@ -1524,22 +1549,56 @@ mod tests {
     }
 
     /// A blend routine's failure passes on as the status it replaced, as the `Upstream` it
-    /// replaced did, whether or not it names an edge.
+    /// replaced did, whether or not it names an edge, and keeps solidcore's reason for it
+    /// ([`Error::BlendFailed`]): a bare status names no cause the user or a report can act on.
     #[test]
-    fn blend_failures_pass_on_as_their_status() {
+    fn blend_failures_pass_on_as_their_status_with_their_reason() {
         use solidcore::error::Failure;
         use solidcore::error::blend::BlendFailure;
         let blend = |b| Failure::new("blend::feature_executive", b).into_error();
-        assert!(matches!(status(blend(BlendFailure::Failed("x"))), Error::Status(1001)));
-        assert!(matches!(status(blend(BlendFailure::Missing("the edge use's edge"))), Error::Status(1006)));
-        assert!(matches!(status(blend(BlendFailure::InvalidValue("x"))), Error::Status(1007)));
-        assert!(matches!(status(blend(BlendFailure::Inconsistent("x"))), Error::Status(1005)));
-        assert!(matches!(status(blend(BlendFailure::BadIntersections("x"))), Error::Status(1027)));
-        assert!(matches!(status(blend(BlendFailure::NotConverged("x"))), Error::Status(1022)));
-        assert!(matches!(status(blend(BlendFailure::PassedOn { what: "x", status: 1020 })), Error::Status(1020)));
+        // the status and the reason the failure carries, and its class (the kernel's own)
+        let carried = |e: Error| match e {
+            Error::Refused(solidcore_ops::Error::BlendFailed { class, status, phrase }) => (status, phrase, class),
+            e => panic!("not a typed blend failure: {e:?}"),
+        };
+        let x = |status: i32, phrase: &str| (status, phrase.to_owned());
+        let cases = [
+            (BlendFailure::Failed("x"), x(1001, "x")),
+            (BlendFailure::Missing("the edge use's edge"), x(1006, "the edge use's edge is missing")),
+            (BlendFailure::InvalidValue("x"), x(1007, "x")),
+            (BlendFailure::Inconsistent("x"), x(1005, "a consistency check failed: x")),
+            (BlendFailure::BadIntersections("x"), x(1027, "x")),
+            (BlendFailure::NotConverged("x"), x(1022, "x")),
+            (BlendFailure::PassedOn { what: "x", status: 1020 }, x(1020, "x")),
+        ];
+        for (failure, (want_status, want_phrase)) in cases {
+            let (status, phrase, class) = carried(status(blend(failure)));
+            assert_eq!((status, phrase.as_str(), class), (want_status, want_phrase.as_str(), failure.class()), "{failure:?}");
+        }
         let at = Failure::new("blend::fillet_executive::p3", BlendFailure::Failed("x"))
             .at(solidcore::EntityRef::Edge(solidcore::topology::EdgeId::from_index(2)))
             .into_error();
-        assert!(matches!(status(at), Error::Status(1001)));
+        assert_eq!(carried(status(at)).0, 1001);
+        // the trim of a blend whose faces leak past its rails, as the message says it
+        let leak = blend(BlendFailure::Failed("the faces the rails enclose reach past the rails"));
+        assert_eq!(status(leak).to_string(), "the blend failed (status 1001): the faces the rails enclose reach past the rails");
+    }
+
+    /// A session's failure says what the session noted of the step that failed, after
+    /// solidcore's statement of it. The session here is asked to fillet with no edge set up: it
+    /// makes no fillet face, and what it noted says so.
+    #[test]
+    fn a_session_failure_says_what_the_session_noted() {
+        let body = super::super::make_box([0.0; 3], [10.0; 3]).unwrap();
+        let mut b = body.kernel();
+        let mut k = Kernel::default();
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        let e = s.do_filleting(&mut k, None).unwrap_err();
+        assert_eq!(status(e.clone()).to_string(), "the blend failed (status 1001): the fillet body has no faces");
+        let failed = blend_failure(&s, e, false, false, false).unwrap_err();
+        assert_eq!(
+            failed.to_string(),
+            "the blend failed (status 1001): the fillet body has no faces: Fillet Surface Computation Failure: no fillet faces were made"
+        );
     }
 }

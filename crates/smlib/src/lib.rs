@@ -93,7 +93,8 @@ pub enum Error {
     /// solidcore reported an error (the call, then its message).
     Solidcore(String),
     /// A refusal solidcore-ops types, carried as it is: the app words it from its fields
-    /// (an offset refused with its reason, [`solidcore_ops::Error::OffsetRefused`]).
+    /// (an offset refused with its reason, [`solidcore_ops::Error::OffsetRefused`]; a fillet or
+    /// chamfer failed with the kernel's statement of why, [`solidcore_ops::Error::BlendFailed`]).
     Refused(solidcore_ops::Error),
     /// solidcore panicked; the guard caught it (the call, then the panic's message).
     Internal(String),
@@ -127,7 +128,7 @@ impl std::fmt::Display for Error {
                     write!(f, " at the edge at ({x:.3}, {y:.3}, {z:.3})")?;
                 }
                 if let Some(why) = why {
-                    write!(f, ": {}", why.words())?;
+                    write!(f, ": {}", why.words_for(*kind))?;
                 }
                 write!(f, "; the largest {} that fits is {size}", kind.word())
             }
