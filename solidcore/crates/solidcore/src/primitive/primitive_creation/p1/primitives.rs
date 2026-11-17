@@ -44,7 +44,9 @@
 //! Not upstream (SolidCraft #17462): a cylinder [`PrimitiveCreation::create_linear_sweep`]
 //! makes from an arc within the B-rep's tolerance of square to the sweep has the sweep
 //! direction as its axis and its origin in the profile's plane (`square_to_sweep`), not
-//! the arc fit's normal, which a very short arc leaves off the sweep.
+//! the arc fit's normal, which a very short arc leaves off the sweep, when the convex
+//! hull of the profile's control points lies within the arc zero of that plane; a
+//! profile that really leans across the sweep keeps the fit's frame, as upstream.
 //! Not upstream (WR-596, opt-in `Kernel::fixes.box_face_failures_propagate`; the fork's
 //! tangency-labs/smlib 0df62c8, 35008b1, 449c81c): [`PrimitiveCreation::create_box`]
 //! returns each face's and the stitch's status and skips sides of zero extent, as the
@@ -1110,15 +1112,28 @@ fn arc_sweep_cylinder(
 
 /// Not upstream (#17462): turn an arc's frame, already within the B-rep's tolerance of
 /// square to the sweep, exactly square to it, so the cylinder swept from it is the
-/// translation surface the sweep defines. The frame of a short arc fitted from a planar
-/// curve is ill-conditioned: a few hundredths of a degree of arc leave its normal up to
-/// `5e-8` off the plane's, and a cylinder on that normal leans across the sweep, its far
-/// edge `distance` times that off the swept curve and its rows no translates of each
-/// other. Z becomes `sweep_dir` (or its negation, keeping the frame's sense, so the arc's
-/// angles still run the same way), X the old X's component across it, and the origin
-/// moves along the new axis into the plane through `on_plane`, a point of the curve. A
-/// frame already exactly square is left as it is.
-fn square_to_sweep(frame: &mut Axis2Placement, sweep_dir: Vec3, on_plane: Vec3) -> Result<()> {
+/// translation surface the sweep defines, when the profile curve itself lies in a plane
+/// square to the sweep. The frame of a short arc fitted from a planar curve is
+/// ill-conditioned: a few hundredths of a degree of arc leave its normal up to `5e-8` off
+/// the plane's, and a cylinder on that normal leans across the sweep, its far edge
+/// `distance` times that off the swept curve and its rows no translates of each other.
+///
+/// The frame is squared only when the convex hull of the curve's control points
+/// ([`Curve::piece_hull_points`], each widened by its coordinates' error bound) lies within
+/// `zero` (the arc zero the curve was fitted to) of the plane square to the sweep through
+/// the curve's start: then the tilt is the fit's rounding, not the profile's. A profile
+/// that really leans across the sweep (up to `2 r` times the tilt over a whole circle,
+/// which the caller's `distance * tilt` check does not bound), or whose kind has no
+/// certain hull, keeps the fit's frame, as upstream. Z becomes `sweep_dir` (or its
+/// negation, keeping the frame's sense, so the arc's angles still run the same way), X the
+/// old X's component across it, and the origin moves along the new axis into that plane.
+/// A frame already exactly square is left as it is.
+fn square_to_sweep(
+    frame: &mut Axis2Placement,
+    curve: &Curve,
+    sweep_dir: Vec3,
+    zero: f64,
+) -> Result<()> {
     let z = frame.z_axis();
     let axis = if sweep_dir.dot(z) < 0.0 {
         -sweep_dir
@@ -1126,6 +1141,21 @@ fn square_to_sweep(frame: &mut Axis2Placement, sweep_dir: Vec3, on_plane: Vec3) 
         sweep_dir
     };
     if z == axis {
+        return Ok(());
+    }
+    let Some(hull) = curve.piece_hull_points(&curve.natural_interval()) else {
+        return Ok(());
+    };
+    let Some(&(on_plane, _)) = hull.first() else {
+        return Ok(());
+    };
+    // An error of `e` in each coordinate moves a point along the axis by at most
+    // `e * (|ax| + |ay| + |az|)`.
+    let spread = axis.x.abs() + axis.y.abs() + axis.z.abs();
+    let flat = hull
+        .iter()
+        .all(|&(p, e)| (p - on_plane).dot(axis).abs() + e * spread <= zero);
+    if !flat {
         return Ok(());
     }
     let origin = frame.origin();
@@ -1216,7 +1246,7 @@ impl PrimitiveCreation {
                         && angle > 360.0 - brep.tolerance()
                         && distance * frame.z_axis().cross(sweep_dir).length() <= brep.tolerance()
                     {
-                        square_to_sweep(&mut frame, sweep_dir, curve.ends(k)?.start)?;
+                        square_to_sweep(&mut frame, curve, sweep_dir, arc_zero(k, curve)?)?;
                         if sweep_dir.dot(frame.z_axis()) < 0.0 {
                             frame.rotate_about_axis_at_point(
                                 180.0 * core::f64::consts::PI / 180.0,
@@ -1246,7 +1276,7 @@ impl PrimitiveCreation {
                         && angle <= 360.0 - brep.tolerance()
                         && distance * frame.z_axis().cross(sweep_dir).length() <= brep.tolerance()
                     {
-                        square_to_sweep(&mut frame, sweep_dir, curve.ends(k)?.start)?;
+                        square_to_sweep(&mut frame, curve, sweep_dir, arc_zero(k, curve)?)?;
                         if let Some(cylinder) =
                             arc_sweep_cylinder(k, frame, radius, (start, end), sweep_dir, distance)?
                         {

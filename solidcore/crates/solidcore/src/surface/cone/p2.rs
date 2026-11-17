@@ -320,7 +320,8 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
 /// centre `r cos α` from the chord's midpoint, square to the chord in the circle's plane
 /// (The NURBS Book, Piegl and Tiller, §7.3). When the end nets are translates of each other,
 /// `axis`, the form's linear direction, gives the plane normal, and the arc's control points
-/// must be within `scaled_zero` of the plane square to it through its start (#17462). A very
+/// must be within `scaled_zero` of the plane square to it through the start of the first
+/// segment at least half as wide as the widest (#17462). A very
 /// short arc's legs and point angles amplify coordinate rounding past the tolerance; its
 /// chord, weight and plane distances do not. The other checks are [`iso_arc_exact`]'s. Used only where [`iso_arc_exact`]'s circles make no
 /// cylinder, so a form that was recognised keeps its circles to the last bit.
@@ -400,7 +401,8 @@ fn iso_arc_from_chord(
     };
     let normal = if let Some(axis) = axis {
         // The arc lies on a plane square to the ruling when its control points are within
-        // the distance zero of the plane through its start. Not the angle of the legs'
+        // the distance zero of the plane through the start of `base` (the first segment at
+        // least half as wide as the widest). Not the angle of the legs'
         // normal to the ruling: that normal carries the rounding of the points over the
         // sweep, 2e-8 rad on a 0.005 degree arc of radius 88 mm (#17462), past an angular
         // zero, where the ruling is the form's own direction to the last bits.
