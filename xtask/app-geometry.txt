@@ -56,6 +56,7 @@ crates/doc/src/eval.rs:face_through dot,normalized
 crates/doc/src/eval.rs:faces_near closest_on_triangle,cross,normalized,triangles
 crates/doc/src/eval.rs:feature_json triangles
 crates/doc/src/eval.rs:feature_tools_with_constructor atan2,cross,dot,normalized
+crates/doc/src/eval.rs:from_slope_height dot
 crates/doc/src/eval.rs:height_at raycast
 crates/doc/src/eval.rs:hole_depth_to dot,raycast
 crates/doc/src/eval.rs:hole_dir_into_face dot,normalized
@@ -69,6 +70,7 @@ crates/doc/src/eval.rs:line_in_sketch_plane dot,normalized
 crates/doc/src/eval.rs:mesh_bodies triangles
 crates/doc/src/eval.rs:mesh_content_digest triangles
 crates/doc/src/eval.rs:mirror_matrix dot
+crates/doc/src/eval.rs:move_turn_line dot
 crates/doc/src/eval.rs:nearest_object_face closest_on_triangle,cross,triangles
 crates/doc/src/eval.rs:offset_sheet dot,normalized
 crates/doc/src/eval.rs:on_edge_without_cap cross,dot
@@ -83,11 +85,16 @@ crates/doc/src/eval.rs:revolve_extent_for_handle atan2,cross,dot,normalized
 crates/doc/src/eval.rs:rotate_vec cross,dot
 crates/doc/src/eval.rs:rotation normalized
 crates/doc/src/eval.rs:runs_along cross,dot,normalized
+crates/doc/src/eval.rs:same_extrude_from_face dot,normalized
 crates/doc/src/eval.rs:seg_at cross,normalized
 crates/doc/src/eval.rs:sketch_line_plane normalized
+crates/doc/src/eval.rs:slanted_plane dot
+crates/doc/src/eval.rs:slope_rise dot
 crates/doc/src/eval.rs:tangent_face_chain dot,normalized,triangles
+crates/doc/src/eval.rs:trim_between_slopes dot
 crates/doc/src/eval.rs:trim_to_curved_face dot
 crates/doc/src/eval.rs:trim_to_face dot
+crates/doc/src/eval.rs:trim_to_plane dot
 crates/doc/src/eval.rs:with_named_face_points normalized
 crates/doc/src/eval_frame.rs:straight dot,normalized
 crates/doc/src/eval_more.rs:FaceSlice::outline dot,triangles
@@ -330,6 +337,7 @@ crates/engine/src/cmd/board_import.rs:closest_on_segment dot
 crates/engine/src/cmd/board_import.rs:on_arc atan2,cross,dot
 crates/engine/src/cmd/board_import.rs:segment_distance cross
 crates/engine/src/cmd/board_layers.rs:flatten atan2,hypot
+crates/engine/src/cmd/browser.rs:keep_facing dot
 crates/engine/src/cmd/canvas_sketch.rs:segments atan2
 crates/engine/src/cmd/clearance.rs:clearance triangles
 crates/engine/src/cmd/clipboard_foreign.rs:onto_plane dot
@@ -363,12 +371,13 @@ crates/engine/src/cmd/features.rs:Session::mirror_meets cross,dot,normalized
 crates/engine/src/cmd/features.rs:auto_operation_in dot
 crates/engine/src/cmd/features.rs:axis_dir_form normalized
 crates/engine/src/cmd/features.rs:axis_line_object normalized
-crates/engine/src/cmd/features.rs:beyond_coarse_range dot
+crates/engine/src/cmd/features.rs:beyond_coarse_sizes dot
 crates/engine/src/cmd/features.rs:edge_points dot
 crates/engine/src/cmd/features.rs:extrude_reach dot
 crates/engine/src/cmd/features.rs:hole normalized
 crates/engine/src/cmd/features.rs:leaving normalized
 crates/engine/src/cmd/features.rs:move_bodies normalized
+crates/engine/src/cmd/features.rs:move_turn_about cross,normalized
 crates/engine/src/cmd/features.rs:pattern_axis normalized
 crates/engine/src/cmd/features_more.rs:align dot,normalized
 crates/engine/src/cmd/features_more.rs:emboss cross,dot,normalized,triangles
@@ -424,6 +433,7 @@ crates/engine/src/cmd/plastic.rs:snap_fit cross,normalized
 crates/engine/src/cmd/plugin.rs:mesh triangles
 crates/engine/src/cmd/print_face.rs:bed_matrix dot
 crates/engine/src/cmd/print_face.rs:turn_down cross,dot
+crates/engine/src/cmd/render.rs:scene triangles
 crates/engine/src/cmd/render/transmission.rs:certify_box triangles
 crates/engine/src/cmd/section.rs:section normalized
 crates/engine/src/cmd/sheet.rs:bend_note normalized
@@ -791,6 +801,7 @@ crates/kernel/src/blend_variable.rs:extension_fits cross,dot,normalized
 crates/kernel/src/body.rs:Body::classify_point closest_on_triangle,triangles
 crates/kernel/src/body.rs:Body::crossed_faces dot
 crates/kernel/src/body.rs:Body::faces cross,dot,normalized,triangles
+crates/kernel/src/body.rs:Body::fire_ray dot,normalized
 crates/kernel/src/body.rs:Body::projected_on_cylinder cross,dot
 crates/kernel/src/body.rs:Body::retained_bytes triangles
 crates/kernel/src/body.rs:Body::transformed_sources cross,dot
@@ -897,6 +908,7 @@ crates/kernel/src/meshbody.rs:TriMesh::to_mesh cross,dot,normalized,triangles
 crates/kernel/src/meshbody.rs:TriMesh::volume6 cross,dot,triangles
 crates/kernel/src/meshbody.rs:is_closed triangles
 crates/kernel/src/meshbody.rs:mesh_body_with_normals normalized,triangles
+crates/kernel/src/meshbody.rs:mesh_ray cross,dot,normalized,raycast,triangles
 crates/kernel/src/meshbody.rs:unify_winding triangles
 crates/kernel/src/native/preview.rs:native_preview_mesh triangles
 crates/kernel/src/offset.rs:Surf::same dot
@@ -1105,7 +1117,6 @@ crates/ui-egui/src/dialogs_assembly.rs:joint_glyphs normalized
 crates/ui-egui/src/dialogs_assembly.rs:nearest_pick triangles
 crates/ui-egui/src/dialogs_assembly.rs:overlay cross,dot,normalized,triangles
 crates/ui-egui/src/dialogs_assembly.rs:plane_disc cross,normalized
-crates/ui-egui/src/dialogs_assembly.rs:shifted cross
 crates/ui-egui/src/dialogs_assembly.rs:snap_of dot,normalized
 crates/ui-egui/src/dialogs_assembly.rs:straight_edge_axis cross,normalized
 crates/ui-egui/src/dialogs_end_cap.rs:for_feature triangles
@@ -1193,6 +1204,7 @@ crates/ui-egui/src/move_preview.rs:ghost triangles
 crates/ui-egui/src/navigation.rs:device atan2,dot
 crates/ui-egui/src/navigation.rs:kept_view_middle distance
 crates/ui-egui/src/navigation.rs:navigator_home_centre distance
+crates/ui-egui/src/navigation.rs:orbit hypot
 crates/ui-egui/src/navigation.rs:orbit_drag dot
 crates/ui-egui/src/navigation.rs:snap_directions normalized
 crates/ui-egui/src/navigation.rs:snapped_axis_camera dot
@@ -1250,6 +1262,7 @@ crates/ui-egui/src/sketch3d.rs:drag_start distance
 crates/ui-egui/src/sketch3d.rs:point_at cross,distance
 crates/ui-egui/src/sketch3d.rs:seg_ray_closest dot
 crates/ui-egui/src/sketch3d.rs:target dot
+crates/ui-egui/src/sketch_construction.rs:pointer_length dot
 crates/ui-egui/src/sketch_construction.rs:preview dot
 crates/ui-egui/src/sketch_cursor_readout.rs:idle_point distance
 crates/ui-egui/src/sketch_dims.rs:construction_offset_at dot,normalized
