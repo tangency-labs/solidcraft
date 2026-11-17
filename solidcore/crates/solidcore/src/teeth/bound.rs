@@ -1,8 +1,13 @@
 //! Rounded enclosures for the tooth module's certificates.
 //!
-//! The library's `sin`, `cos`, `atan` and `hypot` (the platform's libm; IEEE does not round them
-//! correctly) are taken as within two units in the last place of the magnitude of their result.
-//! Every other operation is an `Ivl` operation, widened outward, or counted with `gamma`.
+//! Nothing here trusts the platform's `sin`, `cos`, `atan` or `hypot`: Rust leaves their precision
+//! unspecified, and it differs from one target to the next. A sine, a cosine and an arc tangent
+//! are enclosed from their series ([`sin_cos_at`], [`atan_at`]) and a length from its square root,
+//! with the operations IEEE 754 rounds correctly (`+ - * /` and the square root), each an `Ivl`
+//! operation widened outward. Where a curve's points are computed with the platform's functions,
+//! as the tooth curves' are, each computed point is measured against the enclosure of the true
+//! one ([`off`]): the platform's functions only nominate a point, and its distance from the curve
+//! is proved.
 //!
 //! An interval here is the kernel's [`Ivl`]: its `+ - * /` and `sqrt` are widened outward past
 //! their rounding, so each holds the exact result for every number of its operands, and anything
@@ -13,7 +18,7 @@
 //! Not upstream: SolidCraft's tooth outlines (see [`crate::teeth`]). No recursion.
 
 use crate::blend::fillet_section::interval::{round_down, round_up, Ivl};
-use crate::geom::certified::{next_down, next_up};
+use crate::geom::certified::next_up;
 use crate::teeth::outline::Point;
 
 /// The point interval `[x, x]` (`Ivl::new(x, x)`); the whole line if `x` is not finite. The only
@@ -51,21 +56,128 @@ pub(crate) fn sqr(x: Ivl) -> Ivl {
     Ivl::new(lo, round_up(b * b))
 }
 
-/// A libm result `x` (sin, cos, atan or hypot) widened by two units in the last place of `|x|`:
-/// `w = 2 (next_up(|x|) - |x|)` (exact); `[next_down(x - w), next_up(x + w)]`; the whole line if
-/// `x` is not finite. Counted: the libm result as within two units in the last place (the
-/// module's one assumption); the two sums, each rounded, covered by one step outward.
-pub(crate) fn libm(x: f64) -> Ivl {
-    if !x.is_finite() {
+/// The largest size of an angle whose sine and cosine [`sin_cos_at`] encloses more closely than
+/// `[-1, 1]`: `2^20`. The quarter turns taken off an angle are known only as closely as pi is, so
+/// the enclosure widens with their count; no tooth has an angle near this.
+const MOST_ANGLE: f64 = 1_048_576.0;
+
+/// How many terms after the first the series of [`sin_cos_at`] take.
+const SINE_TERMS: u32 = 10;
+
+/// What the series of [`sin_cos_at`] leave out, for an angle of size at most 1: the first term
+/// left out bounds it (the terms alternate and shrink), `1 / 22!` for the cosine and less for the
+/// sine, below this.
+const SINE_REST: f64 = 1e-21;
+
+/// How many terms after the first the series of [`atan_at`] takes.
+const ATAN_TERMS: u32 = 13;
+
+/// What the series of [`atan_at`] leaves out, for a number of size at most 1/4: the first term
+/// left out, `(1/4)^29 / 29`, below this.
+const ATAN_REST: f64 = 1.5e-19;
+
+/// The sine and the cosine of the one angle `x`, enclosed, with nothing taken from the platform's
+/// functions.
+///
+/// The nearest whole count `k` of quarter turns is taken off: `t = x - k pi/2`, in intervals with
+/// pi enclosed ([`pi`]), which is true for any whole `k` (the nearest only keeps `t` small). Then,
+/// with `y = t^2`, `sin t = t (1 - y/(2 3) (1 - y/(4 5) (1 - ...)))` and
+/// `cos t = 1 - y/(1 2) (1 - y/(3 4) (1 - ...))`, each cut after [`SINE_TERMS`] terms, with
+/// [`SINE_REST`] either way for the rest (the terms alternate and shrink for `|t| <= 1`, so the
+/// first one left out bounds what is). The quarter turns are put back by `k mod 4`. An angle
+/// that is not a number, or larger than [`MOST_ANGLE`], gives `([-1, 1], [-1, 1])`.
+///
+/// Counted: every operation is an `Ivl` one, widened outward (the divisors are whole numbers
+/// below 500, exact in doubles); the series' remainders are added as intervals.
+pub(crate) fn sin_cos_at(x: f64) -> (Ivl, Ivl) {
+    let any = Ivl::new(-1.0, 1.0);
+    if !(x.abs() <= MOST_ANGLE) {
+        return (any, any);
+    }
+    let quarters = (x / std::f64::consts::FRAC_PI_2).round();
+    let t = exact(x) - exact(quarters) * (pi() * exact(0.5));
+    if !(t.mag() <= 1.0) {
+        return (any, any);
+    }
+    let (one, y) = (exact(1.0), sqr(t));
+    let (mut sine, mut cosine) = (one, one);
+    for k in (1..=SINE_TERMS).rev() {
+        let k = f64::from(k);
+        sine = one - y / exact(2.0 * k * (2.0 * k + 1.0)) * sine;
+        cosine = one - y / exact((2.0 * k - 1.0) * 2.0 * k) * cosine;
+    }
+    let rest = Ivl::new(-SINE_REST, SINE_REST);
+    let (s, c) = (t * sine + rest, cosine + rest);
+    // A whole number of at most 2^20 in size, so the cast is exact; its two lowest bits are the
+    // quarter turns left over, for a negative count too.
+    let (s, c) = match (quarters as i64) & 3 {
+        0 => (s, c),
+        1 => (c, neg(s)),
+        2 => (neg(s), neg(c)),
+        _ => (neg(c), s),
+    };
+    (cut_to_one(s), cut_to_one(c))
+}
+
+/// The arc tangent of the one number `x`, enclosed, with nothing taken from the platform's
+/// functions.
+///
+/// A number larger than 1 in size is turned over, `atan x = +-pi/2 - atan(1/x)`. Then the angle
+/// is halved twice, `atan t = 2 atan(t / (1 + sqrt(1 + t^2)))`, which leaves a number of size at
+/// most `tan(pi/16) < 1/4`, and with `y = u^2`, `atan u = u (1 - y/3 + y^2/5 - ...)`, cut after
+/// [`ATAN_TERMS`] terms, with [`ATAN_REST`] either way for the rest (the terms alternate and
+/// shrink). An infinite `x` gives the enclosure of a quarter turn, a NaN the whole line.
+///
+/// Counted: every operation is an `Ivl` one, widened outward, the square roots among them; the
+/// series' remainder is added as an interval.
+pub(crate) fn atan_at(x: f64) -> Ivl {
+    if x.is_nan() {
         return Ivl::whole();
     }
-    let w = 2.0 * (next_up(x.abs()) - x.abs());
-    let (lo, hi) = (next_down(x - w), next_up(x + w));
-    if lo.is_finite() && hi.is_finite() {
-        Ivl::new(lo, hi)
-    } else {
-        Ivl::whole()
+    let (one, quarter_turn) = (exact(1.0), pi() * exact(0.5));
+    if x.is_infinite() {
+        return if x > 0.0 {
+            quarter_turn
+        } else {
+            neg(quarter_turn)
+        };
     }
+    let turned = x.abs() > 1.0;
+    let t = if turned { one / exact(x) } else { exact(x) };
+    let halved = |t: Ivl| t / (one + (one + sqr(t)).sqrt());
+    let u = halved(halved(t));
+    if !(u.mag() <= 0.25) {
+        return Ivl::whole();
+    }
+    let y = sqr(u);
+    let mut series = one / exact(f64::from(2 * ATAN_TERMS + 1));
+    for k in (0..ATAN_TERMS).rev() {
+        series = one / exact(f64::from(2 * k + 1)) - y * series;
+    }
+    let inner = exact(4.0) * (u * series + Ivl::new(-ATAN_REST, ATAN_REST));
+    if !turned {
+        inner
+    } else if x > 0.0 {
+        quarter_turn - inner
+    } else {
+        neg(quarter_turn) - inner
+    }
+}
+
+/// An upper bound of the distance from the computed point `p` to every point of the box `held`,
+/// which holds the true point: how far the computed point can be from the true one. Infinite
+/// where a coordinate is not a number. Counted: the two differences, the squares, the sum and the
+/// root as `Ivl` operations ([`magnitude`]).
+pub(crate) fn off(p: Point, held: [Ivl; 2]) -> f64 {
+    let ([x, y], [hx, hy]) = (p, held);
+    magnitude([exact(x) - hx, exact(y) - hy])
+}
+
+/// An upper bound of the distance between two points, with nothing taken from the platform's
+/// `hypot`. Counted as [`off`].
+pub(crate) fn apart(a: Point, b: Point) -> f64 {
+    let [x, y] = b;
+    off(a, [exact(x), exact(y)])
 }
 
 /// pi enclosed: `[PI, next_up(PI)]`. The double `PI` lies below pi, and the next double above it
@@ -91,12 +203,13 @@ pub(crate) fn half_width(lo: f64, hi: f64) -> (f64, f64) {
     (m, r)
 }
 
-/// sin and cos over every angle of `angle`: with `(m, r) = half_width(angle.lo, angle.hi)`,
-/// `S = libm(sin m) + libm(cos m) [-r, r] + [-q, q]`,
-/// `C = libm(cos m) + libm(sin m) [-r, r] + [-q, q]`, `q = (exact(r) exact(r) exact(0.5)).hi`
-/// (Taylor, `|sin''|, |cos''| <= 1`), each then cut to `[-1, 1]`. A non-finite angle gives
-/// `([-1, 1], [-1, 1])`. Counted: libm sin and cos of the middle, two units in the last place
-/// each; the rest as `Ivl` operations; the Taylor remainder `r^2 / 2` rounded up.
+/// sin and cos over every angle of `angle`: with `(m, r) = half_width(angle.lo, angle.hi)` and
+/// `(Sm, Cm)` the enclosures of the sine and cosine of the middle ([`sin_cos_at`]),
+/// `S = Sm + Cm [-r, r] + [-q, q]`, `C = Cm + Sm [-r, r] + [-q, q]`,
+/// `q = (exact(r) exact(r) exact(0.5)).hi` (Taylor, `|sin''|, |cos''| <= 1`), each then cut to
+/// `[-1, 1]`. A non-finite angle gives `([-1, 1], [-1, 1])`. Counted: the middle's sine and
+/// cosine as [`sin_cos_at`] encloses them; the rest as `Ivl` operations; the Taylor remainder
+/// `r^2 / 2` rounded up.
 pub(crate) fn sin_cos(angle: Ivl) -> (Ivl, Ivl) {
     let any = Ivl::new(-1.0, 1.0);
     if !angle.is_finite() {
@@ -106,12 +219,12 @@ pub(crate) fn sin_cos(angle: Ivl) -> (Ivl, Ivl) {
     if !r.is_finite() {
         return (any, any);
     }
-    let (s, c) = m.sin_cos();
+    let (s, c) = sin_cos_at(m);
     let spread = Ivl::new(-r, r);
     let q = (exact(r) * exact(r) * exact(0.5)).hi;
     let rest = Ivl::new(-q, q);
-    let sine = libm(s) + libm(c) * spread + rest;
-    let cosine = libm(c) + libm(s) * spread + rest;
+    let sine = s + c * spread + rest;
+    let cosine = c + s * spread + rest;
     (cut_to_one(sine), cut_to_one(cosine))
 }
 
@@ -122,14 +235,18 @@ fn cut_to_one(x: Ivl) -> Ivl {
     Ivl::new(lo, hi)
 }
 
-/// atan over every number of `x` (atan increases):
-/// `[libm(atan(x.lo)).lo, libm(atan(x.hi)).hi]`; the whole line for NaN. Counted: libm atan of
-/// the two ends, two units in the last place each.
+/// atan over every number of `x` (atan increases): from the lower end of the enclosure of
+/// `atan(x.lo)` to the upper end of that of `atan(x.hi)` ([`atan_at`]); the whole line for NaN.
 pub(crate) fn atan_over(x: Ivl) -> Ivl {
     if x.lo.is_nan() || x.hi.is_nan() {
         return Ivl::whole();
     }
-    Ivl::new(libm(x.lo.atan()).lo, libm(x.hi.atan()).hi)
+    let (lo, hi) = (atan_at(x.lo).lo, atan_at(x.hi).hi);
+    if lo <= hi {
+        Ivl::new(lo, hi)
+    } else {
+        Ivl::whole()
+    }
 }
 
 /// `R(angle) v` enclosed for every angle of `angle`: with `(S, C) = sin_cos(angle)`,
@@ -195,7 +312,8 @@ pub(crate) fn taylor_from_end(
 }
 
 /// What a curve does over a stretch of its parameter: enclosures of its first and second derivative
-/// vectors, a bound on the size of the second, and the counted rounding of one computed point.
+/// vectors and a bound on the size of the second. How far a computed point of the curve lies from
+/// the true one is not part of it: that is proved for each point by itself ([`off`]).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Bend {
     /// Encloses `P'(t)`, each coordinate, for every `t` of the stretch.
@@ -204,25 +322,23 @@ pub(crate) struct Bend {
     pub(crate) second: [Ivl; 2],
     /// An upper bound of `|P''(t)|` over the stretch (may be tighter than `magnitude(second)`).
     pub(crate) second_size: f64,
-    /// An upper bound of `|computed point - P(t)|` for every `t` of the stretch.
-    pub(crate) rounding: f64,
 }
 
 impl Bend {
-    /// Nothing known: whole intervals, infinite sizes. Proves nothing.
+    /// Nothing known: whole intervals, an infinite size. Proves nothing.
     pub(crate) fn unknown() -> Bend {
         Bend {
             first: [Ivl::whole(), Ivl::whole()],
             second: [Ivl::whole(), Ivl::whole()],
             second_size: f64::INFINITY,
-            rounding: f64::INFINITY,
         }
     }
 }
 
 /// An upper bound of the Hausdorff distance (both ways, as sets) between the curve over a stretch
 /// of parameter width at most `h` and the chord between its two computed end points `p0`, `p1`,
-/// with the rounding of those points counted. Infinite (never NaN) where nothing is proved.
+/// each within `e` of the true point at its end of the stretch (proved for the computed points
+/// themselves, [`off`]). Infinite (never NaN) where nothing is proved.
 ///
 /// Two bounds are formed and the smaller is taken; both hold. By size: `h^2/8` times the size of
 /// `P''` (`Bend::second_size`). Across the chord: `h^2/8` times the size of the part of `P''`
@@ -231,7 +347,7 @@ impl Bend {
 /// parameter has it too). It is what keeps a curve with a large `P''` along its own direction, as
 /// an involute flank near its base circle has, from being cut far finer than it needs.
 ///
-/// Proof. With `E = bend.rounding`, `s` in `[0, 1]` and `L(s)` the chord between the exact end
+/// Proof. With `E = e`, `s` in `[0, 1]` and `L(s)` the chord between the exact end
 /// points `P(t0)` and `P(t1)`, `|P(t0 + s h) - L(s)| <= h^2/8 max |P''|` (the Peano kernel of
 /// linear interpolation, in vector form by the integral): the bound by size holds at matched
 /// parameters, and so as sets. Where `P'.c` has one sign on the whole stretch (`c` the exact
@@ -249,8 +365,7 @@ impl Bend {
 ///
 /// Counted: `h^2/8` as `exact(h) exact(h) exact(0.125)` rounded outward; every other operation an
 /// `Ivl` operation; the end points' rounding `E` added last and the sum rounded up.
-pub(crate) fn chord_bound(h: f64, p0: Point, p1: Point, bend: &Bend) -> f64 {
-    let e = bend.rounding;
+pub(crate) fn chord_bound(h: f64, p0: Point, p1: Point, e: f64, bend: &Bend) -> f64 {
     if !(e >= 0.0) {
         return f64::INFINITY;
     }

@@ -18,7 +18,7 @@ use crate::teeth::fit::fitted;
 use crate::teeth::involute::{hub_for, spline_pair, External, Fit};
 use crate::teeth::mesh::{gap, Body};
 use crate::teeth::outline::{
-    arc_steps, distance, less_gap, on_circle, points_of, sampled, stretch_bends,
+    arc_steps, break_rounding, distance, less_gap, on_circle, points_of, sampled, stretch_bends,
 };
 use crate::teeth::pair::{MAX_STEPS, MOST_TURNING_WORK};
 use crate::teeth::{
@@ -112,8 +112,7 @@ fn circle_at(radius: f64) -> impl Fn(f64) -> Point {
     move |t: f64| [radius * t.cos(), radius * t.sin()]
 }
 
-/// What [`circle_at`] does over a stretch: its derivatives enclosed through `bound::sin_cos`, and
-/// the rounding of a point (libm cos and sin, then the product) taken generously as `16 u r`.
+/// What [`circle_at`] does over a stretch: its derivatives enclosed through `bound::sin_cos`.
 fn circle_bend(radius: f64) -> impl Fn(f64, f64) -> Bend {
     move |lo: f64, hi: f64| {
         let (s, c) = bound::sin_cos(Ivl::new(lo, hi));
@@ -122,8 +121,17 @@ fn circle_bend(radius: f64) -> impl Fn(f64, f64) -> Bend {
             first: [bound::neg(s) * r, c * r],
             second: [bound::neg(c) * r, bound::neg(s) * r],
             second_size: radius,
-            rounding: 16.0 * UNIT * radius,
         }
+    }
+}
+
+/// A proved bound of the distance of a computed point of [`circle_at`] from the circle's true
+/// point at `t`: the point measured against `radius (cos t, sin t)` enclosed from the series.
+fn circle_off(radius: f64) -> impl Fn(f64, Point) -> f64 {
+    move |t: f64, p: Point| {
+        let (s, c) = bound::sin_cos_at(t);
+        let r = bound::exact(radius);
+        bound::off(p, [r * c, r * s])
     }
 }
 
@@ -878,14 +886,21 @@ fn involute_outlines_are_accepted_exactly_when_they_do_not_cross_themselves() {
 // -------------------------------------------------------------------------------------------------
 
 /// Whether the interval holds `x`.
+/// Whether `x` lies in `range` or within a few units in the last place of it: where a value of
+/// the platform's functions is looked for beside a proved enclosure of the true one.
+fn beside(range: Ivl, x: f64) -> bool {
+    let slack = 8.0 * UNIT * (1.0 + x.abs());
+    range.lo - slack <= x && x <= range.hi + slack
+}
+
 fn holds(range: Ivl, x: f64) -> bool {
     (range.lo..=range.hi).contains(&x)
 }
 
 /// The enclosures of `bound` hold what they enclose: sine and cosine over intervals of every width
-/// at angles far from 0, libm results, pi, squares, atan, the Taylor forms of a quadratic and the
-/// chord bound of a circle's arc; and a curve sampled against the direction of its chords keeps
-/// bound across them.
+/// at angles far from 0, the series of one angle, pi, squares, atan, the Taylor forms of a
+/// quadratic and the chord bound of a circle's arc; and a curve sampled against the direction of
+/// its chords keeps the bound across them.
 #[test]
 fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
     let mut dice = Dice(0xB0D);
@@ -898,16 +913,19 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
         let (s, c) = bound::sin_cos(Ivl::new(lo, hi));
         for k in 0..100 {
             let t = (lo + (hi - lo) * f64::from(k) / 99.0).max(lo).min(hi);
+            // The enclosure is proved; the platform's value is only good in practice, so it is
+            // looked for within a few units in the last place of the enclosure.
             let (sine, cosine) = t.sin_cos();
             assert!(
-                holds(s, sine) && holds(c, cosine),
+                beside(s, sine) && beside(c, cosine),
                 "at {t} in [{lo}, {hi}]: sin {sine} in {s:?}, cos {cosine} in {c:?}"
             );
             looked += 1;
         }
     }
     assert_eq!(looked, 200_000);
-    // A libm result widened by two units in the last place holds the result itself.
+    // The sine, cosine and arc tangent of one number, from their series: the platform's values lie
+    // beside them, they are close, and what has no enclosure is the whole range.
     for x in [
         0.0,
         -0.0,
@@ -919,10 +937,49 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
         PI,
         1e300,
     ] {
-        let w = bound::libm(x);
-        assert!(w.lo < x && x < w.hi, "{x:e}: {w:?}");
+        let (s, c) = bound::sin_cos_at(x);
+        if x.abs() <= 1e6 {
+            let (sine, cosine) = x.sin_cos();
+            assert!(
+                beside(s, sine) && beside(c, cosine),
+                "{x:e}: sin {sine:e} in {s:?}, cos {cosine:e} in {c:?}"
+            );
+            assert!(
+                s.hi - s.lo < 1e-9 && c.hi - c.lo < 1e-9,
+                "{x:e}: {s:?} {c:?}"
+            );
+        } else {
+            assert_eq!((s.lo, s.hi, c.lo, c.hi), (-1.0, 1.0, -1.0, 1.0), "{x:e}");
+        }
+        let a = bound::atan_at(x);
+        assert!(beside(a, x.atan()), "atan {x:e}: {} in {a:?}", x.atan());
+        assert!(a.hi - a.lo < 1e-14, "atan {x:e}: {a:?}");
     }
-    assert_eq!(bound::libm(f64::NAN).lo, f64::NEG_INFINITY);
+    // Exact cases: the sine and cosine of 0, the arc tangent of 1 (a quarter of pi) and of what
+    // has no end.
+    let (s, c) = bound::sin_cos_at(0.0);
+    assert!(holds(s, 0.0) && holds(c, 1.0), "{s:?} {c:?}");
+    let quarter = bound::atan_at(1.0);
+    assert!(
+        quarter.lo <= next_up(PI) / 4.0 && quarter.hi >= PI / 4.0,
+        "{quarter:?}"
+    );
+    let far = bound::atan_at(f64::INFINITY);
+    assert!(far.lo <= FRAC_PI_2 && far.hi > FRAC_PI_2, "{far:?}");
+    assert_eq!(bound::atan_at(f64::NAN).lo, f64::NEG_INFINITY);
+    let (s, c) = bound::sin_cos_at(f64::NAN);
+    assert_eq!((s.lo, s.hi, c.lo, c.hi), (-1.0, 1.0, -1.0, 1.0));
+    // A point is measured against the box that holds the true one, and a distance is an upper
+    // bound of it.
+    let held = [Ivl::new(1.0, 2.0), Ivl::new(-1.0, 1.0)];
+    let farthest_corner = bound::off([0.0, 0.0], held);
+    assert!(
+        farthest_corner >= 5f64.sqrt() && farthest_corner < 5f64.sqrt() * (1.0 + 1e-14),
+        "{farthest_corner}"
+    );
+    assert_eq!(bound::off([f64::NAN, 0.0], held), f64::INFINITY);
+    let length = bound::apart([3.0, 0.0], [0.0, 4.0]);
+    assert!((5.0..5.0 * (1.0 + 1e-14)).contains(&length), "{length}");
     let pi = bound::pi();
     assert!(pi.lo == PI && pi.hi > PI, "{pi:?}");
     // Squares: never negative, and exactly 0 below where the interval holds 0.
@@ -992,22 +1049,23 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
     // what the size of the second derivative alone gives, and the same when the stretch's ends
     // are swapped (a curve run against its chord).
     for radius in [0.01, 1.0, 250.0] {
-        let (at, bend_of) = (circle_at(radius), circle_bend(radius));
+        let (at, bend_of, off_of) = (circle_at(radius), circle_bend(radius), circle_off(radius));
         for (t0, h) in [(0.3_f64, 1e-6_f64), (-2.0, 1e-3), (1.0, 0.1), (4.0, 0.5)] {
             let t1 = t0 + h;
             let width = next_up((t1 - t0).abs());
             let (p0, p1, bend) = (at(t0), at(t1), bend_of(t0, t1));
+            let e = off_of(t0, p0).max(off_of(t1, p1));
             let sagitta = 2.0 * radius * (0.25 * (t1 - t0)).sin().powi(2);
-            let by_size = width * width / 8.0 * bend.second_size + bend.rounding;
-            let proved = bound::chord_bound(width, p0, p1, &bend);
-            let swapped = bound::chord_bound(width, p1, p0, &bend);
+            let by_size = width * width / 8.0 * bend.second_size + e;
+            let proved = bound::chord_bound(width, p0, p1, e, &bend);
+            let swapped = bound::chord_bound(width, p1, p0, e, &bend);
             let label = format!("radius {radius}, from {t0} by {h}");
             assert!(
                 proved >= sagitta && proved <= by_size * (1.0 + 1e-12),
                 "{label}: by size {by_size:e}, proved {proved:e}, sagitta {sagitta:e}"
             );
             assert!(
-                proved <= 2.0 * (sagitta + bend.rounding),
+                proved <= 2.0 * (sagitta + e),
                 "{label}: proved {proved:e}, sagitta {sagitta:e}"
             );
             assert_eq!(swapped.to_bits(), proved.to_bits(), "{label}");
@@ -1017,9 +1075,9 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
     // bounded across them all the same: as many points either way, every chord within the
     // tolerance.
     let (radius, tolerance) = (3.0, 1e-4);
-    let (at, bend) = (circle_at(radius), circle_bend(radius));
-    let forward = lift(sampled(&at, &bend, 0.3, 1.7, tolerance))?;
-    let backward = lift(sampled(&at, &bend, 1.7, 0.3, tolerance))?;
+    let (at, bend, off) = (circle_at(radius), circle_bend(radius), circle_off(radius));
+    let forward = lift(sampled(&at, &off, &bend, 0.3, 1.7, tolerance))?;
+    let backward = lift(sampled(&at, &off, &bend, 1.7, 0.3, tolerance))?;
     assert_eq!(forward.len(), backward.len());
     for chain in [&forward, &backward] {
         let far = farthest(chain, &at, 0.3, 1.7, 10_000);
@@ -1039,11 +1097,12 @@ fn bound_enclosures_hold_dense_values() -> crate::Result<()> {
             first: [bound::exact(2.0) * t, t],
             second: [bound::exact(2.0), bound::exact(1.0)],
             second_size: 5f64.sqrt() * (1.0 + 1e-15),
-            rounding: 8.0 * UNIT * lo.abs().max(hi.abs()).powi(2),
         }
     };
-    let forward = lift(sampled(&line, &line_bend, 1.0, 2.0, 1e-6))?;
-    let backward = lift(sampled(&line, &line_bend, 2.0, 1.0, 1e-6))?;
+    // A product and a halving: correctly rounded, so the point's error is counted.
+    let line_off = |t: f64, _: Point| 8.0 * UNIT * t * t;
+    let forward = lift(sampled(&line, &line_off, &line_bend, 1.0, 2.0, 1e-6))?;
+    let backward = lift(sampled(&line, &line_off, &line_bend, 2.0, 1.0, 1e-6))?;
     assert_eq!((forward.len(), backward.len()), (9, 9));
     let by_size = 0.125 * 0.125 / 8.0 * line_bend(1.0, 1.125).second_size;
     assert!(by_size > 1e3 * 1e-6, "{by_size:e}");
@@ -1076,9 +1135,10 @@ fn span_bends_hold_the_spline() -> crate::Result<()> {
                 continue;
             }
             let bend = bspline::span_bend(degree, &knots, &control, span);
+            let rounding = bspline::span_rounding(degree, &control, span);
             assert!(
-                bend.rounding > 0.0 && bend.rounding.is_finite(),
-                "degree {degree}, span {span}: {bend:?}"
+                rounding > 0.0 && rounding.is_finite(),
+                "degree {degree}, span {span}: {rounding}"
             );
             // The first and second derivative at `t`, by Richardson's central differences.
             let derivatives = |t: f64| -> crate::Result<(Point, Point)> {
@@ -1138,7 +1198,6 @@ fn span_bends_hold_the_spline() -> crate::Result<()> {
                 ),
             ];
             for (lo, hi, part) in parts {
-                assert_eq!(part.rounding, bend.rounding, "degree {degree}, span {span}");
                 assert!(
                     part.second_size <= bend.second_size,
                     "degree {degree}, span {span}, [{lo}, {hi}]: {part:?} against {bend:?}"
@@ -1198,10 +1257,7 @@ fn span_bends_hold_the_spline() -> crate::Result<()> {
         (a, f64::INFINITY),
     ] {
         let none = bspline::stretch_bend(degree, &knots, &control, degree, lo, hi);
-        assert!(
-            none.rounding == f64::INFINITY && none.second_size == f64::INFINITY,
-            "[{lo}, {hi}]: {none:?}"
-        );
+        assert_eq!(none.second_size, f64::INFINITY, "[{lo}, {hi}]: {none:?}");
     }
     Ok(())
 }
@@ -1321,8 +1377,9 @@ impl Growth {
                 self.skipped += 1;
                 continue;
             };
-            let near = stretch_bends(degree, knots, control, from, to);
-            let new = sampled(&at, &near, from, to, tolerance);
+            let near = stretch_bends(degree, knots, control, from);
+            let rounding = break_rounding(degree, knots, control, from, to);
+            let new = sampled(&at, &|_, _| rounding, &near, from, to, tolerance);
             self.spans += 1;
             let label = format!("{name}, degree {degree}, at {tolerance:e} over [{from}, {to}]");
             match new {
@@ -1427,7 +1484,7 @@ fn spline_chains_are_never_coarser() -> crate::Result<()> {
 /// The arcs: the proved count against today's rule. Never more than one chord fewer; never fewer
 /// where the tolerance is at least a millionth of the radius (but where today's quotient lies
 /// within 1e-9 of a whole number); no arc that builds today refused where its own points can be
-/// placed within a tenth of the tolerance (`tolerance >= 1e-14 radius`; below that nothing about
+/// placed within their allowance (`tolerance >= 1e-13 radius`; below that nothing about
 /// the arc can be proved, and the refusal is `NotProved`); and every chord within the tolerance
 /// of 10,000 points of the circle.
 #[test]
@@ -1446,7 +1503,7 @@ fn arc_counts_against_the_old_rule() {
                             matches!(e, TeethFailure::NotProved { what, .. } if what == CHORD),
                             "{label}: {e:?}"
                         );
-                        if old <= MAX_CURVE_POINTS && tolerance >= 1e-14 * radius {
+                        if old <= MAX_CURVE_POINTS && tolerance >= 1e-13 * radius {
                             refused.push(label);
                         }
                         continue;
@@ -1501,23 +1558,28 @@ fn hostile_bends_refuse() {
     }
     let unit = circle_at(1.0);
     let bend = circle_bend(1.0);
+    let off = circle_off(1.0);
     let knows_nothing = |_: f64, _: f64| Bend::unknown();
-    let refused = sampled(&unit, &knows_nothing, 0.0, 1.0, 1e-3);
+    let refused = sampled(&unit, &off, &knows_nothing, 0.0, 1.0, 1e-3);
     assert!(chord_unproved(&refused), "{refused:?}");
-    let not_a_number = |_: f64, _: f64| Bend {
-        rounding: f64::NAN,
-        ..Bend::unknown()
-    };
-    let refused = sampled(&unit, &not_a_number, 0.0, 1.0, 1e-3);
+    // A point whose distance from the curve is not known proves nothing either.
+    for unknown in [f64::NAN, f64::INFINITY] {
+        let refused = sampled(&unit, &|_, _| unknown, &bend, 0.0, 1.0, 1e-3);
+        assert!(chord_unproved(&refused), "{unknown}: {refused:?}");
+    }
+    // Nor does a platform whose sine is wrong by more than the tolerance pass for right: its
+    // points are measured, and the curve is refused.
+    let wrong = |t: f64| [t.cos(), t.sin() + 2e-3];
+    let refused = sampled(&wrong, &off, &bend, 0.0, 1.0, 1e-3);
     assert!(chord_unproved(&refused), "{refused:?}");
     let lost = |t: f64| if t > 0.5 { [f64::NAN, 0.0] } else { unit(t) };
-    let refused = sampled(&lost, &bend, 0.0, 1.0, 1e-3);
+    let refused = sampled(&lost, &off, &bend, 0.0, 1.0, 1e-3);
     assert_eq!(
         typed_why(&refused),
         Some(Why::OutlineNotFinite),
         "{refused:?}"
     );
-    let refused = sampled(&unit, &bend, 0.0, 1.0, 1e-300);
+    let refused = sampled(&unit, &off, &bend, 0.0, 1.0, 1e-300);
     assert!(
         matches!(refused, Err(TeethFailure::NotProved { what, reached, .. })
             if what == CHORD && reached > 1e-300),
@@ -1530,7 +1592,7 @@ fn hostile_bends_refuse() {
         (0.0, 1.0, -1.0),
         (0.0, 1.0, 0.0),
     ] {
-        let refused = sampled(&unit, &bend, from, to, tolerance);
+        let refused = sampled(&unit, &off, &bend, from, to, tolerance);
         assert!(refused.is_err(), "{from} {to} {tolerance}: {refused:?}");
     }
     for (centre, radius, start, sweep, tolerance) in [
@@ -1559,9 +1621,10 @@ fn hostile_bends_refuse() {
         (bspline::MAX_DEGREE + 1, 3),
     ] {
         let unknown = bspline::span_bend(degree, &knots, &control, span);
+        let rounding = bspline::span_rounding(degree, &control, span);
         assert!(
-            unknown.rounding == f64::INFINITY && unknown.second_size == f64::INFINITY,
-            "degree {degree}, span {span}: {unknown:?}"
+            rounding == f64::INFINITY && unknown.second_size == f64::INFINITY,
+            "degree {degree}, span {span}: {rounding} {unknown:?}"
         );
     }
 }
@@ -1573,26 +1636,31 @@ fn hostile_bends_refuse() {
 /// tolerance, so a tolerance that the gap alone uses up is refused, not claimed.
 #[test]
 fn ends_gaps_and_what_is_not_a_number_are_counted() -> crate::Result<()> {
-    let (unit, bend) = (circle_at(1.0), circle_bend(1.0));
+    let (unit, bend, off) = (circle_at(1.0), circle_bend(1.0), circle_off(1.0));
     let known = bend(0.0, 0.1);
     for (p0, p1) in [
         ([f64::NAN, 0.0], [1.0, 0.0]),
         ([1.0, 0.0], [0.0, f64::INFINITY]),
     ] {
-        let proved = bound::chord_bound(0.1, p0, p1, &known);
+        let proved = bound::chord_bound(0.1, p0, p1, 1e-15, &known);
         assert_eq!(proved, f64::INFINITY, "{p0:?} {p1:?}");
+    }
+    // Nor does an end whose distance from the curve is not a number, or is below nothing.
+    for e in [f64::NAN, -1e-15] {
+        let proved = bound::chord_bound(0.1, unit(0.0), unit(0.1), e, &known);
+        assert_eq!(proved, f64::INFINITY, "{e}");
     }
     // 0.2 + (0.9 - 0.2) * 8 / 8 is not 0.9 in doubles, so eight even pieces end beside `to`.
     let (from, to) = (0.2_f64, 0.9_f64);
     assert_ne!(from + (to - from) * 8.0 / 8.0, to);
-    let points = lift(sampled(&unit, &bend, from, to, 1e-6))?;
+    let points = lift(sampled(&unit, &off, &bend, from, to, 1e-6))?;
     assert_eq!(points.first(), Some(&unit(from)));
     assert_eq!(points.last(), Some(&unit(to)));
     // No gap leaves the tolerance as it is; a gap takes itself off, rounded down.
     assert_eq!(less_gap(1e-3, 0.0), Ok(1e-3));
     let left = less_gap(1e-3, 1e-4);
     assert!(
-        matches!(left, Ok(x) if x < 9e-4 && x > 9e-4 * (1.0 - 1e-12)),
+        matches!(left, Ok(x) if x <= 9e-4 && x > 9e-4 * (1.0 - 1e-12)),
         "{left:?}"
     );
     for (tolerance, gap) in [

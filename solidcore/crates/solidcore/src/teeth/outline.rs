@@ -2,6 +2,7 @@
 
 use std::f64::consts::TAU;
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::error::teeth::{TeethFailure, Why, CHORD};
 use crate::geom::certified::{gamma, next_up};
 use crate::nurbs::math::UNIT;
@@ -151,15 +152,21 @@ impl Piece {
                 if steps > MAX_CURVE_POINTS {
                     return Err(TOO_FINE);
                 }
-                Ok((0..steps)
-                    .map(|i| {
-                        on_circle(
-                            *centre,
-                            *radius,
-                            start + sweep * (i as f64) / (steps as f64),
-                        )
-                    })
-                    .collect())
+                // Each point is computed with the platform's sine and cosine and then measured
+                // against the enclosure of the arc's true point at its angle: it must lie within
+                // the allowance the count of chords was proved with.
+                let allowed = arc_point_allowance(*centre, *radius);
+                let mut out = Vec::new();
+                for i in 0..steps {
+                    let angle = start + sweep * (i as f64) / (steps as f64);
+                    let p = on_circle(*centre, *radius, angle);
+                    let e = bound::off(p, circle_point(*centre, *radius, angle));
+                    if !(e <= allowed) {
+                        return Err(not_proved(tolerance, e));
+                    }
+                    out.push(p);
+                }
+                Ok(out)
             }
             Piece::Line { from, .. } => Ok(vec![*from]),
             Piece::Curve { points, .. } => Ok(points
@@ -181,8 +188,11 @@ impl Piece {
                 let mut out = Vec::new();
                 for stretch in bspline::breaks_typed(*degree, knots, control)?.windows(2) {
                     if let [from, to] = stretch {
-                        let near = stretch_bends(*degree, knots, control, *from, *to);
-                        let points = sampled(&at, &near, *from, *to, tolerance)?;
+                        let near = stretch_bends(*degree, knots, control, *from);
+                        // De Boor's steps are sums, products and quotients alone, so the rounding
+                        // of a point is counted, not measured.
+                        let rounding = break_rounding(*degree, knots, control, *from, *to);
+                        let points = sampled(&at, &|_, _| rounding, &near, *from, *to, tolerance)?;
                         out.extend(points.iter().take(points.len().saturating_sub(1)));
                         if out.len() > MAX_CURVE_POINTS {
                             return Err(TOO_FINE);
@@ -259,10 +269,12 @@ pub(super) fn on_circle(centre: Point, radius: f64, angle: f64) -> Point {
 /// - the angles `start + sweep i / n` are within `gamma(3) (|start| + |sweep|)` of exact (three
 ///   operations), so the widest step taken is `delta = |sweep| / n + 2 gamma(3) (..)`, in `Ivl`;
 /// - the sagitta of that step, `2 r sin^2(delta / 4)`, with the sine enclosed by
-///   [`bound::sin_cos`] (libm two units in the last place) and the square by [`bound::sqr`];
-/// - a point `centre + r (cos a, sin a)` is within `E = 2 (4 u r + gamma(2) (|cx| + |cy| + 2 r))`
-///   of the exact one at its angle (cos and sin two units in the last place each, the product and
-///   the sum two operations, the factor 2 for both coordinates), computed in `Ivl`.
+///   [`bound::sin_cos`] (from its series) and the square by [`bound::sqr`];
+/// - a point `centre + r (cos a, sin a)` is allowed `E` from the exact one at its angle
+///   ([`arc_point_allowance`]). The points are computed with the platform's sine and cosine, whose
+///   precision nothing promises, so `E` is not taken on trust: [`Piece::chain`] measures every
+///   point it computes against an enclosure of the true one and refuses an arc with a point
+///   farther off than `E`.
 ///
 /// A chord within the sagitta of its arc and points within `E` of it give the bound
 /// `sagitta + E`. Refused with `NotProved` where `E` alone is not below the tolerance, and after
@@ -301,10 +313,7 @@ pub(super) fn arc_steps(
     } else {
         1
     };
-    let [cx, cy] = centre;
-    let size = bound::exact(cx.abs()) + bound::exact(cy.abs()) + bound::exact(2.0 * radius);
-    let placed = bound::exact(4.0 * UNIT) * bound::exact(radius) + bound::exact(gamma(2)) * size;
-    let e = (bound::exact(2.0) * placed).hi;
+    let e = arc_point_allowance(centre, radius);
     if !(e < tolerance) {
         return Err(not_proved(tolerance, e));
     }
@@ -325,6 +334,33 @@ pub(super) fn arc_steps(
         n = (n + 1 + n / 16).min(CAP);
     }
     Err(not_proved(tolerance, proved))
+}
+
+/// How far a computed point of an arc is allowed to lie from the arc's true point at its angle,
+/// in the proof of [`arc_steps`]: `2 (256 u r + gamma(2) (|cx| + |cy| + 2 r))`. It is an
+/// allowance, not a claim about the platform: each point [`Piece::chain`] computes is measured
+/// against it ([`bound::off`] of the point from [`circle_point`]), and what is measured is the
+/// platform's own error together with the width of the enclosure of the true point, which grows
+/// with the quarter turns in the angle. The allowance holds both for any angle a tooth has, and is
+/// a few parts in 1e14 of the radius.
+fn arc_point_allowance(centre: Point, radius: f64) -> f64 {
+    let [cx, cy] = centre;
+    let size = bound::exact(cx.abs()) + bound::exact(cy.abs()) + bound::exact(2.0 * radius);
+    let placed = bound::exact(256.0 * UNIT) * bound::exact(radius) + bound::exact(gamma(2)) * size;
+    let e = (bound::exact(2.0) * placed).hi;
+    if e.is_nan() {
+        f64::INFINITY
+    } else {
+        e
+    }
+}
+
+/// The true point of a circle at an angle, enclosed: `centre + r (cos a, sin a)` with the sine and
+/// cosine from their series ([`bound::sin_cos_at`]), every operation an `Ivl` one.
+fn circle_point(centre: Point, radius: f64, angle: f64) -> [Ivl; 2] {
+    let ([cx, cy], r) = (centre, bound::exact(radius));
+    let (sine, cosine) = bound::sin_cos_at(angle);
+    [bound::exact(cx) + r * cosine, bound::exact(cy) + r * sine]
 }
 
 /// The refusal of a chord that could not be proved within `asked`: `reached` is the best bound
@@ -349,16 +385,14 @@ fn not_proved(asked: f64, reached: f64) -> TeethFailure {
 /// moved chord is within `gap` of the chord), so the gap is taken off the tolerance and not left
 /// out of the bound. No gap leaves the tolerance as it is.
 ///
-/// Counted: the gap is a `hypot` of two differences, each rounded once and the `hypot` within two
-/// units in the last place (`teeth::bound`), so `1 + 8u` times the computed gap covers the true
-/// one; the product and the difference are `Ivl` operations and the lower end is taken. Refused
-/// with `NotProved` where the gap alone is not below the tolerance.
+/// `gap` is an upper bound of the gap, as [`bound::apart`] gives it (with nothing taken from the
+/// platform's `hypot`). Counted: the difference is an `Ivl` operation and its lower end is taken.
+/// Refused with `NotProved` where the gap alone is not below the tolerance.
 pub(super) fn less_gap(tolerance: f64, gap: f64) -> Result<f64, TeethFailure> {
     if gap == 0.0 {
         return Ok(tolerance);
     }
-    let wide = bound::exact(gap) * bound::exact(1.0 + 8.0 * UNIT);
-    let left = (bound::exact(tolerance) - wide).lo;
+    let left = (bound::exact(tolerance) - bound::exact(gap)).lo;
     if gap > 0.0 && left > 0.0 {
         Ok(left)
     } else {
@@ -368,9 +402,11 @@ pub(super) fn less_gap(tolerance: f64, gap: f64) -> Result<f64, TeethFailure> {
 
 /// For each piece of a tooth, the gap its closing chord has to bridge ([`less_gap`]): from the
 /// piece's end to the point the chord really ends on, which is the next piece's start, and for the
-/// last piece the first piece's start turned onto the next tooth. Zero where no gap is counted: an
-/// end that is missing or not finite, and a gap wider than the join allowance `1e-9 (1 + size)`
-/// (such pieces do not join, which [`Outline::new`] refuses in its own words).
+/// last piece the first piece's start turned onto the next tooth. Each is an upper bound of the
+/// gap ([`bound::apart`]). Zero where no gap is counted: an end that is missing or not finite, and
+/// a gap wider than twice the join allowance `1e-9 (1 + size)` (such pieces do not join, which
+/// [`Outline::new`] refuses in its own words; twice, so that a gap at the allowance itself is
+/// counted whichever way its last digit falls).
 fn closing_gaps(teeth: u32, tooth: &[Piece]) -> Vec<f64> {
     let reach = tooth
         .iter()
@@ -401,8 +437,8 @@ fn closing_gaps(teeth: u32, tooth: &[Piece]) -> Vec<f64> {
             let gap = piece
                 .end()
                 .zip(next)
-                .map_or(0.0, |(end, start)| distance(end, start));
-            if gap <= allowed {
+                .map_or(0.0, |(end, start)| bound::apart(end, start));
+            if gap <= 2.0 * allowed {
                 gap
             } else {
                 0.0
@@ -411,59 +447,44 @@ fn closing_gaps(teeth: u32, tooth: &[Piece]) -> Vec<f64> {
         .collect()
 }
 
-/// The enclosures [`Piece::chain`] uses for the break stretch `[from, to]` of a spline that
-/// [`bspline::range`] accepted: those of the span `from` lies in ([`bspline::span_bend`]), with
-/// the rounding raised to cover the end point at `to`, which `Checked::point` evaluates in a later
-/// span at an interior break knot (or further on, past a repeated knot), from control points the
-/// first span's rounding does not cover. In effect `2 gamma(12 p + 4)` times the largest
-/// coordinate of the control points from the first span's first to the end span's last; constant
-/// over the stretch.
-pub(super) fn break_bend(
+/// The counted rounding of a point [`Piece::chain`] computes on the break stretch `[from, to]` of
+/// a spline that [`bspline::range`] accepted: that of the span `from` lies in
+/// ([`bspline::span_rounding`]), raised to cover the end point at `to`, which `Checked::point`
+/// evaluates in a later span at an interior break knot (or further on, past a repeated knot), from
+/// control points the first span's rounding does not cover. In effect `2 gamma(12 p + 4)` times
+/// the largest coordinate of the control points from the first span's first to the end span's
+/// last; constant over the stretch. De Boor's steps are sums, products and quotients alone, which
+/// IEEE 754 rounds correctly, so this is counted and needs no measuring.
+pub(super) fn break_rounding(
     degree: usize,
     knots: &[f64],
     control: &[Point],
     from: f64,
     to: f64,
-) -> Bend {
+) -> f64 {
     let count = control.len();
-    let first = bspline::span_bend(
-        degree,
-        knots,
-        control,
-        bspline::span_of(degree, knots, count, from),
-    );
-    let end = bspline::span_bend(
-        degree,
-        knots,
-        control,
-        bspline::span_of(degree, knots, count, to),
-    );
-    let rounding = if first.rounding.is_nan() || end.rounding.is_nan() {
+    let of =
+        |t: f64| bspline::span_rounding(degree, control, bspline::span_of(degree, knots, count, t));
+    let (first, end) = (of(from), of(to));
+    if first.is_nan() || end.is_nan() {
         f64::INFINITY
     } else {
-        first.rounding.max(end.rounding)
-    };
-    Bend { rounding, ..first }
+        first.max(end)
+    }
 }
 
-/// What [`Piece::chain`] proves the chords of the break stretch `[from, to]` of a spline with: for
-/// a part `[lo, hi]` of the stretch, the enclosures of that part's own Bezier points
-/// ([`bspline::stretch_bend`]), with the rounding of the whole stretch ([`break_bend`], which
-/// covers the end point at `to`). The whole span's hodographs alone would bound a short part of a
+/// What [`Piece::chain`] proves the chords of the break stretch that starts at `from` of a spline
+/// with: for a part `[lo, hi]` of the stretch, the enclosures of that part's own Bezier points
+/// ([`bspline::stretch_bend`]). The whole span's hodographs alone would bound a short part of a
 /// spline of a high degree many times too loosely, and the chain would be that much too fine.
 pub(super) fn stretch_bends<'a>(
     degree: usize,
     knots: &'a [f64],
     control: &'a [Point],
     from: f64,
-    to: f64,
 ) -> impl Fn(f64, f64) -> Bend + 'a {
-    let whole = break_bend(degree, knots, control, from, to);
     let span = bspline::span_of(degree, knots, control.len(), from);
-    move |lo: f64, hi: f64| Bend {
-        rounding: whole.rounding,
-        ..bspline::stretch_bend(degree, knots, control, span, lo, hi)
-    }
+    move |lo: f64, hi: f64| bspline::stretch_bend(degree, knots, control, span, lo, hi)
 }
 
 /// A point turned about the origin.
@@ -820,25 +841,32 @@ pub(super) fn checked_tolerance(tolerance: f64) -> Result<f64, TeethFailure> {
     in_range("tolerance", tolerance, 0.0, MAX_LENGTH)
 }
 
+/// A computed point of a sampled curve: its parameter, the point, and the proved bound of its
+/// distance from the true point of the curve there.
+type Placed = (f64, Point, f64);
+
 /// Points of the curve `at` from `from` to `to`, both ends included, as few as keep the chords
-/// within `tolerance` of the curve, each chord PROVED by [`bound::chord_bound`] with `bend`.
-/// `bend(lo, hi)` (`lo <= hi`) encloses the curve over `[lo, hi]`.
+/// within `tolerance` of the curve, each chord PROVED by [`bound::chord_bound`]. `bend(lo, hi)`
+/// (`lo <= hi`) encloses the curve's derivatives over `[lo, hi]`, and `error(t, p)` is a proved
+/// bound of the distance of the computed point `p = at(t)` from the true point of the curve at
+/// `t`: for a curve computed with the platform's functions, the point measured against an
+/// enclosure of the true one ([`bound::off`]), so that nothing rests on how well the platform
+/// computes a sine.
 ///
 /// The probes only nominate where to split; a chord is accepted only when `chord_bound` proves it
-/// (bound.rs), the rounding of the two end points counted by the caller's `Bend::rounding`. A
-/// stretch that cannot be halved and is not proved is refused.
+/// (bound.rs), with the larger of the proved errors of its two ends. A stretch that cannot be
+/// halved and is not proved is refused.
 ///
-/// The curve is first refused at once where the rounding of its points over the whole stretch
-/// (`bend` over all of it) is not below the tolerance: every caller's rounding over a stretch is
-/// computed from magnitudes over that stretch, so the whole stretch's bounds every part's. Then,
-/// from eight pieces, each stretch is probed at a quarter, the middle and three quarters: one whose
-/// probes lie farther than the tolerance from its chord is halved; another is accepted if
-/// `chord_bound` over it (its parameter width rounded up, `bend` over it) is within the tolerance,
-/// halved if it is not and can be, and refused with `NotProved` if it cannot. So the points are
-/// closest together where the curve bends most, and every chord is within the tolerance of the
-/// curve.
+/// The curve is first refused at once where an end of it is not a finite point, or is not proved
+/// within the tolerance of the curve. Then, from eight pieces, each stretch is probed at a
+/// quarter, the middle and three quarters: one whose probes lie farther than the tolerance from
+/// its chord is halved; another is accepted if `chord_bound` over it (its parameter width rounded
+/// up, `bend` over it) is within the tolerance, halved if it is not and can be, and refused with
+/// `NotProved` if it cannot. So the points are closest together where the curve bends most, and
+/// every chord is within the tolerance of the curve.
 pub(super) fn sampled(
     at: &dyn Fn(f64) -> Point,
+    error: &dyn Fn(f64, Point) -> f64,
     bend: &dyn Fn(f64, f64) -> Bend,
     from: f64,
     to: f64,
@@ -847,9 +875,17 @@ pub(super) fn sampled(
     const TOO_FINE: TeethFailure = TeethFailure::Invalid(Why::CurveTooFine);
     const NOT_FINITE: TeethFailure = TeethFailure::Invalid(Why::OutlineNotFinite);
     const START: u32 = 8; // pieces to begin with, so that no bend is overlooked
-    let whole = bend(from.min(to), from.max(to));
-    if !(whole.rounding < tolerance) {
-        return Err(not_proved(tolerance, whole.rounding));
+    let placed = |t: f64| -> Placed {
+        let p = at(t);
+        (t, p, error(t, p))
+    };
+    for (_, p, e) in [placed(from), placed(to)] {
+        if !p.iter().all(|v| v.is_finite()) {
+            return Err(NOT_FINITE);
+        }
+        if !(e < tolerance) {
+            return Err(not_proved(tolerance, e));
+        }
     }
     // The last place is `to` itself, not a rounded sum that only comes close to it: the proof then
     // covers the curve to the very parameter the next stretch of a piece starts from.
@@ -862,20 +898,20 @@ pub(super) fn sampled(
     };
     let mut out = vec![at(from)];
     // The stretches still to settle, the next one on top.
-    let mut waiting: Vec<(f64, Point, f64, Point)> = (0..START)
+    let mut waiting: Vec<(Placed, Placed)> = (0..START)
         .rev()
-        .map(|i| (place(i), at(place(i)), place(i + 1), at(place(i + 1))))
+        .map(|i| (placed(place(i)), placed(place(i + 1))))
         .collect();
-    while let Some((t0, p0, t1, p1)) = waiting.pop() {
+    while let Some(((t0, p0, e0), (t1, p1, e1))) = waiting.pop() {
         let (quarter, middle, three_quarters) = (
             0.75 * t0 + 0.25 * t1,
             0.5 * (t0 + t1),
             0.25 * t0 + 0.75 * t1,
         );
-        let at_middle = at(middle);
+        let at_middle = placed(middle);
         // The largest of the three, and not a number if any of them is not (`f64::max` would drop
         // it, and the curve would pass for finite).
-        let off = [at(quarter), at_middle, at(three_quarters)]
+        let probe = [at(quarter), at_middle.1, at(three_quarters)]
             .into_iter()
             .map(|p| off_chord(p, p0, p1))
             .fold(
@@ -884,15 +920,21 @@ pub(super) fn sampled(
             );
         // A stretch that cannot be halved any more is as fine as numbers allow.
         let halvable = middle > t0.min(t1) && middle < t0.max(t1);
-        if off.is_nan() {
+        if probe.is_nan() {
             return Err(NOT_FINITE);
         }
-        let split = if off > tolerance && halvable {
+        let split = if probe > tolerance && halvable {
             true
         } else {
             let width = next_up((t1 - t0).abs());
             let near = bend(t0.min(t1), t0.max(t1));
-            let proved = bound::chord_bound(width, p0, p1, &near);
+            // The larger of the two ends' proved errors; not a number proves nothing.
+            let e = if e0.is_nan() || e1.is_nan() {
+                f64::INFINITY
+            } else {
+                e0.max(e1)
+            };
+            let proved = bound::chord_bound(width, p0, p1, e, &near);
             if proved <= tolerance {
                 out.push(p1);
                 false
@@ -906,8 +948,8 @@ pub(super) fn sampled(
             if out.len() + waiting.len() >= MAX_CURVE_POINTS {
                 return Err(TOO_FINE);
             }
-            waiting.push((middle, at_middle, t1, p1));
-            waiting.push((t0, p0, middle, at_middle));
+            waiting.push((at_middle, (t1, p1, e1)));
+            waiting.push(((t0, p0, e0), at_middle));
         }
     }
     Ok(out)

@@ -1397,6 +1397,7 @@ fn compare_chains(
     counts: &mut Chains,
     name: &str,
     at: &dyn Fn(f64) -> Point,
+    off: &dyn Fn(f64, Point) -> f64,
     bend: &dyn Fn(f64, f64) -> Bend,
     from: f64,
     to: f64,
@@ -1406,7 +1407,7 @@ fn compare_chains(
         return;
     };
     counts.curves += 1;
-    let proved = match sampled(at, bend, from, to, tolerance) {
+    let proved = match sampled(at, off, bend, from, to, tolerance) {
         Ok(proved) => proved,
         Err(e) => {
             counts.refused += 1;
@@ -1459,6 +1460,7 @@ fn the_flank_and_fillet_chains_are_proved_and_never_coarser() -> crate::Result<(
                 &mut counts,
                 &format!("the fillet of {e:?} at {tolerance}"),
                 &|phi| fillet.point(phi),
+                &|phi, p| fillet.off(phi, p),
                 &|lo, hi| fillet.bend(lo, hi),
                 fillet.phi_root,
                 fillet.phi_join,
@@ -1468,6 +1470,7 @@ fn the_flank_and_fillet_chains_are_proved_and_never_coarser() -> crate::Result<(
                 &mut counts,
                 &format!("the flank of {e:?} at {tolerance}"),
                 &|v| flank.point(v),
+                &|v, p| flank.off(v, p),
                 &|lo, hi| flank.bend(lo, hi),
                 flank.from,
                 flank.to,
@@ -1483,6 +1486,7 @@ fn the_flank_and_fillet_chains_are_proved_and_never_coarser() -> crate::Result<(
                 &mut counts,
                 &format!("the flank of {hub:?} at {tolerance}"),
                 &|roll| flank.point(roll),
+                &|roll, p| flank.off(roll, p),
                 &|lo, hi| flank.bend(lo, hi),
                 flank.from,
                 flank.to,
@@ -1499,12 +1503,13 @@ fn the_flank_and_fillet_chains_are_proved_and_never_coarser() -> crate::Result<(
     Ok(())
 }
 
-/// The rounding counted for a fillet's point covers its conditioning. Where the centre of the
-/// tool's tip round lies a hair below the line of rolling, the unit vector from the point of
-/// rolling contact to that centre is ill conditioned, and the rounding of the rolling `r phi`
-/// moves the point far more than a count of operations on its size allows: the count carries the
-/// factor `1 + rho / |vc|` for it. The reference rolls with one rounding (`mul_add`), so its own
-/// error there is far below the difference measured.
+/// The proved distance of a fillet's computed point from its true one covers the fillet's
+/// conditioning. Where the centre of the tool's tip round lies a hair below the line of rolling,
+/// the unit vector from the point of rolling contact to that centre is ill conditioned, and the
+/// rounding of the rolling `r phi` moves the computed point far more than a count of operations
+/// on its size would allow: the enclosure the point is measured against widens with it. The
+/// reference rolls with one rounding (`mul_add`), so its own error there is far below the
+/// difference measured.
 #[test]
 fn a_fillet_close_to_the_line_of_rolling_counts_its_conditioning() {
     let fillet = |vc: f64| Fillet {
@@ -1528,22 +1533,31 @@ fn a_fillet_close_to_the_line_of_rolling_counts_its_conditioning() {
     // Angles of rolling about the one where the contact passes under the centre (`r phi = uc`).
     let (close, steps) = (fillet(-1e-9), 200_i32);
     let angle = |k: i32| 0.04 + 2e-11 * f64::from(k);
-    let (lo, hi) = (angle(-steps), angle(steps));
     let mut worst = 0.0_f64;
     for k in -steps..=steps {
-        let (p, q) = (close.point(angle(k)), reference(&close, angle(k)));
-        worst = worst.max((p[0] - q[0]).hypot(p[1] - q[1]));
+        let phi = angle(k);
+        let (p, q) = (close.point(phi), reference(&close, phi));
+        let moved = (p[0] - q[0]).hypot(p[1] - q[1]);
+        let proved = close.off(phi, p);
+        assert!(
+            moved <= proved + 1e-13,
+            "at {phi}: moved {moved:e}, proved {proved:e}"
+        );
+        worst = worst.max(moved);
     }
-    let counted = close.bend(lo, hi).rounding;
-    assert!(worst <= counted, "moved {worst:e}, counted {counted:e}");
-    // A count that left the conditioning out (that of a fillet well below the line, whose sizes
-    // are no smaller) would be short by orders of magnitude.
-    let without = fillet(-0.9).bend(lo, hi).rounding;
+    // A fillet well below the line, whose sizes are no smaller, has its points proved within a
+    // few parts in 1e15 of its size; the other's points really move orders of magnitude more.
+    let plain = fillet(-0.9);
+    let without = plain.off(angle(0), plain.point(angle(0)));
     assert!(without > 0.0 && without < 1e-12, "{without:e}");
     assert!(
         worst > 1e3 * without,
-        "moved {worst:e}, uncarried {without:e}"
+        "moved {worst:e}, well placed {without:e}"
     );
-    // A centre on the line of rolling has no count at all: nothing is proved with it.
-    assert_eq!(fillet(0.0).bend(lo, hi).rounding, f64::INFINITY);
+    // With the centre on the line of rolling, under the point of contact, nothing is proved.
+    let on_line = fillet(0.0);
+    assert_eq!(
+        on_line.off(angle(0), on_line.point(angle(0))),
+        f64::INFINITY
+    );
 }

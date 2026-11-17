@@ -892,9 +892,10 @@ pub(super) fn certifiable(spline: &Spline) -> bool {
 /// `gamma(p + 2) sum |computed N_j| |c_j| <= gamma(p + 2) (1 + gamma(6p)) max |c|`. Per
 /// coordinate that is at most `(gamma(6p) + gamma(p + 2) + gamma(p + 2) gamma(6p)) max |c| <=
 /// gamma(7p + 2) max |c|`, taken as `gamma(12p + 4) max |c|`, and twice that for the two
-/// coordinates of a distance: `E_S`. The distance of a point from the spline's point: the two
-/// differences and `hypot` (the library's, two units in the last place), the factor
-/// `1 + gamma(6)`. A point inside a chord, `a + (b - a) j / k`: four operations per coordinate
+/// coordinates of a distance: `E_S`. The distance of a point from the spline's point is an upper
+/// bound from `bound::apart`: the two differences, their squares, the sum and the square root as
+/// `Ivl` operations, with nothing taken from the platform's `hypot`. A point inside a chord,
+/// `a + (b - a) j / k`: four operations per coordinate
 /// (the difference, the product by `j`, the quotient by `k`, the sum with `a`), within `gamma(4)
 /// (|a_c| + |b_c - a_c|) <= 3 gamma(4) m` per coordinate, `m` the largest coordinate of the two
 /// ends, and `6 gamma(4) m` for both. Parameter widths are rounded up (`next_up` of the computed
@@ -952,13 +953,10 @@ pub(super) fn certificate(
         .flatten()
         .fold(0.0_f64, |m, v| m.max(v.abs()));
     let e_spline = up((exact(2.0) * exact(gamma(12 * degree + 4)) * exact(largest)).hi);
-    let hypot_factor = exact(1.0) + exact(gamma(6));
     // How far a point on the source chord is from the spline's point at `v`, rounded up, with
     // `extra` for the rounding of the point itself.
     let end_distance = |w: Point, v: f64, extra: f64| -> f64 {
-        let s = spline.at(v);
-        let h = (w[0] - s[0]).hypot(w[1] - s[1]);
-        up((exact(h) * hypot_factor + exact(e_spline) + exact(extra)).hi)
+        up((exact(bound::apart(w, spline.at(v))) + exact(e_spline) + exact(extra)).hi)
     };
     let mut bends = Bends::of(spline);
     let mut by_span: Vec<f64> = spline.control.iter().map(|_| 0.0).collect();
@@ -2001,13 +1999,16 @@ pub(crate) fn one_piece_typed(run: &[Piece], tolerance: f64) -> Result<(Piece, f
         let start = piece.start().ok_or(NOT_JOINED)?;
         // A piece after the first is run from the end of the one before it, not from its own
         // start: that distance, within the join allowance, is counted in the piece's tolerance.
-        let apart = points
+        if points
             .last()
-            .map_or(0.0, |&previous| distance(previous, start));
-        if apart > join {
+            .is_some_and(|&previous| distance(previous, start) > join)
+        {
             return Err(NOT_JOINED);
         }
-        let room = less_gap(source, apart)?;
+        let joint = points
+            .last()
+            .map_or(0.0, |&previous| bound::apart(previous, start));
+        let room = less_gap(source, joint)?;
         let own = match piece {
             Piece::Curve { points, .. } => points.clone(),
             Piece::Line { from, to, .. } => {

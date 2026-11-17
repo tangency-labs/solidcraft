@@ -247,11 +247,9 @@ pub(crate) fn breaks_typed(
 
 /// The enclosures of a spline over its knot span `span` (`knots[span] <= t < knots[span + 1]`,
 /// `degree <= span < control.len()`) from the control points of its first and second hodograph
-/// that are active there, computed in `Ivl`, and the counted rounding of a de Boor point there. A
-/// degree 1 span has `second = [0, 0]` and `second_size` 0. An index outside the spline, or a
-/// degree outside 1 to [`MAX_DEGREE`], gives `Bend::unknown()`. Its `rounding` covers points
-/// evaluated in span `span` only; `Piece::chain` raises it for a break stretch whose end point
-/// `Checked::point` evaluates in a later span.
+/// that are active there, computed in `Ivl`. A degree 1 span has `second = [0, 0]` and
+/// `second_size` 0. An index outside the spline, or a degree outside 1 to [`MAX_DEGREE`], gives
+/// `Bend::unknown()`. The rounding of a point computed there is [`span_rounding`]'s.
 ///
 /// With `p` the degree, `s` the span, `P` the control points and `t` the knots, the active control
 /// points are `P[s-p] ..= P[s]`, and:
@@ -266,11 +264,6 @@ pub(crate) fn breaks_typed(
 /// identically 0, and every `R[j]` that uses it; one whose interval holds 0 otherwise makes that
 /// hodograph point the whole line. Every value is computed in `Ivl` from the doubles of the
 /// spline, so the operations are counted outward.
-///
-/// `rounding = 2 gamma(12 p + 4) max |coordinate of P[s-p ..= s]|` (rounded up in `Ivl`): the
-/// kernel's count for de Boor's convex combinations (docs/definitions-and-certificates.md 4.4,
-/// `eval::collapse`), which is what `Checked::point` computes, and the factor 2 covers both
-/// coordinates of the distance.
 pub(crate) fn span_bend(degree: usize, knots: &[f64], control: &[Point], span: usize) -> Bend {
     if !(1..=MAX_DEGREE).contains(&degree) || span >= control.len() {
         return Bend::unknown();
@@ -326,6 +319,36 @@ pub(crate) fn span_bend(degree: usize, knots: &[f64], control: &[Point], span: u
         }
         hull(r.into_iter())
     };
+    Bend {
+        first,
+        second,
+        second_size: if degree == 1 {
+            0.0
+        } else {
+            bound::magnitude(second)
+        },
+    }
+}
+
+/// The counted rounding of a point `Checked::point` computes in the knot span `span` of a spline
+/// of degree `p`: `2 gamma(12 p + 4)` times the largest coordinate of the span's active control
+/// points `P[s-p] ..= P[s]`, rounded up in `Ivl`. It is the kernel's count for de Boor's convex
+/// combinations (docs/definitions-and-certificates.md 4.4, `eval::collapse`), whose steps are
+/// sums, products and quotients, all rounded correctly under IEEE 754; the factor 2 covers both
+/// coordinates of the distance. It covers points evaluated in span `span` only; `Piece::chain`
+/// raises it for a break stretch whose end point is evaluated in a later span. Infinite for an
+/// index outside the spline, a degree outside 1 to [`MAX_DEGREE`], or a coordinate that is not
+/// finite.
+pub(crate) fn span_rounding(degree: usize, control: &[Point], span: usize) -> f64 {
+    if !(1..=MAX_DEGREE).contains(&degree) {
+        return f64::INFINITY;
+    }
+    let active = span
+        .checked_sub(degree)
+        .and_then(|first| control.get(first..=span));
+    let Some(active) = active else {
+        return f64::INFINITY;
+    };
     let largest = active
         .iter()
         .flatten()
@@ -339,19 +362,10 @@ pub(crate) fn span_bend(degree: usize, knots: &[f64], control: &[Point], span: u
         .unwrap_or(f64::INFINITY);
     let count = degree.saturating_mul(12).saturating_add(4);
     let rounding = (bound::exact(2.0) * bound::exact(gamma(count)) * bound::exact(largest)).hi;
-    Bend {
-        first,
-        second,
-        second_size: if degree == 1 {
-            0.0
-        } else {
-            bound::magnitude(second)
-        },
-        rounding: if rounding.is_nan() {
-            f64::INFINITY
-        } else {
-            rounding
-        },
+    if rounding.is_nan() {
+        f64::INFINITY
+    } else {
+        rounding
     }
 }
 
@@ -382,7 +396,7 @@ fn hull(boxes: impl Iterator<Item = [Ivl; 2]>) -> [Ivl; 2] {
 /// Counted: every operation is an `Ivl` one from the doubles of the spline, so the rounding goes
 /// outward. The second differences lose digits as `1 / w^2` over a very short part, so each
 /// enclosure is also cut to the whole span's, which holds the part too: a part too short for its
-/// own differences proves no less than its span does. The rounding of a point is the span's.
+/// own differences proves no less than its span does.
 /// A part that is not inside its span, or has no width, gives `Bend::unknown()`.
 pub(crate) fn stretch_bend(
     degree: usize,
@@ -449,7 +463,6 @@ pub(crate) fn stretch_bend(
         } else {
             whole.second_size
         },
-        rounding: whole.rounding,
     }
 }
 

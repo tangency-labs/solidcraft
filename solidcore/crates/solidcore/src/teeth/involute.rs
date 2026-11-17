@@ -13,7 +13,10 @@
 //! What is decided about a tooth is proved, not sampled: the root fillets are proved apart (each
 //! stays strictly between the middle of its tooth and the middle of the space), and every chord of
 //! a flank or fillet is proved within the tolerance of the curve (`outline::sampled`), each in
-//! rounded intervals with the rounding of the computed points counted.
+//! rounded intervals. A point of a curve is computed with the platform's sine, cosine, arc tangent
+//! and `hypot`, whose precision nothing promises, and is then measured against an enclosure of the
+//! true point made without them (`teeth::bound`): its distance from the curve is proved, not
+//! assumed.
 //!
 //! Lengths are millimetres. Heights of the tooth are given in modules, as usual for involute
 //! splines.
@@ -22,11 +25,10 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use crate::blend::fillet_section::interval::Ivl;
 use crate::error::teeth::{TeethFailure, Why, FILLET_SEPARATION};
-use crate::geom::certified::{gamma, next_up};
-use crate::nurbs::math::UNIT;
+use crate::geom::certified::next_up;
 use crate::teeth::bound::{
-    atan_over, exact, half_width, magnitude, neg, pi, rotated_ivl, sqr, taylor, taylor_from_end,
-    Bend,
+    atan_over, exact, half_width, magnitude, neg, off, pi, rotated_ivl, sqr, taylor,
+    taylor_from_end, Bend,
 };
 use crate::teeth::mesh::Material;
 use crate::teeth::outline::{checked_tolerance, on_circle, sampled, Outline, Piece, Point, Role};
@@ -91,19 +93,6 @@ impl Base {
         } else {
             None
         }
-    }
-}
-
-/// The larger of `|lo|` and `|hi|`; NaN when either is NaN (so that a bound built on it is never
-/// finite by mistake).
-fn size(lo: f64, hi: f64) -> f64 {
-    let (a, b) = (lo.abs(), hi.abs());
-    if a >= b {
-        a
-    } else if b > a {
-        b
-    } else {
-        f64::NAN
     }
 }
 
@@ -207,13 +196,6 @@ impl Flank {
     /// `P'' = R(phi) (2 k cot - k^2 (r + v), -2 k - k^2 v cot)`, each enclosed in rounded
     /// intervals over the heights (the doubles `r`, `s`, `sin`, `cos` are the curve's definition);
     /// the size of `P''` is that of the unrotated vector.
-    ///
-    /// The rounding of a computed point, with `V` the larger of `|lo|`, `|hi|` and
-    /// `A = r + V + V cot`: `phi` is four operations, `gamma(4) (|s|/2 + V/(sin cos))/r`; `sin`,
-    /// `cos` are libm, two ulps each (`4u`, the values being at most 1); the point,
-    /// `(r + v) cos - along sin` and its pair with `along = v cos / sin`, is at most sixteen
-    /// operations on terms of size at most `A`; the factor 2 covers both coordinates:
-    /// `2 (A (dphi + 4u) + gamma(16) A)`, computed in rounded intervals and taken at its upper end.
     pub(super) fn bend(&self, lo: f64, hi: f64) -> Bend {
         let (r, sin, cos) = (exact(self.r), exact(self.sin), exact(self.cos));
         let (one, two) = (exact(1.0), exact(2.0));
@@ -225,16 +207,25 @@ impl Flank {
         let rv = r + v;
         let first = [one + k * v * cot, cot - k * rv];
         let second = [two * k * cot - sqr(k) * rv, neg(two * k) - sqr(k) * v * cot];
-        let most = exact(size(lo, hi));
-        let a = r + most + most * cot;
-        let dphi = exact(gamma(4)) * (exact(self.s.abs()) * exact(0.5) + most / sc) / r;
-        let rounding = two * (a * (dphi + exact(4.0 * UNIT)) + exact(gamma(16)) * a);
         Bend {
             first: rotated_ivl(phi, first),
             second: rotated_ivl(phi, second),
             second_size: magnitude(second),
-            rounding: rounding.hi,
         }
+    }
+
+    /// The true point of the flank at the height `v`, enclosed: `R(phi(v)) (r + v, v cos / sin)`
+    /// in rounded intervals, the turn's sine and cosine from their series (`teeth::bound`).
+    fn held(&self, v: f64) -> [Ivl; 2] {
+        let (r, sin, cos, v) = (exact(self.r), exact(self.sin), exact(self.cos), exact(v));
+        let phi = (exact(self.s) * exact(0.5) - v / (sin * cos)) / r;
+        rotated_ivl(phi, [r + v, v * cos / sin])
+    }
+
+    /// A proved bound of the distance of `p`, the point computed for the height `v`
+    /// ([`Flank::point`], with the platform's sine and cosine), from the flank's true point there.
+    pub(super) fn off(&self, v: f64, p: Point) -> f64 {
+        off(p, self.held(v))
     }
 }
 
@@ -396,8 +387,8 @@ impl Fillet {
     /// `NotProved` naming `FILLET_SEPARATION` and the least lower end found.
     ///
     /// Counted: the operations are rounded interval ones (`Ivl`, outward rounded) on the fillet's
-    /// doubles as its definition; libm `sin` and `cos` of a stretch's middle are counted as two
-    /// units in the last place (`teeth::bound`); pi is `[PI, next_up(PI)]`; the half width is
+    /// doubles as its definition; the sine and cosine of a stretch's middle are enclosed from
+    /// their series (`teeth::bound`); pi is `[PI, next_up(PI)]`; the half width is
     /// rounded up; the Taylor remainder comes from the enclosure of the second derivative over the
     /// whole stretch.
     pub(super) fn separation(&self) -> Result<(), TeethFailure> {
@@ -469,40 +460,31 @@ impl Fillet {
     /// What the fillet does over the angles of rolling `[lo, hi]`, for `outline::sampled`:
     /// `P' = R(phi) p1(phi)`, `P'' = R(phi) p2(phi)` with the vectors of [`Fillet::local`]
     /// enclosed over the stretch, and the size of `P''` that of the unrotated `p2`.
-    ///
-    /// The rounding of a computed point, with `Phi` the larger of `|lo|`, `|hi|`,
-    /// `W = r Phi + |uc|` and `M = r (1 + Phi) + |uc| + |vc| + 3 rho + W` (a bound on every term):
-    /// `w` (2 operations), `hypot` (libm), `rho du / len` (2), `qu`, `qv` (3), `sin` and `cos`
-    /// (libm, two ulps each: `4u` on terms of size at most `M`), `along` (2) and the turn (4), at
-    /// most sixteen operations in all: `gamma(16) M + 4u M` for a coordinate.
-    ///
-    /// The rounding of `w` is also carried through the unit vector `(w, -vc) / len`, which is not
-    /// well conditioned where the round's centre lies close to the line of rolling: as functions
-    /// of `w` its two parts have slopes `vc^2 / len^3` and `vc w / len^3`, neither above `1 / |vc|`
-    /// for any `w`, so an error of at most `gamma(2) W` in `w` moves `qu` and `qv` by at most
-    /// `rho gamma(2) W / |vc|` each. That is covered by the factor `1 + rho / |vc|` on the first
-    /// term (`W <= M`): `2 (gamma(16) M (1 + rho / |vc|) + 4u M)`, the factor 2 for both
-    /// coordinates, computed in rounded intervals and taken at its upper end. A centre on the line
-    /// of rolling (`vc = 0`) gives an infinite rounding, which proves nothing.
     pub(super) fn bend(&self, lo: f64, hi: f64) -> Bend {
         let stretch = Ivl::new(lo, hi);
         let [_, first, second] = self.local(stretch);
-        let r = exact(self.r);
-        let most = exact(size(lo, hi));
-        let w = r * most + exact(self.uc.abs());
-        let m = r * (exact(1.0) + most)
-            + exact(self.uc.abs())
-            + exact(self.vc.abs())
-            + exact(3.0) * exact(self.rho)
-            + w;
-        let carried = exact(1.0) + exact(self.rho.abs()) / exact(self.vc.abs());
-        let rounding = exact(2.0) * (exact(gamma(16)) * m * carried + exact(4.0 * UNIT) * m);
         Bend {
             first: rotated_ivl(stretch, first),
             second: rotated_ivl(stretch, second),
             second_size: magnitude(second),
-            rounding: rounding.hi,
         }
+    }
+
+    /// A proved bound of the distance of `p`, the point computed for the angle of rolling `phi`
+    /// ([`Fillet::point`], with the platform's `hypot`, sine and cosine), from the fillet's true
+    /// point there: `p` measured against `R(phi) q(phi)` enclosed in rounded intervals
+    /// ([`Fillet::local`], its length by a square root and the turn's sine and cosine from their
+    /// series).
+    ///
+    /// The enclosure carries the fillet's conditioning by itself. Where the centre of the tool's
+    /// tip round lies close to the line of rolling, the unit vector `(w, -vc) / len` is ill
+    /// conditioned (its parts' slopes in `w` reach `1 / |vc|`), the rounding of `w = r phi - uc`
+    /// widens the enclosure by about `rho / |vc|` times it, and the bound grows to match; with
+    /// the centre on the line (`vc = 0`) the enclosure is the whole plane and nothing is proved.
+    pub(super) fn off(&self, phi: f64, p: Point) -> f64 {
+        let at = exact(phi);
+        let [q, _, _] = self.local(at);
+        off(p, rotated_ivl(at, q))
     }
 }
 
@@ -825,6 +807,7 @@ impl External {
         let upper_flank = cut.upper_flank();
         let fillet = sampled(
             &|phi| upper_fillet.point(phi),
+            &|phi, p| upper_fillet.off(phi, p),
             &|lo, hi| upper_fillet.bend(lo, hi),
             upper_fillet.phi_root,
             upper_fillet.phi_join,
@@ -832,6 +815,7 @@ impl External {
         )?;
         let flank = sampled(
             &|v| upper_flank.point(v),
+            &|v, p| upper_flank.off(v, p),
             &|lo, hi| upper_flank.bend(lo, hi),
             upper_flank.from,
             upper_flank.to,
@@ -956,14 +940,6 @@ impl HubFlank {
     /// over the lengths and turned by the enclosure of `psi` (with `atan` over an interval,
     /// `teeth::bound::atan_over`); the size of `P''` is that of the unturned vector. At the cusp on
     /// the base circle `P'` is 0 and `P''` stays finite.
-    ///
-    /// The rounding of a computed point, with `L` the larger of `|lo|`, `|hi|`,
-    /// `rhomax = sqrt(rb^2 + L^2)`: the angle is four operations on terms of size at most
-    /// `|c| + 2 L/rb` plus libm `atan`, two ulps of at most pi/2 (`2 pi u`); `hypot` (libm, two
-    /// ulps), `cos` and `sin` (libm, two ulps each) and the products: `8u` and `gamma(16)`
-    /// relative to `rhomax`; the factor 2 covers both coordinates:
-    /// `2 rhomax (dpsi + gamma(16) + 8u)`, computed in rounded intervals and taken at its upper
-    /// end.
     pub(super) fn bend(&self, lo: f64, hi: f64) -> Bend {
         let (rb, two) = (exact(self.rb), exact(2.0));
         let l = Ivl::new(lo, hi);
@@ -978,17 +954,29 @@ impl HubFlank {
         let psi = exact(self.half_at_base) - ratio + atan_over(ratio);
         let first = [rho1, rho * psi1];
         let second = [rho_second - rho * sqr(psi1), two * rho1 * psi1 + rho * psi2];
-        let most = exact(size(lo, hi));
-        let rhomax = (rb2 + sqr(most)).sqrt();
-        let dpsi = exact(gamma(4)) * (exact(self.half_at_base.abs()) + two * most / rb)
-            + two * pi() * exact(UNIT);
-        let rounding = two * rhomax * (dpsi + exact(gamma(16)) + exact(8.0 * UNIT));
         Bend {
             first: rotated_ivl(psi, first),
             second: rotated_ivl(psi, second),
             second_size: magnitude(second),
-            rounding: rounding.hi,
         }
+    }
+
+    /// The true point of the flank at the unwound length `roll`, enclosed:
+    /// `rho (cos psi, sin psi)` in rounded intervals, `rho` by a square root and the arc tangent,
+    /// the sine and the cosine from their series (`teeth::bound`).
+    fn held(&self, roll: f64) -> [Ivl; 2] {
+        let (rb, l) = (exact(self.rb), exact(roll));
+        let ratio = l / rb;
+        let psi = exact(self.half_at_base) - ratio + atan_over(ratio);
+        let rho = (sqr(rb) + sqr(l)).sqrt();
+        rotated_ivl(psi, [rho, exact(0.0)])
+    }
+
+    /// A proved bound of the distance of `p`, the point computed for the unwound length `roll`
+    /// ([`HubFlank::point`], with the platform's `atan`, `hypot`, sine and cosine), from the
+    /// flank's true point there.
+    pub(super) fn off(&self, roll: f64, p: Point) -> f64 {
+        off(p, self.held(roll))
     }
 }
 
@@ -1112,6 +1100,7 @@ impl Internal {
         let flank = f.upper_flank();
         let upper = sampled(
             &|roll| flank.point(roll),
+            &|roll, p| flank.off(roll, p),
             &|lo, hi| flank.bend(lo, hi),
             flank.from,
             flank.to,
