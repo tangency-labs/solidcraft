@@ -1,0 +1,9 @@
+[
+  {"note":"Cut List lists a board, exposes sorting and exports, and reports a material total."},
+  {"call":"engine.execute","params":{"command":"solid.box","params":{"length":360,"width":45,"height":18,"body_name":"Rail"}}},
+  {"start":"cutlist.parts"},
+  {"expect":{"shown":"Export CSV…","errors":0}},
+  {"expect":{"shown":"Total for Unassigned: 1"}},
+  {"widget":"Length"},
+  {"expect":{"query":{"command":"cutlist.parts","path":["total_occurrences"],"value":1}}}
+]

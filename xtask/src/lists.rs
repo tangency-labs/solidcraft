@@ -88,6 +88,7 @@ const FIXED_ARRAYS: &[(&str, &str)] = &[
     ("crates/engine/src/cmd/parts.rs", "WASHER"),            // ISO 7089 plain washer dimensions.
     ("crates/ui-egui/src/dialogs_assembly.rs", "TYPES"),     // Joint types; TYPE_LABELS must stay the same length.
     ("crates/ui-egui/src/dialogs_assembly.rs", "TYPE_LABELS"), // Labels for TYPES, index for index.
+    ("crates/ui-egui/src/panel_runtime/production.rs", "ALL"), // Every application panel; its length sizes the per-panel state arrays.
     ("crates/ui-egui/src/space_mouse_calibration.rs", "STEP_PROMPTS"), // Labels for the twelve fixed calibration motions.
     ("crates/ui-egui/src/space_mouse_calibration.rs", "TRACKBALL_PROMPTS"), // Trackball labels indexed by the same twelve motions.
 ];

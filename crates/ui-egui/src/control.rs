@@ -126,6 +126,8 @@ fn open_windows(app: &SolveApp) -> Vec<&'static str> {
         (app.design_properties.is_some(), "document.metadata"),
         (app.sketch_report.is_some(), "sketch.inspect"),
         (app.bom.is_some(), "assembly.bom"),
+        (app.cutlist.is_some(), "cutlist.parts"),
+        (app.cutting_plan.is_some(), "cutlist.layout"),
         (app.material_card_review.is_some(), "material.properties.validate"),
         (app.help.about, "about"),
         (app.updater.open, "updates"),
@@ -209,6 +211,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.tool.zoom"
             | "view.spin"
             | "view.visual_style"
+            | "view.grain"
             | "view.grid"
             | "view.ground_shadow"
             | "view.navigation_bar"
@@ -512,6 +515,14 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
     )
     .map_err(|e| e.to_string())?;
     scene.plain_cap = !crate::viewport::section_hatch(app);
+    let accent = solidcraft_theme::Tokens::get().accent;
+    scene.lines.extend(crate::grain_guides::segments(app).into_iter().map(|(a, b)| solidcraft_viewport::SceneLine {
+        points: vec![a, b],
+        color: solidcraft_viewport::Rgb(accent.r(), accent.g(), accent.b()),
+        alpha: 1.0,
+        width: 1.4,
+        on_top: false,
+    }));
     if app.preferences.section_hatch == crate::prefs::SectionHatch::One {
         scene.part_hatch = None;
     }
