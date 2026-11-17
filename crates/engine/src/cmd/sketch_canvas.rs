@@ -493,6 +493,21 @@ mod tests {
         assert!(r["canvas"].is_u64());
     }
 
+    /// #18422: a decal on a curved face says the face is curved, not that it no longer exists;
+    /// a point that is on no face still gets the old words.
+    #[test]
+    fn a_decal_on_a_curved_face_says_the_face_is_curved() {
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 10, "height": 10})).unwrap();
+        let curved = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [10, 0, 5], "width": 5})).unwrap_err().to_string();
+        assert!(curved.contains("curved or is not an exact plane"), "{curved}");
+        assert!(!curved.contains("no longer exists"), "{curved}");
+        let nowhere = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [100, 100, 100], "width": 5})).unwrap_err().to_string();
+        assert!(nowhere.contains("no longer exists"), "{nowhere}");
+        // The flat end of the same cylinder still takes a decal.
+        assert!(s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [0, 0, 10], "width": 5})).is_ok());
+    }
+
     /// Where a point of the plane is on the image, as fractions (s, t) of its bottom and left
     /// edges, and back: straightening must keep every image point's place relative to the others.
     fn on_image(c: &solidcraft_doc::canvas::Canvas, p: Vec2) -> (f64, f64) {

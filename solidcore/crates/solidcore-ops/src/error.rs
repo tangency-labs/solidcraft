@@ -400,6 +400,15 @@ pub enum OffsetRefusal {
         /// The radius of curvature the face attains on the displaced side.
         radius: f64,
     },
+    /// The wall reaches half the width between two opposite planar faces (a square boss inset
+    /// by half its width): the material between them has no offset left. `largest` is half
+    /// the narrowest such width, the largest wall that fits.
+    WallsMeetAcross {
+        /// The offset distance asked for (signed).
+        distance: f64,
+        /// The largest wall that fits.
+        largest: f64,
+    },
     /// Loops of the face's offset cross in a way the offset does not resolve: how.
     LoopsCross {
         /// How they cross.
@@ -466,6 +475,11 @@ impl std::fmt::Display for OffsetRefusal {
             OffsetRefusal::Collapses { distance, radius } => write!(
                 f,
                 "its offset by {distance} collapses (a radius of curvature {radius})"
+            ),
+            OffsetRefusal::WallsMeetAcross { largest, .. } => write!(
+                f,
+                "the wall reaches half the width between two opposite faces of a boss; the \
+                 largest wall that fits is {largest}"
             ),
             OffsetRefusal::LoopsCross { crossing } => write!(
                 f,
