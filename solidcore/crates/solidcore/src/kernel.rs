@@ -1065,6 +1065,13 @@ pub struct Kernel {
     /// ([`crate::blend::definition_check`]), for the check that every blend face is a
     /// definition. `None` (the default) marks and keeps nothing; it changes no result.
     pub blend_face_log: Option<crate::blend::definition_check::BlendFaceLog>,
+    /// Not upstream: while `Some`, each Coons corner patch made tangent to its sides
+    /// appends the record of its refinement (every candidate, its stations and side
+    /// angles, and the one kept), for tests that replay the choice. `None` (the default)
+    /// keeps nothing; it changes no result. A [`RefCell`] so the corner blend can append
+    /// through the `&Kernel` it takes (the kernel stays `Send`).
+    pub coons_tangency_log:
+        RefCell<Option<Vec<crate::nurbs::b_spline_surface_n_lib::p2::CoonsTangencyLog>>>,
     /// Not upstream: the profiler of the operations run on this kernel (feature
     /// `profile`; [`crate::profile`]). It only observes: no result reads it. Shared with
     /// the kernel copies an operation makes for its caches, which record into the same
@@ -1110,6 +1117,7 @@ impl Kernel {
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
+            coons_tangency_log: RefCell::new(None),
             #[cfg(feature = "profile")]
             profiler: crate::profile::Profiler::default(),
         }
