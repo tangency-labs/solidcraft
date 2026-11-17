@@ -4450,9 +4450,7 @@ fn mass_row_replay(case: &goldens::Case, exact: bool) -> RowReplay {
         }
         _ => unreachable!(),
     };
-    let (r, e) = if !exact {
-        (Vec::new(), Vec::new())
-    } else {
+    let (r, e) = if exact {
         match query {
             0 => (m.r.clone(), m.e.clone()),
             2 | 4 => (vec![m.r[0].abs()], vec![m.e[0].abs()]),
@@ -4469,6 +4467,8 @@ fn mass_row_replay(case: &goldens::Case, exact: bool) -> RowReplay {
             }
             _ => unreachable!(),
         }
+    } else {
+        (Vec::new(), Vec::new())
     };
     RowReplay {
         float,
