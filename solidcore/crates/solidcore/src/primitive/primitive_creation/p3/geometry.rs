@@ -134,21 +134,29 @@ pub struct PreparedCurveSweep {
     pub orientation: Option<Axis2Placement>,
 }
 
-pub(super) fn split_profiles(k: &Kernel, curves: &mut Vec<BSplineCurve>) -> Result<()> {
-    let mut index = 0;
-    while let Some(curve) = curves.get(index) {
+/// The B-spline profiles ([`bspline`]), each split at its C1 discontinuities.
+///
+/// The split runs on the curve with its NURB ([`bspline_with_nurb`]), as upstream's
+/// `SmLine` and `SmEllipse` hold one: a copy of a line's bare base has none, and its
+/// split's refusal, passed on since WR-662, would refuse every line profile. A curve
+/// that is not split keeps [`bspline`]'s copy.
+pub(super) fn split_profiles(k: &Kernel, profiles: &[Option<Curve>]) -> Result<Vec<BSplineCurve>> {
+    let mut curves = Vec::new();
+    for profile in profiles.iter().flatten() {
+        let (Some(curve), Some(with_nurb)) = (bspline(profile), bspline_with_nurb(k, profile)?)
+        else {
+            continue;
+        };
         // SubdivideAtDiscontinuity resets its output before any fallible call.
         // fork c8f6a31 (WR-662): SER(SubdivideAtDiscontinuity(..)).
-        let pieces = curve.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5)?;
+        let pieces = with_nurb.subdivide_at_discontinuity(k, ContinuityType::C1, 0.5)?;
         if pieces.len() > 1 {
-            let count = pieces.len();
-            curves.splice(index..=index, pieces.iter().cloned());
-            index += count;
+            curves.extend(pieces);
         } else {
-            index += 1;
+            curves.push(curve);
         }
     }
-    Ok(())
+    Ok(curves)
 }
 
 fn scaling(
@@ -241,10 +249,11 @@ pub fn prepare_curve_sweep(
         return Err(SolidError::primitive_failed(OP, "no profiles to sweep"));
     }
     let mut path = path.clone();
-    let mut profiles: Vec<_> = profiles.iter().flatten().filter_map(bspline).collect();
-    if test_continuity {
-        split_profiles(k, &mut profiles)?;
-    }
+    let mut profiles: Vec<_> = if test_continuity {
+        split_profiles(k, profiles)?
+    } else {
+        profiles.iter().flatten().filter_map(bspline).collect()
+    };
     let scale = match (scale_reference, scale_curve) {
         (Some(reference), Some(scale)) => Some(scaling(k, &mut path, reference, scale)?),
         _ => None,

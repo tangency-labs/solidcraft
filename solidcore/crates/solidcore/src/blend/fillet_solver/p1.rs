@@ -1764,12 +1764,13 @@ impl FilletSolver {
 
     /// `new SmFilletGeom(pFilletGeom)` (the copy constructor) for this solver's
     /// geometry `other` of `pseudo`: a geometry of the same solver without offset
-    /// surfaces, two new rail edges (`MakeRailEdge`), `Copy(pFilletGeom)` (both
-    /// statuses ignored, `SE`), then `other`'s type. The new geometry's id.
+    /// surfaces, two new rail edges (`MakeRailEdge`, status ignored, `SE`),
+    /// `Copy(pFilletGeom)` (status passed on, WR-661), then `other`'s type. The new
+    /// geometry's id.
     ///
     /// # Errors
     /// [`SolidError::NotFound`] for `other` not in `pseudo`; [`SolidError::Unported`]
-    /// from the rail edges or the copy.
+    /// from the rail edges; every failure of the copy.
     fn copy_constructed_geom(
         &self,
         k: &Kernel,
@@ -1786,7 +1787,11 @@ impl FilletSolver {
         for i in 0..2 {
             ignore_status(pseudo.make_rail_edge(k, copy, i).map(|_| ()))?;
         }
-        ignore_status(pseudo.copy_geom_with_solver(k, copy, other, self))?;
+        // upstream ignores `Copy`'s status (a constructor cannot report it); since the fork
+        // returns from `Copy` at a failed offset-surface copy before the rails get their
+        // curves (9b7cd48, WR-661), the failure is passed on rather than leaving a
+        // geometry without rail curves (PR #18402 review)
+        pseudo.copy_geom_with_solver(k, copy, other, self)?;
         pseudo.geom_mut(copy)?.set_fillet_geom_type(geom_type);
         Ok(copy)
     }

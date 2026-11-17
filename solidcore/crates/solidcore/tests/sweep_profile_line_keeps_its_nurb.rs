@@ -25,7 +25,10 @@ use solidcore::math::Point3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::CPoint;
-use solidcore::sweep::api_brep::{create_linear_sweep, create_rotational_sweep};
+use solidcore::primitive::primitive_creation::SweepOptions;
+use solidcore::sweep::api_brep::{
+    create_curve_sweep, create_linear_sweep, create_rotational_sweep,
+};
 use solidcore::{Brep, Kernel, Vec3};
 
 fn kernel() -> Kernel {
@@ -130,4 +133,31 @@ fn a_circle_extrudes_and_a_line_revolves_with_their_statuses_passed_on() {
     let body = create_rotational_sweep(&mut k, &[Some(&side)], Vec3::ZERO, Vec3::Z, 360.0, false)
         .unwrap_or_else(|e| panic!("revolve: {e:?}"));
     assert!(!body.face_list().is_empty(), "revolve");
+}
+
+/// `CreateCurveSweep`'s split (`prepare_curve_sweep`, PR #18402 review): a unit square of
+/// four lines swept 2 along a straight path, capped, is the 1 x 1 x 2 prism, volume 2.
+#[test]
+fn a_square_of_lines_curve_sweeps_with_its_statuses_passed_on() {
+    let corners = [
+        Point3::ZERO,
+        Point3::new(1.0, 0.0, 0.0),
+        Point3::new(1.0, 1.0, 0.0),
+        Point3::new(0.0, 1.0, 0.0),
+    ];
+    let sides: Vec<Curve> = (0..4)
+        .map(|i| line(corners[i], corners[(i + 1) % 4]))
+        .collect();
+    let profile: Vec<Option<&Curve>> = sides.iter().map(Some).collect();
+    let path = line(Point3::ZERO, Point3::new(0.0, 0.0, 2.0));
+    let options = SweepOptions {
+        cap_ends: true,
+        ..SweepOptions::default()
+    };
+    let mut k = kernel();
+    let mut s = create_curve_sweep(&mut k, &profile, Some(&path), None, None, Some(&options))
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(s.brep.face_list().len(), 6);
+    let v = volume(&k, &mut s.brep);
+    assert!((v - 2.0).abs() <= 1e-9 * 2.0, "volume {v}");
 }

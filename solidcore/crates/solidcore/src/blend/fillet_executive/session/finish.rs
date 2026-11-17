@@ -182,6 +182,68 @@ fn on_one_of<'a>(
     Ok(false)
 }
 
+/// Whether the curve `curve` over `interval` runs along one of `pieces`, certified (no
+/// sampled acceptance): its two ends drop onto the piece within the larger of the
+/// piece's tolerance and `tolerance`, and [`curves_stay_within`] certifies that the whole
+/// stretch between them stays within that distance of the piece's curve between the two
+/// drop parameters. The drops only choose which stretch of the piece is compared; the
+/// acceptance is the certificate. A stretch that cannot be certified on any one piece
+/// (a curve that leaves the piece between its ends, one that runs over two pieces, a
+/// curve kind without a speed bound, a failed drop) does not run along `pieces`.
+///
+/// [`curves_stay_within`]: crate::curve::curve::p8::curves_stay_within
+fn runs_along_one_of<'a>(
+    k: &Kernel,
+    pieces: impl IntoIterator<Item = &'a BoundaryPiece>,
+    curve: &crate::curve::curve::Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+    tolerance: f64,
+) -> Result<bool> {
+    let ends = [interval.min(), interval.max()];
+    let points = [
+        curve.evaluate_point(k, ends[0])?,
+        curve.evaluate_point(k, ends[1])?,
+    ];
+    for (piece, piece_interval, piece_tolerance) in pieces {
+        let within = piece_tolerance.max(tolerance);
+        let mut on_piece = [0.0; 2];
+        let mut dropped_both = true;
+        for (at, point) in on_piece.iter_mut().zip(points) {
+            match piece.drop_point(
+                k,
+                piece_interval,
+                point,
+                None,
+                within,
+                None,
+                crate::geom::global_solver::SolverOperation::Minimize,
+            ) {
+                Ok(dropped) if dropped.success && dropped.distance <= within => {
+                    *at = dropped.parameter;
+                }
+                Err(error) if error.is_unported_or_cancelled() => return Err(error),
+                Ok(_) | Err(_) => dropped_both = false,
+            }
+        }
+        if !dropped_both {
+            continue;
+        }
+        match crate::curve::curve::p8::curves_stay_within(
+            k,
+            curve,
+            piece,
+            [ends[0], on_piece[0]],
+            [ends[1], on_piece[1]],
+            within,
+        ) {
+            Ok(true) => return Ok(true),
+            Err(error) if error.is_unported_or_cancelled() => return Err(error),
+            Ok(false) | Err(_) => {}
+        }
+    }
+    Ok(false)
+}
+
 impl OpenInput {
     /// The boundary of `target` as it is now. A lamina edge with no curve cannot be
     /// matched, so nothing lies on it.
@@ -226,8 +288,9 @@ impl OpenInput {
     /// - the input was open (it had a boundary);
     /// - every end vertex of every lamina edge of `result` lies on the input's boundary
     ///   (to the result's tolerance);
-    /// - a lamina edge on a face the input had runs along the input's boundary: its
-    ///   curve's middle point lies on it too. Only an edge whose faces the fillet made
+    /// - a lamina edge on a face the input had runs along the input's boundary: the
+    ///   whole edge stays within the tolerance of one boundary piece, certified
+    ///   ([`runs_along_one_of`]). Only an edge whose faces the fillet made
     ///   (a blend's end) may leave the boundary, with both ends on it. So the result's
     ///   boundary is the input's, cut back where a fillet meets it, and a seam the stitch
     ///   left unjoined, at any distance, is refused whenever one side of it is an input
@@ -262,13 +325,13 @@ impl OpenInput {
                     return Ok(false);
                 }
             }
-            let middle = curve.evaluate_point(k, interval.mid())?;
             let on_input_face = crate::topology::edge::faces(result, *edge, None)?
                 .iter()
                 .any(|face| self.faces.binary_search(face).is_ok());
-            if on_input_face && !on_one_of(k, &self.boundary, middle, tolerance, false)? {
+            if on_input_face && !runs_along_one_of(k, &self.boundary, curve, interval, tolerance)? {
                 return Ok(false);
             }
+            let middle = curve.evaluate_point(k, interval.mid())?;
             let others = lamina
                 .iter()
                 .filter(|(other, _)| other != edge)
@@ -1357,6 +1420,51 @@ mod open_input_tests {
         assert!(!input.keeps_open_result(&mut k, &mut b).unwrap());
         input.faces.clear();
         assert!(input.keeps_open_result(&mut k, &mut b).unwrap());
+    }
+
+    /// A cubic through the straight boundary piece's two ends and its middle point that
+    /// leaves it in between, `(t, 16 t (t - 1/2) (t - 1), 0)`, 0.75 off at `t = 1/4`
+    /// (PR #18402 review): a check of the ends and the middle point would take it as
+    /// running along the piece; the certificate does not. The piece itself and a straight
+    /// stretch of it are certified.
+    #[test]
+    fn an_edge_that_leaves_the_boundary_between_samples_is_not_along_it() {
+        use crate::curve::curve::Curve;
+        use crate::geom::extent1d::Extent1d;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        let k = Kernel::default();
+        let cubic = |ys: [f64; 4], x0: f64, x1: f64| {
+            let points = ys
+                .iter()
+                .enumerate()
+                .map(|(i, &y)| {
+                    let x = x0 + (x1 - x0) * i as f64 / 3.0;
+                    crate::nurbs::math::CPoint::from_point(Point3::new(x, y, 0.0))
+                })
+                .collect();
+            let nurb = crate::nurbs::crv_basic::Curve::new(
+                points,
+                3,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap();
+            Curve::from(BSplineCurve::from_nurb(nurb, 3, false))
+        };
+        let unit = Extent1d::from_min_max(0.0, 1.0);
+        let boundary = cubic([0.0; 4], 0.0, 1.0);
+        let pieces = [(boundary.clone(), unit, 1e-6)];
+        let wiggle = cubic([0.0, 8.0 / 3.0, -8.0 / 3.0, 0.0], 0.0, 1.0);
+        // the samples a midpoint rule reads all lie on the piece
+        for t in [0.0, 0.5, 1.0] {
+            let p = wiggle.evaluate_point(&k, t).unwrap();
+            assert!(on_one_of(&k, &pieces, p, 1e-6, false).unwrap(), "t = {t}");
+        }
+        let off = wiggle.evaluate_point(&k, 0.25).unwrap();
+        assert!((off.y - 0.75).abs() < 1e-12, "{off:?}");
+        assert!(!runs_along_one_of(&k, &pieces, &wiggle, &unit, 1e-6).unwrap());
+        assert!(runs_along_one_of(&k, &pieces, &boundary, &unit, 1e-6).unwrap());
+        let stretch = cubic([0.0; 4], 0.25, 0.75);
+        assert!(runs_along_one_of(&k, &pieces, &stretch, &unit, 1e-6).unwrap());
     }
 }
 
