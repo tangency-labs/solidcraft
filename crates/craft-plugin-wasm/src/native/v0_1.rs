@@ -124,6 +124,19 @@ impl<H: PluginHost> old_formats::evaluate::Host for State<H> {
     }
 }
 
+/// Links a 0.1 component against its world without instantiating it (`plugin check`).
+pub(super) fn check_link<H: PluginHost + 'static>(engine: &Engine, component: &Component, importer: bool) -> wasmtime::Result<()> {
+    let mut linker = Linker::<State<H>>::new(engine);
+    if importer {
+        importer_bindings::ImporterPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
+        importer_bindings::ImporterPluginPre::new(linker.instantiate_pre(component)?)?;
+    } else {
+        bindings::CommandPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
+        bindings::CommandPluginPre::new(linker.instantiate_pre(component)?)?;
+    }
+    Ok(())
+}
+
 /// Instantiates a 0.1 command plugin and calls `entry`.
 pub(super) fn call_entry<H: PluginHost + 'static>(
     engine: &Engine,

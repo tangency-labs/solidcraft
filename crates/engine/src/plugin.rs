@@ -228,8 +228,15 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         scratch.plugin_state.file_grants = grants.folders;
-        let host =
-            SolidCraftHost { session: scratch, transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new(), evaluation: None };
+        let host = SolidCraftHost {
+            session: scratch,
+            transaction: None,
+            sketch_exits: Vec::new(),
+            view: None,
+            groups,
+            file_folders: Vec::new(),
+            evaluation: None,
+        };
         let file_folders = host
             .granted_folders()
             .into_iter()
@@ -248,7 +255,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
                 session.echo(message);
             }
         }
-        Ok(crate::schema::plugin::RunResult { result: value, sketch_exits: host.sketch_exits, param_warnings: vec![] })
+        Ok(crate::schema::plugin::RunResult { result: value, sketch_exits: host.sketch_exits, view: host.view, param_warnings: vec![] })
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
@@ -257,6 +264,7 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
     }
 }
 
+pub mod check;
 mod import;
 pub mod install;
 pub mod messages;
@@ -275,12 +283,32 @@ pub struct SolidCraftHost {
     pub session: Session,
     transaction: Option<Session>,
     sketch_exits: Vec<Option<u64>>,
+    /// The last view command in this run. Cleared on rollback, like `sketch_exits`.
+    /// `accept_computed` does not copy `session.camera`, so the window applies this beside that.
+    view: Option<crate::schema::plugin::PluginView>,
     /// Granted sensitive command groups, for this call's manifest.
     groups: BTreeSet<String>,
     /// The file scope of a granted `file` command; every other command has none.
     file_folders: Vec<PathBuf>,
     /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
     evaluation: Option<Box<Session>>,
+}
+
+impl SolidCraftHost {
+    /// Keep the last view command. `view.fit` and `view.home` frame in the window.
+    /// `view.navigate` does not store a camera; its reply is what the navigator applies.
+    /// Any other command that changes `session.camera` keeps that camera.
+    fn note_view(&mut self, name: &str, reply: &Value, before: Option<solidcraft_viewport::Camera>, after: Option<solidcraft_viewport::Camera>) {
+        if matches!(name, "view.fit" | "view.home") {
+            self.view = Some(if name == "view.home" { crate::schema::plugin::PluginView::Home } else { crate::schema::plugin::PluginView::Fit });
+        } else if name == "view.navigate" {
+            self.view = Some(crate::schema::plugin::PluginView::Navigate { reply: reply.clone() });
+        } else if after != before
+            && let Ok(camera) = serde_json::to_value(after)
+        {
+            self.view = Some(crate::schema::plugin::PluginView::Camera { camera });
+        }
+    }
 }
 
 /// The commands an importer may run on its own design to check it: they read the model, and
@@ -335,6 +363,7 @@ impl PluginHost for SolidCraftHost {
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
+        let camera_before = s.camera;
         let before = s.doc.clone();
         let previous: BTreeMap<_, _> = s.model.results.iter().map(|r| (r.id, r.error.clone())).collect();
         // Even implicit font and linked-design reads have no authority from a command grant.
@@ -348,9 +377,11 @@ impl PluginHost for SolidCraftHost {
         {
             return Err(HostError::CommandFailed { command: name.into(), reason: failed.error.clone().unwrap_or_default() });
         }
+        let camera_after = s.camera;
         if matches!(name, "sketch.finish" | "sketch.cancel") {
             self.sketch_exits.push(reply.get("sketch").and_then(Value::as_u64));
         }
+        self.note_view(name, &reply, camera_before, camera_after);
         Ok(reply)
     }
     fn begin_transaction(&mut self) -> craft_plugin::Result<()> {
@@ -381,6 +412,7 @@ impl PluginHost for SolidCraftHost {
     fn rollback_transaction(&mut self) -> craft_plugin::Result<()> {
         self.transaction = None;
         self.sketch_exits.clear();
+        self.view = None;
         Ok(())
     }
     fn granted_command_groups(&self) -> BTreeSet<String> {

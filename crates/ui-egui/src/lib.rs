@@ -125,6 +125,7 @@ mod linked_source;
 pub mod links;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
+pub mod log_file;
 #[cfg(test)]
 mod look_at_tests;
 #[cfg(test)]
@@ -1611,6 +1612,7 @@ impl SolveApp {
             self.status = None;
         }
         let done = self.command_completed(id, r);
+        issue_report::ticket::step_params(self, id, params);
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
@@ -1875,6 +1877,7 @@ impl SolveApp {
     /// the status line when it failed, what opening and saving update, and the toolbar tab.
     pub(crate) fn finish_command(&mut self, id: &str, r: &Result<Value, String>) {
         let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+        issue_report::ticket::record_step(self, id, r);
         match r {
             Ok(v) => {
                 // Programmatic callers (the control channel, scripts) run outside a render
@@ -3797,6 +3800,7 @@ impl SolveApp {
         file_load::tick(self, ctx);
         save_job::tick(self, false);
         verify_job::tick(self);
+        timeline::tick_import_checks(self, ctx);
         edit_in_place::tick(self);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {

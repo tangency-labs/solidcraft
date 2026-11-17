@@ -151,6 +151,7 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
             session: Session::default(),
             transaction: None,
             sketch_exits: Vec::new(),
+            view: None,
             groups: BTreeSet::new(),
             file_folders: Vec::new(),
             evaluation: None,

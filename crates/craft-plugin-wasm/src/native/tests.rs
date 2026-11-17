@@ -205,6 +205,37 @@ fn a_command_plugin_built_against_wit_0_1_still_runs() {
     assert_eq!((app.value, app.rollbacks), (2, 1));
 }
 #[test]
+fn a_component_is_checked_against_its_world_without_running_it() {
+    let check = |manifest: &Manifest, bytes: &[u8]| crate::check_component(manifest, bytes);
+    // `unreachable` would trap if any code ran.
+    check(&manifest(), &component("unreachable")).unwrap();
+    check(&importer_manifest(false), &importer_component()).unwrap();
+    // Each world needs its own export: a command component is no importer, and back.
+    for (manifest, bytes) in [(importer_manifest(false), component("call $box")), (manifest(), importer_component())] {
+        let failure = check(&manifest, &bytes).unwrap_err();
+        assert!(matches!(&failure, HostError::InvalidInput { field, .. } if field == "component"), "{failure}");
+    }
+    let core = wat::parse_str("(module)").unwrap();
+    assert!(matches!(check(&manifest(), &core), Err(HostError::InvalidInput { reason, .. }) if reason.contains("core WebAssembly module")));
+    let (package, version) = API.split_once('@').unwrap();
+    let source = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
+    let (prefix, _) = source.rsplit_once(')').unwrap();
+    let with_import = |interface: &str| wat::parse_str(format!("{prefix}\n(import \"{interface}\" (instance (export \"get\" (func))))\n)")).unwrap();
+    let wasi = check(&manifest(), &with_import("wasi:cli/environment@0.2.0")).unwrap_err();
+    assert!(matches!(&wasi, HostError::InvalidInput { reason, .. } if reason.contains("wasi:cli/environment")), "{wasi}");
+    assert_eq!(
+        check(&manifest(), &with_import("wasi:http/types@0.2.0")).unwrap_err(),
+        HostError::PermissionDenied { permission: "network import is forbidden: wasi:http/types@0.2.0".into() }
+    );
+    assert!(matches!(check(&manifest(), &with_import(&format!("{package}/storage@0.9.0"))), Err(HostError::UnsupportedCapability { .. })));
+    // A component built against 0.1 checks against the 0.1 world it runs in.
+    check(&manifest(), &component_for("0.1.0", "call $box")).unwrap();
+    check(&importer_manifest(false), &importer_component_for("0.1.0")).unwrap();
+    let mut net = manifest();
+    net.runtime.as_mut().unwrap().permissions.net = true;
+    assert_eq!(check(&net, &component("call $box")).unwrap_err(), HostError::PermissionDenied { permission: "net".into() });
+}
+#[test]
 fn cancellation_prevents_running_plugin_code() {
     let mut app = App { cancelled: true, ..Default::default() };
     assert_eq!(run(&mut app, &manifest(), &component("(loop br 0)"), "make", &json!({})).unwrap_err(), HostError::Cancelled);
