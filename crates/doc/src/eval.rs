@@ -9552,6 +9552,8 @@ mod more;
 pub use model_cache::SavedModel;
 #[path = "eval_cell_grid.rs"]
 pub mod cell_grid;
+#[path = "eval_tab_slot.rs"]
+pub(crate) mod tab_slot;
 #[path = "eval_frame.rs"]
 pub(crate) mod frame_member;
 #[path = "eval_surface.rs"]
