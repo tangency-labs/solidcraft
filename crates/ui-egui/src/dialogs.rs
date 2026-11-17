@@ -5039,8 +5039,11 @@ pub(crate) fn preset_to_object(d: &mut Dialog, on: bool) {
     }
 }
 
+/// A To or From Object input takes a face, a body vertex or a snap point: the end or middle of a
+/// sketch line or an edge, or a hole's centre, as Move's points do (#17394). The command takes
+/// any point there.
 fn set_object(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
-    set_object_accepting(inputs, active, label, FACES | selection::VERTICES, on);
+    set_object_accepting(inputs, active, label, FACES | selection::VERTICES | selection::SNAP_POINTS, on);
 }
 
 /// Add or remove the pick input `label` accepting `accept`; the active input moves to it when it

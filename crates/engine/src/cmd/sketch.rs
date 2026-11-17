@@ -272,7 +272,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&COINCIDENT_CONTRACT)
         .output(output_schema_for::<CoincidentResult>)
-        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two 3D points (`<3D curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's id) or a 3D point and a drawn 3D line", model_operand_doc!())),
+        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (they become collinear), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two 3D points (`<3D curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's id) or a 3D point and a drawn 3D line", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.tangent", "Tangent", crate::checked!("sketch.constraint.tangent", c_tangent))
         .in_sketch_part()
         .at("SKETCH", "CONSTRAINTS")
@@ -2957,6 +2957,18 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some((a, b)) = two_round(&sk, p) {
         return coincident_circles(s, p, cmd, a, b);
     }
+    // Two straight lines made coincident lie along one line: Collinear, as in other CAD tools (#18232).
+    if let Some((a, b)) = two_lines(sk, p, cmd)? {
+        if let Some(c) =
+            sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Collinear { a: x, b: y } if (x, y) == (a, b) || (x, y) == (b, a)))
+        {
+            let rep = solve(&mut sk.clone());
+            let made = CoincidentMade::Existing { constraint: c.id.clone(), existing: true, sketch: report_json(&rep) };
+            return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
+        }
+        let made = constrain(s, p, cmd, |_| Ok(ConstraintKind::Collinear { a, b }))?;
+        return reply(cmd, CoincidentResult { made: CoincidentMade::Added(made), param_warnings: Vec::new() });
+    }
     let pt = |k: &str| p.get(k).and_then(Value::as_str).and_then(|r| sk.resolve_point(r));
     let line_points = coincident_line_points(&sk, p, cmd)?;
     if let Some((a, b)) = line_points.or_else(|| pt("a").zip(pt("b")))
@@ -2967,9 +2979,6 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
     }
     let pick = |sk: &mut Sketch| -> Result<ConstraintKind> {
-        if let Some((a, b)) = line_points {
-            return Ok(ConstraintKind::Coincident { p: a, q: b });
-        }
         // A line's middle, `{midpoint: line}` as a selected midpoint is sent (#10311): the point
         // tied there by a Midpoint constraint stands for it, made as Horizontal/Vertical makes it.
         let middle = |sk: &mut Sketch, key: &str| -> Result<Option<usize>> {
@@ -3057,33 +3066,16 @@ fn coincident_circles(s: &mut Session, p: &Value, cmd: &str, a: usize, b: usize)
     reply(cmd, CoincidentResult { made: CoincidentMade::Circles { constraint, constraints: ids, sketch: info }, param_warnings: Vec::new() })
 }
 
-/// Four endpoint pairs, ordered independently of pick order when distances tie.
-fn coincident_line_points(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
+/// `a` and `b` both straight lines (two different ones), by curve index.
+fn two_lines(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
     let curve = |key: &str| p.get(key).and_then(Value::as_str).and_then(|id| sk.curve_index(id));
     let (Some(a), Some(b)) = (curve("a"), curve("b")) else { return Ok(None) };
     if a == b {
         return Err(bad(cmd, "choose two distinct lines"));
     }
-    let ends = |i: usize| match sk.curves.get(i).map(|curve| &curve.kind) {
-        Some(CurveKind::Line { a, b }) => Some([*a, *b]),
-        _ => None,
-    };
-    let (Some(first), Some(second)) = (ends(a), ends(b)) else {
+    let line = |i: usize| matches!(sk.curves.get(i).map(|curve| &curve.kind), Some(CurveKind::Line { .. }));
+    if !(line(a) && line(b)) {
         return Err(bad(cmd, "two curves must both be straight lines; otherwise choose a point and a curve"));
-    };
-    let mut best: Option<(f64, usize, usize)> = None;
-    for a in first {
-        for b in second {
-            let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return Err(bad(cmd, "line endpoint is missing")) };
-            let candidate = (pa.dist(pb), a.min(b), a.max(b));
-            if best.is_none_or(|old| candidate < old) {
-                best = Some(candidate);
-            }
-        }
-    }
-    let (_, a, b) = best.ok_or_else(|| bad(cmd, "line endpoints are missing"))?;
-    if a == b {
-        return Err(bad(cmd, "the lines already share an endpoint"));
     }
     Ok(Some((a, b)))
 }
