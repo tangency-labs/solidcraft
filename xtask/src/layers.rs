@@ -50,6 +50,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("3dx-client", Class::Standalone),
     // the profiler: timed spans for every layer, the kernel's calls to commands (no workspace dependencies)
     ("profile", Class::Standalone),
+    // a saved design's picture and summary for file browsers, read without the kernel (no workspace dependencies)
+    ("design-preview", Class::Standalone),
     ("sketch", Class::Layer(1)),
     // sheet development: solidcore's (solidcore-ops' develop and query) with SolidCraft's wording of its refusals
     ("develop", Class::Layer(1)),
@@ -102,6 +104,7 @@ pub const TABLE: &[(&str, Class)] = &[
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),
+    ("quicklook", Class::Exempt),
     ("web", Class::Exempt),
     ("xtask", Class::Exempt),
 ];

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: packaging/macos/package.sh substitutes @VERSION@ and @SHORT_VERSION@ as in
+     Info.plist.in. Quick Look previews: a design's model in 3D, or its picture (apps/solidcraft-quicklook/src/preview.rs). -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>SolidCraft Preview</string>
+  <key>CFBundleName</key>
+  <string>SolidCraft Preview</string>
+  <key>CFBundleExecutable</key>
+  <string>solidcraft-preview-extension</string>
+  <key>CFBundleIdentifier</key>
+  <string>io.tangencylabs.solidcraft.preview</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundlePackageType</key>
+  <string>XPC!</string>
+  <key>CFBundleShortVersionString</key>
+  <string>@SHORT_VERSION@</string>
+  <key>CFBundleVersion</key>
+  <string>@SHORT_VERSION@</string>
+  <key>SolidCraftVersion</key>
+  <string>@VERSION@</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>11.0</string>
+  <key>NSExtension</key>
+  <dict>
+    <key>NSExtensionPointIdentifier</key>
+    <string>com.apple.quicklook.preview</string>
+    <key>NSExtensionPrincipalClass</key>
+    <string>SolidCraftPreviewController</string>
+    <key>NSExtensionAttributes</key>
+    <dict>
+      <key>QLSupportedContentTypes</key>
+      <array><string>io.tangencylabs.solidcraft.design</string></array>
+      <!-- A view-controller preview (the model turns with the pointer), not a data-based one. -->
+      <key>QLIsDataBasedPreview</key>
+      <false/>
+      <key>QLSupportsSearchableItems</key>
+      <false/>
+    </dict>
+  </dict>
+</dict>
+</plist>
