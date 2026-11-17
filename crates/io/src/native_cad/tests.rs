@@ -329,7 +329,14 @@ fn built(imp: &solidcraft_kernel::StepImport) -> Vec<(bool, usize, f64, [f64; 6]
             (b.refused.is_none(), m.faces, m.volume, [m.bbox.min.x, m.bbox.min.y, m.bbox.min.z, m.bbox.max.x, m.bbox.max.y, m.bbox.max.z])
         })
         .collect();
-    out.sort_by(|a, b| a.2.total_cmp(&b.2));
+    // By volume and then box, each to a thousandth, so two bodies of nearly one volume (a part
+    // placed twice) keep one order whatever the last digits of their volumes are.
+    let key = |b: &(bool, usize, f64, [f64; 6])| {
+        let mut k = vec![(b.2 * 1e3).round() as i64];
+        k.extend(b.3.iter().map(|v| (v * 1e3).round() as i64));
+        k
+    };
+    out.sort_by_key(key);
     out
 }
 
