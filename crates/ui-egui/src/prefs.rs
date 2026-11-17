@@ -1952,6 +1952,9 @@ preference_settings! {
     move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+    /// Remember a moved plugin command window's position for the current design, until the
+    /// application closes (#18684). Off keeps the previously centred reopen behaviour.
+    plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
     /// Approved install permissions survive page resets and Cancel, like installed files.
     plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
     /// User ceilings, not automatic increases to a package's approved execution budget.

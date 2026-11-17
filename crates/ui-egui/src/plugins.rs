@@ -543,6 +543,13 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         }
         ui.add_space(8.0);
         resource_controls(app, ui);
+        crate::ui_kit::checkbox(
+            ui,
+            solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
+            &mut app.preferences.plugin_remember_dialog_position,
+        )
+        .on_hover_text(solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position_help"));
+        ui.add_space(8.0);
         let t = solidcraft_theme::Tokens::get();
         let path = dir.display().to_string();
         let searching = crate::ui_kit::settings_search::querying(ui);
