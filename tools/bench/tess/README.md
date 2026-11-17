@@ -12,10 +12,10 @@ the combined mesher (#14003, #14029, #14033); the results are kept outside the r
 ## Steps
 
 Each commit to measure is its own worktree with its own target folder (a shared one builds stale
-code). Copy this folder into it first (an older commit has no `bench/tess/`).
+code). Copy this folder into it first (an older commit has no `tools/bench/tess/`).
 
 1. `fetch.sh DEST`: the example designs and the 47 STEP files as kernel-case folders in `DEST/cases`.
-2. Bodies: `git apply bench/tess/cli-dump.patch` on one commit (a local change to the CLI, never
+2. Bodies: `git apply tools/bench/tess/cli-dump.patch` on one commit (a local change to the CLI, never
    committed), build `solidcraft-cli`, then run it over `tests/kernel-cases/*/*/` and `DEST/cases/*/*/`
    with `MESHBAKE_DUMP=DUMPS`: every body each case ends with is written to `DUMPS/<area>__<case>__<n>.nb`.
    Every commit is fed the same `.nb` files. `mkprims` (in `src/bin`) writes the six primitives.

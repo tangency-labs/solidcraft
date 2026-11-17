@@ -5,8 +5,8 @@
 # that tree's Cargo.lock and its own target folder (never shared with another tree: a shared one
 # builds stale code). Prints the folder the binaries are in.
 #
-# Usage: bench/tess/build.sh            (inside a SolidCraft tree; to bench another commit, check it
-#                                        out as a worktree and copy bench/tess/ into it first)
+# Usage: tools/bench/tess/build.sh            (inside a SolidCraft tree; to bench another commit, check it
+#                                        out as a worktree and copy tools/bench/tess/ into it first)
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP="$(cd "$HERE/../../.." && pwd)"

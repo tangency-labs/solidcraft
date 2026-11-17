@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build the mesher bake-off's case folders in DEST (default bench/tess/corpus, gitignored): one
+# Build the mesher bake-off's case folders in DEST (default tools/bench/tess/corpus, gitignored): one
 # kernel-case folder (recipe.json, expected.json, input.step) per example design and per STEP
 # file. Every input comes from where it lives, at run time; nothing downloaded is committed:
 #
@@ -16,13 +16,13 @@
 #
 # The kernel-case folders (SolidCraft's own tests/kernel-cases) are read in place by dump.sh.
 #
-# Usage: bench/tess/fetch.sh [DEST]      (run inside a SolidCraft tree)
+# Usage: tools/bench/tess/fetch.sh [DEST]      (run inside a SolidCraft tree)
 set -euo pipefail
 
 CONFORMANCE_REV=96f30bb
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CORE="$(cd "$HERE/../.." && pwd)"
-APP="$(cd "$CORE/.." && pwd)"
+APP="$(cd "$HERE/../../.." && pwd)"
+CORE="$APP/solidcore"
 DEST="${1:-$HERE/corpus}"
 mkdir -p "$DEST"
 DEST="$(cd "$DEST" && pwd)"

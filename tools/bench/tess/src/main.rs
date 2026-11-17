@@ -1,6 +1,6 @@
 //! meshbake FILE.nb [--mode display|export] [--no-dev] : mesh one body with SolidCraft's mesher (`Body::mesh_plan`) and
 //! solidcore-tess's (`solidcore_tess::plan`), grade each, print JSON lines. `MB_ONLY=solidcraft|solidcore-tess` runs one.
-use solidcore::eval::SurfaceEval;
+use solidcore_ops::face_surface::FaceSurface;
 use solidcore_record::brep::Brep;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -186,10 +186,19 @@ fn grade(m: &M, rec: &Brep, size: f64, chord: f64, dev: bool) -> serde_json::Val
         let budget = 4000usize / faces.len().max(1);
         let per = budget.clamp(8, 60);
         for (fi, tl) in faces {
-            let Some(face) = rec.faces.get(fi as usize) else { continue };
-            let Ok(ks) = solidcore_convert::surface(&face.surface) else { continue };
-            let Ok(se) = SurfaceEval::new(&ks) else { continue };
-            let starts = solidcore::eval::uv::Starts::default();
+            if rec.faces.get(fi as usize).is_none() {
+                continue;
+            }
+            // The face's exact surface through solidcore-ops (the app side calls solidcore only
+            // through its public crates). A face it cannot evaluate is skipped, as one the
+            // conversion refused was.
+            let Ok(fs) = FaceSurface::of(rec, fi as usize) else { continue };
+            let [[u0, u1], [v0, v1]] = fs.domain();
+            // Newton starts: the last point's (u, v), then a 3 x 3 grid over the face's box; the
+            // nearest that settles is the projection.
+            let grid: Vec<[f64; 2]> =
+                [0.1, 0.5, 0.9].iter().flat_map(|&a| [0.1, 0.5, 0.9].map(|b| [u0 + a * (u1 - u0), v0 + b * (v1 - v0)])).collect();
+            let mut last: Option<[f64; 2]> = None;
             let step = (tl.len() / per).max(1);
             for &ti in tl.iter().step_by(step).take(per) {
                 let t = m.tris[ti];
@@ -197,12 +206,16 @@ fn grade(m: &M, rec: &Brep, size: f64, chord: f64, dev: bool) -> serde_json::Val
                 let bary = [[1. / 3., 1. / 3., 1. / 3.], [0.5, 0.5, 0.0], [0.0, 0.5, 0.5], [0.5, 0.0, 0.5], [0.6, 0.2, 0.2], [0.2, 0.6, 0.2], [0.2, 0.2, 0.6]];
                 for w in bary {
                     let p = [0, 1, 2].map(|k| w[0] * a[k] + w[1] * b[k] + w[2] * c[k]);
-                    let pv = solidcore::Vec3::new(p[0], p[1], p[2]);
-                    let q = se
-                        .project_with(&starts, pv, None, (5.0 * chord).max(size * 1e-3))
-                        .or_else(|| se.project_with(&starts, pv, None, f64::INFINITY));
-                    match q.and_then(|uv| se.point(uv)) {
-                        Some(s) => devs.push(((s.x - p[0]).powi(2) + (s.y - p[1]).powi(2) + (s.z - p[2]).powi(2)).sqrt()),
+                    let near = last
+                        .iter()
+                        .chain(grid.iter())
+                        .filter_map(|&guess| fs.closest_point(p, guess).ok())
+                        .min_by(|a, b| a.distance.total_cmp(&b.distance));
+                    match near {
+                        Some(c) => {
+                            last = Some(c.uv);
+                            devs.push(c.distance);
+                        }
                         None => unproj += 1,
                     }
                 }

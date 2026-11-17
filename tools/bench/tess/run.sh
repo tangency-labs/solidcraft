@@ -7,7 +7,7 @@
 #
 #   TMO=900   seconds a process may take before it is killed
 #
-# Usage: bench/tess/run.sh LIST DUMPS OUT LABEL=BIN[:ONLY]...
+# Usage: tools/bench/tess/run.sh LIST DUMPS OUT LABEL=BIN[:ONLY]...
 #   LIST   one body name per line (the body is DUMPS/NAME.nb)
 #   ONLY   solidcraft (SolidCraft's mesher, `Body::mesh_plan`) or solidcore-tess (`solidcore_tess::plan`);
 #          without it the binary meshes with both
