@@ -230,6 +230,7 @@ pub(crate) mod open_meshing;
 pub mod operations;
 pub mod panel_runtime;
 pub mod params_dialog;
+pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
@@ -882,6 +883,9 @@ pub struct SolveApp {
     pub synthetic_mods: egui::Modifiers,
     /// A click that came in the same frame as typing before it, held for the next frame.
     held_click: Vec<egui::Event>,
+    /// Pen-tip release positions from the platform, for this frame and for a held click.
+    pen_release: Option<egui::Pos2>,
+    held_pen_release: Option<egui::Pos2>,
     /// A synthetic press is held: its drag never moves the real cursor (`navigation::wrap_cursor`).
     pub(crate) synthetic_press: bool,
     control_rx: Option<Receiver<ControlRequest>>,
@@ -1134,6 +1138,8 @@ impl SolveApp {
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             held_click: Vec::new(),
+            pen_release: None,
+            held_pen_release: None,
             synthetic_press: false,
             control_rx: None,
             control_switch: Default::default(),
@@ -1610,6 +1616,9 @@ impl SolveApp {
         let selection_changed = self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
+            if id == "select.set" {
+                sketch_attachment_ui::selection_picked(self);
+            }
         }
         // Render focus already applies its semantic selection after clearing object picks.
         // A tab switch brings in the other design's own Render selection.
@@ -3095,7 +3104,9 @@ impl SolveApp {
     /// planes (Mirror's plane, Offset Plane, Midplane, the construct tools)? The origin planes are
     /// shown for it, so they can be picked in the view rather than only in the browser (#2581).
     pub fn picking_plane(&self) -> bool {
-        self.picking_sketch_plane() || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
+        self.picking_sketch_plane()
+            || self.tree.redefine.is_some()
+            || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
     }
 
     /// Is the Sketch Project dialog open, picking its geometry? Its pick takes origin planes,
@@ -3818,6 +3829,19 @@ impl SolveApp {
     /// The frame's input before the app reads it: synthetic events, then what is typed while a
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
+        self.raw_input_hook_with_pen(raw, None);
+    }
+
+    /// Process a frame with what the platform says about its taps (a pen tip lifted, a finger
+    /// down): Pencil mode first keeps a finger in the view from clicking there.
+    pub fn raw_input_hook_with_taps(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput, taps: pencil::PlatformTaps) {
+        pencil::filter(self, ctx, raw, &taps);
+        self.raw_input_hook_with_pen(raw, taps.pen_release);
+    }
+
+    /// Process a frame with a platform-identified pen-tip release in egui coordinates.
+    pub fn raw_input_hook_with_pen(&mut self, raw: &mut egui::RawInput, pen_release: Option<egui::Pos2>) {
+        self.pen_release = pen_release;
         self.synthetic_input(raw);
         finite_input(raw);
         self.hold_click_after_typing(raw);
@@ -3832,12 +3856,14 @@ impl SolveApp {
             let mut events = std::mem::take(&mut self.held_click);
             events.append(&mut raw.events);
             raw.events = events;
+            self.pen_release = self.pen_release.or(self.held_pen_release.take());
         }
         let button = raw.events.iter().position(|e| matches!(e, egui::Event::PointerButton { .. }));
         if let Some(i) = button
             && raw.events[..i].iter().any(issue_report::typing)
         {
             self.held_click = raw.events.split_off(i);
+            self.held_pen_release = self.pen_release.take();
         }
     }
 
