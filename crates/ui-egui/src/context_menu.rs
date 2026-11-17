@@ -1027,6 +1027,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         entries.insert(0, Item::heading("Shared child: edits affect all copies of its parent"));
     }
     let bodies = app.session.occurrence_bodies(path, true).unwrap_or_default();
+    let selected_paths = crate::browser::selected_occurrence_paths(app, path);
+    let show_selected = selected_paths.iter().all(|path| app.session.occurrence_hidden(path));
     // The component's menu asks its first placement; this row may be another one.
     let movable = !placement.grounded && app.session.held_by_rigid_group(placement.occurrence).is_none();
     each_item(&mut entries, &mut |item: &mut Item| match item.id.as_str() {
@@ -1057,7 +1059,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         "ui.delete" => item.params = Some(json!({"occurrences": [placement.occurrence]})),
         "ui.hide" | "ui.show" => {
             item.id = "browser.visibility".into();
-            item.params = Some(json!({"visible": app.session.occurrence_hidden(path), "paths": [path]}));
+            item.params = Some(json!({"visible": show_selected, "paths": selected_paths}));
             item.enabled = true;
         }
         "ui.isolate" => {
@@ -1134,7 +1136,8 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let occ = doc.occurrence_of(id);
     let active = app.session.active_component == id;
     let bodies = component_bodies(app, id);
-    let hidden = !bodies.is_empty() && bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+    let visibility_bodies = crate::browser::selected_component_bodies(app, id);
+    let hidden = !visibility_bodies.is_empty() && visibility_bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
     let names = json!(bodies);
     // The clipboard: Copy takes the selection (the row right-clicked); Paste puts what was copied
     // inside this component (never a component inside itself or what it holds); Paste New pastes
@@ -1239,7 +1242,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
     v.push(Item::sep());
-    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": visibility_bodies })).on(!bodies.is_empty()));
     if bodies_hidden(app) {
         v.push(act("ui.showAll", "Show All Bodies", "eye"));
     }

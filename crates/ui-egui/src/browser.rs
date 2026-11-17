@@ -433,6 +433,41 @@ pub(crate) fn bodies_of_component(app: &SolveApp, id: u64) -> Vec<String> {
     kept
 }
 
+/// A component row's visibility control acts on the whole Browser multi-selection if the
+/// clicked row is in it. A row outside the selection acts on that row alone (#18716).
+pub(crate) fn selected_component_bodies(app: &SolveApp, clicked: u64) -> Vec<String> {
+    let selected = &app.tree.picked_components;
+    let ids = if clicked != 0 && selected.contains(&clicked) && selected.len() > 1 {
+        selected.clone()
+    } else {
+        vec![clicked]
+    };
+    let mut bodies = Vec::new();
+    for id in ids {
+        for name in bodies_of_component(app, id) {
+            if !bodies.contains(&name) {
+                bodies.push(name);
+            }
+        }
+    }
+    bodies
+}
+
+/// A placement row's visibility control also acts on the selected occurrences when the
+/// clicked row belongs to that selection. Paths distinguish independent copies (#18716).
+pub(crate) fn selected_occurrence_paths(app: &SolveApp, clicked: &[u64]) -> Vec<Vec<u64>> {
+    let selected: Vec<Vec<u64>> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|s| match s {
+            Sel::Occurrence { path } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    if selected.iter().any(|path| path.as_slice() == clicked) { selected } else { vec![clicked.to_vec()] }
+}
+
 /// How a browser click changes a dialog input that takes bodies.
 enum Take {
     /// A second click on the same set removes it.
@@ -1644,13 +1679,10 @@ fn component_rows_inner(
         let _ = app.run("component.activate", json!({ "component": id }));
     }
     if r.eye {
-        if visible {
-            app.session
-                .visibility
-                .hidden_bodies
-                .extend(bodies.iter().filter(|b| !app.session.visibility.hidden_bodies.contains(b)).cloned().collect::<Vec<_>>());
-        } else {
-            app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
+        let bodies = selected_component_bodies(app, id);
+        if !bodies.is_empty() {
+            let show = bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+            let _ = app.run("browser.visibility", json!({"items": bodies, "visible": show}));
         }
     }
     // With a dialog open a second click picks again: the dialog takes the component's bodies.
@@ -1847,7 +1879,9 @@ fn occurrence_rows_inner(
         toggle(app, key, true);
     }
     if r.eye {
-        let _ = app.run("browser.visibility", json!({"visible": app.session.occurrence_hidden(path), "paths": [path]}));
+        let paths = selected_occurrence_paths(app, path);
+        let show = paths.iter().all(|p| app.session.occurrence_hidden(p));
+        let _ = app.run("browser.visibility", json!({"visible": show, "paths": paths}));
     }
     let takes_components = app.dialog.as_ref().is_some_and(|d| d.takes_components());
     let params = json!({"component": placement.component, "occurrence": placement.occurrence, "path": path});
