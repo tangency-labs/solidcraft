@@ -80,7 +80,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_analytic_mate_edges = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
-    f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
     f.fillet_point_step_per_point = true;

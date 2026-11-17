@@ -691,8 +691,6 @@ pub struct UpstreamFixes {
     /// carrying on and reporting success (WR-661, #2009 group B; tangency-labs/smlib
     /// 873c7c9, 66b02de, 9b7cd48). Off by default for pinned parity.
     pub fillet_statuses_pass_on: bool,
-    /// A boolean vertex takes its position from the intersection curve that crosses its edge most steeply (WR-410, #1059).
-    pub boolean_vertex_by_best_crossing: bool,
     /// `SmProtoEdge::Resolve` splits a proto edge from a proto vertex back to itself whose curve ends find two of its vertex definitions at each other definition of that proto vertex lying on the curve (`DropPoint` within the larger of the two tolerances, farther than twice it from both ends), then resolves the proto vertex; upstream keeps the edge whole past that third vertex, a vertex of its own face, and the merge fails (`SM_ERR`; two equal tubes a hair apart end to end) (WR-579, #1517; the fork's tangency-labs/smlib@9eec159).
     pub proto_edge_splits_at_captured_vertices: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057). Curved pieces only: a straight interval along a straight edge is always classified, by a certificate on its two ends (the distance is affine along it), with or without this flag.

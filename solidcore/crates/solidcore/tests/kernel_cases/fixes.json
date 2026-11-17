@@ -25,7 +25,6 @@
   "cone_iso_circle_at_axial_height",
   "cone_unbounded_parameterized_as_nurb",
   "fillet_statuses_pass_on",
-  "boolean_vertex_by_best_crossing",
   "proto_edge_splits_at_captured_vertices",
   "classify_edge_interval",
   "new_edge_vertex_tolerance_covers_gap",
