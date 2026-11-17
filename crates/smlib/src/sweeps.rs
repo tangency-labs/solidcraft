@@ -23,30 +23,7 @@ pub struct ScrewSweepOptions<'a> {
 }
 
 /// A 3D curve of a profile, path or section.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Curve {
-    Line {
-        start: [f64; 3],
-        end: [f64; 3],
-    },
-    /// Counter-clockwise about the unit `axis` from angle `start` to `end` (radians,
-    /// 0 < end - start <= 2 pi), angle 0 along the unit `reference` (square to `axis`).
-    Arc {
-        center: [f64; 3],
-        axis: [f64; 3],
-        reference: [f64; 3],
-        radius: f64,
-        start: f64,
-        end: f64,
-    },
-    /// Control points (x, y, z, weight > 0) and the clamped knot vector (points + degree + 1
-    /// knots).
-    Nurbs {
-        degree: usize,
-        points: Vec<[f64; 4]>,
-        knots: Vec<f64>,
-    },
-}
+pub use solidcore_ops::sweep::Curve;
 
 /// How a drafted [`Brep::extrude`] closes the gap its offset opens at a sharp corner of the
 /// profile. Where the offsets overlap instead, all three trim them where they cross.
@@ -147,7 +124,13 @@ impl Brep {
     /// The planar `profile` turned `angle` radians (0 < angle <= 2 pi) right-handed about the
     /// axis through `origin` along `direction`, in the profile's plane (touching it at most).
     pub fn revolve(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], angle: f64, cap: bool) -> Result<Brep> {
-        let r = core::sweep::revolve(profile, origin, direction, angle, cap).map(Brep::made_core);
+        let r = solidcore_ops::sweep::join_profile_arcs(profile)
+            .map_err(|e| match e {
+                solidcore_ops::Error::Argument => crate::Error::Argument,
+                e => crate::Error::Refused(e),
+            })
+            .and_then(|joined| core::sweep::revolve(&joined, origin, direction, angle, cap))
+            .map(Brep::made_core);
         trace::made(
             "revolve",
             &[],
