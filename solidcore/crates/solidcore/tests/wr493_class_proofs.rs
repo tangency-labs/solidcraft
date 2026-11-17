@@ -23,8 +23,11 @@
 //!   corner's volume and moments are those its trims bound (Stokes and Green agree), so
 //!   the geometry is exact. The `corpus.parity` volume is 5.1e-12 off the trims-bound
 //!   reference (old 9.8e-11). The `blend.fillet_executive_p3` mass row is closer in area,
-//!   volume, cx, the inertia and Pzx; cy, Pyz and Pxy are off by the corners' quadrature
-//!   at the row's requested accuracy 1e-4 (at most 1.6e-10), within 1e-9 relative.
+//!   volume, cx, the inertia and Pzx. cy, Pyz and Pxy are FARTHER (open): 7.3e-10,
+//!   7.1e-10 and 7.1e-10 relative off, against 1.7e-10, 2.5e-10 and 2.5e-10 before. That is
+//!   the corners' quadrature of the first moment in y at the row's requested accuracy 1e-4:
+//!   all eight corners err the same way (1.1e-10 in all, before 6.2e-11 summed by
+//!   magnitude), each within 1e-9 relative.
 //! - `point_just_outside_the_sphere_pole_is_in_the_infinite_region`: the
 //!   `query.brep` `sphere_vertex3_off_region` point lies outside the sphere exactly.
 #![allow(
@@ -876,7 +879,7 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     let mut v = read(&mut k, name);
     let bbox = calculate_bounding_box(&k, &mut v, BoundingBoxOptions::default()).unwrap();
     let row = brep_volume_default(&k, &mut v, 1e-6).unwrap();
-    assert_eq!(row, 0.680_748_106_613_681_3);
+    assert_eq!(row, 0.680_748_106_613_681_7);
     let mut m = read(&mut k, name);
     let mut delta = 0.0;
     for &f in &spheres {
@@ -915,18 +918,18 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
         ]
     };
     let new_row = [
-        5.914390008518431,
-        0.6807481065892809,
-        0.6807481065892809,
-        1.9999999999999845,
-        -0.21949084166711508,
+        5.9143900085407815,
+        0.6807481065898701,
+        0.6807481065898701,
+        1.9999999999999853,
+        -0.2194908416672513,
         0.19830878452084486,
-        0.3158247468374329,
-        2.796768143572408,
-        3.0415735197104565,
-        -0.029630896983732523,
-        0.26999665916517174,
-        -0.29883594975713673,
+        0.31582474683781425,
+        2.796768143574872,
+        3.0415735197131566,
+        -0.029630896983776557,
+        0.26999665916540555,
+        -0.29883594975758043,
     ];
     let old_row = [
         5.9143899129759,
@@ -1009,8 +1012,9 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
         match i {
             // cz: no corner moves it
             5 => assert_eq!(new_off, old_off),
-            // cy, Pyz, Pxy: the corners' quadrature at the requested 1e-4 (the geometry
-            // is exact, above); the old row was nearer only by its corners' errors cancelling
+            // cy, Pyz, Pxy: FARTHER, open (the corners' quadrature of the first moment in y
+            // at the requested 1e-4; the geometry is exact, above): asserted within 1e-9
+            // relative only
             4 | 9 | 11 => {}
             // area, volume, cx, inertia and Pzx: CLOSER
             _ => assert!(

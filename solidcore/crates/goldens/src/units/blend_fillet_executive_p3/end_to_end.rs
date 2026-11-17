@@ -2745,7 +2745,7 @@ mod wr56_certificates {
 /// rho = sqrt(8) on the plane and the circle on the sphere at 10/9 of the centre circle.
 /// The round face is that torus to rounding on both sides; its contact edges on the plane
 /// and on the sphere are each closer to it than before (CLOSER against the closed form:
-/// 4.8e-12 and 1.5e-6, before 3.5e-11 and 4.1e-6), and each lies within its own tolerance.
+/// 7.2e-12 and 1.9e-6, before 3.5e-11 and 4.1e-6), and each lies within its own tolerance.
 #[cfg(test)]
 mod wr493_certificates {
     use super::{apply, build, RealSolid};
