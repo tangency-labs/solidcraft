@@ -203,12 +203,13 @@ pub fn blob(doc: &Document, id: &str, path: &str) -> Option<Vec<u8>> {
     doc.plugin_data.get(&format!("{id}/{path}")).and_then(|text| base64_decode(text))
 }
 
-/// The installed plugin with this id, when there is one: its manifest. Reading it runs no code.
+/// The installed plugin with this id, when there is one: its manifest alone (not its component, so
+/// opening a design reads a few KiB per plugin). Reading it runs no code.
 #[cfg(not(target_arch = "wasm32"))]
 fn installed(s: &Session, id: &str) -> Option<craft_plugin::Manifest> {
-    let path =
-        s.plugin_state.packages.get(id).cloned().or_else(|| s.plugin_state.plugins_dir().map(|dir| dir.join(id).to_string_lossy().into_owned()))?;
-    super::read_package(&path).ok().map(|package| package.manifest)
+    let dir = s.plugin_state.packages.get(id).map(std::path::PathBuf::from).or_else(|| s.plugin_state.plugins_dir().map(|dir| dir.join(id)))?;
+    let bytes = solidcraft_io::vfs::read(&dir.join("plugin.json").to_string_lossy(), super::MAX_MANIFEST_BYTES).ok()?;
+    super::parse_manifest(&bytes, id).ok()
 }
 #[cfg(target_arch = "wasm32")]
 fn installed(_s: &Session, _id: &str) -> Option<craft_plugin::Manifest> {
