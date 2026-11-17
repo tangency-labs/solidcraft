@@ -295,6 +295,18 @@ fn skipped_note(joints: &[TabSlotJoint]) -> Option<String> {
     (!parts.is_empty()).then(|| format!("tab and slot: {}", parts.join("; ")))
 }
 
+/// The feature's failure when every pair is skipped (design v2 11.2, `no_plate_joint`): "tab and
+/// slot: no plate joint to make (Wall → Bottom cannot be cut: Bottom is sheet metal; Far → Bottom
+/// does not meet it (0.50 mm apart)) (no_plate_joint)".
+fn no_plate_joint(skipped: &[TabSlotJoint], passed: &[String]) -> DocError {
+    let mut items: Vec<String> = skipped.iter().map(|j| format!("{} → {} {}", j.tab, j.slot, j.skipped.as_deref().unwrap_or(""))).collect();
+    items.extend(passed.iter().cloned());
+    if items.is_empty() {
+        return DocError::Invalid("tab and slot: no tab plate stands on a slot plate (no_plate_joint)".into());
+    }
+    DocError::Invalid(format!("tab and slot: no plate joint to make ({}) (no_plate_joint)", named_items(&items, "; ")))
+}
+
 /// What a Tab and Slot feature did (design 5.7): its joints in pick order and the tool faces each
 /// plate's boolean took (by body, in pick order).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -316,14 +328,12 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
     if let Some(bad) = bad_plate_key(tab_plates, slot_plates) {
         return Err(DocError::Invalid(format!("tab and slot: {bad}")));
     }
-    // The plates, each once, as the state has them.
+    // The plates, each once, as the state has them. A plate whose body is gone skips its pairs
+    // (`plate_missing`, design v2 3.2 / 11.3).
     let mut names: Vec<String> = Vec::new();
     for p in tab_plates.iter().chain(slot_plates) {
         let name = p.body.to_string();
-        if st.body(&name).is_none() {
-            return Err(DocError::Invalid(format!("tab and slot: no body {name}")));
-        }
-        if !names.contains(&name) {
+        if st.body(&name).is_some() && !names.contains(&name) {
             names.push(name);
         }
     }
@@ -335,12 +345,27 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
     // Pairs with a plate the cut cannot take (design v3 4.4 / 11.3): sheet metal or a mesh body in
     // the state before the feature. Every pair with such a plate is skipped and named.
     let mut unusable: Vec<TabSlotJoint> = Vec::new();
+    // Pairs that do not make a joint (no contact, ...), "Wall → Bottom does not meet it", for the
+    // `no_plate_joint` message.
+    let mut passed: Vec<String> = Vec::new();
     for t in tab_plates {
         for s in slot_plates {
-            let (ti, si) = (index(&t.body), index(&s.body));
-            if ti == si {
+            let (tn, sn) = (t.body.to_string(), s.body.to_string());
+            if tn == sn {
                 continue;
             }
+            if let Some(gone) = [&tn, &sn].into_iter().find(|n| !names.contains(*n)) {
+                unusable.push(TabSlotJoint {
+                    tab: tn.clone(),
+                    slot: sn.clone(),
+                    skipped: Some(format!("cannot be cut: {gone} is gone")),
+                    reason: Some("plate_missing".into()),
+                    tabs: 0,
+                    left_out: Vec::new(),
+                });
+                continue;
+            }
+            let (ti, si) = (index(&tn), index(&sn));
             if let Some((reason, text)) = [ti, si].into_iter().find_map(|i| plate_unusable(st, &names[i], plates.get(i))) {
                 unusable.push(TabSlotJoint {
                     tab: names[ti].clone(),
@@ -354,18 +379,19 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
             }
             let near = s.near.or(t.near).map(Into::into);
             let Some((tab, slot)) = plates.get(ti).zip(plates.get(si)) else { continue };
-            let Ok((p, joint)) = kernel_ts::joint_plane(tab, slot, near, JOINT_TOL)? else { continue };
+            let (p, joint) = match kernel_ts::joint_plane(tab, slot, near, JOINT_TOL)? {
+                Ok(found) => found,
+                Err(skip) => {
+                    passed.push(format!("{tn} → {sn} {}", pair_skip_text(&skip)));
+                    continue;
+                }
+            };
             specs.push(spec_of(vals, k, joint.faces.thickness, extent_along(slot, &p)?)?);
             list.push((ti, si, p));
         }
     }
     if specs.is_empty() {
-        let report = TabSlotReport { joints: unusable, tool_faces: Vec::new() };
-        match skipped_note(&report.joints) {
-            Some(note) => append_warning(warning, note),
-            None => append_warning(warning, "tab and slot: no tab plate stands on a slot plate".into()),
-        }
-        return Ok(report);
+        return Err(no_plate_joint(&unusable, &passed));
     }
     let refs: Vec<&Body> = plates.iter().collect();
     let (skips, tool_faces) = kernel_ts::joints_each(&refs, &list, &specs, JOINT_TOL)?;
@@ -399,6 +425,9 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
         };
         let (reason, skipped) = skipped.map_or((None, None), |(id, text)| (Some(id), Some(text)));
         report.joints.push(TabSlotJoint { tab: tab_name, slot: slot_name, skipped, reason, tabs, left_out });
+    }
+    if report.joints.iter().all(|j| j.reason.is_some()) {
+        return Err(no_plate_joint(&report.joints, &passed));
     }
     if let Some(note) = skipped_note(&report.joints) {
         append_warning(warning, note);
@@ -629,7 +658,7 @@ mod tests {
 
     /// Design 11.6: a wall whose every tab is dropped is never silent. Thick (10 thick, 120 long)
     /// on Bottom with two tabs of the default width 30 and the default end distance 30: the
-    /// stretch is too short, the joint made no tab, and both the warning and the report say so.
+    /// stretch is too short, the joint made no tab, and the feature's failure says so.
     #[test]
     fn tab_slot_joint_with_every_tab_dropped_is_named() {
         use solidcore_record::Vec3;
@@ -648,13 +677,10 @@ mod tests {
         }))
         .unwrap();
         let mut warning = None;
-        let report = apply(&BTreeMap::new(), &k, &mut st, &mut warning).unwrap();
-        let joint = &report.joints[0];
-        assert_eq!((joint.tabs, joint.reason.as_deref()), (0, Some("too_short")), "{report:?}");
-        assert!(joint.skipped.as_deref().is_some_and(|s| s.starts_with("made no tab: the stretch from")), "{report:?}");
-        assert_eq!(joint.left_out.len(), 1, "{report:?}");
-        let warning = warning.unwrap_or_default();
-        assert!(warning.contains("skipped 1 plate joint: Thick → Bottom made no tab") && warning.contains("too short"), "{warning}");
+        // Its only joint skipped, the feature fails `no_plate_joint` naming it (design v2 11.2).
+        let err = apply(&BTreeMap::new(), &k, &mut st, &mut warning).unwrap_err().to_string();
+        assert!(err.contains("Thick → Bottom made no tab: the stretch from") && err.contains("too short"), "{err}");
+        assert!(err.ends_with("(no_plate_joint)"), "{err}");
         let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
         assert!((volume("Thick") - 72_000.0).abs() < 1e-6 && (volume("Bottom") - 96_000.0).abs() < 1e-6);
     }
@@ -686,12 +712,77 @@ mod tests {
         let frame = solidcore_record::Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
         st.sheets.push(base_flange("Bottom", "Steel (mm)", &rv, frame, region));
         let mut warning = None;
-        let report = apply(&BTreeMap::new(), &kind(serde_json::json!({"clearance": "0.1"})), &mut st, &mut warning).unwrap();
-        assert_eq!(report.joints.len(), 1, "{report:?}");
-        let joint = &report.joints[0];
-        assert_eq!((joint.tabs, joint.reason.as_deref()), (0, Some("sheet_metal")), "{report:?}");
+        let err = apply(&BTreeMap::new(), &kind(serde_json::json!({"clearance": "0.1"})), &mut st, &mut warning).unwrap_err().to_string();
+        assert_eq!(err, "tab and slot: no plate joint to make (Wall → Bottom cannot be cut: Bottom is sheet metal) (no_plate_joint)");
+        let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
+        assert!((volume("Wall") - 43_200.0).abs() < 1e-6 && (volume("Bottom") - 96_000.0).abs() < 1e-6);
+    }
+
+    /// Fixture F's Bottom and Wall, and `more` (name, min, max) boxes, in the state.
+    fn fixture_f_with(more: &[(&str, [f64; 3], [f64; 3])]) -> ModelState {
+        use solidcore_record::Vec3;
+        use solidcraft_kernel as kernel;
+        let mut st = ModelState::default();
+        let mut add = |n: &str, a: [f64; 3], b: [f64; 3]| {
+            let body = kernel::box_solid(Vec3::new(a[0], a[1], a[2]), Vec3::new(b[0], b[1], b[2])).unwrap();
+            st.bodies.push(super::super::ModelBody::new(n.into(), body, 0));
+        };
+        add("Bottom", [0.0, 0.0, 0.0], [160.0, 100.0, 6.0]);
+        add("Wall", [20.0, 30.0, 6.0], [140.0, 36.0, 66.0]);
+        for (n, a, b) in more {
+            add(n, *a, *b);
+        }
+        st
+    }
+
+    fn tab_slot_of(tabs: &[&str], slots: &[&str]) -> FeatureKind {
+        let picks = |names: &[&str], from: usize| -> Vec<serde_json::Value> {
+            names.iter().enumerate().map(|(i, n)| serde_json::json!({"key": from + i, "body": n})).collect()
+        };
+        serde_json::from_value(serde_json::json!({
+            "type": "tab_slot",
+            "tab_plates": picks(tabs, 1),
+            "slot_plates": picks(slots, 1 + tabs.len()),
+            "clearance": "0.1",
+            "count": "3",
+            "tab_width": "20",
+            "end_distance": "10",
+        }))
+        .unwrap()
+    }
+
+    /// Design v2 3.2 / 11.3: a plate whose body is gone skips its pairs `plate_missing`; the
+    /// other pairs are cut as before (Wall 45 360, Bottom 93 745.68 mm³ as fixture F).
+    #[test]
+    fn tab_slot_skips_a_pair_whose_plate_is_gone() {
+        use solidcraft_kernel as kernel;
+        let mut st = fixture_f_with(&[]);
+        let mut warning = None;
+        let report = apply(&BTreeMap::new(), &tab_slot_of(&["Wall", "Ghost"], &["Bottom"]), &mut st, &mut warning).unwrap();
+        assert_eq!(report.joints.len(), 2, "{report:?}");
+        let gone = report.joints.iter().find(|j| j.tab == "Ghost").unwrap();
+        assert_eq!((gone.tabs, gone.reason.as_deref(), gone.skipped.as_deref()), (0, Some("plate_missing"), Some("cannot be cut: Ghost is gone")));
+        let wall = report.joints.iter().find(|j| j.tab == "Wall").unwrap();
+        assert_eq!((wall.tabs, wall.reason.as_deref()), (3, None), "{report:?}");
         let warning = warning.unwrap_or_default();
-        assert!(warning.contains("skipped 1 plate joint: Wall → Bottom cannot be cut: Bottom is sheet metal"), "{warning}");
+        assert!(warning.contains("skipped 1 plate joint: Ghost → Bottom cannot be cut: Ghost is gone"), "{warning}");
+        let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
+        assert!((volume("Wall") - 45_360.0).abs() < 1e-6, "{}", volume("Wall"));
+        assert!((volume("Bottom") - 93_745.68).abs() < 1e-6, "{}", volume("Bottom"));
+    }
+
+    /// Design v2 11.2: when every pair is skipped, a gone plate or plates that do not meet, the
+    /// feature fails `no_plate_joint` naming each pair, and the plates are left as they were.
+    #[test]
+    fn tab_slot_with_every_pair_skipped_fails_no_plate_joint() {
+        use solidcraft_kernel as kernel;
+        let mut st = fixture_f_with(&[("Far", [20.0, 60.0, 10.0], [140.0, 66.0, 70.0])]);
+        let mut warning = None;
+        let err = apply(&BTreeMap::new(), &tab_slot_of(&["Ghost"], &["Bottom"]), &mut st, &mut warning).unwrap_err().to_string();
+        assert_eq!(err, "tab and slot: no plate joint to make (Ghost → Bottom cannot be cut: Ghost is gone) (no_plate_joint)");
+        let err = apply(&BTreeMap::new(), &tab_slot_of(&["Far", "Ghost"], &["Bottom"]), &mut st, &mut warning).unwrap_err().to_string();
+        assert!(err.contains("Ghost → Bottom cannot be cut: Ghost is gone") && err.contains("Far → Bottom "), "{err}");
+        assert!(err.ends_with("(no_plate_joint)"), "{err}");
         let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
         assert!((volume("Wall") - 43_200.0).abs() < 1e-6 && (volume("Bottom") - 96_000.0).abs() < 1e-6);
     }
