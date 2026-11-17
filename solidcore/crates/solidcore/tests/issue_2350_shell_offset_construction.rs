@@ -287,7 +287,8 @@ fn analytic_shells_keep_their_closed_forms() {
 
 /// #18239: a 2 x 2 x 2 square boss on a 20 x 20 x 10 block, shelled closed. At a wall of 1
 /// the boss's opposite sides' offsets meet (half its width), so its offset vanishes while
-/// the block keeps a cavity: refused as a collapse naming 1, the largest wall that fits. At
+/// the block keeps a cavity: refused as walls meeting across it, naming 1, the largest wall
+/// that fits (not as a radius of curvature, which a flat face has none of). At
 /// 0.9 it builds: the block's cavity (18.2 x 18.2 x 8.2) and the boss's (0.2 x 0.2 x 2).
 #[test]
 fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
@@ -303,12 +304,23 @@ fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
     let mut k = Kernel::default();
     let boss = part(&mut k);
     let err = shell(&mut k, boss, -1.0, &[]).unwrap_err();
-    let Some(&Reason::Offset(OffsetFailure::Collapses { radius, .. })) =
+    let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross { face, largest, .. })) =
         err.failure().map(|f| &f.reason)
     else {
-        panic!("wall 1: not a collapse: {err}");
+        panic!("wall 1: not walls meeting across the boss: {err}");
     };
-    assert!((radius - 1.0).abs() <= 1e-9, "{radius}");
+    assert!((largest - 1.0).abs() <= 1e-9, "{largest}");
+    assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "{}: the offset of face {} by 1 vanishes: the wall reaches half the width between \
+             two opposite faces (the largest wall that fits is {largest})",
+            err.operation(),
+            face.index()
+        )
+    );
+    assert!(!err.to_string().contains("curvature"), "{err}");
     let mut k = Kernel::default();
     let boss = part(&mut k);
     let mut b = shell(&mut k, boss, -0.9, &[]).unwrap();

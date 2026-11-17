@@ -924,6 +924,18 @@ fn every_other_offset_refusal_says_why_and_where() {
             },
         ),
         (
+            O::WallsMeetAcross {
+                face: named,
+                distance: 1.0,
+                largest: 1.0,
+            },
+            Some(7),
+            R::WallsMeetAcross {
+                distance: 1.0,
+                largest: 1.0,
+            },
+        ),
+        (
             O::LoopsCross {
                 face: Some(named),
                 crossing: LoopCrossing::SharesEdge,
@@ -1045,6 +1057,16 @@ fn every_other_offset_refusal_says_why_and_where() {
         };
         assert_eq!(matches!(why, R::Phrase { .. }), o.is_phrase(), "{o:?}");
     }
+    // walls meeting across a square boss name the largest wall, not a radius of curvature
+    let across = R::WallsMeetAcross {
+        distance: 1.0,
+        largest: 1.0,
+    };
+    assert_eq!(
+        across.to_string(),
+        "the wall reaches half the width between two opposite faces of a boss; the largest wall \
+         that fits is 1"
+    );
     // the face the kernel sets on a failure whose reason names none (a draft's face without a
     // surface) is the one said
     let what = "the face has no surface or no outer face use";
