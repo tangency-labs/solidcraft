@@ -1037,6 +1037,26 @@ mod tests {
         assert_eq!(faces(&m.brep, None).unwrap().len(), 1);
     }
 
+    /// A real join still maps after the ten-tolerance window is narrowed (#16634). The tiny
+    /// boundary pieces of a sheet cut ten tolerances from its edge are five tolerances from that
+    /// edge's start; they lie on the joined edge, so they map to it. Only the parallel seam, ten
+    /// tolerances from the boundary, is gone.
+    #[test]
+    fn a_joined_boundary_piece_at_five_tolerances_still_maps_to_its_joined_edge() {
+        let mut k = Kernel::default();
+        let s = spline(&[(0.0, 0.0), (10.0, 0.0)], &[0.0, 0.0, 1.0, 1.0]);
+        let (b, _) = sheet_of(&mut k, of(&s), &[1e-6], &[], 1e-6).unwrap();
+        let tiny_bottom = edge_through(&k, &b, [5e-6, 0.0, 0.0]);
+        let tiny_top = edge_through(&k, &b, [5e-6, 4.0, 0.0]);
+        let seam = edge_through(&k, &b, [1e-5, 2.0, 0.0]);
+        let m = merged_faces(&mut k, &b).unwrap();
+        let bottom = edge_through(&k, &m.brep, [5.0, 0.0, 0.0]);
+        let top = edge_through(&k, &m.brep, [5.0, 4.0, 0.0]);
+        assert_eq!(mapped(&m, tiny_bottom), Some(bottom));
+        assert_eq!(mapped(&m, tiny_top), Some(top));
+        assert_eq!(mapped(&m, seam), None);
+    }
+
     #[test]
     fn the_flat_arch_merges_into_one_face_its_halves_into_one_edge() {
         let mut k = Kernel::default();
