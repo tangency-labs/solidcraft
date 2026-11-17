@@ -976,8 +976,16 @@ mod tests {
         assert_eq!(out.ints["status"], vec![1007], "{out:?}");
     }
 
+    /// The line crosses the curve at t = 6.1104 (WR-647). Before the flag
+    /// `simple_coincidence_crossing_is_point` was retired, the answer there was two ranges
+    /// within the tolerance (0.5) of the curve, [5.4153, 6.1104] and the tail [6.1104,
+    /// 6.3447], split at the crossing; the faulty range end check (#527) collapsed the
+    /// tail onto its start and discarded it. Now the two ranges are one stretch whose
+    /// ends part with the separations on opposite sides, and the answer is the crossing
+    /// itself: the tail's start, where the curves meet. The end check stays covered by
+    /// the `issue_527_refine_cc_range_end` tests in `curve/curve/p1.rs`.
     #[test]
-    fn range_end_refinement_keeps_the_noncollapsed_tail() {
+    fn range_end_tail_and_its_head_are_one_crossing() {
         let fixtures: Value = serde_json::from_str(include_str!(
             "../../../../fixtures/curve.curve_p8/edge.json"
         ))
@@ -991,28 +999,30 @@ mod tests {
         let op: OpIn = serde_json::from_value(case["inputs"].clone()).unwrap();
         let out = rust(&op).unwrap();
         assert_eq!(out.ints["status"], vec![0]);
-        let values = &out.values["out"];
-        assert_eq!(values[0], 3.0);
-        let tail = &values[20..];
-        assert_eq!(tail.len(), 11);
-        assert_eq!(tail[0], f64::from(SolutionType::RangeOfValues as i32));
-        assert!(tail[9] - tail[6] > 0.2);
-        assert!(tail[10] - tail[7] > 0.07);
-        let OpIn::Gci { c1, c2, tol, .. } = &op;
+        let sols = solutions(&out.values["out"]);
+        assert_eq!(sols.len(), 2, "{sols:?}");
+        let point = f64::from(SolutionType::SingleValue as i32);
+        assert!(sols.iter().all(|s| s.0 == point && s.3.is_none()), "{sols:?}");
+        let OpIn::Gci { c1, c2, .. } = &op;
         let a = build(c1).unwrap();
         let b = build(c2.as_ref().unwrap()).unwrap();
         let k = Kernel::default();
-        // This tail is a legitimate approximate range at the requested tolerance.
-        // The faulty end check collapsed it onto its start and discarded it.
-        for i in 0..=10 {
-            let fraction = f64::from(i) / 10.0;
-            let t = tail[6] + fraction * (tail[9] - tail[6]);
-            let u = tail[7] + fraction * (tail[10] - tail[7]);
-            let deviation = a
-                .evaluate_point(&k, t)
+        let gap = |[t, u]: [f64; 2]| {
+            a.evaluate_point(&k, t)
                 .unwrap()
-                .distance(b.evaluate_point(&k, u).unwrap());
-            assert!(deviation <= *tol, "{deviation}");
+                .distance(b.evaluate_point(&k, u).unwrap())
+        };
+        // the crossing: where the old head ended and the tail began, the curves meeting
+        let cross = sols[1].2;
+        assert!((cross[0] - 6.11037890900769).abs() < 1e-9, "{cross:?}");
+        assert!((cross[1] - 0.4336618890164721).abs() < 1e-9, "{cross:?}");
+        assert!(gap(cross) < 1e-12, "{}", gap(cross));
+        // both old ranges' far ends are farther apart than the crossing (they part there)
+        for far in [
+            [5.415269021279051, 0.2949661473355207],
+            [6.344696713196761, 0.5053108900962493],
+        ] {
+            assert!(gap(far) > 0.1, "{far:?}: {}", gap(far));
         }
     }
 
