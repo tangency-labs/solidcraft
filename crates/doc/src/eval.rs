@@ -7400,10 +7400,10 @@ fn centered_extrude(
     // other. Without that record no cap answers to `start`. It spans the plane when its caps
     // lie on both sides of it, as their roles already say.
     let spans = caps[0].as_deref() == Some("bottom") && caps[1].as_deref() == Some("top") && !two_sided;
-    let start = || Some("start".to_string());
+    let start_name = || Some("start".to_string());
     let cap_synonyms = match one_sided_direction.filter(|_| spans) {
-        Some(crate::Direction::Positive) => [start(), None],
-        Some(crate::Direction::Negative) => [None, start()],
+        Some(crate::Direction::Positive) => [start_name(), None],
+        Some(crate::Direction::Negative) => [None, start_name()],
         Some(crate::Direction::Symmetric) | None => [None, None],
     };
     let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
