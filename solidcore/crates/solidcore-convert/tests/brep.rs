@@ -489,9 +489,9 @@ fn an_untrusted_record_is_healed_into_the_same_body() {
     valid(&mut k, &mut b);
 }
 
-/// A closed polyhedron record: planar faces, each a cycle of `corners` counter-clockwise from
-/// outside on the plane through its first, second and last corner; straight edges and pcurves;
-/// every edge and vertex at `tol`, the body at `body_tol`.
+/// A closed polyhedron record whose faces lie on axis planes: each a cycle of `corners`
+/// counter-clockwise from outside, its plane's axes along its first side and towards its last
+/// corner; straight edges and pcurves; every edge and vertex at `tol`, the body at `body_tol`.
 fn polyhedron(corners: &[[f64; 3]], cycles: &[&[usize]], tol: f64, body_tol: f64) -> Record {
     let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
     let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -502,8 +502,9 @@ fn polyhedron(corners: &[[f64; 3]], cycles: &[&[usize]], tol: f64, body_tol: f64
             a[0] * b[1] - a[1] * b[0],
         ]
     };
+    // an axis vector's length is its largest component (no square root in this crate)
     let unit = |a: [f64; 3]| {
-        let l = dot(a, a).sqrt();
+        let l = a[0].abs().max(a[1].abs()).max(a[2].abs());
         [a[0] / l, a[1] / l, a[2] / l]
     };
     let mut ends: Vec<(usize, usize)> = Vec::new();
@@ -666,10 +667,13 @@ fn the_healer_keeps_a_vertex_tolerance_that_covers_its_gaps() {
         ],
         [8, 18, 12]
     );
+    // the floor, the gap gain times twice the gap, under the stated tolerance
     let healed = solidcore::topology::vertex::tolerance(&b, order.vertices[corner]).unwrap();
+    let floor = 2.0 * solidcore::geom::tol::gap_gain(&k) * gap;
+    assert!(floor < stated);
     assert!(
-        (2.0 * gap..=stated).contains(&healed),
-        "{healed} against {stated}"
+        (healed - floor).abs() <= 4.0 * f64::EPSILON * floor,
+        "{healed} against {floor}"
     );
     valid(&mut k, &mut b);
 }
