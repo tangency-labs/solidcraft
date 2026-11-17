@@ -4,6 +4,27 @@
 `xtask licences --check`, `xtask layers`, clippy with `-D warnings`, the tests with the `ci`
 profile and the wasm build check.
 
+`cargo xtask fast` checks only what your change touches, for the edit-commit-push loop. It
+compares your branch with `origin/main` (`--base REF` for another), counting committed,
+uncommitted and untracked files, and:
+
+- formats the code;
+- runs the quick checks of `cargo xtask ci` (assets, lists, skills, layers, ui-containers,
+  mesh-decisions; `shared`, `licences --check` and `icons` only when the change can affect them);
+- runs `cargo clippy --workspace --all-targets --profile ci -- -D warnings`, the same build as
+  `cargo xtask ci`, so a change that breaks another crate still fails;
+- tests only the packages whose files changed, as `scripts/ci/affected.py --owners` maps them,
+  with nextest's `ci` profile (no heavy tests);
+- for changed crates in `solidcore/`, its own workspace: their clippy and tests and the
+  `solidcore` wasm check. It reminds you to run the goldens of the units you touched
+  (solidcore/AGENTS.md §4).
+
+`-p PACKAGE` (repeatable) picks the packages to test instead, `--list` only prints what would be
+tested, and arguments after `--` go to the test runner (`cargo xtask fast -- sketch`). Every step runs even after one fails, and the
+failures are listed at the end: check each against `main` before blaming your change. It
+skips the wasm build of the application crates, the doc tests, web-offline-test and the tests
+of the packages that depend on yours. CI runs those on the pull request.
+
 | Harness | Where | What it catches |
 |---|---|---|
 | Unit and engine tests | next to the code, `*_tests.rs` | measured results: volume, area, topology counts against derived values |
