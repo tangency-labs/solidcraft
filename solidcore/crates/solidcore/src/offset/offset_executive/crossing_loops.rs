@@ -1419,7 +1419,7 @@ impl OffsetExecutive {
                     let Some(cp) = closest_point(kernel, b, wall, crossing.point)? else {
                         return Ok(false);
                     };
-                    if cp.distance > tol_3d {
+                    if !(cp.distance.is_finite() && cp.distance <= tol_3d) {
                         return Ok(false);
                     }
                     let wall_use = required(b.edge(wall)?.edgeuses.first().copied())?;
@@ -1434,13 +1434,13 @@ impl OffsetExecutive {
                     .binormal
                     .dot(normal);
                     // every wall across one edge use leaves the face the same way
-                    if into == 0.0 || *side * into < 0.0 {
+                    if !(into.is_finite() && into != 0.0 && *side * into >= 0.0) {
                         return Ok(false);
                     }
                     *side = into;
                 }
             }
-            if sides[0] * sides[1] >= 0.0 {
+            if !(sides[0].is_finite() && sides[1].is_finite() && sides[0] * sides[1] < 0.0) {
                 return Ok(false);
             }
         }
@@ -1484,7 +1484,7 @@ impl OffsetExecutive {
                         let Some(cp) = closest_point(kernel, b, e, crossing.point)? else {
                             continue;
                         };
-                        if cp.distance > tol_3d {
+                        if !(cp.distance.is_finite() && cp.distance <= tol_3d) {
                             continue;
                         }
                         let ends = [edge::start_vertex(b, e)?, edge::end_vertex(b, e)?];
