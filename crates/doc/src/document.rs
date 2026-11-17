@@ -270,6 +270,21 @@ fn default_cell_clip() -> solidcore_record::cell_grid::Clip {
     solidcore_record::cell_grid::Clip::Snap
 }
 
+/// A plate of a Tab and Slot feature: its body, and the point that picked it, when one did.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct PlatePick {
+    /// Stable for the life of the pick: names every tool of the pick's plate joints. Minted by
+    /// SolidCraft (the writers, and the file load for a pick that has none), never by the user;
+    /// `None` only on its way in. A key has no walk label: no parameter reaches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<u32>,
+    pub body: BodyName,
+    /// Chooses between several contact planes of a pair. A plain position, as Dogbone's
+    /// `edges`: it moves with the feature and names no face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub near: Option<Position>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -1526,6 +1541,43 @@ pub enum FeatureKind {
         /// Target body names (empty = the feature's participants, else all bodies of its component).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
+    },
+    /// Tab and Slot (#17422): tabs on the tab plates' edges where they meet the slot plates, and
+    /// matching slots cut through the slot plates, planned by solidcore
+    /// (`solidcore_ops::tab_slot`). Nothing measured from the model is stored: thicknesses,
+    /// contacts and stretches are read again at every rebuild.
+    TabSlot {
+        /// The plates that get tabs.
+        tab_plates: Vec<PlatePick>,
+        /// The plates that get slots.
+        slot_plates: Vec<PlatePick>,
+        /// The next key a new pick gets. Only grows: a key is never handed out twice in one
+        /// feature, so a pick added after another was removed never takes over its names.
+        #[serde(default)]
+        next_plate_key: u32,
+        /// Tabs per stretch (default: as many as fit, auto).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Tabs Per Stretch")]
+        count: Option<Expr>,
+        /// Centre to centre between tabs, instead of a count.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Spacing")]
+        spacing: Option<Expr>,
+        /// A tab's width (default: three times the tab plate's thickness).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Tab Width")]
+        tab_width: Option<Expr>,
+        /// From a stretch's end to the nearest tab (default: the tab width).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End Distance")]
+        end_distance: Option<Expr>,
+        /// The gap on every side of a tab in its slot (the command writes 0.1 mm).
+        #[walk(length = "Clearance")]
+        clearance: Expr,
+        /// How far a tab stands out past the slot plate's far face (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Protrusion")]
+        protrusion: Option<Expr>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
@@ -3005,6 +3057,7 @@ impl FeatureKind {
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::CellGrid { .. } => "CellGridFeature",
+            FeatureKind::TabSlot { .. } => "TabSlotFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
             FeatureKind::ReplaceFace { .. } => "ReplaceFaceFeature",
@@ -3076,6 +3129,7 @@ impl FeatureKind {
             FeatureKind::Align { .. } => "align",
             FeatureKind::Coil { .. } => "coil",
             FeatureKind::CellGrid { .. } => "cell_grid",
+            FeatureKind::TabSlot { .. } => "tab_slot",
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
@@ -3173,6 +3227,7 @@ impl FeatureKind {
             "ConvertToSheetMetalFeature" => "sheet_convert",
             "CoilFeature" => "coil",
             "CellGridFeature" => "cell_grid",
+            "TabSlotFeature" => "tab_slot",
             "RibFeature" | "WebFeature" => "rib",
             "ReplaceFaceFeature" => "replace_face",
             "AlignFeature" => "align",
@@ -3260,6 +3315,7 @@ impl FeatureKind {
             FeatureKind::SheetConvert { .. } => "ConvertToSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
             FeatureKind::CellGrid { .. } => "CellGrid",
+            FeatureKind::TabSlot { .. } => "TabSlot",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",
             FeatureKind::ReplaceFace { .. } => "ReplaceFace",

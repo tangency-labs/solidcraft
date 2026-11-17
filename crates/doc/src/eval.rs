@@ -10314,6 +10314,8 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        // The joints land with `eval_tab_slot.rs` (a later commit of the doc layer).
+        FeatureKind::TabSlot { .. } => Err(DocError::Invalid("tab and slot: not built yet".into())),
         FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
             if st.bodies.is_empty() {
                 return Err(empty_boolean_targets(doc, st, f, &[], f.participants.is_empty()));
