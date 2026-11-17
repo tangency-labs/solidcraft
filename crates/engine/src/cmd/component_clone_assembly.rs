@@ -67,6 +67,7 @@ fn budget(assembly: &Assembly) -> Result<()> {
         if !joint.values.iter().all(|v| v.is_finite())
             || !joint.limits.iter().flatten().all(|(lo, hi)| lo.is_finite() && hi.is_finite() && lo <= hi)
             || !joint.offset.is_finite()
+            || !joint.offset_xy.iter().all(|v| v.is_finite())
             || !joint.angle.is_finite()
         {
             return Err(invalid("joint contains invalid motion values"));

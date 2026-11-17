@@ -300,3 +300,54 @@ fn renaming_the_path_body_keeps_a_sweep_along_its_edges() {
     assert!(feature["error"].is_null(), "{}", feature["error"]);
     assert!((measure(&s, "Rib").volume - before).abs() < 1e-6 * before);
 }
+
+/// #17828: a design saved by 0.43.0, a line swept along a closed 3D spline (eight fit points round
+/// a circle of radius 25, up and down by 4 in turn) and a surface offset of one face of it. 0.43.0
+/// swept the line along the spline's 192 sample lines, a face along each, and saved the offset's
+/// pick on the 38th of them. Opened now, the saved sweep keeps those faces (the format step marks
+/// it), so the offset still finds its face and builds the same strip; saved and reopened, it
+/// stays so. A new sweep along the same spline is one face along the spline itself.
+#[test]
+fn an_older_sweep_along_a_3d_spline_keeps_its_faces_for_what_refers_to_them() {
+    let fit: Vec<[f64; 3]> = (0..=8)
+        .map(|i| {
+            let t = PI + std::f64::consts::TAU * f64::from(i % 8) / 8.0;
+            [25.0 * t.cos(), 25.0 * t.sin(), if i % 2 == 0 { 10.0 } else { 6.0 }]
+        })
+        .collect();
+    let on_plane = json!({"feature": 1, "type": "construction"});
+    let saved = json!({
+        "format": "solidcraft/57",
+        "name": "Old",
+        "units": "mm",
+        "params": [],
+        "next_id": 6,
+        "features": [
+            {"id": 1, "name": "Plane1", "plane": {"base": {"name": "XY", "type": "origin"}, "distance": "10.00 mm", "type": "offset"}, "type": "construction_plane"},
+            {"id": 2, "name": "Sketch1", "plane": on_plane, "type": "sketch", "sketch": {
+                "constraints": [], "counters": {"w": 1}, "curves": [], "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}], "view": {"three_d": true},
+                "wires": [{"fit": fit, "id": "w1", "pts": fit, "space": "component"}]}},
+            {"id": 3, "name": "Sketch2", "plane": on_plane, "type": "sketch", "sketch": {
+                "constraints": [], "counters": {"l": 1, "p": 2}, "curves": [{"a": 1, "b": 2, "id": "l1", "type": "line"}],
+                "points": [{"fixed": true, "id": "origin", "pos": [0.0, 0.0]}, {"fixed": true, "id": "p1", "pos": [-25.0, 0.0]}, {"fixed": true, "id": "p2", "pos": [-31.0, 0.0]}]}},
+            {"id": 4, "name": "SurfaceSweep1", "type": "surface_sweep", "body_names": ["Body1"], "curves": ["l1"], "path": ["w1"], "path_sketch": 2, "sketch": 3},
+            {"id": 5, "name": "OffsetSurface1", "type": "surface_offset", "body": "Body1", "body_names": ["Skin"], "distance": "1 mm", "face_names": [""],
+                "faces": [[-9.29397203630335, -26.191947234484033, 8.372395833333334]], "param_names": ["d2"]}
+        ]
+    });
+    let mut s = Session::new(solidcraft_doc::format::read(&saved.to_string()).unwrap());
+    let check = |s: &Session| {
+        let errors: Vec<(&str, &str)> = s.model.results.iter().filter_map(|r| Some((r.name.as_str(), r.error.as_deref()?))).collect();
+        assert!(errors.is_empty(), "{errors:?}");
+        let state = s.model.state();
+        assert_eq!((state.body("Body1").unwrap().body.face_count(), state.body("Skin").unwrap().body.face_count()), (192, 1));
+        // The offset is of the one strip the pick lies on, as 0.43.0 built it.
+        let strip = measure(s, "Skin").area;
+        assert!(strip < measure(s, "Body1").area / 100.0, "offset {strip}");
+    };
+    check(&s);
+    check(&Session::new(solidcraft_doc::format::read(&s.doc.to_json()).unwrap()));
+    // A new sweep along the spline follows it: one face.
+    run(&mut s, "surface.sweep", json!({"sketch": "Sketch2", "curves": ["l1"], "path_sketch": "Sketch1", "path": ["w1"], "body_name": "New"}));
+    assert_eq!(s.model.state().body("New").unwrap().body.face_count(), 1);
+}

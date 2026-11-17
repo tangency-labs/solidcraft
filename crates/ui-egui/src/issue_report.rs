@@ -2545,7 +2545,9 @@ mod tests {
     fn frames_until(app: &mut SolveApp, ctx: &egui::Context, mut done: impl FnMut(&SolveApp) -> bool) -> Vec<String> {
         let mut opened = Vec::new();
         for _ in 0..400 {
-            let out = ctx.run_ui(Default::default(), |ui| tickets::tick(app, ui.ctx()));
+            let mut out = ctx.run_ui(Default::default(), |ui| tickets::tick(app, ui.ctx()));
+            // No painter takes the font atlas: drop it on purpose (egui asserts otherwise).
+            out.textures_delta.clear();
             opened.extend(out.platform_output.commands.into_iter().filter_map(|c| match c {
                 egui::OutputCommand::OpenUrl(u) => Some(u.url),
                 _ => None,
@@ -2606,11 +2608,13 @@ mod tests {
         let report = payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &evidence_with_design(), "t");
         tickets::send(&mut app, report);
         frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        // The step that went unanswered is named (#17932), after one more try.
         assert!(
-            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable")),
+            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable") && why.contains("at POST /api/drafts")),
             "{:?}",
             app.tickets.outcome
         );
+        assert_eq!(requests.lock().unwrap().len(), 2, "the draft is asked for twice, then the report waits");
         assert_eq!(tickets::queue::list(&dir).len(), 1, "one report kept");
         let sent = requests.lock().unwrap().len();
         frames_until(&mut app, &ctx, |_| false);
@@ -2625,6 +2629,43 @@ mod tests {
             requests.lock().unwrap().iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
         assert!(uploaded.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"));
         no_token_anywhere(&requests);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ticket_report_sends_a_step_again_once_when_it_went_unanswered() {
+        // The first part of an upload gets no answer (a connection that hung, #17932): it goes
+        // again and the report opens, instead of waiting in the queue.
+        let dir = temp_dir("queue-again");
+        let (mut app, _, requests, _) = ticket_app(true, None);
+        app.tickets.queue_dir = Some(dir.clone());
+        let inner = app.services.tickets_http.take().unwrap();
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let drop_once = dropped.clone();
+        let seen = requests.clone();
+        app.services.tickets_http =
+            Some(Arc::new(move |r: crate::agent_chat::backend::HttpRequest, done: std::sync::mpsc::Sender<tickets::Reply>| {
+                if r.method == "PUT" && !drop_once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    seen.lock().unwrap().push(r);
+                    let _ = done.send(Err("timeout: global".into()));
+                    return;
+                }
+                inner(r, done);
+            }));
+        let ctx = crate::fonts::test_context();
+        let report = payload::build(&form(), payload::Ticks::default(), &evidence_with_design(), "t");
+        tickets::send(&mut app, report);
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened(draft_page())));
+        assert!(tickets::queue::list(&dir).is_empty(), "nothing kept");
+        assert!(
+            app.session.log.iter().any(|l| l.contains("no answer to PUT /api/uploads/") && l.contains("timeout: global")),
+            "{:?}",
+            app.session.log
+        );
+        let puts: Vec<String> = requests.lock().unwrap().iter().filter(|r| r.method == "PUT").map(|r| r.url.clone()).collect();
+        assert_eq!(puts.first(), puts.get(1), "the same part again, not the next one: {puts:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

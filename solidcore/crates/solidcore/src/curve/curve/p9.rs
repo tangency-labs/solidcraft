@@ -80,6 +80,13 @@
 //! - **Interval knots.** `CalculateTightBoundingBox` adds only the tangent
 //!   discontinuous knots strictly inside the interval (WR-474, #1054); upstream adds
 //!   them all, and the last knot.
+//! - **Turning points (#17685).** `CalculateTightBoundingBox` also adds the points where
+//!   a coordinate stops changing (`C' . e = 0`), isolated from the roots of the
+//!   derivative's numerator by Bezier subdivision (`curve::curve::turning`; B-spline
+//!   kinds and Hermite curves). A coordinate can peak where the curve stops or nearly
+//!   stops (`|C'|^2 < SM_EFF_ZERO`), and the perpendicular analyses refuse to evaluate
+//!   there. The subdivision is bounded (`turning::MAX_DEPTH`, `turning::MAX_NODES`) and
+//!   refuses with `InvalidInput` past either bound.
 //! - **Coordinate bound.** `GlobalCurveSolve` of a curve whose natural box reaches past
 //!   [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (`1e150`, below `sqrt(f64::MAX)`)
 //!   fails with `InvalidInput` before any cache is built (the curve cache is built over
@@ -1700,6 +1707,12 @@ impl Curve {
             })?;
         }
 
+        // Not upstream (#17685): the points where a coordinate stops changing, isolated
+        // from the roots of `C' . e` (`curve::curve::turning`).
+        self.add_turning_points(k, interval, &mut pt, &mut |p| {
+            tight_box.add_point(p);
+        })?;
+
         Ok(tight_box)
     }
 
@@ -1999,6 +2012,68 @@ mod tests {
             Some(CurveHandle(c1.natural_interval())),
             Some(CurveHandle(c2.natural_interval())),
         ]
+    }
+
+    /// The u = 0 side of `query.brep` gen0128's patch: a quadratic B-spline whose control
+    /// points all lie on the z axis, so it runs up the axis, stops and runs back down.
+    const TURNING_Z: [f64; 5] = [
+        0.336_409_316_230_782_1,
+        0.448_428_932_357_200_6,
+        0.412_240_069_159_368_5,
+        -0.128_554_999_916_893,
+        -0.388_250_346_477_554_63,
+    ];
+    /// Its knots.
+    const TURNING_KNOTS: [f64; 8] = [
+        0.0,
+        0.0,
+        0.0,
+        0.324_471_410_413_183_8,
+        0.897_412_383_425_158_5,
+        1.0,
+        1.0,
+        1.0,
+    ];
+    /// Its peak, from exact rational arithmetic on these control points and knots (Bezier
+    /// subdivision and convex hulls in `Fraction`s, to a width of 6e-22), rounded outward.
+    const TURNING_PEAK: (f64, f64) = (0.436_712_872_774_132_9, 0.436_712_872_774_132_95);
+
+    /// (#17685) A coordinate's extreme where the curve stops is in its tight box. The
+    /// curve's tangent is +z or -z wherever it moves, never perpendicular to z, and the
+    /// perpendicular analyses refuse the parameters where it has stopped: the box ended
+    /// at 0.43534, 1.4e-3 below the peak. With the turning points (the roots of `C' . z`,
+    /// isolated by subdivision) it reaches the peak to within 4 ulp and stays on the curve
+    /// (no higher than the peak but for the evaluation's rounding).
+    #[test]
+    fn tight_box_reaches_the_peak_where_a_curve_turns_back() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let pw = TURNING_Z
+            .iter()
+            .map(|&z| CPoint::new(0.0, 0.0, z, NOW))
+            .collect();
+        let nl = NlCurve::new(pw, 2, TURNING_KNOTS.to_vec()).unwrap();
+        let curve = Curve::from(BSplineCurve::from_nurb(nl, 3, false));
+        let k = Kernel::default();
+        let bx = curve
+            .calculate_tight_bounding_box(&k, &curve.natural_interval())
+            .unwrap();
+        let (lo, hi) = (bx.min(), bx.max());
+        let (peak_lo, peak_hi) = TURNING_PEAK;
+        // The side is the curve at a parameter where z changes by at most its rounding
+        // from the peak: within 4 ulp of the exact interval, on both sides.
+        assert!(
+            hi.z >= peak_lo - 4.0 * f64::EPSILON * peak_lo,
+            "box top {} below the peak {peak_lo}",
+            hi.z
+        );
+        assert!(
+            hi.z <= peak_hi + 4.0 * f64::EPSILON,
+            "box top {} above the peak",
+            hi.z
+        );
+        assert_eq!(lo.z, TURNING_Z[4], "the least is the end");
+        assert_eq!((lo.x, lo.y, hi.x, hi.y), (0.0, 0.0, 0.0, 0.0));
     }
 
     #[test]
