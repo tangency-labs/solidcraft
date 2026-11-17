@@ -2591,7 +2591,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// Takes the refusal a proto edge from a proto vertex back to itself left
     /// (WR-214): its curve leaves its ends' reach of a definition on a vertex, so it can be
-    /// neither split nor dropped. Not upstream.
+    /// neither split nor dropped. Not upstream. It also holds the refusal of a resolution
+    /// that would grow a tolerance into another vertex definition (#18312,
+    /// [`ProtoTopologyManager::refuse_growth_overlap`]).
     pub fn take_self_loop_refusal(&mut self) -> Option<SolidError> {
         self.self_loop_refusal.take()
     }
@@ -3137,7 +3139,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// [`SolidError::InvalidInput`] without a proto vertex; [`SolidError::Unported`]
     /// from the classifications (topology objects); [`SolidError::Failed`] (from
     /// `set_position`, the definition unchanged) when an absorbed hull point lies at no
-    /// finite distance from the new position.
+    /// finite distance from the new position, and the refusal
+    /// ([`ProtoTopologyManager::refuse_growth_overlap`], the definition unchanged) when the
+    /// growth reaches another vertex definition
+    /// ([`ProtoTopologyManager::growth_reaches_another`]).
     pub fn resolve_vertex_definition(
         &mut self,
         k: &Kernel,
@@ -3188,7 +3193,23 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let position = pt1 + frac * vec;
             // Not upstream (WR-306): through `set_position`, so a definition that absorbed
             // a self-loop grows to keep the curve's hull covered from the new position (a
-            // definition with no hull is moved as upstream moves it).
+            // definition with no hull is moved as upstream moves it). Not upstream
+            // (#18312): a growth into another vertex definition its tolerance kept clear of
+            // is refused, with the definition unchanged.
+            if let Some(v) = self.vertex_def(vd) {
+                if let Some(cover) = v.covering_tolerance(k, position) {
+                    if self.growth_reaches_another(
+                        k,
+                        position,
+                        v.tolerance(k),
+                        cover,
+                        v.proto_vertex,
+                        &[vd],
+                    )? {
+                        return Err(self.refuse_growth_overlap());
+                    }
+                }
+            }
             if let Some(v) = self.vertex_def_mut(vd) {
                 v.set_position(k, position)?;
             }

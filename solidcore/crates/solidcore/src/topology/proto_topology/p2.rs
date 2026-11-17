@@ -194,6 +194,8 @@ const OP_COMBINE_VD: &str =
     "topology::proto_topology::p2::ProtoTopologyManager::can_combine_vertex_definitions";
 const OP_RESOLVE_PE: &str =
     "topology::proto_topology::p2::ProtoTopologyManager::resolve_proto_edge";
+const OP_RESOLVE_PV: &str =
+    "topology::proto_topology::p2::ProtoTopologyManager::resolve_proto_vertex";
 
 /// `sdTolFactor` of `CanCombineVertexDefinitions`: the distance allowed between two
 /// combinable vertex definitions, in units of their summed tolerances. Upstream's, kept
@@ -553,6 +555,28 @@ fn within_tolerance_of_segment(x: Point3, a: Point3, b: Point3, tol: f64) -> boo
     let d = x.distance(a + t * ab);
     let bound = tol + gamma(32) * (x.length() + a.length() + b.length());
     bound.is_finite() && d <= bound
+}
+
+/// Not upstream (WR-306, #18312): whether a ball at `centre` growing from `old_tol` to
+/// `grown` reaches a vertex at `at` with tolerance `tol` that the ball before kept clear
+/// of: the two balls are certainly apart before (`old_tol + tol < D`, `D` the exact
+/// distance) and may touch after (`D <= grown + tol`). A ball that does not grow reaches
+/// nothing new.
+///
+/// The computed distance `d` is within `γ_4·D` of `D` (the inputs are stored points). A
+/// computed sum `s` is at least `(1 - u)` times the exact one, and the rounded product
+/// `s·(1 + γ_8)` (the factor's own rounding included) is then at least `(1 + γ_4)` times
+/// the exact sum. So `old·(1 + γ_8) < d` gives `old_exact < D`, and `D <= reach_exact`
+/// gives `d <= reach·(1 + γ_8)`: the test may refuse a growth that misses by a rounding,
+/// and of balls it finds apart before it never passes one that reaches. A non-finite
+/// distance or bound reaches nothing (left as upstream leaves it).
+fn grown_into(centre: Point3, old_tol: f64, grown: f64, at: Point3, tol: f64) -> bool {
+    if !(grown > old_tol) {
+        return false;
+    }
+    let d = centre.distance(at);
+    let margin = 1.0 + gamma(8);
+    (old_tol + tol) * margin < d && d <= (grown + tol) * margin
 }
 
 /// `SM_CAST_PTR(SmTopology, obj)`.
@@ -1680,13 +1704,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// ([`ProtoTopologyManager::can_combine_vertex_definitions`]). Not upstream (WR-306):
     /// before the delete, the one that stays takes over the hull points of the self-loops
     /// the deleted one absorbed and grows to cover them
-    /// ([`VertexDefinition::take_over_hull`]).
+    /// ([`VertexDefinition::take_over_hull`]). Not upstream (#18312): a definition's move,
+    /// a hull's hand-over or the proto vertex's placement that would grow a tolerance into
+    /// another vertex definition is refused ([`Self::refuse_growth_overlap`]).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for deleted objects; [`SolidError::Unported`] from
     /// the definitions' resolution and comparisons; [`SolidError::Failed`] when a hull
-    /// point lies at no finite distance from the definition taking it over.
+    /// point lies at no finite distance from the definition taking it over; the refusal
+    /// of a growth into another vertex definition.
     pub fn resolve_proto_vertex(
         &mut self,
         k: &Kernel,
@@ -1787,7 +1814,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                             let (ends, _, ends_bounded) =
                                 self.attached_curve_ends(k, brep, pv, &absorbed, &absorbed_defs);
                             absorbed.extend(ends);
-                            self.cover_in_place(pv, &absorbed, absorbed_bounded && ends_bounded)?;
+                            self.cover_in_place(
+                                k,
+                                pv,
+                                &absorbed,
+                                absorbed_bounded && ends_bounded,
+                            )?;
                         }
                         listed?;
                         return Err(e);
@@ -2016,18 +2048,56 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// Not upstream (#16637): records `absorbed` (the computed points of definitions combined
     /// away, `absorbed_points_of`) at `pv` and covers every point it has absorbed where it
-    /// is, without moving it ([`ProtoVertex::cover_absorbed`]).
+    /// is, without moving it ([`ProtoVertex::cover_absorbed`]), unless that grows it into
+    /// another vertex definition (#18312, [`Self::set_grown_proto_vertex`]).
     fn cover_in_place(
         &mut self,
+        k: &Kernel,
         pv: ProtoVertexId,
         absorbed: &[Point3],
         bounded: bool,
     ) -> Result<()> {
+        let mut grown = self
+            .proto_vertex(pv)
+            .ok_or(dangling("proto vertex is deleted"))?
+            .clone();
+        grown.absorb(absorbed, bounded);
+        grown.cover_absorbed();
+        self.set_grown_proto_vertex(k, pv, grown)
+    }
+
+    /// Not upstream (#18312): writes `grown`, the proto vertex `pv` placed or covering what
+    /// it absorbed (#16637), unless its tolerance grew, from where `grown` is, into a vertex
+    /// definition of another proto vertex that the tolerance before kept clear of
+    /// ([`Self::growth_reaches_another`]; `pv`'s own definitions are what it stands for).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when `pv` is deleted; the refusal
+    /// ([`Self::refuse_growth_overlap`]) of a growth into another definition, with `pv`
+    /// unchanged.
+    fn set_grown_proto_vertex(
+        &mut self,
+        k: &Kernel,
+        pv: ProtoVertexId,
+        grown: ProtoVertex,
+    ) -> Result<()> {
         let v = self
-            .proto_vertex_mut(pv)
+            .proto_vertex(pv)
             .ok_or(dangling("proto vertex is deleted"))?;
-        v.absorb(absorbed, bounded);
-        v.cover_absorbed();
+        if self.growth_reaches_another(
+            k,
+            grown.position(),
+            v.tolerance(k),
+            grown.tolerance(k),
+            None,
+            v.vertex_definitions(),
+        )? {
+            return Err(self.refuse_growth_overlap());
+        }
+        *self
+            .proto_vertex_mut(pv)
+            .ok_or(dangling("proto vertex is deleted"))? = grown;
         Ok(())
     }
 
@@ -2048,6 +2118,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// false, now or in an earlier resolution, or a remaining definition's point), or if
     /// the average is not finite, `pv` stays at upstream's position. It then covers only
     /// the absorbed points there.
+    ///
+    /// Not upstream (#18312): the placed vertex is written only when its grown tolerance
+    /// reaches no vertex definition of another proto vertex that its tolerance before kept
+    /// clear of ([`Self::set_grown_proto_vertex`]); refused otherwise, with `pv` unchanged.
     fn place_at_survivors(
         &mut self,
         k: &Kernel,
@@ -2057,9 +2131,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         survivor_ends: &[Point3],
         bounded: bool,
     ) -> Result<()> {
-        let v = self
-            .proto_vertex_mut(pv)
-            .ok_or(dangling("proto vertex is deleted"))?;
+        let mut v = self
+            .proto_vertex(pv)
+            .ok_or(dangling("proto vertex is deleted"))?
+            .clone();
         v.absorb(absorbed, bounded);
         let unbounded = v.absorbed_unbounded();
         let live = v.vertex_definitions().to_vec();
@@ -2077,9 +2152,6 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let average = sum / live.len() as f64;
             position = (all_bounded && finite_point(average)).then_some(average);
         }
-        let v = self
-            .proto_vertex_mut(pv)
-            .ok_or(dangling("proto vertex is deleted"))?;
         // a move: the remaining definitions' points are covered from the new position. With
         // no move the position is the one upstream's tolerance was set around, which then
         // stands for them (as when the vertex does not move at all).
@@ -2090,24 +2162,42 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             Some(p) => v.set_position(p),
             None => v.cover_absorbed(),
         }
-        Ok(())
+        self.set_grown_proto_vertex(k, pv, v)
     }
 
     /// Not upstream (WR-306): the hull points the definition `from`, about to be combined
     /// away, recorded for the self-loops it absorbed go to `to`, which grows to cover them
     /// where it is ([`VertexDefinition::take_over_hull`]). Nothing changes when `from` holds
-    /// none.
+    /// none. Not upstream (#18312): nor when the growth would reach another vertex
+    /// definition `to`'s tolerance kept clear of ([`Self::growth_reaches_another`]); the
+    /// combine is refused then.
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for a deleted definition; [`SolidError::Failed`] when
-    /// a point lies at no finite distance from `to` (which is then unchanged).
+    /// a point lies at no finite distance from `to`, and the refusal
+    /// ([`Self::refuse_growth_overlap`]) of a growth into another definition (`to` is
+    /// unchanged in both).
     fn hand_over_hull(&mut self, k: &Kernel, from: VertexDefId, to: VertexDefId) -> Result<()> {
         let hull = self.vd_ref(from)?.absorbed_hull().to_vec();
         if hull.is_empty() {
             return Ok(());
         }
-        self.vd_mut(to)?.take_over_hull(k, &hull)
+        let current = self.vd_ref(to)?;
+        let mut grown = current.clone();
+        grown.take_over_hull(k, &hull)?;
+        if self.growth_reaches_another(
+            k,
+            current.position(),
+            current.tolerance(k),
+            grown.tolerance(k),
+            current.proto_vertex(),
+            &[to, from],
+        )? {
+            return Err(self.refuse_growth_overlap());
+        }
+        *self.vd_mut(to)? = grown;
+        Ok(())
     }
 
     /// Sets the vertex definitions listed at `pv`.
@@ -2614,6 +2704,67 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         refusal
     }
 
+    /// Not upstream (#18312): the refusal of a resolution that would grow a vertex
+    /// definition or a proto vertex, to cover what it absorbed, into another vertex
+    /// definition its tolerance kept clear of ([`Self::growth_reaches_another`]), kept for the
+    /// Boolean to return as the self-loop refusals are.
+    pub(crate) fn refuse_growth_overlap(&mut self) -> SolidError {
+        let refusal = SolidError::boolean_stage_failed(
+            OP_RESOLVE_PV,
+            BooleanStage::Relate,
+            "covering what a vertex absorbed would grow it to reach another vertex",
+        );
+        self.note_self_loop_refusal(refusal.clone());
+        refusal
+    }
+
+    /// Not upstream (WR-306, #18312): whether a tolerance ball at `centre` that grows from
+    /// `old_tol` to `grown` reaches a vertex definition that the ball before the growth kept
+    /// clear of ([`grown_into`]): one of the proto vertex `own`, or of any other listed
+    /// one, other than `skip` (the definitions the ball stands for) and deleted ones. An
+    /// overlap the growth does not cause is left as upstream leaves it.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when `own` is deleted.
+    pub(crate) fn growth_reaches_another(
+        &self,
+        k: &Kernel,
+        centre: Point3,
+        old_tol: f64,
+        grown: f64,
+        own: Option<ProtoVertexId>,
+        skip: &[VertexDefId],
+    ) -> Result<bool> {
+        if !(grown > old_tol) {
+            return Ok(false);
+        }
+        let mut pvs = Vec::new();
+        if let Some(own) = own {
+            self.proto_vertex(own)
+                .ok_or(dangling("proto vertex is deleted"))?;
+            pvs.push(own);
+        }
+        pvs.extend(self.proto_vertices().iter().filter(|&&pv| Some(pv) != own));
+        for pv in pvs {
+            // (a deleted proto vertex or definition holds no vertex)
+            let Some(v) = self.proto_vertex(pv) else {
+                continue;
+            };
+            for &x in v.vertex_definitions() {
+                if skip.contains(&x) {
+                    continue;
+                }
+                if let Some(d) = self.vertex_def(x) {
+                    if grown_into(centre, old_tol, grown, d.position(), d.tolerance(k)) {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// Resolves the proto edge `pe` (`Resolve`). A proto edge from a proto vertex to
     /// itself loses its definitions when its first curve is shorter than twice its
     /// tolerance; when it is longer with ends farther apart than that, the start proto
@@ -2815,40 +2966,19 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         // growth does not cause (or a NaN distance) is left as upstream
                         // leaves it.
                         let old_tol = self.vd_ref(vd0)?.tolerance(k);
-                        if cover > old_tol {
-                            let mut others = vec![(pt1, self.vd_ref(new_vd)?.tolerance(k))];
-                            for &x in self
-                                .proto_vertex(start)
-                                .ok_or(dangling("proto vertex is deleted"))?
-                                .vertex_definitions()
-                            {
-                                if x != vd0 {
-                                    let d = self.vd_ref(x)?;
-                                    others.push((d.position(), d.tolerance(k)));
-                                }
-                            }
-                            // (a deleted proto vertex or definition holds no vertex)
-                            for &pv in self.proto_vertices() {
-                                if pv == start {
-                                    continue;
-                                }
-                                let Some(v) = self.proto_vertex(pv) else {
-                                    continue;
-                                };
-                                for &x in v.vertex_definitions() {
-                                    if let Some(d) = self.vertex_def(x) {
-                                        others.push((d.position(), d.tolerance(k)));
-                                    }
-                                }
-                            }
-                            let grown_into = |(at, tol): (Point3, f64)| {
-                                let d = pt0.distance(at);
-                                old_tol + tol < d && cover + tol >= d
-                            };
-                            if others.into_iter().any(grown_into) {
-                                self.delete_vertex_definition(new_vd);
-                                return Err(self.refuse_moving_absorbed());
-                            }
+                        let new_tol = self.vd_ref(new_vd)?.tolerance(k);
+                        if grown_into(pt0, old_tol, cover, pt1, new_tol)
+                            || self.growth_reaches_another(
+                                k,
+                                pt0,
+                                old_tol,
+                                cover,
+                                Some(start),
+                                &[vd0],
+                            )?
+                        {
+                            self.delete_vertex_definition(new_vd);
+                            return Err(self.refuse_moving_absorbed());
                         }
 
                         let v0 = self.vd_mut(vd0)?;
@@ -5881,8 +6011,10 @@ mod tests {
     /// another proto vertex at (3.8e-4, 0, 0) with tolerance 1e-4 is 2.3e-4 from there:
     /// clear of the old tolerance (2e-4 < 2.3e-4) but reached by the grown one
     /// (2.5e-4 >= 2.3e-4), so the resolution is refused for the Boolean and the definition
-    /// is left as it was. One at (6e-4, 0, 0) stays clear (4.5e-4 > 2.5e-4): the move goes
-    /// ahead.
+    /// is left as it was (`resolve_proto_vertex` ignores the definition's status without
+    /// `ssi_proto_topology_statuses_pass_on`, as upstream does; the manager keeps the
+    /// refusal either way). One at (6e-4, 0, 0) stays clear (4.5e-4 > 2.5e-4): the move
+    /// goes ahead.
     #[test]
     fn a_resolve_whose_cover_would_reach_another_definition_is_refused() {
         for (x, refused) in [(3.8e-4, true), (6e-4, false)] {
@@ -5918,9 +6050,11 @@ mod tests {
             assert_eq!(m.proto_vertex(pv2).unwrap().vertex_definitions(), &[other]);
             let def = m.vertex_def(vd).unwrap();
             if refused {
-                let err = result.unwrap_err();
+                let err = refusal.expect("kept for the Boolean");
                 assert!(err.to_string().contains("another vertex"), "{err}");
-                assert!(refusal.is_some(), "kept for the Boolean");
+                if let Err(e) = result {
+                    assert_eq!(e, err);
+                }
                 assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[vd]);
                 assert_eq!(def.position(), p, "not moved");
                 assert_eq!(def.tolerance(&k), 1e-4, "not grown");
@@ -6015,9 +6149,17 @@ mod tests {
             let mut m = manager();
             let p = Point3::new(1.0, 2.0, 3.0);
             let mk = |m: &mut ProtoTopologyManager<H>, at: Point3, a: H, b: H, gap: f64| {
-                let vd =
-                    VertexDefinition::new(&k, &geo, &region_pc(a), &region_pc(b), at, 1e-5, gap, None)
-                        .unwrap();
+                let vd = VertexDefinition::new(
+                    &k,
+                    &geo,
+                    &region_pc(a),
+                    &region_pc(b),
+                    at,
+                    1e-5,
+                    gap,
+                    None,
+                )
+                .unwrap();
                 m.insert_vertex_definition(vd).unwrap()
             };
             let far = p + Vec3::new(3e-5, 0.0, 0.0);
@@ -6029,7 +6171,8 @@ mod tests {
             for vd in [a, b, c] {
                 m.add_vertex_definition(pv, vd).unwrap();
             }
-            let (pv2, other) = another_vertex_at(&k, &mut m, &geo, p - Vec3::new(dx, 0.0, 0.0), 1e-5);
+            let (pv2, other) =
+                another_vertex_at(&k, &mut m, &geo, p - Vec3::new(dx, 0.0, 0.0), 1e-5);
 
             let result = m.resolve_proto_vertex(&k, &geo, pv);
             let refusal = m.take_self_loop_refusal();
