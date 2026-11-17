@@ -754,7 +754,7 @@ impl DialogFolder {
 
     /// The folder a dialog of this kind opens in (#5522). A design save opens beside the open
     /// design, or in the Designs folder for a design never saved. An export opens in the folder
-    /// last chosen for an export, or in the Exports folder. Without the setting, or when its
+    /// last chosen for an export while it still exists, or in the Exports folder. Without the setting, or when its
     /// folder does not exist (`is_dir`), the dialog opens in the folder last used, as before.
     fn folder_for(&self, kind: DialogKind, is_dir: impl Fn(&std::path::Path) -> bool) -> Option<std::path::PathBuf> {
         let state = self.0.lock().ok()?;
@@ -765,9 +765,11 @@ impl DialogFolder {
                 .as_ref()
                 .filter(|f| is_dir(f))
                 .map(|designs| state.design.as_deref().and_then(|p| parent_folder(std::path::Path::new(p))).unwrap_or_else(|| designs.clone())),
-            DialogKind::Export => {
-                state.exports.as_ref().filter(|f| is_dir(f)).map(|exports| state.export_chosen.clone().unwrap_or_else(|| exports.clone()))
-            }
+            DialogKind::Export => state
+                .exports
+                .as_ref()
+                .filter(|f| is_dir(f))
+                .map(|exports| state.export_chosen.clone().filter(|f| is_dir(f)).unwrap_or_else(|| exports.clone())),
         };
         setting.or_else(|| state.folder.clone())
     }
@@ -2638,6 +2640,10 @@ mod dialog_folder_tests {
         let exists = |f: &Path| !f.starts_with("/gone");
         assert_eq!(folder.folder_for(DialogKind::Design, exists), Some(PathBuf::from("/work")));
         assert_eq!(folder.folder_for(DialogKind::Export, exists), Some(PathBuf::from("/work")));
+        // A folder chosen in an export dialog and deleted since gives way to the Exports folder.
+        folder.settings("", "/home/sam/Prints");
+        folder.picked(DialogKind::Export, Path::new("/gone/output/lid.stl"));
+        assert_eq!(folder.folder_for(DialogKind::Export, exists), Some(PathBuf::from("/home/sam/Prints")));
     }
 }
 
