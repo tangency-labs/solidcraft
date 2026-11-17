@@ -481,6 +481,7 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 
 /// Put `slot` into the app and return what was there.
 fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
+    crate::select_other::close(app);
     let reveals = crate::browser::take_reveals(app);
     crate::semantic_content::leave_document(app);
     if crate::render_workspace::active(app) {
@@ -839,6 +840,7 @@ struct ViewMotion {
     key_hold: Option<crate::navigation::KeyHold>,
     mouse: Option<egui::Pos2>,
     hover: Option<crate::viewport::Hit>,
+    select_other: crate::select_other::State,
 }
 
 impl ViewMotion {
@@ -873,10 +875,12 @@ impl ViewMotion {
         std::mem::swap(&mut self.key_hold, &mut app.viewport.key_hold);
         std::mem::swap(&mut self.mouse, &mut app.viewport.mouse);
         std::mem::swap(&mut self.hover, &mut app.viewport.hover);
+        std::mem::swap(&mut self.select_other, &mut app.viewport.select_other);
     }
 }
 
 fn switch_navigation(app: &mut SolveApp, before: u64, id: u64) {
+    crate::select_other::close(app);
     let mut look = app.docs.navigation.remove(&id).unwrap_or_else(|| ViewLook::from_ui(&app.ui));
     look.swap(app);
     // A single view always uploads to slot zero, regardless of which sub-tab is shown.
