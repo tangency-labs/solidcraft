@@ -4,7 +4,7 @@ use crate::{
     SolveApp,
     dialogs::Kind,
     selection::{BODIES, PROFILES, SelInput, SelectionExt as _, VERTICES},
-    ui_kit::{choice_row, expr_row},
+    ui_kit::{BackingTooltipExt as _, choice_row, expr_row},
 };
 use serde_json::{Map, Value, json};
 use solidcraft_engine::Sel;
@@ -49,11 +49,18 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             Kind::LivingHinge(LivingHinge::default()),
             vec![
                 SelInput::new("ui.profiles", PROFILES, true),
-                SelInput::new("ui.living_hinge.plate", BODIES, true),
-                SelInput::new("Anchor", VERTICES, false),
+                SelInput::new("ui.living_hinge.plate", BODIES, true).tip("ui.living_hinge.plate_tip"),
+                SelInput::new("Anchor", VERTICES, false).tip("ui.living_hinge.anchor_tip"),
             ],
         )
     })
+}
+
+/// A row with its tooltip, the message `tip`.
+fn tipped<R>(ui: &mut egui::Ui, tip: &str, row: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let row = ui.scope(row);
+    row.response.backing_on_hover_text(solidcraft_ui_text::tr(tip));
+    row.inner
 }
 
 pub fn rows(_: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, _: &[SelInput]) -> bool {
@@ -69,23 +76,25 @@ pub fn rows(_: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, _: &[SelInput]
         enter |= expr_row(ui, "ui.angle", &mut h.angle);
     }
     enter |= expr_row(ui, "ui.living_hinge.slot_length", &mut h.slot_length);
-    enter |= expr_row(ui, "ui.living_hinge.bridge", &mut h.bridge);
-    enter |= expr_row(ui, "ui.living_hinge.row_spacing", &mut h.row_spacing);
-    enter |= expr_row(ui, "ui.living_hinge.slot_width", &mut h.slot_width);
-    choice_row(
-        ui,
-        "ui.living_hinge.clip",
-        "living_hinge_clip",
-        &mut h.clip,
-        &["ui.living_hinge.run_out", "ui.living_hinge.shorten", "ui.living_hinge.whole"],
-    );
-    enter |= expr_row(ui, "ui.living_hinge.margin", &mut h.margin);
+    enter |= tipped(ui, "ui.living_hinge.bridge_tip", |ui| expr_row(ui, "ui.living_hinge.bridge", &mut h.bridge));
+    enter |= tipped(ui, "ui.living_hinge.row_spacing_tip", |ui| expr_row(ui, "ui.living_hinge.row_spacing", &mut h.row_spacing));
+    enter |= tipped(ui, "ui.living_hinge.slot_width_tip", |ui| expr_row(ui, "ui.living_hinge.slot_width", &mut h.slot_width));
+    tipped(ui, "ui.living_hinge.clip_tip", |ui| {
+        choice_row(
+            ui,
+            "ui.living_hinge.clip",
+            "living_hinge_clip",
+            &mut h.clip,
+            &["ui.living_hinge.run_out", "ui.living_hinge.shorten", "ui.living_hinge.whole"],
+        )
+    });
+    enter |= tipped(ui, "ui.living_hinge.margin_tip", |ui| expr_row(ui, "ui.living_hinge.margin", &mut h.margin));
     enter
 }
 
-pub fn commands(_: &SolveApp, h: &LivingHinge, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
+pub fn commands(app: &SolveApp, h: &LivingHinge, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let ps = crate::selection::items(inputs, 0).profiles();
-    let Some(sketch) = ps.first().map(|p| p.0) else { return Err("Pick the sketch area to fill with slots".into()) };
+    let Some(sketch) = ps.first().map(|p| p.0) else { return Err(app.tr("error.living_hinge_profiles").into()) };
     let profiles: Vec<usize> = ps.iter().filter(|p| p.0 == sketch).map(|p| p.1).collect();
     let angle = match h.axis {
         0 => "0 deg",

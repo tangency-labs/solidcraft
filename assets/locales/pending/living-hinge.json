@@ -15,7 +15,16 @@
     "ui.living_hinge.run_out": "Run out",
     "ui.living_hinge.shorten": "Shorten",
     "ui.living_hinge.whole": "Whole",
-    "ui.living_hinge.margin": "Margin"
+    "ui.living_hinge.margin": "Margin",
+    "help.solid.living_hinge": "Cuts rows of staggered slots through a plate inside a sketch's area, so a laser-cut plywood, MDF or acrylic plate can bend there. Use it for round box corners, book spines and lampshades; cut a test strip of your material first.",
+    "ui.living_hinge.plate_tip": "The plate to cut. None picked: the one plate with a face in the sketch's plane under the area.",
+    "ui.living_hinge.anchor_tip": "The point a slot's centre sits on: a corner, the origin or a snap point. None picked: the pattern is centred on the area.",
+    "ui.living_hinge.bridge_tip": "Material left between two slots in a row: wider is stiffer.",
+    "ui.living_hinge.row_spacing_tip": "Centre to centre between rows: closer bends tighter.",
+    "ui.living_hinge.slot_width_tip": "The cut's width: for a laser, about the kerf.",
+    "ui.living_hinge.clip_tip": "Slots the edges cross. Run out: every other row runs out through the plate's edge and the rest are shortened. Shorten: all are shortened, leaving a solid border that stiffens the hinge. Whole: only whole slots.",
+    "ui.living_hinge.margin_tip": "The least material between a slot's end and an edge of the area or a keep-out. At the plate's own edge a slot keeps at least half a bridge, or the strip between rows if that is thinner.",
+    "error.living_hinge_profiles": "Pick the sketch area to fill with slots"
   },
   "ar": {
     "cmd.solid_living_hinge": "مفصل مرن",
@@ -33,7 +42,16 @@
     "ui.living_hinge.run_out": "حتى الحافة",
     "ui.living_hinge.shorten": "تقصير",
     "ui.living_hinge.whole": "كاملة",
-    "ui.living_hinge.margin": "الهامش"
+    "ui.living_hinge.margin": "الهامش",
+    "help.solid.living_hinge": "يقطع صفوفًا من الشقوق المتداخلة عبر لوح داخل منطقة رسم، ليتمكن لوح الخشب الرقائقي أو MDF أو الأكريليك المقطوع بالليزر من الانثناء هناك. استخدمه لزوايا الصناديق المستديرة وظهور الكتب وأغطية المصابيح؛ اقطع شريط اختبار من مادتك أولًا.",
+    "ui.living_hinge.plate_tip": "اللوح المراد قطعه. إن لم يُختر: اللوح الوحيد الذي له وجه في مستوى الرسم تحت المنطقة.",
+    "ui.living_hinge.anchor_tip": "النقطة التي يقع عليها مركز الشق: زاوية أو نقطة الأصل أو نقطة التقاط. إن لم تُختر: يتوسط النمط المنطقة.",
+    "ui.living_hinge.bridge_tip": "المادة المتبقية بين شقين في صف: الأعرض أصلب.",
+    "ui.living_hinge.row_spacing_tip": "المسافة بين مراكز الصفوف: الأقرب ينثني أكثر.",
+    "ui.living_hinge.slot_width_tip": "عرض القطع: لليزر، نحو عرض الشق.",
+    "ui.living_hinge.clip_tip": "الشقوق التي تعبرها الحواف. حتى الحافة: كل صف ثانٍ يمتد عبر حافة اللوح والباقي يُقصَّر. تقصير: تُقصَّر كلها تاركة إطارًا صلبًا يقوّي المفصل. كاملة: الشقوق الكاملة فقط.",
+    "ui.living_hinge.margin_tip": "أقل مادة بين طرف الشق وحافة المنطقة أو منطقة محظورة. عند حافة اللوح نفسه يحتفظ الشق بنصف جسر على الأقل، أو بالشريط بين الصفوف إن كان أرق.",
+    "error.living_hinge_profiles": "اختر منطقة الرسم المراد ملؤها بالشقوق"
   },
   "de": {
     "cmd.solid_living_hinge": "Biegescharnier",
@@ -51,7 +69,16 @@
     "ui.living_hinge.run_out": "Auslaufen",
     "ui.living_hinge.shorten": "Kürzen",
     "ui.living_hinge.whole": "Nur ganze",
-    "ui.living_hinge.margin": "Rand"
+    "ui.living_hinge.margin": "Rand",
+    "help.solid.living_hinge": "Schneidet Reihen versetzter Schlitze in eine Platte innerhalb einer Skizzenfläche, damit sich eine gelaserte Sperrholz-, MDF- oder Acrylplatte dort biegen lässt. Für runde Kistenecken, Buchrücken und Lampenschirme; schneiden Sie zuerst einen Probestreifen Ihres Materials.",
+    "ui.living_hinge.plate_tip": "Die zu schneidende Platte. Keine gewählt: die eine Platte mit einer Fläche in der Skizzenebene unter der Fläche.",
+    "ui.living_hinge.anchor_tip": "Der Punkt, auf dem die Mitte eines Schlitzes liegt: eine Ecke, der Ursprung oder ein Fangpunkt. Keiner gewählt: das Muster wird auf der Fläche zentriert.",
+    "ui.living_hinge.bridge_tip": "Material zwischen zwei Schlitzen einer Reihe: breiter ist steifer.",
+    "ui.living_hinge.row_spacing_tip": "Mitte zu Mitte zwischen den Reihen: enger biegt sich stärker.",
+    "ui.living_hinge.slot_width_tip": "Die Schnittbreite: beim Laser etwa die Schnittfuge.",
+    "ui.living_hinge.clip_tip": "Schlitze, die die Ränder kreuzen. Auslaufen: jede zweite Reihe läuft durch den Plattenrand aus, die übrigen werden gekürzt. Kürzen: alle werden gekürzt, ein fester Rand versteift das Scharnier. Ganz: nur ganze Schlitze.",
+    "ui.living_hinge.margin_tip": "Das kleinste Material zwischen dem Ende eines Schlitzes und einem Rand der Fläche oder einer Sperrzone. Am Plattenrand bleibt mindestens eine halbe Brücke, oder der Streifen zwischen den Reihen, falls dieser schmaler ist.",
+    "error.living_hinge_profiles": "Wählen Sie die Skizzenfläche, die mit Schlitzen gefüllt werden soll"
   },
   "he": {
     "cmd.solid_living_hinge": "ציר גמיש",
@@ -69,7 +96,16 @@
     "ui.living_hinge.run_out": "יציאה מהקצה",
     "ui.living_hinge.shorten": "קיצור",
     "ui.living_hinge.whole": "שלמים בלבד",
-    "ui.living_hinge.margin": "שוליים"
+    "ui.living_hinge.margin": "שוליים",
+    "help.solid.living_hinge": "חותך שורות של חריצים מדורגים דרך לוח בתוך אזור של סקיצה, כך שלוח דיקט, MDF או אקריליק בחיתוך לייזר יוכל להתכופף שם. השתמשו בו לפינות קופסה מעוגלות, לשדרות ספרים ולאהילים; חתכו קודם רצועת ניסיון מהחומר.",
+    "ui.living_hinge.plate_tip": "הלוח לחיתוך. אם לא נבחר: הלוח היחיד שיש לו פאה במישור הסקיצה מתחת לאזור.",
+    "ui.living_hinge.anchor_tip": "הנקודה שעליה יושב מרכז חריץ: פינה, הראשית או נקודת הצמדה. אם לא נבחרה: התבנית ממורכזת באזור.",
+    "ui.living_hinge.bridge_tip": "החומר שנשאר בין שני חריצים בשורה: רחב יותר קשיח יותר.",
+    "ui.living_hinge.row_spacing_tip": "מרחק בין מרכזי השורות: קרוב יותר מתכופף חזק יותר.",
+    "ui.living_hinge.slot_width_tip": "רוחב החיתוך: בלייזר, בערך רוחב הקרף.",
+    "ui.living_hinge.clip_tip": "חריצים שהקצוות חוצים. עד הקצה: כל שורה שנייה יוצאת דרך קצה הלוח והשאר מקוצרים. קיצור: כולם מקוצרים ומשאירים שוליים מלאים שמקשיחים את הציר. שלמים: רק חריצים שלמים.",
+    "ui.living_hinge.margin_tip": "החומר המזערי בין קצה חריץ לקצה האזור או לאזור אסור. בקצה הלוח עצמו חריץ שומר לפחות חצי גשר, או את הרצועה שבין השורות אם היא דקה יותר.",
+    "error.living_hinge_profiles": "בחרו את אזור הסקיצה שימולא בחריצים"
   },
   "ja": {
     "cmd.solid_living_hinge": "リビングヒンジ",
@@ -87,7 +123,16 @@
     "ui.living_hinge.run_out": "端まで抜く",
     "ui.living_hinge.shorten": "短縮",
     "ui.living_hinge.whole": "完全なもののみ",
-    "ui.living_hinge.margin": "余白"
+    "ui.living_hinge.margin": "余白",
+    "help.solid.living_hinge": "スケッチの領域内のプレートに千鳥配置のスリットを並べて切り込み、レーザーカットした合板、MDF、アクリル板をそこで曲げられるようにします。箱の丸い角、本の背、ランプシェードに使います。まず材料のテスト片を切ってください。",
+    "ui.living_hinge.plate_tip": "切るプレート。未選択の場合: 領域の下にあり、スケッチ平面上に面を持つ唯一のプレート。",
+    "ui.living_hinge.anchor_tip": "スリットの中心を置く点: 角、原点、またはスナップ点。未選択の場合: パターンは領域の中央に配置されます。",
+    "ui.living_hinge.bridge_tip": "列内の2つのスリットの間に残る材料: 広いほど硬くなります。",
+    "ui.living_hinge.row_spacing_tip": "列の中心間の距離: 狭いほどきつく曲がります。",
+    "ui.living_hinge.slot_width_tip": "切り込みの幅: レーザーではほぼカーフ幅。",
+    "ui.living_hinge.clip_tip": "縁にかかるスリット。縁まで: 1列おきにプレートの縁まで切り抜け、残りは短縮されます。短縮: すべて短縮され、ヒンジを硬くする縁が残ります。完全: 完全なスリットのみ。",
+    "ui.living_hinge.margin_tip": "スリットの端と領域の縁または除外領域との間の最小の材料。プレート自体の縁では、スリットは少なくともブリッジの半分、または列間の帯の方が細ければその幅を残します。",
+    "error.living_hinge_profiles": "スリットで埋めるスケッチ領域を選択してください"
   },
   "ko": {
     "cmd.solid_living_hinge": "리빙 힌지",
@@ -105,7 +150,16 @@
     "ui.living_hinge.run_out": "끝까지",
     "ui.living_hinge.shorten": "줄이기",
     "ui.living_hinge.whole": "온전한 것만",
-    "ui.living_hinge.margin": "여백"
+    "ui.living_hinge.margin": "여백",
+    "help.solid.living_hinge": "스케치 영역 안의 판에 엇갈린 슬롯을 여러 줄로 잘라, 레이저로 자른 합판, MDF, 아크릴 판이 그곳에서 휘어지게 합니다. 둥근 상자 모서리, 책등, 램프 갓에 사용하세요. 먼저 재료의 시험 조각을 잘라 보세요.",
+    "ui.living_hinge.plate_tip": "자를 판. 선택하지 않으면: 영역 아래에 스케치 평면의 면을 가진 유일한 판.",
+    "ui.living_hinge.anchor_tip": "슬롯 중심이 놓이는 점: 꼭짓점, 원점 또는 스냅 점. 선택하지 않으면: 패턴이 영역 가운데에 놓입니다.",
+    "ui.living_hinge.bridge_tip": "한 줄의 두 슬롯 사이에 남는 재료: 넓을수록 단단합니다.",
+    "ui.living_hinge.row_spacing_tip": "줄과 줄의 중심 간격: 좁을수록 더 작게 휩니다.",
+    "ui.living_hinge.slot_width_tip": "절단 폭: 레이저에서는 대략 커프 폭.",
+    "ui.living_hinge.clip_tip": "가장자리가 지나는 슬롯. 끝까지: 한 줄 걸러 판의 가장자리까지 잘리고 나머지는 짧아집니다. 짧게: 모두 짧아져 힌지를 단단하게 하는 테두리가 남습니다. 온전한 것만: 온전한 슬롯만.",
+    "ui.living_hinge.margin_tip": "슬롯 끝과 영역 가장자리 또는 제외 영역 사이의 최소 재료. 판 자체의 가장자리에서는 슬롯이 적어도 브리지의 절반, 또는 줄 사이 띠가 더 얇으면 그 띠를 남깁니다.",
+    "error.living_hinge_profiles": "슬롯으로 채울 스케치 영역을 선택하세요"
   },
   "nb": {
     "cmd.solid_living_hinge": "Bøyehengsel",
@@ -123,7 +177,16 @@
     "ui.living_hinge.run_out": "Løp ut",
     "ui.living_hinge.shorten": "Forkort",
     "ui.living_hinge.whole": "Bare hele",
-    "ui.living_hinge.margin": "Marg"
+    "ui.living_hinge.margin": "Marg",
+    "help.solid.living_hinge": "Skjærer rader med forskutte spalter gjennom en plate innenfor et skisseområde, slik at en laserskåret plate av kryssfiner, MDF eller akryl kan bøyes der. Bruk den til runde eskehjørner, bokrygger og lampeskjermer; skjær en prøvestripe av materialet først.",
+    "ui.living_hinge.plate_tip": "Platen som skal skjæres. Ingen valgt: den ene platen med en flate i skissens plan under området.",
+    "ui.living_hinge.anchor_tip": "Punktet midten av en spalte ligger på: et hjørne, origo eller et festepunkt. Ingen valgt: mønsteret sentreres i området.",
+    "ui.living_hinge.bridge_tip": "Materiale mellom to spalter i en rad: bredere er stivere.",
+    "ui.living_hinge.row_spacing_tip": "Senter til senter mellom radene: tettere bøyer seg krappere.",
+    "ui.living_hinge.slot_width_tip": "Snittets bredde: for laser omtrent snittbredden.",
+    "ui.living_hinge.clip_tip": "Spalter som kantene krysser. Gjennom kanten: annenhver rad går ut gjennom platens kant, resten kortes av. Kort av: alle kortes av og etterlater en hel kant som gjør hengselet stivere. Hele: bare hele spalter.",
+    "ui.living_hinge.margin_tip": "Minste materiale mellom enden av en spalte og en kant av området eller en sperresone. Ved platens egen kant beholder en spalte minst en halv bro, eller stripen mellom radene om den er tynnere.",
+    "error.living_hinge_profiles": "Velg skisseområdet som skal fylles med spalter"
   },
   "vi": {
     "cmd.solid_living_hinge": "Bản lề dẻo",
@@ -141,7 +204,16 @@
     "ui.living_hinge.run_out": "Chạy ra mép",
     "ui.living_hinge.shorten": "Rút ngắn",
     "ui.living_hinge.whole": "Chỉ rãnh nguyên",
-    "ui.living_hinge.margin": "Lề"
+    "ui.living_hinge.margin": "Lề",
+    "help.solid.living_hinge": "Cắt các hàng rãnh so le xuyên qua tấm trong vùng của bản phác, để tấm gỗ dán, MDF hoặc acrylic cắt laser có thể uốn cong tại đó. Dùng cho góc hộp bo tròn, gáy sách và chụp đèn; hãy cắt thử một dải vật liệu trước.",
+    "ui.living_hinge.plate_tip": "Tấm cần cắt. Không chọn: tấm duy nhất có một mặt nằm trong mặt phẳng bản phác dưới vùng.",
+    "ui.living_hinge.anchor_tip": "Điểm đặt tâm một rãnh: một góc, gốc tọa độ hoặc điểm bắt dính. Không chọn: mẫu được căn giữa trong vùng.",
+    "ui.living_hinge.bridge_tip": "Vật liệu giữa hai rãnh trong một hàng: rộng hơn thì cứng hơn.",
+    "ui.living_hinge.row_spacing_tip": "Khoảng cách tâm giữa các hàng: gần hơn thì uốn gắt hơn.",
+    "ui.living_hinge.slot_width_tip": "Bề rộng vết cắt: với laser, khoảng bằng mạch cắt.",
+    "ui.living_hinge.clip_tip": "Các rãnh mà cạnh cắt qua. Ra ngoài: cứ một hàng xen kẽ chạy ra qua cạnh tấm, các hàng còn lại được rút ngắn. Rút ngắn: tất cả được rút ngắn, để lại viền liền làm bản lề cứng hơn. Nguyên: chỉ các rãnh nguyên.",
+    "ui.living_hinge.margin_tip": "Vật liệu tối thiểu giữa đầu rãnh và cạnh vùng hoặc vùng cấm. Ở cạnh của chính tấm, rãnh giữ ít nhất nửa cầu nối, hoặc dải giữa các hàng nếu dải đó mỏng hơn.",
+    "error.living_hinge_profiles": "Chọn vùng bản phác cần lấp đầy bằng rãnh"
   },
   "zh": {
     "cmd.solid_living_hinge": "活动铰链",
@@ -159,6 +231,15 @@
     "ui.living_hinge.run_out": "穿出边缘",
     "ui.living_hinge.shorten": "缩短",
     "ui.living_hinge.whole": "仅完整槽",
-    "ui.living_hinge.margin": "边距"
+    "ui.living_hinge.margin": "边距",
+    "help.solid.living_hinge": "在草图区域内的板上切出交错排列的缝槽，使激光切割的胶合板、MDF 或亚克力板可在该处弯曲。用于圆角盒子、书脊和灯罩；请先切一条材料测试条。",
+    "ui.living_hinge.plate_tip": "要切割的板。未选择时：区域下方在草图平面内有一个面的唯一板。",
+    "ui.living_hinge.anchor_tip": "缝槽中心所在的点：角点、原点或捕捉点。未选择时：图案在区域内居中。",
+    "ui.living_hinge.bridge_tip": "一行中两条缝槽之间保留的材料：越宽越硬。",
+    "ui.living_hinge.row_spacing_tip": "行与行之间的中心距：越近弯得越紧。",
+    "ui.living_hinge.slot_width_tip": "切口宽度：激光切割时约为切缝宽度。",
+    "ui.living_hinge.clip_tip": "边缘穿过的缝槽。切出：每隔一行穿出板边，其余缩短。缩短：全部缩短，留下加固铰链的实心边。完整：只切完整缝槽。",
+    "ui.living_hinge.margin_tip": "缝槽端部与区域边缘或禁区之间的最少材料。在板自身边缘，缝槽至少保留半个连接桥，若行间条带更窄则保留该条带。",
+    "error.living_hinge_profiles": "请选择要填充缝槽的草图区域"
   }
 }
