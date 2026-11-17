@@ -227,8 +227,10 @@ pub enum BlendFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WeldGap {
-    /// Beads that meet at a vertex need a corner piece (#17916); the failure's site names the
-    /// vertex.
+    /// Beads that meet at a vertex in a way their corner is not built for yet (#17916): not two
+    /// beads at an outside corner, beads at a vertex with spans or a shaped end there, faces
+    /// not planar at the vertex, a wall not square to the face both beads lie on, or sections
+    /// that differ at an outside corner; the failure's site names the vertex.
     BeadsMeetAtVertex,
 }
 
@@ -573,7 +575,7 @@ impl core::fmt::Display for BlendFailure {
             Self::Missing(what) => write!(f, "{what} is missing"),
             Self::WeldNotBuilt(WeldGap::BeadsMeetAtVertex) => write!(
                 f,
-                "{}: weld beads that meet at a vertex are not built yet (their corner, #17916)",
+                "{}: this corner of weld beads meeting at a vertex is not built yet (#17916)",
                 self.class()
             ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),

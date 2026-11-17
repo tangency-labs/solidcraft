@@ -509,6 +509,11 @@ pub fn beads_apart_in_spans(
 /// rounded end's one bead reach). Nothing is cut: the planar sweep's shaped ends
 /// ([`beads_apart_in_spans`]) are another shape, not this one's.
 ///
+/// Beads whose edges meet at a vertex are joined there (#17916): at an inside corner as they
+/// are, below 90 degrees each cut at the other's wall first; round an outside corner by the
+/// first bead's end section turned to the second's (a wrap-around). See `generic-blend.md`
+/// §2.5, Corners.
+///
 /// A weld never changes the part it lies on: `target`'s geometry and topology are left as
 /// they were whether the bead is built or refused (it is mutable for the edges' binormals,
 /// asked in 3D only, and for the classification of the toes on their faces, which builds
@@ -519,7 +524,9 @@ pub fn beads_apart_in_spans(
 /// Native invalid input for no edge, sizes not one per edge, a size that is not two legs, or
 /// spans out of order, overlapping or too short for their ends;
 /// [`crate::error::blend::BlendFailure::WeldNotBuilt`]
-/// naming the vertex for two of `edges` that meet at one; the foot blend's refusals, typed and with the size that builds (a toe off
+/// naming the vertex where `edges` meet in a corner not built yet (spans or a shaped end
+/// there, a third bead at an outside corner, faces not planar where needed, a wall not square
+/// to the face both beads lie on, different sections round an outside corner); the foot blend's refusals, typed and with the size that builds (a toe off
 /// its face, no toe at the leg, an arc that would cut into a face); those of the closing.
 #[allow(clippy::too_many_arguments)]
 pub fn bead_body(
@@ -532,7 +539,6 @@ pub fn bead_body(
     spans: &[BeadSpan],
     ends: [BeadEnd; 2],
 ) -> Result<Brep> {
-    use crate::blend::foot_blend::{close_bead_body, BeadWeld, FootBlend, WELD_FIT_TOLERANCE};
     use crate::error::blend::{BlendFailure, WeldGap};
     use crate::error::{Failure, Site, TargetVertex};
     if edges.is_empty() || sizes.len() != edges.len() {
@@ -541,22 +547,51 @@ pub fn bead_body(
             "a weld bead takes edges and one size per edge",
         ));
     }
-    // beads meeting at a vertex: refused before anything is built
-    let mut seen: std::collections::BTreeMap<crate::topology::VertexId, EdgeId> =
+    // beads meeting at a vertex: built one by one and joined at their corners
+    let mut seen: std::collections::BTreeMap<crate::topology::VertexId, Vec<usize>> =
         std::collections::BTreeMap::new();
-    for &e in edges {
+    for (i, &e) in edges.iter().enumerate() {
         let (start, end) = edge::start_end_vertices(target, e)?;
-        for v in [start, end].into_iter().flatten() {
-            if seen.insert(v, e).is_some_and(|other| other != e) {
-                return Err(Failure::new(
-                    OP,
-                    BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
-                )
-                .or_at(Site::vertex(TargetVertex::of_target(v)))
-                .into_error());
-            }
+        let mut ends_of = vec![start, end];
+        ends_of.dedup();
+        for v in ends_of.into_iter().flatten() {
+            seen.entry(v).or_default().push(i);
         }
     }
+    seen.retain(|_, at| at.len() > 1);
+    if !seen.is_empty() {
+        let refuse = |v: crate::topology::VertexId| {
+            Failure::new(OP, BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex))
+                .or_at(Site::vertex(TargetVertex::of_target(v)))
+                .into_error()
+        };
+        return corner_beads(
+            k, target, edges, sizes, sagitta, along, spans, ends, &seen, &refuse,
+        );
+    }
+    beads_together(k, target, edges, sizes, sagitta, along, spans, ends, &[])
+}
+
+/// The beads along `edges` in one body, none of them meeting at a vertex ([`bead_body`]);
+/// `behind` per edge the planes (a point, the unit normal into a neighbour's wall) behind
+/// which its toes may leave their faces: it is cut there afterwards.
+///
+/// # Errors
+///
+/// Those of [`bead_body`].
+#[allow(clippy::too_many_arguments)]
+fn beads_together(
+    k: &mut Kernel,
+    target: &mut Brep,
+    edges: &[EdgeId],
+    sizes: &[ChamferSize],
+    sagitta: f64,
+    along: &[FaceId],
+    spans: &[BeadSpan],
+    ends: [BeadEnd; 2],
+    behind: &[Vec<(Point3, Vec3)>],
+) -> Result<Brep> {
+    use crate::blend::foot_blend::{close_bead_body, BeadWeld, FootBlend, WELD_FIT_TOLERANCE};
     let spans = if spans.is_empty() {
         vec![BeadSpan::new(0.0, 1.0)?]
     } else {
@@ -577,7 +612,11 @@ pub fn bead_body(
             .into_iter()
             .find(|f| along.contains(f));
         let blend = FootBlend::of_edge(k, target, e, first)?;
-        blend.toes_on_faces(k, target, legs)?;
+        let planes = behind.get(defined.len()).map_or(&[][..], Vec::as_slice);
+        let reach = 1e-9 * (1.0 + legs[0].max(legs[1]));
+        blend.toes_on_faces_except(k, target, legs, &|p: Point3| {
+            planes.iter().any(|&(o, n)| (p - o).dot(n) > -reach)
+        })?;
         let params = span_parameters(k, &blend, &spans)?;
         let mut made = Vec::new();
         for &p in &params {
@@ -691,3 +730,291 @@ pub fn span_lengths(
 /// The relative accuracy [`span_lengths`] asks of an edge's arc length (a line's and a
 /// circle's are exact whatever is asked).
 const LENGTH_ACCURACY: f64 = 1e-12;
+
+/// A bead's end at a corner: its foot blend, the leader's parameter there, the station there,
+/// and the leader's unit direction away from the vertex.
+struct CornerEnd {
+    blend: crate::blend::foot_blend::FootBlend,
+    t: f64,
+    station: crate::blend::foot_blend::FootStation,
+    away: Vec3,
+}
+
+impl CornerEnd {
+    /// Which support of this bead is on `face`.
+    fn side_on(&self, face: FaceId) -> Option<usize> {
+        self.blend.sides.iter().position(|s| s.face == Some(face))
+    }
+
+    /// The unit direction from the root to the foot on support `i`.
+    fn toward(&self, i: usize) -> Result<Vec3> {
+        let foot = self.station.feet.get(i).copied().ok_or_else(stage_failed)?;
+        (foot - self.station.root).unitize()
+    }
+
+    /// Whether support `i` is a plane.
+    fn planar(&self, i: usize) -> bool {
+        self.blend
+            .sides
+            .get(i)
+            .is_some_and(|s| matches!(s.surface.kind(), SurfaceKind::Plane(_)))
+    }
+}
+
+fn stage_failed() -> SolidError {
+    SolidError::blend(OP, crate::error::blend::BlendFailure::StageFailed)
+}
+
+/// The beads along `edges` where some meet at the vertices of `corners` (each with the
+/// indices of its edges): each built alone, an inside corner's beads joined as they are
+/// (below 90° each cut at the other's wall first, its toes behind that wall excused), an
+/// outside corner closed by the first bead's end section turned about the face both lie on,
+/// to the second's (a wrap-around). Everything else at a corner is refused by `refuse`.
+///
+/// # Errors
+///
+/// `refuse`'s for a corner not built yet; those of [`bead_body`] and of the booleans.
+#[allow(clippy::too_many_arguments)]
+fn corner_beads(
+    k: &mut Kernel,
+    target: &mut Brep,
+    edges: &[EdgeId],
+    sizes: &[ChamferSize],
+    sagitta: f64,
+    along: &[FaceId],
+    spans: &[BeadSpan],
+    ends: [BeadEnd; 2],
+    corners: &std::collections::BTreeMap<crate::topology::VertexId, Vec<usize>>,
+    refuse: &dyn Fn(crate::topology::VertexId) -> SolidError,
+) -> Result<Brep> {
+    use crate::blend::foot_blend::FootBlend;
+    let mut behind: Vec<Vec<(Point3, Vec3)>> = vec![Vec::new(); edges.len()];
+    let mut cuts: Vec<Vec<(Point3, Vec3, f64)>> = vec![Vec::new(); edges.len()];
+    let mut pieces: Vec<Brep> = Vec::new();
+    for (&v, at) in corners {
+        let mut wraps = Vec::new();
+        if !spans.is_empty() {
+            return Err(refuse(v));
+        }
+        // each bead's end at the vertex: the interval's end nearest the other beads' ends
+        let mut tips = Vec::new();
+        for &i in at {
+            let (Some(&e), Some(size)) = (edges.get(i), sizes.get(i)) else {
+                return Err(stage_failed());
+            };
+            let ChamferSize::Distances(legs) = *size else {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a weld bead's size is its two legs",
+                ));
+            };
+            let first = edge_faces(target, e)?
+                .into_iter()
+                .find(|f| along.contains(f));
+            let blend = FootBlend::of_edge(k, target, e, first)?;
+            let (lo, hi) = (blend.interval.min(), blend.interval.max());
+            let (p_lo, _) = blend.root_at(k, lo)?;
+            let (p_hi, _) = blend.root_at(k, hi)?;
+            tips.push((blend, legs, lo, hi, p_lo, p_hi));
+        }
+        let Some(&(_, _, _, _, a_lo, a_hi)) = tips.first() else {
+            return Err(stage_failed());
+        };
+        let near = |p: Point3| {
+            tips.iter()
+                .skip(1)
+                .map(|t| (t.4 - p).length().min((t.5 - p).length()))
+                .fold(0.0_f64, f64::max)
+        };
+        let vertex = if near(a_lo) <= near(a_hi) { a_lo } else { a_hi };
+        let mut corner = Vec::new();
+        for (blend, legs, lo, hi, p_lo, p_hi) in tips {
+            let at_start = (p_lo - vertex).length() <= (p_hi - vertex).length();
+            let t = if at_start { lo } else { hi };
+            // a square end only: ends[0] at the start of the span, ends[1] at its end
+            if !matches!(if at_start { ends[0] } else { ends[1] }, BeadEnd::Square) {
+                return Err(refuse(v));
+            }
+            let station = blend.station(k, t, legs, None)?;
+            let away = if at_start {
+                station.tangent
+            } else {
+                -station.tangent
+            };
+            corner.push((
+                CornerEnd {
+                    blend,
+                    t,
+                    station,
+                    away,
+                },
+                legs,
+            ));
+        }
+        let pairs: Vec<(usize, usize)> = (0..corner.len())
+            .flat_map(|a| ((a + 1)..corner.len()).map(move |b| (a, b)))
+            .collect();
+        for (a, b) in pairs {
+            let (Some((ea, legs_a)), Some((eb, _))) = (corner.get(a), corner.get(b)) else {
+                return Err(stage_failed());
+            };
+            // the face both beads lie on, and each bead's other face (its wall)
+            let faces_a: Vec<FaceId> = ea.blend.sides.iter().filter_map(|s| s.face).collect();
+            let common: Vec<FaceId> = eb
+                .blend
+                .sides
+                .iter()
+                .filter_map(|s| s.face)
+                .filter(|f| faces_a.contains(f))
+                .collect();
+            let [face] = common[..] else {
+                return Err(refuse(v));
+            };
+            let (Some(ja), Some(jb)) = (ea.side_on(face), eb.side_on(face)) else {
+                return Err(refuse(v));
+            };
+            let (wa, wb) = (1 - ja, 1 - jb);
+            let (ua, ub) = (ea.toward(ja)?, eb.toward(jb)?);
+            let (wa_dir, wb_dir) = (ea.toward(wa)?, eb.toward(wb)?);
+            let eps = 1e-9;
+            let inside_ab = eb.away.dot(ua) > eps;
+            let inside_ba = ea.away.dot(ub) > eps;
+            if inside_ab != inside_ba {
+                return Err(refuse(v));
+            }
+            let (ia, ib) = (at.get(a).copied(), at.get(b).copied());
+            let (Some(ia), Some(ib)) = (ia, ib) else {
+                return Err(stage_failed());
+            };
+            if inside_ab {
+                // below 90 degrees each bead runs into the other's wall: cut it there
+                if ea.away.dot(eb.away) > eps {
+                    if !(ea.planar(wa) && eb.planar(wb)) {
+                        return Err(refuse(v));
+                    }
+                    let reach = 4.0 * legs_a[0].max(legs_a[1])
+                        / (1.0 - ea.away.dot(eb.away).powi(2)).sqrt().max(1e-3);
+                    for (me, other, w, u) in [(ia, eb, wb_dir, ub), (ib, ea, wa_dir, ua)] {
+                        let mut n = other.away.cross(w).unitize()?;
+                        if n.dot(u) > 0.0 {
+                            n = -n;
+                        }
+                        if let (Some(bh), Some(c)) = (behind.get_mut(me), cuts.get_mut(me)) {
+                            bh.push((vertex, n));
+                            c.push((vertex, n, reach));
+                        }
+                    }
+                }
+            } else {
+                // an outside corner: two beads only, walls square to the face, one section
+                if corner.len() != 2 || !ea.planar(ja) {
+                    return Err(refuse(v));
+                }
+                let axis = ea.away.cross(ua).unitize()?;
+                if wa_dir.dot(axis).abs() < 1.0 - 1e-9 || wb_dir.dot(axis).abs() < 1.0 - 1e-9 {
+                    return Err(refuse(v));
+                }
+                let angle = ua.dot(ub).clamp(-1.0, 1.0).acos();
+                let turn = |ax: Vec3, u: Vec3| u * angle.cos() + ax.cross(u) * angle.sin();
+                let fit = |ax: Vec3| turn(ax, ua).dot(ub) > 1.0 - 1e-9;
+                let ax = if fit(axis) {
+                    axis
+                } else if fit(-axis) {
+                    -axis
+                } else {
+                    return Err(refuse(v));
+                };
+                // the turned section must be the second bead's
+                let (sa, sb) = (&ea.station, &eb.station);
+                let gap = |i: usize, j: usize| -> Option<f64> {
+                    let fa = sa.feet.get(i)?;
+                    let fb = sb.feet.get(j)?;
+                    let d = *fa - sa.root;
+                    let along = ax * ax.dot(d);
+                    let turned = sa.root + along + turn(ax, d - along);
+                    Some((turned - *fb).length())
+                };
+                let scale = 1e-7 * (1.0 + legs_a[0].max(legs_a[1]));
+                if !(gap(ja, jb).is_some_and(|g| g <= scale)
+                    && gap(wa, wb).is_some_and(|g| g <= scale))
+                {
+                    return Err(refuse(v));
+                }
+                wraps.push((a, ax, angle));
+            }
+        }
+        // the outside corners' pieces: the first bead's end section turned to the second's
+        for (a, ax, angle) in wraps {
+            let Some((ea, legs)) = corner.get(a) else {
+                return Err(stage_failed());
+            };
+            let (_, _, section) = ea.blend.cut_curves(k, ea.t, *legs, sagitta)?;
+            let s = &ea.station;
+            let [f0, f1] = s.feet;
+            let r0 = Curve::from(create_line_segment(s.root, f0)?);
+            let r1 = Curve::from(create_line_segment(f1, s.root)?);
+            let arc = Curve::from(section);
+            pieces.push(crate::sweep::api_brep::create_rotational_sweep(
+                k,
+                &[Some(&r0), Some(&arc), Some(&r1)],
+                s.root,
+                ax,
+                angle.to_degrees(),
+                true,
+            )?);
+        }
+    }
+    // each bead alone, cut at the walls it runs into, then all joined
+    let mut joined: Option<Brep> = None;
+    for (i, (&e, size)) in edges.iter().zip(sizes).enumerate() {
+        let planes = behind.get(i).cloned().unwrap_or_default();
+        let mut bead = beads_together(
+            k,
+            target,
+            &[e],
+            core::slice::from_ref(size),
+            sagitta,
+            along,
+            &[],
+            ends,
+            &[planes],
+        )?;
+        for &(o, n, reach) in cuts.get(i).map_or(&[][..], Vec::as_slice) {
+            let block = wall_block(k, o, n, reach)?;
+            bead = boolean_difference(k, bead, block)?;
+        }
+        joined = Some(match joined {
+            None => bead,
+            Some(body) => crate::boolean::api_brep::boolean_union(k, body, bead)?,
+        });
+    }
+    let mut body = joined.ok_or_else(stage_failed)?;
+    for piece in pieces {
+        body = crate::boolean::api_brep::boolean_union(k, body, piece)?;
+    }
+    Ok(body)
+}
+
+/// A block behind the plane through `o` with unit normal `n` (into the wall): a square of
+/// side `4 reach` in the plane, centred on `o`, swept `reach` along `n`.
+///
+/// # Errors
+///
+/// Those of the frame and the sweep.
+fn wall_block(k: &mut Kernel, o: Point3, n: Vec3, reach: f64) -> Result<Brep> {
+    let [x, y] = square_to(n)?;
+    let h = 2.0 * reach;
+    let corners = [
+        o - x * h - y * h,
+        o + x * h - y * h,
+        o + x * h + y * h,
+        o - x * h + y * h,
+    ];
+    let mut sides = Vec::with_capacity(4);
+    for (i, &p) in corners.iter().enumerate() {
+        let q = corners.get((i + 1) % 4).copied().ok_or_else(stage_failed)?;
+        sides.push(Curve::from(create_line_segment(p, q)?));
+    }
+    let refs: Vec<Option<&Curve>> = sides.iter().map(Some).collect();
+    create_linear_sweep(k, &refs, n, reach, true)
+}

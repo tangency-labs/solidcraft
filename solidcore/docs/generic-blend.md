@@ -329,6 +329,28 @@ The foot blend is a record kind of its own, not a field added to an older record
 that predates it can take a bead for a chamfer (as one that predates `ChamferRecord::sagitta` can,
 §2.2). The part file (`FaceDefinition`) does not carry it yet: how it enters the format is open.
 
+**Corners (#17916).** Beads whose edges meet at a vertex are each built alone and joined; the
+part is not touched. Where two beads share a face at the vertex (the floor of two walls), the
+second bead's direction away from the vertex on the first one's side of that face makes an
+inside corner, on the other side an outside one.
+
+- **Inside corner, 90 degrees or more:** the bodies joined as they are (a union). Flat equal legs
+  at 90 degrees give the 45-degree mitre exactly; three beads at a corner (two on the floor, one
+  up the walls' edge) are joined the same way.
+- **Inside corner below 90 degrees:** each bead runs into the other's wall. Its toes behind that
+  wall's plane are excused from the toe check, and the bead is cut at the plane (a difference
+  with a block behind it) before the join. Both walls must be planar.
+- **Outside corner:** two beads only, their walls square to the shared face (planar), and one
+  section. The first bead's end section is turned about the shared face's normal through the
+  vertex by the angle between the two sections (180 degrees less the walls' angle), onto the
+  second's, which is checked to 10⁻⁷ (1 + leg). The piece is a solid of revolution (a cone and
+  planes for a flat bead; Pappus gives its volume).
+
+The section faces keep their foot blend definitions through the joins and cuts (their records
+are the whole edge's; the cut is the face's trim). Spans or a shaped end at the vertex, a third
+bead at an outside corner, faces that are not planar where needed, a wall not square to the shared
+face and different sections round an outside corner are refused, naming the vertex.
+
 **Refusals.** Every station refused is typed, with the size that builds over the stations checked:
 
 | cause | reason | class | fit |
@@ -339,7 +361,7 @@ that predates it can take a bead for a chamfer (as one that predates `ChamferRec
 | Newton does not converge from either start | `StationDidNotConverge` | a defect | none |
 | the feet between two stations not proved after the halvings | `NotCertified` (`NoToeAtLeg` with its leg fit where the equations are near singular at an end: the toes on the leg's circle meet there) | `NotWithinTolerance` | none (the fit where `NoToeAtLeg`) |
 | the net does not hold the tolerance after its refinements | `SkinPastStationCap` | `NotWithinTolerance` | none |
-| beads meeting at a vertex | `WeldNotBuilt(BeadsMeetAtVertex)`, naming the vertex | `Unsupported` | none (#17916) |
+| beads meeting at a vertex in a corner not built yet (see Corners) | `WeldNotBuilt(BeadsMeetAtVertex)`, naming the vertex | `Unsupported` | none (#17916) |
 
 ## 3. Events of the trace
 

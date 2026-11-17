@@ -1219,10 +1219,11 @@ fn a_weld_bead_body_is_its_section_along_the_edge() {
     }
 }
 
-/// Two beads that meet at a vertex are refused before anything is built, naming the vertex,
-/// and the corner's file is unchanged.
+/// Two beads that meet at a vertex with spans given are refused before anything is built
+/// (corners are built for whole edges only), naming the vertex, and the corner's file is
+/// unchanged.
 #[test]
-fn beads_that_meet_at_a_vertex_are_refused_naming_it() {
+fn beads_that_meet_at_a_vertex_in_spans_are_refused_naming_it() {
     let mut k = kernel();
     let (mut b, at) = corner(&mut k, FRAC_PI_2);
     let first = pick(&k, &b, at);
@@ -1246,7 +1247,7 @@ fn beads_that_meet_at_a_vertex_are_refused_naming_it() {
         &[size; 2],
         1.0,
         &[],
-        &[],
+        &[BeadSpan::new(0.0, 0.5).unwrap()],
         SQUARE,
     )
     .err()

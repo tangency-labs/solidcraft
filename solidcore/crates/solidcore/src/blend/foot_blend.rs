@@ -367,7 +367,7 @@ impl FootBlend {
     }
 
     /// The root `e(t)` and the leader's unit tangent there.
-    fn root_at(&self, k: &Kernel, t: f64) -> Result<(Point3, Vec3)> {
+    pub(crate) fn root_at(&self, k: &Kernel, t: f64) -> Result<(Point3, Vec3)> {
         let at = self.curve.evaluate(k, t, 1, false, false)?;
         let (Some(&root), Some(&d)) = (at.first(), at.get(1)) else {
             return Err(SolidError::blend(OP, BlendFailure::StageFailed));
@@ -683,6 +683,23 @@ impl FootBlend {
     /// toe found off its face, naming the face and the edge, with the largest leg on that side
     /// whose toes stay on the face at those stations; those of the classification.
     pub fn toes_on_faces(&self, k: &Kernel, target: &Brep, legs: [f64; 2]) -> Result<()> {
+        self.toes_on_faces_except(k, target, legs, &|_| false)
+    }
+
+    /// [`Self::toes_on_faces`], a toe for which `excused` holds counting as on its face: a
+    /// bead's toe behind a neighbour's wall at an inside corner, where the bead is cut at that
+    /// wall afterwards.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::toes_on_faces`].
+    pub fn toes_on_faces_except(
+        &self,
+        k: &Kernel,
+        target: &Brep,
+        legs: [f64; 2],
+        excused: &dyn Fn(Point3) -> bool,
+    ) -> Result<()> {
         check_legs(legs)?;
         let breaks = self.breaks()?;
         // at least 32 stations, and 4 between each two knots
@@ -722,7 +739,7 @@ impl FootBlend {
                 else {
                     continue;
                 };
-                if !on_face(target, i, face, uv)? {
+                if !excused(foot) && !on_face(target, i, face, uv)? {
                     off = Some((i, foot));
                     break 'stations;
                 }
@@ -745,7 +762,7 @@ impl FootBlend {
                 let Ok((p, uv, r)) = self.foot(k, i, root, tangent, leg, near.as_ref())? else {
                     return Ok(false);
                 };
-                if !on_face(target, i, face, uv)? {
+                if !excused(p) && !on_face(target, i, face, uv)? {
                     return Ok(false);
                 }
                 let mut s = near.unwrap_or(FootStation {
@@ -1853,7 +1870,7 @@ impl FootBlend {
     /// # Errors
     ///
     /// The refusals of [`Self::station`] and of the section's bound; those of the curves.
-    fn cut_curves(
+    pub(crate) fn cut_curves(
         &self,
         k: &Kernel,
         t: f64,
