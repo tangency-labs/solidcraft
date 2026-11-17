@@ -35,12 +35,15 @@
 //! tangency-labs/smlib `abastran/void-shell-check`; WR-265,
 //! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). Own design
 //! (WR-619): a union whose step 6 deletes a face between the infinite region and a solid
-//! region, and which then has no solid region left (the solid merged into the outside), is
-//! refused with `SM_ERR` (the face in the error) instead of returning that body.
+//! region, and after which that solid's side (the uses of its faces that stay) no longer lies
+//! in a solid region (the solid merged into the outside), is refused with `SM_ERR` (the face
+//! in the error) instead of returning that body.
 //! Own design, not upstream: in step 6 a region that a deleted face joins to another, neither
 //! with merge data (no face of the other body was copied into them, as when a union fills a
 //! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
 //! upstream leaves it the flag it had, so the filled void stayed void.
+
+use std::collections::BTreeSet;
 
 use super::p1::{self, MergeOptions};
 use crate::error::boolean::BooleanFailure;
@@ -458,12 +461,22 @@ fn region_pair(b: &Brep, fu: FaceuseId) -> Result<(RegionId, RegionId)> {
     ))
 }
 
-/// Not upstream (WR-619): the first of `delete` with the infinite region on one side and a
-/// solid region on the other, whose deletion would merge that solid into the outside.
-fn face_leaking_solid(b: &Brep, delete: &[FaceId]) -> Result<Option<FaceId>> {
+/// Not upstream (WR-619): a face to be deleted with the infinite region on one side and a
+/// solid region on the other, and the face uses, on faces that stay, that bound that solid.
+struct SolidLeak {
+    face: FaceId,
+    region: RegionId,
+    bounding: Vec<FaceuseId>,
+}
+
+/// Not upstream (WR-619): one [`SolidLeak`] per solid region that a face of `delete` lies
+/// between it and the infinite region (the first such face names it). Deleting such a face
+/// joins the solid to the outside unless the other body's solid lies just across it.
+fn solid_leaks(b: &Brep, delete: &[FaceId]) -> Result<Vec<SolidLeak>> {
     let Some(infinite) = b.infinite_region() else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
+    let mut leaks: Vec<SolidLeak> = Vec::new();
     for &f in delete {
         let Some(fu) = face::faceuses(b, f)?.0 else {
             continue;
@@ -474,22 +487,54 @@ fn face_leaking_solid(b: &Brep, delete: &[FaceId]) -> Result<Option<FaceId>> {
             (false, true) => r1,
             _ => continue,
         };
-        if void(b, inside)? == 0 {
-            return Ok(Some(f));
+        if void(b, inside)? == 0 && !leaks.iter().any(|l| l.region == inside) {
+            leaks.push(SolidLeak {
+                face: f,
+                region: inside,
+                bounding: Vec::new(),
+            });
         }
     }
-    Ok(None)
+    if leaks.is_empty() {
+        return Ok(leaks);
+    }
+    let deleted: BTreeSet<FaceId> = delete.iter().copied().collect();
+    for f in bp::faces(b, None)? {
+        if deleted.contains(&f) {
+            continue;
+        }
+        let (fu1, fu2) = face::faceuses(b, f)?;
+        for fu in [fu1, fu2].into_iter().flatten() {
+            let Some(r) = eu::faceuse_region(b, fu)? else {
+                continue;
+            };
+            for leak in leaks.iter_mut().filter(|l| l.region == r) {
+                leak.bounding.push(fu);
+            }
+        }
+    }
+    Ok(leaks)
 }
 
-/// Not upstream (WR-619): whether `b` has a solid region other than the infinite one.
-fn has_solid_region(b: &Brep) -> Result<bool> {
+/// Not upstream (WR-619): whether the solid a [`SolidLeak`]'s face bounded still lies in a
+/// solid region: at least one of the face uses that bounded it is left, and each one left
+/// lies in a region that is neither the infinite one nor a void.
+fn leak_stays_solid(b: &Brep, leak: &SolidLeak) -> Result<bool> {
     let infinite = b.infinite_region();
-    for r in bp::regions(b, None)? {
-        if Some(r) != infinite && void(b, r)? == 0 {
-            return Ok(true);
+    let mut located = false;
+    for &fu in &leak.bounding {
+        if b.faceuses().get(fu).is_none() {
+            continue;
         }
+        let Some(r) = eu::faceuse_region(b, fu)? else {
+            continue;
+        };
+        if Some(r) == infinite || void(b, r)? != 0 {
+            return Ok(false);
+        }
+        located = true;
     }
-    Ok(false)
+    Ok(located)
 }
 
 fn void(b: &Brep, r: RegionId) -> Result<i32> {
@@ -1547,13 +1592,14 @@ fn editing_stages(
         }
     }
     // Not upstream (WR-619): a union whose face deletion merges a solid into the outside is
-    // refused below. A face between a solid and the outside is also deleted where the other
-    // body's solid lies just across it (a coincident wall), so only a union left with no
-    // solid is refused.
-    let leak = if operation == BooleanOperation::Union {
-        face_leaking_solid(primary, &faces.delete)?
+    // refused after post-processing, if the solid side of any deleted face between a solid
+    // and the outside no longer lies in a solid region. Such a face is also deleted where the
+    // other body's solid lies just across it (a coincident wall); that solid region then
+    // takes the material in, and the union is kept.
+    let leaks = if operation == BooleanOperation::Union {
+        solid_leaks(primary, &faces.delete)?
     } else {
-        None
+        Vec::new()
     };
     let joined = joined_without_data(primary, intersector, attributes, &faces.delete)?;
     intersector.delete_faces(
@@ -1597,9 +1643,11 @@ fn editing_stages(
     {
         intersector.post_process(kernels, primary, attributes, state, false)?;
     }
-    if let Some(f) = leak {
-        if !has_solid_region(primary)? {
-            return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
+    for leak in &leaks {
+        if !leak_stays_solid(primary, leak)? {
+            return Err(
+                Failure::new(OP, BooleanFailure::SolidLeaks { face: leak.face }).into_error(),
+            );
         }
     }
     Ok(false)

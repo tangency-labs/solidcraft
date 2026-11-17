@@ -110,8 +110,8 @@ pub enum BooleanFailure {
         /// What is missing.
         what: &'static str,
     },
-    /// A union deleted `face`, which bounded a solid against the outside, and was left with
-    /// no solid region: the solid merged into the outside (WR-619).
+    /// A union deleted `face`, which bounded a solid against the outside, and that solid's
+    /// side was left in no solid region: the solid merged into the outside (WR-619).
     SolidLeaks {
         /// The face, of the B-rep the operation edits.
         face: FaceId,
@@ -194,7 +194,7 @@ impl core::fmt::Display for BooleanFailure {
             }
             Self::SolidLeaks { face } => write!(
                 f,
-                "the union would delete face {} and merge the solid it bounds into the outside",
+                "the union deleted face {} and the solid it bounded merged into the outside",
                 face.index()
             ),
             Self::RelateConflict {
