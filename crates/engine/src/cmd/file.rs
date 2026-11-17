@@ -292,8 +292,10 @@ struct StepOptions {
     /// after their part where the file gives them a placeholder. `false` (the default) keeps the
     /// file's assembly structure.
     flatten: bool,
-    /// `reader: "cadmpeg"`: a FreeCAD or Rhino file's solids are read from cadmpeg's model straight
-    /// into records; `solidcraft` (the default) restates them as STEP for SolidCraft's own reader.
+    /// `reader: "cadmpeg"`: the file is read by cadmpeg into records, a STEP file by cadmpeg's STEP
+    /// decoder and a FreeCAD or Rhino file's solids straight from cadmpeg's model; `solidcraft`
+    /// (the default) is SolidCraft's own STEP reader (for FreeCAD and Rhino, of the STEP that
+    /// cadmpeg's writer restates them as).
     reader: solidcraft_io::StepReader,
 }
 
@@ -540,7 +542,7 @@ fn open_step(
     let key = solidcraft_io::ImportCache::key(
         &bytes,
         path,
-        &json!({"y_up": options.y_up, "names": format!("{:?}", options.names), "folder": options.folder}),
+        &json!({"y_up": options.y_up, "names": format!("{:?}", options.names), "folder": options.folder, "reader": format!("{:?}", options.reader)}),
     );
     let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
     if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {

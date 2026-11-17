@@ -1,18 +1,18 @@
 {
   "en": {
-    "settings.cadmpeg_import": "Read FreeCAD and Rhino files with cadmpeg straight into B-rep, instead of through SolidCraft's STEP reader",
+    "settings.cadmpeg_import": "Read STEP, FreeCAD and Rhino files with cadmpeg straight into B-rep, instead of through SolidCraft's STEP reader",
     "prefs.cadmpeg_import": "Import with cadmpeg"
   },
   "es": {
-    "settings.cadmpeg_import": "Leer los archivos de FreeCAD y Rhino con cadmpeg directamente a B-rep, en lugar de a través del lector STEP de SolidCraft",
+    "settings.cadmpeg_import": "Leer los archivos STEP, FreeCAD y Rhino con cadmpeg directamente a B-rep, en lugar de a través del lector STEP de SolidCraft",
     "prefs.cadmpeg_import": "Importar con cadmpeg"
   },
   "de": {
-    "settings.cadmpeg_import": "FreeCAD- und Rhino-Dateien mit cadmpeg direkt in B-Rep lesen statt über den STEP-Leser von SolidCraft",
+    "settings.cadmpeg_import": "STEP-, FreeCAD- und Rhino-Dateien mit cadmpeg direkt in B-Rep lesen statt über den STEP-Leser von SolidCraft",
     "prefs.cadmpeg_import": "Mit cadmpeg importieren"
   },
   "fr": {
-    "settings.cadmpeg_import": "Lire les fichiers FreeCAD et Rhino avec cadmpeg directement en B-rep, plutôt qu'en passant par le lecteur STEP de SolidCraft",
+    "settings.cadmpeg_import": "Lire les fichiers STEP, FreeCAD et Rhino avec cadmpeg directement en B-rep, plutôt qu'en passant par le lecteur STEP de SolidCraft",
     "prefs.cadmpeg_import": "Importer avec cadmpeg"
   },
   "ar": {
