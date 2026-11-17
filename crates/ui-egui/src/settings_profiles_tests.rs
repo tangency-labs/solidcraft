@@ -39,7 +39,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
     assert_eq!(
         keys.len(),
-        107,
+        108,
         "include document browser visibility and sizing and the repeated-shortcut preference among the current portable settings"
     );
     for key in [
@@ -811,6 +811,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "browser_eye_left",
         "center_arc_follows_cursor",
         "color_vision",
+        "command_search_centred",
         "design_reopen_views",
         "design_reuse_views",
         "design_sub_tab_render",
@@ -917,7 +918,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 107);
+    assert_eq!(expected.len(), 108);
     assert_eq!(actual, expected);
 }
 

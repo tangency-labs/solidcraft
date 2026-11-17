@@ -1403,6 +1403,9 @@ preference_settings! {
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
     /// by default: the ribbon stays as it was.
     ribbon_reveal: bool = false, PAGE_LAYOUT;
+    /// Search commands opens centred over the view instead of in the ribbon's top-right corner
+    /// (#18309); the shortcut, results and keys are the same. Off by default: it opens in place.
+    command_search_centred: bool = false, PAGE_LAYOUT;
     /// Fold the ribbon to its tab row, so the view has the room its panels took (#10112). A tab's
     /// click shows its panels over the view until a command starts or the pointer leaves them.
     /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
@@ -7080,6 +7083,7 @@ mod tests {
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("remember_toolbar_tab", json!(false), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("command_search_centred", json!(true), PAGE_LAYOUT),
             ("pinned_constraints_in_grid", json!(false), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("design_views_as_tabs", json!(false), PAGE_LAYOUT),
