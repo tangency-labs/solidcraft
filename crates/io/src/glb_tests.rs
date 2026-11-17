@@ -724,7 +724,7 @@ fn without_hierarchy_an_assembly_is_flat_in_world_coordinates() {
         let mesh = &gltf["meshes"][node["mesh"].as_u64().unwrap() as usize];
         assert_eq!(mesh["name"], body.name.as_str());
         let got = bounds(vectors(&gltf, &bin, &mesh["primitives"][0]["attributes"]["POSITION"]));
-        let want = bounds(export_mesh_at(&body.body, MeshQuality::Standard).unwrap().positions);
+        let want = bounds(display_mesh_at(&body.body, MeshQuality::Standard).unwrap().positions);
         for i in 0..3 {
             assert!((got.0[i] - want.0[i]).abs() < 1e-4 && (got.1[i] - want.1[i]).abs() < 1e-4, "{}: {got:?} != {want:?}", body.name);
         }
