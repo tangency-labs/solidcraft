@@ -182,6 +182,16 @@ fn disabled_ids_survive_scratch_and_new_design() {
     assert!(s.disabled_plugins.contains("sample"));
 }
 
+#[test]
+fn a_failure_message_shows_braces_in_a_file_name_or_reason_as_they_are() {
+    let failure = |file: &str, reason: &str| PluginFailure {
+        plugin: "Sample".into(),
+        file: Some(file.into()),
+        error: craft_plugin::HostError::Unsupported { reason: reason.into() },
+    };
+    assert_eq!(failure("part{reason}.smp", "no {file} solids").text(), "Sample does not support part{reason}.smp: no {file} solids");
+    assert_eq!(failure("part.smp", "no solids").text(), "Sample does not support part.smp: no solids");
+}
 #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod native {
     use super::*;

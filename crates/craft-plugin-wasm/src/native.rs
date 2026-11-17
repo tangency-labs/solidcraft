@@ -589,9 +589,12 @@ fn check_imports(engine: &Engine, component: &Component) -> Result<Wit> {
         found.insert(version);
         Ok(())
     };
+    /// One import (`import`) or export and everything in it, at most `remaining` items in all.
+    #[allow(clippy::too_many_arguments)]
     fn check(
         engine: &Engine,
         package: &str,
+        import: bool,
         name: &str,
         item: ComponentItem,
         depth: usize,
@@ -599,26 +602,29 @@ fn check_imports(engine: &Engine, component: &Component) -> Result<Wit> {
         note: &mut dyn FnMut(&str) -> Result<()>,
     ) -> Result<()> {
         if depth > 64 || *remaining == 0 {
-            return Err(limit("plugin import interface count or depth"));
+            return Err(limit(if import { "plugin import interface count or depth" } else { "plugin export interface count or depth" }));
         }
         *remaining -= 1;
         note(name)?;
-        if name == "fetch" || name.starts_with("wasi:sockets/") || name.starts_with("wasi:http/") || name.starts_with(&format!("{package}/fetch")) {
+        // Only an import reaches the network; an export named like one is the plugin's own.
+        if import && (name == "fetch" || name.starts_with("wasi:sockets/") || name.starts_with("wasi:http/") || name.starts_with(&format!("{package}/fetch"))) {
             return Err(HostError::PermissionDenied { permission: format!("network import is forbidden: {name}") });
         }
         if let ComponentItem::ComponentInstance(instance) = item {
             for (name, export) in instance.exports(engine) {
-                check(engine, package, name, export.ty, depth + 1, remaining, note)?;
+                check(engine, package, import, name, export.ty, depth + 1, remaining, note)?;
             }
         }
         Ok(())
     }
     let mut remaining = 4096;
     for (name, import) in component.component_type().imports(engine) {
-        check(engine, package, name, import.ty, 0, &mut remaining, &mut |name| note(name, &mut found))?;
+        check(engine, package, true, name, import.ty, 0, &mut remaining, &mut |name| note(name, &mut found))?;
     }
-    for (name, _) in component.component_type().exports(engine).take(4096) {
-        note(name, &mut found)?;
+    // Exports are read the same way, members of exported instances too, with a budget of their own.
+    let mut remaining = 4096;
+    for (name, export) in component.component_type().exports(engine) {
+        check(engine, package, false, name, export.ty, 0, &mut remaining, &mut |name| note(name, &mut found))?;
     }
     if found.len() > 1 {
         let versions = found.iter().map(String::as_str).collect::<Vec<_>>().join(" and ");
