@@ -89,6 +89,8 @@ pub struct ViewSet {
     /// Closed views with the place each had, the latest last.
     closed: Vec<(usize, DesignView)>,
     next_id: u64,
+    /// Open views belonging to another window of the same design.
+    elsewhere: usize,
     /// How the window lays its views out side by side. Dormant while the active view is outside it.
     tiles: Option<Tiles>,
 }
@@ -103,7 +105,49 @@ impl ViewSet {
     /// A design's first views: one Model view, active.
     pub fn new() -> Self {
         let model = DesignView { id: 1, kind: ViewKind::Model, name: ViewKind::Model.label().into(), subject: None, spec: None };
-        ViewSet { views: vec![model], active: 1, closed: Vec::new(), next_id: 2, tiles: None }
+        ViewSet { views: vec![model], active: 1, closed: Vec::new(), next_id: 2, elsewhere: 0, tiles: None }
+    }
+
+    /// Move a view intact into its own window, keeping a Model view in the source window.
+    pub fn detach(&mut self, id: u64) -> Option<Self> {
+        let i = self.index_of(id)?;
+        if self.views.len() == 1 {
+            if self.views.len().saturating_add(self.elsewhere) >= MAX_VIEWS {
+                return None;
+            }
+            self.open(ViewKind::Model, None, false);
+        }
+        let view = self.views.remove(i);
+        if self.active == id {
+            self.active = self.views[i.saturating_sub(1)].id;
+        }
+        self.prune_tiles();
+        Some(Self { views: vec![view], active: id, closed: Vec::new(), next_id: self.next_id, elsewhere: 0, tiles: None })
+    }
+
+    /// Keep one id sequence and one open-view limit across the design's windows.
+    pub fn share_window_limits(&mut self, next_id: u64, elsewhere: usize) {
+        self.next_id = self.next_id.max(next_id);
+        self.elsewhere = elsewhere;
+    }
+
+    /// Open and recently closed views, including those kept when a presentation is parked.
+    pub fn ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.views.iter().map(|view| view.id).chain(self.closed.iter().map(|(_, view)| view.id))
+    }
+
+    /// The next unused view id for this design.
+    pub fn next_id(&self) -> u64 {
+        self.next_id
+    }
+
+    /// Return the views of a closed window to this window's tab strip.
+    pub fn reattach(&mut self, mut other: Self) {
+        self.next_id = self.next_id.max(other.next_id);
+        self.views.append(&mut other.views);
+        self.closed.append(&mut other.closed);
+        let excess = self.closed.len().saturating_sub(CLOSED_CAP);
+        self.closed.drain(..excess);
     }
 
     /// The views in tab order (never empty).
@@ -159,7 +203,7 @@ impl ViewSet {
             self.active = view.id;
             return view.id;
         }
-        if self.views.len() >= MAX_VIEWS {
+        if self.views.len().saturating_add(self.elsewhere) >= MAX_VIEWS {
             return self.active;
         }
         let Some(id) = self.take_id() else { return self.active };
@@ -261,7 +305,7 @@ impl ViewSet {
     /// Bring back the view closed last, in its old place, and make it active. None when no view
     /// was closed (or the set is full).
     pub fn reopen(&mut self) -> Option<u64> {
-        if self.views.len() >= MAX_VIEWS {
+        if self.views.len().saturating_add(self.elsewhere) >= MAX_VIEWS {
             return None;
         }
         let (at, view) = self.closed.pop()?;
@@ -299,7 +343,7 @@ impl ViewSet {
     /// default name) and make it active. None when there is no such view or the set is full.
     pub fn duplicate(&mut self, id: u64) -> Option<u64> {
         let i = self.index_of(id)?;
-        if self.views.len() >= MAX_VIEWS {
+        if self.views.len().saturating_add(self.elsewhere) >= MAX_VIEWS {
             return None;
         }
         let (kind, subject, spec) = (self.views[i].kind, self.views[i].subject.clone(), self.views[i].spec);
@@ -547,7 +591,7 @@ impl ViewSet {
         let next_id = value.get("next_id").and_then(Value::as_u64).unwrap_or(0).clamp(highest + 1, MAX_ID + 1);
         let active = value.get("active").and_then(Value::as_u64).filter(|id| views.iter().any(|view| view.id == *id)).unwrap_or(views[0].id);
         let tiles = value.get("tiles").and_then(Tiles::from_json);
-        let mut set = ViewSet { views, active, closed, next_id, tiles };
+        let mut set = ViewSet { views, active, closed, next_id, elsewhere: 0, tiles };
         set.prune_tiles();
         Some(set)
     }
@@ -622,6 +666,43 @@ mod tests {
             set.open(ViewKind::Sketch, Some(format!("s{i}")), false);
         }
         set
+    }
+
+    #[test]
+    fn detached_view_preserves_identity_and_reattaches_without_id_collisions() {
+        let mut main = ViewSet::new();
+        let model = main.active().id;
+        let second = main.duplicate(model).unwrap();
+        assert!(main.rename(second, "Side"));
+        assert_eq!(main.set_layout(Preset::SideBySide), 2);
+        let mut child = main.detach(second).unwrap();
+        assert_eq!(main.active().id, model);
+        assert!(!main.is_tiled());
+        assert_eq!(child.active().id, second);
+        assert_eq!(child.active().name, "Side");
+
+        child.share_window_limits(main.next_id(), main.len());
+        let new_child_view = child.open(ViewKind::Model, None, false);
+        main.share_window_limits(child.next_id(), child.len());
+        let new_main_view = main.open(ViewKind::Model, None, false);
+        assert_ne!(new_child_view, new_main_view);
+        main.reattach(child);
+        assert_eq!(main.len(), 4);
+        assert!(main.get(second).is_some());
+        assert!(main.get(new_child_view).is_some());
+    }
+
+    #[test]
+    fn detaching_the_only_view_leaves_a_model_and_obeys_the_shared_limit() {
+        let mut main = ViewSet::new();
+        let model = main.active().id;
+        main.share_window_limits(main.next_id(), MAX_VIEWS - 1);
+        assert!(main.detach(model).is_none());
+        main.share_window_limits(main.next_id(), 0);
+        let child = main.detach(model).unwrap();
+        assert_eq!(child.active().id, model);
+        assert_ne!(main.active().id, model);
+        assert_eq!(main.active().kind, ViewKind::Model);
     }
 
     #[test]
