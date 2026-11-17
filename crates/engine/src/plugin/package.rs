@@ -111,9 +111,11 @@ pub fn remove(s: &mut Session, id: &str) -> Result<RemoveResult> {
         return Err(invalid("installed package must be a directory, not a symlink"));
     }
     check_remove_tree(&path)?;
+    s.plugin_state.refresh_stored();
     std::fs::remove_dir_all(path).map_err(io)?;
     s.plugin_state.grants.remove(id);
     s.plugin_state.packages.remove(id);
     s.disabled_plugins.remove(id);
+    s.plugin_state.persist_stored()?;
     Ok(RemoveResult { id: id.into(), removed: true, param_warnings: vec![] })
 }

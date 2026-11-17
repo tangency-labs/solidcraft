@@ -1547,6 +1547,11 @@ fn main() -> eframe::Result {
             app.graphics_fallback = fallback_note.clone();
             let stored_ui = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k)));
             restore_preferences(&mut app, stored_ui.as_deref(), graphics().as_ref(), safe_mode);
+            // Plugin approvals live in the plugins folder's grant store, shared with the command
+            // line and headless MCP; safe mode keeps to its own empty preferences.
+            if !safe_mode {
+                app.share_plugin_grants();
+            }
             // The administrator's policy holds in safe mode too.
             app.policy = solidcraft_ui_egui::policy::load();
             if let Some(path) = &theme_file

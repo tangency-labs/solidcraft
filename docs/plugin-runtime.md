@@ -132,10 +132,13 @@ a scope of exactly the approved folders that the manifest requests for both read
 by plugin id after successful publication. Each folder approval has `name`, absolute local `path`,
 `read` and `write`. Omitting `approve` leaves no grants, including after replacement. Explicit approvals
 replace the stored set, so stale grants cannot survive an update. Desktop preferences persist grants
-and pass them to the session and its worker copies. `plugin.run` intersects
+and pass them to the session and its worker copies; the plugins folder's grant store
+(`crates/engine/src/plugin/grant_store.rs`) keeps them for the command line and headless MCP too
+([Headless use](plugins.md#headless-use)). `plugin.run` intersects
 that id's stored grants with the manifest's requests; another plugin's grants never apply.
 A hand-installed package with no grant record receives no groups or folders. Removing a package
-through `plugin.remove` deletes its grant record. These are host preferences, never design data.
+through `plugin.remove` deletes its grant record; `plugin.revoke` deletes the record and keeps the
+package. These are host preferences, never design data.
 
 ## Versions and capabilities
 
@@ -235,6 +238,8 @@ zero, fractional and out-of-range values are refused. The CLI reads it once befo
 local sessions. Omit the flag to use the original ceilings. `--connect` and non-headless `mcp`
 refuse this flag because the connected desktop owns its preferences. GUI preferences and CLI
 startup files are separate user settings; a package or saved design cannot supply either.
+Approvals given at install are shared instead: these processes read and write the same grant store
+as the desktop app, or the one in `--plugins-dir DIR` ([Headless use](plugins.md#headless-use)).
 
 Both host and manifest accept positive integer fuel through 18446744073709551615 (`u64::MAX`),
 without conversion through floating-point controls. Memory accepts 1..4096 MiB: the remaining

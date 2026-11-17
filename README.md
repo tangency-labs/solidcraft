@@ -219,6 +219,12 @@ A changed manifest budget requires a fresh approval hash. Keep the selected ceil
 machine's available resources; they are limits on guest execution, not total SolidCraft memory
 or native CAD work. The independent maximum execution deadline stays 30 seconds.
 
+Standalone CLI runs and headless MCP use the plugins installed for the desktop app and the
+approvals given there or in an earlier run, so a plugin is installed and approved once. Add
+`--plugins-dir DIR` to keep a separate set of plugins and approvals, for example in CI; list
+approvals with `solidcraft-cli exec plugin.grants` and take one back with
+`solidcraft-cli exec plugin.revoke '{"id":"PLUGIN_ID"}'` ([Headless use](docs/plugins.md#headless-use)).
+
 ### Permissions, results and saved designs
 
 A plugin can call any command in the MCP catalog whose exact id its manifest lists. Commands that

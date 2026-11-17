@@ -224,6 +224,7 @@ pub(crate) fn host_limits(p: &crate::prefs::Prefs) -> solidcraft_engine::plugin:
     solidcraft_engine::plugin::HostLimits { max_fuel: p.plugin_max_fuel, max_memory_mib: p.plugin_max_memory_mib }
 }
 pub(crate) fn sync_policy(app: &mut SolveApp) {
+    sync_store(app);
     app.session.disabled_plugins.clone_from(&app.preferences.disabled_plugins);
     app.session.plugin_limits = host_limits(&app.preferences);
     app.session.plugin_state.grants.clone_from(&app.preferences.plugin_grants);
@@ -235,24 +236,36 @@ pub(crate) fn persist_grants(app: &mut SolveApp) {
         grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
     }
     app.preferences.plugin_grants.clone_from(&app.session.plugin_state.grants);
+    sync_store(app);
+    app.session.plugin_state.grants.clone_from(&app.preferences.plugin_grants);
+}
+
+/// Start sharing grants through the plugins folder's grant store ([`SolveApp::share_plugin_grants`]).
+pub(crate) fn share_grants(app: &mut SolveApp) {
+    let Some(dir) = app.session.plugin_state.plugins_dir() else { return };
+    let mut synced = solidcraft_engine::plugin::grant_store::Synced::default();
+    if let Err(e) = synced.adopt(&dir, &mut app.preferences.plugin_grants) {
+        log::warn!("plugins: approvals could not be shared with the command line: {e}");
+    }
+    app.preferences.plugin_grants.retain(|id, grants| valid_id(id) && valid_grants(grants));
+    app.plugin_grant_store = Some(synced);
+    sync_policy(app);
+}
+
+/// Write the grants changed here to the shared store, then take in what the command line or
+/// headless MCP changed there. Nothing to do unless the app shares its grants.
+fn sync_store(app: &mut SolveApp) {
+    let Some(synced) = app.plugin_grant_store.as_mut() else { return };
+    let Some(dir) = app.session.plugin_state.plugins_dir() else { return };
+    if let Err(e) = synced.persist(&dir, &app.preferences.plugin_grants) {
+        log::warn!("plugins: approvals could not be shared with the command line: {e}");
+    }
+    synced.refresh(&dir, &mut app.preferences.plugin_grants);
 }
 
 /// Bound persisted grants as strictly as manifest permissions, including host folder paths.
 pub(crate) fn valid_grants(grants: &solidcraft_engine::plugin::Grants) -> bool {
-    let mut names = std::collections::BTreeSet::new();
-    grants.command_groups.len() <= solidcraft_engine::plugin::COMMAND_GROUPS.len()
-        && grants.command_groups.iter().all(|group| solidcraft_engine::plugin::COMMAND_GROUPS.contains(&group.as_str()))
-        && grants.memory_mib.is_none_or(|memory| (1..=solidcraft_engine::plugin::MAX_MEMORY_MIB).contains(&memory))
-        && grants.folders.len() <= 32
-        && grants.folders.iter().all(|grant| {
-            let path = grant.folder.to_string_lossy();
-            valid_id(&grant.name)
-                && names.insert(&grant.name)
-                && (grant.read || grant.write)
-                && grant.folder.is_absolute()
-                && path.len() <= 4096
-                && !path.chars().any(char::is_control)
-        })
+    solidcraft_engine::plugin::grant_store::valid_record(grants)
 }
 
 pub(crate) enum PackageAction {
@@ -1009,6 +1022,40 @@ mod tests {
         let many: serde_json::Map<String, serde_json::Value> = (0..257).map(|i| (format!("plugin-{i}"), grants.clone())).collect();
         assert!(crate::prefs::set(&mut h.app, &json!({"plugin_grants":many})).is_err());
         assert_eq!(crate::prefs::lenient(&json!({"plugin_grants":many})).plugin_grants.len(), MAX_DISABLED);
+    }
+
+    #[test]
+    fn shared_approvals_move_to_the_grant_store_once_and_then_follow_it() {
+        use serde_json::json;
+        use solidcraft_engine::plugin::{Grants, grant_store};
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("installed");
+        h.app.session.plugin_state.plugins_dir = Some(root.clone());
+        let approved = |groups: &[&str]| Grants {
+            package_hash: Some("b".repeat(64)),
+            command_groups: groups.iter().map(|g| g.to_string()).collect(),
+            ..Default::default()
+        };
+        // Approved here before there was a store: they move to it.
+        h.app.preferences.plugin_grants.insert("gears".into(), approved(&["file"]));
+        h.app.share_plugin_grants();
+        assert_eq!(grant_store::read_all(&root), h.app.preferences.plugin_grants);
+        assert_eq!(h.app.session.plugin_state.grants, h.app.preferences.plugin_grants);
+        // The command line approves one plugin and revokes the other: the app follows.
+        grant_store::write(&root, "bolts", &approved(&["doc"])).unwrap();
+        grant_store::delete(&root, "gears").unwrap();
+        let listed = h.app.run("plugin.grants", json!({})).unwrap();
+        assert_eq!(listed["grants"][0]["id"], "bolts");
+        assert_eq!(h.app.preferences.plugin_grants.keys().collect::<Vec<_>>(), ["bolts"]);
+        // Revoked here: gone from the store too.
+        assert_eq!(h.app.run("plugin.revoke", json!({"id":"bolts"})).unwrap()["revoked"], true);
+        assert!(grant_store::read_all(&root).is_empty() && h.app.preferences.plugin_grants.is_empty());
+        // Once the store exists it is the whole truth: a record left in older preferences stays gone.
+        let mut restarted = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restarted.session.plugin_state.plugins_dir = Some(root.clone());
+        restarted.preferences.plugin_grants.insert("gears".into(), approved(&["file"]));
+        restarted.share_plugin_grants();
+        assert!(restarted.preferences.plugin_grants.is_empty() && restarted.session.plugin_state.grants.is_empty());
     }
 
     fn page_frame(app: &mut SolveApp, ctx: &egui::Context, dir: &Path, events: Vec<egui::Event>) {

@@ -213,6 +213,51 @@ pub struct RemoveResult {
     pub param_warnings: Vec<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GrantsParams {}
+/// Whether a stored approval still applies to the installed plugin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GrantStatus {
+    /// It was approved for the installed manifest and component.
+    Current,
+    /// The installed plugin changed since: it runs only after it is installed and approved again.
+    Changed,
+    /// No plugin of this id is installed.
+    NotInstalled,
+    /// The installed plugin could not be read (the caller's file scope, a damaged package).
+    Unreadable,
+}
+/// What the user approved for one plugin.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct StoredGrant {
+    pub id: String,
+    pub status: GrantStatus,
+    #[serde(flatten)]
+    pub grants: crate::plugin::Grants,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GrantsResult {
+    pub grants: Vec<StoredGrant>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RevokeParams {
+    pub id: String,
+}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevokeResult {
+    pub id: String,
+    /// Whether anything was approved for it.
+    pub revoked: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// A subset of the manifest's requested permissions; no unrequested access is accepted.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

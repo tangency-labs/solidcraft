@@ -904,6 +904,9 @@ pub struct SolveApp {
     control_answering: Vec<control_job::ControlJob>,
     /// Most recent completed inspection per session and package, ordered by request.
     plugin_inspection_versions: std::collections::BTreeMap<(u64, String), usize>,
+    /// Set by the desktop app ([`Self::share_plugin_grants`]): the approved plugin grants are kept
+    /// in the plugins folder's grant store too, shared with the command line and headless MCP.
+    plugin_grant_store: Option<solidcraft_engine::plugin::grant_store::Synced>,
     plugin_slots: plugin_slots::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
@@ -1151,6 +1154,7 @@ impl SolveApp {
             agent_replies: Vec::new(),
             control_answering: Vec::new(),
             plugin_inspection_versions: Default::default(),
+            plugin_grant_store: None,
             plugin_slots: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
@@ -1506,6 +1510,14 @@ impl SolveApp {
         panel_runtime::load_preferences(self, &v);
     }
 
+    /// Keep approved plugin grants in the plugins folder's grant store, which the command line and
+    /// headless MCP read and write too, instead of in these preferences alone. Once the store
+    /// exists it is the whole truth; the first time, the grants approved in this app move to it.
+    /// Call after [`Self::load_prefs`].
+    pub fn share_plugin_grants(&mut self) {
+        crate::plugins::share_grants(self);
+    }
+
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
         self.control_rx = Some(rx);
         self
@@ -1653,7 +1665,7 @@ impl SolveApp {
             _ => r,
         };
         if let Ok(v) = &r {
-            if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
+            if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") {
                 plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
             }
