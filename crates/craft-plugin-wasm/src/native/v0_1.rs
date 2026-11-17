@@ -135,7 +135,7 @@ pub(super) fn call_entry<H: PluginHost + 'static>(
     let mut linker = Linker::new(engine);
     bindings::CommandPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
     let guest = bindings::CommandPlugin::instantiate(&mut *store, component, &linker)?;
-    Ok(guest.craft_plugin_entry().call_execute(&mut *store, entry, params)?.map_err(newer))
+    Ok(guest.craft_plugin_entry().call_execute(&mut *store, entry, &params.to_owned())?.map_err(newer))
 }
 
 /// Instantiates a 0.1 importer and converts `file`.
@@ -151,7 +151,7 @@ pub(super) fn call_import<H: PluginHost + 'static>(
     importer_bindings::ImporterPlugin::add_to_linker::<_, HasSelf<_>>(&mut linker, |s| s)?;
     let guest = importer_bindings::ImporterPlugin::instantiate(&mut *store, component, &linker)?;
     let file = old_formats::source::FileInfo { name: file.name.clone(), size: file.size };
-    Ok(guest.craft_plugin_importer().call_import_file(&mut *store, entry, &file, options)?.map_err(newer))
+    Ok(guest.craft_plugin_importer().call_import_file(&mut *store, entry, &file, &options.to_owned())?.map_err(newer))
 }
 
 #[cfg(test)]
