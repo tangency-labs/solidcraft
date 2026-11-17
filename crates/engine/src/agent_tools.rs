@@ -31,6 +31,7 @@ pub const MESSAGE_TOOLS: &[&str] = &[
     "running",
     "screenshot",
     "skill_reference",
+    "version",
 ];
 
 /// The command a tool stands for, when it is one.
