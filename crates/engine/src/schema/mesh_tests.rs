@@ -11,7 +11,7 @@ use crate::tests::mesh_convert::imported_box;
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<MeshConvertParams>(), &["body", "name", "participants", "tolerance"]);
+    assert_keys(input_schema_for::<MeshConvertParams>(), &["body", "legacy_names", "name", "participants", "tolerance"]);
 }
 
 /// The handler finds the body before it reads the tolerance, so on a design with no mesh body
@@ -66,6 +66,11 @@ fn the_check_takes_what_the_schema_allows() {
     for (p, takes) in [
         (json!({}), true),
         (json!({"body": "Mesh"}), true),
+        (json!({"legacy_names": true}), true),
+        (json!({"legacy_names": false}), true),
+        (json!({"legacy_names": null}), true),
+        (json!({"legacy_names": "true"}), false),
+        (json!({"legacy_names": 1}), false),
         (json!({"body": "Mesh", "tolerance": "0.01 mm", "name": "Rebuilt", "participants": ["Mesh"]}), true),
         (json!({"body": "", "tolerance": 0.02, "participants": "*"}), true),
         (json!({"body": null, "tolerance": null, "name": null, "participants": null}), true),
@@ -100,6 +105,8 @@ fn convert_mesh_replies_with_feature_result() {
         json!({}),
         json!({"body": "", "tolerance": "0.01 mm", "name": "Rebuilt"}),
         json!({"body": "Mesh", "tolerance": 0.02, "participants": ["Mesh"]}),
+        json!({"body": "Mesh", "legacy_names": true}),
+        json!({"body": "Mesh", "legacy_names": false}),
     ] {
         let mut s = imported_box();
         s.param_check = ParamCheck::Warn;

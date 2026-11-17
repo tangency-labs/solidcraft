@@ -59,6 +59,7 @@ pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
+pub mod mesh;
 pub mod network;
 pub mod offset;
 pub mod order;

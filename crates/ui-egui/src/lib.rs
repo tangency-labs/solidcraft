@@ -1531,6 +1531,11 @@ impl SolveApp {
         {
             params.entry("reuse_import").or_insert(Value::Bool(self.preferences.reuse_imports));
         }
+        if id == "mesh.convert"
+            && let Some(options) = params.as_object_mut()
+        {
+            options.entry("legacy_names").or_insert(Value::Bool(self.preferences.mesh_convert_legacy_names));
+        }
         // Commands may start only detected slicers and the programs the user added under Custom….
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);

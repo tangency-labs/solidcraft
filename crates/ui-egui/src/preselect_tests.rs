@@ -4138,10 +4138,7 @@ fn editing_a_point_along_an_edge_takes_a_newly_picked_edge() {
     assert!(at(&h).is_some_and(|p| p.dist(Vec3::new(40.0, 15.0, 20.0)) < 1e-6), "the point moves to the new edge: {:?}", at(&h));
 }
 
-/// #3001: Convert Mesh opens a dialog instead of failing with "select a mesh body". With the
-/// mesh selected first it takes it, and OK rebuilds it as faces.
-#[test]
-fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
+fn mesh_conversion_harness() -> crate::scenario::Harness {
     use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
     let body = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
     let mesh = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
@@ -4162,6 +4159,14 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     .unwrap();
     let mut h = crate::scenario::Harness::new();
     h.app.session = Session::new(doc);
+    h
+}
+
+/// #3001: Convert Mesh opens a dialog instead of failing with "select a mesh body". With the
+/// mesh selected first it takes it, and OK rebuilds it as faces.
+#[test]
+fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
+    let mut h = mesh_conversion_harness();
     h.app.start("mesh.convert");
     h.frames(1);
     let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
@@ -4169,14 +4174,102 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::MeshConvert { .. })));
     crate::dialogs::cancel(&mut h.app);
 
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
     h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
     h.app.start("mesh.convert");
     h.frames(1);
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Body { name: "Mesh".into() }]);
     h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.applying.is_none(), "new mesh conversions apply synchronously");
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     let state = h.app.session.model.state();
     assert!(!state.body("Mesh").unwrap().body.is_mesh(), "rebuilt as faces");
+}
+
+/// Both direct calls and dialog computation store the naming choice on the new feature.
+#[test]
+fn mesh_conversion_naming_preference_reaches_direct_and_dialog_commands() {
+    for legacy in [false, true] {
+        let expected = if legacy { "analytic_v1_geometry_names" } else { "analytic_v1" };
+        let mut direct = mesh_conversion_harness();
+        crate::prefs::control(&mut direct.app, &json!({"mesh_convert_legacy_names":legacy})).unwrap();
+        direct.app.run("mesh.convert", json!({"body":"Mesh"})).unwrap();
+        assert_eq!(serde_json::to_value(direct.app.session.doc.features.last().unwrap()).unwrap()["reconstruction"], expected);
+        let saved = direct.app.session.doc.to_json();
+        let names = solidcraft_engine::doc::naming::face_names(direct.app.session.model.state().body("Mesh").unwrap());
+        assert!(names.iter().all(|name| name.contains(":mesh:") != legacy));
+        crate::prefs::control(&mut direct.app, &json!({"mesh_convert_legacy_names":!legacy})).unwrap();
+        assert_eq!(direct.app.session.doc.to_json(), saved);
+        assert_eq!(solidcraft_engine::doc::naming::face_names(direct.app.session.model.state().body("Mesh").unwrap()), names);
+
+        let mut dialog = mesh_conversion_harness();
+        crate::prefs::control(&mut dialog.app, &json!({"mesh_convert_legacy_names":legacy})).unwrap();
+        dialog.app.apply_off_thread = Some(std::time::Duration::ZERO);
+        dialog.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+        dialog.app.start("mesh.convert");
+        dialog.frames(1);
+        let commands = crate::dialogs::apply_commands(&dialog.app, dialog.app.dialog.as_ref().unwrap()).unwrap();
+        let preview = crate::dialogs::preview_commands(&dialog.app, dialog.app.dialog.as_ref().unwrap()).unwrap();
+        assert_eq!(commands, preview);
+        assert_eq!(commands[0].1["legacy_names"], legacy);
+        dialog.step(&json!({"key":"Enter"})).unwrap();
+        assert!(dialog.app.applying.is_none(), "Convert Mesh applies synchronously");
+        assert!(dialog.app.dialog.is_none());
+        assert_eq!(serde_json::to_value(dialog.app.session.doc.features.last().unwrap()).unwrap()["reconstruction"], expected);
+    }
+}
+
+/// An explicit per-command naming option takes precedence over the UI preference.
+#[test]
+fn mesh_conversion_explicit_naming_option_overrides_the_preference() {
+    for legacy in [false, true] {
+        let mut h = mesh_conversion_harness();
+        crate::prefs::control(&mut h.app, &json!({"mesh_convert_legacy_names":!legacy})).unwrap();
+        let reply = h.call("engine.execute", json!({"command":"mesh.convert","params":{"body":"Mesh","legacy_names":legacy}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        let expected = if legacy { "analytic_v1_geometry_names" } else { "analytic_v1" };
+        assert_eq!(serde_json::to_value(h.app.session.doc.features.last().unwrap()).unwrap()["reconstruction"], expected);
+    }
+}
+
+/// Repeated OK on an unsupported open mesh keeps the dialog and the imported design.
+#[test]
+fn failed_convert_mesh_submissions_keep_the_dialog_and_original_mesh() {
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "open-tetrahedron.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: vec![0., 0., 0., 8., 0., 0., 0., 8., 0., 0., 0., 8.].into(),
+                triangles: vec![0, 2, 1, 0, 1, 3, 0, 3, 2].into(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Imported open mesh"),
+    )
+    .unwrap();
+    doc.features.last_mut().unwrap().body_names = vec!["Mesh".into()];
+    let mut h = crate::scenario::Harness::new();
+    h.app.session = Session::new(doc);
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    let before = h.app.session.doc.to_json();
+    h.app.start("mesh.convert");
+    h.frames(1);
+    for _ in 0..3 {
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(h.app.applying.is_none(), "each retry applies synchronously");
+        let dialog = h.app.dialog.as_ref().expect("failed conversion stays open");
+        assert!(dialog.error.as_ref().is_some_and(|e| e.contains("mesh conversion")), "{:?}", dialog.error);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert!(h.app.session.model.state().body("Mesh").unwrap().body.is_mesh());
+    }
+    crate::dialogs::cancel(&mut h.app);
+    h.frames(1);
+    assert!(h.app.dialog.is_none());
 }
 
 /// #3745: hovering a large body never waits for its pick index. A long modelled thread's mesh

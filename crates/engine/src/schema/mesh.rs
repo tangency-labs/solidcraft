@@ -23,6 +23,11 @@ pub struct MeshConvertParams {
     /// an arc becomes a cylinder. From 0.000001 mm to 1 mm. Default: 0.05 mm.
     #[serde(default)]
     pub tolerance: Option<LengthExpr>,
+    /// Keep geometry-derived face and edge names for this conversion. Default: false (source-bound
+    /// names, which invalidate stale attachments when the source or tolerance changes). Does not
+    /// change reconstruction geometry or the naming of any existing conversion.
+    #[serde(default)]
+    pub legacy_names: Option<bool>,
     // Not `FeatureCommon`: the solid keeps the mesh body's name, so `body_name` and `body_names`
     // would do nothing. `participants` stays because `timeline.redefine` passes a feature's own
     // back.

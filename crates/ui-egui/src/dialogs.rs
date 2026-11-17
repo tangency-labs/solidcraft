@@ -6234,7 +6234,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 Some(Sel::Body { name }) => name.clone(),
                 _ => return Err("pick the mesh body to convert".into()),
             };
-            ("mesh.convert", json!({"body": body, "tolerance": tolerance}))
+            let mut params = json!({"body": body, "tolerance": tolerance});
+            if d.editing.is_none() {
+                params["legacy_names"] = d.extra.get("legacy_names").cloned().unwrap_or_else(|| json!(app.preferences.mesh_convert_legacy_names));
+            }
+            ("mesh.convert", params)
         }
         Kind::Midplane => {
             need(0, "the first plane")?;

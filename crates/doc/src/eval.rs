@@ -10511,6 +10511,33 @@ fn chamfer_with(
     })
 }
 
+/// Fit the original mesh through SolidCore. The native envelope adapts its B-rep record to
+/// the document's existing body type. Only an unsupported analytic shape takes the existing
+/// closed-mesh path. Malformed input, hard budget limits and certificate failures remain errors.
+fn reconstruct_mesh(source: &Body, tolerance: f64) -> Result<Body> {
+    use solidcore_record::brep::envelope;
+    use solidcore_record::native::{self, Runtime, Saved};
+
+    let (positions, triangles) = source.triangle_mesh().ok_or_else(|| DocError::Invalid("select a mesh body".into()))?;
+    let Some(solid) = solidcore_ops::mesh::reconstruct_mesh(positions, triangles, tolerance).map_err(|error| DocError::Invalid(error.to_string()))?
+    else {
+        return Ok(kernel::convert_prismatic_mesh(source, tolerance)?);
+    };
+    let metadata = envelope::Metadata {
+        version: envelope::VERSION,
+        color: None,
+        paint: None,
+        boundaries: None,
+        face_sources: None,
+        history: None,
+        preserve_boundaries: false,
+    };
+    let runtime = Runtime { size: 0., coarse_missing: None };
+    let bytes = native::encode(&Saved { solid, metadata, runtime }).map_err(|error| DocError::Invalid(error.to_string()))?;
+    Ok(kernel::decode_native_body(&bytes)?)
+}
+
+/// Evaluate one feature against the prior model state and preserve traced identities for later references.
 fn eval_feature(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -11531,16 +11558,30 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::MeshConvert { body, tolerance } => {
+        FeatureKind::MeshConvert { body, tolerance, reconstruction } => {
             let tolerance = val(vals, tolerance, Kind::Length)?;
             let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let source = st.bodies.get(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             if doc.model_body_component(source) != f.component {
                 return Err(DocError::Invalid("activate the mesh body's component before converting it".into()));
             }
-            let converted = kernel::convert_prismatic_mesh(&source.body, tolerance)?;
+            let converted = match reconstruction {
+                crate::MeshReconstruction::LegacyPrism => kernel::convert_prismatic_mesh(&source.body, tolerance)?,
+                crate::MeshReconstruction::AnalyticV1 | crate::MeshReconstruction::AnalyticV1GeometryNames => {
+                    reconstruct_mesh(&source.body, tolerance)?
+                }
+            };
             let converted = converted.with_color(source.body.color());
-            let result = ModelBody::new(source.name.clone(), converted, f.id);
+            let result = match reconstruction {
+                crate::MeshReconstruction::LegacyPrism | crate::MeshReconstruction::AnalyticV1GeometryNames => {
+                    ModelBody::new(source.name.clone(), converted, f.id)
+                }
+                crate::MeshReconstruction::AnalyticV1 => {
+                    let (positions, triangles) = source.body.triangle_mesh().ok_or_else(|| DocError::Invalid("select a mesh body".into()))?;
+                    let converted = crate::lineage::reconstructed_tool(converted, positions, triangles, tolerance);
+                    ModelBody::traced_new(source.name.clone(), converted, f.id)
+                }
+            };
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;
             Ok(())

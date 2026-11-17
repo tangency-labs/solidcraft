@@ -193,6 +193,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        ui_kit::settings_section(ui, "mesh_conversion", app.tr("cmd.mesh_convert"), |ui| {
+            let response = setting::mesh_convert_legacy_names(app, ui);
+            crate::scenario::publish_target("prefs:mesh_convert_legacy_names", response.rect);
+        });
         export_name(app, ui, label_width);
         origin_plane_names(app, ui, label_width);
         ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {

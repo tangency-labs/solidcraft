@@ -2963,6 +2963,17 @@ fn a_converted_meshs_face_extrudes_on_a_fixed_plane_when_asked() {
     let names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
     let [name] = names.as_slice() else { panic!("{names:?}") };
     run(&mut s, "mesh.convert", json!({"body": name}));
+    // Keep the unversioned saved-conversion case: the analytic converter has its own
+    // face-profile behavior, covered by the mesh-conversion regressions.
+    let conversion = s.doc.features.last().unwrap().id;
+    {
+        let solidcraft_doc::FeatureKind::MeshConvert { reconstruction, .. } = &mut s.doc_mut().feature_mut(conversion).unwrap().kind else {
+            panic!("mesh conversion");
+        };
+        *reconstruction = solidcraft_doc::MeshReconstruction::LegacyPrism;
+    }
+    s.refresh();
+    assert!(serde_json::to_value(s.doc.feature(conversion).unwrap()).unwrap().get("reconstruction").is_none());
     let before = body_volume(&s, name);
     let top = json!({"face": [2, 2, 10], "distance": 5, "operation": "join"});
     let refused = s.execute("solid.extrude", &top).expect_err("the face keeps no attachment").to_string();

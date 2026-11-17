@@ -64,9 +64,16 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   assemblies with joints as URDF for robot simulators (urdf.md);
   3MF, STL, OBJ and glTF 2.0 (`.glb`/`.gltf`, its node tree as components and its materials as
   appearances) import as mesh bodies (they render, measure, move and export; solid features
-  need B-rep bodies). The `mesh.convert` command reconstructs closed meshes as parametric
-  solids — constant-section parts with planar and circular cylindrical faces, any other closed
-  mesh as the faceted solid its triangles describe;
+  need B-rep bodies). The `mesh.convert` command reconstructs closed meshes as parametric solids.
+  Supported straight-extrusion parts and planar shoulders become planar and circular cylindrical
+  faces, including partial circular walls within the chosen tolerance. Other closed meshes become
+  faceted solids with planar faces that follow the source triangles. Malformed inputs, hard work
+  limits and failed safety certificates remain refused. New conversions use
+  source-bound face names; the `mesh_convert_legacy_names` preference (or `mesh.convert`'s
+  `legacy_names: true` parameter) keeps geometry-derived names without changing reconstruction
+  geometry. New sketches in this mode need an explicit fixed plane; source-bound names support
+  dynamic face attachments. Saved legacy sketch references still replay. The naming choice is
+  saved per conversion; changing the preference does not alter existing designs;
   STEP import (AP203/AP214/AP242 solids, assemblies, units, names, colours) and IGES import
   (manifold solid B-reps, or trimmed and bounded surfaces sewn into solids) as a base feature
   that later features build on — open a `.step`/`.stp`/`.igs`/`.iges` file, insert one into a

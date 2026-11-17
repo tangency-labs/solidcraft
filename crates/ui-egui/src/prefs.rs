@@ -1056,6 +1056,9 @@ preference_settings! {
     library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
+    /// New Convert Mesh features use geometry-derived face and edge names when enabled.
+    /// The choice is stored per feature and does not change existing conversions.
+    mesh_convert_legacy_names: bool = false, PAGE_DESIGN => check_id_help("prefs.mesh_convert_legacy_names", "prefs.mesh_convert_legacy_names.help");
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
@@ -7052,6 +7055,7 @@ mod tests {
         use super::*;
         let fields = [
             ("default_units", json!("ft"), PAGE_DESIGN),
+            ("mesh_convert_legacy_names", json!(true), PAGE_DESIGN),
             ("length_decimals", json!(5), PAGE_DESIGN),
             ("angle_decimals", json!(4), PAGE_DESIGN),
             ("parameter_list_rows", json!(75), PAGE_DESIGN),
@@ -9563,6 +9567,24 @@ mod tests {
         for bad in ["1.234,5", "1,2,3", ",", "abc", "", "inf", "NaN"] {
             assert_eq!(crate::ui_kit::parse_number(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn mesh_conversion_naming_preference_saves_and_resets_for_new_features() {
+        use serde_json::json;
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        assert!(!app.preferences.mesh_convert_legacy_names);
+        let before = app.session.doc.to_json();
+        let out = super::control(&mut app, &json!({"mesh_convert_legacy_names":true})).unwrap();
+        assert_eq!(out["mesh_convert_legacy_names"], true);
+        assert_eq!(app.session.doc.to_json(), before);
+        assert!(super::control(&mut app, &json!({"mesh_convert_legacy_names":"yes"})).is_err());
+        assert!(app.preferences.mesh_convert_legacy_names);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.mesh_convert_legacy_names);
+        super::defaults(&mut restored, super::PAGE_DESIGN);
+        assert!(!restored.preferences.mesh_convert_legacy_names);
     }
 
     #[test]
