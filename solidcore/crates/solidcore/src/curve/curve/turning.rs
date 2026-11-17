@@ -29,6 +29,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
 use crate::nurbs::crv_basic::Curve as NlCurve;
+use crate::nurbs::knots::Side;
 use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 
 const OP: &str = "curve::curve::turning::add_turning_points";
@@ -359,6 +360,15 @@ fn homogeneous(c: CPoint, axis: usize) -> Option<(f64, f64)> {
 /// So after the `p` levels each bound is at most about `14 p u A`, `A` the largest
 /// `|V|` of the span's support: local to this span, whatever the curve's values and
 /// weights elsewhere. `None` when `vals` or `u` is short.
+///
+/// (#17987) `[a, b]` may also lie past the span, for the span's polynomial extended past
+/// the curve's knots (see [`bspline_pieces`]). A step whose `al` is outside `[0, 1]` is
+/// then an affine combination, not a convex one: with `s = |1 - al| + |al|` its result is
+/// within `s max(e_P, e_Q) + gamma_7 s (|P| + |Q|)`. `s` is taken from the computed `al`,
+/// within `gamma_8` of the exact one (the `gamma_3` of `al` and `gamma_4` of `1 - al`), and
+/// `1 + gamma_16` covers that and the bound's own arithmetic. The denominator is a knot
+/// difference across the span, at least its width, whatever `a` and `b` are. Steps inside
+/// `[0, 1]` keep the bound above, so a span's own extraction is unchanged.
 fn bezier_points(vals: &[f64], u: &[f64], a: f64, b: f64) -> Option<Vec<(f64, f64)>> {
     let p = vals.len().checked_sub(1)?;
     if u.len() != 2 * p {
@@ -379,7 +389,12 @@ fn bezier_points(vals: &[f64], u: &[f64], a: f64, b: f64) -> Option<Vec<(f64, f6
                 } else {
                     let al = (t - lo) / (hi - lo);
                     let v = (1.0 - al) * pv + al * qv;
-                    let e = (pe.max(qe) + gamma(7) * (pv.abs() + qv.abs())) * (1.0 + gamma(5));
+                    let e = if (0.0..=1.0).contains(&al) {
+                        (pe.max(qe) + gamma(7) * (pv.abs() + qv.abs())) * (1.0 + gamma(5))
+                    } else {
+                        let s = (1.0 - al).abs() + al.abs();
+                        (s * pe.max(qe) + gamma(7) * s * (pv.abs() + qv.abs())) * (1.0 + gamma(16))
+                    };
                     (v, e)
                 };
                 *d.get_mut(l)? = next;
@@ -417,12 +432,23 @@ fn bezier_points(vals: &[f64], u: &[f64], a: f64, b: f64) -> Option<Vec<(f64, f6
 /// non-rational `c_k` has two roundings and `p (e_k + e_{k+1})` from the points. The
 /// weight bound `w_min` is `min (w_i - e_w,i)`, two roundings, times `1 - gamma_3`.
 ///
+/// (#17987) `past`, for a curve that evaluates past its knots: where `[lo, hi]` runs
+/// below the domain's start or above its end, one more piece covers that part, the
+/// polynomial of the span the evaluation takes there (`KnotVector::find_span`) extended,
+/// extracted by [`bezier_points`] over the part. Its weights may then be zero or
+/// negative (a pole past the knots); its `w_min` is then not positive and `isolate`
+/// refuses it.
+///
 /// # Errors
 ///
 /// `InvalidInput` for a non-finite or non-positive weight, a non-finite point or knot,
 /// decreasing knots, too few knots for the control points, or a degree at or above
-/// `nurbs_crv::MAX_DEGREE` (as Bezier extraction refuses).
-fn bspline_pieces(nl: &NlCurve, axis: usize) -> Result<Option<Vec<Piece>>> {
+/// `nurbs_crv::MAX_DEGREE` (as Bezier extraction refuses); those of `find_span`.
+fn bspline_pieces(
+    nl: &NlCurve,
+    axis: usize,
+    past: Option<(f64, f64)>,
+) -> Result<Option<Vec<Piece>>> {
     let pts = nl.cpts();
     let mut first = None;
     let mut varies = false;
@@ -462,10 +488,12 @@ fn bspline_pieces(nl: &NlCurve, axis: usize) -> Result<Option<Vec<Piece>>> {
     let xs_all: Vec<f64> = hs_all.iter().map(|h| h.0).collect();
     let ws_all: Vec<f64> = hs_all.iter().map(|h| h.1).collect();
     let pf = p as f64;
-    let mut pieces = Vec::new();
+    let short =
+        || SolidError::invalid_input(OP, "a B-spline's knots do not cover its control points");
+    // (span j, t0, t1): the non-empty spans, then the parts of `past` beyond the domain,
+    // each on the span the curve's evaluation extends there.
+    let mut spans = Vec::new();
     for j in p..hs_all.len() {
-        let short =
-            || SolidError::invalid_input(OP, "a B-spline's knots do not cover its control points");
         let (&t0, &t1) = (
             knots.get(j).ok_or_else(short)?,
             knots.get(j + 1).ok_or_else(short)?,
@@ -473,9 +501,25 @@ fn bspline_pieces(nl: &NlCurve, axis: usize) -> Result<Option<Vec<Piece>>> {
         if t1 < t0 {
             return Err(SolidError::invalid_input(OP, "a B-spline's knots decrease"));
         }
-        if t1 == t0 {
-            continue;
+        if t1 > t0 {
+            spans.push((j, t0, t1));
         }
+    }
+    if let Some((lo, hi)) = past {
+        let (&d0, &d1) = (
+            knots.get(p).ok_or_else(short)?,
+            knots.get(hs_all.len()).ok_or_else(short)?,
+        );
+        let kv = nl.knot_vector()?;
+        if lo < d0 {
+            spans.push((kv.find_span(p, lo, Side::Left)?, lo, d0));
+        }
+        if hi > d1 {
+            spans.push((kv.find_span(p, hi, Side::Left)?, d1, hi));
+        }
+    }
+    let mut pieces = Vec::new();
+    for (j, t0, t1) in spans {
         let u = knots.get(j + 1 - p..=j + p).ok_or_else(short)?;
         let support = j - p..=j;
         let bez = |vals: &[f64]| {
@@ -661,15 +705,18 @@ impl Curve {
     /// the cubic Hermite curve, over any `interval` (a Hermite curve's cubic is
     /// extrapolated past its natural domain, as it evaluates). The other kinds
     /// (procedural, offset, on-surface, composite, iso, projected) add nothing; their box
-    /// is upstream's. A B-spline is searched over its knots' range only: a part of
-    /// `interval` past them (with out-of-bounds evaluation enabled) is not searched.
+    /// is upstream's. A B-spline with out-of-bounds evaluation enabled is also searched
+    /// over the part of `interval` past its knots, where its evaluation extends its first
+    /// or last span's polynomial (#17987); without it, evaluation clamps there.
     ///
     /// # Errors
     ///
     /// `InvalidInput` for a non-finite interval, a non-finite control point or weight, a
-    /// weight that is not positive, or when isolation needs more than [`MAX_DEPTH`]
-    /// levels or [`MAX_NODES`] subdivisions; those of clamping, extraction and
-    /// evaluation. An inverted (empty) interval adds nothing.
+    /// weight that is not positive (also a weight of a rational B-spline's extension past
+    /// its knots that is not certified positive: it may run through a pole), or when
+    /// isolation needs more than [`MAX_DEPTH`] levels or [`MAX_NODES`] subdivisions;
+    /// those of `find_span`, clamping, extraction and evaluation. An inverted (empty)
+    /// interval adds nothing.
     pub(crate) fn add_turning_points(
         &self,
         k: &Kernel,
@@ -697,8 +744,14 @@ impl Curve {
                     };
                     hermite_pieces([pick(a), pick(b), pick(c), pick(d)], lo, hi)
                 }
-                _ => match self.b_spline_base().and_then(|b| b.nurb.as_ref()) {
-                    Some(nl) => bspline_pieces(nl, axis)?,
+                _ => match self.b_spline_base() {
+                    Some(b) => match b.nurb.as_ref() {
+                        Some(nl) => {
+                            let past = b.is_out_of_bounds_enabled().then_some((lo, hi));
+                            bspline_pieces(nl, axis, past)?
+                        }
+                        None => None,
+                    },
                     None => None,
                 },
             };
