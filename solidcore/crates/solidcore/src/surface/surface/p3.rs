@@ -2413,9 +2413,15 @@ mod tests {
     /// The flat sheet is planar to `SM_EFF_ZERO` (`IsPlanar` tests the unpadded pseudo
     /// box, `SmSurface.cpp:22371` at `3fd5b95`), so `GetMaxAnalyticDomain` expands it
     /// relatively by 100 instead of by half a span per cubic direction. The search over
-    /// that domain reaches the folded continuation and the cover fails, changing nothing.
+    /// that domain reaches the folded continuation, and the fold rule (WR-407, #434)
+    /// refuses the cover, changing nothing: the sheet's x derivative is, in closed
+    /// form, `x'(u) = 3 (1 - 4 u^2 / 9)` (the Bezier's derivative net `3 (1, 1, 5/9)`),
+    /// zero at `u = 1.5` only, and the two samples the rule reports straddle it with
+    /// the unit normals turned back. (Before #17856 the search failed first, at a pole
+    /// inversion answer 0.487 from its test point while the guess was within 1e-10:
+    /// [`issue_434_the_inversion_answer_behind_the_old_search_failure_was_not_the_closest_point`].)
     /// At `c9c5979` the padded box was not planar; the domain ended at the fold
-    /// (u = 1.5) and only the fold rule (WR-407, #434) refused the cover.
+    /// (u = 1.5) and the fold rule refused the cover too.
     #[test]
     fn issue_434_default_refuses_the_fold_of_a_planar_sheet() -> Result<()> {
         let k = Kernel::default();
@@ -2424,8 +2430,24 @@ mod tests {
             !covered.success,
             "the planar sheet's cover across the fold fails: {covered:?}"
         );
-        // The search failed before the fold rule ran.
-        assert_eq!(covered.fold, None);
+        // The fold rule refused the cover at the closed-form fold: `x'` changes sign
+        // between the two samples (each value far above its rounding, a few ulps of 3),
+        // so u = 1.5, its only root, lies between them, and the normals are reversed.
+        let x_prime = |u: f64| 3.0 * (1.0 - 4.0 * u * u / 9.0);
+        assert_eq!(x_prime(1.5), 0.0);
+        let Some(ContinuationFold::TurnsBack { uv, neighbour, dot }) = covered.fold else {
+            panic!("the fold rule refuses the cover: {covered:?}");
+        };
+        assert!(dot < 0.0, "{dot}");
+        assert!(
+            (uv.x - 1.5) * (neighbour.x - 1.5) < 0.0,
+            "{uv:?} {neighbour:?}"
+        );
+        assert!(
+            x_prime(uv.x).min(x_prime(neighbour.x)) < -1e-12
+                && x_prime(uv.x).max(x_prime(neighbour.x)) > 1e-12,
+            "{uv:?} {neighbour:?}"
+        );
         assert_eq!(u_max, 1.0);
         Ok(())
     }
@@ -2438,9 +2460,10 @@ mod tests {
     /// answer is 0.487 from the point (certified) while the guess is within 1e-10 of
     /// it. No answer proven farther than its guess is the closest point; the
     /// inversion now refuses it, the search finds its points, and the fold rule
-    /// (`ContinuationFold::TurnsBack`) refuses the cover instead. The line
-    /// `assert_eq!(covered.fold, None)` above records the old mechanism, not the
-    /// cover's outcome (still refused): a maintainer decides that expectation.
+    /// (`ContinuationFold::TurnsBack`) refuses the cover instead. The guess lies
+    /// outside the `[0, 1]` u domain passed: the cover evaluates the sheet's
+    /// continuation, and the evaluation's rounding is bounded there too (the basis
+    /// grows by at most `(1 + 2 * 0.5)^3 = 8` at u = 1.5).
     #[test]
     fn issue_434_the_inversion_answer_behind_the_old_search_failure_was_not_the_closest_point(
     ) -> Result<()> {
