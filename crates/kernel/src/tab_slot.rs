@@ -27,6 +27,7 @@ fn kernel_error(e: solidcore_ops::Error) -> KernelError {
     match e {
         solidcore_ops::Error::Empty => KernelError::Invalid(format!("{WHAT}: a plate has no size")),
         solidcore_ops::Error::Unsupported(m) => KernelError::Invalid(format!("{WHAT}: {m}")),
+        e @ (solidcore_ops::Error::Refused { .. } | solidcore_ops::Error::Argument) => KernelError::Invalid(format!("{WHAT}: {e}")),
         solidcore_ops::Error::Internal(m) => KernelError::Internal(format!("{WHAT}: {m}")),
         e => KernelError::Failed(format!("{WHAT}: {e}")),
     }
@@ -125,5 +126,43 @@ mod tests {
         one_lump_checked(&c.slot_plate);
         assert!((volume(&wall) - 43_200.0).abs() < 1e-6);
         assert!((volume(&bottom) - 96_000.0).abs() < 1e-6);
+    }
+
+    /// 16.3, E1b defaults on F (auto layout, W = e = 18, c 0.1): two tabs, cut; Wall 44 496 and
+    /// Bottom 94 645.92 mm³, 14 faces each, one lump each, solidcore's check clean.
+    #[test]
+    fn e1b_defaults_planned_and_cut() {
+        let (wall, bottom, p) = fixture_f();
+        let s = spec(Layout::Auto, 18.0, 18.0);
+        let (_, stretches) = plan(&wall, &bottom, p, s, TOL).unwrap().unwrap();
+        let tabs: Vec<&TabPlan> = stretches.iter().filter_map(|st| st.tabs.as_ref().ok()).flatten().collect();
+        assert_eq!(tabs.len(), 2);
+        assert!(tabs.iter().all(|t| t.skip.is_none() && t.tab.is_ok()));
+        let c = cut(&wall, &bottom, p, s, TOL).unwrap().unwrap();
+        assert_eq!(c.plan, stretches);
+        assert!((volume(&c.tab_plate) - 44_496.0).abs() < 1e-6, "{}", volume(&c.tab_plate));
+        assert!((volume(&c.slot_plate) - 94_645.92).abs() < 1e-6, "{}", volume(&c.slot_plate));
+        assert_eq!((c.tab_plate.face_count(), c.slot_plate.face_count()), (14, 14));
+        one_lump_checked(&c.tab_plate);
+        one_lump_checked(&c.slot_plate);
+    }
+
+    /// Refusals: a mesh body as either plate, and a tolerance of 0, are [`KernelError::Invalid`]
+    /// for both the plan and the cut.
+    #[test]
+    fn mesh_body_and_zero_tolerance_are_invalid() {
+        let (wall, bottom, p) = fixture_f();
+        let s = spec(Layout::Count(3), 20.0, 10.0);
+        let pos = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)];
+        let mesh = crate::mesh_body(&pos, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]).unwrap();
+        assert!(mesh.is_mesh());
+        assert!(matches!(plan(&mesh, &bottom, p, s, TOL), Err(KernelError::Invalid(_))));
+        assert!(matches!(plan(&wall, &mesh, p, s, TOL), Err(KernelError::Invalid(_))));
+        assert!(matches!(cut(&mesh, &bottom, p, s, TOL), Err(KernelError::Invalid(_))));
+        assert!(matches!(cut(&wall, &mesh, p, s, TOL), Err(KernelError::Invalid(_))));
+        let zero = plan(&wall, &bottom, p, s, 0.0);
+        assert!(matches!(zero, Err(KernelError::Invalid(_))), "{zero:?}");
+        let zero = cut(&wall, &bottom, p, s, 0.0);
+        assert!(matches!(zero, Err(KernelError::Invalid(_))), "{:?}", zero.map(|r| r.map(|c| c.plan)));
     }
 }
