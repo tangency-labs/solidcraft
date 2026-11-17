@@ -554,6 +554,12 @@ pub fn tab_slot_joints(
         .collect())
 }
 
+/// The gap between two bodies' exact boxes ([`Body::bounds`]) when it is more than `tol`
+/// ([`solidcore::plate_contact::boxes_gap`]), else `None`.
+fn boxes_gap(a: &Body, b: &Body, tol: f64) -> Result<Option<f64>> {
+    Ok(pc::boxes_gap(a.bounds()?, b.bounds()?, tol))
+}
+
 /// [`tab_slot_joints`] with each made joint's plan (empty for a skipped joint).
 fn plan_joints(
     plates: &[Body],
@@ -570,6 +576,13 @@ fn plan_joints(
         let (Some(tab), Some(slot)) = (plates.get(t), plates.get(s)) else {
             return Err(Error::Argument);
         };
+        if let Some(gap) = boxes_gap(tab, slot, tol)? {
+            // Quick reject (design v2 5.2, [m18]): exact boxes more than tol apart.
+            let distance = tab.boundary_distance(slot, tol).map_or(gap, |g| g.upper);
+            let skip = PairSkip::Contact(Contact::NoContact { distance });
+            out.push((Some(JointSkip::Pair(skip)), Vec::new()));
+            continue;
+        }
         let joint = match tab.plate_pair(slot, p, tol)? {
             Ok(joint) => joint,
             Err(skip) => {
@@ -1396,5 +1409,28 @@ mod tests {
             "{}",
             v(&cut.slot_plate)
         );
+    }
+
+    /// 16.2 quick reject by boxes (design v2 5.2, [m18]): a wall whose box is 40 from S's is
+    /// skipped `no_contact` with its distance before any plate reading; a wall standing on S is
+    /// still made.
+    #[test]
+    fn boxes_apart_are_no_contact_at_once() {
+        let (s, p) = bottom();
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let beside = make_box([200.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        assert_eq!(boxes_gap(&wall, &s, TOL).unwrap(), None);
+        let gap = boxes_gap(&beside, &s, TOL).unwrap().unwrap();
+        assert!((gap - 40.0).abs() < 1e-6, "{gap}");
+        let plates = [s, wall, beside];
+        match tab_slot_joints(&plates, &[(1, 0, p), (2, 0, p)], spec2(), TOL)
+            .unwrap()
+            .as_slice()
+        {
+            [None, Some(JointSkip::Pair(PairSkip::Contact(Contact::NoContact { distance })))] => {
+                assert!((distance - 40.0).abs() < 1e-2, "{distance}");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

@@ -1348,6 +1348,20 @@ pub fn pair_at(
     })
 }
 
+/// The gap between two exact axis-aligned boxes, each least corner then greatest, when it is
+/// more than `tol` (design v2 5.2 quick reject, [m18]): such a pair is `no_contact` before any
+/// plate reading. `None` when the boxes are within `tol` of each other.
+#[must_use]
+pub fn boxes_gap(a: ([f64; 3], [f64; 3]), b: ([f64; 3], [f64; 3]), tol: f64) -> Option<f64> {
+    let gap =
+        a.0.iter()
+            .zip(&a.1)
+            .zip(b.0.iter().zip(&b.1))
+            .map(|((al, ah), (bl, bh))| (bl - ah).max(al - bh).max(0.0))
+            .fold(0.0_f64, f64::hypot);
+    (gap > tol).then_some(gap)
+}
+
 /// Which of several contacts a face pick `near` chooses (design v2 4.2): `distances` are each
 /// contact's distance to `near` ([`contact_distance`]). One contact is taken as it is; of
 /// several, the nearest when it is nearer than every other by more than `tol`; else `None`
