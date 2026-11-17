@@ -235,10 +235,10 @@ mod tests {
         let config = String::from_utf8(pkg.files[2].1.clone()).unwrap();
         let (elements, texts) = read(&config);
         assert_eq!(elements, ["model", "name", "version", "sdf", "description"]);
-        assert!(
-            texts.iter().any(|t| t == "Panel") && texts.iter().any(|t| t == "model.sdf") && texts.iter().any(|t| t == "a &lt;panel&gt;"),
-            "{config}"
-        );
+        // The reader hands an escaped character over as an event of its own, so the description
+        // is checked as written.
+        assert!(texts.iter().any(|t| t == "Panel") && texts.iter().any(|t| t == "model.sdf"), "{config}");
+        assert!(config.contains("<description>a &lt;panel&gt;</description>"), "{config}");
         assert!(config.contains("<sdf version=\"1.9\">model.sdf</sdf>"), "{config}");
 
         let sdf = String::from_utf8(pkg.files[3].1.clone()).unwrap();
