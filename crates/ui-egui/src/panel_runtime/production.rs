@@ -246,6 +246,9 @@ impl Product {
         if self == Self::DrawingInspector {
             presentation.title = crate::drawing_workspace::inspector_title(app).into();
         }
+        if self == Self::Browser && crate::drawing_workspace::active(app) && app.session.drawing("drawing.inspect").is_ok() {
+            presentation.status = Some(app.tr("ui.drawing_browser_one_drawing").into());
+        }
         presentation.actions = match self {
             Self::History => crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button)
                 .iter()
@@ -1453,10 +1456,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             )
         });
         match product {
-            Product::Browser => {
-                crate::drawing_workspace::sheet_settings_entry(self.app, ui);
-                crate::browser::panel_contents(self.app, ui);
-            }
+            Product::Browser => crate::browser::panel_contents(self.app, ui),
             Product::DrawingSheets => crate::drawing_workspace::sheets_section(self.app, ui),
             Product::DrawingInspector => crate::drawing_workspace::inspector_contents(self.app, ui),
             Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),
