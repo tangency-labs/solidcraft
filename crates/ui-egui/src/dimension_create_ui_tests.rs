@@ -2188,6 +2188,41 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
     assert!(sk.constraints.iter().any(|c| c.param.as_deref() == Some("width") && c.kind.value().is_some_and(|v| (v - 30.0).abs() < 1e-6)));
 }
 
+/// A bare name offered by the dimension editor's Create variable path gets the current
+/// dimension's value. It creates the named parameter atomically instead of submitting an
+/// unknown reference to parameters.change (#18721).
+#[test]
+fn dimension_create_variable_seeds_its_current_value() {
+    // A new dimension: its value lives in the draft until Enter.
+    let mut h = line([25., 0.]);
+    place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
+    let before = h.app.session.undo.len();
+    type_value(&mut h, "breite");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
+    assert!(h.app.status.as_ref().is_some_and(|s| !s.2), "{:?}", h.app.status);
+    assert_eq!(h.app.session.undo.len(), before + 1);
+    let doc = &h.app.session.doc;
+    assert!(doc.param("breite").is_some());
+    let sk = doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert!(sk.constraints.iter().any(|c| c.param.as_deref() == Some("breite") && c.kind.value().is_some_and(|v| (v - 25.0).abs() < 1e-6)));
+
+    // An already created dimension also keeps its size and changes its name in one step.
+    let mut h = line([30., 0.]);
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"30 mm"})).unwrap();
+    h.settle();
+    let before = h.app.session.undo.len();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "breite");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(!crate::dim_view::editing(), "{:?}", h.app.status);
+    assert!(h.app.session.doc.param("d1").is_none());
+    assert_eq!(h.app.session.doc.param("breite").map(|p| p.expr.as_str()), Some("30 mm"));
+    assert_eq!(h.app.session.undo.len(), before + 1);
+    crate::dim_view::cancel();
+}
+
 /// The status line after a dimension is applied reads in the interface language (#8863): a
 /// new parameter (`w = 40/2`), a plain value, a renamed parameter and a driven dimension, with
 /// the parameter name kept as typed.

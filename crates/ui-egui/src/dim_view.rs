@@ -724,6 +724,28 @@ fn make_driving(app: &mut SolveApp, constraint: &str, typed: &str) -> Result<ser
     result
 }
 
+/// A bare, unused name in a dimension's value box means "create a variable" (#18721).
+/// Seed it with the dimension's current expression, preserving its unit. The normal
+/// `name = expression` path then creates the named dimension in a single undo step.
+fn dimension_value_or_definition(
+    doc: &solidcraft_engine::doc::Document,
+    source: &solidcraft_engine::doc::Document,
+    param: &str,
+    typed: &str,
+) -> String {
+    let name = typed.trim();
+    let definition = format!("{name} = 1");
+    if solidcraft_engine::doc::expr::definition(&definition).is_none_or(|(n, _)| n != name)
+        || solidcraft_engine::doc::Document::param_name_problem(name).is_some()
+        || doc.all_param_exprs().iter().any(|(n, _, _)| n == name)
+        || doc.text_param(name).is_some()
+        || source.param(name).is_some()
+    {
+        return typed.to_string();
+    }
+    source.param(param).map_or_else(|| typed.to_string(), |p| format!("{name} = {}", p.expr))
+}
+
 /// Set dimension parameter `param` to the expression typed for it, in the parameter's unit.
 fn change_value(app: &mut SolveApp, param: &str, typed: &str) -> Result<serde_json::Value, String> {
     let kind = app
@@ -1361,18 +1383,20 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {
+            let source = e.draft.as_ref().map_or(app.session.doc.as_ref(), |draft| draft.preview_doc.as_ref());
+            let submitted = dimension_value_or_definition(&app.session.doc, source, &e.param, &e.expr);
             let result = if let Some(draft) = &e.draft {
                 if draft.valid(app) {
                     draft
-                        .evaluate(app, &e.expr)
-                        .and_then(|_| app.run("sketch.dimension", draft.params(&e.expr)).map_err(|err| shown_error("sketch.dimension", &err)))
+                        .evaluate(app, &submitted)
+                        .and_then(|_| app.run("sketch.dimension", draft.params(&submitted)).map_err(|err| shown_error("sketch.dimension", &err)))
                 } else {
                     Err("The sketch changed; place the dimension again".into())
                 }
             } else if let Some(constraint) = &e.driven {
-                make_driving(app, constraint, &e.expr)
+                make_driving(app, constraint, &submitted)
             } else {
-                change_value(app, &e.param, &e.expr)
+                change_value(app, &e.param, &submitted)
             };
             match result {
                 Err(err) => {
@@ -1495,6 +1519,18 @@ pub fn drawn() -> Vec<(String, Pos2)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variable_creation_only_uses_free_parameter_names() {
+        let mut doc = solidcraft_engine::doc::Document::new("Test");
+        doc.add_user_param("width", "20 mm", Some("mm"), None).unwrap();
+        let name = |typed: &str| dimension_value_or_definition(&doc, &doc, "width", typed);
+        assert_eq!(name("breite"), "breite = 20 mm");
+        assert_eq!(name("width"), "width", "existing names remain references");
+        assert_eq!(name("sin"), "sin", "reserved functions are not new variables");
+        assert_eq!(name("12width"), "12width", "invalid names keep normal validation");
+        assert_eq!(name("breite = 50 mm"), "breite = 50 mm", "explicit definitions are unchanged");
+    }
 
     /// #11057: a value typed before its target keeps a 30 px gap from the pointer, and near the
     /// viewport's edge it opens on the pointer's other side instead of sliding back over it.
