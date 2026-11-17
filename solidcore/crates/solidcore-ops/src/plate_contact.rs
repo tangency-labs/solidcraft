@@ -11,7 +11,7 @@ use solidcore::tab_slot::{self as ts, Layout, SlotSkip, StretchSkip, TabSkip};
 use crate::body::Body;
 use crate::contact::{copy_of, poisoned};
 use crate::error::status;
-use crate::session::{run_on, Answer};
+use crate::session::{run, run_on, Answer};
 use crate::Result;
 
 /// A pair's answer: the joint, or why there is none.
@@ -49,6 +49,8 @@ pub struct TabPlan {
     pub skip: Option<SlotSkip>,
     /// The tab's outline in T's `(u, z)` frame (design 7.1), or why it is not made.
     pub tab: core::result::Result<Region2, TabSkip>,
+    /// The levels `(w_A, w_B)` of T's faces A and B across the strip, what the tab prism spans.
+    pub faces: (f64, f64),
 }
 
 /// One stretch of the strip and its tabs, or why it gets none.
@@ -217,6 +219,7 @@ impl Body {
                             slot: outline,
                             skip,
                             tab,
+                            faces: across,
                         });
                     }
                     Ok(tabs)
@@ -226,6 +229,32 @@ impl Body {
         }
         Ok(Ok((d, out)))
     }
+}
+
+/// Tab `k`'s prism ([`solidcore::plate_contact::tab_prism`]): `outline` (a [`TabPlan`]'s tab,
+/// in T's `(u, z)` frame on `p`, `u` along `d`) extruded across T from `faces.0` to `faces.1`.
+///
+/// # Errors
+/// [`crate::Error::Refused`], in the kernel's words, for a bad plane, direction or faces; those of
+/// the session.
+pub fn tab_prism(p: Plane, d: Vec2, outline: &Region2, faces: (f64, f64)) -> Result<Body> {
+    run("plate_contact::tab_prism", |k| {
+        pc::tab_prism(k, p, d, outline, faces)
+    })
+    .map(Body::new)
+}
+
+/// Slot `k`'s prism ([`solidcore::plate_contact::slot_prism`]): `outline` (a [`TabPlan`]'s
+/// slot, in `p`'s frame) extruded along `p`'s normal from `−t_s − over` to `over`.
+///
+/// # Errors
+/// [`crate::Error::Refused`], in the kernel's words, for a bad plane, thickness or overshoot;
+/// those of the session.
+pub fn slot_prism(p: Plane, outline: &Region2, t_s: f64, over: f64) -> Result<Body> {
+    run("plate_contact::slot_prism", |k| {
+        pc::slot_prism(k, p, outline, t_s, over)
+    })
+    .map(Body::new)
 }
 
 #[cfg(test)]
@@ -349,6 +378,25 @@ mod tests {
             let want = ts::tab_outline(t.start, 10.0, 7.0, 0.0).unwrap().unwrap();
             assert_eq!(tab, &want, "{t:?}");
         }
+        // Prisms: the tab 10 x 6 x 7 under the wall (z -1..6 world, y 30..36), the slot
+        // 10.2 x 6.2 through S with 0.5 past each face (z -0.5..6.5).
+        let t = &tabs[0];
+        let tab = tab_prism(p, d, t.tab.as_ref().expect("a tab"), t.faces).unwrap();
+        let m = tab.mass_properties(1e-9).unwrap();
+        assert!((m.volume - 420.0).abs() < 1e-6, "{m:?}");
+        let cx = x(t.start) + 5.0 * d.x;
+        let want = [cx, 33.0, 2.5];
+        for (got, want) in m.centroid.iter().zip(want) {
+            assert!((got - want).abs() < 1e-6, "{m:?} {want:?}");
+        }
+        let slot = slot_prism(p, &t.slot, 6.0, 0.5).unwrap();
+        let m = slot.mass_properties(1e-9).unwrap();
+        assert!((m.volume - 10.2 * 6.2 * 7.0).abs() < 1e-6, "{m:?}");
+        let want = [cx, 33.0, 3.0];
+        for (got, want) in m.centroid.iter().zip(want) {
+            assert!((got - want).abs() < 1e-6, "{m:?} {want:?}");
+        }
+        assert!(slot_prism(p, &t.slot, 0.0, 0.5).is_err());
         let short = TabSlotSpec {
             protrusion: -7.0,
             ..spec

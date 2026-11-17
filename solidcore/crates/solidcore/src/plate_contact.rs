@@ -1070,6 +1070,67 @@ pub fn slot_thickness(
         .min_by(f64::total_cmp))
 }
 
+/// Slot `k`'s prism (design 7.2): its outline in `p`'s frame ([`slot_face`]'s `(u, w)` plane)
+/// extruded along `n` from `−t_S − over` to `+over`, `over` the overshoot past S's two faces.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a bad plane, a `t_s` not finite and positive or an `over`
+/// not finite and non-negative; those of the extrusion.
+pub fn slot_prism(
+    k: &mut crate::kernel::Kernel,
+    p: Plane,
+    outline: &crate::prism::profile::Region2,
+    t_s: f64,
+    over: f64,
+) -> Result<crate::topology::Brep> {
+    check_plane(p)?;
+    if !(t_s.is_finite() && t_s > 0.0 && over.is_finite() && over >= 0.0) {
+        return Err(invalid(
+            "the slot plate's thickness must be positive and the overshoot non-negative",
+        ));
+    }
+    let frame = frame_of(p)?;
+    crate::prism::extrude::extrude_region(k, &frame, outline, -t_s - over, over)
+}
+
+/// Tab `k`'s prism (design 7.1): its outline in T's `(u, z)` plane (`u` along the strip's run
+/// `d` in `p`'s frame, `z` along `n`, from `p`'s frame origin) extruded across the plate from
+/// `w_A` to `w_B` (`faces`, the levels along `w`, a quarter turn left of `d`).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a bad plane, a `d` that is not a finite unit vector, or
+/// faces that are not finite and ordered; those of the extrusion.
+pub fn tab_prism(
+    k: &mut crate::kernel::Kernel,
+    p: Plane,
+    d: crate::math::Vec2,
+    outline: &crate::prism::profile::Region2,
+    faces: (f64, f64),
+) -> Result<crate::topology::Brep> {
+    check_plane(p)?;
+    if !(d.x.is_finite() && d.y.is_finite() && (d.x.hypot(d.y) - 1.0).abs() <= 1e-9) {
+        return Err(invalid("the strip's direction is not unit"));
+    }
+    let (wa, wb) = faces;
+    if !(wa.is_finite() && wb.is_finite() && wa < wb) {
+        return Err(invalid("the tab plate's faces must be finite and ordered"));
+    }
+    let pf = frame_of(p)?;
+    let [xx, xy, xz] = pf.x_axis;
+    let [yx, yy, yz] = pf.y_axis;
+    let u = Vec3::new(xx, xy, xz) * d.x + Vec3::new(yx, yy, yz) * d.y;
+    let n = p.normal;
+    // The frame (u, n) has normal u × n = −w, so w ∈ [w_A, w_B] is the level span [−w_B, −w_A].
+    let frame = crate::eval::Frame {
+        origin: pf.origin,
+        x_axis: [u.x, u.y, u.z],
+        y_axis: [n.x, n.y, n.z],
+    };
+    crate::prism::extrude::extrude_region(k, &frame, outline, -wb, -wa)
+}
+
 /// The touch level of T's first planar face within `tol` of `p` ([`touch_offset`]).
 fn first_touch(t_faces: &[FaceRead], p: Plane, tol: f64) -> Result<Option<f64>> {
     for q in t_faces.iter().filter_map(|f| f.plane) {
