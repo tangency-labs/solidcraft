@@ -106,10 +106,11 @@
 //!   still a touch for a B-rep at that tolerance: `FaceIntersect` makes it one
 //!   (`topology::face::p3`). No input-driven recursion.
 //! - **Found spheres keep the tested NURB** (WR-493, the SolidCraft fork's
-//!   tangency-labs/smlib@7ea6a96): `IsNurbSurfaceSphere` tests the half meridian within
-//!   `180 + 360 * SM_EFF_ZERO` degrees (upstream `180 + SM_EFF_ZERO`) and the sphere it
-//!   finds keeps the tested NURB (`SetFromGwNurb`), its sweep interval the polar
-//!   curve's (#2073). Upstream keeps the NURB made from the fitted circles.
+//!   tangency-labs/smlib@7ea6a96): the sphere `IsNurbSurfaceSphere` finds keeps the
+//!   tested NURB (`SetFromGwNurb`), its sweep interval the polar curve's (#2073).
+//!   Upstream keeps the NURB made from the fitted circles. The fork also widens the
+//!   half-meridian test to `180 + 360 * SM_EFF_ZERO` degrees; that is not taken, since
+//!   the angles' rounding (far spheres, below) already covers it and no more.
 //! - **Far spheres** (#3131, by default): `IsNurbSurfaceSphere` and
 //!   `RebuildSTEPFromNURBParameters` add to their fixed half-meridian tolerances, and
 //!   `IsNurbSurfaceSphere` to its generator's STEP interval test, the angles' rounding at
@@ -2063,10 +2064,9 @@ impl Sphere {
     /// domain of `test` (through [`Self::reparameterize`]). `None` when `test` is not
     /// a sphere.
     ///
-    /// The half turn is tested within `180 + 360 * SM_EFF_ZERO` degrees and the sphere
-    /// then keeps a copy of `test`'s NURB, its analytic data rebuilt from it
-    /// (`SetFromGwNurb`; WR-493: upstream tests `180 + SM_EFF_ZERO` and keeps the NURB
-    /// made from the fitted circles). Not upstream: the half-meridian test, and
+    /// The half turn is tested within `180 + SM_EFF_ZERO` degrees, as upstream, and the
+    /// sphere then keeps a copy of `test`'s NURB, its analytic data rebuilt from it
+    /// (`SetFromGwNurb`; WR-493: upstream keeps the NURB made from the fitted circles). Not upstream: the half-meridian test, and
     /// the test of the generator's STEP interval against the sphere's (within `SM_EFF_ZERO`
     /// upstream), also allow the angles' rounding at the points' size,
     /// [`meridian_rounding`] of the corner points' size and the circle's radius: `4
@@ -2143,9 +2143,10 @@ impl Sphere {
         // see if we have a U or a V oriented sphere
         let angles_u = iso_u.angles.unwrap_or(Extent1d::new());
         let angles_v = iso_v.angles.unwrap_or(Extent1d::new());
-        // not upstream (WR-493; tangency-labs/smlib@7ea6a96): the half-meridian
-        // tolerance compensates for degrees, as RebuildSTEPFromNURBParameters [B279]
-        let half_meridian_tol = 360.0 * EFF_ZERO;
+        // upstream's half-meridian tolerance. The fork (WR-493, tangency-labs/smlib@7ea6a96)
+        // widens it to `360 * SM_EFF_ZERO` degrees; the angles' rounding below already
+        // covers what that compensated for, and no more (`far_sphere_recognised`).
+        let half_meridian_tol = EFF_ZERO;
         // not upstream: the angles' rounding at the points' size (`meridian_rounding`)
         let corners = min_pnt.max_dimension().max(max_pnt.max_dimension());
         let (p, q) = (test.degree(SurfParamType::U), test.degree(SurfParamType::V));
