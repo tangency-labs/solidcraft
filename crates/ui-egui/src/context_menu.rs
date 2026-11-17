@@ -1759,7 +1759,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
-            let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
+            let default_name = crate::export_name::default_for_bodies(app, &bodies);
+            let name = crate::export_name::offered(app, body, &default_name);
             app.pick_save_command(
                 &format!("{name}.step"),
                 &["step", "stp", "igs", "stl", "3mf", "obj", "glb"],

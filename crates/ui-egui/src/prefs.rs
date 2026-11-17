@@ -1709,7 +1709,8 @@ preference_settings! {
     personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
     /// The file name File › Export and Save As Mesh offer: `{design}` and `{body}` stand for the
     /// design's and the exported body's names (`export_name`). Empty: each export offers the name
-    /// it did before (the design's, or the first body's for a mesh).
+    /// it needs: the design name for the whole design, the body name for a subset. The `{body}`
+    /// template keeps the earlier body-first naming for mesh exports.
     export_name: String = String::new(), PAGE_DESIGN;
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,

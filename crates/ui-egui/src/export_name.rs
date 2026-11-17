@@ -1,7 +1,7 @@
 //! The file name an export offers in the save dialog, from the Export file name preference: a
 //! template where `{design}` stands for the design's name, `{body}` for the exported body's, and
 //! `{project}`, `{part_number}`, `{revision}` and the other Design Properties for their values.
-//! An empty template keeps the name each export offered before the preference existed.
+//! An empty template uses the export's default name; `{body}` chooses the body explicitly.
 
 use solidcraft_engine::doc::Metadata;
 use solidcraft_engine::doc::metadata::{Owner, keys};
@@ -76,9 +76,22 @@ fn is_windows_device(name: &str) -> bool {
     WINDOWS_DEVICES.iter().any(|device| device.eq_ignore_ascii_case(base))
 }
 
+/// The default for an export of `bodies`: use the design name when the selection holds
+/// the entire design (including a single-body part). A subset of a multi-body design keeps
+/// the first exported body's name. The `{body}` template restores that earlier choice.
+pub(crate) fn default_for_bodies(app: &crate::SolveApp, bodies: &[String]) -> String {
+    let all = crate::open_meshing::session_world(&app.session);
+    if !bodies.is_empty() && all.bodies.len() == bodies.len()
+        && all.bodies.iter().all(|body| bodies.contains(&body.name))
+    {
+        return app.session.doc.name.clone();
+    }
+    bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone())
+}
+
 /// The file name, without extension, that an export of `body` from the open design offers, from
 /// the Export file name preference. Every place that asks where to export a design or its bodies
-/// takes its name from here; `legacy` is the name it offered before the preference existed.
+/// takes its name from here; `legacy` is the export's suggested name with no template.
 pub(crate) fn offered(app: &crate::SolveApp, body: Option<&str>, legacy: &str) -> String {
     let names = Names { design: &app.session.doc.name, body, metadata: &app.session.doc.metadata };
     stem(&app.preferences.export_name, &names, legacy)
