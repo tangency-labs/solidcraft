@@ -27,6 +27,9 @@
 //! Not upstream (WR-584, fork tangency-labs/smlib@69c5198): the closure test searches
 //! from the face use and its mate at once ([`tr::closure_traversal_from_both_sides`]):
 //! the same answer without marks, where upstream walks the shell from one side.
+//! Not upstream (WR-18287): after the split the inner shell, the side of the closed
+//! boundary that encloses its region, is put first in its region's list; upstream leaves
+//! the old region's list as it was, a void's shell possibly ahead of it.
 //! `MakeFaceTopology`: the caller's [`Marks`] hold the objects' mark values (the
 //! `SmNewMarkAndLock` block claims and releases a new mark, also on error). New objects
 //! get their `SmTopology` record in the [`NotifyEnv`] under its identity, which also
@@ -1649,6 +1652,21 @@ fn split_closed(
     if shells.len() > 1 {
         let rays = split_link(shells_for_rays)?;
         nest_shells(k, brep, &query, &split, rays, &shells)?;
+    }
+
+    // Not upstream (WR-18287): the inner shell's region lies inside the split's closed
+    // boundary, so the inner shell encloses that region's other shells and comes first
+    // (`SmBrep::AssertValid` test 12). Upstream leaves the old region's list as it was, where
+    // a shell that stayed in the region, such as a void's, can come first.
+    if let Some(rays) = shells_for_rays {
+        let region = split_link(brep.shell(rays.inner)?.region)?;
+        let list = &mut brep.region_mut(region)?.shells;
+        if let Some(at) = list.iter().position(|&s| s == rays.inner) {
+            // SmRegion::SetList(InnerShell): the circular list now starts at it
+            if let (Some(tail), Some(head)) = (list.get(at..), list.get(..at)) {
+                *list = tail.iter().chain(head).copied().collect();
+            }
+        }
     }
 
     remove_empty_split_objects(k, brep, env, old_shell, new_shell)
