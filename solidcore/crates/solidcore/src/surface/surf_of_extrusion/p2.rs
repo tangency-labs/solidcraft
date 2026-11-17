@@ -69,6 +69,12 @@
 //!   and types already added, with no more intersections needed (upstream clears the
 //!   flag before its first failure). [`SolidError::Unported`] and
 //!   [`SolidError::InvalidInput`] (an input upstream would not survive) propagate.
+//! - **Coincident patch (not upstream).** `IntersectWithPlane` hands a generator lying
+//!   in the plane over a range to the general intersection, whose answer then depends
+//!   on its tolerance. Here the patch's boundary is the answer (typed
+//!   `RegionBoundary`, cut to the plane domain; `plane_patch`), when a control-net
+//!   certificate shows the patch in the plane; else the general intersection as
+//!   upstream.
 //! - **Debug code.** The `SM_DEBUG_CODE` drawing and dumps are omitted.
 
 use crate::curve::curve::p7::PropertyAnalysisOptions;
@@ -106,6 +112,7 @@ use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 use super::p1::{
     gen_base, gen_with_out_of_bounds, intersect_generators, CurveOrientType, SurfOfExtrusion,
 };
+use super::plane_patch::{coincident_patch, PatchInputs};
 
 const OP_PLANE: &str = "surface::surf_of_extrusion::p2::SurfOfExtrusion::intersect_with_plane";
 const OP_CYL: &str = "surface::surf_of_extrusion::p2::SurfOfExtrusion::intersect_with_cylinder";
@@ -467,7 +474,11 @@ impl SurfOfExtrusion {
     ///   shorter than the tolerance), touching, tangent (generator tangent within 2
     ///   degrees of the plane) or crossing; of close tangent points, and of close
     ///   points at the two ends of a closed generator, only the better solution is
-    ///   kept. A range solution (generator in the plane) needs more.
+    ///   kept. A range solution (generator in the plane over a range) is a coincident
+    ///   patch: its boundary curves typed `RegionBoundary` (degenerate ones
+    ///   `Touching`), cut to the plane domain, after the directrices of the point
+    ///   solutions outside the ranges. When the patch fails its in-plane certificate,
+    ///   the general intersection is needed (as upstream for every range).
     /// * Otherwise the general intersection is needed.
     ///
     /// # Errors
@@ -774,18 +785,61 @@ impl SurfOfExtrusion {
                 .solutions;
             let sols = solutions.as_slice();
 
-            // for every SweptCurve/Plane intersection
-            if sols
-                .iter()
-                .any(|s| s.solution_type == SolutionType::RangeOfValues)
-            {
-                // Some Surf/Surf coincidence - handle it at a higher level
-                out.needs_more_intersections = true;
-                return Ok(out);
-            }
-
-            // arrive here when all solutions are PointSolutions
             let is_closed = gen.is_closed(k, &gen_curve_nurb_ivl, 0.0)?;
+
+            // for every SweptCurve/Plane intersection: a range is a Surf/Surf
+            // coincidence. Not upstream (which hands it to the general intersection,
+            // whose answer depends on its tolerance): the coincident patch's boundary,
+            // when certified in the plane (else the general intersection as upstream).
+            let first_param = |p: &[f64]| p.first().copied().unwrap_or(f64::NAN);
+            let ranges: Vec<(f64, f64)> = sols
+                .iter()
+                .filter(|s| s.solution_type == SolutionType::RangeOfValues)
+                .map(|s| {
+                    (
+                        first_param(&s.start.parameters),
+                        first_param(&s.end.parameters),
+                    )
+                })
+                .collect();
+            let mut patch = Vec::new();
+            if !ranges.is_empty() {
+                let inputs = PatchInputs {
+                    gen,
+                    extrusion_vec: self.extrusion_vec,
+                    gen_ivl: gen_curve_nurb_ivl,
+                    v_ivl: if self.swap_uv {
+                        uv_domain.u_interval()
+                    } else {
+                        uv_domain.v_interval()
+                    },
+                    is_closed,
+                    plane,
+                    plane_domain: *other_uv_domain,
+                    tol,
+                };
+                let Some(p) = coincident_patch(k, &inputs, &ranges)? else {
+                    // Some Surf/Surf coincidence - handle it at a higher level
+                    out.needs_more_intersections = true;
+                    return Ok(out);
+                };
+                patch = p;
+            }
+            // the point solutions outside the ranges (all of them without a range)
+            let in_range = |t: f64| {
+                ranges
+                    .iter()
+                    .any(|&(a, b)| a.min(b) - EFF_ZERO_PARAM <= t && t <= a.max(b) + EFF_ZERO_PARAM)
+            };
+            let sols: Vec<_> = sols
+                .iter()
+                .filter(|s| {
+                    s.solution_type != SolutionType::RangeOfValues
+                        && !in_range(first_param(&s.start.parameters))
+                })
+                .collect();
+
+            // arrive here for the PointSolutions
 
             // for every SweptCurve/Plane point intersection - build, trim and if
             // nonNULL, output a line
@@ -910,6 +964,12 @@ impl SurfOfExtrusion {
                 };
                 out.curves_3d.push(Curve::from(crv));
                 out.curve_types.push(curve_type);
+            }
+
+            // the coincident patches' boundaries (not upstream)
+            for (c, t) in patch {
+                out.curves_3d.push(c);
+                out.curve_types.push(t);
             }
         } else {
             // this is not a special case intersection:
@@ -1666,6 +1726,191 @@ mod tests {
         assert_eq!(r.curves_3d.len(), r.curve_types.len());
         assert!(r.curve_types.iter().all(|t| *t == TsectCurveType::Crossing));
         assert_eq!(r.surface1_uv_curves.len(), r.curves_3d.len());
+    }
+
+    /// A curve through `pts` (degree 1), or a rational quadratic arc through
+    /// `pts` with middle weight `w`, swept along `e`.
+    fn swept(k: &Kernel, pts: &[(f64, f64, f64)], w: Option<f64>, e: Vec3) -> SurfOfExtrusion {
+        let pw: Vec<CPoint> = pts
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, y, z))| {
+                match w {
+                    // homogeneous coordinates, end weights 1
+                    Some(w) => {
+                        let wi = if i == 1 { w } else { 1.0 };
+                        CPoint::new(x * wi, y * wi, z * wi, wi)
+                    }
+                    None => CPoint::new(x, y, z, NOW),
+                }
+            })
+            .collect();
+        let cur = if w.is_some() {
+            NurbCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap()
+        } else {
+            let n = pts.len();
+            let mut kv = vec![0.0];
+            kv.extend((0..n).map(|i| i as f64));
+            kv.push((n - 1) as f64);
+            NurbCurve::new(pw, 1, kv).unwrap()
+        };
+        SurfOfExtrusion::create_canonical(k, Curve::from(BSplineCurve::from_nurb(cur, 3, false)), e)
+            .unwrap()
+    }
+
+    /// Checks the coincident patch answer of `s` and the plane `z = 0` over `od`:
+    /// answered, curves in the plane and its domain, closed `RegionBoundary` loops.
+    /// Returns the answer.
+    fn patch_in_xy_plane(k: &Kernel, s: &SurfOfExtrusion, plane: &Plane) -> ExtrusionIntersection {
+        let od = plane.natural_uv_domain();
+        let r = s
+            .intersect_with_plane(k, &s.base().natural_uv_domain(), plane, &od, None)
+            .unwrap();
+        assert!(!r.needs_more_intersections);
+        assert_eq!(r.curve_types.len(), r.curves_3d.len());
+        assert_eq!(r.deviations.len(), r.curves_3d.len());
+        assert!(r.curve_types.contains(&TsectCurveType::RegionBoundary));
+        let mut ends = Vec::new();
+        for (c, t) in r.curves_3d.iter().zip(&r.curve_types) {
+            let ivl = c.natural_interval();
+            for i in 0..=8 {
+                let p = c
+                    .evaluate(
+                        k,
+                        ivl.min() + ivl.length() * f64::from(i) / 8.0,
+                        0,
+                        true,
+                        true,
+                    )
+                    .unwrap()[0];
+                let uv = plane.project_point_to_uv_domain(p);
+                if *t == TsectCurveType::RegionBoundary {
+                    assert!(p.z.abs() <= 1e-12, "in the plane: {p:?}");
+                }
+                assert!(
+                    od.u_interval().min() - 1e-12 <= uv.x
+                        && uv.x <= od.u_interval().max() + 1e-12
+                        && od.v_interval().min() - 1e-12 <= uv.y
+                        && uv.y <= od.v_interval().max() + 1e-12,
+                    "inside the plane's domain: {p:?}"
+                );
+            }
+            if *t == TsectCurveType::RegionBoundary {
+                for t in [ivl.min(), ivl.max()] {
+                    ends.push(c.evaluate(k, t, 0, true, true).unwrap()[0]);
+                }
+            }
+        }
+        for (i, p) in ends.iter().enumerate() {
+            let met = ends
+                .iter()
+                .enumerate()
+                .any(|(j, q)| j != i && p.distance(*q) <= 1e-12);
+            assert!(met, "open boundary end {p:?}");
+        }
+        r
+    }
+
+    /// A bounded plane covering part of an in-plane extrusion: the boundary is cut
+    /// by the plane's domain, whose side `x = 0.5` closes it.
+    #[test]
+    fn extrusion_in_a_bounded_plane_gives_the_clipped_patch() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[(0.0, 0.0, 0.0), (1.0, 0.5, 0.0), (2.0, 0.0, 0.0)],
+            None,
+            Vec3::Y,
+        );
+        let dom = Extent2d::from_bounds(0.5, -5.0, 5.0, 5.0);
+        let mut plane = Plane::new(
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            crate::geom::vector2d::Vec2::new(1.0, 1.0),
+            &dom,
+        );
+        plane.make_nurb().unwrap();
+        let r = patch_in_xy_plane(&k, &s, &plane);
+        let on_side = r.curves_3d.iter().any(|c| {
+            let ivl = c.natural_interval();
+            let a = c.evaluate(&k, ivl.min(), 0, true, true).unwrap()[0];
+            let b = c.evaluate(&k, ivl.max(), 0, true, true).unwrap()[0];
+            (a.x - 0.5).abs() <= 1e-12 && (b.x - 0.5).abs() <= 1e-12 && a.distance(b) > 0.1
+        });
+        assert!(on_side, "the domain side closes the clipped patch");
+    }
+
+    /// A generator part in the plane and part crossing it: the patch for the part,
+    /// and the crossing's directrix outside it as before.
+    #[test]
+    fn partly_coincident_generator_keeps_its_crossing_directrix() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 0.0, 1.0),
+                (2.0, 0.0, -1.0),
+            ],
+            None,
+            Vec3::Y,
+        );
+        let plane = Plane::from_normal(Point3::ZERO, Vec3::Z);
+        let r = patch_in_xy_plane(&k, &s, &plane);
+        let crossing = r
+            .curves_3d
+            .iter()
+            .zip(&r.curve_types)
+            .filter(|(_, t)| **t != TsectCurveType::RegionBoundary)
+            .any(|(c, _)| {
+                let ivl = c.natural_interval();
+                let a = c.evaluate(&k, ivl.min(), 0, true, true).unwrap()[0];
+                (a.x - 1.5).abs() <= 1e-9 && a.z.abs() <= 1e-12
+            });
+        assert!(crossing, "the directrix at x = 1.5: {:?}", r.curve_types);
+    }
+
+    /// A rational (circular) profile in the plane: the certificate takes the
+    /// weights, and the patch is answered.
+    #[test]
+    fn rational_profile_in_the_plane_gives_its_patch() {
+        let k = k();
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let s = swept(
+            &k,
+            &[(1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)],
+            Some(w),
+            Vec3::new(2.0, 0.0, 0.0),
+        );
+        let plane = Plane::from_normal(Point3::ZERO, Vec3::Z);
+        patch_in_xy_plane(&k, &s, &plane);
+    }
+
+    /// A profile 1e-9 off the plane (within the analysis tolerance, so a range,
+    /// but not within the certificate's bound): the general intersection, as before.
+    #[test]
+    fn uncertified_range_falls_back_to_the_general_intersection() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[(0.0, 0.0, 0.0), (1.0, 0.5, 1e-9), (2.0, 0.0, 0.0)],
+            None,
+            Vec3::Y,
+        );
+        let plane = Plane::from_normal(Point3::ZERO, Vec3::Z);
+        let r = s
+            .intersect_with_plane(
+                &k,
+                &s.base().natural_uv_domain(),
+                &plane,
+                &plane.natural_uv_domain(),
+                None,
+            )
+            .unwrap();
+        assert!(r.needs_more_intersections);
+        assert!(r.curves_3d.is_empty());
     }
 
     #[test]

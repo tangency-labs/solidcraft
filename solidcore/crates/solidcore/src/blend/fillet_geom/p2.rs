@@ -1473,6 +1473,13 @@ pub fn srf_srf_intersection_with_context(
                 c3: &mut Vec<Curve>,
                 u1: &mut Vec<Option<Curve>>,
                 u2: &mut Vec<Option<Curve>>| {
+        // A surface of extrusion lying in the plane answers its coincident patch's
+        // boundary; that is no section curve, so this search goes on to the paths
+        // below as it did when the special case asked for more.
+        let r = r.filter(|(_, xs)| {
+            !xs.curve_types
+                .contains(&crate::surface::surface::p2::TsectCurveType::RegionBoundary)
+        });
         if let Some((_, xs)) = r {
             c3.extend(xs.curves_3d);
             if swap {
