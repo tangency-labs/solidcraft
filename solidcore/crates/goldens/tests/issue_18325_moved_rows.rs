@@ -14,7 +14,8 @@
 //! the bits) and main's old golden line (`O`), with the stations the drop quality maxima are
 //! taken over (`DC`/`DU` the edge's 3D curve or the UV line of its `CrvOnSurf`, `DI` the
 //! `drop_iso_curve` stations, `DG` the `surface_curve_max_distance_between` stations, as the
-//! kernel evaluated them) and the blade hub face's surface (`S`).
+//! kernel evaluated them), the blade hub face's surface (`S`) and main's Gauss-Kronrod
+//! decision tapes of the replayed mass faces (`T unit case face len hex`).
 //!
 //! The test replays every listed case through the goldens runner. Each row's vector must
 //! match the new golden bit for bit; every index not listed must equal main's (`M`) bit for
@@ -113,12 +114,32 @@
 //!   nested adaptive Gauss-Kronrod integration of a face's properties along its trims, the
 //!   trims the face's domain sides (every end a domain corner bit for bit). The integrator
 //!   is replayed in floats (bit for bit the row's values, recording each piece's
-//!   accept/split decision) and then over the same partition in outward-rounded intervals
-//!   ([`mass_replay`]): `R` the exact quadrature of that partition on the exact sides (the
-//!   ideal pipeline's value), `E` the enclosure of the kernel's float result (every
-//!   recorded float intermediate checked inside it). Each moved element has `R ⊆ E` and
-//!   `new ∈ E` (at rounding), or new is closer; main's value is asserted in the same `E`
-//!   or farther than new (`label_mass`, `label_api_areas`).
+//!   accept/split decision: the partition), then over the same partition in
+//!   outward-rounded intervals ([`mass_replay`]): `R` exact, `E` the enclosure of the
+//!   kernel's float result (every recorded float intermediate checked inside it). The same
+//!   float replay run against main's kernel reproduced main's row (`M`) bit for bit, and
+//!   its tape is committed (`T`, one line per replayed face). Two certificates:
+//!   - `mass.integrator` (`label_mass`): the new run's tape must equal main's decision for
+//!     decision, so main and the fix integrate over one shared partition, and `R` is the
+//!     exact quadrature of that shared partition on the exact sides (the kernel's rule
+//!     computed exactly: its nodes, weights and partition). `R` is not claimed to be the
+//!     value an exact pipeline would reach: in exact arithmetic some accept/split
+//!     decisions of three `issue1435_multispan_*` rows straddle the threshold (the
+//!     estimate's enclosure contains it), and such a pipeline could partition
+//!     differently. Those rows are certified against the kernel's rule on the shared
+//!     partition.
+//!   - `boolean.api_brep` `more0138` (`label_api_areas`): its new partition is not main's
+//!     (face 0 has one decision fewer), so every decision of the new run is checked in
+//!     exact arithmetic against the kernel's rule (`|K − G| <= accuracy · max(|K|, scale,
+//!     EFF_ZERO)` per component, `K` and `G` enclosed; [`kr_settle`]). An accepted piece
+//!     must be settled; a split piece the exact rule could accept adds the hull of both
+//!     branches. `R` then holds the exact pipeline's value.
+//!
+//!   Each moved element has `R ⊆ E` and `new ∈ E` (at rounding), or new is closer; main's
+//!   value (`M`) is asserted in the same `E` or farther than new. `E`'s absolute width
+//!   tracks `γ · M` (the sums' magnitudes), not `|value|`: its largest width relative to
+//!   `|new|` is on near-cancelling components (`|value|` ~1e-7 against O(1) siblings),
+//!   where the absolute width matches the O(1) entries'.
 //!
 //! Run: `cargo test --profile goldens -p goldens --test issue_18325_moved_rows -- --nocapture`
 //! (prints the table: element classes per unit and kind, the largest `|new − r| / B` of the
@@ -1886,6 +1907,8 @@ struct Data {
     mains: BTreeMap<(String, String), (String, Vec<f64>)>,
     /// `(unit, case)` -> main's committed golden of that key (`O`).
     olds: BTreeMap<(String, String), Value>,
+    /// `(unit, case)` -> main's Gauss-Kronrod decision tape of every replayed face (`T`).
+    tapes: BTreeMap<(String, String), Vec<Vec<bool>>>,
     /// The blade hub face's surface and domain.
     blade: Option<(Srf, [f64; 4])>,
 }
@@ -1932,6 +1955,19 @@ fn srf(s: &str) -> (Srf, [f64; 4]) {
         v: fs(p[3]),
     };
     (s, [d[0], d[1], d[2], d[3]])
+}
+
+/// A `T` line's tape: `len` decisions packed most significant bit first (`1` accept, `0`
+/// split) in hex, the padding bits `0`.
+fn tape(len: usize, hex: &str) -> Vec<bool> {
+    assert_eq!(hex.len(), len.div_ceil(8) * 2, "T length");
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .collect();
+    let bit = |i: usize| bytes[i / 8] >> (7 - i % 8) & 1 == 1;
+    assert!((len..bytes.len() * 8).all(|i| !bit(i)), "T padding");
+    (0..len).map(bit).collect()
 }
 
 fn data() -> Data {
@@ -1984,6 +2020,14 @@ fn data() -> Data {
                     (c[1].to_owned(), c[2].to_owned()),
                     serde_json::from_str(c[4]).unwrap(),
                 );
+            }
+            "T" => {
+                let faces = d
+                    .tapes
+                    .entry((c[1].to_owned(), c[2].to_owned()))
+                    .or_default();
+                assert_eq!(c[3].parse::<usize>().unwrap(), faces.len(), "T face order");
+                faces.push(tape(c[4].parse().unwrap(), c[5]));
             }
             "S" => d.blade = Some(srf(c[2])),
             k => panic!("unknown line kind {k}"),
@@ -2345,12 +2389,16 @@ fn certificates(
         label_rail_eu(case, v, &mut out);
         return out;
     }
-    if unit == "mass.integrator" {
-        label_mass(case, v, main, &mut out);
-        return out;
-    }
-    if unit == "boolean.api_brep" {
-        label_api_areas(case, v, main, &mut out);
+    if unit == "mass.integrator" || unit == "boolean.api_brep" {
+        let tapes = d
+            .tapes
+            .get(&(unit.to_owned(), name.to_owned()))
+            .unwrap_or_else(|| panic!("{name}: no T lines (main's partition)"));
+        if unit == "mass.integrator" {
+            label_mass(case, v, main, tapes, &mut out);
+        } else {
+            label_api_areas(case, v, main, tapes, &mut out);
+        }
         return out;
     }
     let dom = if let Some(x) = inputs["brep"].get("dom") {
@@ -3496,6 +3544,140 @@ fn kr_iv<F>(
     }
 }
 
+/// The kernel's accept rule for the exact decision check of [`kr_settle`]: the rule's
+/// `accuracy` (the outer and the inner integrals both run at `accuracy / 10`), the
+/// per-component `scale`, and the count of pieces the check left unsettled.
+struct Settle {
+    accuracy: f64,
+    scale: Vec<f64>,
+    unsettled: std::cell::Cell<usize>,
+}
+
+/// [`kr_iv`] in exact arithmetic (not `round`), every tape decision checked against the
+/// kernel's rule on the exact values: a piece is accepted when every component has
+/// `|K − G| <= accuracy · max(|K|, scale, EFF_ZERO)`. With `K`, `G` enclosed:
+/// - an accepted piece must be settled (no component can exceed its threshold), else the
+///   exact pipeline could split it and its branch is not on the tape: the test fails;
+/// - a split piece settled as a split adds its halves; one the exact rule could accept
+///   (unsettled, or settled the other way) adds the hull of both branches, its halves'
+///   sum and its own `K`, so `R` holds the exact pipeline's value whichever way it goes.
+///
+/// The same nodes, sums and order as [`kr_iv`] (halves left then right, the tape's order);
+/// the recursion is bounded by the kernel's depth (48), asserted.
+#[allow(clippy::too_many_arguments)]
+fn kr_settle<F>(
+    rule: Rule,
+    lo: Iv,
+    hi: Iv,
+    settle: &Settle,
+    y: &mut [Iv],
+    tape: &[bool],
+    pos: &mut usize,
+    f: &mut F,
+    depth: u32,
+) where
+    F: FnMut(Iv, &mut [Iv], &mut usize),
+{
+    use solidcore::math::EFF_ZERO;
+    assert!(
+        depth <= 48,
+        "the replay bisects past the kernel's depth bound"
+    );
+    let (nodes, kw, gw) = rule;
+    let n = y.len();
+    let zero = Iv::p(0.0);
+    let mid = lo.add(hi).mul(Iv::p(0.5));
+    let half = hi.sub(lo).mul(Iv::p(0.5));
+    let mut kronrod = vec![zero; n];
+    let mut gauss = vec![zero; n];
+    let mut centre = vec![zero; n];
+    f(mid, &mut centre, pos);
+    for (i, &x) in nodes.iter().enumerate().skip(1) {
+        for side in [-1.0, 1.0] {
+            let mut dy = vec![zero; n];
+            let at = mid.add(Iv::p(side * x).mul(half));
+            f(at, &mut dy, pos);
+            for (((kv, gv), d), c) in kronrod.iter_mut().zip(&mut gauss).zip(&dy).zip(&centre) {
+                let off = d.sub(*c);
+                *kv = kv.add(Iv::p(kw[i]).mul(off));
+                *gv = gv.add(Iv::p(gw[i]).mul(off));
+            }
+        }
+    }
+    let whole: Vec<Iv> = kronrod
+        .iter()
+        .zip(&centre)
+        .map(|(kv, c)| half.mul(Iv::p(2.0).mul(*c).add(*kv)))
+        .collect();
+    // can the exact rule accept (no component surely over), can it split (one possibly over)
+    let mut can_accept = true;
+    let mut can_split = false;
+    for (i, (k, gv)) in whole.iter().zip(&gauss).enumerate() {
+        let g = half.mul(Iv::p(2.0).mul(centre[i]).add(*gv));
+        let est = k.sub(g).abs();
+        let ka = k.abs();
+        let sc = settle.scale.get(i).copied().unwrap_or(0.0).max(EFF_ZERO);
+        let thr = Iv {
+            lo: ka.lo.max(sc),
+            hi: ka.hi.max(sc),
+        }
+        .mul(Iv::p(settle.accuracy));
+        if est.lo > thr.hi {
+            can_accept = false;
+        }
+        if est.hi > thr.lo {
+            can_split = true;
+        }
+    }
+    let accepted = tape[*pos];
+    *pos += 1;
+    let part = if accepted {
+        assert!(
+            !can_split,
+            "an accepted piece the exact rule could split (its branch is not on the tape)"
+        );
+        whole
+    } else {
+        let mut halves = vec![zero; n];
+        kr_settle(rule, lo, mid, settle, &mut halves, tape, pos, f, depth + 1);
+        kr_settle(rule, mid, hi, settle, &mut halves, tape, pos, f, depth + 1);
+        if can_accept {
+            settle.unsettled.set(settle.unsettled.get() + 1);
+            halves
+                .iter()
+                .zip(&whole)
+                .map(|(h, w)| Iv::hull(*h, *w))
+                .collect()
+        } else {
+            halves
+        }
+    };
+    for (t, p) in y.iter_mut().zip(&part) {
+        *t = t.add(*p);
+    }
+}
+
+/// [`kr_settle`] for the exact pass (not `round`) when `settle` is given, else [`kr_iv`].
+#[allow(clippy::too_many_arguments)]
+fn kr_run<F>(
+    rule: Rule,
+    a: Iv,
+    b: Iv,
+    round: bool,
+    settle: Option<&Settle>,
+    y: &mut [Iv],
+    tape: &[bool],
+    pos: &mut usize,
+    mut f: F,
+) where
+    F: FnMut(Iv, &mut [Iv], &mut usize),
+{
+    match settle {
+        Some(s) if !round => kr_settle(rule, a, b, s, y, tape, pos, &mut f, 0),
+        _ => kr_iv(rule, a, b, round, y, tape, pos, f),
+    }
+}
+
 /// The kernel's float `S`, `S_u`, `S_v` of a rational net at `(u, v)` enclosed operation for
 /// operation as `first_derivs_span` (`nurbs/srf_nurb.rs`) computes them (`round`), or the
 /// exact values (not `round`): the basis values and first derivatives from `univariate_first`
@@ -3682,10 +3864,19 @@ struct Side {
 
 impl Side {
     /// `C(t)` and `C'(t)` over `t`, enclosed: exact (not `round`), or the kernel's float
-    /// `evaluate` (`round`: the exact values widened by `γ_16 Σ|terms|`, more than the
-    /// degree-1 chains of the basis (a level: `left`/`right`, their sum, the quotient, the
-    /// product and the sum) and the derivative (the divisor, the reciprocal, the product,
-    /// the factor `p`, the sum) and the weighted sums).
+    /// `evaluate` (`round`: the exact values widened by `γ_16 Σ|terms|`). `16` over-counts
+    /// the degree-1 chain of `BSplineCurve::evaluate` (`crv_derivs_n` in
+    /// `nurbs/nurbs_crv.rs`: `basis_derivs_into`, then `Σ b P` on the Euclidean points),
+    /// counted relative to the terms as [`Crv::kernel`] counts:
+    /// - the value, `9`: the basis level `5` (`left`/`right` 1, their sum `den` 1, the
+    ///   quotient `ll / den` 1, the product by `ndu` 1, the sum `saved + …` 1), the
+    ///   weighted sum `3` (the product `b · P` 1, the running sum of the `p + 1 = 2` terms
+    ///   2), the Euclidean point `P = Pw / w` `1` (here `w = 1`, exact, counted anyway);
+    /// - the derivative, `10`: the stored divisor `den` `2` (`left`/`right` and their sum),
+    ///   the quotient `a / den` 1, the product by `ndu` 1, the sum of the two terms 1, the
+    ///   factor `p` 1, then the weighted sum `3` and the Euclidean point `1`.
+    ///
+    /// Every trim value the kernel computed is also checked inside this enclosure.
     fn eval(&self, t: Iv, round: bool) -> ([Iv; 2], [Iv; 2]) {
         let (t0, t1) = (Iv::p(self.t[0]), Iv::p(self.t[1]));
         let dt = t1.sub(t0);
@@ -3713,13 +3904,18 @@ impl Side {
 }
 
 /// The kernel's float result of `boundary_properties` (unbanded, thickness 0) over the
-/// rectangle face, replayed, with the decision tape; and the same partition in intervals,
-/// `(R, E)`: `R` the exact sums over the exact trims, `E` the enclosure of the kernel's float
-/// sums. Each output as `[area, volume, moments (8 × 3)]`.
+/// rectangle face, replayed, with the decision tape (the partition); and, `intervals`, the
+/// same partition in intervals, `(R, E)`: `R` the exact sums of that partition over the
+/// exact trims, `E` the enclosure of the kernel's float sums (empty without `intervals`).
+/// Each output as `[area, volume, moments (8 × 3)]`.
 struct MassReplay {
     float: Vec<f64>,
     r: Vec<Iv>,
     e: Vec<Iv>,
+    tape: Vec<bool>,
+    /// With `settle`: the split pieces whose exact decision is not settled as a split
+    /// (their `R` the hull of both branches, [`kr_settle`]).
+    unsettled: usize,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3734,6 +3930,8 @@ fn mass_replay(
     origin: [f64; 3],
     estimated_area: f64,
     flags: u64,
+    intervals: bool,
+    settle: bool,
 ) -> MassReplay {
     use solidcore::geom::extent3d::Extent3d;
     use solidcore::math::{Vec3, EFF_ZERO, EFF_ZERO_SQ};
@@ -3905,8 +4103,23 @@ fn mass_replay(
         out
     };
     let float = assemble(&y);
+    if !intervals {
+        return MassReplay {
+            float,
+            r: Vec::new(),
+            e: Vec::new(),
+            tape,
+            unsettled: 0,
+        };
+    }
 
     // ---- intervals over the same partition ----
+    let settler = Settle {
+        accuracy: iso_acc,
+        scale: scale.clone(),
+        unsettled: std::cell::Cell::new(0),
+    };
+    let settle = settle.then_some(&settler);
     let interval = |round: bool| -> Vec<Iv> {
         let r = |x: Iv| rnd(x, U, round);
         let mut pos = 0usize;
@@ -3923,11 +4136,12 @@ fn mass_replay(
                     continue;
                 }
                 let mut span_y = vec![Iv::p(0.0); n];
-                kr_iv(
+                kr_run(
                     KR7,
                     Iv::p(a),
                     Iv::p(b),
                     round,
+                    settle,
                     &mut span_y,
                     &tape,
                     &mut pos,
@@ -3974,7 +4188,7 @@ fn mass_replay(
                         let mut ends: Vec<Iv> = knots.iter().map(|&x| Iv::p(x)).collect();
                         ends.push(p0[1]);
                         for v1 in ends {
-                            kr_iv(KR15, v0, v1, round, dy, &tape, pos, |v, g, _| {
+                            kr_run(KR15, v0, v1, round, settle, dy, &tape, pos, |v, g, _| {
                                 let iso = iso_iv(&srf, &lay, origin, p0[0], v, round);
                                 if round {
                                     for (c, x) in iso.iter().enumerate() {
@@ -4024,10 +4238,13 @@ fn mass_replay(
         }
         out
     };
+    let (r, e) = (interval(false), interval(true));
     MassReplay {
         float,
-        r: interval(false),
-        e: interval(true),
+        r,
+        e,
+        tape,
+        unsettled: settler.unsettled.get(),
     }
 }
 
@@ -4070,9 +4287,11 @@ impl Srf {
 /// A face's precise properties as `face_properties` integrates them, replayed
 /// ([`mass_replay`]) with the kernel's own preparation in its order: the face's box (the
 /// estimated area `d²/100` and, `origin` `None`, the box middle as the origin), the oriented
-/// trims, the box again (the scale's origin distance). The trims must be the face's domain
-/// sides, every end a corner of `uv_domain` bit for bit (the exact sides). Returns the
-/// replay and the origin.
+/// trims, the box again (the scale's origin distance). `exact`: the trims must be the face's
+/// domain sides, every end a corner of `uv_domain` bit for bit (the exact sides), and the
+/// partition is replayed in intervals too; otherwise (the main-side tape dump, whose trims
+/// need not be exact) the floats and the tape only. Returns the replay and the origin.
+#[allow(clippy::too_many_arguments)]
 fn face_replay(
     k: &Kernel,
     b: &mut Brep,
@@ -4081,6 +4300,8 @@ fn face_replay(
     origin: Option<[f64; 3]>,
     flags: u64,
     accuracy: f64,
+    exact: bool,
+    settle: bool,
 ) -> (MassReplay, [f64; 3]) {
     use solidcore::geom::attribute::ObjectKey;
     use solidcore::geom::object::ObjectRef;
@@ -4113,7 +4334,7 @@ fn face_replay(
             // the exact sides: every end a corner of the domain, bit for bit
             for q in &cr.cps {
                 assert!(
-                    us.contains(&q[0]) && vs.contains(&q[1]),
+                    !exact || (us.contains(&q[0]) && vs.contains(&q[1])),
                     "a trim end off the domain's corners: {q:?}"
                 );
             }
@@ -4134,7 +4355,7 @@ fn face_replay(
     let mid = bbox.mid();
     let origin = origin.unwrap_or([mid.x, mid.y, mid.z]);
     let m = mass_replay(
-        k, &surface, &sides, &fbox, vs[0], same, accuracy, origin, est, flags,
+        k, &surface, &sides, &fbox, vs[0], same, accuracy, origin, est, flags, exact, settle,
     );
     (m, origin)
 }
@@ -4186,13 +4407,23 @@ fn label_replayed(
     );
 }
 
-/// The certificate of a moved `mass.integrator` face row (`issue1435_multispan_*`: the
-/// rational kind-5 face over a rectangle of its domain; the query's own outputs, as the
-/// runner computes them): the integrator's partition replayed in floats, bit for bit the
-/// row's vector, and in intervals over the same partition (the exact trims, the domain's
-/// sides: the reference `R`, the exact quadrature of that partition; and the enclosure `E`
-/// of the kernel's float result).
-fn label_mass(case: &goldens::Case, v: &[f64], main: &[f64], out: &mut BTreeMap<usize, Cert>) {
+/// A replayed `mass.integrator` or `boolean.api_brep` row: the row's outputs from the replayed
+/// properties in floats; with `exact`, their `R` and `E` (empty otherwise); and the decision
+/// tape (the partition) of every replayed face, in the order replayed.
+struct RowReplay {
+    float: Vec<f64>,
+    r: Vec<Iv>,
+    e: Vec<Iv>,
+    tapes: Vec<Vec<bool>>,
+    /// Per replayed face, with the exact decision check ([`kr_settle`]): the split pieces
+    /// whose `R` is the hull of both branches.
+    unsettled: Vec<usize>,
+}
+
+/// A `mass.integrator` face row (`issue1435_multispan_*`: the rational kind-5 face over a
+/// rectangle of its domain) replayed ([`face_replay`]), the query's own outputs as the
+/// runner computes them from the properties.
+fn mass_row_replay(case: &goldens::Case, exact: bool) -> RowReplay {
     use goldens::units::mass_integrator::face_scene;
     use solidcore::topology::face::p2::{PPF_AREA, PPF_AREA_FIRST_MOMENTS};
     let (k, mut b, f, p, query) = face_scene(case).unwrap().expect("a face case");
@@ -4203,49 +4434,60 @@ fn label_mass(case: &goldens::Case, v: &[f64], main: &[f64], out: &mut BTreeMap<
         _ => panic!("query {query}"),
     };
     assert!(query != 0 || p[13] == 0.0, "a thick face");
-    let (m, origin) = face_replay(&k, &mut b, f, same, origin, flags, p[12]);
+    let (m, origin) = face_replay(&k, &mut b, f, same, origin, flags, p[12], exact, false);
+    let a = m.float[0];
     // the query's outputs from the properties
-    let (fl, rr, ee): (Vec<f64>, Vec<Iv>, Vec<Iv>) = match query {
-        0 => (m.float.clone(), m.r.clone(), m.e.clone()),
-        2 | 4 => (
-            vec![m.float[0].abs()],
-            vec![m.r[0].abs()],
-            vec![m.e[0].abs()],
-        ),
+    let float = match query {
+        0 => m.float.clone(),
+        2 | 4 => vec![a.abs()],
         3 => {
             // `origin + m / area`
-            let c = |round: bool, ar: &[Iv]| -> Vec<Iv> {
-                let mut o = vec![ar[0].abs()];
-                for (c, &oc) in origin.iter().enumerate() {
-                    let q = rnd(ar[2 + c].div(ar[0]), U, round);
-                    o.push(rnd(Iv::p(oc).add(q), U, round));
-                }
-                o
-            };
-            let a = m.float[0];
             let mut fo = vec![a.abs()];
             for (c, &oc) in origin.iter().enumerate() {
                 fo.push(oc + m.float[2 + c] / a);
             }
-            (fo, c(false, &m.r), c(true, &m.e))
+            fo
         }
         _ => unreachable!(),
     };
-    label_replayed(&case.name, &fl, &rr, &ee, v, main, out);
+    let (r, e) = if !exact {
+        (Vec::new(), Vec::new())
+    } else {
+        match query {
+            0 => (m.r.clone(), m.e.clone()),
+            2 | 4 => (vec![m.r[0].abs()], vec![m.e[0].abs()]),
+            3 => {
+                let c = |round: bool, ar: &[Iv]| -> Vec<Iv> {
+                    let mut o = vec![ar[0].abs()];
+                    for (c, &oc) in origin.iter().enumerate() {
+                        let q = rnd(ar[2 + c].div(ar[0]), U, round);
+                        o.push(rnd(Iv::p(oc).add(q), U, round));
+                    }
+                    o
+                };
+                (c(false, &m.r), c(true, &m.e))
+            }
+            _ => unreachable!(),
+        }
+    };
+    RowReplay {
+        float,
+        r,
+        e,
+        tapes: vec![m.tape],
+        unsettled: Vec::new(),
+    }
 }
 
-/// The certificate of a moved `boolean.api_brep` areas row (`more0138`, a rotational sweep):
-/// the swept B-rep's face areas as the runner takes them (`face_area` of each face in order,
-/// at `AREA_ACCURACY`, then sorted), with every face whose area moved replayed
-/// ([`face_replay`]) in its place in that order; the others the kernel's.
-fn label_api_areas(case: &goldens::Case, v: &[f64], main: &[f64], out: &mut BTreeMap<usize, Cert>) {
+/// A `boolean.api_brep` areas row (`more0138`, a rotational sweep) replayed: the swept
+/// B-rep's face areas as the runner takes them (`face_area` of each face in order, at
+/// `AREA_ACCURACY`, then sorted), with every face whose area is `v[i]` at a `moved` index
+/// replayed ([`face_replay`]) in its place in that order; the others the kernel's.
+fn api_row_replay(case: &goldens::Case, moved: &[usize], v: &[f64], exact: bool) -> RowReplay {
     use goldens::units::boolean_api_brep::rotational_sweep_scene;
     use solidcore::mass::integrator::properties::face_area;
     use solidcore::topology::face::p2::PPF_AREA;
     const AREA_ACCURACY: f64 = 1e-4;
-    let moved: Vec<usize> = (1..v.len())
-        .filter(|&i| v[i].to_bits() != main[i].to_bits())
-        .collect();
     // which faces: the kernel's areas in the runner's order
     let (k, mut b) = rotational_sweep_scene(case)
         .unwrap()
@@ -4270,25 +4512,126 @@ fn label_api_areas(case: &goldens::Case, v: &[f64], main: &[f64], out: &mut BTre
         .expect("a swept B-rep");
     let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
     let mut rows: Vec<(f64, Iv, Iv)> = Vec::new();
+    let mut tapes = Vec::new();
+    let mut unsettled = Vec::new();
     for (j, &f) in faces.iter().enumerate() {
         if target.contains(&j) {
-            let (m, _) = face_replay(&k, &mut b, f, true, None, PPF_AREA, AREA_ACCURACY);
-            rows.push((m.float[0].abs(), m.r[0].abs(), m.e[0].abs()));
+            let (m, _) = face_replay(
+                &k,
+                &mut b,
+                f,
+                true,
+                None,
+                PPF_AREA,
+                AREA_ACCURACY,
+                exact,
+                true,
+            );
+            unsettled.push(m.unsettled);
+            let a = m.float[0].abs();
+            let (r, e) = if exact {
+                (m.r[0].abs(), m.e[0].abs())
+            } else {
+                (Iv::p(a), Iv::p(a))
+            };
+            rows.push((a, r, e));
+            tapes.push(m.tape);
         } else {
             let a = face_area(&k, &mut b, f, AREA_ACCURACY).unwrap();
             rows.push((a, Iv::p(a), Iv::p(a)));
         }
     }
     rows.sort_by(|x, y| x.0.total_cmp(&y.0));
-    let mut fl = vec![faces.len() as f64];
-    let mut rr = vec![Iv::p(fl[0])];
-    let mut ee = rr.clone();
-    for (a, r, e) in rows {
-        fl.push(a);
-        rr.push(r);
-        ee.push(e);
+    let mut float = vec![faces.len() as f64];
+    let mut r = vec![Iv::p(float[0])];
+    let mut e = r.clone();
+    for (a, ra, ea) in rows {
+        float.push(a);
+        r.push(ra);
+        e.push(ea);
     }
-    label_replayed(&case.name, &fl, &rr, &ee, v, main, out);
+    if !exact {
+        r.clear();
+        e.clear();
+    }
+    RowReplay {
+        float,
+        r,
+        e,
+        tapes,
+        unsettled,
+    }
+}
+
+/// The partition is shared: every replayed face's decision tape equals main's (`T`, from the
+/// same replay run against main's kernel, whose floats reproduced main's row `M` bit for
+/// bit), decision for decision. `R` is then the exact quadrature of that one partition.
+fn assert_same_partition(name: &str, new: &[Vec<bool>], main: &[Vec<bool>]) {
+    assert_eq!(new.len(), main.len(), "{name}: the replayed faces");
+    for (j, (n, m)) in new.iter().zip(main).enumerate() {
+        assert!(
+            n == m,
+            "{name}: face {j}'s partition ({} decisions) is not main's ({} decisions)",
+            n.len(),
+            m.len()
+        );
+    }
+}
+
+/// The certificate of a moved `mass.integrator` face row: the integrator's partition replayed
+/// in floats, bit for bit the row's vector, its decision tape main's (`T`), and in intervals
+/// over that shared partition (the exact trims, the domain's sides: the reference `R`, the
+/// exact quadrature of the partition; and the enclosure `E` of the kernel's float result).
+fn label_mass(
+    case: &goldens::Case,
+    v: &[f64],
+    main: &[f64],
+    tapes: &[Vec<bool>],
+    out: &mut BTreeMap<usize, Cert>,
+) {
+    let rep = mass_row_replay(case, true);
+    assert_same_partition(&case.name, &rep.tapes, tapes);
+    label_replayed(&case.name, &rep.float, &rep.r, &rep.e, v, main, out);
+}
+
+/// The certificate of a moved `boolean.api_brep` areas row ([`api_row_replay`]). Its new
+/// partition is not main's (`T`; printed per face), so `R` does not rest on a shared
+/// partition: the exact pass checks every decision of the new run against the kernel's
+/// rule in exact arithmetic and takes the hull of both branches wherever the exact rule
+/// could accept a piece the float run split ([`kr_settle`]); an accepted piece the exact
+/// rule could split fails the test. `R` then holds the exact pipeline's value of each
+/// replayed face's quadrature.
+fn label_api_areas(
+    case: &goldens::Case,
+    v: &[f64],
+    main: &[f64],
+    tapes: &[Vec<bool>],
+    out: &mut BTreeMap<usize, Cert>,
+) {
+    let moved: Vec<usize> = (1..v.len())
+        .filter(|&i| v[i].to_bits() != main[i].to_bits())
+        .collect();
+    let rep = api_row_replay(case, &moved, v, true);
+    assert_eq!(
+        rep.tapes.len(),
+        tapes.len(),
+        "{}: the replayed faces",
+        case.name
+    );
+    for (j, ((n, m), u)) in rep.tapes.iter().zip(tapes).zip(&rep.unsettled).enumerate() {
+        eprintln!(
+            "settled {}: face {j}: {} decisions (main {}, {}), {u} split piece(s) hulled",
+            case.name,
+            n.len(),
+            m.len(),
+            if n == m {
+                "the same"
+            } else {
+                "a different partition"
+            }
+        );
+    }
+    label_replayed(&case.name, &rep.float, &rep.r, &rep.e, v, main, out);
 }
 
 /// `|new − r| / B` of an at-rounding element.
