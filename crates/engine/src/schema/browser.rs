@@ -962,6 +962,11 @@ fn some_visible<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Visible>, D::E
     Visible::deserialize(d).map(Some)
 }
 
+/// `browser.toggle_planes` and `browser.toggle_reference` take no parameters: an empty object.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserToggleParams {}
+
 /// Show or hide what is in the Browser: name one kind of target (`items`, `joints`, `features`,
 /// `folder`, `tree_folders` or `paths`). Saved with the design and undone like any other
 /// change; the camera is not. With `isolate`, everything else is hidden.
@@ -1602,6 +1607,28 @@ pub struct RedefineSketchParams {
     /// component's own coordinates. Default: world. A named plane or a face takes none.
     #[serde(default)]
     pub frame: Option<PlaneFrame>,
+    /// Not on a face: `true`, `"x"` or `"y"` turns the new plane half way about that in-plane axis
+    /// (as `sketch.create`'s `flip`), `false` keeps the new plane's own side. Default: when the new
+    /// plane faces the other way, it is turned so the sketch keeps facing the way it did and stays
+    /// upright (the reply's `flip` says about which axis).
+    #[serde(default)]
+    pub flip: Option<SketchFlip>,
+}
+
+/// A sketch plane's half turn: `true` or either in-plane axis.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SketchFlip {
+    Flag(bool),
+    Axis(FlipAxis),
+}
+
+/// The in-plane axis a half turn is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FlipAxis {
+    X,
+    Y,
 }
 
 /// How a redefined sketch is attached to its plane: `exact_face` (to a face of a body, which it
@@ -1622,6 +1649,9 @@ pub struct RedefineSketchResult {
     pub sketch: u64,
     /// How it is attached now.
     pub attachment: Option<RedefineAttachment>,
+    /// When the new plane was turned half way: the in-plane axis it was turned about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip: Option<FlipAxis>,
     /// For an explicit plane: the coordinates it was read in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frame: Option<PlaneFrame>,

@@ -177,7 +177,8 @@ key is the argument the plugin receives. The design follows the
 
 - **What it takes.** `accept` lists one or more of `profile`, `edge`, `face`, `body`,
   `sketch_point` and `sketch_curve`. Sketch points and curves are picked with their sketch, because
-  ids repeat from one sketch to the next. The annotation has exactly `version` (1) and `accept`.
+  ids repeat from one sketch to the next. A profile field takes profiles from any number of
+  sketches; the plugin decides what it accepts. The annotation has exactly `version` (1) and `accept`.
   An unknown version or category, or any other keyword on the property (`uniqueItems`, a detailed
   `items` schema), leaves Run off with the note to run the entry from the agent or the CLI.
 - **How many.** `minItems` and `maxItems` are the counts Run checks. With `maxItems: 1` a pick
@@ -198,13 +199,63 @@ key is the argument the plugin receives. The design follows the
   starts with what is selected that it takes. The other fields start empty, so one selection never
   fills two fields. Clicking a field makes it the one that picks; its clear button, its list of
   picks and the hover highlight work as in the native tools. One tool picks at a time: while a
-  native tool is open, clicking a plugin field says to finish or cancel it first.
+  native tool is open, clicking a plugin field says to finish or cancel it first (a sketch tool too).
   Escape and Cancel close the dialog and stop the picking.
 - **References stay true.** The picks belong to the design they were made on. Any change to the
   design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning
   the view or changing the selection does not. Picking runs no plugin code; Run sends the picks
   through the same `plugin.run` request. Programs calling `plugin.run` pass the same references
   themselves; nothing fills them from the selection.
+
+### Icons and pictures
+
+A plugin can ship vector images in its package and name them with `x-solidcraft-icon`, a
+relative path to an `.svg` file inside the package:
+
+```json
+"input_schema": {"type": "object", "x-solidcraft-icon": "icons/seat.svg", "properties": {
+  "series": {"type": "string", "title": "Type", "default": "standard", "oneOf": [
+    {"const": "standard", "title": "Standard", "x-solidcraft-icon": "icons/standard.svg"},
+    {"const": "short", "title": "Short", "x-solidcraft-icon": "icons/short.svg"}
+  ]}}}
+```
+
+- At the top of the schema it is the command's icon: its ribbon button, its rows in the Plugins,
+  File and Help menus, and its dialog's header. Without one the command has the generic plugin icon.
+- On a `oneOf` option it is that option's picture in the dropdown. Pictures show when every option
+  of the choice names one that passed the check below; otherwise the dropdown shows the titles alone.
+- The image is drawn like the app's own icons, and must be one: SolidCraft's icon SVG subset
+  (the check the built-in icons pass, see `crates/look/icons/design/tools/lint_icons.py`).
+  `viewBox="0 0 64 64"`; absolute `M L C Q A Z` paths, circles, groups with a clip or opacity,
+  masks and clip paths. Every colour is one of the icon palette's role colours
+  (`crates/look/icons/design/palette.toml`, the `source` values) or `currentColor`, so the image
+  follows the light and dark themes, the accent and the colour-vision setting as the app's icons do.
+  Text, raster images, `<use>`, links, scripts, styles and any other element or colour are refused.
+- The path uses forward slashes and plain names (letters, digits, `.`, `_`, `-`), ends in `.svg`
+  and stays inside the package: no `..`, no absolute path, no link. A file is at most 64 KiB and a
+  package names at most 64 images. Images are read from the installed package when the plugins are
+  listed; nothing is fetched from the network. A refused or missing image is logged and left out,
+  and the command works as before.
+- Images are not part of the `approval` hash: changing one changes only what is drawn.
+
+### Preview
+
+A command entry that edits the design is previewed the way native tools are: while its dialog's
+fields make parameters, the host runs the entry on a scratch copy of the design and draws what
+it would change in the viewport (new material tinted, removed material as a see-through ghost).
+The dialog has a **Preview** box, on when it opens; with it off, nothing runs until Run.
+
+- The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged and declares
+  nothing new. It runs on a scratch session that is thrown away, so the design, the undo history
+  and the selection never change. The run has none of the plugin's folder or command-group grants,
+  so it reads and writes no file and reaches nothing past the design; a plugin that needs them
+  shows "Preview:" with the refusal under its fields, and Run still runs it with its grants.
+- It runs again only when the parameters or the design change, under the plugin's own fuel,
+  memory and deadline limits, off the window's thread. A run left behind by newer inputs is
+  dropped.
+- The most recently opened dialog on the design is previewed (the one picking in the viewport,
+  when one is). While a native tool is open, its own preview is the one shown. Read entries and
+  importers are not previewed.
 
 ## Versions
 

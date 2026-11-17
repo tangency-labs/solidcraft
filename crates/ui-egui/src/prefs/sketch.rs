@@ -508,6 +508,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (&[ctrl, click], toggle),
             ],
         );
+        #[cfg(target_arch = "wasm32")]
+        check(ui, "pencil_mode", "prefs.pencil_mode", Some("prefs.pencil_mode_tip"), &mut app.preferences.pencil_mode);
         check(ui, "prefer_free_sketch_points", "prefs.sketch.prefer_free_points", None, &mut app.preferences.prefer_free_sketch_points);
         check(
             ui,

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING};
+use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING, PlaneRef};
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr};
@@ -19,7 +19,7 @@ use crate::params::{bad, bool_, expr, str_};
 use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
-    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, Isolated, PlaneFrame, RedefineAttachment,
+    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FlipAxis, Isolated, PlaneFrame, RedefineAttachment,
     RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn,
     ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved,
     VisibilityState,
@@ -37,6 +37,7 @@ const RENAME_GROUP_CONTRACT: TypedContract<BrowserRenameGroupParams> = TypedCont
 const MOVE_CONTRACT: TypedContract<BrowserMoveParams> = TypedContract::new();
 const ORDER_CONTRACT: TypedContract<BrowserOrderParams> = TypedContract::new();
 const VISIBILITY_CONTRACT: TypedContract<BrowserVisibilityParams> = TypedContract::new();
+const TOGGLE_CONTRACT: TypedContract<crate::schema::browser::BrowserToggleParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<BrowserFoldParams> = TypedContract::new();
 const REDEFINE_SKETCH_CONTRACT: TypedContract<RedefineSketchParams> = TypedContract::new();
 const VIEW_SAVE_CONTRACT: TypedContract<ViewSaveParams> = TypedContract::new();
@@ -69,7 +70,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane")
         .contract(&REDEFINE_SKETCH_CONTRACT)
         .output(output_schema_for::<RedefineSketchResult>)
-        .params("sketch: id or name; plane: as sketch.create; frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
+        .params("sketch: id or name; plane: as sketch.create; flip?: bool | \"x\" | \"y\" as sketch.create (not on a face; default: when the new plane faces the other way, it is turned so the sketch keeps facing the way it did and stays upright, and the reply's `flip` says about which axis; false keeps the new plane's own side); frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
     CommandSpec::new("browser.group", "New Group", crate::checked!("browser.group", group))
         .icon("folder")
         .contract(&GROUP_CONTRACT)
@@ -140,6 +141,20 @@ pub static COMMANDS: &[CommandSpec] = &[
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
          or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, o:4/origin, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state; component origin items use o:4/origin/XY etc. in items); \
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (with paths or items of bodies, and visible:true: everything else is hidden, other placements as placements). Saved with the design and undone like any other change (the camera is not)",
+    ),
+    CommandSpec::new("browser.toggle_planes", "Show/Hide Planes", crate::checked!("browser.toggle_planes", toggle_planes))
+        .icon("eye")
+        .contract(&TOGGLE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params(
+        "(no parameters) the origin planes (XY, XZ, YZ) and every construction plane: hidden when any of them shows, shown otherwise;          axes, points and sketches keep their state. Saved with the design and undone like browser.visibility",
+    ),
+    CommandSpec::new("browser.toggle_reference", "Show/Hide Reference Geometry", crate::checked!("browser.toggle_reference", toggle_reference))
+        .icon("eye")
+        .contract(&TOGGLE_CONTRACT)
+        .output(output_schema_for::<BrowserVisibilityResult>)
+        .params(
+        "(no parameters) all reference geometry: the origin (point, axes, planes), every construction plane, axis and point, and every sketch;          hidden when any of it shows, shown otherwise (showing does not show a sketch a feature uses unless it was shown on its own).          Bodies and joints keep their state. Saved with the design and undone like browser.visibility",
     ),
     CommandSpec::new("browser.expand_all", "Expand All", crate::checked!("browser.expand_all", expand_all))
         .icon("folder")
@@ -857,6 +872,99 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, BrowserVisibilityResult { visible, changed: Some(items.len()), isolated: None, visibility, param_warnings: Vec::new() })
 }
 
+/// `browser.toggle_planes`: the origin planes and the construction planes, hidden when any shows.
+fn toggle_planes(s: &mut Session, _: &Value) -> Result<Value> {
+    let mut names: Vec<String> = ["XY", "XZ", "YZ"].iter().map(|n| n.to_string()).collect();
+    names.extend(s.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. })).map(|f| f.name.clone()));
+    toggle_category(s, "browser.toggle_planes", &names, false)
+}
+
+/// `browser.toggle_reference`: the origin, construction geometry and sketches, hidden when any shows.
+fn toggle_reference(s: &mut Session, _: &Value) -> Result<Value> {
+    let mut names: Vec<String> = crate::origins::ITEMS.iter().map(|n| n.to_string()).collect();
+    names.extend(s.doc.features.iter().filter(|f| f.kind.is_construction()).map(|f| f.name.clone()));
+    toggle_category(s, "browser.toggle_reference", &names, true)
+}
+
+/// Hide the origin and construction items `names` (and, with `sketches`, every sketch) when any
+/// of them shows; otherwise show them all, the origin folder too. A sketch a feature uses comes
+/// back only if it was shown on its own, as before it was hidden.
+///
+/// Showing also shows the Construction folder (and, with `sketches`, the Sketches folder) and
+/// their groups, at every placement, since an item in a hidden folder stays hidden. Another
+/// construction item the Construction folder was hiding (an axis, for the planes) is hidden on
+/// its own instead, so it looks as it did.
+fn toggle_category(s: &mut Session, cmd: &str, names: &[String], sketches: bool) -> Result<Value> {
+    let sketch_ids: Vec<u64> =
+        if sketches { s.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).collect() } else { Vec::new() };
+    let origin_shown = s.visibility.origin_hidden != Some(true);
+    let item_shown = |n: &String| {
+        if crate::origins::ITEMS.contains(&n.as_str()) { origin_shown && !s.visibility.hidden_origin.contains(n) } else { s.construction_visible(n) }
+    };
+    let any_shown = names.iter().any(item_shown) || sketch_ids.iter().any(|id| crate::view::sketch_shown(s, *id));
+    let visible = !any_shown;
+    let (folder_keys, keep_hidden) = if visible { category_folders(s, names, sketches) } else { (Vec::new(), Vec::new()) };
+    let v = &mut s.visibility;
+    for n in names {
+        if visible {
+            v.hidden_origin.retain(|x| x != n);
+        } else if !v.hidden_origin.contains(n) {
+            v.hidden_origin.push(n.clone());
+        }
+    }
+    for id in &sketch_ids {
+        if visible {
+            v.hidden_sketches.retain(|x| x != id);
+        } else if !v.hidden_sketches.contains(id) {
+            v.hidden_sketches.push(*id);
+        }
+    }
+    v.hidden_folders.retain(|k| !folder_keys.contains(k));
+    for n in keep_hidden {
+        if !v.hidden_origin.contains(&n) {
+            v.hidden_origin.push(n);
+        }
+    }
+    if visible && names.iter().any(|n| crate::origins::ITEMS.contains(&n.as_str())) {
+        v.origin_hidden = Some(false);
+    }
+    s.refresh_display();
+    let visibility = VisibilityState::from(&s.visibility);
+    reply(
+        cmd,
+        BrowserVisibilityResult { visible, changed: Some(names.len() + sketch_ids.len()), isolated: None, visibility, param_warnings: Vec::new() },
+    )
+}
+
+/// The hidden folder and group keys showing a category clears (the Construction folder, and with
+/// `sketches` the Sketches folder, and groups of theirs), and the construction items outside
+/// `names` those keys hide, which stay hidden on their own.
+fn category_folders(s: &Session, names: &[String], sketches: bool) -> (Vec<String>, Vec<String>) {
+    let folders: &[&str] = if sketches { &["construction", "sketches"] } else { &["construction"] };
+    let ours = |key: &str| {
+        let Some(last) = key.rsplit('/').next() else { return false };
+        folders.contains(&last)
+            || last
+                .strip_prefix('g')
+                .and_then(|id| id.parse::<u64>().ok())
+                .and_then(|id| s.doc.browser_group(id))
+                .is_some_and(|g| folders.contains(&g.folder.as_str()))
+    };
+    let keys: Vec<String> = s.visibility.hidden_folders.iter().filter(|k| ours(k)).cloned().collect();
+    if keys.is_empty() {
+        return (keys, Vec::new());
+    }
+    let keep = s
+        .doc
+        .features
+        .iter()
+        .filter(|f| f.kind.is_construction() && !names.contains(&f.name) && !s.visibility.hidden_origin.contains(&f.name))
+        .filter(|f| s.feature_folder_hidden(f.id, "construction"))
+        .map(|f| f.name.clone())
+        .collect();
+    (keys, keep)
+}
+
 /// Browser rows that start open (`c0`, Bodies, placements) vs closed (Origin, Features).
 struct FoldKeys {
     open: BTreeSet<String>,
@@ -1483,6 +1591,7 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     let made = s.model.result(fid).map_or(&st.bodies, |r| &r.state.bodies);
     let siblings: Vec<String> = made.iter().filter(|x| x.feature == fid).map(|x| x.name.clone()).collect();
     let k = siblings.iter().position(|n| *n == old).unwrap_or(0);
+    let own_left_out = s.model.result(fid).map(|r| r.state.pattern_left_out(fid).to_vec()).unwrap_or_default();
     // A body numbered by the counter (`BodyN`) gives its number back once it has a name of its
     // own, and every counted body after it would move down one (`Body3` becoming `Body1`) and
     // break what names it. Those later features keep the names they made too (#1109): each one's
@@ -1492,36 +1601,37 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     let derived = format!("{old} (");
     let at = s.doc.features.iter().position(|f| f.id == fid);
     let counts = at.and_then(|at| s.doc.features.get(at)).is_some_and(|f| counted(f, k));
-    let later: Vec<(u64, Vec<String>)> = match at {
+    let later: Vec<(u64, Vec<String>, Vec<usize>)> = match at {
         Some(at) => s
             .doc
             .features
             .iter()
             .skip(at + 1)
             .filter_map(|f| {
-                let made: Vec<String> = s.model.result(f.id)?.state.bodies.iter().filter(|x| x.feature == f.id).map(|x| x.name.clone()).collect();
+                let state = &s.model.result(f.id)?.state;
+                let made: Vec<String> = state.bodies.iter().filter(|x| x.feature == f.id).map(|x| x.name.clone()).collect();
                 let keep = (counts && (0..made.len()).any(|i| counted(f, i))) || made.iter().any(|n| n.starts_with(&derived));
-                keep.then_some((f.id, made))
+                keep.then(|| (f.id, made, state.pattern_left_out(f.id).to_vec()))
             })
             .collect(),
         None => Vec::new(),
     };
     // Frame members are named by their lines (#4003): each keeps the name it has now on its
     // line, whichever lines come and go later, and the renamed one takes its new name.
-    let later_pins: Vec<Option<BTreeMap<String, String>>> = later.iter().map(|(id, _)| member_pins(s, *id)).collect();
+    let later_pins: Vec<Option<BTreeMap<String, String>>> = later.iter().map(|(id, _, _)| member_pins(s, *id)).collect();
     let own_pins = member_pins(s, fid).and_then(|mut pins| {
         let line = pins.iter().find(|(_, n)| **n == old).map(|(line, _)| line.clone())?;
         pins.insert(line, name.to_string());
         Some(pins)
     });
     let d = s.doc_mut();
-    for ((id, made), pins) in later.iter().zip(later_pins) {
+    for ((id, made, left_out), pins) in later.iter().zip(later_pins) {
         if let Some(f) = d.feature_mut(*id) {
             if let (Some(pins), FeatureKind::FrameMember { names, .. }) = (pins, &mut f.kind) {
                 *names = pins;
                 f.body_names.clear();
             } else {
-                f.pin_body_names(made);
+                f.pin_body_names(made, left_out);
             }
         }
     }
@@ -1529,6 +1639,12 @@ fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<Bod
     if let (Some(pins), FeatureKind::FrameMember { names, .. }) = (own_pins, &mut f.kind) {
         *names = pins;
         f.body_names.clear();
+    } else if let Some((names, slots)) = f.pattern_pins(&siblings, &own_left_out) {
+        // A body Pattern keeps the names of the copies of the sources it left out, in their places.
+        f.body_names = names;
+        if let Some(stored) = slots.get(k).and_then(|slot| f.body_names.get_mut(*slot)) {
+            *stored = name.to_string();
+        }
     } else {
         // An Import keeps its names by the file's body index, its skipped bodies' too (#2175).
         let slots = f.body_name_slots(siblings.len().max(k + 1));
@@ -1639,6 +1755,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     baseline.doc_mut().marker = Some(index + 1);
     baseline.refresh();
     let visible_geometry = baseline.model.state().sketch(id).map(|resolved| resolved.sketch.clone());
+    let evaluated_plane = baseline.model.state().sketch(id).map(|resolved| resolved.plane);
     let mut trial = s.scratch();
     trial.active_component = component;
     trial.active_occurrence_path = (!author_path.is_empty()).then_some(author_path);
@@ -1657,7 +1774,15 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     if super::sketch::face::is_face(p) {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
+    // Compare the destination in the author frame that the saved sketch will use.
     solidcraft_doc::capture_sketch_plane_placement(&trial.design_document(), &mut plane, component, &trial.active_component_frame())?;
+    let flipped = match p.get("flip") {
+        None | Some(Value::Null) if !super::sketch::face::is_face(p) => keep_facing(&trial, id, evaluated_plane, &plane),
+        _ => super::sketch::flip_param(&trial, p, &plane, cmd)?,
+    };
+    if let Some(about_y) = flipped {
+        plane = PlaneRef::Flipped { base: Box::new(plane), about_y };
+    }
     if let Some(anchor) = old_anchor
         && super::sketch::face::anchor(&plane)
             .is_none_or(|next| next.target != anchor.target || next.component != anchor.component || next.path != anchor.path)
@@ -1724,7 +1849,36 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     });
     let note = frame.and_then(|f| super::sketch::frame_note(Some(f), &placement)).map(str::to_string);
     let frame = frame.and_then(PlaneFrame::from_name);
-    reply(cmd, RedefineSketchResult { sketch: id, attachment, frame, note, created: None, param_warnings: Vec::new() })
+    let flip = flipped.map(|about_y| if about_y { FlipAxis::Y } else { FlipAxis::X });
+    reply(cmd, RedefineSketchResult { sketch: id, attachment, flip, frame, note, created: None, param_warnings: Vec::new() })
+}
+
+/// Moved onto a plane whose normal points against the one it is on now, a sketch would come
+/// out back to front and upside down (#11467): a sketch drawn from the front on XZ is turned to
+/// face the viewer, and an offset of XZ is not. `Some(about_y)`: the half turn of the new plane
+/// (as `sketch.create`'s `flip`) that keeps it facing the same way, about whichever in-plane axis
+/// keeps the sketch's x and y closest to where they were. `None` when it already faces that
+/// way, or when either plane cannot be placed (a lost face: nothing to keep).
+///
+/// `evaluated`: where the sketch is now as the model placed it (a face attachment follows its
+/// face, which may have turned since it was picked); without it, its stored plane.
+fn keep_facing(s: &Session, sketch: u64, evaluated: Option<solidcore_record::Plane>, next: &PlaneRef) -> Option<bool> {
+    use solidcraft_geom::{PlaneGeom, Vec3Geom};
+    let (vals, _) = s.doc.param_values();
+    let state = s.model.state();
+    let now = match evaluated {
+        Some(plane) => plane,
+        None => {
+            let FeatureKind::Sketch { plane: now, .. } = &s.doc.feature(sketch)?.kind else { return None };
+            s.doc.resolve_plane_in(&vals, now, 0, s.active_component, Some(&state)).ok()?
+        }
+    };
+    let next = s.doc.resolve_plane_in(&vals, next, 0, s.active_component, Some(&state)).ok()?;
+    if now.normal().dot(next.normal()) >= -1e-9 {
+        return None;
+    }
+    // A half turn about x reverses y, about y reverses x: keep the axis that agrees more.
+    Some(next.y.dot(now.y) > next.x.dot(now.x))
 }
 
 #[cfg(test)]
@@ -2649,6 +2803,80 @@ mod tests {
         assert!(s.execute("sketch.redefine", &json!({"sketch": 999, "plane": "XY"})).is_err());
     }
 
+    /// #11467: a sketch drawn from the front on XZ faces the viewer (XZ turned about its x
+    /// axis). Moved onto a plane offset from XZ, which faces the other way, it came out upside
+    /// down and back to front; it keeps facing the viewer and stays upright now.
+    #[test]
+    fn redefined_sketch_keeps_facing_the_way_it_did() {
+        let mut s = Session::default();
+        run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 30, "name": "Front30"}));
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XZ", "flip": "x"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5}));
+        let bbox = |s: &mut Session| {
+            let m = run(s, "inspect.measure", json!({}));
+            let b = &m["bodies"][0]["bbox"];
+            let v = |k: &str, i: usize| b[k][i].as_f64().unwrap();
+            [v("min", 1), v("max", 1), v("min", 2), v("max", 2)]
+        };
+        let near = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
+        let before = bbox(&mut s);
+        assert!(near(before, [-5.0, 0.0, 0.0, 20.0]), "{before:?}");
+
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "Front30"}));
+        assert_eq!(reply["flip"], "x", "{reply}");
+        let after = bbox(&mut s);
+        assert!(near(after, [25.0, 30.0, 0.0, 20.0]), "upright and still extruding toward the viewer: {after:?}");
+
+        // Back onto XZ itself it is where it started, with no second turn piled on.
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "XZ"}));
+        assert_eq!(reply["flip"], "x", "{reply}");
+        assert!(near(bbox(&mut s), before));
+
+        // An explicit turn is taken as given.
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "XZ", "flip": "y"}));
+        assert_eq!(reply["flip"], "y", "{reply}");
+        assert!(near(bbox(&mut s), [-5.0, 0.0, -20.0, 0.0]), "XZ turned about its y axis: sketch y along -Z");
+        // A plane already facing the same way: nothing to turn.
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": {"origin": [0, 10, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+        assert!(reply.get("flip").is_none(), "{reply}");
+        assert!(near(bbox(&mut s), [5.0, 10.0, 0.0, 20.0]));
+
+        // `flip: false` takes the new plane's own side, as before.
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sk, "plane": "Front30", "flip": false}));
+        assert!(reply.get("flip").is_none(), "{reply}");
+        assert!(near(bbox(&mut s), [30.0, 35.0, -20.0, 0.0]));
+        assert!(s.execute("sketch.redefine", &json!({"sketch": sk, "plane": "XZ", "flip": "sideways"})).is_err());
+    }
+
+    #[test]
+    fn redefined_sketch_keeps_facing_on_a_captured_foreign_plane() {
+        use solidcraft_doc::{FeatureKind, PlaneRef};
+        use solidcraft_geom::PlaneGeom;
+
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Source", "grounded": false}));
+        let plane = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Foreign"}))["feature"].as_u64().unwrap();
+        // The source plane points up locally and down in the destination sketch's frame.
+        run(&mut s, "occurrence.move", json!({"occurrence": "Source:1", "axis": [1, 0, 0], "angle": "180 deg", "capture": true}));
+        run(&mut s, "component.create", json!({"name": "Author", "parent": "root", "grounded": false}));
+        let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+
+        let reply = run(&mut s, "sketch.redefine", json!({"sketch": sketch, "plane": "Foreign"}));
+        assert_eq!(reply["flip"], "x", "{reply}");
+        let FeatureKind::Sketch { plane: PlaneRef::Flipped { base, about_y: false }, .. } = &s.doc.feature(sketch).unwrap().kind else {
+            panic!("the sketch must store the flip around its captured plane");
+        };
+        assert!(matches!(base.as_ref(), PlaneRef::Construction { feature, placement: Some(_) } if feature.0 == plane));
+        let state = s.model.state();
+        let placed = state.sketch(sketch).unwrap().plane;
+        assert!(placed.normal().z > 1.0 - 1e-6, "{placed:?}");
+        assert!((placed.origin.z + 5.0).abs() < 1e-6, "{placed:?}");
+    }
+
     #[test]
     fn design_units_change_without_moving_geometry() {
         let mut s = Session::default();
@@ -2989,6 +3217,57 @@ mod tests {
         run(&mut s, "browser.visibility", json!({"folder": "construction", "visible": false}));
         assert_eq!(s.visibility.hidden_origin, ["Floor", "Spine", "Pin"]);
         assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.hidden_sketches.is_empty(), "{:?}", s.visibility);
+    }
+
+    /// One command hides every plane, another all reference geometry (#18131); each shows its
+    /// category again when nothing of it shows, and each press is one undo step.
+    #[test]
+    fn planes_and_reference_geometry_toggle_as_categories() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.point", json!({"point": [25, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
+        run(&mut s, "construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"}));
+        run(&mut s, "construct.point.three_planes", json!({"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"}));
+        run(&mut s, "browser.visibility", json!({"items": ["XZ"], "visible": false}));
+        let steps = s.undo.len();
+        // Planes: one shows, so all of them are hidden; axes, points and sketches stay.
+        let r = run(&mut s, "browser.toggle_planes", json!({}));
+        assert_eq!(r["visible"], false);
+        assert_eq!(s.visibility.hidden_origin, ["XZ", "XY", "YZ", "Floor"]);
+        assert!(crate::view::sketch_shown(&s, sketch) && s.visibility.hidden_bodies.is_empty());
+        // None shows: all of them come back, the XZ plane hidden on its own too.
+        assert_eq!(run(&mut s, "browser.toggle_planes", json!({}))["visible"], true);
+        assert!(s.visibility.hidden_origin.is_empty(), "{:?}", s.visibility.hidden_origin);
+        assert_eq!(s.undo.len(), steps + 2, "each press is one step");
+        // Reference geometry: the origin, construction planes, axes and points, and sketches.
+        assert_eq!(run(&mut s, "browser.toggle_reference", json!({}))["visible"], false);
+        assert_eq!(s.visibility.hidden_origin, ["O", "X", "Y", "Z", "XY", "XZ", "YZ", "Floor", "Spine", "Pin"]);
+        assert!(!crate::view::sketch_shown(&s, sketch));
+        assert!(s.visibility.hidden_bodies.is_empty() && s.visibility.hidden_joints.is_empty(), "bodies and joints stay");
+        // Planes alone come back while the rest stays hidden; then reference shows the rest.
+        assert_eq!(run(&mut s, "browser.toggle_planes", json!({}))["visible"], true);
+        assert_eq!(s.visibility.hidden_origin, ["O", "X", "Y", "Z", "Spine", "Pin"]);
+        assert_eq!(run(&mut s, "browser.toggle_reference", json!({}))["visible"], false, "planes show, so it hides");
+        assert_eq!(run(&mut s, "browser.toggle_reference", json!({}))["visible"], true);
+        assert!(s.visibility.hidden_origin.is_empty() && s.visibility.hidden_sketches.is_empty() && crate::view::sketch_shown(&s, sketch));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.visibility.hidden_origin.len(), 10, "one undo puts the hide back");
+        // Showing also shows the Sketches and Construction folders an item hides in; the Bodies
+        // folder keeps its own state.
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches", "c0/construction", "c0/bodies"], "visible": false}));
+        assert_eq!(run(&mut s, "browser.toggle_reference", json!({}))["visible"], true);
+        assert!(crate::view::sketch_shown(&s, sketch), "the sketch in the hidden folder shows");
+        assert!(["Floor", "Spine", "Pin"].iter().all(|n| s.construction_visible(n)), "{:?}", s.visibility);
+        assert_eq!(s.visibility.hidden_folders, ["c0/bodies"]);
+        // The planes share the Construction folder with axes and points: those stay hidden.
+        run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/construction"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["XY", "XZ", "YZ"], "visible": false}));
+        assert_eq!(run(&mut s, "browser.toggle_planes", json!({}))["visible"], true);
+        assert!(s.construction_visible("Floor") && !s.construction_visible("Spine") && !s.construction_visible("Pin"), "{:?}", s.visibility);
+        assert_eq!(s.visibility.hidden_folders, ["c0/bodies"]);
     }
 
     #[test]
