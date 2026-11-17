@@ -13,6 +13,7 @@ use solidcraft_theme::Tokens;
 
 mod first_sheet;
 mod panels;
+pub(crate) mod placement;
 
 use panels::Tool;
 
@@ -23,6 +24,7 @@ pub struct State {
     pub settings_open: bool,
     sheet_notice: Option<panels::SheetNotice>,
     options: Option<Tool>,
+    placement: Option<placement::Placement>,
     add_sheet: Option<panels::AddSheet>,
     first_sheet: Option<first_sheet::BlankSheet>,
     strip: Option<Rect>,
@@ -48,6 +50,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     } else if active(app) {
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
         app.drawing_workspace.options = None;
+        app.drawing_workspace.placement = None;
         app.drawing_workspace.add_sheet = None;
         app.drawing_workspace.first_sheet = None;
         app.drawing_workspace.strip = None;
@@ -65,6 +68,10 @@ pub fn reset_document(app: &mut SolveApp) {
     app.drawing_workspace = State::default();
 }
 
+pub(crate) fn placing_view(app: &SolveApp) -> bool {
+    app.drawing_workspace.placement.is_some()
+}
+
 pub fn can_open_options(id: &str) -> bool {
     Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
 }
@@ -77,6 +84,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
         || app.drawing_workspace.first_sheet.is_some();
     app.drawing_workspace.settings_open = false;
     app.drawing_workspace.options = None;
+    app.drawing_workspace.placement = None;
     app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
@@ -92,6 +100,10 @@ pub fn start(app: &mut SolveApp, id: &str) -> bool {
     match id {
         "drawing.sheet.add" => open_add_sheet(app),
         "drawing.sheet.set" => app.drawing_workspace.settings_open = true,
+        "drawing.view.base" | "drawing.view.base.planned" => {
+            app.drawing_workspace.placement = placement::Placement::new(app);
+            app.drawing_workspace.options = Some(Tool::Base);
+        }
         _ => app.drawing_workspace.options = Tool::for_command(id),
     }
     true
@@ -677,7 +689,12 @@ fn panel_body(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if let Some(tool) = app.drawing_workspace.options {
+    if let Some(placement) = &mut app.drawing_workspace.placement {
+        placement.fields(ui);
+        if panels::finish_placement(ui) {
+            close_panel(app);
+        }
+    } else if let Some(tool) = app.drawing_workspace.options {
         panels::tool_body(app, ui, tool);
         if panels::footer(ui, tool) {
             close_panel(app);
@@ -691,6 +708,42 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn base_view_places_projected_views_until_escape() {
+        use solidcraft_engine::doc::drawing::view::{ViewKind, ViewPlace};
+        use solidcraft_engine::geom::drawing_view::ProjectedSide;
+
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        h.frames(6);
+        h.step(&serde_json::json!({"click":{"handle":"button:drawing.view.base.planned"}})).unwrap();
+        h.frames(6);
+        assert!(placing_view(&h.app));
+        let paper = crate::scenario::rect_of("sheet:paper").unwrap();
+        let y = paper.center().y;
+        let base_x = paper.left() + paper.width() * 0.35;
+        let projected_x = paper.left() + paper.width() * 0.57;
+        h.step(&serde_json::json!({"move":[base_x,y]})).unwrap();
+        assert!(h.app.session.drawing("drawing.inspect").unwrap().views.is_empty());
+        h.step(&serde_json::json!({"click":[base_x,y]})).unwrap();
+        h.frames(4);
+        h.step(&serde_json::json!({"click":[projected_x,y]})).unwrap();
+        h.step(&serde_json::json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+
+        assert!(!placing_view(&h.app));
+        let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+        assert_eq!(drawing.views.len(), 2);
+        let base = drawing.views.iter().find(|view| matches!(view.kind, ViewKind::Base { .. })).unwrap();
+        let projected = drawing.views.iter().find(|view| view.kind.parent() == Some(base.id)).unwrap();
+        assert!(matches!(projected.kind, ViewKind::Projected { side: ProjectedSide::Right, .. }));
+        assert!(matches!(projected.place, ViewPlace::Aligned(_)));
+        assert_eq!(drawing.view_centre(base.id).unwrap().y, drawing.view_centre(projected.id).unwrap().y);
+    }
 
     #[test]
     fn a_smaller_sheet_warns_about_views_without_moving_them() {

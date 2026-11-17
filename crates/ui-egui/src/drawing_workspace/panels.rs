@@ -80,6 +80,12 @@ fn caption(ui: &mut egui::Ui, id: &'static str) {
     ui_kit::text(ui, tr(id), ui_kit::Text::Note(id));
 }
 
+pub(super) fn finish_placement(ui: &mut egui::Ui) -> bool {
+    ui.separator();
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui_kit::button(ui, tr("ui.drawing_panel.finish"), Button::Normal).clicked())
+        .inner
+}
+
 pub(super) fn footer(ui: &mut egui::Ui, tool: Tool) -> bool {
     let mut close = false;
     ui.separator();
