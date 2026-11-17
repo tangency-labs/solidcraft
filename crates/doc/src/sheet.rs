@@ -145,7 +145,7 @@ fn rule_corner_relief_shape() -> String {
 /// compressed away), no press brake or forming tool makes that, and the part could not be built
 /// either: the bend's end wall would join a line on one face of the sheet to an arc on the other.
 pub(crate) const KNIFE_EDGE: &str =
-    "a bend radius of 0 can't be made: no material bends to a knife edge, so give the smallest inside radius your material and tooling form";
+    "the bend radius must be more than 0: use your tooling's real inside radius, or a tiny one like 0.001 mm for a sharp look";
 
 fn rule_hem_gap() -> String {
     "0.01 mm".into()

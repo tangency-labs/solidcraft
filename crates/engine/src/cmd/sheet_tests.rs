@@ -637,7 +637,7 @@ fn a_refused_rule_names_the_value_at_fault() {
     // A bend radius of 0 is refused: no material bends to a knife edge (see
     // `a_bend_radius_of_0_is_refused_wherever_it_is_given`).
     let e = refused(&mut s, json!({"name": "R", "thickness": 2, "bend_radius": 0}));
-    assert!(e.contains("a bend radius of 0 can't be made") && !e.contains("negative"), "{e}");
+    assert!(e.contains("the bend radius must be more than 0") && !e.contains("negative"), "{e}");
 }
 
 /// Every bend keeps an inside radius. At 0 the inside fiber would close to nothing (all of its
@@ -649,7 +649,7 @@ fn a_refused_rule_names_the_value_at_fault() {
 fn a_bend_radius_of_0_is_refused_wherever_it_is_given() {
     let mut s = Session::default();
     let e = s.execute("sheet.manage_rules", &json!({"name": "Sharp", "thickness": 1.2, "bend_radius": 0})).unwrap_err().to_string();
-    assert!(e.contains("a bend radius of 0 can't be made"), "{e}");
+    assert!(e.contains("the bend radius must be more than 0"), "{e}");
     run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 1.2, "bend_radius": 1.2, "active": true}));
     base(&mut s, 100.0, 60.0);
     for (command, p) in [
@@ -659,8 +659,8 @@ fn a_bend_radius_of_0_is_refused_wherever_it_is_given() {
     ] {
         let before = s.doc.to_json();
         let e = s.execute(command, &p).unwrap_err().to_string();
-        let knife = if command == "sheet.hem" { "the hem gap must be more than 0" } else { "a bend radius of 0 can't be made" };
-        assert!(e.contains(knife) && e.contains("knife edge"), "{command}: {e}");
+        let knife = if command == "sheet.hem" { "the hem gap must be more than 0" } else { "the bend radius must be more than 0" };
+        assert!(e.contains(knife) && (command != "sheet.hem" || e.contains("knife edge")), "{command}: {e}");
         assert_eq!(s.doc.to_json(), before, "{command}");
     }
 }
