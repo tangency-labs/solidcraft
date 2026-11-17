@@ -374,6 +374,25 @@ pub struct PositionFromPcs {
     pub deviation: f64,
 }
 
+/// Not upstream: whether `pc` classifies onto a vertex that ends a seam edge of its
+/// B-rep ([`vertex::ends_seam_edge`]); `false` for a handle the adapter cannot resolve.
+///
+/// # Errors
+///
+/// Those of [`vertex::ends_seam_edge`].
+pub(crate) fn on_seam_vertex<O: ClassObject>(
+    geometry: &impl ClassGeometry<O>,
+    pc: &PointClassification<O>,
+) -> Result<bool> {
+    if pc.point_class() != PointClassType::Vertex {
+        return Ok(false);
+    }
+    match pc.object().and_then(|o| geometry.topology_entity(o)) {
+        Some((b, EntityRef::Vertex(v))) => vertex::ends_seam_edge(b, v),
+        _ => Ok(false),
+    }
+}
+
 /// The position two point classifications define (`sm_FindPositionFromPCs`). A
 /// classification without parameters gets them from the other's object point when
 /// possible. With both points known, the lower-dimensional object wins; at equal
@@ -3110,6 +3129,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// with the smaller gap but within both objects' zone tolerances. The status
     /// output is always 0.
     ///
+    /// Not upstream: a definition on a vertex that ends a seam edge
+    /// ([`vertex::ends_seam_edge`]) stays at that vertex. The seam edge's curve is the
+    /// seam, an iso line of its face's surface, and its vertex ends that line; a vertex
+    /// moved off it leaves the seam edge's trims off the seam, which the face's seam test
+    /// refuses (test 36, a suspicious edge near the seam) however small the move. The
+    /// other object takes the gap, as the definition's position already is that vertex
+    /// (`find_position_from_pcs` weights a vertex over an edge or a face).
+    ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] without a proto vertex; [`SolidError::Unported`]
@@ -3144,7 +3171,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv(v.proto_vertex)?;
         let tol = self.tolerance(k);
 
-        if dist > tol && dist1 + dist2 > EFF_ZERO {
+        // (not upstream) a seam's vertex is not moved off the seam
+        let on_seam = on_seam_vertex(geometry, &v.pc1)? || on_seam_vertex(geometry, &v.pc2)?;
+
+        if dist > tol && dist1 + dist2 > EFF_ZERO && !on_seam {
             // Put it proportionally closer to the topo object with the smaller gap,
             // but not out of Tolerance
             let vec = pt2 - pt1;

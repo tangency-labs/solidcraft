@@ -2585,3 +2585,129 @@ fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin()
     // the bin's 15 faces with the insert's top and slanted side
     one_valid_solid_of_volume(&joined, [17, 41, 27], want, 1e-9);
 }
+
+/// The upper half (z >= 0) of the torus of radii 1.8 and 0.6 about z, revolved from its
+/// profile circle starting at the circle's outer point (2.4, 0, 0) as SolidCraft revolves it:
+/// the seam meridian lies in the xz plane on +x and ends at (2.4, 0, 0) on the flat face's
+/// outer edge, which is the profile circle's own seam.
+fn half_torus() -> Body {
+    let profile = [Curve::Arc {
+        center: [1.8, 0.0, 0.0],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 0.6,
+        start: 0.0,
+        end: TAU,
+    }];
+    let torus = revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
+    let below = make_box([-3.4, -3.4, -1.6], [6.8, 6.8, 1.6]).unwrap();
+    boolean(torus, below, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// A cylinder of `radius` about z from `base` up `height`, its seam at the angle SolidCraft
+/// gives a cylinder's (0.6131 rad from +x).
+#[allow(clippy::disallowed_methods)] // the test's operand, not ops computing geometry
+fn rod(base: [f64; 3], radius: f64, height: f64) -> Body {
+    let (s, c) = 0.6131_f64.sin_cos();
+    let circle = [Curve::Arc {
+        center: base,
+        axis: [0.0, 0.0, 1.0],
+        reference: [c, s, 0.0],
+        radius,
+        start: 0.0,
+        end: TAU,
+    }];
+    extrude(
+        &circle,
+        [0.0, 0.0, 1.0],
+        height,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap()
+}
+
+/// #18274: a boss of radius 0.07 and height 0.14 joined under the flat face of a half
+/// torus, centred on the torus's seam meridian, its side `d` beyond the flat face's outer
+/// edge, both through their records as SolidCraft hands them on. The boss's top crosses
+/// that edge 1.2e-3 either side of the seam at 1 degree, a crossing fixed only to the
+/// tolerance over that sine, so the two crossings and the seam's vertex between them are one
+/// point. The vertex the merge kept was a crossing's, 1.2e-3 off the seam, so the seam edge
+/// ended off the seam and the check refused the join (face test 36) for d 1e-5 and 2e-5. The
+/// seam's vertex now stays. The join is one valid solid of the two volumes added,
+/// π²·1.8·0.6² + π·0.07²·0.14: they share only part of a face.
+#[test]
+fn a_boss_overhanging_a_half_torus_flat_face_by_a_tolerance_at_its_seam_joins() {
+    all_fixes();
+    let want = PI * PI * 1.8 * 0.36 + PI * 0.07 * 0.07 * 0.14;
+    for d in [1e-5, 1.5e-5, 2e-5] {
+        let boss = round_tripped(&rod([2.33 + d, 0.0, -0.14], 0.07, 0.14));
+        let r = boolean(round_tripped(&half_torus()), boss, BooleanOp::Union)
+            .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "d {d}");
+        let v = volume(&r);
+        assert!((v - want).abs() <= 1e-8 * want, "d {d}: {v} vs {want}");
+    }
+}
+
+/// #18274: the r 2 ball cut flat at z 1.2 (a cap edge of radius 1.6), less a notch of radius
+/// 0.19 from z -0.4 up to the cap, centred on the cap's edge just off the ball's seam meridian
+/// so that its side passes `d` outside the corner (1.6, 0, 1.2) where the seam meets the cap's
+/// edge, the operands through their records. The corner lies on the notch's top circle within
+/// tolerance, and the vertex definition there moved it halfway to the circle, 5e-6 off the
+/// seam: the seam edge's trim left the seam and the check refused the cut (face test 36). The
+/// seam's corner now stays. The cut is one valid solid: the ball less its cap, less the
+/// notch's share of it, which is the same wherever the notch's centre lies on the cap's edge:
+/// over each radius ρ about z, the notch's arc at ρ times the ball's height there between the
+/// bottom and the cap.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
+fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
+    all_fixes();
+    let (big, cap, edge, r, bottom) = (2.0_f64, 1.2_f64, 1.6_f64, 0.19_f64, -0.4_f64);
+    let h = big - cap;
+    let capped = 4.0 / 3.0 * PI * big.powi(3) - PI * h * h * (3.0 * big - h) / 3.0;
+    let height = |rho: f64| (big * big - rho * rho).max(0.0).sqrt().min(cap) - bottom;
+    let arc = |rho: f64| {
+        2.0 * rho
+            * ((rho * rho + edge * edge - r * r) / (2.0 * rho * edge))
+                .clamp(-1.0, 1.0)
+                .acos()
+    };
+    // (split at ρ = 1.6, where the height turns from the cap's to the ball's)
+    let share = |step: f64| {
+        tanh_sinh(|rho| height(rho) * arc(rho), edge - r, edge, step)
+            + tanh_sinh(|rho| height(rho) * arc(rho), edge, edge + r, step)
+    };
+    let (coarse, fine) = (share(1.0 / 32.0), share(1.0 / 64.0));
+    assert!((coarse - fine).abs() <= 1e-13 * fine, "{coarse} {fine}");
+    let want = capped - fine;
+    for d in [5e-6, 1e-5, 2e-5] {
+        // the centre on the cap's edge at the angle that puts the corner r + d from it
+        let angle = 2.0 * ((r + d) / (2.0 * edge)).asin();
+        let notch = rod(
+            [edge * angle.cos(), edge * angle.sin(), bottom],
+            r,
+            cap - bottom,
+        );
+        let ball = make_sphere([0.0; 3], big).unwrap();
+        let top = make_box([-3.0, -3.0, cap], [6.0, 6.0, 2.0]).unwrap();
+        let capped_ball = boolean(ball, top, BooleanOp::Subtract).unwrap().unwrap();
+        let res = boolean(
+            round_tripped(&capped_ball),
+            round_tripped(&notch),
+            BooleanOp::Subtract,
+        )
+        .unwrap_or_else(|e| panic!("d {d}: {e:?}"))
+        .unwrap_or_else(|| panic!("d {d}: the cut removed everything"));
+        let report = res.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {}", report.text);
+        assert_eq!(res.solid_count().unwrap(), 1, "d {d}");
+        let v = volume(&res);
+        assert!((v - want).abs() <= 1e-8 * want, "d {d}: {v} vs {want}");
+    }
+}

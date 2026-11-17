@@ -119,7 +119,7 @@
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::CurveKind;
-use crate::error::{passed_on, Result, SolidError};
+use crate::error::{passed_on, EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
@@ -1506,16 +1506,43 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         &mut was_deleted2
                     };
                     if dist > xs {
-                    } else if edges.is_empty() {
+                        continue;
+                    }
+                    // Not upstream: the vertex that stays is the first definition's, unless
+                    // only the other is the operand's own vertex at the end of a seam edge
+                    // (its definition found it on that vertex): a seam's vertex keeps its
+                    // place on the seam (`resolve_vertex_definition`), and the edges of the
+                    // one squeezed or glued away come to it.
+                    let on_seam = |s: &Self, vd: VertexDefId, v: O| -> Result<bool> {
+                        let def = s
+                            .vertex_def(vd)
+                            .ok_or(dangling("vertex definition is deleted"))?;
+                        Ok(
+                            def.brep_point_classif(which).point_class() == PointClassType::Vertex
+                                && ends_seam(&*brep, v)?,
+                        )
+                    };
+                    let keep_second = on_seam(self, vd2, v2)? && !on_seam(self, vd1, v1)?;
+                    let (keep, gone) = if keep_second { (v2, v1) } else { (v1, v2) };
+                    let merge_away = |s: &mut Self, deleted_v: &mut [Option<O>]| -> Result<()> {
+                        set_slot(deleted_v, jj, gone);
+                        if keep_second {
+                            s.vertex_def_mut(vd1)
+                                .ok_or(dangling("vertex definition is deleted"))?
+                                .set_final_vertex(which, Some(keep));
+                        }
+                        s.vertex_def_mut(vd2)
+                            .ok_or(dangling("vertex definition is deleted"))?
+                            .set_final_vertex(which, None);
+                        Ok(())
+                    };
+                    if edges.is_empty() {
                         if v1 != v2 {
                             ignore_soft(passed_on(
-                                brep.glue_vertices(k, self.which_brep(which), v1, v2, None),
+                                brep.glue_vertices(k, self.which_brep(which), keep, gone, None),
                                 pass,
                             )?)?;
-                            set_slot(deleted_v, jj, v2);
-                            self.vertex_def_mut(vd2)
-                                .ok_or(dangling("vertex definition is deleted"))?
-                                .set_final_vertex(which, None);
+                            merge_away(self, deleted_v)?;
                             *flag = true;
                         }
                     } else {
@@ -1523,7 +1550,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                             // UB-241 (SolidCraft fix, tangency-labs/smlib da8d05e): stop
                             // before the GlueVertices path; the delete branch runs as
                             // upstream.
-                            let v2_deleted = deleted_v.get(jj).copied().flatten() == Some(v2);
+                            let merged = deleted_v.get(jj).copied().flatten() == Some(gone);
                             let curve_handle =
                                 brep.edge_curve(edge).ok_or(dangling("edge is unknown"))?;
                             let ivl = brep
@@ -1533,7 +1560,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                 .approximate_length(k, &ivl, 5, false)?
                                 .0;
                             if len < xs {
-                                if v2_deleted && brep.edge_other_vertex(edge, Some(v1))? != Some(v1)
+                                if merged && brep.edge_other_vertex(edge, Some(keep))? != Some(keep)
                                 {
                                     break;
                                 }
@@ -1543,16 +1570,21 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                     .other_mate(edge)
                                     .filter(|m| m.class_kind() == ClassObjectKind::Edge);
                                 let vertex_mate = mates
-                                    .other_mate(v2)
+                                    .other_mate(gone)
                                     .filter(|m| m.class_kind() == ClassObjectKind::Vertex);
-                                let other_vtx = brep.edge_other_vertex(edge, Some(v1))?;
-                                let stat = if other_vtx == Some(v1) {
+                                let other_vtx = brep.edge_other_vertex(edge, Some(keep))?;
+                                let stat = if other_vtx == Some(keep) {
                                     // Can't call SqueezeEdge() in this case.
                                     brep.delete_edge(k, self.which_brep(which), edge)
                                 } else {
-                                    let r =
-                                        brep.brep_squeeze_edge(k, self.which_brep(which), edge, v1); // deletes v2
-                                    set_slot(deleted_v, jj, v2);
+                                    // deletes `gone`
+                                    let r = brep.brep_squeeze_edge(
+                                        k,
+                                        self.which_brep(which),
+                                        edge,
+                                        keep,
+                                    );
+                                    merge_away(self, deleted_v)?;
                                     r
                                 };
                                 deleted_e.push(edge);
@@ -1567,7 +1599,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                         }
                                         if let Some(m) = vertex_mate {
                                             ignore_soft(passed_on(
-                                                mates.remove_relationship(v2, m),
+                                                mates.remove_relationship(gone, m),
                                                 pass,
                                             )?)?;
                                         }
@@ -1606,19 +1638,22 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                 }
                             } else {
                                 // UB-241: stop before GlueVertices
-                                if v2_deleted {
+                                if merged {
                                     break;
                                 }
                                 // coincident Vertices connected by a long Edge: Glue.
                                 if v1 != v2 {
                                     ignore_soft(passed_on(
-                                        brep.glue_vertices(k, self.which_brep(which), v1, v2, None),
+                                        brep.glue_vertices(
+                                            k,
+                                            self.which_brep(which),
+                                            keep,
+                                            gone,
+                                            None,
+                                        ),
                                         pass,
                                     )?)?;
-                                    set_slot(deleted_v, jj, v2);
-                                    self.vertex_def_mut(vd2)
-                                        .ok_or(dangling("vertex definition is deleted"))?
-                                        .set_final_vertex(which, None);
+                                    merge_away(self, deleted_v)?;
                                     *flag = true;
                                 }
                             }
@@ -2124,6 +2159,20 @@ fn vertex_distance<O: Copy>(brep: &impl ProtoBrep<O>, v1: O, v2: O) -> Result<f6
     let p1 = brep.vertex_point(v1)?;
     let p2 = brep.vertex_point(v2)?;
     Ok(p1.distance(p2))
+}
+
+/// Not upstream: whether the vertex handle `v` names a vertex that ends a seam edge
+/// ([`crate::topology::vertex::ends_seam_edge`]); `false` for a handle the adapter cannot
+/// resolve.
+///
+/// # Errors
+///
+/// Those of [`crate::topology::vertex::ends_seam_edge`].
+fn ends_seam<O: Copy>(brep: &impl ClassGeometry<O>, v: O) -> Result<bool> {
+    match brep.topology_entity(v) {
+        Some((b, EntityRef::Vertex(id))) => crate::topology::vertex::ends_seam_edge(b, id),
+        _ => Ok(false),
+    }
 }
 
 /// `SmTol::GetXSectTol3d(pV1, pV2)`: the sum of the two zone tolerances.
