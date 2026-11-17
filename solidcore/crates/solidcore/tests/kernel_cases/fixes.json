@@ -23,8 +23,6 @@
   "sweep_statuses_pass_on",
   "ssi_proto_topology_statuses_pass_on",
   "analytic_inversion_answers_apart",
-  "cone_iso_circle_at_axial_height",
-  "cone_unbounded_parameterized_as_nurb",
   "fillet_statuses_pass_on",
   "boolean_vertex_by_best_crossing",
   "proto_edge_splits_at_captured_vertices",
