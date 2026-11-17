@@ -577,10 +577,8 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 let (command, params) = request.command();
                 app.run(command, params)
             }
-            Kind::Insert => {
-                app.insert_path_with(&request.path, &request.options, request.mesh);
-                Ok(Value::Null)
-            }
+            // A failed import is the request's answer, as a staged one's is.
+            Kind::Insert => app.insert_path_with(&request.path, &request.options, request.mesh).map(|()| Value::Null),
             Kind::InsertDesign => {
                 let (command, params) = request.command();
                 let r = solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params));
@@ -598,10 +596,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 r
             }
             Kind::Open => {
-                app.open_path_with(&request.path, &request.options);
+                let r = app.open_path_with(&request.path, &request.options);
                 // Opened in place of the blank tab it made, with no switch to it.
                 crate::edit_in_place::attach(app);
-                Ok(Value::Null)
+                r.map(|()| Value::Null)
             }
             Kind::Recover { .. } => {
                 let (command, params) = request.command();
