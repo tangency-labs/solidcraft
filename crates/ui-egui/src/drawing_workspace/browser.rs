@@ -147,7 +147,7 @@ fn show_objects(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, shee
                 None => {
                     let msg = format!("ui.drawing_browser_{kind}");
                     let label = solidcraft_ui_text::format(&msg, &[("number", &(index + 1).to_string())]);
-                    (label, (kind == "dimension").then_some(kind))
+                    (label, matches!(kind, "dimension" | "note").then_some(kind))
                 }
             };
             let hit = row(
