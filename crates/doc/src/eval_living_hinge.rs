@@ -139,6 +139,12 @@ pub(crate) fn plate(shown: &ModelState, plane: &Plane, scope: &[String], warning
 /// The slots over `field` in `plate`, checked against the cap.
 pub(crate) fn plan(inputs: &HingeInputs, plate: &[Loop2], warning: &mut Option<String>) -> Result<LivingHingePlan> {
     let plan = kernel::living_hinge::plan(&inputs.field, plate, &inputs.spec, inputs.angle, inputs.anchor)?;
+    if inputs.spec.slot_length <= inputs.spec.bridge {
+        append_warning(
+            warning,
+            "the slots are no longer than the bridges: neighbouring rows do not overlap, so the plate will hardly bend".to_string(),
+        );
+    }
     if plan.slots.is_empty() {
         return Err(DocError::Invalid("no slot fits in the area: use shorter slots, a smaller bridge or margin, or a larger area".into()));
     }

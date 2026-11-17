@@ -104,3 +104,13 @@ fn a_living_hinge_refuses_no_plate_or_several() {
     let e = hinge(&mut s, json!({"sketch": "Both"})).unwrap_err().to_string();
     assert!(e.contains("the area lies over") && e.contains("Wall") && e.contains("Other"), "{e}");
 }
+
+#[test]
+fn a_living_hinge_warns_when_its_slots_are_no_longer_than_its_bridges() {
+    let mut s = wall();
+    let reply = hinge(&mut s, json!({"bridge": 20})).unwrap();
+    assert!(reply["warning"].as_str().is_some_and(|w| w.contains("no longer than the bridges")), "{reply}");
+    let mut s = wall();
+    let reply = hinge(&mut s, json!({})).unwrap();
+    assert!(!reply["warning"].as_str().is_some_and(|w| w.contains("no longer than the bridges")), "{reply}");
+}
