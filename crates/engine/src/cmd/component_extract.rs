@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
 
-use super::{absolute, component_key, file_sha256, inherit_properties, reply, resolve, session_bodies, stored};
+use super::{absolute, component_key, file_sha256, inherit_properties, link_refused, link_target, reply, resolve, session_bodies, stored};
 use crate::params::{bad, str_};
 use crate::schema::component_link::{CopiesResult, CopyInfo, ExtractResult, ReplaceWithLinkResult};
 use crate::{EngineError, Result, Session};
@@ -316,6 +316,12 @@ fn scope(s: &Session, comp: u64, cmd: &str) -> Result<Scope> {
     if let Some(o) = source.occurrences.iter().find(|o| children.contains(&o.component) && !subtree.contains(&o.parent)) {
         return Err(bad(cmd, format!("{} is placed outside {name} too", o.name)));
     }
+    // A component placed inside and outside keeps its parent outside, so it would be left out of
+    // the new design and the placement inside lost
+    if let Some(o) = source.occurrences.iter().find(|o| subtree.contains(&o.parent) && !subtree.contains(&o.component)) {
+        let shared = source.components.iter().find(|c| c.id == o.component).map_or(o.name.clone(), |c| c.name.clone());
+        return Err(bad(cmd, format!("{shared} is placed inside {name} and elsewhere in the design, so it can't go with {name}")));
+    }
     let mut inside: BTreeSet<u64> = source.features.iter().filter(|f| subtree.contains(&f.component)).map(|f| f.id).collect();
     let state = s.model.state();
     let owners: BTreeMap<String, u64> = state.bodies.iter().map(|b| (b.name.clone(), source.model_body_component(b))).collect();
@@ -403,7 +409,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
                 *from = to_root(*from);
                 *to = to_root(*to);
             }
-            FeatureKind::Mirror { placements, .. } => {
+            FeatureKind::Mirror { placements, .. } | FeatureKind::Pattern { placements, .. } => {
                 for path in placements {
                     local_path(path, &sc.own);
                 }
@@ -771,9 +777,14 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
         component_key(s, p, "with", cmd)?
     } else {
         let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`with` or `path` is required"))?;
-        let file = absolute(Path::new(given));
-        let existing =
-            s.doc.links.iter().find(|(_, l)| l.configuration.is_none() && absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c);
+        link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
+        let target = link_target(&absolute(Path::new(given)));
+        let existing = s
+            .doc
+            .links
+            .iter()
+            .find(|(_, l)| l.configuration.is_none() && link_target(&resolve(s.path.as_deref(), &l.path)) == target)
+            .map(|(c, _)| *c);
         match existing {
             Some(c) => c,
             None => {
@@ -1015,6 +1026,22 @@ mod tests {
         run(&mut s, "component.activate", json!({"component": 0}));
         run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": 3, "operation": "new"}));
         refuse(&mut s, json!({"component": "Plate", "path": file}), "uses a sketch of Plate");
+
+        // A component placed twice, with one placement moved into an empty component
+        let mut t = Session::default();
+        run(&mut t, "component.create", json!({"name": "Block"}));
+        run(&mut t, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "BlockBody"}));
+        run(&mut t, "component.activate", json!({"component": 0}));
+        let copy = run(&mut t, "occurrence.copy", json!({"component": "Block", "translate": [30, 0, 0]}));
+        let copy = copy["occurrence"].as_u64().unwrap();
+        let holder = run(&mut t, "component.create", json!({"name": "Holder"}))["component"].as_u64().unwrap();
+        run(&mut t, "component.activate", json!({"component": 0}));
+        run(&mut t, "occurrence.reparent", json!({"occurrence": copy, "parent": holder}));
+        let before = serde_json::to_value(&*t.doc).unwrap();
+        let err = t.execute("component.extract", &json!({"component": "Holder", "path": file})).unwrap_err().to_string();
+        assert!(err.contains("Block is placed inside Holder and elsewhere"), "{err}");
+        assert_eq!(serde_json::to_value(&*t.doc).unwrap(), before);
+        assert!(!file.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1188,6 +1215,20 @@ mod tests {
         assert!(out["warnings"].to_string().contains("the joints now place Other"), "{out}");
         assert_eq!(run(&mut s, "component.copies", json!({"component": plate}))["copies"], out["copies"]);
         let shapes_before = shapes(&s);
+
+        #[cfg(unix)]
+        {
+            // Reopening resolves the existing link's folder; an alias must still reuse it.
+            let alias = dir.join("source");
+            std::os::unix::fs::symlink(dir.canonicalize().unwrap(), &alias).unwrap();
+            let mut reopened = s.scratch();
+            let design = dir.join("assembly.sc");
+            run(&mut reopened, "file.save", json!({"path": design}));
+            run(&mut reopened, "doc.open", json!({"path": design}));
+            let replaced = run(&mut reopened, "component.replace_with_link", json!({"component": copy, "path": alias.join("plate.solidcraft")}));
+            assert_eq!(replaced["component"], plate);
+            assert_eq!(reopened.doc.links.len(), 1);
+        }
 
         let replaced = run(&mut s, "component.replace_with_link", json!({"components": [copy], "with": plate}));
         assert_eq!(replaced["warnings"], json!([]), "{replaced}");

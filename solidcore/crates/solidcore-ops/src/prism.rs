@@ -27,8 +27,9 @@ pub use solidcore::prism::measure::Interval;
 pub use solidcore::prism::placement::LoopPlacement;
 pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
 
+use crate::body::Contract;
 use crate::body::{finish, Body, Expect};
-use crate::boolean::{union_all, BooleanOp};
+use crate::boolean::{union_all_with, BooleanOp};
 use crate::order::{self, Order};
 use crate::session::{read_body, run, run_on, Answer};
 use crate::{Error, Result};
@@ -250,7 +251,10 @@ pub fn extrude_planar_regions(
         }
         Ok(Out(Ok(solids)))
     })?;
-    union_all(pieces.0?.into_iter().map(Body::new).collect())
+    union_all_with(
+        pieces.0?.into_iter().map(Body::new).collect(),
+        Contract::Proved,
+    )
 }
 
 /// A uniform prism along a plane's normal, as [`prism_section`] proves it.
@@ -262,7 +266,7 @@ pub struct PrismSection {
     pub hi: f64,
     /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
     pub region: Region2,
-    /// How far the levels may be off the body's caps.
+    /// How far the levels and section may be off the body's caps, including frame conversion.
     pub tolerance: f64,
     /// An enclosure of its volume.
     pub volume: Interval,
@@ -299,7 +303,7 @@ pub fn prism_equivalent(a: &Body, b: &Body) -> Result<Option<bool>> {
         });
     }
     run_on("prism_equivalent", &[("a", a), ("b", b)], |k| {
-        let (ga, gb) = (a.lock(), b.lock());
+        let (ga, gb) = Body::lock_pair(a, b);
         Ok(measure::equivalent(k, &ga, &gb))
     })
 }
@@ -454,6 +458,15 @@ pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc>
         start: arc.start,
         end: arc.end,
     })
+}
+
+/// Whether a piece of a planar curve within the reading tolerance of its chord is read as the
+/// arc it is proved on before that line ([`read::arc_before_line`]): `spans` its Bézier spans
+/// (`[x w, y w, w]` in the plane), `zone` the model's zone tolerance
+/// ([`crate::sweep::zone_tolerance`]).
+#[must_use]
+pub fn arc_before_line(spans: &[Vec<[f64; 3]>], zone: f64) -> bool {
+    read::arc_before_line(spans, zone)
 }
 
 /// Recognize one directed turn of arcs with the same stored support.

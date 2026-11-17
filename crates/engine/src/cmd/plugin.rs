@@ -1,8 +1,8 @@
 //! One-shot plugins share the engine's command surface, file scope and undo history.
 use super::CommandSpec;
 use crate::schema::plugin::{
-    InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, RemoveParams,
-    RemoveResult, RunParams, RunResult,
+    CheckParams, ImportParams, ImportedDesign, InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin,
+    MeshParams, MeshResult, RemoveParams, RemoveResult, RunParams, RunResult,
 };
 use crate::{
     Result, Session, checked,
@@ -13,15 +13,21 @@ use crate::{
 use serde_json::Value;
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("file.import", "Import with Plugin", checked!("file.import", import)).icon("import").noundo()
+        .contract(&TypedContract::<ImportParams>::new()).output(output_schema_for::<ImportedDesign>)
+        .params("path, format?: installed importer plugin_id.entry (default: the one claiming the file's extension; see plugin.list importers), options?: the importer's declared options; opens the file as a new, unsaved design made by the importer plugin and returns its loss_report; never opens a dialog"),
     CommandSpec::new("model.mesh", "Read Body Mesh", checked!("model.mesh", mesh)).icon("inspect").noundo().read_only()
         .contract(&TypedContract::<MeshParams>::new()).output(output_schema_for::<MeshResult>)
         .params("body, tolerance?: finite positive chord tolerance in mm (default 0.05); evaluated component-local mesh, at most 8192 vertices and 16384 triangles; no files or model changes"),
+    CommandSpec::new("plugin.check", "Check Plugin", checked!("plugin.check", check)).icon("inspect").noundo().read_only().doc_only()
+        .contract(&TypedContract::<CheckParams>::new()).output(output_schema_for::<crate::schema::plugin::CheckResult>)
+        .params("path: plugin package folder or .zip; checks it as Install and a call would (manifest, size limits, permissions, the component's WIT world and version) and lists each problem with how to fix it; runs no plugin code and installs nothing"),
     CommandSpec::new("plugin.inspect", "Inspect Plugin", checked!("plugin.inspect", inspect)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<InspectParams>::new()).output(output_schema_for::<InspectResult>)
         .params("path: plugin package folder; returns inert manifest and approval hash covering manifest and component; runs no plugin code"),
     CommandSpec::new("plugin.install", "Install Plugin", checked!("plugin.install", install)).icon("import").noundo().doc_only()
         .contract(&TypedContract::<InstallParams>::new()).output(output_schema_for::<InstallResult>)
-        .params("path: plugin .zip, approval?: exact hash from a reviewed dry run (mismatch refuses installation), archive?: exact .zip hash from that dry run (any changed file refuses installation), replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?: exactly the manifest's limits.memory_mib, allowed above the user's ceiling for this package}; validates requested approvals and checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
+        .params("path: plugin .zip, approval?: exact hash from a reviewed dry run (mismatch refuses installation), archive?: exact .zip hash from that dry run (any changed file refuses installation), replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?: exactly the manifest's limits.memory_mib, allowed above the user's ceiling for this package, input_folder?: bool, only for an importer that asks for it}; validates requested approvals and checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
     CommandSpec::new("plugin.list", "List Plugins", checked!("plugin.list", list)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<ListParams>::new()).output(output_schema_for::<ListResult>)
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
@@ -32,6 +38,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TypedContract::<RunParams>::new()).output(output_schema_for::<RunResult>)
         .params("path, approval: exact hash from plugin.inspect after reviewing permissions, entry, params?: JSON; explicit native Wasm component execution, one undo step; errors discard all edits"),
 ];
+fn check(s: &mut Session, p: &Value) -> Result<Value> {
+    let p: CheckParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.check", e.to_string()))?;
+    serde_json::to_value(plugin::check::check(s, &p.path)).map_err(|e| bad("plugin.check", e.to_string()))
+}
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let p: InspectParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.inspect", e.to_string()))?;
     let package = plugin::read_package(&p.path)?;
@@ -122,6 +132,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         commands: runtime.map(|r| r.commands.iter().cloned().collect()).unwrap_or_default(),
         entries: runtime.map(|r| r.entries.iter().map(|e| format!("{}.{}", manifest.id, e.name)).collect()).unwrap_or_default(),
         entry_points: runtime.map(|r| r.entries.clone()).unwrap_or_default(),
+        opens: runtime.map(|r| r.entries.iter().flat_map(|e| e.extensions.iter().cloned()).collect()).unwrap_or_default(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),
@@ -182,12 +193,24 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
                 .manifest
                 .runtime
                 .as_ref()
-                .map(|r| r.entries.iter().map(|e| format!("{}.{}", package.manifest.id, e.name)).collect())
+                .map(|r| {
+                    r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Command).map(|e| format!("{}.{}", package.manifest.id, e.name)).collect()
+                })
                 .unwrap_or_default();
             plugins.push(ListedPlugin { disabled: s.disabled_plugins.contains(&package.manifest.id), manifest: package.manifest, commands });
         }
     }
-    serde_json::to_value(ListResult { plugins, param_warnings: vec![] }).map_err(|e| bad("plugin.list", e.to_string()))
+    serde_json::to_value(ListResult { plugins, importers: plugin::describe_importers(s), param_warnings: vec![] })
+        .map_err(|e| bad("plugin.list", e.to_string()))
+}
+
+fn import(s: &mut Session, p: &Value) -> Result<Value> {
+    let p: ImportParams = serde_json::from_value(p.clone()).map_err(|e| bad("file.import", e.to_string()))?;
+    let path = p.path.0;
+    let importer = plugin::importer_for(s, &path, p.format.as_deref())?
+        .ok_or_else(|| bad("file.import", "no installed, enabled importer plugin reads this file"))?;
+    let imported = plugin::import_file(s, &importer, &path, &p.options)?;
+    serde_json::to_value(imported).map_err(|e| bad("file.import", e.to_string()))
 }
 
 fn remove(_s: &mut Session, p: &Value) -> Result<Value> {

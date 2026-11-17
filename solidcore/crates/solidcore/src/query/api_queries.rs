@@ -63,7 +63,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::topology_solver::p1::{CurveRef, TopologyObjects, TopologySolver};
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
+use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::MODEL_TOL;
@@ -1646,6 +1646,90 @@ pub fn point_distance(a: Point3, b: Point3) -> Result<Distance> {
     })
 }
 
+/// A point set's arithmetic centroid and mean Euclidean distance from that centroid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointSetSummary {
+    /// The arithmetic mean of the input points.
+    pub centroid: Point2,
+    /// The arithmetic mean of each point's distance from `centroid`.
+    pub mean_distance: f64,
+}
+
+/// The arithmetic centroid and mean radial distance of a non-empty point set.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an empty set, a non-finite point, or a non-finite
+/// intermediate or result.
+pub fn point_set_summary(points: &[Point2]) -> Result<PointSetSummary> {
+    if points.is_empty() {
+        return Err(SolidError::invalid_input(OP, "empty point set"));
+    }
+    if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+
+    let (mut x, mut y) = (0.0, 0.0);
+    for point in points {
+        x += point.x;
+        y += point.y;
+        if !x.is_finite() || !y.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point centroid overflows"));
+        }
+    }
+    let count = points.len() as f64;
+    let centroid = Point2::new(x / count, y / count);
+    if !centroid.x.is_finite() || !centroid.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point centroid is not finite",
+        ));
+    }
+
+    let mut total_distance = 0.0;
+    for point in points {
+        let distance = point.distance(centroid);
+        if !distance.is_finite() {
+            return Err(SolidError::invalid_input(OP, "point distance overflows"));
+        }
+        total_distance += distance;
+        if !total_distance.is_finite() {
+            return Err(SolidError::invalid_input(
+                OP,
+                "mean point distance overflows",
+            ));
+        }
+    }
+    let mean_distance = total_distance / count;
+    if !mean_distance.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "mean point distance is not finite",
+        ));
+    }
+    Ok(PointSetSummary {
+        centroid,
+        mean_distance,
+    })
+}
+
+/// The vector from point `from` to point `to`.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a non-finite input or a displacement that overflows.
+pub fn point_displacement(from: Point2, to: Point2) -> Result<Vec2> {
+    if !from.x.is_finite() || !from.y.is_finite() || !to.x.is_finite() || !to.y.is_finite() {
+        return Err(SolidError::invalid_input(OP, "non-finite point"));
+    }
+    let displacement = to - from;
+    if !displacement.x.is_finite() || !displacement.y.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "point displacement overflows",
+        ));
+    }
+    Ok(displacement)
+}
+
 /// The largest distance from `point` to a point of the box with opposite corners `a`
 /// and `b`: to its farthest corner ([`Extent3d::max_distance_to_point`]; not upstream).
 ///
@@ -2118,6 +2202,81 @@ mod tests {
     }
 
     #[test]
+    fn point_set_summary_uses_the_arithmetic_mean_radius() {
+        let points = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 6.0),
+        ];
+        let summary = point_set_summary(&points).unwrap();
+        assert_eq!(summary.centroid, Point2::new(2.0, 2.0));
+        let expected = (2.0 * 2.0_f64.sqrt() + 4.0 * 5.0_f64.sqrt()) / 3.0;
+        assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
+        assert_ne!(
+            summary.mean_distance, 4.0,
+            "the RMS radius is not the mean radius"
+        );
+
+        let moved = [
+            Point2::new(0.0, 0.0),
+            Point2::new(6.0, 0.0),
+            Point2::new(0.0, 12.0),
+        ];
+        let moved_summary = point_set_summary(&moved).unwrap();
+        assert_eq!(moved_summary.centroid, Point2::new(2.0, 4.0));
+        let moved_expected =
+            (2.0 * 5.0_f64.sqrt() + 4.0 * 2.0_f64.sqrt() + 2.0 * 17.0_f64.sqrt()) / 3.0;
+        assert!(
+            (moved_summary.mean_distance - moved_expected).abs()
+                <= 2.0 * f64::EPSILON * moved_expected
+        );
+    }
+
+    #[test]
+    fn point_set_summary_accepts_single_and_duplicate_points() {
+        let one = Point2::new(3.0, -4.0);
+        assert_eq!(
+            point_set_summary(&[one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+        assert_eq!(
+            point_set_summary(&[one, one, one]).unwrap(),
+            PointSetSummary {
+                centroid: one,
+                mean_distance: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn point_set_summary_refuses_empty_non_finite_and_overflowing_sets() {
+        assert!(point_set_summary(&[]).is_err());
+        assert!(point_set_summary(&[Point2::new(f64::NAN, 0.0)]).is_err());
+        assert!(point_set_summary(&[Point2::new(0.0, f64::INFINITY)]).is_err());
+        assert!(
+            point_set_summary(&[Point2::new(f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+        assert!(
+            point_set_summary(&[Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
+        );
+    }
+
+    #[test]
+    fn point_displacement_is_from_first_point_to_second_and_refuses_bad_values() {
+        assert_eq!(
+            point_displacement(Point2::new(2.0, 2.0), Point2::new(5.0, 6.0)).unwrap(),
+            Vec2::new(3.0, 4.0)
+        );
+        assert!(point_displacement(Point2::new(f64::NAN, 0.0), Point2::ZERO).is_err());
+        assert!(
+            point_displacement(Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),).is_err()
+        );
+    }
+
+    #[test]
     fn vertex_distance_is_the_point_distance_to_the_vertex() {
         let mut k = Kernel::default();
         let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
@@ -2520,6 +2679,95 @@ mod tests {
     fn whole(k: &mut Kernel, curve: Curve) -> (Brep, EdgeId) {
         let interval = curve.natural_interval();
         wire(k, curve, interval)
+    }
+
+    /// The closest points of the arc of `radius` about `center` over the angles `from..to`
+    /// (degrees from +X, counterclockwise; the kernel's exact circle segment, over its whole
+    /// interval) and a whole analytic circle of `whole_radius` about (0, 0, `z`), both in XY
+    /// planes ([`closest_to_members`]).
+    fn arc_to_circle(
+        center: Point3,
+        radius: f64,
+        [from, to]: [f64; 2],
+        whole_radius: f64,
+        z: f64,
+    ) -> MembersClosest {
+        let mut k = Kernel::default();
+        let circle = crate::primitive::api_curves::create_analytic_circle(
+            &k,
+            Point3::new(0.0, 0.0, z),
+            whole_radius,
+        )
+        .unwrap();
+        let (mut b, e) = whole(&mut k, Curve::from(circle));
+        let probe = Curve::from(
+            crate::primitive::api_curves::create_arc(center, radius, from, to).unwrap(),
+        );
+        let interval = probe.natural_interval();
+        // the arc runs from its `from` end to its `to` end
+        for (t, deg) in [(interval.min(), from), (interval.max(), to)] {
+            let end = probe.evaluate_point(&k, t).unwrap();
+            let (cos, sin) = (deg.to_radians().cos(), deg.to_radians().sin());
+            let want = center + Vec3::new(radius * cos, radius * sin, 0.0);
+            assert!(end.distance(want) <= 1e-9, "{end:?} {want:?}");
+        }
+        closest_to_members(
+            &mut k,
+            &mut b,
+            BrepId::from_index(0),
+            &[],
+            &[e],
+            Probe::Curve {
+                curve: &probe,
+                interval,
+            },
+        )
+        .unwrap()
+    }
+
+    /// A half circle of radius 35 about the centre of a circle of radius 20 is 15 from it,
+    /// at points on both.
+    #[test]
+    fn closest_to_members_of_concentric_circles_is_their_radii_apart() {
+        let c = arc_to_circle(Point3::new(0.0, 0.0, 5.0), 35.0, [0.0, 180.0], 20.0, 5.0);
+        assert!((c.distance - 15.0).abs() <= 1e-9, "{c:?}");
+        let radius = |p: Point3| p.x.hypot(p.y);
+        assert!((radius(c.on_probe) - 35.0).abs() <= 1e-9, "{c:?}");
+        assert!((radius(c.on_members) - 20.0).abs() <= 1e-9, "{c:?}");
+        assert!(c.on_probe.y >= -1e-9, "{c:?}");
+    }
+
+    /// The radius 35 arc moved 2 up, over its lower left quarter, against the radius 20 circle:
+    /// a point P of the circle is 35 - |P - C| from the arc's circle, largest |P - C| at
+    /// P = (0, -20), whose nearest arc point is the arc's end (0, -33): 13 apart.
+    #[test]
+    fn closest_to_members_of_shifted_circles_is_at_their_lowest_points() {
+        let c = arc_to_circle(Point3::new(0.0, 2.0, 0.0), 35.0, [180.0, 270.0], 20.0, 0.0);
+        assert!((c.distance - 13.0).abs() <= 1e-9, "{c:?}");
+        assert!(
+            c.on_members.distance(Point3::new(0.0, -20.0, 0.0)) <= 1e-9,
+            "{c:?}"
+        );
+        assert!(
+            c.on_probe.distance(Point3::new(0.0, -33.0, 0.0)) <= 1e-9,
+            "{c:?}"
+        );
+    }
+
+    /// A radius 10 arc about (40, 0) over 0°..170° against the radius 10 circle about the
+    /// origin: the circles come nearest at 180° on the arc's circle, past its end, and a point
+    /// at angle t of the arc is sqrt(1700 + 800 cos t) - 10 from the circle, least at the end
+    /// E (t = 170°), with the circle's point 10 E / |E|.
+    #[test]
+    fn closest_to_members_of_an_arc_past_its_end_is_at_the_end() {
+        let end = 170f64.to_radians();
+        let c = arc_to_circle(Point3::new(40.0, 0.0, 0.0), 10.0, [0.0, 170.0], 10.0, 0.0);
+        let e = Point3::new(40.0 + 10.0 * end.cos(), 10.0 * end.sin(), 0.0);
+        let reach = (1700.0 + 800.0 * end.cos()).sqrt();
+        assert!((c.distance - (reach - 10.0)).abs() <= 1e-9, "{c:?}");
+        assert!(c.on_probe.distance(e) <= 1e-9, "{c:?}");
+        let near = Point3::new(e.x * 10.0 / reach, e.y * 10.0 / reach, 0.0);
+        assert!(c.on_members.distance(near) <= 1e-9, "{c:?}");
     }
 
     /// Each crossing's point is on its edge at its parameter, to 1e-9.

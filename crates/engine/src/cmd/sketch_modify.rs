@@ -99,14 +99,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("trim")
         .key("T")
         .enabled(in_sketch)
-        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it). Trimming a line source or its single-line offset releases linked extents (offset_released: curve ids), retaining their driving normal-distance dimensions and parallel relations", created_doc!())),
+        .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it). Trimming a line, circle or arc that has offsets, or a piece of an offset's copy (from one curve, or from several lines and arcs), releases the offset first (offset_released: curve ids): each copy keeps following its source at the offset's distance, held by dimensions that keep the offset's parameter", created_doc!())),
     CommandSpec::new("sketch.trim.path", "Trim Along Path", crate::checked!("sketch.trim.path", trim_path))
         .contract(&TRIM_PATH_CONTRACT)
         .output(output_schema_for::<TrimPathResult>)
         .icon("trim")
         .enabled(in_sketch)
         .params(concat!(
-            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; eligible single-line offset outputs are trimmed while preserving their distance; projected geometry, infinite lines, other offset outputs and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
+            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; offset copies are trimmed as `sketch.trim` trims them, keeping their distance; projected geometry, infinite lines, offset copies trim can't release and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
             created_doc!()
         )),
     CommandSpec::new("sketch.extend", "Extend", crate::checked!("sketch.extend", extend))
@@ -633,8 +633,11 @@ fn released_family(kind: &CurveKind) -> Option<Released> {
 /// Source lines, circles and arcs and their offsets can have independent ends. Materialize the
 /// affected offsets before Trim, retaining their original driving distance parameters as
 /// point-line dimensions (lines) or nested circle-circle gaps (circles and arcs, #7390). Without
-/// a dimension, the stored distance stays a fixed distance. Offsets mixing lines with arcs still
-/// need their association.
+/// a dimension, the stored distance stays a fixed distance. Trimming a piece of an offset's
+/// copy releases the whole copy (#8074), as a fillet at its corner does: a copy made from several
+/// lines and arcs, mixed or not, or from one line, circle or arc. Trimming a source releases its
+/// offsets when they are all lines or all round; a source in a chain mixing lines with arcs keeps
+/// its offset's association.
 fn release_trim_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
     let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
     if curve.infinite || sk.is_linked_curve(ci) || released_family(&curve.kind).is_none() {
@@ -642,22 +645,24 @@ fn release_trim_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usi
     }
     let id = curve.id.clone();
     let family = |id: &String| sk.curve_index(id).and_then(|ci| sk.curves.get(ci)).and_then(|c| released_family(&c.kind));
+    let line_or_arc = |id: &String| {
+        sk.curve_index(id).and_then(|i| sk.curves.get(i)).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. }))
+    };
     let affected: Vec<usize> = sk
         .offsets
         .iter()
         .enumerate()
         .filter_map(|(i, offset)| {
+            let one_family = offset.sources.first().and_then(|(first, _)| family(first)).is_some_and(|kind| {
+                offset.sources.iter().zip(&offset.outputs).all(|((source, _), output)| family(source) == Some(kind) && family(output) == Some(kind))
+            });
+            let of_source = offset.sources.iter().any(|(source, _)| source == &id);
+            let of_copy = offset.outputs.contains(&id);
+            let lines_and_arcs = offset.outputs.iter().all(line_or_arc) && offset.sources.iter().all(|(source, _)| line_or_arc(source));
             (offset.topology.is_none()
-                && (offset.sources.iter().any(|(source, _)| source == &id) || (offset.sources.len() == 1 && offset.outputs.contains(&id)))
                 && offset.sources.len() == offset.outputs.len()
-                && offset.sources.first().and_then(|(first, _)| family(first)).is_some_and(|kind| {
-                    offset
-                        .sources
-                        .iter()
-                        .zip(&offset.outputs)
-                        .all(|((source, _), output)| family(source) == Some(kind) && family(output) == Some(kind))
-                }))
-            .then_some(i)
+                && ((one_family && (of_source || (of_copy && offset.sources.len() == 1))) || (of_copy && lines_and_arcs)))
+                .then_some(i)
         })
         .collect();
     release_offsets(sk, doc, affected, cmd)

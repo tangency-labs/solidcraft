@@ -456,8 +456,7 @@ pub fn export(app: &SolveApp) -> Value {
 pub const MAX_IMPORT_BYTES: usize = 1 << 20;
 
 pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
-    // "solvecraft-shortcuts/1": files exported before the rename (compatibility shim).
-    if !matches!(v.get("format").and_then(Value::as_str), Some("solidcraft-shortcuts/1" | "solvecraft-shortcuts/1")) {
+    if v.get("format").and_then(Value::as_str) != Some("solidcraft-shortcuts/1") {
         return Err("not a SolidCraft shortcuts file".into());
     }
     let navigation_bar = v

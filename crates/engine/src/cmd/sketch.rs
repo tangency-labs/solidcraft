@@ -253,7 +253,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&COINCIDENT_CONTRACT)
         .output(output_schema_for::<CoincidentResult>)
-        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two 3D points (`<3D curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's id) or a 3D point and a drawn 3D line", model_operand_doc!())),
+        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (they become collinear), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two 3D points (`<3D curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's id) or a 3D point and a drawn 3D line", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.tangent", "Tangent", crate::checked!("sketch.constraint.tangent", c_tangent))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_tangent")
@@ -1273,7 +1273,7 @@ fn create_sketch_on(s: &mut Session, p: &Value, mut plane: PlaneRef, frame: Opti
 
 /// `flip` of `sketch.create`: `None` keeps the plane's own side, otherwise the axis to turn
 /// about (`true`: about y when the plane's y axis points upward, so it stays up, else about x).
-fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Option<bool>> {
+pub(super) fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Option<bool>> {
     let about_y = match p.get("flip") {
         None | Some(Value::Null) | Some(Value::Bool(false)) => return Ok(None),
         Some(Value::String(a)) if a.eq_ignore_ascii_case("x") => false,
@@ -1303,11 +1303,12 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
 }
 
 /// A new sketch on `plane`, as `sketch.create` replies.
-fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
+fn sketch_on_plane(s: &mut Session, p: &Value, mut plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<CreateResult> {
     let before = entry_point(s);
     if face::is_face(p) {
         face::capture_positions(s, &plane)?;
     }
+    solidcraft_doc::capture_sketch_plane_placement(&s.design_document(), &mut plane, s.active_component, &s.active_component_frame())?;
     // Validate the plane resolves.
     let (vals, _) = s.doc.param_values();
     s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;
@@ -1520,7 +1521,8 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
     before.marker = marker.filter(|m| *m < before.features.len());
     let mut after = (*s.doc).clone();
     after.marker = marker.filter(|m| *m < after.features.len());
-    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility;
+    let section = s.undo.get(start..).unwrap_or_default().iter().find_map(|snap| snap.section.clone()).filter(|was| *was != s.section_state());
+    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility || section.is_some();
     s.undo.truncate(start);
     if changed {
         s.undo.push(Snapshot {
@@ -1529,6 +1531,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
             active_sketch: None,
             pending_moves: entry.pending_moves.clone(),
             visibility: entry.visibility.clone(),
+            section,
         });
         if s.undo.len() > crate::MAX_UNDO {
             s.undo.remove(0);
@@ -2886,9 +2889,20 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some((a, b)) = two_round(sk, p) {
         return coincident_circles(s, p, cmd, a, b);
     }
+    // Two straight lines made coincident lie along one line: Collinear, as in other CAD tools (#18232).
+    if let Some((a, b)) = two_lines(sk, p, cmd)? {
+        if let Some(c) =
+            sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Collinear { a: x, b: y } if (x, y) == (a, b) || (x, y) == (b, a)))
+        {
+            let rep = solve(&mut sk.clone());
+            let made = CoincidentMade::Existing { constraint: c.id.clone(), existing: true, sketch: report_json(&rep) };
+            return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
+        }
+        let made = constrain(s, p, cmd, |_| Ok(ConstraintKind::Collinear { a, b }))?;
+        return reply(cmd, CoincidentResult { made: CoincidentMade::Added(made), param_warnings: Vec::new() });
+    }
     let pt = |k: &str| p.get(k).and_then(Value::as_str).and_then(|r| sk.resolve_point(r));
-    let line_points = coincident_line_points(sk, p, cmd)?;
-    if let Some((a, b)) = line_points.or_else(|| pt("a").zip(pt("b")))
+    if let Some((a, b)) = pt("a").zip(pt("b"))
         && let Some(c) = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (a, b) || (p, q) == (b, a)))
     {
         let rep = solve(&mut sk.clone());
@@ -2896,9 +2910,6 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
     }
     let pick = |sk: &mut Sketch| -> Result<ConstraintKind> {
-        if let Some((a, b)) = line_points {
-            return Ok(ConstraintKind::Coincident { p: a, q: b });
-        }
         // A line's middle, `{midpoint: line}` as a selected midpoint is sent (#10311): the point
         // tied there by a Midpoint constraint stands for it, made as Horizontal/Vertical makes it.
         let middle = |sk: &mut Sketch, key: &str| -> Result<Option<usize>> {
@@ -2986,33 +2997,16 @@ fn coincident_circles(s: &mut Session, p: &Value, cmd: &str, a: usize, b: usize)
     reply(cmd, CoincidentResult { made: CoincidentMade::Circles { constraint, constraints: ids, sketch: info }, param_warnings: Vec::new() })
 }
 
-/// Four endpoint pairs, ordered independently of pick order when distances tie.
-fn coincident_line_points(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
+/// `a` and `b` both straight lines (two different ones), by curve index.
+fn two_lines(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
     let curve = |key: &str| p.get(key).and_then(Value::as_str).and_then(|id| sk.curve_index(id));
     let (Some(a), Some(b)) = (curve("a"), curve("b")) else { return Ok(None) };
     if a == b {
         return Err(bad(cmd, "choose two distinct lines"));
     }
-    let ends = |i: usize| match sk.curves.get(i).map(|curve| &curve.kind) {
-        Some(CurveKind::Line { a, b }) => Some([*a, *b]),
-        _ => None,
-    };
-    let (Some(first), Some(second)) = (ends(a), ends(b)) else {
+    let line = |i: usize| matches!(sk.curves.get(i).map(|curve| &curve.kind), Some(CurveKind::Line { .. }));
+    if !(line(a) && line(b)) {
         return Err(bad(cmd, "two curves must both be straight lines; otherwise choose a point and a curve"));
-    };
-    let mut best: Option<(f64, usize, usize)> = None;
-    for a in first {
-        for b in second {
-            let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return Err(bad(cmd, "line endpoint is missing")) };
-            let candidate = (pa.dist(pb), a.min(b), a.max(b));
-            if best.is_none_or(|old| candidate < old) {
-                best = Some(candidate);
-            }
-        }
-    }
-    let (_, a, b) = best.ok_or_else(|| bad(cmd, "line endpoints are missing"))?;
-    if a == b {
-        return Err(bad(cmd, "the lines already share an endpoint"));
     }
     Ok(Some((a, b)))
 }

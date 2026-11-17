@@ -1,5 +1,6 @@
 //! #2385 (WR-717): a cliff overflow's crease that runs along an edge of the face it crosses,
-//! within the trim's tolerance, is that edge (`fixes.fillet_overflow_crease_along_edge`).
+//! within the trim's tolerance, is that edge (once `fixes.fillet_overflow_crease_along_edge`,
+//! now unconditional).
 //!
 //! A disc 13 in radius and 2 high (SolidCraft #190's) has its top edge rounded r a little
 //! past its height. The round's section is the circle of radius r about (13 - r, 2 - r) in
@@ -42,10 +43,9 @@ use solidcore::{Brep, Kernel};
 
 const PI: f64 = std::f64::consts::PI;
 
-/// Every flag, with WR-717's set as `on`.
-fn kernel(on: bool) -> Kernel {
+/// Every flag.
+fn kernel() -> Kernel {
     let mut fixes = UpstreamFixes::all();
-    fixes.fillet_overflow_crease_along_edge = on;
     // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
     // body's outline (`wr730_round_ends_on_outline.rs`)
     fixes.fillet_round_ends_on_outline = false;
@@ -68,8 +68,8 @@ fn pick(k: &Kernel, b: &Brep, p: [f64; 3]) -> EdgeId {
 }
 
 /// The disc with its top edge rounded `r` (`SmApiFilletEdges`, circular section).
-fn rounded(on: bool, r: f64) -> (Kernel, solidcore::Result<Brep>) {
-    let mut k = kernel(on);
+fn rounded(r: f64) -> (Kernel, solidcore::Result<Brep>) {
+    let mut k = kernel();
     let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 13.0, 2.0).unwrap();
     let e = pick(&k, &b, [0.0, 13.0, 2.0]);
     let built = fillet_edges(&mut k, &mut b, &[e], r, 1, 1, 1.0).map(|()| b);
@@ -102,7 +102,7 @@ fn closed_form(r: f64) -> f64 {
 #[test]
 fn a_round_just_past_its_wall_builds() {
     for r in [2.00005, 2.0001, 2.0003, 2.001, 2.005, 2.01] {
-        let (k, built) = rounded(true, r);
+        let (k, built) = rounded(r);
         let mut b = built.unwrap_or_else(|e| panic!("r {r}: {e}"));
         assert!(brep_is_manifold_solid(&b).unwrap(), "r {r}");
         assert_eq!(b.face_list().len(), 3, "r {r}");
@@ -117,25 +117,14 @@ fn a_round_just_past_its_wall_builds() {
     }
 }
 
-/// Without the flag the band is refused, as the fork refuses it.
-#[test]
-fn without_the_flag_the_band_is_refused() {
-    for r in [2.0001, 2.001, 2.01] {
-        let (_, built) = rounded(false, r);
-        assert!(built.is_err(), "r {r}");
-    }
-}
-
 /// Where the crease lies inside the bottom face (and at r 2, where nothing overflows) the
-/// flag changes nothing: the same volume to the bit, at V(r) to 1e-6.
+/// round builds at V(r) to 1e-6, as it did before the fix.
 #[test]
 fn a_crease_inside_the_face_is_unchanged() {
     for r in [2.0, 2.02, 2.5] {
-        let (k_on, on) = rounded(true, r);
-        let (k_off, off) = rounded(false, r);
-        let (mut on, mut off) = (on.unwrap(), off.unwrap());
-        let (v_on, v_off) = (volume_of(&k_on, &mut on), volume_of(&k_off, &mut off));
-        assert_eq!(v_on.to_bits(), v_off.to_bits(), "r {r}");
-        assert!((v_on - closed_form(r)).abs() <= 1e-6, "r {r}: {v_on}");
+        let (k, built) = rounded(r);
+        let mut b = built.unwrap_or_else(|e| panic!("r {r}: {e}"));
+        let v = volume_of(&k, &mut b);
+        assert!((v - closed_form(r)).abs() <= 1e-6, "r {r}: {v}");
     }
 }

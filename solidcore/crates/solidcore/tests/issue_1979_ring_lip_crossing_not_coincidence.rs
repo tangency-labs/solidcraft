@@ -4,8 +4,9 @@
 //! the curve/curve global solver on the two circles, whose span ends lie within 1e-9 of the
 //! other circle: `SmCurve::SimpleCoincidenceChecker` takes the span pair as a coincidence
 //! range, although the circles cross inside it, and the range becomes a tiny edge. Upstream
-//! (the default) is then non-manifold at e = 1e-4 (`SmTrimmingTools` #0/#2/#3/#4, as the fork
-//! reports) and gives no solid (volume 0) at e = 1e-3; with
+//! was then non-manifold at e = 1e-4 (`SmTrimmingTools` #0/#2/#3/#4, as the fork reports; the
+//! default union there is now valid, see below) and gives no solid (volume 0) at e = 1e-3,
+//! which the union's WR-619 guard now refuses; with
 //! `Kernel::fixes.simple_coincidence_crossing_is_point` the range is the crossing and every
 //! offset is a valid manifold solid of the analytic volume.
 #![allow(
@@ -17,6 +18,8 @@
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
+use solidcore::error::boolean::BooleanFailure;
+use solidcore::error::Reason;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
@@ -49,7 +52,7 @@ fn arc(k: &Kernel, c: Point3, x0: Vec3, y0: Vec3, r: f64, degrees: f64) -> Curve
 }
 
 /// The union of the ring and the lip at offset `e`.
-fn ring_and_lip(k: &mut Kernel, e: f64) -> Brep {
+fn ring_and_lip(k: &mut Kernel, e: f64) -> solidcore::Result<Brep> {
     let p = Point3::new;
     let o = arc(k, p(0.0, 10.0, 0.0), Vec3::X, Vec3::Y, 5.0, 360.0);
     let i = arc(k, p(0.0, 10.0, 0.0), Vec3::X, Vec3::Y, 3.0, 360.0);
@@ -65,17 +68,18 @@ fn ring_and_lip(k: &mut Kernel, e: f64) -> Brep {
     ];
     let refs: Vec<Option<&Curve>> = outline.iter().map(Some).collect();
     let lip = create_linear_sweep(k, &refs, Vec3::Z, 18.0, true).unwrap();
-    boolean_union(k, ring, lip).unwrap()
+    boolean_union(k, ring, lip)
 }
 
-/// Whether the union is a manifold solid, its level-2 check failures and its volume.
-fn union_at(e: f64, fix: bool) -> (bool, Vec<String>, f64) {
+/// Whether the union is a manifold solid, its level-2 check failures and its volume; or
+/// the union's refusal.
+fn union_at(e: f64, fix: bool) -> solidcore::Result<(bool, Vec<String>, f64)> {
     let mut k = Kernel::default();
     k.fixes.simple_coincidence_crossing_is_point = fix;
-    let mut b = ring_and_lip(&mut k, e);
+    let mut b = ring_and_lip(&mut k, e)?;
     let manifold = is_manifold_solid(&b).unwrap();
     let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-    (manifold, check.lines(), volume(&k, &mut b))
+    Ok((manifold, check.lines(), volume(&k, &mut b)))
 }
 
 /// Base pi (25 - 9) 2 plus half of pi (25 - 16) 18: 354.99997.
@@ -88,7 +92,7 @@ fn want() -> f64 {
 fn issue_1979_ring_lip_union_is_valid_at_every_offset_with_the_fix() {
     let mut report = Vec::new();
     for e in [0.0, 1e-4, 1e-3, 1e-2] {
-        let got = union_at(e, true);
+        let got = union_at(e, true).unwrap();
         let ok = got.0 && got.1.is_empty() && (got.2 - want()).abs() <= 1e-5 * want();
         if !ok {
             report.push(format!("e = {e}: {got:?}"));
@@ -97,15 +101,26 @@ fn issue_1979_ring_lip_union_is_valid_at_every_offset_with_the_fix() {
     assert!(report.is_empty(), "want {}: {report:#?}", want());
 }
 
-/// Upstream (the default): non-manifold at 1e-4, no solid at 1e-3.
+/// Upstream (the default) is non-manifold at 1e-4 (`SmTrimmingTools` #4) and gives no
+/// solid at 1e-3. The tiny edge's two ends at 1e-4 are one point: each is fixed along its
+/// circle only to its tolerance over the sine of the angle at which the circles cross
+/// (docs/booleans.md, "One point or two"), so the default union there is now the valid
+/// solid too. At 1e-3 its face deletion still leaves no solid region (volume 0, against
+/// the 355 of `want`): a union of two non-empty solids always has one, so the union's
+/// WR-619 guard refuses that body (`BooleanFailure::SolidLeaks`).
 #[test]
-fn issue_1979_ring_lip_union_is_invalid_by_default() {
-    let (manifold, lines, _) = union_at(1e-4, false);
-    assert!(!manifold, "e = 1e-4 is manifold by default: {lines:?}");
+fn issue_1979_ring_lip_union_by_default() {
+    let (manifold, lines, v) = union_at(1e-4, false).unwrap();
     assert!(
-        lines.iter().any(|l| l.contains("SmTrimmingTools::Test #4")),
-        "{lines:?}"
+        manifold && lines.is_empty() && (v - want()).abs() <= 1e-5 * want(),
+        "e = 1e-4: {manifold} {lines:?} {v}"
     );
-    let (_, lines, v) = union_at(1e-3, false);
-    assert!(!lines.is_empty() && v == 0.0, "e = 1e-3: {lines:?} {v}");
+    let e = union_at(1e-3, false).unwrap_err();
+    assert!(
+        matches!(
+            e.failure().map(|f| &f.reason),
+            Some(Reason::Boolean(BooleanFailure::SolidLeaks { .. }))
+        ),
+        "e = 1e-3: {e:?}"
+    );
 }

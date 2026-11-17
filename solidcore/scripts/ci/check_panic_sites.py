@@ -46,7 +46,7 @@ LIST = Path("plan/panic-sites.tsv")
 # solidcore and the STEP crates SolidCraft links (solidcore-step: SolidCraft's STEP reader,
 # moved in by tangency-labs/solidcraft#13979). nurbs-grid-mesh is not here: nothing depends on
 # it, and docs/layers.md has it merged into solidcore-tess and then deleted.
-CRATES = ["solidcore", "step-export", "solidcore-step"]
+CRATES = ["solidcore", "step-export", "solidcore-step", "solidcore-cadir"]
 COLUMNS = ["file", "fn", "pattern", "n", "status", "code", "reason"]
 
 # clippy `disallowed-methods` path -> pattern name. Only calls that can panic on their
