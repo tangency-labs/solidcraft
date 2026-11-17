@@ -734,6 +734,7 @@ pub(crate) fn open_entry(app: &mut SolveApp, p: usize, e: usize) {
     // picking: that tool keeps them until a field here is clicked.
     if let Some(dialog) = app.plugin_menu.dialogs.last()
         && !dialog.selection_inputs().is_empty()
+        && app.tool.is_none()
         && app.dialog.as_ref().is_none_or(|d| matches!(d.kind, crate::dialogs::Kind::PluginPick { .. }))
     {
         start_picking(app, id, 0);
@@ -797,7 +798,8 @@ pub(crate) fn start_picking(app: &mut SolveApp, id: u64, field: usize) -> bool {
 
 /// [`start_picking`], with the field's list of picks open when `listed`.
 fn start_picking_listed(app: &mut SolveApp, id: u64, field: usize, listed: bool) -> bool {
-    if app.dialog.as_ref().is_some_and(|d| !matches!(d.kind, crate::dialogs::Kind::PluginPick { .. })) {
+    // A native tool (a sketch tool) or dialog that is open keeps the viewport's input.
+    if app.tool.is_some() || app.dialog.as_ref().is_some_and(|d| !matches!(d.kind, crate::dialogs::Kind::PluginPick { .. })) {
         return false;
     }
     if let Some(d) = app.dialog.take() {

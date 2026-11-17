@@ -177,7 +177,8 @@ key is the argument the plugin receives. The design follows the
 
 - **What it takes.** `accept` lists one or more of `profile`, `edge`, `face`, `body`,
   `sketch_point` and `sketch_curve`. Sketch points and curves are picked with their sketch, because
-  ids repeat from one sketch to the next. The annotation has exactly `version` (1) and `accept`.
+  ids repeat from one sketch to the next. A profile field takes profiles from any number of
+  sketches; the plugin decides what it accepts. The annotation has exactly `version` (1) and `accept`.
   An unknown version or category, or any other keyword on the property (`uniqueItems`, a detailed
   `items` schema), leaves Run off with the note to run the entry from the agent or the CLI.
 - **How many.** `minItems` and `maxItems` are the counts Run checks. With `maxItems: 1` a pick
@@ -198,7 +199,7 @@ key is the argument the plugin receives. The design follows the
   starts with what is selected that it takes. The other fields start empty, so one selection never
   fills two fields. Clicking a field makes it the one that picks; its clear button, its list of
   picks and the hover highlight work as in the native tools. One tool picks at a time: while a
-  native tool is open, clicking a plugin field says to finish or cancel it first.
+  native tool is open, clicking a plugin field says to finish or cancel it first (a sketch tool too).
   Escape and Cancel close the dialog and stop the picking.
 - **References stay true.** The picks belong to the design they were made on. Any change to the
   design while the dialog is open (an edit, an undo) clears them and the dialog says so; turning

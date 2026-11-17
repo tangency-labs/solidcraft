@@ -2336,7 +2336,8 @@ fn retain_profile_list_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
 /// Keep the profile picks of the sketch just picked; lofts retain their separate sections.
 fn retain_profile_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
     if let Sel::Profile { sketch, .. } = sel
-        && !matches!(kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
+        // A plugin's profile field takes what is picked; the plugin decides what it accepts.
+        && !matches!(kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }) | Kind::PluginPick { .. })
     {
         input.items.retain(|x| !matches!(x, Sel::Profile { sketch: other, .. } if other != sketch));
     }
