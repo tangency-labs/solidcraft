@@ -3,7 +3,7 @@
 //! [`guard`], with the bodies made back into this crate's [`Body`]. Computes nothing itself.
 
 pub use solidcore::plate_contact::{Contact, PairSkip, Plane};
-pub use solidcore::tab_slot::Layout;
+pub use solidcore::tab_slot::{Layout, SlotSkip, StretchSkip, TabSkip};
 pub use solidcore_ops::plate_contact::{
     JointSkip, MAX_TOOL_FACES, NearPair, SLOW_TOOL_FACES, StretchPlan, TabPlan, TabSlotPlan, TabSlotSpec, ToolFaceCap, check_tool_faces,
 };

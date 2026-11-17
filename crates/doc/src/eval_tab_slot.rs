@@ -139,6 +139,89 @@ pub struct TabSlotJoint {
     pub skipped: Option<String>,
     /// The skip's reason id of design 11.3 (`swapped`, `meets_other_plate_joint`, ...; `None`: cut).
     pub reason: Option<String>,
+    /// The tabs the joint made (0 when skipped).
+    pub tabs: usize,
+    /// The stretches and tabs of a cut joint left out (design 11.3: `too_short`, `at_edge`,
+    /// `over_hole`, ...), in strip order. A cut joint that made no tab is skipped, named by its
+    /// first.
+    pub left_out: Vec<TabSlotLeftOut>,
+}
+
+/// A stretch or tab of a cut joint that is not made (design 11.3, stretch and tab level).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabSlotLeftOut {
+    /// The reason id of design 11.3 (`too_short`, `spacing_too_small`, `at_edge`, `over_hole`,
+    /// `uneven_far_side`, `no_far_side`, `tab_too_short`).
+    pub reason: String,
+    /// Why, in the user's words ("the tab at 12.0 mm: its slot would open the slot plate's edge").
+    pub text: String,
+}
+
+/// A stretch's skip in the user's words (design 11.3).
+fn stretch_skip_text(stretch: (f64, f64), skip: &kernel_ts::StretchSkip) -> String {
+    use kernel_ts::StretchSkip as S;
+    let at = format!("the stretch from {:.1} to {:.1} mm", stretch.0, stretch.1);
+    match skip {
+        S::TooShort { length, need, most: 0 } => format!("{at} is too short for a tab ({length:.1} mm, needs {need:.1} mm)"),
+        S::TooShort { length, need, most } => format!(
+            "{at} is too short for the tabs asked ({length:.1} mm, needs {need:.1} mm, {most} tab{} would fit)",
+            if *most == 1 { "" } else { "s" }
+        ),
+        S::SpacingTooSmall { space, least } => {
+            format!("{at}: the spacing leaves {space:.2} mm between tabs, less than {least:.2} mm")
+        }
+    }
+}
+
+/// A slot's skip in the user's words (design 11.3, 7.4).
+fn slot_skip_text(skip: &kernel_ts::SlotSkip) -> String {
+    use kernel_ts::SlotSkip as S;
+    match skip {
+        S::AtEdge => "its slot would open the slot plate's edge".into(),
+        S::OverHole { web } => format!("its slot comes {web:.2} mm from a hole of the slot plate"),
+        S::UnevenFarSide => "the slot plate steps under its slot".into(),
+        S::NoFarSide => "no flat far face of the slot plate lies under its slot".into(),
+    }
+}
+
+/// A tab's skip in the user's words (design 11.3, 7.1).
+fn tab_skip_text(skip: &kernel_ts::TabSkip) -> String {
+    match skip {
+        kernel_ts::TabSkip::TooShort { length } => format!("it would be {length:.2} mm long, too short to make"),
+    }
+}
+
+/// The tabs a cut joint made and what it left out (stretch by stretch, then tab by tab), from
+/// its plan.
+fn left_out_of(plan: &[kernel_ts::StretchPlan]) -> (usize, Vec<TabSlotLeftOut>) {
+    let mut made = 0;
+    let mut out = Vec::new();
+    let mut push = |reason: &str, text: String| out.push(TabSlotLeftOut { reason: reason.into(), text });
+    for st in plan {
+        match &st.tabs {
+            Err(skip) => push(skip.reason_id(), stretch_skip_text(st.stretch, skip)),
+            Ok(tabs) => {
+                for t in tabs {
+                    let at = format!("the tab at {:.1} mm", t.start);
+                    match (t.skip, &t.tab) {
+                        (Some(skip), _) => push(skip.reason_id(), format!("{at}: {}", slot_skip_text(&skip))),
+                        (None, Err(skip)) => push(skip.reason_id(), format!("{at}: {}", tab_skip_text(skip))),
+                        (None, Ok(_)) => made += 1,
+                    }
+                }
+            }
+        }
+    }
+    (made, out)
+}
+
+/// Up to [`SKIPS_NAMED`] of `items` joined by `sep`, then "and N more".
+fn named_items(items: &[String], sep: &str) -> String {
+    let mut s = items.iter().take(SKIPS_NAMED).cloned().collect::<Vec<_>>().join(sep);
+    if items.len() > SKIPS_NAMED {
+        s = format!("{s} and {} more", items.len() - SKIPS_NAMED);
+    }
+    s
 }
 
 /// The most skipped joints the feature's warning names before "and N more" (design 11.6).
@@ -172,23 +255,32 @@ fn joint_skip_text(skip: &kernel_ts::JointSkip, earlier: &[String]) -> String {
 
 /// The feature's warning for its skipped joints (design 11.6): "skipped 2 plate joints: Back →
 /// Bottom too short, Left → Bottom swapped", up to [`SKIPS_NAMED`] named, then "and N more".
-/// `no_contact` skips are left out (the reply names them).
+/// `no_contact` skips are left out (the reply names them). Then the cut joints that left
+/// stretches or tabs out: "left out in 1 plate joint: Wall → Bottom the tab at 12.0 mm: its slot
+/// would open the slot plate's edge".
 fn skipped_note(joints: &[TabSlotJoint]) -> Option<String> {
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
     let skipped: Vec<String> = joints
         .iter()
         .filter(|j| j.reason.as_deref().is_some_and(|r| r != "no_contact"))
         .map(|j| format!("{} → {} {}", j.tab, j.slot, j.skipped.as_deref().unwrap_or("")))
         .collect();
-    if skipped.is_empty() {
-        return None;
+    let partial: Vec<String> = joints
+        .iter()
+        .filter(|j| j.reason.is_none() && !j.left_out.is_empty())
+        .map(|j| {
+            let texts: Vec<String> = j.left_out.iter().map(|l| l.text.clone()).collect();
+            format!("{} → {} {}", j.tab, j.slot, named_items(&texts, "; "))
+        })
+        .collect();
+    let mut parts = Vec::new();
+    if !skipped.is_empty() {
+        parts.push(format!("skipped {} plate joint{}: {}", skipped.len(), plural(skipped.len()), named_items(&skipped, ", ")));
     }
-    let n = skipped.len();
-    let mut note = format!("tab and slot: skipped {n} plate joint{}: ", if n == 1 { "" } else { "s" });
-    note.push_str(&skipped.iter().take(SKIPS_NAMED).cloned().collect::<Vec<_>>().join(", "));
-    if n > SKIPS_NAMED {
-        note = format!("{note} and {} more", n - SKIPS_NAMED);
+    if !partial.is_empty() {
+        parts.push(format!("left out in {} plate joint{}: {}", partial.len(), plural(partial.len()), named_items(&partial, ", ")));
     }
-    Some(note)
+    (!parts.is_empty()).then(|| format!("tab and slot: {}", parts.join("; ")))
 }
 
 /// What a Tab and Slot feature did (design 5.7): its joints in pick order and the tool faces each
@@ -252,22 +344,31 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
     let mut report = TabSlotReport { joints: Vec::new(), tool_faces: names.iter().cloned().zip(tool_faces).collect() };
     for (j, ((ti, si, p), spec)) in list.iter().zip(&specs).enumerate() {
         let (tab_name, slot_name) = (names[*ti].clone(), names[*si].clone());
+        let (mut tabs, mut left_out) = (0, Vec::new());
         let skipped = if let Some(Some(skip)) = skips.get(j) {
-            Some((skip.reason_id(), joint_skip_text(skip, &pair_names)))
+            Some((skip.reason_id().to_string(), joint_skip_text(skip, &pair_names)))
         } else if let Some((tab, slot)) = plates.get(*ti).zip(plates.get(*si)) {
             match kernel_ts::cut(tab, slot, *p, *spec, JOINT_TOL)? {
                 Ok(c) => {
+                    (tabs, left_out) = left_out_of(&c.plan);
                     plates[*ti] = c.tab_plate;
                     plates[*si] = c.slot_plate;
-                    None
+                    // A cut joint that made no tab is skipped: never silent (design 11.6).
+                    match left_out.first() {
+                        Some(first) if tabs == 0 => {
+                            let texts: Vec<String> = left_out.iter().map(|l| l.text.clone()).collect();
+                            Some((first.reason.clone(), format!("made no tab: {}", named_items(&texts, "; "))))
+                        }
+                        _ => None,
+                    }
                 }
-                Err(skip) => Some((skip.reason_id(), pair_skip_text(&skip))),
+                Err(skip) => Some((skip.reason_id().to_string(), pair_skip_text(&skip))),
             }
         } else {
             continue;
         };
-        let (reason, skipped) = skipped.map_or((None, None), |(id, text)| (Some(id.to_string()), Some(text)));
-        report.joints.push(TabSlotJoint { tab: tab_name, slot: slot_name, skipped, reason });
+        let (reason, skipped) = skipped.map_or((None, None), |(id, text)| (Some(id), Some(text)));
+        report.joints.push(TabSlotJoint { tab: tab_name, slot: slot_name, skipped, reason, tabs, left_out });
     }
     if let Some(note) = skipped_note(&report.joints) {
         append_warning(warning, note);
@@ -400,7 +501,14 @@ mod tests {
     }
 
     fn joint(tab: &str, reason: Option<&str>, text: &str) -> TabSlotJoint {
-        TabSlotJoint { tab: tab.into(), slot: "Bottom".into(), skipped: reason.map(|_| text.to_string()), reason: reason.map(Into::into) }
+        TabSlotJoint {
+            tab: tab.into(),
+            slot: "Bottom".into(),
+            skipped: reason.map(|_| text.to_string()),
+            reason: reason.map(Into::into),
+            tabs: 0,
+            left_out: Vec::new(),
+        }
     }
 
     /// Design 11.3 and 11.6: skips read as the user's words keyed by the reason id; the warning
@@ -464,5 +572,60 @@ mod tests {
         for (n, v) in want {
             assert!((volume(n) - v).abs() < 1e-6, "{n}: {} not {v}", volume(n));
         }
+    }
+
+    /// Design 11.3 and 11.6: stretches and tabs a cut joint leaves out are named in the warning
+    /// in the user's words, after the skipped joints; a joint that made some tabs is not counted
+    /// as skipped.
+    #[test]
+    fn tab_slot_left_out_tabs_read_as_user_text() {
+        let left = |reason: &str, text: &str| TabSlotLeftOut { reason: reason.into(), text: text.into() };
+        let mut wall = joint("Wall", None, "");
+        wall.tabs = 2;
+        wall.left_out = vec![left("at_edge", "the tab at 12.0 mm: its slot would open the slot plate's edge")];
+        let note = skipped_note(&[wall.clone()]).unwrap();
+        assert_eq!(note, "tab and slot: left out in 1 plate joint: Wall → Bottom the tab at 12.0 mm: its slot would open the slot plate's edge");
+        let note = skipped_note(&[joint("Left", Some("swapped"), "is the other way round"), wall]).unwrap();
+        assert!(
+            note.starts_with("tab and slot: skipped 1 plate joint: Left → Bottom is the other way round; left out in 1 plate joint: Wall"),
+            "{note}"
+        );
+        let short = kernel_ts::StretchSkip::TooShort { length: 120.0, need: 120.4, most: 1 };
+        let text = stretch_skip_text((20.0, 140.0), &short);
+        assert!(text.contains("from 20.0 to 140.0 mm") && text.contains("too short") && text.contains("1 tab would fit"), "{text}");
+        assert!(slot_skip_text(&kernel_ts::SlotSkip::OverHole { web: 0.25 }).contains("0.25 mm from a hole"));
+        assert!(tab_skip_text(&kernel_ts::TabSkip::TooShort { length: -1.0 }).contains("too short"));
+    }
+
+    /// Design 11.6: a wall whose every tab is dropped is never silent. Thick (10 thick, 120 long)
+    /// on Bottom with two tabs of the default width 30 and the default end distance 30: the
+    /// stretch is too short, the joint made no tab, and both the warning and the report say so.
+    #[test]
+    fn tab_slot_joint_with_every_tab_dropped_is_named() {
+        use solidcore_record::Vec3;
+        use solidcraft_kernel as kernel;
+        let mut st = ModelState::default();
+        let bottom = kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(160.0, 100.0, 6.0)).unwrap();
+        let thick = kernel::box_solid(Vec3::new(20.0, 60.0, 6.0), Vec3::new(140.0, 70.0, 66.0)).unwrap();
+        st.bodies.push(super::super::ModelBody::new("Bottom".into(), bottom, 0));
+        st.bodies.push(super::super::ModelBody::new("Thick".into(), thick, 0));
+        let k: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": "tab_slot",
+            "tab_plates": [{"key": 1, "body": "Thick"}],
+            "slot_plates": [{"key": 2, "body": "Bottom"}],
+            "clearance": "0.1",
+            "count": "2",
+        }))
+        .unwrap();
+        let mut warning = None;
+        let report = apply(&BTreeMap::new(), &k, &mut st, &mut warning).unwrap();
+        let joint = &report.joints[0];
+        assert_eq!((joint.tabs, joint.reason.as_deref()), (0, Some("too_short")), "{report:?}");
+        assert!(joint.skipped.as_deref().is_some_and(|s| s.starts_with("made no tab: the stretch from")), "{report:?}");
+        assert_eq!(joint.left_out.len(), 1, "{report:?}");
+        let warning = warning.unwrap_or_default();
+        assert!(warning.contains("skipped 1 plate joint: Thick → Bottom made no tab") && warning.contains("too short"), "{warning}");
+        let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
+        assert!((volume("Thick") - 72_000.0).abs() < 1e-6 && (volume("Bottom") - 96_000.0).abs() < 1e-6);
     }
 }

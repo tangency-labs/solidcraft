@@ -100,7 +100,7 @@ pub use assembly::{
 };
 pub use document::*;
 pub use eval::cell_grid::{MAX_CUT_CELLS, SLOW_CUT_CELLS};
-pub use eval::tab_slot::{TabSlotJoint, TabSlotReport};
+pub use eval::tab_slot::{TabSlotJoint, TabSlotLeftOut, TabSlotReport};
 pub use eval::{
     EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PendingChecks, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch,
     ThreadInfo, blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state,
