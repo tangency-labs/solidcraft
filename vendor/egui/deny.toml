@@ -1,0 +1,125 @@
+# Copied from https://github.com/rerun-io/rerun_template
+#
+# https://github.com/EmbarkStudios/cargo-deny
+#
+# cargo-deny checks our dependency tree for copy-left licenses,
+# duplicate dependencies, and rustsec advisories (https://rustsec.org/advisories).
+#
+# Install: `cargo install cargo-deny`
+# Check: `cargo deny check`.
+
+
+# Note: running just `cargo deny check` without a `--target` can result in
+# false positives due to https://github.com/EmbarkStudios/cargo-deny/issues/324
+[graph]
+targets = [
+  { triple = "aarch64-apple-darwin" },
+  { triple = "i686-pc-windows-gnu" },
+  { triple = "i686-pc-windows-msvc" },
+  { triple = "i686-unknown-linux-gnu" },
+  { triple = "wasm32-unknown-unknown" },
+  { triple = "x86_64-apple-darwin" },
+  { triple = "x86_64-pc-windows-gnu" },
+  { triple = "x86_64-pc-windows-msvc" },
+  { triple = "x86_64-unknown-linux-gnu" },
+  { triple = "x86_64-unknown-linux-musl" },
+  { triple = "x86_64-unknown-redox" },
+]
+all-features = true
+
+
+[advisories]
+version = 2
+ignore = [
+  "RUSTSEC-2024-0320", # unmaintained yaml-rust pulled in by syntect
+  "RUSTSEC-2025-0141", # https://rustsec.org/advisories/RUSTSEC-2025-0141 - bincode is unmaintained - https://git.sr.ht/~stygianentity/bincode/tree/v3.0/item/README.md
+  "RUSTSEC-2026-0192", # ttf-parser is unmaintained. Only brought in via winit/sctk-adwaita (wayland window frame rendering)
+  "RUSTSEC-2026-0206", # rustybuzz is unmaintained. Brought in via resvg. TODO(linebender/resvg#922): Remove once the PR lands and is released
+]
+
+[bans]
+multiple-versions = "deny" # Use `cargo tree --duplicates` to easily find duplicates
+wildcards = "deny"
+deny = [
+  { name = "cmake", reason = "It has hurt me too much" },
+  { name = "openssl-sys", reason = "Use rustls" },
+  { name = "openssl", reason = "Use rustls" },
+]
+
+skip = [
+  { name = "base64" }, # ureq-proto depends on 0.23, syntect's plist on 0.22
+  { name = "bit-set" }, # wgpu's naga depends on 0.8, syntect's (used by egui_extras) fancy-regex depends on 0.5
+  { name = "bit-vec" }, # dependency of bit-set in turn, different between 0.6 and 0.5
+  { name = "bitflags" }, # old 1.0 version via glutin, png, spirv, …
+  { name = "env_filter" }, # android_logger depends on 0.1, env_logger 0.11.11 on 2.0
+  { name = "foldhash" }, # pulled by the duplicated hashbrown versions
+  { name = "getrandom" }, # ring / rustls (and thus ehttp) still depend on getrandom 0.2
+  { name = "gif" }, # resvg 0.45's raster-images feature depends on 0.13, image 0.25 on 0.14
+  { name = "hashbrown" }, # wgpu's naga depends on 0.16, accesskit depends on 0.15
+  { name = "itertools" }, # puffin 0.20 depends on 0.14, criterion 0.8 on 0.13
+  { name = "jni-sys" }, # 0.3.1 depends on 0.4
+  { name = "kurbo" }, # resvg 0.45's svgtypes depends on 0.11, peniko (via vello_cpu) on 0.13
+  { name = "phf" }, # mime_guess2 -> 0.11, unicode_names2 -> 0.13
+  { name = "png" }, # glifo (vello_cpu's text feature, for bitmap emoji) depends on 0.18, image 0.25 on 0.17
+  { name = "phf_generator" }, # same phf split as phf
+  { name = "phf_shared" }, # same phf split as phf
+  { name = "rand_core" }, # rand ecosystem is migrating 0.8 -> 0.10; phf_generator's rand 0.8 needs rand_core 0.6, getrandom 0.4/chacha20 need rand_core 0.10
+  { name = "redox_syscall" }, # old version via winit
+  { name = "roxmltree" }, # fontique (Android backend) depends on 0.21, resvg's usvg on 0.20
+  { name = "rustc-hash" }, # Small enough
+  { name = "syn" }, # ecosystem is in the process of migrating from 2.x to 3.x; build-time only
+  { name = "thiserror" }, # ecosystem is in the process of migrating from 1.x to 2.x
+  { name = "thiserror-impl" }, # same as above
+  { name = "zune-core" }, # resvg 0.45's zune-jpeg 0.4 depends on 0.4, image 0.25 on 0.5
+  { name = "zune-jpeg" }, # resvg 0.45 depends on 0.4, image 0.25 on 0.5
+]
+skip-tree = [
+  # PREFER `skip` (above): `skip-tree` exempts the crate AND its whole transitive subtree from the
+  # duplicate check, so it can silently hide unrelated new duplicates. Only use `skip-tree` when an
+  # outdated root drags in a self-contained cluster of old deps that would be noise to list one-by-one.
+  { name = "rfd" }, # example dependency
+  { name = "windows-sys" }, # mostly hopeless to avoid
+]
+
+
+[licenses]
+version = 2
+private = { ignore = true }
+confidence-threshold = 0.93 # We want really high confidence when inferring licenses from text
+allow = [
+  "Apache-2.0 WITH LLVM-exception", # https://spdx.org/licenses/LLVM-exception.html
+  "Apache-2.0", # https://tldrlegal.com/license/apache-license-2.0-(apache-2.0)
+  "BSD-2-Clause", # https://tldrlegal.com/license/bsd-2-clause-license-(freebsd)
+  "BSD-3-Clause", # https://tldrlegal.com/license/bsd-3-clause-license-(revised)
+  "BSL-1.0", # https://tldrlegal.com/license/boost-software-license-1.0-explained
+  "CC0-1.0", # https://creativecommons.org/publicdomain/zero/1.0/
+  "CDLA-Permissive-2.0", # https://spdx.org/licenses/CDLA-Permissive-2.0.html
+  "ISC", # https://www.tldrlegal.com/license/isc-license
+  "MIT-0", # https://choosealicense.com/licenses/mit-0/
+  "MIT", # https://tldrlegal.com/license/mit-license
+  "MPL-2.0", # https://www.mozilla.org/en-US/MPL/2.0/FAQ/ - see Q11. Used by webpki-roots on Linux.
+  "OFL-1.1", # https://spdx.org/licenses/OFL-1.1.html
+  "OpenSSL", # https://www.openssl.org/source/license.html - used on Linux
+  "Ubuntu-font-1.0", # https://ubuntu.com/legal/font-licence
+  "Unicode-3.0", # https://www.unicode.org/license.txt
+  "Unicode-DFS-2016", # https://spdx.org/licenses/Unicode-DFS-2016.html
+  "Zlib", # https://tldrlegal.com/license/zlib-libpng-license-(zlib)
+]
+exceptions = []
+
+[[licenses.clarify]]
+name = "webpki"
+expression = "ISC"
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+allow-git = []

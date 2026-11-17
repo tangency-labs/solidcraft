@@ -4020,6 +4020,7 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
             *direction = dir;
         }
     }
+    point_cut_into_body(app, d);
     let Kind::Extrude { direction, distance, .. } = &d.kind else { return };
     let Ok(dist) = crate::length_input::eval(&app.session.doc, distance, ValueKind::Length) else { return };
     let mut side = crate::smart_extrude::side(dist, *direction);
@@ -4090,6 +4091,31 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
     };
     if let Kind::Extrude { operation, smart, .. } = &mut d.kind {
         *operation = crate::smart_extrude::operation(fresh, *operation, side, &mut smart.latch);
+    }
+}
+
+/// Cut chosen by hand on a one-sided extrude that points away from the body turns to point into
+/// it (#18243). Asked once, when Cut is chosen; a direction set by hand is never changed.
+fn point_cut_into_body(app: &SolveApp, d: &mut Dialog) {
+    let Kind::Extrude { smart, direction, .. } = &mut d.kind else { return };
+    if !std::mem::take(&mut smart.point_cut) || smart.manual_dir || *direction > 1 {
+        return;
+    }
+    let cuts = |d: &Dialog| {
+        let params = dialog_commands(app, d).ok().and_then(|c| c.into_iter().next()).map(|(_, p)| p)?;
+        solidcraft_engine::auto_operation(&app.session, &params).ok().flatten()
+    };
+    if cuts(d) == Some("cut") {
+        return;
+    }
+    let mut flipped = d.clone();
+    if let Kind::Extrude { direction, .. } = &mut flipped.kind {
+        *direction = 1 - *direction;
+    }
+    if cuts(&flipped) == Some("cut")
+        && let Kind::Extrude { direction, .. } = &mut d.kind
+    {
+        *direction = 1 - *direction;
     }
 }
 
