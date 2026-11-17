@@ -351,7 +351,39 @@ fn member_pairs(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<MemberPair>, u
     Ok((pairs, next))
 }
 
-fn member(s: &mut Session, p: &Value) -> Result<Value> {
+/// The section `frame.member` with these parameters would put on its first line, in world
+/// coordinates, as the member will be made in the active component: for a dialog that shows it
+/// before OK. An error when the command would refuse the parameters or the member cannot be made.
+pub fn member_section_view(s: &Session, p: &Value) -> Result<frame::SectionView> {
+    let cmd = "frame.member";
+    let Parsed { kind, .. } = parse_member(s, p)?;
+    let f = feature_in_active(s, cmd, &kind)?;
+    let st = s.model.state();
+    frame::section_view(&s.doc, &st, &f).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// `kind` as the feature it will be added as: in the active component, whose frame it is laid out in.
+fn feature_in_active(s: &Session, cmd: &str, kind: &FeatureKind) -> Result<Feature> {
+    let mut laid = kind.clone();
+    super::component::to_active_frame(s, &mut laid);
+    let mut v = serde_json::to_value(&laid).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(o) = v.as_object_mut() {
+        o.extend([("id".to_string(), json!(0)), ("name".to_string(), json!("")), ("component".to_string(), json!(s.active_component))]);
+    }
+    serde_json::from_value(v).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// A `frame.member`'s parameters, checked: the feature (its member names not yet pinned and its
+/// corners' Flips not yet saved as orders), the name its members get without their own, the names
+/// asked for by line, and each corner override's Flip where it gives one.
+struct Parsed {
+    kind: FeatureKind,
+    base: String,
+    kept: BTreeMap<String, String>,
+    flips: Vec<Option<bool>>,
+}
+
+fn parse_member(s: &Session, p: &Value) -> Result<Parsed> {
     let cmd = "frame.member";
     // A `sketch` that is there is read, `null` included, as before pairs.
     let path_sketch = match p.get("sketch") {
@@ -488,7 +520,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, format!("`names` must map up to {} line ids to names", frame::MAX_MEMBERS))),
     };
     let base = body_name.clone().unwrap_or(default_name);
-    let mut kind = FeatureKind::FrameMember {
+    let kind = FeatureKind::FrameMember {
         path_sketch: path_sketch.map(SketchId),
         lines,
         profile,
@@ -502,21 +534,23 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         gap,
         angle,
         mirror,
-        body_name,
+        body_name: body_name.clone(),
         names: BTreeMap::new(),
         pairs,
         next_pair,
     };
+    Ok(Parsed { kind, base, kept, flips })
+}
+
+fn member(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "frame.member";
+    let Parsed { mut kind, base, kept, flips } = parse_member(s, p)?;
+    let FeatureKind::FrameMember { corner, .. } = kind else {
+        return Err(bad(cmd, "not a frame member feature"));
+    };
     let st = s.model.state();
     if flips.iter().any(Option::is_some) {
-        // The feature as it will be added: in the active component, whose frame it is laid out in.
-        let mut laid = kind.clone();
-        super::component::to_active_frame(s, &mut laid);
-        let mut v = serde_json::to_value(&laid).map_err(|e| bad(cmd, e.to_string()))?;
-        if let Some(o) = v.as_object_mut() {
-            o.extend([("id".to_string(), json!(0)), ("name".to_string(), json!("")), ("component".to_string(), json!(s.active_component))]);
-        }
-        let mut f: Feature = serde_json::from_value(v).map_err(|e| bad(cmd, e.to_string()))?;
+        let mut f = feature_in_active(s, cmd, &kind)?;
         flips_as_order(&s.doc, &st, &mut f, &flips);
         if let (FeatureKind::FrameMember { corners: ordered, .. }, FeatureKind::FrameMember { corners, .. }) = (f.kind, &mut kind) {
             *corners = ordered;
