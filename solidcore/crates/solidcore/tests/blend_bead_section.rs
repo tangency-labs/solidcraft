@@ -2071,3 +2071,51 @@ fn a_toe_in_a_notch_of_its_face_is_refused_with_the_leg_that_fits() {
     assert!(weld_bead_body(&mut k, &mut b, &[edge], &[fits], 0.0, &[], &[], SQUARE).is_ok());
     assert!(smb(&k, &b) == before, "the part changed");
 }
+
+/// An L of walls standing on a floor plate, joined by booleans: the floor [-40, 40]^2 x
+/// [-10, 0], walls x in [0, 40], y in [0, 10] and x in [0, 10], y in [0, 40], 40 high. The
+/// booleans leave some of its edge uses without their uv curves (saved as none), which the
+/// kernel makes on demand when a point is classified on a face.
+fn walls_on_a_floor(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::primitive::api_primitives::create_box;
+    let floor = create_box(k, Point3::new(-40.0, -40.0, -10.0), 80.0, 80.0, 10.0).unwrap();
+    let a = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 10.0, 40.0).unwrap();
+    let b = create_box(k, Point3::new(0.0, 0.0, 0.0), 10.0, 40.0, 40.0).unwrap();
+    let walls = boolean_union(k, a, b).unwrap();
+    boolean_union(k, floor, walls).unwrap()
+}
+
+/// The toes are checked on their faces by reading the part only: a part saved without some
+/// edge uses' uv curves (the walls on a floor: the classification would make them in the
+/// part) keeps its file byte for byte, whether its bead is built or refused for a toe past
+/// its face (each face runs 40 mm from the joint here, so the refusal names 40 mm).
+#[test]
+fn a_part_without_some_uv_curves_is_only_read() {
+    use solidcore::error::{ErrorKind, FitMeasure};
+    let mut k = kernel();
+    let mut part = walls_on_a_floor(&mut k);
+    let before = smb(&k, &part);
+    let without = String::from_utf8_lossy(&before).contains(" 9999999 ");
+    assert!(
+        without,
+        "every edge use of the walls has its uv curve: the test checks nothing"
+    );
+    let edge = pick(&k, &part, [20.0, 0.0, 0.0]);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    for h in [0.0, 1.0] {
+        let mut body =
+            weld_bead_body(&mut k, &mut part, &[edge], &[size], h, &[], &[], SQUARE).unwrap();
+        assert_sound(&mut k, &mut body, &format!("the bead on the walls, h {h}"));
+        assert!(smb(&k, &part) == before, "h {h}: the walls changed");
+    }
+    let size = ChamferSize::Distances([45.0; 2]);
+    let err = weld_bead_body(&mut k, &mut part, &[edge], &[size], 0.0, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert!(smb(&k, &part) == before, "the walls changed");
+    assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+    let fit = err.fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
+    assert!(fit.size > 39.0 && fit.size <= 40.0 + 1e-6, "{err}");
+}

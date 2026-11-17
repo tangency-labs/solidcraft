@@ -672,8 +672,7 @@ impl FootBlend {
     /// The refusal [`crate::blend::fillet_executive::NoRoomReason::LegPastFace`] at the first
     /// toe found off its face, naming the face and the edge, with the largest leg on that side
     /// whose toes stay on the face at those stations; those of the classification.
-    pub fn toes_on_faces(&self, k: &Kernel, target: &mut Brep, legs: [f64; 2]) -> Result<()> {
-        use crate::intersect::point_class::PointClassType as C;
+    pub fn toes_on_faces(&self, k: &Kernel, target: &Brep, legs: [f64; 2]) -> Result<()> {
         check_legs(legs)?;
         let breaks = self.breaks()?;
         // at least 32 stations, and 4 between each two knots
@@ -694,14 +693,12 @@ impl FootBlend {
             let periods = periods_of(k, &side.surface, &domain)?;
             frames.push((domain, periods));
         }
-        let on_face = |target: &mut Brep, i: usize, face: FaceId, uv: Point2| -> Result<bool> {
-            let uv = frames
-                .get(i)
-                .map_or(uv, |(domain, periods)| wrapped(domain, *periods, uv));
-            Ok(matches!(
-                crate::query::api_queries::face_classify_uv(k, target, face, uv)?,
-                C::Face | C::Edge | C::Vertex | C::Edgeuse
-            ))
+        let on_face = |target: &Brep, i: usize, face: FaceId, uv: Point2| -> Result<bool> {
+            let (Some((domain, periods)), Some(side)) = (frames.get(i), self.sides.get(i)) else {
+                return Ok(true);
+            };
+            let uv = wrapped(domain, *periods, uv);
+            face_holds(k, target, face, &side.surface, domain, *periods, uv)
         };
         // the stations, each from the one before; and the first toe off its face
         let mut off: Option<(usize, Point3)> = None;
@@ -728,7 +725,7 @@ impl FootBlend {
         let face = self.sides.get(i).and_then(|s| s.face);
         let z = legs.get(i).copied().unwrap_or(0.0);
         // the largest leg on that side whose toes stay on the face, halved down from the leg
-        let mut holds = |leg: f64| -> Result<bool> {
+        let holds = |leg: f64| -> Result<bool> {
             let Some(face) = face else {
                 return Ok(true);
             };
@@ -784,6 +781,133 @@ impl FootBlend {
         .with_fit(Fit::new(lo, FitMeasure::Leg, edge))
         .into_error())
     }
+}
+
+/// Whether `uv` of `surface` (the support of `face`, over `domain` with `periods`) lies on
+/// `face` of `target`, its boundary included, reading `target` only: the kernel's
+/// classification where every trim curve it visits is already made
+/// ([`crate::query::face::p2::point_classify_prepared`]); where one is not (a part saved
+/// without some edge uses' uv curves), the classification would make it in the part, so
+/// [`boundary_holds`] decides instead.
+///
+/// # Errors
+///
+/// Those of the classification other than a trim curve it would have to make, and those of
+/// [`boundary_holds`].
+fn face_holds(
+    k: &Kernel,
+    target: &Brep,
+    face: FaceId,
+    surface: &Surface,
+    domain: &Extent2d,
+    periods: [Option<f64>; 2],
+    uv: Point2,
+) -> Result<bool> {
+    use crate::intersect::point_class::{PointClassType as C, PointClassification};
+    use crate::query::face::p2::{point_classify_prepared, PointClassifyOptions};
+    let tolerance = crate::geom::tol::zone_tol3d(k, crate::geom::tol::USE_DEFAULT);
+    let mut classification = PointClassification::new(tolerance);
+    let options = PointClassifyOptions {
+        src_zone_tol_3d: target.face(face)?.tolerance,
+        use_uv_classification: true,
+        ..PointClassifyOptions::default()
+    };
+    match point_classify_prepared(k, target, face, uv, &mut classification, options) {
+        Ok(()) => Ok(matches!(
+            classification.point_class(),
+            C::Face | C::Edge | C::Vertex | C::Edgeuse
+        )),
+        Err(e) if e.is_unported() => boundary_holds(k, target, face, surface, domain, periods, uv),
+        Err(e) => Err(e),
+    }
+}
+
+/// How many points [`boundary_holds`] samples on each edge of a face's boundary.
+const BOUNDARY_SAMPLES: usize = 32;
+
+/// Whether `uv` lies inside `face` of `target` by its boundary dropped onto `surface`: each
+/// loop's edges, each at [`BOUNDARY_SAMPLES`] points in its edge use's direction, dropped onto
+/// the surface (a periodic direction unwrapped along the loop), and `uv` inside by the
+/// even-odd rule over all loops (an outer loop and its holes), moved by whole periods to the
+/// loops' range. Sampled, not exact: it decides only where the kernel's classification would
+/// have to make a trim curve in the part ([`face_holds`]). `target` is only read.
+///
+/// # Errors
+///
+/// A defect where an edge has no curve or a boundary point does not drop onto the surface;
+/// those of the topology and the evaluations.
+fn boundary_holds(
+    k: &Kernel,
+    target: &Brep,
+    face: FaceId,
+    surface: &Surface,
+    domain: &Extent2d,
+    periods: [Option<f64>; 2],
+    uv: Point2,
+) -> Result<bool> {
+    use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use crate::topology::edgeuse::p1 as eu1;
+    let stage = || SolidError::blend(OP, BlendFailure::StageFailed);
+    let unwrap = |x: f64, near: f64, period: Option<f64>| match period {
+        Some(p) if p > 0.0 && p.is_finite() => x + p * ((near - x) / p).round(),
+        _ => x,
+    };
+    let mut polygons: Vec<Vec<Point2>> = Vec::new();
+    for l in crate::topology::face::p2::loops(target, face, false, None)? {
+        let mut polygon: Vec<Point2> = Vec::new();
+        for eu in crate::topology::loopuse::loop_edgeuses(target, l)? {
+            let e = eu1::edge(target, eu)?.ok_or_else(stage)?;
+            let curve = edge::curve(target, e)?.ok_or_else(stage)?;
+            let ivl = edge::interval(target, e)?;
+            let reversed = eu1::orientation(target, eu)? == OrientType::Opposite;
+            for j in 0..BOUNDARY_SAMPLES {
+                let f = j as f64 / BOUNDARY_SAMPLES as f64;
+                let f = if reversed { 1.0 - f } else { f };
+                let t = ivl.min() + (ivl.max() - ivl.min()) * f;
+                let p = curve.evaluate_point(k, t)?;
+                let near = polygon.last().copied();
+                let q = dropped(k, surface, domain, p, near)?.ok_or_else(stage)?;
+                let [pu, pv] = periods;
+                let q = match near {
+                    Some(n) => Point2::new(unwrap(q.x, n.x, pu), unwrap(q.y, n.y, pv)),
+                    None => q,
+                };
+                polygon.push(q);
+            }
+        }
+        if polygon.len() >= 3 {
+            polygons.push(polygon);
+        }
+    }
+    // the point moved by whole periods to the middle of the loops' range
+    let (mut lo, mut hi) = (
+        Point2::new(f64::INFINITY, f64::INFINITY),
+        Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
+    );
+    for q in polygons.iter().flatten() {
+        lo = Point2::new(lo.x.min(q.x), lo.y.min(q.y));
+        hi = Point2::new(hi.x.max(q.x), hi.y.max(q.y));
+    }
+    let [pu, pv] = periods;
+    let at = Point2::new(
+        unwrap(uv.x, 0.5 * (lo.x + hi.x), pu),
+        unwrap(uv.y, 0.5 * (lo.y + hi.y), pv),
+    );
+    let mut inside = false;
+    for polygon in &polygons {
+        for (j, &a) in polygon.iter().enumerate() {
+            let Some(&b) = polygon.get((j + 1) % polygon.len()) else {
+                continue;
+            };
+            if (a.y > at.y) != (b.y > at.y) {
+                let x = a.x + (at.y - a.y) / (b.y - a.y) * (b.x - a.x);
+                if at.x < x {
+                    inside = !inside;
+                }
+            }
+        }
+    }
+    Ok(inside)
 }
 
 /// Whether `uv` lies on the rim of `domain` (to a millionth of its size): where a Newton the
