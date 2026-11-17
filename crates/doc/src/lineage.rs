@@ -115,10 +115,14 @@ impl Lineage {
             .collect()
     }
 
-    /// A tool of `faces` faces and no edges (a mesh's triangles) whose faces have no role.
-    pub(crate) fn unnamed_faces(faces: usize) -> Lineage {
-        let faces = (0..faces).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
-        Lineage { history: History { operands: 1, faces, edges: Vec::new() }, operands: vec![Arc::new(Operand::Made(Vec::new()))] }
+    /// A tool of `faces` faces and no edges whose faces are named by their place in it, `<role>:<k>`.
+    /// No face is left to be named by sampling the body around it, which could hand a tool face the
+    /// name of a face the tool never touched and leave both without a name of their own (an end
+    /// face after a Thread, #18460).
+    pub(crate) fn numbered_faces(faces: usize, role: &str) -> Lineage {
+        let faces_prov = (0..faces).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
+        let roles = (0..faces).map(|face| vec![format!("{role}:{face}")]).collect();
+        Lineage { history: History { operands: 1, faces: faces_prov, edges: Vec::new() }, operands: vec![Arc::new(Operand::Made(roles))] }
     }
 
     /// The lineages of `pieces`, the lumps of `whole` (whose lineage is `lineage`): their faces

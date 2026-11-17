@@ -1005,3 +1005,19 @@ fn a_sketch_on_a_face_of_a_two_sided_cut_keeps_its_attachment() {
     assert_eq!(error(&cold, "OnUpper"), None);
     assert_eq!(error(&cold, "OnLower"), None);
 }
+
+/// A sketch on the end face of a turned part keeps its attachment after a Thread cut the side
+/// (#18460): the groove's faces are named by the feature, not by sampling the faces around them.
+#[test]
+fn a_sketch_on_the_end_face_of_a_threaded_revolve_keeps_its_attachment() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [4, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "y", "angle": "360 deg", "body_name": "Part"}));
+    run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8", "length": 10, "from": [4, 0, 0]}));
+    let made = s.execute("sketch.create", &json!({"plane": {"face": [1.0, 0.0, 20.0]}, "name": "OnEnd"}));
+    let refused = made.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(refused.is_empty(), "the sketch on the end face was refused: {refused}");
+    assert_eq!(error(&s, "OnEnd"), None);
+}
