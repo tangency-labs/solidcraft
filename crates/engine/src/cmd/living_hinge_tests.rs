@@ -73,3 +73,34 @@ fn a_living_hinge_follows_its_parameters() {
     run(&mut s, "parameters.change", json!({"name": "slot", "expression": "10 mm"}));
     assert!((volume(&s) - first).abs() > 1e-3, "the volume did not change");
 }
+
+#[test]
+fn a_living_hinge_finds_its_plate_and_stores_it() {
+    let mut s = wall();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [200, 0, 0], "operation": "new_body", "body_name": "Far"}));
+    let reply = hinge(&mut s, json!({})).unwrap();
+    assert_eq!(reply["changed_bodies"], json!(["Wall"]), "{reply}");
+    let id = reply["feature"].as_u64().unwrap();
+    let f = s.doc.features.iter().find(|f| f.id == id).unwrap();
+    let solidcraft_doc::FeatureKind::LivingHinge { targets, .. } = &f.kind else { panic!("{f:?}") };
+    assert_eq!(targets.iter().map(|t| t.0.as_str()).collect::<Vec<_>>(), ["Wall"]);
+}
+
+#[test]
+fn a_living_hinge_refuses_no_plate_or_several() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 120, "width": 80, "height": 3, "body_name": "Wall"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10, "name": "HingeArea"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [80, 80]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = hinge(&mut s, json!({})).unwrap_err().to_string();
+    assert!(e.contains("no plate has a flat face in the sketch's plane"), "{e}");
+
+    let mut s = wall();
+    run(&mut s, "solid.box", json!({"length": 120, "width": 80, "height": 3, "corner": [0, 80, 0], "operation": "new_body", "body_name": "Other"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 3, "name": "Both"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 10], "p1": [80, 150]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = hinge(&mut s, json!({"sketch": "Both"})).unwrap_err().to_string();
+    assert!(e.contains("the area lies over") && e.contains("Wall") && e.contains("Other"), "{e}");
+}

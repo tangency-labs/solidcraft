@@ -4,9 +4,10 @@
 //! `crates/doc/src/eval_living_hinge.rs`.
 
 use serde_json::Value;
+use solidcore_record::Loop2;
 use solidcore_record::living_hinge::HingeClip;
 use solidcraft_doc::expr::Kind;
-use solidcraft_doc::{BodyName, Expr, FeatureKind, SketchId};
+use solidcraft_doc::{BodyName, Expr, FeatureKind, ProfileSel, SketchId};
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr, default_extrude_profiles, feature_sketch, point_param, profiles};
@@ -92,8 +93,11 @@ fn living_hinge(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`margin` must be 0 or more"));
     }
     let anchor = point_param(s, p, "anchor", cmd)?;
-    let targets = string_list(cmd, p, "targets")?;
     let profiles = if p.get("profiles").is_none() { default_extrude_profiles(s, sketch) } else { profiles(p, cmd)? };
+    let mut targets = string_list(cmd, p, "targets")?;
+    if targets.is_empty() {
+        targets = resolve_plate(s, sketch, &profiles, cmd)?;
+    }
     let mut reply = add_feature(
         s,
         p,
@@ -113,6 +117,39 @@ fn living_hinge(s: &mut Session, p: &Value) -> Result<Value> {
     )?;
     with_report(s, &mut reply);
     Ok(reply)
+}
+
+/// The default plate (design 2, 3.5): the one body with a flat face in the sketch's plane whose
+/// outline meets the area, read from the model as it stands before the new feature. Every decision
+/// is a kernel call; this only counts the answers. None or several are refused.
+fn resolve_plate(s: &Session, sketch: u64, profiles: &ProfileSel, cmd: &str) -> Result<Vec<String>> {
+    let st = s.model.state();
+    let Some(ss) = st.sketch(sketch) else { return Ok(Vec::new()) };
+    let regions = solidcraft_sketch::merge_regions(&solidcraft_doc::select_profiles(ss, profiles).map_err(|e| bad(cmd, e.to_string()))?);
+    let field: Vec<Loop2> = regions.iter().flat_map(|r| r.loops().cloned()).collect();
+    let mut found = Vec::new();
+    for b in &st.bodies {
+        // A body the plate reader cannot take (a mesh) is no plate.
+        let Ok(outline) = solidcraft_kernel::living_hinge::plate_outline(&b.body, &ss.plane) else { continue };
+        for face in outline.faces.iter().filter(|f| f.in_plane) {
+            let loops: Vec<Loop2> = face.regions.iter().flat_map(|r| r.loops().cloned()).collect();
+            if solidcraft_kernel::living_hinge::meets(&field, &loops).map_err(|e| bad(cmd, e.to_string()))? {
+                found.push(b.name.clone());
+                break;
+            }
+        }
+    }
+    match found.len() {
+        1 => Ok(found),
+        0 => Err(bad(
+            cmd,
+            "no plate has a flat face in the sketch's plane under the area: draw the area on the plate's face, or name the plate with \"targets\"",
+        )),
+        _ => {
+            let last = found.pop().unwrap_or_default();
+            Err(bad(cmd, format!("the area lies over {} and {last}: name the plate to cut with \"targets\"", found.join(", "))))
+        }
+    }
 }
 
 /// Adds the feature's report (what the evaluation cut) to its reply.
