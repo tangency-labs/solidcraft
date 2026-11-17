@@ -45,6 +45,10 @@ pub struct Canvas {
     /// the component's occurrence); 0 = the root.
     #[serde(default, skip_serializing_if = "is_root")]
     pub component: u64,
+    /// A decal: part of the model's look, which a URDF export writes as a textured visual of its
+    /// component's link. A reference canvas (to trace) is not exported.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub decal: bool,
     /// The sketch points its corners follow, so dimensions and constraints in that sketch place
     /// and size the image. `None`: its own centre, width and angle place it, as they also do
     /// while the sketch or a point is missing.
@@ -304,6 +308,7 @@ mod tests {
             visible: true,
             locked: false,
             component: 0,
+            decal: true,
             anchor: None,
         }
     }

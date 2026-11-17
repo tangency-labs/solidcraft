@@ -72,9 +72,10 @@ pub struct CanvasInsertParams {
     pub resolution: Option<f64>,
 }
 
-/// Put an image on a planar face of the model, like a sticker, kept in the design. Give the image
-/// as `path` or as base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a
-/// PNG. The image goes into the active component. One undo step.
+/// Put an image on a planar face of the model, like a sticker, kept in the design and written to
+/// a URDF export as a textured visual of its component's link. Give the image as `path` or as
+/// base64 `data`; PNG, JPEG and SVG are taken, up to 16 MiB, an SVG drawn into a PNG. The image
+/// goes into the active component. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = decal_required)]
 pub struct CanvasDecalParams {
@@ -161,6 +162,10 @@ pub struct CanvasEditParams {
     /// and Delete until it is unlocked; its opacity, visibility and name can still change.
     #[serde(default)]
     pub locked: Option<bool>,
+    /// Make it a decal, part of the model's look that a URDF export writes as a textured visual
+    /// of its component's link, or a reference canvas, which is not exported.
+    #[serde(default)]
+    pub decal: Option<bool>,
     /// The sketch points the image's corners follow, or `null` to let its own centre, width and
     /// angle place it again. An anchored canvas refuses a new centre, width or angle, Calibrate
     /// and Straighten.

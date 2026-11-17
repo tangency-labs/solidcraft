@@ -20,6 +20,9 @@ Next to `robot.urdf` the export writes one binary STL per component, in metres:
   in `robot-base.stl`.
 - `robot-<component>-collision.stl` appears only when a component mixes closed solids with
   open surfaces: it holds the closed ones, which are the collision geometry.
+- `robot-<component>-<decal>.dae` and `robot-<component>-<decal>.png` (or `.jpg`) appear for
+  each decal (**Insert → Decal**, `canvas.decal`) of the component: a COLLADA mesh with texture
+  coordinates, and the decal's image beside it. See [Decals](#decals).
 
 Every path is checked before anything is written, including against the folders an agent may
 use (`allow_paths`). The meshes are written first and the `.urdf` last. If a write fails part
@@ -56,6 +59,28 @@ defaults are written and a warning says so. A value that is not a positive numbe
   mass of 1e-6 kg and inertia of 1e-12 kg m², because Gazebo drops massless links and breaks
   the chain there.
 - **Colour:** the first body's colour, as the visual's material.
+
+## Decals
+
+A decal is an image on a face of a part, such as a label, a logo or an ArUco marker. Each shown
+decal becomes one more `<visual>` of every link its component gives, at the same origin as the
+link's own mesh. Its mesh is a COLLADA file (`.dae`) that names the image as its material's
+texture, so Gazebo (Classic and Sim), RViz and other COLLADA readers draw the image where
+SolidCraft shows it.
+
+- The image covers the decal's rectangle as SolidCraft shows it, mirrored when the decal is.
+  A decal anchored to sketch points (`canvas.frame_sketch`) is written where its sketch puts it.
+- The quad is written on both sides, 0.05 mm off the face each way, so the face never hides it
+  and one side faces out whichever way the face points.
+- A PNG's own transparency is kept, so a logo with a clear background shows only the logo. A
+  decal made partly transparent in SolidCraft (`opacity` below 1) is written opaque, with a
+  warning.
+- The image file is written as it is: a PNG stays a PNG, a JPEG becomes `.jpg`. An SVG decal is
+  already a PNG in the design.
+- Only decals are written. A reference canvas (**Insert → Canvas**) is not; `canvas.edit
+  {decal: true}` makes a canvas a decal, and `{decal: false}` keeps a decal out of the export.
+- A hidden decal is left out. A decal whose image is damaged, or whose component is placed
+  nowhere, is left out with a warning.
 
 ## Joints
 
@@ -112,6 +137,7 @@ the copies move together, which a URDF could only express with `<mimic>`.) The e
 
 - `<mimic>` for motion links.
 - Simplified collision shapes: the collision mesh is the visual mesh.
+- Images wrapped around curved faces: a decal is a flat image on a plane.
 - SDF and MJCF export, and URDF import.
 - Joint motion inside the copies of a component placed several times.
 - Drive dynamics: `effort` and `velocity` are limits you choose.

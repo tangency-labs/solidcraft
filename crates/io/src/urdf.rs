@@ -26,6 +26,9 @@ const TOKEN_INERTIA: f64 = 1e-12;
 const UNLIMITED_TRAVEL_MM: f64 = 1e6;
 const DEFAULT_EFFORT: f64 = 1000.0;
 const DEFAULT_VELOCITY: f64 = 10.0;
+/// How far a decal's quad stands off its face on each side (mm): enough for a renderer's depth
+/// test to keep it in front of the face, too little to see.
+const DECAL_LIFT_MM: f64 = 0.05;
 
 /// Choices for [`urdf`] (`file.export` parameters).
 #[derive(Clone, Debug, Default)]
@@ -35,6 +38,23 @@ pub struct UrdfOptions {
     /// `<limit effort>` (N or N m) and `velocity` (m/s or rad/s); defaults with a warning.
     pub effort: Option<f64>,
     pub velocity: Option<f64>,
+    /// The design's decals, each written as a textured mesh in a visual of its component's links.
+    pub decals: Vec<UrdfDecal>,
+}
+
+/// A decal for [`urdf`]: an image on a quad in its component's frame. It becomes a COLLADA mesh
+/// with texture coordinates and the image file beside it, in an extra `<visual>` of each link a
+/// placement of the component gives, so Gazebo, RViz and other COLLADA readers draw the image.
+#[derive(Clone, Debug)]
+pub struct UrdfDecal {
+    pub name: String,
+    /// Its component (0: the root's bodies, on `base_link`).
+    pub component: u64,
+    /// The image's bottom-left, bottom-right, top-right and top-left corners in the component's
+    /// frame (mm).
+    pub corners: [Vec3; 4],
+    /// The image file, PNG or JPEG, written as it is.
+    pub image: Vec<u8>,
 }
 
 /// The URDF, its mesh files (name next to the `.urdf`, bytes) and what was approximated.
@@ -66,6 +86,9 @@ pub struct Link {
     /// sRGB and opacity, 0..1.
     pub color: Option<[f32; 4]>,
     pub inertial: Option<Inertial>,
+    /// Its component's decals: a textured COLLADA mesh file each, drawn as more visuals at the
+    /// same origin as `visual`.
+    pub decals: Vec<String>,
 }
 
 /// Mass (kg), centre of mass (mm, link frame) and inertia about it (kg m², link axes).
@@ -194,6 +217,18 @@ impl Names {
         }
         format!("{name}.stl")
     }
+    /// A file name with extension `ext` (a decal's mesh or image), unique without regard to case
+    /// among the files of that extension. Link and joint names hold no `.`, so they never meet.
+    fn file_with(&mut self, raw: &str, ext: &str) -> String {
+        let base = sanitise(raw, true);
+        let mut name = format!("{base}.{ext}");
+        let mut k = 2;
+        while !self.0.insert(name.to_ascii_lowercase()) {
+            name = format!("{base}_{k}.{ext}");
+            k += 1;
+        }
+        name
+    }
     fn unique(&mut self, base: String) -> String {
         let mut name = base.clone();
         let mut k = 2;
@@ -214,10 +249,50 @@ struct Part {
     collision: Option<String>,
     color: Option<[f32; 4]>,
     masses: Vec<BodyMass>,
+    decals: Vec<String>,
+}
+
+/// The decals of component `c` (named `label` in file names) as COLLADA meshes, each with its
+/// image beside it: the mesh file names. A decal whose image is neither PNG nor JPEG, or whose
+/// corners give no plane, is left out with a warning.
+fn decal_files(decals: &[UrdfDecal], c: u64, prefix: &str, names: &mut Names, out: &mut UrdfPackage) -> Vec<String> {
+    let mut files = Vec::new();
+    for d in decals.iter().filter(|d| d.component == c) {
+        let (ext, alpha) = match image_kind(&d.image) {
+            Some(kind) => kind,
+            None => {
+                out.warnings.push(format!("decal `{}`: its image is neither PNG nor JPEG: left out", d.name));
+                continue;
+            }
+        };
+        let image = names.file_with(&format!("{prefix}-{}", d.name), ext);
+        let Some(dae) = decal_dae(d, &image, alpha) else {
+            out.warnings.push(format!("decal `{}`: its corners lie on one line or are not finite: left out", d.name));
+            continue;
+        };
+        let mesh = names.file_with(&format!("{prefix}-{}", d.name), "dae");
+        out.meshes.push((image, d.image.clone()));
+        out.meshes.push((mesh.clone(), dae.into_bytes()));
+        files.push(mesh);
+    }
+    files
+}
+
+/// A decal image's file extension and whether it may be partly transparent, from its first bytes.
+fn image_kind(bytes: &[u8]) -> Option<(&'static str, bool)> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        // Colour type (IHDR byte 9): 4 grey and alpha, 6 RGBA; a tRNS chunk gives other types alpha.
+        let alpha = matches!(bytes.get(25), Some(4 | 6)) || bytes.windows(4).take(1 << 16).any(|w| w == b"tRNS");
+        Some(("png", alpha))
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some(("jpg", false))
+    } else {
+        None
+    }
 }
 
 /// Mesh files and masses per component (0: the root's bodies, named `base`).
-fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &mut UrdfPackage) -> Result<BTreeMap<u64, Part>> {
+fn parts(doc: &Document, st: &ModelState, stem: &str, decals: &[UrdfDecal], names: &mut Names, out: &mut UrdfPackage) -> Result<BTreeMap<u64, Part>> {
     let mut used: BTreeSet<u64> = doc.occurrences.iter().map(|o| o.component).collect();
     used.insert(0);
     let mut parts = BTreeMap::new();
@@ -251,7 +326,8 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &m
                 }
             }
         }
-        let mut part = Part { visual: None, collision: None, color, masses };
+        let decals = decal_files(decals, c, &format!("{stem}-{label}"), names, out);
+        let mut part = Part { visual: None, collision: None, color, masses, decals };
         if !visual.triangles.is_empty() {
             let file = names.file(&format!("{stem}-{label}"));
             out.meshes.push((file.clone(), stl_binary(&[metres(&visual)], &label)));
@@ -328,6 +404,7 @@ impl<'a> Tree<'a> {
             collision: part.and_then(|p| p.collision.clone()),
             color: part.and_then(|p| p.color),
             inertial: part.and_then(|p| inertial(&p.masses, &mesh_origin)).or(Some(token())),
+            decals: part.map(|p| p.decals.clone()).unwrap_or_default(),
         };
         self.model.links.push(link);
         Some(self.model.links.len() - 1)
@@ -444,6 +521,7 @@ impl<'a> Tree<'a> {
                     collision: None,
                     color: None,
                     inertial: Some(token()),
+                    decals: Vec::new(),
                 });
                 self.model.links.len() - 1
             };
@@ -526,7 +604,10 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     let mut out = UrdfPackage { xml: String::new(), meshes: Vec::new(), model: UrdfModel::default(), warnings: Vec::new() };
     let base = names.take("base_link");
     let robot = sanitise(stem, false);
-    let parts = parts(doc, st, stem, &mut names, &mut out)?;
+    let parts = parts(doc, st, stem, &options.decals, &mut names, &mut out)?;
+    for d in options.decals.iter().filter(|d| !parts.contains_key(&d.component)) {
+        out.warnings.push(format!("decal `{}`: its component is placed nowhere in the assembly: left out", d.name));
+    }
     let mut tree = Tree {
         doc,
         parts,
@@ -545,6 +626,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         collision: root.and_then(|p| p.collision.clone()),
         color: root.and_then(|p| p.color),
         inertial: root.and_then(|p| inertial(&p.masses, &IDENTITY)),
+        decals: root.map(|p| p.decals.clone()).unwrap_or_default(),
     };
     tree.model.links.push(base_link);
 
@@ -665,6 +747,118 @@ fn metres(m: &Mesh) -> Mesh {
     Mesh { positions: m.positions.iter().map(|p| *p * 1e-3).collect(), triangles: m.triangles.clone(), ..Mesh::default() }
 }
 
+/// A decal as a COLLADA 1.4.1 document in metres, Z up: its quad on both sides, each lifted
+/// [`DECAL_LIFT_MM`] off the face (the back one wound the other way, so one side faces out
+/// whichever way the face does), with texture coordinates that lay `image`, a file beside the
+/// document, on the corners: its bottom-left at (0, 0), its top-right at (1, 1). `None` when the
+/// corners are not finite or give no plane.
+fn decal_dae(d: &UrdfDecal, image: &str, alpha: bool) -> Option<String> {
+    if !d.corners.iter().all(|p| p.is_finite()) {
+        return None;
+    }
+    let [bl, br, _, tl] = d.corners;
+    let normal = (br - bl).cross(tl - bl).normalized()?;
+    let lift = normal * DECAL_LIFT_MM;
+    let front = d.corners.iter().map(|p| (*p + lift) * 1e-3);
+    let back = d.corners.iter().map(|p| (*p - lift) * 1e-3);
+    let positions = front.chain(back).map(triple).collect::<Vec<_>>().join(" ");
+    let normals = format!("{} {}", triple(normal), triple(-normal));
+    // Per corner: position, normal, texture coordinate. The front is counter-clockwise about the
+    // normal (bottom-left, bottom-right, top-right; bottom-left, top-right, top-left), the back
+    // the same corners the other way round.
+    let indices = "0 0 0 1 0 1 2 0 2 0 0 0 2 0 2 3 0 3 4 1 0 6 1 2 5 1 1 4 1 0 7 1 3 6 1 2";
+    let (name, image) = (attr(&d.name), attr(image));
+    // The image's own alpha cuts the decal's outline; an opaque image needs none of this.
+    let transparent = if alpha {
+        "\n            <transparent opaque=\"A_ONE\"><texture texture=\"decal-sampler\" texcoord=\"UVSET0\"/></transparent>\n            <transparency><float sid=\"transparency\">1</float></transparency>"
+    } else {
+        ""
+    };
+    Some(format!(
+        r##"<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor><authoring_tool>SolidCraft</authoring_tool></contributor>
+    <created>1970-01-01T00:00:00Z</created>
+    <modified>1970-01-01T00:00:00Z</modified>
+    <unit name="meter" meter="1"/>
+    <up_axis>Z_UP</up_axis>
+  </asset>
+  <library_images>
+    <image id="decal-image" name="decal-image"><init_from>{image}</init_from></image>
+  </library_images>
+  <library_effects>
+    <effect id="decal-effect">
+      <profile_COMMON>
+        <newparam sid="decal-surface"><surface type="2D"><init_from>decal-image</init_from></surface></newparam>
+        <newparam sid="decal-sampler"><sampler2D><source>decal-surface</source></sampler2D></newparam>
+        <technique sid="common">
+          <phong>
+            <emission><color sid="emission">0 0 0 1</color></emission>
+            <ambient><color sid="ambient">1 1 1 1</color></ambient>
+            <diffuse><texture texture="decal-sampler" texcoord="UVSET0"/></diffuse>
+            <specular><color sid="specular">0 0 0 1</color></specular>
+            <shininess><float sid="shininess">0</float></shininess>{transparent}
+          </phong>
+        </technique>
+      </profile_COMMON>
+    </effect>
+  </library_effects>
+  <library_materials>
+    <material id="decal-material" name="{name}"><instance_effect url="#decal-effect"/></material>
+  </library_materials>
+  <library_geometries>
+    <geometry id="decal-mesh" name="{name}">
+      <mesh>
+        <source id="decal-positions">
+          <float_array id="decal-positions-array" count="24">{positions}</float_array>
+          <technique_common>
+            <accessor source="#decal-positions-array" count="8" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor>
+          </technique_common>
+        </source>
+        <source id="decal-normals">
+          <float_array id="decal-normals-array" count="6">{normals}</float_array>
+          <technique_common>
+            <accessor source="#decal-normals-array" count="2" stride="3"><param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/></accessor>
+          </technique_common>
+        </source>
+        <source id="decal-uvs">
+          <float_array id="decal-uvs-array" count="8">0 0 1 0 1 1 0 1</float_array>
+          <technique_common>
+            <accessor source="#decal-uvs-array" count="4" stride="2"><param name="S" type="float"/><param name="T" type="float"/></accessor>
+          </technique_common>
+        </source>
+        <vertices id="decal-vertices"><input semantic="POSITION" source="#decal-positions"/></vertices>
+        <triangles material="decal-material-symbol" count="4">
+          <input semantic="VERTEX" source="#decal-vertices" offset="0"/>
+          <input semantic="NORMAL" source="#decal-normals" offset="1"/>
+          <input semantic="TEXCOORD" source="#decal-uvs" offset="2" set="0"/>
+          <p>{indices}</p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+  <library_visual_scenes>
+    <visual_scene id="decal-scene" name="decal-scene">
+      <node id="decal-node" name="{name}" type="NODE">
+        <instance_geometry url="#decal-mesh" name="{name}">
+          <bind_material>
+            <technique_common>
+              <instance_material symbol="decal-material-symbol" target="#decal-material">
+                <bind_vertex_input semantic="UVSET0" input_semantic="TEXCOORD" input_set="0"/>
+              </instance_material>
+            </technique_common>
+          </bind_material>
+        </instance_geometry>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+  <scene><instance_visual_scene url="#decal-scene"/></scene>
+</COLLADA>
+"##
+    ))
+}
+
 /// `xyz` (m) and `rpy` (rad, fixed axes: R = Rz(yaw) Ry(pitch) Rx(roll)) of a frame.
 fn xyz_rpy(m: &Mat) -> (Vec3, Vec3) {
     let r = |row: usize, col: usize| m.get(col).and_then(|c| c.get(row)).copied().unwrap_or(0.0);
@@ -746,6 +940,14 @@ fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
                 );
             }
             s += "    </visual>\n";
+        }
+        // A decal's mesh carries its own textured material.
+        for file in &l.decals {
+            s += &format!(
+                "    <visual>\n      {}\n      <geometry><mesh filename=\"{prefix}{}\"/></geometry>\n    </visual>\n",
+                origin_xml(&l.mesh_origin),
+                attr(file)
+            );
         }
         if let Some(file) = &l.collision {
             s += &format!(
@@ -839,6 +1041,7 @@ mod tests {
             collision: Some("m.stl".into()),
             color: None,
             inertial: None,
+            decals: Vec::new(),
         };
         let mut model = UrdfModel { links: vec![link("base_link".into(), IDENTITY)], joints: Vec::new() };
         for (k, mut m) in hard_rotations().into_iter().enumerate() {
@@ -902,6 +1105,79 @@ mod tests {
             assert!(e.contains("mesh_prefix") && e.contains(why), "{e}");
         }
         assert!(urdf(&doc, &st, "t", &UrdfOptions { mesh_prefix: "package://r/m/".into(), ..UrdfOptions::default() }).is_ok());
+    }
+
+    /// A PNG header of `color_type` (6: RGBA, 2: RGB): what [`image_kind`] reads.
+    fn png_header(color_type: u8) -> Vec<u8> {
+        let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        b.extend(4u32.to_be_bytes());
+        b.extend(2u32.to_be_bytes());
+        b.extend([8, color_type, 0, 0, 0]);
+        b
+    }
+
+    /// A decal of the root component becomes an image file and a COLLADA mesh beside the URDF,
+    /// and a second visual of `base_link` naming the mesh. The mesh holds the quad on both sides
+    /// in metres, lifted off the face along its normal, with texture coordinates on its corners
+    /// and the image as its material's texture.
+    #[test]
+    fn a_decal_is_a_textured_collada_visual_with_its_image_beside_it() {
+        let doc = Document::new("t");
+        let st = ModelState::default();
+        // 40 x 20 mm on the plane z = 10, its normal +z.
+        let corners = [Vec3::new(0.0, 0.0, 10.0), Vec3::new(40.0, 0.0, 10.0), Vec3::new(40.0, 20.0, 10.0), Vec3::new(0.0, 20.0, 10.0)];
+        let decal = UrdfDecal { name: "Logo 1".into(), component: 0, corners, image: png_header(6) };
+        let options = UrdfOptions { mesh_prefix: "package://r/meshes/".into(), decals: vec![decal.clone()], ..UrdfOptions::default() };
+        let pkg = urdf(&doc, &st, "robot", &options).unwrap();
+        let names: Vec<&str> = pkg.meshes.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["robot-base-Logo_1.png", "robot-base-Logo_1.dae"]);
+        assert_eq!(pkg.meshes[0].1, png_header(6), "the image is written as it is");
+        assert_eq!(pkg.model.links[0].decals, ["robot-base-Logo_1.dae"]);
+        assert!(pkg.xml.contains("<geometry><mesh filename=\"package://r/meshes/robot-base-Logo_1.dae\"/></geometry>"), "{}", pkg.xml);
+
+        let dae = String::from_utf8(pkg.meshes[1].1.clone()).unwrap();
+        // Well formed, and every element the textured material needs is there.
+        let mut reader = quick_xml::Reader::from_str(&dae);
+        let mut elements = Vec::new();
+        let mut texts = Vec::new();
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(e) | Event::Empty(e)) => elements.push(String::from_utf8_lossy(e.local_name().as_ref()).to_string()),
+                Ok(Event::Text(t)) => texts.push(String::from_utf8_lossy(&t).trim().to_string()),
+                Ok(Event::Eof) => break,
+                Err(e) => panic!("{e}"),
+                _ => {}
+            }
+        }
+        for element in ["init_from", "sampler2D", "texture", "transparent", "triangles", "bind_vertex_input", "instance_visual_scene"] {
+            assert!(elements.iter().any(|e| e == element), "no <{element}>");
+        }
+        assert!(texts.iter().any(|t| t == "robot-base-Logo_1.png"), "the image is named beside the mesh");
+        assert!(texts.iter().any(|t| t == "0 0 1 0 1 1 0 1"), "texture coordinates on the corners");
+        // Front at z = 10.05 mm, back at 9.95 mm, in metres.
+        let positions: Vec<f64> = texts
+            .iter()
+            .find(|t| t.split_whitespace().count() == 24)
+            .map(|t| t.split_whitespace().filter_map(|x| x.parse().ok()).collect())
+            .unwrap_or_default();
+        assert_eq!(positions.len(), 24);
+        let z: Vec<f64> = positions.chunks(3).map(|p| p[2]).collect();
+        assert!(z[..4].iter().all(|z| (z - 0.01005).abs() < 1e-12) && z[4..].iter().all(|z| (z - 0.00995).abs() < 1e-12), "{z:?}");
+        assert!((positions[3] - 0.04).abs() < 1e-12, "bottom-right at x = 40 mm");
+
+        // An opaque image needs no transparency; an image neither PNG nor JPEG, or corners on one
+        // line, are left out with a warning.
+        assert!(!decal_dae(&decal, "x.png", false).unwrap().contains("transparent"));
+        assert_eq!(image_kind(&png_header(2)), Some(("png", false)));
+        assert_eq!(image_kind(&[0xFF, 0xD8, 0xFF, 0xE0]), Some(("jpg", false)));
+        let line = [corners[0], corners[1], corners[1] * 2.0, corners[0]];
+        let bad = [UrdfDecal { image: b"GIF89a".to_vec(), ..decal.clone() }, UrdfDecal { corners: line, ..decal.clone() }];
+        let pkg = urdf(&doc, &st, "robot", &UrdfOptions { decals: bad.to_vec(), ..UrdfOptions::default() }).unwrap();
+        assert!(pkg.meshes.is_empty() && pkg.model.links[0].decals.is_empty());
+        assert_eq!(pkg.warnings.iter().filter(|w| w.starts_with("decal `Logo 1`")).count(), 2, "{:?}", pkg.warnings);
+        // A decal of a component placed nowhere says so.
+        let pkg = urdf(&doc, &st, "robot", &UrdfOptions { decals: vec![UrdfDecal { component: 7, ..decal }], ..UrdfOptions::default() }).unwrap();
+        assert!(pkg.warnings.iter().any(|w| w.contains("placed nowhere")), "{:?}", pkg.warnings);
     }
 
     #[test]

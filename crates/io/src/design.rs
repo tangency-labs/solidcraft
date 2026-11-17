@@ -2178,6 +2178,7 @@ mod tests {
             visible: true,
             locked: false,
             component: 0,
+            decal: false,
             anchor: None,
         });
         doc

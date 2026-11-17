@@ -121,6 +121,55 @@ fn stl_volume(bytes: &[u8]) -> Option<f64> {
     mesh.mass_properties().map(|m| m.volume)
 }
 
+/// A decal on a part goes to the part's link as a textured COLLADA visual, with its image beside
+/// it and its corners in the part's frame, lifted off the face; a reference canvas is not exported.
+#[test]
+fn urdf_writes_decals_as_textured_visuals() {
+    use image::ImageEncoder;
+    let mut s = two_cubes();
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
+    let png = solidcraft_doc::canvas::base64_encode(&png);
+    run(&mut s, "canvas.decal", json!({"data": png, "face": [25, 5, 10], "width": 8, "name": "Logo"}));
+    run(&mut s, "canvas.insert", json!({"data": png, "plane": "XY", "width": 8, "name": "Reference"}));
+    let d = temp("decal");
+    let path = d.join("t.urdf");
+    let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy()}));
+    let mut files: Vec<String> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    files.sort();
+    assert_eq!(files, ["t-A.stl", "t-B-Logo.dae", "t-B-Logo.png", "t-B.stl", "t.urdf"], "{r}");
+    let xml = std::fs::read_to_string(&path).unwrap();
+    let link_b = xml.split(r#"<link name="B">"#).nth(1).and_then(|x| x.split("</link>").next()).unwrap_or_default();
+    assert!(link_b.contains(r#"<mesh filename="t-B-Logo.dae"/>"#) && link_b.contains(r#"<mesh filename="t-B.stl"/>"#), "{xml}");
+    let dae = std::fs::read_to_string(d.join("t-B-Logo.dae")).unwrap();
+    assert!(dae.contains("<init_from>t-B-Logo.png</init_from>"), "{dae}");
+    // The front quad is the decal as SolidCraft shows it, in B's frame, in metres, 0.05 mm off the
+    // face along its normal; the back quad as far the other way.
+    let positions: Vec<f64> = dae
+        .split(r#"<float_array id="decal-positions-array" count="24">"#)
+        .nth(1)
+        .and_then(|x| x.split('<').next())
+        .map(|x| x.split_whitespace().filter_map(|v| v.parse().ok()).collect())
+        .unwrap_or_default();
+    assert_eq!(positions.len(), 24);
+    let (vals, _) = s.doc.param_values();
+    let c = s.doc.canvases.iter().find(|c| c.name == "Logo").unwrap();
+    let to_b = solidcraft_doc::mat_inverse(&s.doc.component_transform(c.component)).unwrap();
+    let shown = s.doc.canvas_corners(&vals, c, &s.model.state()).unwrap().map(|p| solidcraft_doc::apply_point(&to_b, p));
+    let (bl, br, tl) = (shown[0], shown[1], shown[3]);
+    assert!(((br - bl).len() - 8.0).abs() < 1e-9 && ((tl - bl).len() - 4.0).abs() < 1e-9, "8 x 4 mm: {shown:?}");
+    let n = (br - bl).cross(tl - bl).normalized().unwrap();
+    for (k, corner) in positions.chunks(3).enumerate() {
+        let side = if k < 4 { 0.05 } else { -0.05 };
+        let want = (shown[k % 4] + n * side) * 1e-3;
+        assert!(
+            (corner[0] - want.x).abs() < 1e-12 && (corner[1] - want.y).abs() < 1e-12 && (corner[2] - want.z).abs() < 1e-12,
+            "{k}: {corner:?} vs {want:?}"
+        );
+    }
+}
+
 fn names(m: &UrdfModel) -> (Vec<&str>, Vec<&str>) {
     (m.links.iter().map(|l| l.name.as_str()).collect(), m.joints.iter().map(|j| j.name.as_str()).collect())
 }
