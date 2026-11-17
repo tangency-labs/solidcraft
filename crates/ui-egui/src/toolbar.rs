@@ -552,7 +552,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         rows.push(FileRow::Separator);
     }
     for item in entries {
-        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown || item.importer));
+        rows.push(row(&item.command, &item.label, "", &item.icon, shown || item.importer));
     }
     rows
 }
@@ -1335,7 +1335,7 @@ impl RibbonPanels {
                         run: &b.id,
                         label: &b.label,
                         name: &b.name,
-                        icon: b.icon,
+                        icon: &b.icon,
                         size: *size,
                         enabled: true,
                         pressed: false,
@@ -1364,7 +1364,7 @@ impl RibbonPanels {
                             .map(|b| ribbon::MoreRow {
                                 id: &b.id,
                                 label: &b.label,
-                                icon: b.icon,
+                                icon: &b.icon,
                                 shortcut: "",
                                 enabled: true,
                                 checked: None,
