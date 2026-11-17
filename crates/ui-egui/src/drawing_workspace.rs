@@ -745,6 +745,22 @@ mod tests {
         assert_eq!(drawing.view_centre(base.id).unwrap().y, drawing.view_centre(projected.id).unwrap().y);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn base_view_snapshot_draws_marks_while_a_drawing_is_open() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        let drawing = h.app.session.open_drawing;
+        let marks = placement::snapshot_marks(
+            h.app.session.scratch(),
+            &serde_json::json!({"view":"front","scale":"1:1","position_mm":[0,0],"scene":true,"chord_mm":0.1}),
+        )
+        .unwrap();
+        assert!(!marks.marks.is_empty());
+        assert_eq!(h.app.session.open_drawing, drawing);
+    }
+
     #[test]
     fn a_smaller_sheet_warns_about_views_without_moving_them() {
         let mut h = Harness::new();

@@ -147,18 +147,14 @@ impl Placement {
                 self.worker = None;
             }
             if changed {
-                let mut session = app.session.scratch();
+                let session = app.session.scratch();
                 let request = key.1.clone();
                 let (tx, rx) = std::sync::mpsc::channel();
                 let repaint = ctx.clone();
                 if std::thread::Builder::new()
                     .name("drawing placement preview".into())
                     .spawn(move || {
-                        let preview = session
-                            .execute("drawing.view.snapshot", &request)
-                            .ok()
-                            .and_then(|mut reply| serde_json::from_value::<Scene>(reply["scene"].take()).ok())
-                            .map(|scene| Marks::of(&scene, 0, 0.1));
+                        let preview = snapshot_marks(session, &request);
                         let _ = tx.send(preview);
                         repaint.request_repaint();
                     })
@@ -173,6 +169,15 @@ impl Placement {
         let _ = (ctx, changed);
         self.key = Some(key);
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn snapshot_marks(mut session: solidcraft_engine::Session, request: &Value) -> Option<Marks> {
+    // The transient snapshot reads the model. Only the scratch session leaves the drawing.
+    session.open_drawing = None;
+    let mut reply = session.execute("drawing.view.snapshot", request).ok()?;
+    let scene = serde_json::from_value::<Scene>(reply["scene"].take()).ok()?;
+    Some(Marks::of(&scene, 0, 0.1))
 }
 
 pub(crate) fn on_sheet(
