@@ -1131,7 +1131,14 @@ mod tests {
         // the line bound no planar region, so the start cap cannot be made: upstream went on
         // to the two open walls, the fork returns the cap's failure (c8f6a31, the curve
         // `CreateLinearSweep`'s `SER( pBrep->CreatePlanarFacesWith3DCurves(m_pRegion,
-        // cr3DCurves, dTol, sStartFaces) )`)
+        // cr3DCurves, dTol, sStartFaces) )`). The capped body asked for does not exist: the
+        // line is open (its ends differ) and lies inside the circle, so its swept wall is a
+        // fin with a free edge inside the cylinder that no cap closes off. Main returned the
+        // two uncapped walls (2, 7, 6) as a success.
+        let ends = l.natural_interval();
+        let start = l.evaluate_point(&k, ends.min()).expect("start");
+        let end = l.evaluate_point(&k, ends.max()).expect("end");
+        assert!((end - start).length() > 0.0 && start.length() < 2.0 && end.length() < 2.0);
         let e = create_linear_sweep(&mut k, &ok, z, 10.0, true).expect_err("no cap");
         assert_eq!(e.sm_status(), Some(1001), "{e:?}");
         // no profile curves and caps: no cap can be made either; upstream returned a

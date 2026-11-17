@@ -511,3 +511,172 @@ impl UnitDiff for Runner {
         .ok()
     }
 }
+
+/// #14246 G1 (WR-662 retired): the rows whose success became a refusal. On main every one
+/// of them except the bowtie built nothing (no face in the B-rep) and returned success;
+/// the bowtie built one open face. Each row is refused for a closed-form reason:
+/// - `Small`: a cone, sphere or pipe whose sizes are all within the B-rep's tolerance of
+///   zero (radius, or radius and height), so every face it would have is degenerate;
+/// - `NoArea`: a taper profile of zero signed area: its lines all lie on one line (a line
+///   and its reverse, or a "triangle" whose corners are collinear), or it is the bowtie,
+///   whose two lobes cancel and which crosses itself. Such a profile bounds no region, so
+///   it has no caps and the taper no solid;
+/// - `Open`: a taper profile that does not close, so it has no caps;
+/// - `WasRefused`: main refused it too (status to status).
+#[cfg(test)]
+mod moved_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum Reason {
+        Small,
+        NoArea,
+        Open,
+        WasRefused,
+    }
+
+    /// The row's primitive call as [`entry`] makes it, with its typed result and the
+    /// number of faces in the B-rep afterwards.
+    fn run(i: &Inputs) -> (Result<()>, usize, f64) {
+        let d = &i.data;
+        let b = BrepId::from_index(0);
+        let mut k = Kernel::default();
+        let mut model = PrimitiveModel::new(&mut k, fixture_brep(d[0] != 0.).unwrap());
+        let tolerance = model.brep(b).unwrap().tolerance();
+        let mut primitive = PrimitiveCreation::new(Some(RegionId::from_index(0)), 0, false);
+        let (mut starts, mut sides, mut ends) = (Vec::new(), Vec::new(), Vec::new());
+        let result = match i.op {
+            1 => primitive.create_partial_cone(
+                &mut model,
+                b,
+                d[1],
+                d[2],
+                d[3],
+                d[4],
+                d[5],
+                &frame(&d[6..15]),
+            ),
+            2 => primitive.create_partial_sphere(&mut model, b, d[1], d[2], d[3], &frame(&d[4..13])),
+            7 => primitive.create_pipe_sweep(
+                &mut model,
+                b,
+                d[1],
+                &curve(&d[5..12]).unwrap(),
+                d[2],
+                d[3] != 0.,
+                d[4] != 0.,
+                &mut starts,
+                &mut sides,
+                &mut ends,
+            ),
+            8 => {
+                let corner = match d[7] as i64 {
+                    0 => OffsetCornerType::LinearExtension,
+                    1 => OffsetCornerType::FilletCorner,
+                    _ => OffsetCornerType::LinearChamfer,
+                };
+                primitive.create_taper_extrude(
+                    &mut model,
+                    b,
+                    curves(&d[8..]).unwrap(),
+                    d[1],
+                    d[2],
+                    d[3] as i32,
+                    &mut Vec3::new(d[4], d[5], d[6]),
+                    corner,
+                )
+            }
+            op => panic!("{op}"),
+        };
+        let faces = solidcore::topology::brep::p1::faces(model.brep(b).unwrap(), None)
+            .unwrap()
+            .len();
+        (result, faces, tolerance)
+    }
+
+    /// The taper profile's line ends in the XY plane, in order.
+    fn ends(d: &[f64]) -> Vec<[f64; 4]> {
+        d[8..]
+            .as_chunks::<7>()
+            .0
+            .iter()
+            .map(|c| {
+                assert_eq!(c[0], 0.0, "lines only");
+                assert_eq!((c[3], c[6]), (0.0, 0.0), "in the XY plane");
+                [c[1], c[2], c[4], c[5]]
+            })
+            .collect()
+    }
+
+    fn reason(i: &Inputs, tolerance: f64) -> Reason {
+        let d = &i.data;
+        match i.op {
+            1 => {
+                assert!([d[1], d[2], d[3]].iter().all(|s| s.abs() <= tolerance));
+                Reason::Small
+            }
+            2 => {
+                assert!(d[1].abs() <= tolerance);
+                Reason::Small
+            }
+            7 => {
+                assert!(d[1].abs() <= tolerance, "radius");
+                Reason::Small
+            }
+            8 => {
+                let lines = ends(d);
+                let closed = lines.windows(2).all(|w| w[0][2] == w[1][0] && w[0][3] == w[1][1])
+                    && lines.last().unwrap()[2..] == lines.first().unwrap()[..2];
+                if !closed {
+                    return Reason::Open;
+                }
+                let area: f64 = lines.iter().map(|l| l[0] * l[3] - l[2] * l[1]).sum();
+                assert_eq!(area, 0.0, "a profile with area");
+                Reason::NoArea
+            }
+            op => panic!("{op}"),
+        }
+    }
+
+    /// (row, reason)
+    const ROWS: [(&str, Reason); 21] = [
+        ("gen0027", Reason::Small),
+        ("gen0041", Reason::WasRefused),
+        ("gen0046", Reason::Small),
+        ("gen0082", Reason::NoArea),
+        ("gen0105", Reason::Small),
+        ("gen0112", Reason::NoArea),
+        ("gen0119", Reason::NoArea),
+        ("gen0123", Reason::Small),
+        ("gen0134", Reason::NoArea),
+        ("gen0135", Reason::Small),
+        ("gen0158", Reason::WasRefused),
+        ("gen0175", Reason::Small),
+        ("gen0216", Reason::NoArea),
+        ("gen0230", Reason::Small),
+        ("gen0235", Reason::NoArea),
+        ("line_back_2_5e-5_off_the_last_mid_start_cap", Reason::NoArea),
+        ("review3_start_cap_bowtie", Reason::NoArea),
+        ("ub50_taper_end_cap_offsets_of_a_loop_enclosing_nothing", Reason::NoArea),
+        ("ub50_taper_line_and_its_reverse", Reason::NoArea),
+        ("ub50_taper_line_back_through_the_last_mid", Reason::NoArea),
+        ("ub50_taper_two_identical_lines", Reason::Open),
+    ];
+
+    #[test]
+    fn each_moved_row_is_refused_for_its_reason() {
+        for (name, expected) in ROWS {
+            let i: Inputs = crate::case::regression_case(&Runner, name).parse().unwrap();
+            let (result, faces, tolerance) = run(&i);
+            result.expect_err(name);
+            if expected != Reason::WasRefused {
+                let found = reason(&i, tolerance);
+                assert_eq!(found, expected, "{name}: reason");
+            }
+            // Main built nothing for every row but the bowtie, where it left one open
+            // face on the self-crossing profile: no valid cap. The refusal leaves none.
+            assert_eq!(faces, 0, "{name}: the refusal leaves no face");
+        }
+    }
+}
