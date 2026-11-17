@@ -212,6 +212,11 @@ pub struct ViewportState {
     pub(crate) zoom_shortcut_drag: bool,
     /// Button-free gesture and its last owned pointer position, kept through pauses.
     pub(crate) modifier_nav: Option<(NavMode, Pos2)>,
+    /// Pan, Orbit or Zoom Mode (`view.pan_mode`…): plain pointer motion over the view moves the
+    /// camera, no button held, until the mode's key is pressed again, another mode's key or Esc.
+    pub(crate) nav_toggle: Option<NavMode>,
+    /// Where the pointer was when Zoom Mode began: the zoom stays on what was under it.
+    pub(crate) nav_toggle_at: Option<Pos2>,
     /// The mode the middle or right drag under way started with, kept until its button is
     /// released when `nav_drag_keeps_mode` is on (#9557).
     pub(crate) button_nav: Option<(crate::prefs::NavButton, Option<NavMode>)>,
@@ -16237,6 +16242,10 @@ mod tests {
 #[cfg(test)]
 #[path = "view_home_tests.rs"]
 mod view_home_tests;
+
+#[cfg(test)]
+#[path = "nav_mode_tests.rs"]
+mod nav_mode_tests;
 
 #[cfg(test)]
 mod grid_plane_tests {

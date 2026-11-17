@@ -1690,6 +1690,16 @@ impl SolveApp {
                         self.viewport.nav = None;
                     }
                 }
+                mode_id if navigation::toggle_mode(mode_id).is_some() => {
+                    let mode = navigation::toggle_mode(mode_id);
+                    let active = self.viewport.nav_toggle == mode;
+                    if v.get("on").and_then(Value::as_bool).unwrap_or(!active) {
+                        self.viewport.nav_toggle = mode;
+                    } else if active {
+                        self.viewport.nav_toggle = None;
+                        self.viewport.nav_toggle_at = None;
+                    }
+                }
                 "view.spin" => {
                     self.cancel_view_animation();
                     self.viewport.spin = v.get("on").and_then(Value::as_bool).unwrap_or(!self.viewport.spin);
@@ -2237,6 +2247,9 @@ impl SolveApp {
             "view.fit"
                 | "view.home"
                 | "view.tool.zoom"
+                | "view.pan_mode"
+                | "view.orbit_mode"
+                | "view.zoom_mode"
                 | "view.spin"
                 | "view.grid"
                 | "view.ground_shadow"
