@@ -23,6 +23,10 @@ pub(crate) const CUT_OVERSHOOT_PER_THICKNESS: f64 = 0.5;
 /// The most tabs a stretch is asked for: far past any plate, and small enough for a `u32`.
 pub(crate) const MAX_TABS_PER_STRETCH: u32 = 10_000;
 
+/// The largest length the feature takes (mm), as the command's: a hand-edited file past it is
+/// refused here too, and a protrusion is at least its negative.
+pub(crate) const MAX_LENGTH: f64 = 100_000.0;
+
 /// The recipe's settings for one plate pair: the tab plate `t_tab` and the slot plate `t_slot`
 /// thick. The defaults are per pair: the tab width is three times the tab plate's thickness, the
 /// end distance is the tab width and the overshoot half the slot plate's thickness.
@@ -32,8 +36,10 @@ pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f6
     };
     let length = |e: &str, what: &str, least: f64| -> Result<f64> {
         let v = val(vals, e, Kind::Length)?;
-        if v.is_finite() && v >= least {
+        if v.is_finite() && v >= least && v <= MAX_LENGTH {
             Ok(v)
+        } else if v > MAX_LENGTH {
+            Err(DocError::Invalid(format!("the {what} must be at most {MAX_LENGTH} mm, not {v}")))
         } else if least > 0.0 {
             Err(DocError::Invalid(format!("the {what} must be more than 0, not {v}")))
         } else {
@@ -67,6 +73,9 @@ pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f6
             let v = val(vals, e, Kind::Length)?;
             if !v.is_finite() {
                 return Err(DocError::Invalid(format!("the protrusion must be a length, not {v}")));
+            }
+            if v.abs() > MAX_LENGTH {
+                return Err(DocError::Invalid(format!("the protrusion must be from -{MAX_LENGTH} to {MAX_LENGTH} mm, not {v}")));
             }
             v
         }
@@ -785,5 +794,24 @@ mod tests {
         assert!(err.ends_with("(no_plate_joint)"), "{err}");
         let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
         assert!((volume("Wall") - 43_200.0).abs() < 1e-6 && (volume("Bottom") - 96_000.0).abs() < 1e-6);
+    }
+
+    /// Design v3 4.4 item 3: a hand-edited file with a length past 1e5 mm is refused by the eval
+    /// too, as by the command; the cap itself is taken.
+    #[test]
+    fn tab_slot_spec_of_refuses_lengths_past_the_cap() {
+        let s = spec(serde_json::json!({"clearance": "0.1", "tab_width": "100000", "protrusion": "-100000"})).unwrap();
+        assert_eq!((s.width, s.protrusion), (100_000.0, -100_000.0));
+        for (bad, what) in [
+            (serde_json::json!({"clearance": "0.1", "tab_width": "100001"}), "tab width"),
+            (serde_json::json!({"clearance": "0.1", "spacing": "1000000"}), "spacing"),
+            (serde_json::json!({"clearance": "0.1", "end_distance": "200000"}), "end distance"),
+            (serde_json::json!({"clearance": "100001"}), "clearance"),
+            (serde_json::json!({"clearance": "0.1", "protrusion": "100001"}), "protrusion"),
+            (serde_json::json!({"clearance": "0.1", "protrusion": "-100001"}), "protrusion"),
+        ] {
+            let e = spec(bad.clone()).unwrap_err().to_string();
+            assert!(e.contains(what) && e.contains("100000"), "{bad}: {e}");
+        }
     }
 }
