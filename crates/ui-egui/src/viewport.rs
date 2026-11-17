@@ -6182,7 +6182,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         unavailable_note(app, &painter, rect);
     }
     let overlay_rect = crate::shell::bottom_readout_rect(app, rect);
-    crate::viewport_details::legacy_legends(app, ui, overlay_rect);
+    let legends = crate::viewport_details::legacy_legends(app, ui, overlay_rect);
     placement_note(app, &painter, overlay_rect);
     crate::frame_rate::paint(app, ui, &painter, overlay_rect);
 
@@ -6858,6 +6858,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         taken.extend(readout);
         taken.extend(toasts.iter().copied());
+        taken.extend(legends);
         crate::scale_bar::show(app, ui, &proj, crate::shell::content_rect(app, overlay_rect), &taken)
     };
     toasts.extend(scale_bar);
@@ -7096,6 +7097,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     {
         crate::scenario::publish_rect("toast:placement", r);
         obstacles.push(r);
+        shown.push(r);
         free.max.y = r.top() - t.space_8;
     }
     if let Some((msg, at, error)) = app.status.clone() {
