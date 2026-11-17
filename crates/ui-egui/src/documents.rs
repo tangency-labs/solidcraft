@@ -3186,6 +3186,20 @@ mod tests {
     }
 
     #[test]
+    fn preparing_view_windows_reads_native_scale_in_a_frame() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let context = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(1.5);
+        let mut prepared = false;
+        let _ = context.run_ui(input, |ui| {
+            crate::view_windows::prepare(&mut app, ui.ctx());
+            prepared = true;
+        });
+        assert!(prepared);
+    }
+
+    #[test]
     fn only_a_listed_fingerprint_is_trusted() {
         assert!(trusted_fingerprint("0123456789ABCDEF, fedcba9876543210", "0123456789abcdef"));
         assert!(trusted_fingerprint("0123456789ABCDEF; fedcba9876543210", "FEDCBA9876543210"));
