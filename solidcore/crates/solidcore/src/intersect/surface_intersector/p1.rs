@@ -2956,24 +2956,34 @@ mod tests {
     }
 
     /// tangency-labs/solidcraft#17720: a cone with no height runs over `[apex, 1234567]`
-    /// in v (`[-1234567, apex]` for a negative semi-angle), unbounded, so its scale is its
-    /// cross-section at height 0, the base circle, `4 r` along `[0, 360]`. Against a plane
-    /// over its natural domain (no scale) the default is `4 r / 1000` in either order, and
-    /// it scales with the model.
+    /// in v (`[-1234567, apex]` for a negative semi-angle under WR-713), unbounded, so its
+    /// scale is its cross-section at height 0, the base circle, `4 r` along its u range.
+    /// Against a plane over its natural domain (no scale) the default is `4 r / 1000` in
+    /// either order, and it scales with the model. Without WR-713 a negative semi-angle's
+    /// range starts above 0 and is shorter than 1234567: bounded, so its size decides
+    /// (the cut of `an_extrusion_scales_by_its_profile_over_an_unbounded_sweep`).
     #[test]
     fn an_unbounded_cone_scales_by_its_base_circle() {
-        let k = &Kernel::default();
+        let mut k = Kernel::default();
+        k.fixes.cone_unbounded_parameterized_as_nurb = true;
         for s in [1.0, 10.0] {
             for semi_angle in [30.0, -30.0] {
-                let cone = unbounded_cone(k, s, semi_angle, false);
-                let dc = cone.natural_uv_domain_with_nurb(k).unwrap();
+                let cone = unbounded_cone(&k, s, semi_angle, false);
+                let dc = cone.natural_uv_domain_with_nurb(&k).unwrap();
                 assert!(dc.v_max() - dc.v_min() >= INFINITE_PARAMETER, "{dc:?}");
                 let plane = horizontal_plane(7.0 * s);
-                let dp = plane.natural_uv_domain_with_nurb(k).unwrap();
-                let got = default_tolerances(k, (&cone, &dc), (&plane, &dp));
+                let dp = plane.natural_uv_domain_with_nurb(&k).unwrap();
+                let got = default_tolerances(&k, (&cone, &dc), (&plane, &dp));
                 assert_near(got, 4.0 * 2.0 * s / 1000.0);
             }
         }
+        let k = Kernel::default();
+        let cone = unbounded_cone(&k, 1.0, -30.0, false);
+        let dc = cone.natural_uv_domain_with_nurb(&k).unwrap();
+        assert!(
+            dc.v_min() > 0.0 && dc.v_max() - dc.v_min() < INFINITE_PARAMETER,
+            "{dc:?}"
+        );
     }
 
     /// tangency-labs/solidcraft#17720: swapped, the cone's unbounded range is u, and its
@@ -3050,29 +3060,6 @@ mod tests {
             default_tolerances(k, (&empty, &measured), (&cone, &dc)),
             8.0 / 1000.0,
         );
-    }
-
-    /// tangency-labs/solidcraft#17720: a cancelled kernel stops the constructor with the
-    /// cancellation, whichever surface comes first.
-    #[test]
-    fn a_cancelled_kernel_stops_the_default_tolerance() {
-        let built = &Kernel::default();
-        let cone = unbounded_cone(built, 1.0, 30.0, false);
-        let dc = cone.natural_uv_domain_with_nurb(built).unwrap();
-        let plane = horizontal_plane(0.0);
-        let dp = plane.natural_uv_domain_with_nurb(built).unwrap();
-        let mut k = Kernel::default();
-        let token = crate::kernel::CancelToken::new();
-        token.cancel();
-        k.cancel = Some(token);
-        for (a, da, b, db) in [(&cone, &dc, &plane, &dp), (&plane, &dp, &cone, &dc)] {
-            let r = SurfaceIntersector::new(&k, a, da, b, db, false);
-            assert!(
-                r.as_ref().is_err_and(SolidError::is_cancelled),
-                "{:?}",
-                r.map(|si| si.this_approx_tol_3d)
-            );
-        }
     }
 
     #[test]

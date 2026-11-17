@@ -1252,4 +1252,69 @@ mod tests {
         assert_eq!(unit.len(), 4);
         assert_eq!(long.len(), unit.len());
     }
+
+    /// tangency-labs/solidcraft#17720: `refuse_points_where_a_plane_crosses` is a
+    /// post-condition on the result, whatever tolerance found it. The plane `z = 0` over its
+    /// natural domain crosses the unit sphere about `(0, 0, 0.3)` (its points reach `z =
+    /// 1.3` and `z = -0.7`). A result of one touching point, deviation 0.2, is refused in
+    /// either order, naming the default tolerance (the same in either order); within the
+    /// default, within a caller's larger tolerance, or with the sphere wholly above the
+    /// plane, it is kept. (Since the default no longer runs at the plane's size, no
+    /// plane-first case of the goldens reaches the refusal: a loop on the barrel of
+    /// `ssi-revolution-plane-near-profile-extremum` is found down to about 4 tolerances
+    /// across and missed below, never traced as a lone touching point.)
+    #[test]
+    fn touching_points_where_a_plane_crosses_are_refused() {
+        use crate::error::ErrorKind;
+        let k = Kernel::default();
+        let frame = |o: Point3| {
+            let mut f = Axis2Placement::default();
+            f.set_canonical(o, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0))
+                .unwrap();
+            f
+        };
+        let plane = Surface::from(Plane::create_canonical(&frame(Point3::ZERO)).unwrap());
+        let sphere_at = |z: f64| {
+            Surface::from(
+                crate::surface::sphere::Sphere::create_canonical(
+                    &k,
+                    &frame(Point3::new(0.0, 0.0, z)),
+                    1.0,
+                )
+                .unwrap(),
+            )
+        };
+        let touching = |deviation: f64| SurfaceIntersection {
+            curve_types: vec![TsectCurveType::Touching],
+            deviations: vec![deviation],
+            ..SurfaceIntersection::default()
+        };
+        let refuse = |a: &Surface, b: &Surface, tol: Option<f64>, r: &SurfaceIntersection| {
+            let da = a.natural_uv_domain_with_nurb(&k).unwrap();
+            let db = b.natural_uv_domain_with_nurb(&k).unwrap();
+            refuse_points_where_a_plane_crosses(&k, [a, b], [&da, &db], tol, r)
+        };
+        let sphere = sphere_at(0.3);
+        let dp = plane.natural_uv_domain_with_nurb(&k).unwrap();
+        let ds = sphere.natural_uv_domain_with_nurb(&k).unwrap();
+        let tolerance = SurfaceIntersector::new(&k, &plane, &dp, &sphere, &ds, false)
+            .unwrap()
+            .this_approx_tol_3d;
+        assert!(tolerance < 0.01, "{tolerance}");
+        for (a, b) in [(&plane, &sphere), (&sphere, &plane)] {
+            let e = refuse(a, b, None, &touching(0.2)).unwrap_err();
+            assert_eq!(
+                e.intersect_failure(),
+                Some(&IntersectFailure::PointsWhereAPlaneCrosses {
+                    tolerance,
+                    surface_tolerance: tolerance
+                }),
+                "{e}"
+            );
+            assert_eq!(e.kind(), ErrorKind::NotWithinTolerance);
+            refuse(a, b, None, &touching(0.5 * tolerance)).unwrap();
+            refuse(a, b, Some(0.5), &touching(0.2)).unwrap();
+        }
+        refuse(&plane, &sphere_at(5.0), None, &touching(0.2)).unwrap();
+    }
 }

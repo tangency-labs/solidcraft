@@ -1471,44 +1471,6 @@ mod tests {
         }
     }
 
-    /// WR-51, tangency-labs/solidcraft#17720: with the plane first, the intersection finds a
-    /// lone touching point where the plane crosses the revolution. `intersect_surfaces`
-    /// refuses that answer with its typed cause, naming the tolerance it ran at (the
-    /// plane's, a thousandth of its 2.47e6 domain) and the revolution's own. At the
-    /// revolution's tolerance the plane-first intersection finds the crossing curves of
-    /// [`PLANE_FIRST`], and `intersect_surfaces_within` returns them.
-    #[test]
-    fn plane_first_pairs_refuse_touching_points_where_the_plane_crosses() {
-        use solidcore::error::intersect::IntersectFailure;
-        use solidcore::error::ErrorKind;
-        use solidcore::intersect::api_intersectors::intersect_surfaces_within;
-        for (name, count, shape) in PLANE_FIRST {
-            let c = plane_first(name);
-            let (tolerance, surface_tolerance) = c.tolerances();
-            assert!(tolerance > 3000.0 && surface_tolerance < 0.03, "{name}");
-            let (curves, status) = intersect_surfaces(&c.k, &c.plane, &c.revolution);
-            assert!(curves.is_empty(), "{name}: {} curves", curves.len());
-            let e = status.unwrap_err();
-            assert_eq!(
-                e.intersect_failure(),
-                Some(&IntersectFailure::PointsWhereAPlaneCrosses {
-                    tolerance,
-                    surface_tolerance
-                }),
-                "{name}: {e}"
-            );
-            assert_eq!(e.kind(), ErrorKind::NotWithinTolerance, "{name}");
-
-            let (r, status) = c.intersect(Some(surface_tolerance));
-            status.unwrap();
-            assert_crossing_curves(&c, name, &r, (count, shape), surface_tolerance);
-            let (curves, status) =
-                intersect_surfaces_within(&c.k, &c.plane, &c.revolution, Some(surface_tolerance));
-            status.unwrap();
-            assert_eq!(curves.len(), count, "{name}");
-        }
-    }
-
     /// The refusal needs the plane to cross: a plane tangent to the barrel of
     /// `ssi-revolution-plane-near-axis-parallel` at its widest circle (x = 1.375, the
     /// profile's largest radius at z = 0) leaves every point of the revolution on one side,
@@ -1542,10 +1504,10 @@ mod tests {
         );
     }
 
-    /// The refusal needs a point farther from the surfaces than the other surface's own
-    /// tolerance: the plane `z = 4 - 1e-7` crosses the cone of `ssi-cone-plane-near-apex`
-    /// (apex at z = 4, half-angle atan(1/2)) in a circle of radius 5e-8, far below the cone's
-    /// tolerance 5.84e-3, so the touching point at its centre (deviation 0) is that circle
+    /// The refusal needs a point farther from the surfaces than their default tolerance:
+    /// the plane `z = 4 - 1e-7` crosses the cone of `ssi-cone-plane-near-apex` (apex at z =
+    /// 4, half-angle atan(1/2)) in a circle of radius 5e-8, far below the default tolerance
+    /// 5.84e-3 (the cone's), so the touching point at its centre (deviation 0) is that circle
     /// at the cone's size, in either order, and is not refused.
     #[test]
     fn a_touching_point_within_the_surface_tolerance_is_not_refused() {
@@ -1753,52 +1715,6 @@ mod tests {
             let apart = ends[0].distance(a).max(ends[1].distance(b));
             let swapped = ends[0].distance(b).max(ends[1].distance(a));
             assert!(apart.min(swapped) <= tolerance, "{name}: ends {ends:?}");
-        }
-    }
-
-    /// Exploration (removed before review): plane x = 11/8 - delta against the barrel of
-    /// `ssi-revolution-plane-near-profile-extremum`, both orders.
-    #[test]
-    #[ignore = "exploration"]
-    fn explore_17720_tiny_loop() {
-        use solidcore::intersect::surface_intersector::p1::SurfaceIntersector;
-        let name = "ssi-revolution-plane-near-profile-extremum-swapped";
-        let case = crate::case::regression_case(&Runner, name);
-        let Inputs::Surfaces { surface2, .. } = case.parse().unwrap() else {
-            panic!();
-        };
-        let mut k = Kernel::default();
-        let rev = build_surface(&mut k, &surface2).unwrap();
-        for delta in [1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1, 2e-1] {
-            let plane = build_surface(
-                &mut k,
-                &SurfaceIn::Analytic {
-                    shape: AnalyticIn::Plane {
-                        origin: [1.375 - delta, 0.0, 0.0],
-                        x: [0.0, 1.0, 0.0],
-                        y: [0.0, 0.0, 1.0],
-                    },
-                    domain: None,
-                },
-            )
-            .unwrap();
-            for (order, a, b) in [("plane", &plane, &rev), ("rev", &rev, &plane)] {
-                let da = a.natural_uv_domain_with_nurb(&k).unwrap();
-                let db = b.natural_uv_domain_with_nurb(&k).unwrap();
-                let tau = SurfaceIntersector::new(&k, a, &da, b, &db, false)
-                    .unwrap()
-                    .this_approx_tol_3d;
-                let (r, st) =
-                    a.global_surface_intersect_with_partial(&k, &da, b, &db, [true, true], None, None);
-                let (curves, status) = intersect_surfaces(&k, a, b);
-                println!(
-                    "delta={delta:e} {order} tau={tau:e} global={st:?} types={:?} dev={:?} api={} {:?}",
-                    r.curve_types,
-                    r.deviations,
-                    curves.len(),
-                    status.err().map(|e| e.to_string())
-                );
-            }
         }
     }
 
