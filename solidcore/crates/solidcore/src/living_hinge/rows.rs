@@ -406,7 +406,9 @@ fn pull_apart(spec: &LivingHingeSpec, pieces: &mut [HingeSlot]) {
 }
 
 /// Whether a planned piece is kept: `clip` (design 6.7) and the short-piece rule (design 6.9),
-/// a piece shorter than the bridge inside the material being left out.
+/// a piece shorter than the bridge inside the material being left out. The bar is never above the
+/// slot length: a whole slot is never shorter than itself, and slots no longer than the bridges
+/// are a warning (design 3.1), not a plan with no slot.
 fn keeps(spec: &LivingHingeSpec, slot: &HingeSlot) -> bool {
     if spec.clip == HingeClip::Whole && slot.kind != SlotKind::Whole {
         return false;
@@ -420,5 +422,5 @@ fn keeps(spec: &LivingHingeSpec, slot: &HingeSlot) -> bool {
         (Some(Side::Hi), Some(x)) => x - slot.a0 + r,
         _ => slot.a1 - slot.a0 + spec.slot_width,
     };
-    inside >= spec.bridge
+    inside >= spec.bridge.min(spec.slot_length) - GRAZE
 }
