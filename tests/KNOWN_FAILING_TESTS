@@ -10,6 +10,12 @@
 solidcraft-cli::action_matrix::action_matrix_sample 2 baseline actions fail: 2 shells (Bad Loop Orient on issue-616-lid-ribs; status 1001 on filleted-shelled-box)
 solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, the offset of face 0 by -1 is not proved regular, so thicken is refused with no size named
 solidcraft-engine::cmd::edit::tests::inserting_variable_fillet_control_preserves_parameters_at_existing_positions solidcore refuses a variable fillet whose law has a corner (solidcore#430)
+solidcraft-engine::cmd::features::fillet_connected_rounds_tests::a_round_on_an_edge_a_boss_stands_across_ends_at_the_boss the round fails with "Fillet Corner Error: Corner Geometry Computation Failure" (status 1001) (T-95, #17590)
+solidcraft-engine::cmd::features::fillet_connected_rounds_tests::a_round_on_an_outline_edge_ending_at_a_pocket_floor_builds the round fails with "Fillet Corner Error: Unable to Make Topology" (status 1001) (T-103, #17600)
+solidcraft-engine::cmd::features::fillet_connected_rounds_tests::a_tube_to_flange_round_beside_a_crossing_pipe_is_the_same_with_the_tangent_chain with the tangent chain on the round is refused as larger than the faces allow at every radius; off, it builds (T-96, #17591)
+solidcraft-engine::cmd::features_more::tests::a_draft_on_a_pocket_wall_beside_rounds_never_fails_with_a_bare_status the draft fails with a bare "SMLib failed (status 1001)" (T-97, #17592)
+solidcraft-engine::cmd::sketch_project::tests::redefining_a_sketch_onto_a_parallel_plane_keeps_its_points_where_they_were the redefined sketch keeps its coordinates on the midplane's own origin, so its spline shifts by (30, 40) (T-181, #18260)
+solidcraft-engine::face_name_tests::faces_marked_exact_report_their_exact_area model.faces marks mesh areas exact: the hole wall reads 156.83 for 157.08 (T-93, #17588)
 solidcraft-engine::hole_face_tests::a_hole_wider_than_the_part_says_it_removes_all_of_it a 40 mm hole at (10, 10) touches the plate's edge y = 30 at one point; the kernel parts the plate there into 2 bodies, the test wants truck's 1, as on SMLib
 solidcraft-engine::tests::chord_and_variable_fillets its 2 → 4 → 2 waist: solidcore refuses a variable fillet whose law has a corner (solidcore#430)
 solidcraft-engine::tests::fillet_fit_taper_closes_to_a_point fillet status 1001 on the taper fit (radius 16 closing to 0), as on C++

@@ -2938,3 +2938,51 @@ fn a_ray_through_a_hole_opening_projects_its_rim() {
     assert!(rim.at.dist(solidcore_record::Vec3::new(85.0, 270.0, 60.0)) < 1e-4, "{rim:?}");
     assert!(rim.edges.iter().all(|p| (p.z - 60.0).abs() < 1e-4 && (p.z - 60.0).abs() + rim.at.dist(*p) > 0.0), "{rim:?}");
 }
+
+/// Moving a sketch onto a parallel plane lifts it along the planes' normal: every point keeps
+/// its world x and y, and only z changes. A sketch on XY holding the projected outline of a
+/// 60 x 80 x 15 block's top face and a spline whose ends lie on two of those projected lines,
+/// redefined onto the midplane between the block's top and bottom: today the spline keeps its
+/// sketch coordinates on the midplane's own origin (the face centre), so it shifts by (30, 40)
+/// and its ends slide along the lines ([T-181](https://tickets.solidcraft.io/t/181), #18260).
+#[test]
+fn redefining_a_sketch_onto_a_parallel_plane_keeps_its_points_where_they_were() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 80, "height": 15, "body_name": "Tray"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Wave"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"face": [30, 40, 15], "body": "Tray"}]}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 30], [20, 45], [40, 25], [60, 50]]}));
+    // The spline's ends on the projected sides x = 0 and x = 60.
+    let created = run(&mut s, "sketch.inspect", json!({"sketch": "Wave"}));
+    let spline = created["curves"].as_array().unwrap().iter().find(|c| c["type"] == "spline").unwrap().clone();
+    let ends = spline["points"].as_array().unwrap();
+    let side = |x: f64| {
+        created["curves"].as_array().unwrap().iter().find(|c| {
+            c["type"] == "line" && c["start_at"][0].as_f64() == Some(x) && c["end_at"][0].as_f64() == Some(x)
+        })
+        .unwrap()["id"]
+            .clone()
+    };
+    run(&mut s, "sketch.constraint.coincident", json!({"a": ends[0], "b": side(0.0)}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": ends[ends.len() - 1], "b": side(60.0)}));
+    run(&mut s, "sketch.finish", json!({}));
+    let world = |s: &mut Session| -> std::collections::BTreeMap<String, [f64; 3]> {
+        run(s, "sketch.inspect", json!({"sketch": "Wave"}))["points"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["id"] != "origin")
+            .map(|p| (p["id"].as_str().unwrap().to_string(), [0, 1, 2].map(|i| p["world"][i].as_f64().unwrap())))
+            .collect()
+    };
+    let before = world(&mut s);
+    run(&mut s, "construct.plane.midplane", json!({"a": {"face": [30, 40, 15]}, "b": {"face": [30, 40, 0]}, "name": "Mid"}));
+    run(&mut s, "sketch.redefine", json!({"sketch": "Wave", "plane": "Mid"}));
+    let after = world(&mut s);
+    assert_eq!(before.keys().collect::<Vec<_>>(), after.keys().collect::<Vec<_>>());
+    for (id, [x, y, z]) in &before {
+        let [x2, y2, z2] = after[id];
+        assert!(z.abs() < 1e-9 && (z2 - 7.5).abs() < 1e-9, "{id}: z {z} -> {z2}");
+        assert!((x2 - x).abs() < 1e-6 && (y2 - y).abs() < 1e-6, "{id}: ({x}, {y}) -> ({x2}, {y2})");
+    }
+}
