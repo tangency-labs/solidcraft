@@ -820,7 +820,8 @@ fn trim_metric(
 /// side its piece of the trim lies on (the arriving piece behind its tangent, the leaving
 /// piece ahead of it). The sides differ only at a knot of the surface, where its
 /// parameterisation may be only `C0`. `None` where the trim or the surface cannot be
-/// evaluated or an image tangent vanishes (the caller keeps the trim's own turn).
+/// evaluated, an image tangent vanishes or the image is not finite (the caller keeps the
+/// trim's own turn).
 ///
 /// # Errors
 ///
@@ -852,7 +853,10 @@ fn trim_turn_on_surface(
     let (Some(arriving), Some(leaving)) = (image(false)?, image(true)?) else {
         return Ok(None);
     };
-    Ok(Some(arriving.dot(leaving)))
+    // a non-finite image (a surface with a non-finite pole) decides nothing: the caller
+    // keeps the turn it read in the parameters
+    let turn = arriving.dot(leaving);
+    Ok(turn.is_finite().then_some(turn))
 }
 
 /// A copy of `trim` with its control points mapped by [`trim_metric`]'s `l` (the
@@ -3775,5 +3779,13 @@ mod tests {
 
         // the same corner off the knot line: the image turns with it
         assert_eq!(failed_tests(&k, &trim(0.3), Some(&surface)), vec![7]);
+
+        // a surface whose image of the corner is not finite decides nothing: the corner
+        // is reported as it reads in the parameters
+        let mut broken = net;
+        broken[3][0] = CPoint::new(f64::NAN, 0.0, 0.0, NOW);
+        let broken =
+            Surface::from(BSplineSurface::from_data(6, 1, 3, 1, 10, 3, &broken, &u, &v).unwrap());
+        assert!(failed_tests(&k, &on_line, Some(&broken)).contains(&7));
     }
 }
