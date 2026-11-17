@@ -2721,7 +2721,7 @@
   "render.cpu_body_choose": "Escoller un corpo",
   "render.cpu_body_filter": "Filtrar corpos por nome",
   "render.cpu_body_filter_more": "Afina o filtro para ver máis corpos.",
-  "render.cpu_body_missing": "Falta un destino de reflexo, está oculto, é ambiguo ou ten un nome de máis de 128 bytes. Escóllao de novo.",
+  "render.cpu_body_missing": "Falta un destino de reflexo, está oculto, é ambiguo ou ten un nome de máis de 512 bytes. Escóllao de novo.",
   "render.cpu_budget": "Perfil de recursos da CPU",
   "render.cpu_budget_bodies": "Límite de corpos",
   "render.cpu_budget_compact": "Compacto (límites antigos)",

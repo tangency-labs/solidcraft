@@ -2525,4 +2525,10 @@ fn feature_and_folder_names_count_characters_not_bytes() {
         let error = s.execute(command, &params).unwrap_err().to_string();
         assert!(error.contains("1…128 characters"), "{command}: {error}");
     }
+    // A new folder is given such a name too.
+    let made = run(&mut s, "timeline.group", json!({"name": too_long.chars().skip(1).collect::<String>()}))["group"].as_u64().unwrap();
+    assert_eq!(s.doc.timeline_groups.iter().find(|g| g.id == made).map(|g| g.name.chars().count()), Some(128));
+    // A design with such names is saved and opens again.
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).map_err(|e| e.to_string());
+    assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
 }
