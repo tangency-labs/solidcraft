@@ -1,7 +1,0 @@
-# Git LFS settings for everyone who clones SolidCraft (vendor/README.md, "Git LFS").
-# SolidCraft keeps nothing in LFS. The vendored egui (vendor/egui) has upstream's images as LFS
-# pointer files whose contents only egui's own LFS storage has: never download them, and let a push
-# go on without them.
-[lfs]
-	fetchexclude = vendor/egui/**
-	allowincompletepush = true

@@ -396,10 +396,7 @@ and a fresh CI run:
    - Push work in progress at least daily. A draft with no pushes for 72 hours may be taken over:
      comment on it first, then open your own claim.
    - Mark the PR ready for review when it is done.
-2. Branch from `main` and keep the PR to one topic. If Git LFS is installed and a push to your fork
-   is refused with "can not upload new objects to public fork", your fork does not have the
-   vendored egui yet: sync the fork with `main` (GitHub's "Sync fork"), or push with
-   `GIT_LFS_SKIP_PUSH=1` (`vendor/README.md`, "Git LFS").
+2. Branch from `main` and keep the PR to one topic.
 3. Run `cargo xtask ci` before pushing. It runs fmt, the asset, licence and layer checks,
    clippy (`-D warnings`), then the tests with the wasm build check alongside. A PR has to pass it.
    Heavy CI runs after review: a pull request gets the formatting and repository checks and a

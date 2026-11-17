@@ -8,44 +8,47 @@ are marked `SolidCraft:` in the source.
 
 `vendor/egui` is egui's whole repository at tag 0.37.0 (commit `841a328ba2`, https://github.com/emilk/egui),
 added with `git subtree add --squash`, so SolidCraft can carry its own changes to egui, eframe and
-egui-wgpu. Nothing of it is deleted or reorganised: SolidCraft's changes, listed below and marked
-`SolidCraft:` in the source, are the only difference from upstream, so a `git subtree pull` of a
-newer egui meets nothing but them. It keeps its own licences (both texts are in it), tooling and
-rules: SolidCraft's checks do not apply to it, and the workspace excludes `vendor/`.
+egui-wgpu. Nothing of it is reorganised: SolidCraft's changes, listed below and marked `SolidCraft:`
+in the source, and the images left out (below) are the only difference from upstream, so a
+`git subtree pull` of a newer egui meets nothing but them. It keeps its own licences (both texts are
+in it), tooling and rules: SolidCraft's checks do not apply to it, and the workspace excludes
+`vendor/`.
 
 Every egui crate SolidCraft builds is patched to it in the workspace `Cargo.toml`: `ecolor`,
 `eframe`, `egui`, `egui-wgpu`, `egui-winit`, `egui_glow`, `emath`, `epaint` and
-`epaint_default_fonts`. egui's own workspace builds and tests there as upstream's does, for example
+`epaint_default_fonts`. egui's own crates build and test there, for example
 `cargo test --manifest-path vendor/egui/Cargo.toml -p egui -p eframe --lib`.
 
-### Git LFS
+### Images upstream keeps in Git LFS
 
-Upstream keeps its images (screenshot tests, demo and media pictures; none in the crates SolidCraft
-builds) in Git LFS, and the subtree has them as LFS pointer files. SolidCraft has no LFS storage of
-its own, so the repository's `.lfsconfig` tells Git LFS never to download anything under
-`vendor/egui/` (`fetchexclude`): a checkout leaves the pointer files as they are, instead of failing
-with "smudge filter lfs failed". It also sets `allowincompletepush`, so a push to this repository
-does not stop on images nobody has.
-
-GitHub refuses LFS uploads to a public fork ("can not upload new objects to public fork"). A push to
-a fork that does not have the egui import yet (or a new egui) carries its pointer files, and Git LFS
-then tries to upload their images. Sync the fork with `main` first (GitHub's "Sync fork"), or skip
-the upload, which nothing needs:
-
-```sh
-GIT_LFS_SKIP_PUSH=1 git push <fork> <branch>
-```
+The vendored tree is plain files; SolidCraft uses no Git LFS. Upstream keeps some images in Git
+LFS (screenshot-test references, demo and media pictures, example screenshots, and the `images`
+example's `ferris.gif`), and a subtree import brings them as LFS pointer files whose contents only
+egui's own LFS storage has. They are left out of `vendor/egui`, with the `filter=lfs` lines of its
+`.gitattributes`. None is in a crate SolidCraft builds; the images those crates use
+(`crates/eframe/data`, `crates/egui/assets`) are plain files upstream too. Without them egui's
+screenshot tests have nothing to compare against and its `images` example does not build.
 
 ### Updating egui
 
 ```sh
 GIT_LFS_SKIP_SMUDGE=1 git subtree pull --prefix=vendor/egui https://github.com/emilk/egui <tag> --squash
+# Leave out the LFS images again (if the pull stops on a conflict, run these to resolve it):
+git grep -lz 'git-lfs.github.com/spec' -- vendor/egui | xargs -0 -r git rm -q --
+sed -i -e '/filter=lfs/d' -e '/LFS:$/d' -e '/!filter !diff !merge/d' vendor/egui/.gitattributes
+git add vendor/egui/.gitattributes
+git commit -m "vendor/egui: leave out the images upstream keeps in Git LFS"
+git grep -l 'git-lfs.github.com/spec' -- vendor/egui   # prints nothing
 ```
 
-Conflicts can only come from SolidCraft's own changes. Land the pull request that does this with a
-merge commit, not a squash or a rebase: `git subtree` finds the last import by its squash commit, and
-a squash merge rewrites it away. SolidCraft's changes can go back to a fork of egui the same way, with
-`git subtree split --prefix=vendor/egui` or `git subtree push --prefix=vendor/egui <egui fork> <branch>`.
+`GIT_LFS_SKIP_SMUDGE=1` keeps Git LFS, where it is installed, from fetching the images while the
+pull checks them out.
+
+Conflicts can only come from SolidCraft's own changes and the images left out. Land the pull request
+that does this with a merge commit, not a squash or a rebase: `git subtree` finds the last import by
+its squash commit, and a squash merge rewrites it away. SolidCraft's changes can go back to a fork
+of egui the same way, with `git subtree split --prefix=vendor/egui` or `git subtree push
+--prefix=vendor/egui <egui fork> <branch>`.
 
 The shared viewport crate `solidcraft-viewport-egui` draws through egui-wgpu and relies on the
 fixes below (above all, the drawable acquired before paint callbacks are prepared: without it the
