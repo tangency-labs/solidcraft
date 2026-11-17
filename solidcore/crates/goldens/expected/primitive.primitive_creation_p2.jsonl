@@ -279,7 +279,7 @@
 {"case":"review2_low_triangle_end_cap_normal_down","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"review2_needle_end_cap_normal_down","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-1.0]}}
 {"case":"review2_sliver_end_cap_normal_up","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
-{"case":"review3_start_cap_bowtie","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
+{"case":"review3_start_cap_bowtie","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[1007.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"review3_start_cap_square_off_corner","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"review3_start_cap_squares_apart","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}
 {"case":"review3_start_cap_tail_into_open_c","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0]}}

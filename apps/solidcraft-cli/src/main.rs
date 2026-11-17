@@ -21,6 +21,8 @@
 //!                    [--param-check off|warn|strict] [--compact]
 //!                                                             MCP server on stdio (docs/mcp.md)
 //! solidcraft-cli mcp setup [--dry-run] [--client NAME] [--live] (alias: mcp install) add it to OpenCode, Claude Desktop, Claude Code, Cursor
+//! solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes
+//! solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] run the plugin's tests/*.json on the real host
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
@@ -39,6 +41,7 @@ mod kernel_cases;
 mod kernel_cases_export;
 mod logger;
 mod oracle;
+mod plugin;
 mod preview;
 mod profiling;
 mod recipe;
@@ -94,6 +97,8 @@ const USAGE_FUZZ: &str =
 /// `mcp`'s lines in the usage.
 const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact]\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
 /// `crashes`'s lines in the usage.
+const USAGE_PLUGIN: &str = "  solidcraft-cli plugin check <folder|plugin.zip> [--json]\n  solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR]\n      (check: what Install and a call would refuse, without running the plugin: the manifest and its size, permissions\n       (net is refused), limits, the component's WIT world and version; each problem with how to fix it; exits non-zero on an error;\n       a folder is checked without its tests folder and hidden files)\n      (test: installs the package in a scratch folder and runs its test cases, tests/*.json, on the real host and limits;\n       an entry with no case runs once with its defaults when it can; --json prints pass or fail per case; --out DIR keeps\n       each case's resulting design and log; exits non-zero when a case fails; see the plugin guide in the docs)\n";
+
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
 /// `licences`'s lines in the usage.
 const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
@@ -131,6 +136,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "fuzz", usage: USAGE_FUZZ, listed: true },
     Command { name: "fuzz-one", usage: USAGE_FUZZ_ONE, listed: false },
     Command { name: "mcp", usage: USAGE_MCP, listed: true },
+    Command { name: "plugin", usage: USAGE_PLUGIN, listed: true },
     Command { name: "crashes", usage: USAGE_CRASHES, listed: true },
     Command { name: "licences", usage: USAGE_LICENCES, listed: true },
     Command { name: "licenses", usage: USAGE_LICENCES, listed: false },
@@ -143,6 +149,8 @@ const COMMANDS: &[Command] = &[
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
+    // The kernel's fix set, named to solidcore-ops before any call runs on it.
+    solidcraft_engine::kernel::start();
     // `--profile` / `--profile-out` (run, eval, bench-open) or SOLIDCRAFT_PROFILE (any command):
     // record from here, and print the table when the command ends.
     let profiling = match args.first().map(String::as_str) {
@@ -205,6 +213,7 @@ fn main() -> ExitCode {
             solidcraft_mcp::cleanup_scratch_dir();
             result
         }
+        Some("plugin") => plugin::run(&args[1..]),
         Some("crashes") => crashes::run(&args[1..]),
         Some("icon") => cmd_icon(&args[1..]),
         Some("licences" | "licenses") => {

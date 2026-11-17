@@ -46,7 +46,6 @@ use solidcore::Kernel;
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
     "analytic_copy_keeps_parameterization",
-    "boolean_union_refuses_solid_leak",
     "boolean_vertex_by_best_crossing",
     "box_face_failures_propagate",
     "bspline_trim_preserves_uv_spans",
@@ -58,13 +57,11 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_cleanup_keeps_target_faces",
     "fillet_exact_round_classes",
     "fillet_knife_edge_rounds",
-    "fillet_mitre_concave_face_corners",
     "fillet_patch_keeps_fillet_edges",
     "fillet_point_step_per_point",
     "fillet_rail_trim_at_near_knot",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_overlapping_bands",
-    "fillet_removal_takes_ring_fillets",
     "fillet_statuses_pass_on",
     "fillet_trace_reaches_rails",
     "fillet_trim_status",
