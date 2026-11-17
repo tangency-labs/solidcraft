@@ -634,7 +634,7 @@
 {"case":"nm_test_rotation_y_30_stitch","deferred":null,"error":null,"ints":{"body":[1,0],"tags":{"blocks":[[51,4947],[2,396]],"n":461},"whole":[0,2,3,15,21,36,26,0]},"topology":null,"values":{"points":{"blocks":[[338.4681279536331,988.3425761306837,53898.93980099964],[88.26279441628773,218.2627944162878,2244.4322973010785]],"n":294}}}
 {"case":"nm_wire_linear_z","deferred":null,"error":null,"ints":{"body":[1,0],"tags":{"blocks":[[8,154]],"n":56},"whole":[0,1,1,1,1,5,6,0]},"topology":null,"values":{"points":{"blocks":[[276.0,276.0,7186.0]],"n":48}}}
 {"case":"nm_wire_linear_z_stitch","deferred":null,"error":null,"ints":{"body":[0,0],"tags":{"blocks":[[7,125]],"n":47},"whole":[0,1,1,1,1,4,4,0]},"topology":null,"values":{"points":{"blocks":[[222.0,222.0,4326.0]],"n":36}}}
-{"case":"nm_wire_linear_z_two_reps_ub269","deferred":null,"error":null,"ints":{"whole":[1001]},"topology":null,"values":{"points":[]}}
+{"case":"nm_wire_linear_z_two_reps_ub269","deferred":null,"error":null,"ints":{"whole":[-1]},"topology":null,"values":{"points":[]}}
 {"case":"nm_wire_rotation_y_30","deferred":null,"error":null,"ints":{"body":[1,0],"tags":{"blocks":[[8,154]],"n":56},"whole":[0,1,1,1,1,5,6,0]},"topology":null,"values":{"points":{"blocks":[[130.41342951089754,265.41342951089877,3396.6243060694414]],"n":48}}}
 {"case":"null_brep_early_return","deferred":null,"error":null,"ints":{"state":{"blocks":[[8758,1051341],[8128,1051584],[640,7040]],"n":676}},"topology":null,"values":{"geometry":[-123.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0]}}
 {"case":"null_key_and_null_value","deferred":null,"error":null,"ints":{"state":{"blocks":[[6946,1023802],[8011,1031978],[960,14400]],"n":685}},"topology":null,"values":{"geometry":{"blocks":[[-492.0,492.0,-10086.0]],"n":52}}}
@@ -687,7 +687,7 @@
 {"case":"whole_linear_zero_repetitions","deferred":null,"error":null,"ints":{"whole":[0,2,2,6,6,12,8,0]},"topology":null,"values":{"points":{"blocks":[[480.0,480.0,26880.0]],"n":96}}}
 {"case":"whole_merge_linear_oblique","deferred":null,"error":null,"ints":{"whole":[0,2,2,12,12,24,14,0]},"topology":null,"values":{"points":{"blocks":[[1178.0,1178.0,123986.0]],"n":186}}}
 {"case":"whole_merge_linear_z","deferred":null,"error":null,"ints":{"whole":[0,1,1,14,14,32,16,0]},"topology":null,"values":{"points":{"blocks":[[1380.0,1380.0,191070.0]],"n":240}}}
-{"case":"whole_merge_rotation_y_90","deferred":null,"error":null,"ints":{"whole":[0,2,2,19,19,29,12,0]},"topology":null,"values":{"points":{"blocks":[[730.0,1130.0,98430.0]],"n":210}}}
+{"case":"whole_merge_rotation_y_90","deferred":null,"error":null,"ints":{"whole":[1001]},"topology":null,"values":{"points":[]}}
 {"case":"whole_rotation_full_turn","deferred":null,"error":null,"ints":{"whole":[0,1,0,0,0,0,0,0]},"topology":null,"values":{"points":[]}}
 {"case":"whole_rotation_x_30","deferred":null,"error":null,"ints":{"whole":[0,2,11,15,15,44,40,0]},"topology":null,"values":{"points":{"blocks":[[1157.9165124598862,1297.9165124598865,154648.5814448907],[878.8268590217988,938.8268590217989,62119.67505076899]],"n":384}}}
 {"case":"whole_rotation_y_90","deferred":null,"error":null,"ints":{"whole":[0,1,12,15,15,52,48,0]},"topology":null,"values":{"points":{"blocks":[[610.0,1250.0,77320.0],[990.0,1270.0,109040.0]],"n":456}}}

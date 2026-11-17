@@ -357,7 +357,7 @@ fn a_blend_too_large_is_refused_with_the_largest_size_that_fits() {
 /// ([`solidcore_ops::blend::session_refusal`]), one case per reason a SolidCraft blend of
 /// boxes and cylinders gives, each the kernel's or ops' own case of that reason
 /// (solidcore's `wr696_fit_sizes.rs`): the L's inner edge past its
-/// wall's top, a can's rim chamfered across its top, a bossed can's rim past the boss, both
+/// wall's top, a square top chamfered across, a bossed can's rim past the boss, both
 /// edges of a narrow end, a cube's corner. The collapsed offset's is solidcraft-kernel's
 /// `a_ball_as_wide_as_the_round_it_rolls_on_is_refused_saying_why`. ops' thin wall
 /// (`BreaksThrough`) builds with SolidCraft's fixes, and the rest reach SolidCraft only from
@@ -381,16 +381,17 @@ fn each_room_reason_reaches_the_refusal_as_ops_gives_it() {
             K::Radius,
             [7.98, 8.0],
         ),
-        // the cone takes the whole top: an offset of 10 less the margin, as its distance
+        // the chamfers take the whole top of a 10 cube at its depth 5, less the margin, as
+        // their distance (a can's rim chamfered across its top builds a cone, #17198)
         (
-            "can_top",
-            Shape::Cylinder([0.0; 3], 10.0, 20.0).core(),
+            "square_top",
+            Shape::Box([0.0; 3], [10.0; 3]).core(),
             Blend::Chamfer,
-            vec![rim(10.0, 20.0)],
-            10.0,
+            vec![[5.0, 0.0, 10.0], [10.0, 5.0, 10.0], [5.0, 10.0, 10.0], [0.0, 5.0, 10.0]],
+            5.0,
             R::FaceConsumed,
             K::Distance,
-            [0.0, 10.0],
+            [0.0, 5.0],
         ),
         // the rail on the top, a circle of radius 7 - r, reaches the boss at r = 4.3
         (
@@ -576,6 +577,34 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
     });
 }
 
+/// Two chamfers that overlap (#18178): a 40 high disc of radius 14.5 with a hole of radius 10 off
+/// centre by 2, so its top ring is 2.5 wide at the narrowest place. A 1.5 chamfer on the outer
+/// circle and on the hole's rim alone each builds, and together their contact lines on the top
+/// cross there (1.5 + 1.5 > 2.5): refused as too large for the faces, not as "not a closed solid".
+#[test]
+fn chamfers_that_overlap_are_too_large_not_a_non_solid() {
+    let ring = || {
+        let disc = make_cylinder([0.0; 3], 14.5, 40.0).unwrap();
+        let hole = make_cylinder([2.0, 0.0, -1.0], 10.0, 42.0).unwrap();
+        boolean(&disc, &hole, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let (outer, rim) = ([-14.5, 0.0, 40.0], [2.0, 10.0, 40.0]);
+    timed("overlap_alone", move || {
+        blend(&ring(), Blend::Chamfer, &[outer], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+        blend(&ring(), Blend::Chamfer, &[rim], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+    });
+    let both = timed("overlap_both", move || {
+        blend(&ring(), Blend::Chamfer, &[outer, rim], &[1.5; 2], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err()
+    });
+    assert!(overlap_refusal(&both), "{both:?}");
+}
+
+/// The refusal of blends whose contact lines on a face they share cross: unsized, or sized with
+/// the bands' reason.
+fn overlap_refusal(e: &Error) -> bool {
+    matches!(e, Error::NoRoom | Error::TooLarge { why: Some(crate::RoomReason::BandsOverlap), .. })
+}
+
 /// The capi's `overflow_goes_first` (fork 241f7ba): R21 on a 20 cube's edge takes all of both faces
 /// that edge lies on, and rounds with it on other edges go after it. With R5 on the corner's other
 /// two edges those edges are gone (the two R5 points flagged) and the result is the R21's alone,
@@ -678,7 +707,7 @@ fn rounds_turning_round_a_boss_edge_mitred_or_swept() {
         rec.validate().unwrap();
         let mut tori = Vec::new();
         {
-            let g = b.0.lock().unwrap();
+            let g = b.kernel();
             for f in solidcore::query::api_queries::get_faces(&g).unwrap() {
                 if let Some(s) = solidcore::topology::face::p2::surface(&g, f).unwrap()
                     && let SurfaceKind::Torus(t) = s.kind()
@@ -762,7 +791,7 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
 /// Solidcore alone: the pocket rim chamfered 5.5, as `fillet_mitre_concave_face_corners`' own test
 /// does it, with `keep_operand_uv_trims` on too, on the body the boolean gives:
 /// 21000 - (50 d² + 4/3 d³) = 19265.666666667 (the fork, and the same body through the flat
-/// arrays). Without `fillet_run_on_bspline_trims` it is refused: error 3, Corner Edge Computation
+/// arrays). Before WR-654's B-spline run-on it was refused: error 3, Corner Edge Computation
 /// Failure (solidcore#1981).
 #[test]
 fn pocket_chamfer_on_a_boolean_body() {
@@ -776,7 +805,6 @@ fn pocket_chamfer_on_a_boolean_body() {
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.keep_operand_uv_trims = true;
-    k.fixes.fillet_run_on_bspline_trims = true;
     let plate = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap();
     let cut = create_box(&mut k, p(15.0, 10.0, 5.0), 30.0, 20.0, 6.0).unwrap();
     let mut b = boolean_difference(&mut k, plate, cut).unwrap();
@@ -800,7 +828,7 @@ fn pocket_chamfer_on_a_boolean_body() {
     assert!(r.is_ok(), "{} {}", s.error_info().code, s.error_info().comment);
     drop(s);
     b.refresh_cached_topology();
-    let v = volume(&Body::new(b), 1e-8).unwrap();
+    let v = volume(&Body::from_kernel(b), 1e-8).unwrap();
     let d: f64 = 5.5;
     assert!(rel(v, 21000.0 - (50.0 * d * d + 4.0 / 3.0 * d * d * d)) < 1e-8, "{v}");
 }

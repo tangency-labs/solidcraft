@@ -96,10 +96,11 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         _ => return None,
     };
     Some(match &d.kind {
-        Kind::Extrude { start, .. } => {
+        Kind::Extrude { start, all, taper, .. } => {
             let n = normal?;
             let plane = solidcore_record::Plane::from_normal(at, n)?;
-            let from = reference_height(app, d, "From Object", &plane, at).unwrap_or(0.0);
+            let from =
+                from_slope_height(app, d, &plane, at, *all, taper).or_else(|| reference_height(app, d, "From Object", &plane, at)).unwrap_or(0.0);
             let offset = if start.trim().is_empty() { 0.0 } else { crate::length_input::eval(&app.session.doc, start, ValueKind::Length).ok()? };
             (at + n * (from + offset), Some(n))
         }
@@ -212,6 +213,27 @@ pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcore_rec
         solidcraft_engine::doc::apply_vector(&frame, plane.x),
         solidcraft_engine::doc::apply_vector(&frame, plane.y),
     )
+}
+
+/// Where an extrude From a flat face at a slant starts above `centre`, on the face, when the
+/// build starts it there ([`solidcraft_engine::doc::from_slope_height`]): not with To Object,
+/// Through All (`all`) or a nonzero `taper`, nor for an edited extrude kept on its old start
+/// at the face's level (`from_level`). `None` otherwise, so the arrow starts at
+/// [`reference_height`] as before.
+fn from_slope_height(app: &SolveApp, d: &Dialog, plane: &solidcore_record::Plane, centre: Vec3, all: bool, taper: &str) -> Option<f64> {
+    let to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+    let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
+    let kept_level = d
+        .editing
+        .and_then(|(id, _)| app.session.doc.feature(id))
+        .is_some_and(|f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level));
+    if to || all || tapered || kept_level {
+        return None;
+    }
+    let point = crate::dialogs::object_point(&d.inputs, "From Object")?;
+    let p = point.as_array()?;
+    let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
+    solidcraft_engine::doc::from_slope_height(&crate::open_meshing::session_world(&app.session), plane, centre, p)
 }
 
 fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcore_record::Plane, centre: Vec3) -> Option<f64> {
@@ -342,9 +364,6 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
             .and_then(|d| move_rotation(app, d, proj))
             .and_then(|r| proj.to_screen(r.point(r.angle)))
             .is_some_and(|end| egui::Rect::from_center_size(end, vec2(20.0, 20.0)).contains(p))
-        || (app.dialog.is_none()
-            && app.tool.is_none()
-            && crate::browser::occurrence_triad_model(app).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p)))
         || crate::place_gizmo::contains_pointer(app, p)
         || app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, Kind::Measure { labels, .. } if labels.contains(p)))
 }
@@ -355,9 +374,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
         return;
-    }
-    if app.dialog.is_none() && app.tool.is_none() {
-        crate::browser::occurrence_triad(app, ui, painter, proj);
     }
     let Some(mut d) = app.dialog.take() else { return };
     if matches!(d.kind, Kind::Assembly(_)) {
@@ -865,6 +881,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let mut box_at = bs + vec2(16.0, -30.0);
     // Where the box hangs from: the arrow's tip, or the base when there is no arrow.
     let mut anchor = bs;
+    let mut reverse = false;
     if let (Some(n), Some(l)) = (dir, len.filter(|_| kind == ValueKind::Length)) {
         let n = n * sign;
         let baseline = to_span.map(f64::abs).unwrap_or(0.0);
@@ -885,11 +902,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             decimals,
             dragged,
         );
-        if let Some((_, Some(stop))) = &drawn {
+        if let Some((_, Some(stop), _)) = &drawn {
             crate::extrude_face_snap::outline(app, painter, proj, stop);
         }
-        crate::extrude_face_snap::set(drawn.as_ref().and_then(|(_, stop)| stop.clone()));
-        if let Some((ts, _)) = drawn {
+        crate::extrude_face_snap::set(drawn.as_ref().and_then(|(_, stop, _)| stop.clone()));
+        reverse = matches!(drawn, Some((_, _, true)));
+        if let Some((ts, _, _)) = drawn {
             if (to_span.is_some() || symmetric_scale != 1.0)
                 && shown_value != original_shown
                 && let Ok(v) = crate::length_input::eval(&app.session.doc, &shown_value, ValueKind::Length)
@@ -920,6 +938,16 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
+    }
+    // Double-clicking the arrow reverses the direction, as the window's Reverse Direction does
+    // (#17402). Symmetric has no direction to reverse.
+    if reverse
+        && let Kind::Extrude { direction, smart, auto_op, .. } = &mut d.kind
+        && let Some(reversed) = reversed_direction(*direction)
+    {
+        *direction = reversed;
+        smart.manual_dir = true;
+        *auto_op = false;
     }
 }
 
@@ -1157,6 +1185,18 @@ fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> e
 /// How far (logical points) from an arrow's stem a press still takes the arrow.
 const ARROW_STEM_REACH: f32 = 6.0;
 
+/// An extrude direction turned the other way: One Side and Two Sides swap with their reversed
+/// forms; Symmetric has none.
+fn reversed_direction(direction: usize) -> Option<usize> {
+    match direction {
+        0 => Some(1),
+        1 => Some(0),
+        crate::dialogs::TWO_SIDES => Some(crate::dialogs::TWO_SIDES_REVERSED),
+        crate::dialogs::TWO_SIDES_REVERSED => Some(crate::dialogs::TWO_SIDES),
+        _ => None,
+    }
+}
+
 /// The distance from `p` to the segment from `a` to `b` on screen.
 fn to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let v = b - a;
@@ -1188,7 +1228,7 @@ fn drag_arrow(
     value: &mut String,
 ) -> Option<Pos2> {
     let line = ArrowLine { base, bs, n, l, signed, clear_px };
-    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _)| ts)
+    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _, _)| ts)
 }
 
 /// Where a drag arrow stands: from `base` (on screen `bs`) along `n`, showing `l`; `signed` lets
@@ -1204,8 +1244,8 @@ struct ArrowLine {
 }
 
 /// [`drag_arrow`] that also stops at `stops` (#2398): a drag whose tip comes near a stop's
-/// plane takes its distance exactly instead of a round step. Returns the tip's screen position
-/// and the stop it took this frame.
+/// plane takes its distance exactly instead of a round step. Returns the tip's screen position,
+/// the stop it took this frame and whether the arrow was double-clicked.
 #[allow(clippy::too_many_arguments)]
 fn drag_arrow_to(
     doc: &solidcraft_engine::doc::Document,
@@ -1218,7 +1258,7 @@ fn drag_arrow_to(
     stops: &[crate::extrude_face_snap::Stop],
     decimals: u8,
     value: &mut String,
-) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>)> {
+) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>, bool)> {
     let ArrowLine { base, bs, n, l, signed, clear_px } = line;
     let mut stopped = None;
     let t = Tokens::get();
@@ -1242,6 +1282,7 @@ fn drag_arrow_to(
         on_stem.map_or(at_tip, |p| egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)))
     };
     let r = ui.interact(area, id, egui::Sense::drag());
+    let double = r.contains_pointer() && ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
     // How far along the arrow the press was short of its end: the drag keeps that gap.
     let grab = id.with("stem grab");
     if r.drag_started() {
@@ -1285,7 +1326,7 @@ fn drag_arrow_to(
         painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    Some((ts, stopped))
+    Some((ts, stopped, double))
 }
 
 /// A fillet's radius spline on each of its edges (a spline fillet, or the splines a taper gave

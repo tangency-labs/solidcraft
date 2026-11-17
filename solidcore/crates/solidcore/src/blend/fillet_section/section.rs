@@ -506,7 +506,11 @@ pub(crate) fn certificate_faces<'a>(
     let mut nurbs = Vec::new();
     // a face that is a blend by its definition: its definition enclosed over the
     // certificate's boxes (definition_partials_over_box), on the faces under it and its
-    // leader, whatever its net (c5b6bb7, WR-714, #2570)
+    // leader, whatever its net (c5b6bb7, WR-714, #2570). A face that keeps an exact round's
+    // definition (`Surface::set_exact_round`, #2485) is not one of these: its kind is its
+    // net's, and that net is S at bound 0, re-certified as lying on the class's surface
+    // derived from its supports (`ExactRound::recertify`), so enclosing its NURBS form
+    // encloses its definition
     let mut defs = GnDefs::default();
     for (f, face) in faces.into_iter().enumerate() {
         let Some(bs) = super::station::as_b_spline(k, face)? else {
@@ -1408,8 +1412,6 @@ impl GnSectionFsg {
             ));
         }
         let [rail1, rail2] = rails;
-        // (the fork's 4a10ed8, opt-in: the surface is the blend by its definition)
-        let definition = k.fixes.fillet_round_as_definition;
         let (c_min, c_max) = interval(center);
         // the stations: the unique knots of the rails and the centre line; with a law, the
         // solver's own stations' t (their feet the seeds) and the leader's and the law's
@@ -1707,6 +1709,32 @@ impl GnSectionFsg {
             k.check_cancelled(OP_BUILD)?;
             system.solve_before(k, st)?;
         }
+        // a blend that closes on itself has one station at its seam, solved at the leader's
+        // start on the pieces after it and at its end on the pieces before it. A span
+        // ending at a station takes the station's values, so the end takes the start's:
+        // where a support's normal differs across a knot line at the seam, the two solves
+        // differ by that jump, and the net's end rows would stand apart by it
+        if let [first, .., last] = stations.as_mut_slice() {
+            let at = |st: &GnStation, q: usize| st.v.a.get(q).map_or(f64::NAN, |c| c.at(0, 0));
+            let m0 = Vec3::new(at(first, 0), at(first, 1), at(first, 2));
+            let m1 = Vec3::new(at(last, 0), at(last, 1), at(last, 2));
+            // (the station solve's tolerance: within it two stations are one point)
+            let same = 1.0e-9 * smax(1.0, m0.length());
+            let closes = m0.distance(m1) <= same
+                && (0..2).all(|f| foot(first, f, 0, 0).distance(foot(last, f, 0, 0)) <= same);
+            if closes {
+                for (lf, ff) in last.f.iter_mut().zip(&first.f) {
+                    for (lq, fq) in lf.a.iter_mut().zip(&ff.a) {
+                        for kk in 0..=n {
+                            lq.set(0, kk, fq.at(0, kk));
+                        }
+                    }
+                }
+                for (lq, fq) in last.v.a.iter_mut().zip(&first.v.a) {
+                    lq.set(0, 0, fq.at(0, 0));
+                }
+            }
+        }
 
         let ld = section_width(n); // the section's control points across
 
@@ -1755,6 +1783,29 @@ impl GnSectionFsg {
             spans.push(net_form.span(a, ra, b, rb));
         }
         let surface = net_of_spans(&ss, &spans, ld)?;
+        // each span's own Hermite rows, which its certificate bounds against the
+        // definition: at the station ending it, the values of the pieces before the
+        // station, where the net's row there holds the values of the pieces after it. The
+        // two differ where a support's normal differs across a knot line under a foot (by
+        // about the ball's radius times that angle), and at the seam of a blend that
+        // closes on itself; they are the same rows everywhere else
+        let mut own_spans: Vec<(Vec<Vec3>, Vec<f64>)> = Vec::new();
+        let ending = stations.iter().zip(&rows).skip(1);
+        for ((a, ra), (b, rb)) in stations.iter().zip(&rows).zip(ending) {
+            k.check_cancelled(OP_BUILD)?;
+            let mut before = *b;
+            if b.sided {
+                before.x = b.xl;
+                before.f = b.fl;
+                before.v = b.vl;
+                before.wds = b.wdsl;
+            }
+            let own = net_form.station_rows(&before)?;
+            let mut rb_own = rb.clone();
+            rb_own.v = own.v;
+            rb_own.w = own.w;
+            own_spans.push(net_form.span(a, ra, b, &rb_own));
+        }
 
         // the feet's uv curves: the Hermite interpolants of the stations' feet, the
         // definition's seeds (4a10ed8); the rails and uv curves become them with
@@ -1792,12 +1843,10 @@ impl GnSectionFsg {
                 weights: None,
                 trim: None,
             };
-            if definition {
-                // (apUV[f]->Copy, then SetCanonical on the copy)
-                let mut seed = uv.clone();
-                seed.set_canonical(&uv_data)?;
-                seeds.push(seed);
-            }
+            // (apUV[f]->Copy, then SetCanonical on the copy)
+            let mut seed = uv.clone();
+            seed.set_canonical(&uv_data)?;
+            seeds.push(seed);
             if replace_rails {
                 let rail_cps: Vec<Point3> = (0..lnu).map(|i| jet(f, 0, i)).collect();
                 rail.set_canonical(&CanonicalData {
@@ -1844,10 +1893,6 @@ impl GnSectionFsg {
             })?;
             new_center = Some(c);
         }
-        if !definition {
-            return Ok(Some((Surface::from(surface), new_center)));
-        }
-
         // the blend by its definition on this net (4a10ed8): the faces, the ball's offsets
         // and sides, the section, the centre line as the leader the stations were solved
         // in, the seeds, the certified bound
@@ -1860,7 +1905,8 @@ impl GnSectionFsg {
         // its bound: the certificate's, of the Hermite rows; how far the net stored (its
         // control points divided out of the rows and its weights scaled, each rounded) is
         // from them; and three floors, how far rows computed again may be (#2388)
-        let rounding = super::recertify::stored_net_distance(&surface, &spans, ld)?
+        // (measured to each span's own rows: the certificate's bound is from those)
+        let rounding = super::recertify::stored_net_distance(&surface, &own_spans, ld)?
             + 3.0 * super::recertify::precision_floor(k, faces, n as u32, &surface)?;
         let input = BlendDefinitionInput {
             supports: faces,
@@ -1930,7 +1976,20 @@ impl GnSectionFsg {
                             continue;
                         }
                         // the parameter where that foot is on the knot line: the secant,
-                        // kept in its bracket
+                        // kept in its bracket. Every trial station is solved on the piece
+                        // the foot comes from (xa's side of the line), carried on past the
+                        // line: the face is only as smooth across the line as its knot
+                        // allows, so a solve that takes the piece each iterate's value is
+                        // in has no fixed point once the trial is within the jump of the
+                        // face's normal of the line (each piece's foot lies on the other's
+                        // side), while the one piece's foot is smooth in s through it
+                        let after = if xb > xa { 1 } else { -1 };
+                        let mut ai_after = [0_i32; 4];
+                        let mut ai_before = [0_i32; 4];
+                        if let (Some(x), Some(y)) = (ai_after.get_mut(q), ai_before.get_mut(q)) {
+                            *x = after;
+                            *y = -after;
+                        }
                         let (mut s0, mut s1, mut x0, mut x1) = (a.s, b.s, xa - dk, xb - dk);
                         let mut at: Option<GnStation> = None;
                         for _ in 0..60 {
@@ -1945,6 +2004,14 @@ impl GnSectionFsg {
                             for (q2, sq) in seed.iter_mut().enumerate() {
                                 *sq = (1.0 - t) * param(a, q2, 0, 0) + t * param(b, q2, 0, 0);
                             }
+                            // (the seed names the piece: kept on xa's side of the line)
+                            if let Some(sq) = seed.get_mut(q) {
+                                *sq = if after > 0 {
+                                    smin(*sq, dk)
+                                } else {
+                                    smax(*sq, dk)
+                                };
+                            }
                             let tol_ds = solve_tol(ds)?;
                             let law_r = law_series(law, ds, tr.s(), false)?;
                             let st = solve_top(
@@ -1958,7 +2025,7 @@ impl GnSectionFsg {
                                 tr,
                                 tol_ds,
                                 self.order,
-                                None,
+                                Some(ai_before),
                                 false,
                                 law_r.as_ref(),
                             )?;
@@ -1981,14 +2048,6 @@ impl GnSectionFsg {
                             // s-derivatives: the station is solved on the piece after it
                             // (the foot moves on to xb's side) and on the piece before,
                             // for the span ending there (3bc54a4)
-                            let after = if xb > xa { 1 } else { -1 };
-                            let mut ai_after = [0_i32; 4];
-                            let mut ai_before = [0_i32; 4];
-                            if let (Some(x), Some(y)) = (ai_after.get_mut(q), ai_before.get_mut(q))
-                            {
-                                *x = after;
-                                *y = -after;
-                            }
                             let on = [0, 1, 2, 3].map(|q2| param(&st, q2, 0, 0));
                             let tol_on = solve_tol(st.s)?;
                             let law_r = law_series(law, st.s, tr.s(), false)?;
@@ -2820,8 +2879,7 @@ mod tests {
             }
         }
         let cylinder = surface(2, 1, &cps, Some(&ws));
-        let mut k = Kernel::default();
-        k.fixes.fillet_round_as_definition = true;
+        let k = Kernel::default();
         let id = [1.0, 0.0];
         let mut center = quarter(3, rc * c, 2.0 * c, id, id);
         let inner: Vec<f64> = (1..knots).map(|i| i as f64 / knots as f64).collect();

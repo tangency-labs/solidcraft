@@ -1,0 +1,13 @@
+# topology.proto_topology_p2: addendum (2026-11-16): WR-306 still drops real closed curves, so its flag cannot retire as it is
+
+Updates: plan/findings/topology.proto_topology_p2--wr306-absorbs-small-closed-curves.md
+
+Checked while retiring #14246's group-B topology flags (PR #17825), at main `b12086dae`, with `degenerate_proto_edge_in_one_vertex` made the only path (the flag-on code unchanged):
+
+- `tests/wr_619_imprint_skips_collapsed_definition.rs::wr_619_keeps_closed_edges_on_a_vertex` fails: the union of box [0,4]^3 and a cylinder of radius 1e-3 on its top centre gives 9 faces, 15 edges, 10 vertices and **2 solid regions** (the circle is not imprinted), against 8, 15, 10 and 1 solid region with the flag off. This is the breakage the finding above measured on 2026-10-31; nothing since has changed it.
+- `more0033` no longer moves, and `boolean.api_brep` moves only `tess0033` (points up to 1.9e-4 apart).
+- `topology.proto_topology_p2`: 14 rows move (`edge_pe_closed_huge`, `gen0027`, `gen0140`, `gen0342`, `gen0372`, `gen0439`, `gen0545`, `gen0550`, `gen0645`, `gen0960`, `gen0966`, `gen1053`, `gen1261`, `gen1374`). A scratch replay of every `PE_RESOLVE` op on the state before it (not committed) shows two defects of the bound in them, not traced row by row:
+  - "Both curve ends find the same vertex definition" holds for any two ends when the proto vertex has one definition, and the containment radius is at least the capture distance, which the generated scripts draw up to 9.9e6. So curves of real length are absorbed: a line of length 2 inside a radius-10 ball (`edge_pe_closed_huge`), B-splines 1.7 and 14 long (`gen0027`, `gen0439`). In the Boolean the radius is at least 0.01, which is how the 1e-3 circle above (6.3e-3 long) is absorbed.
+  - The bound replaces upstream's `2 * m_dTol` of the proto edge instead of adding to it: with a containment radius of 0 (`gen0960`: capture distance 0, proto vertex tolerance 0) a speck 4.3e-9 long under the proto edge's `2 * m_dTol` = 2e-5 is no longer degenerate, and the resolve goes on to split it.
+
+So the absorb bound (`2 * max(proto vertex m_dTol, capture distance)`, the vertex's containment radius, in place of upstream's `2 * proto edge m_dTol`) is the defect: the capture distance is how far vertex definitions are merged, not the size of a point. A retirement needs a bound that keeps the fork's case (#1058: a 1.43e-5 curve inside one vertex, `tests/issue_1058_pleated_skins_speck_face.rs`) and drops no curve the result's vertices cannot hold, for example a certified hull of the curve within the final vertices' tolerances rather than within the capture ball. That is fix work of its own; the flag stays opt-in until then.

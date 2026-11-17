@@ -239,8 +239,12 @@ sphere or cone has poles where a whole parameter line is one point. The B-rep ma
 
 A vertex at a shared classification boundary ends a coincident seam interval when that
 interval is on either side of the boundary. The near-miss check applies its existing local
-vertex-zone rule from both sides; a separate edge beside the seam still counts as a near miss
-(`intersect/curve_class/p7.rs`).
+vertex-zone rule from both sides; a separate edge whose coincident interval runs beside the
+seam still counts as a near miss (`intersect/curve_class/p7.rs`). At a vertex, the vertex zone
+is withheld where another edge at it runs beside the seam and bounds a face that one of the
+seam's own edges bounds too: the sliver test 36 is for. An edge at the vertex beside the seam
+on other faces, such as the tip of another hole's wall touching the face's wall along the
+seam, does not withhold it.
 When dropping a curve along a seam, equivalent parameter endpoints stay on one side only when
 the two are the same 3D point (a crossing keeps the approximation bound) (`intersect/surface_drop_lib/p1.rs`).
 Subdivision drops a pending endpoint again only when the new span makes its seam branch

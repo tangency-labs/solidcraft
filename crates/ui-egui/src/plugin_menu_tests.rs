@@ -1,5 +1,5 @@
-//! The Plugins menu and its entry dialog: schema fields, required gating, and a run through the
-//! dialog matching `plugin.run`.
+//! The Plugins menu and its entry dialog: schema fields, selection fields picked in the viewport,
+//! required gating, and a run through the dialog matching `plugin.run`.
 use super::*;
 use std::collections::BTreeSet;
 
@@ -71,8 +71,9 @@ fn choice_options_show_their_titles_and_send_their_values() {
 }
 
 #[test]
-fn selections_targets_and_nested_objects_are_not_guessed() {
+fn other_lists_and_nested_objects_are_not_guessed() {
     for property in [
+        // A target list of strings: not body names (only `bodies` and `body_ids` send those).
         json!({"type":"array","items":{"type":"string"}}),
         json!({"type":"object","properties":{"x":{"type":"number"}}}),
         json!({"$ref":"#/definitions/face"}),
@@ -85,6 +86,95 @@ fn selections_targets_and_nested_objects_are_not_guessed() {
     }
     assert_eq!(form(&json!({"type":"array"})), None);
     assert_eq!(form(&json!({"type":"object","required":["missing"],"properties":{}})), None);
+}
+
+/// A schema with two selection fields: the edges to work on, and one body.
+fn pick_schema() -> Value {
+    json!({"type":"object","required":["edges","body"],"properties":{
+        "edges":{"type":"array","title":"Edges","description":"The rims to seat","minItems":1,
+            "x-solidcraft-selection":{"version":1,"accept":["edge"]}},
+        "body":{"type":"array","title":"Body to modify","maxItems":1,"items":{"type":"object"},
+            "x-solidcraft-selection":{"version":1,"accept":["body"]}},
+        "depth":{"type":"number","default":2}
+    }})
+}
+
+#[test]
+fn annotated_and_reserved_lists_become_selection_fields() {
+    use crate::selection::{BODIES, EDGES, EXTERNAL_POINTS, FACES, PROFILES, SKETCH_LINES};
+    let fields = form(&pick_schema()).expect("drawn");
+    let kinds: Vec<(&str, &Kind)> = fields.iter().map(|(f, _)| (f.key.as_str(), &f.kind)).collect();
+    assert_eq!(kinds[0], ("edges", &Kind::Selection { accept: EDGES, min: 1, max: None, names: false }));
+    assert_eq!(kinds[1], ("body", &Kind::Selection { accept: BODIES, min: 0, max: Some(1), names: false }));
+    assert_eq!((fields[0].0.label.as_str(), fields[0].0.tip.as_deref()), ("Edges", Some("The rims to seat")));
+    assert_eq!(fields[0].1, Input::Selection(Vec::new()), "nothing picked yet");
+    let every = json!({"type":"object","properties":{"p":{"type":"array",
+        "x-solidcraft-selection":{"version":1,"accept":["profile","edge","face","body","sketch_point","sketch_curve"]}}}});
+    assert!(
+        matches!(form(&every).unwrap()[0].0.kind, Kind::Selection { accept, .. } if accept == PROFILES | EDGES | FACES | BODIES | EXTERNAL_POINTS | SKETCH_LINES),
+        "each category is its pick kind"
+    );
+    // The lists the manifest reserves are selection fields without the annotation.
+    let reserved = |key: &str, items: Value| {
+        let mut property = json!({"type":"array"});
+        if !items.is_null() {
+            property["items"] = items;
+        }
+        form(&json!({"type":"object","properties":{key:property}})).map(|f| f[0].0.kind.clone())
+    };
+    for key in ["bodies", "body_ids"] {
+        assert_eq!(reserved(key, Value::Null), Some(Kind::Selection { accept: BODIES, min: 0, max: None, names: true }), "{key}");
+        assert!(reserved(key, json!({"type":"string"})).is_some(), "{key}: names are strings");
+        assert_eq!(reserved(key, json!({"type":"object"})), None, "{key}: not references");
+    }
+    for key in ["selection", "target", "targets"] {
+        assert_eq!(reserved(key, Value::Null), Some(Kind::Selection { accept: EDGES | FACES | BODIES, min: 0, max: None, names: false }), "{key}");
+    }
+    assert_eq!(reserved("points", Value::Null), None, "any other list is not guessed");
+}
+
+#[test]
+fn a_selection_annotation_this_host_cannot_honour_is_not_guessed() {
+    let one = |property: Value| form(&json!({"type":"object","properties":{"p":property}}));
+    let annotated = |annotation: Value| json!({"type":"array","x-solidcraft-selection":annotation});
+    for property in [
+        annotated(json!({"version":2,"accept":["edge"]})),
+        annotated(json!({"accept":["edge"]})),
+        annotated(json!({"version":1,"accept":["edge","hole"]})),
+        annotated(json!({"version":1,"accept":[]})),
+        annotated(json!({"version":1,"accept":"edge"})),
+        annotated(json!({"version":1,"accept":["edge"],"tangent_chain":true})),
+        json!({"type":"array","minItems":2,"maxItems":1,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","maxItems":0,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","uniqueItems":true,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","items":{"type":"string"},"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","items":{"type":"object","required":["body"]},"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","title":3,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+    ] {
+        assert_eq!(one(property.clone()), None, "{property}");
+    }
+}
+
+#[test]
+fn picks_are_sent_as_explicit_references_and_counted() {
+    use solidcore_record::Vec3;
+    let mut fields = form(&pick_schema()).unwrap();
+    assert_eq!(params(&fields), Err(Problem::Missing("Edges".into())), "minItems 1: a pick is needed");
+    let edge = Sel::Edge { body: "Body1".into(), index: 3, point: Vec3::new(1.0, 2.0, 3.0) };
+    fields[0].1 = Input::Selection(vec![edge.clone()]);
+    let sent = params(&fields).unwrap();
+    assert_eq!(sent["edges"], json!([serde_json::to_value(&edge).unwrap()]), "the engine's own selection reference");
+    assert_eq!(sent["edges"][0]["type"], "edge");
+    assert_eq!(sent["body"], json!([]), "required with no minimum: sent, empty");
+    fields[1].1 = Input::Selection(vec![Sel::Body { name: "A".into() }, Sel::Body { name: "B".into() }]);
+    assert_eq!(params(&fields), Err(Problem::Invalid("Body to modify".into())), "more than maxItems");
+    fields[1].1 = Input::Selection(vec![Sel::Body { name: "A".into() }]);
+    assert_eq!(params(&fields).unwrap()["body"], json!([{"type":"body","name":"A"}]));
+    // An optional field with nothing picked is left out; `bodies` sends names.
+    let mut bodies = form(&json!({"type":"object","properties":{"bodies":{"type":"array"}}})).unwrap();
+    assert_eq!(params(&bodies), Ok(json!({})));
+    bodies[0].1 = Input::Selection(vec![Sel::Body { name: "Body1".into() }]);
+    assert_eq!(params(&bodies), Ok(json!({"bodies":["Body1"]})));
 }
 
 #[test]
@@ -274,18 +364,22 @@ fn plugin_dialog_titles_are_the_command_alone_and_plugin_text_has_no_long_dashes
     }
 }
 
-/// A narrow app bar puts the same rows in the File menu, under `plugins:`, and they act the same.
+/// File › Plugins… is one row that opens Preferences on the Plugins page, at any window width.
 #[test]
-fn the_file_submenu_holds_the_same_rows_and_opens_the_same_dialog() {
-    use crate::app_bar::FileRow;
+fn file_plugins_row_opens_preferences_on_the_plugins_page() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-    app.plugin_menu.listed = vec![listed("gears", vec![entry("spur", "edit", json!([]))])];
-    let FileRow::Sub { label, rows } = file_submenu(&app) else { panic!("a submenu") };
-    assert_eq!(label, app.tr("ui.plugins"));
-    let ids: Vec<&str> = rows.iter().filter_map(|r| if let FileRow::Item(i) = r { Some(i.id.as_str()) } else { None }).collect();
-    assert_eq!(ids, ["plugins:install", "plugins:entry:0:0"]);
-    choose(&mut app, "entry:0:0");
-    assert_eq!(app.plugin_menu.dialog().map(|d| d.entry.as_str()), Some("spur"));
+    let rows = crate::toolbar::file_rows(&app);
+    let item = rows
+        .iter()
+        .find_map(|r| match r {
+            crate::app_bar::FileRow::Item(i) if i.id == "plugins.preferences" => Some(i),
+            _ => None,
+        })
+        .expect("File has a Plugins… row");
+    assert_eq!(item.label, format!("{}…", app.tr("ui.plugins")));
+    assert!(!rows.iter().any(|r| matches!(r, crate::app_bar::FileRow::Sub { label, .. } if label == app.tr("ui.plugins"))), "no Plugins submenu");
+    crate::toolbar::run_file_row(&mut app, "plugins.preferences");
+    assert!(app.prefs_window.shell.open);
 }
 
 /// Each plugin entry has its own dialog: opening a second one leaves the first open with its values.
@@ -322,6 +416,147 @@ fn each_plugin_entry_has_its_own_dialog_with_its_own_values() {
     assert_eq!(h.app.plugin_menu.dialogs.iter().map(|d| d.entry.as_str()).collect::<Vec<_>>(), ["hex"]);
 }
 
+/// A 20 x 20 x 10 box in the home view, with a plugin whose one command has [`pick_schema`].
+fn box_and_pick_plugin() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    let mut seats = entry("seats", "edit", json!([]));
+    seats.input_schema = pick_schema();
+    h.app.plugin_menu.listed = vec![listed("inserts", vec![seats])];
+    // The test's own list: the installed plugins are not read over it.
+    h.app.plugin_menu.loaded = true;
+    h
+}
+
+/// Open the plugin's dialog. Its window is in the middle of the view: the picks below are made
+/// on the box's bottom front edge and its right face, beside it.
+fn open_dialog(h: &mut crate::scenario::Harness) {
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+}
+
+fn picks(h: &crate::scenario::Harness) -> Vec<Vec<Sel>> {
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    dialog.fields.iter().flatten().filter_map(|(_, input)| if let Input::Selection(p) = input { Some(p.clone()) } else { None }).collect()
+}
+
+#[test]
+fn selection_fields_pick_in_the_viewport_each_into_its_own_field() {
+    let mut h = box_and_pick_plugin();
+    open_dialog(&mut h);
+    let id = h.app.plugin_menu.dialog().unwrap().id;
+    assert_eq!(picking(&h.app), Some(id), "the first selection field takes the viewport's picks");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    // An edge clicked in the view goes into Edges, and nowhere else.
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.frames(2);
+    let [edges, body] = &picks(&h)[..] else { panic!() };
+    assert!(matches!(edges[..], [Sel::Edge { .. }]), "{edges:?}");
+    assert!(body.is_empty(), "the other field keeps its own picks");
+    // Body to modify, clicked: the next click picks the body there.
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:body"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(1), "the clicked field is the active one");
+    h.step(&json!({"click":{"world":[20,10,5]}})).unwrap();
+    h.frames(2);
+    let [edges, body] = &picks(&h)[..] else { panic!() };
+    assert_eq!(edges.len(), 1, "picking the body leaves Edges alone");
+    let Sel::Edge { body: name, .. } = &edges[0] else { panic!() };
+    assert_eq!(body, &[Sel::Body { name: name.clone() }]);
+    let sent = h.app.plugin_menu.dialog().unwrap().ready(&h.app).expect("both filled");
+    assert_eq!(sent["edges"][0]["type"], "edge");
+    assert_eq!(sent["body"][0]["type"], "body");
+    // Cancel: the picking stops with the window, and the design is as it was.
+    let doc = h.app.session.doc.clone();
+    h.app.plugin_menu.dialogs.clear();
+    h.frames(2);
+    assert!(h.app.dialog.is_none(), "no picks are taken for a closed dialog");
+    assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
+}
+
+#[test]
+fn the_selection_fills_only_the_first_field_and_a_design_change_clears_the_picks() {
+    let mut h = box_and_pick_plugin();
+    // An edge and the body selected: Edges takes the edge, Body to modify stays empty.
+    h.step(&json!({"click":{"world":[10,0,10]}})).unwrap();
+    h.frames(2);
+    let Some(Sel::Edge { body, .. }) = h.app.session.selection.first().cloned() else { panic!("{:?}", h.app.session.selection) };
+    h.app.session.selection.push(Sel::Body { name: body.clone() });
+    open_dialog(&mut h);
+    let [edges, picked_body] = &picks(&h)[..] else { panic!() };
+    assert!(matches!(edges[..], [Sel::Edge { .. }]), "{edges:?}");
+    assert!(picked_body.is_empty(), "one selection never fills two fields");
+    // The design changes under the open dialog: the picks are cleared, and it says so.
+    h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[40,0,0]})).unwrap();
+    h.frames(2);
+    assert!(picks(&h).iter().all(Vec::is_empty), "references into the old model are dropped");
+    assert!(h.app.plugin_menu.dialog().unwrap().picks_cleared);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app), Err(solidcraft_ui_text::format("ui.plugin_dialog_missing", &[("field", "Edges")])));
+    // Turning the view changes nothing.
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"call":"ui.view","params":{"view":"top"}})).unwrap();
+    h.settle();
+    assert_eq!(picks(&h)[0].len(), 1, "the camera is not the design");
+    assert!(!h.app.plugin_menu.dialog().unwrap().picks_cleared);
+}
+
+#[test]
+fn a_profile_field_keeps_profiles_from_several_sketches() {
+    let mut h = crate::scenario::Harness::new();
+    for x in [0, 40] {
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[x,0],"p1":[x + 20,20]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    h.app.run("select.clear", json!({})).unwrap();
+    let mut make = entry("make", "edit", json!([]));
+    make.input_schema =
+        json!({"type":"object","properties":{"profiles":{"type":"array","x-solidcraft-selection":{"version":1,"accept":["profile"]}}}});
+    h.app.plugin_menu.listed = vec![listed("shapes", vec![make])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+    let sketches: Vec<u64> =
+        h.app.session.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })).map(|f| f.id).collect();
+    assert_eq!(sketches.len(), 2);
+    for sketch in &sketches {
+        let session = h.app.session.scratch();
+        h.app.dialog.as_mut().unwrap().pick(&session, Sel::Profile { sketch: *sketch, index: 0 });
+    }
+    h.frames(2);
+    assert_eq!(picks(&h)[0].len(), 2, "a plugin's profile field is not limited to one sketch: {:?}", picks(&h));
+}
+
+#[test]
+fn an_open_tool_keeps_the_viewport_until_it_is_done() {
+    let mut h = box_and_pick_plugin();
+    h.step(&json!({"start":"solid.fillet"})).unwrap();
+    h.frames(2);
+    open_dialog(&mut h);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Fillet { .. })), "Fillet keeps picking");
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:edges"}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Fillet { .. })), "the click asks; it does not cancel Fillet");
+    assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some((h.app.tr("ui.plugin_dialog_finish_tool"), true)));
+    // Fillet is done: the field picks once clicked.
+    h.app.dialog = None;
+    h.frames(2);
+    assert_eq!(picking(&h.app), None, "nothing takes the viewport by itself");
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:edges"}})).unwrap();
+    h.frames(2);
+    assert_eq!(picking(&h.app), Some(h.app.plugin_menu.dialog().unwrap().id), "with Fillet closed the field picks");
+    // Escape cancels the plugin's dialog as it does a native tool's, and the picking stops with it.
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.is_none());
+    assert!(h.app.plugin_menu.dialogs.is_empty());
+}
+
 #[test]
 fn ungranted_command_groups_keep_run_off_and_are_named() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
@@ -339,6 +574,23 @@ fn ungranted_command_groups_keep_run_off_and_are_named() {
     assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_err(), "another plugin's grants do not approve this plugin");
     app.session.plugin_state.grants.entry("files".into()).or_default().command_groups.insert("file".into());
     assert!(app.plugin_menu.dialog().unwrap().ready(&app).is_ok());
+}
+
+#[test]
+fn a_previewed_run_has_none_of_the_plugins_grants() {
+    let mut session = solidcraft_engine::Session::default();
+    let grants = session.plugin_state.grants.entry("inserts".into()).or_default();
+    grants.package_hash = Some("hash".into());
+    grants.command_groups.insert("file".into());
+    grants.folders.push(serde_json::from_value(json!({"name":"out","folder":"/tmp/out","read":true,"write":true})).unwrap());
+    grants.input_folder = true;
+    session.plugin_state.grants.entry("other".into()).or_default().command_groups.insert("doc".into());
+    dry_run(&mut session, "inserts");
+    let grants = &session.plugin_state.grants["inserts"];
+    assert!(grants.folders.is_empty() && grants.command_groups.is_empty() && !grants.input_folder, "no files, no groups");
+    assert_eq!(grants.package_hash.as_deref(), Some("hash"), "still the approved package");
+    assert!(session.plugin_state.file_grants.is_empty());
+    assert!(session.plugin_state.grants["other"].command_groups.contains("doc"), "other plugins keep theirs");
 }
 
 #[cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64")))]
@@ -457,27 +709,100 @@ mod native {
         // The package changed after the dialog read it: its hash no longer matches.
         std::fs::write(root.join("boxes/plugin.json"), std::fs::read_to_string(root.join("boxes/plugin.json")).unwrap() + " ").unwrap();
         let doc = h.app.session.doc.clone();
+        h.app.home.open = true;
         run(&mut h.app).unwrap();
         settle(&mut h);
         let error = h.app.plugin_menu.dialog().and_then(|d| d.error.clone()).expect("the dialog stays with its error");
         assert!(error.contains("approval"), "{error}");
         assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        assert!(h.app.home.open, "a failed run leaves the Start page up");
         let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
-    fn the_plugins_menu_opens_from_the_app_bar_and_its_entry_opens_the_dialog() {
+    fn an_edit_from_the_start_page_closes_it_and_lands_in_the_design() {
+        let root = package("start");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = true;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        open_entry(&mut h.app, 0, 0);
+        let before = h.app.session.doc.clone();
+        assert!(before.features.is_empty(), "a blank design");
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        assert!(!h.app.home.open, "the Start page closes when the design changes");
+        assert!(!std::sync::Arc::ptr_eq(&before, &h.app.session.doc), "the edit replaced the document");
+        assert!(!h.app.session.doc.features.is_empty(), "the edit is in the design");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn the_plugins_menu_opens_from_the_ribbon_group_and_its_entry_opens_the_dialog() {
         let root = package("menu");
         let mut h = crate::scenario::Harness::new();
         h.app.session.plugin_state.packages.insert("boxes".into(), root.join("boxes").to_string_lossy().into_owned());
         h.frames(2);
-        h.step(&json!({"click":{"handle":"appbar:plugins"}})).unwrap();
-        h.frames(1);
+        // The ribbon's Plugins group label opens the menu below it.
+        let ctx = h.ctx.clone();
+        toggle_below(&mut h.app, &ctx, egui::Rect::from_min_size(egui::pos2(300.0, 100.0), egui::vec2(60.0, 20.0)));
+        h.frames(2);
         assert!(h.app.plugin_menu.open && h.app.plugin_menu.listed.len() == 1);
         h.step(&json!({"widget":"Box…"})).unwrap();
         h.frames(2);
         assert_eq!(h.app.plugin_menu.dialog().map(|d| d.entry.as_str()), Some("make"));
         assert!(crate::scenario::handle_at("plugin_dialog:field:length").is_some());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Frames until the preview is computed.
+    fn previewed(h: &mut crate::scenario::Harness) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        h.frames(2);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the preview did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            h.frames(1);
+        }
+        h.frames(1);
+    }
+
+    #[test]
+    fn the_host_previews_what_run_would_change_and_changes_nothing() {
+        let root = package("preview");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
+        open_entry(&mut h.app, 0, 0);
+        previewed(&mut h);
+        assert!(h.app.preview.active, "the box the entry makes is drawn: {:?}", h.app.preview.error);
+        let size = |h: &crate::scenario::Harness| {
+            let b = h.app.preview.bounds;
+            ((b.max.x - b.min.x).round(), (b.max.y - b.min.y).round(), (b.max.z - b.min.z).round())
+        };
+        assert_eq!(size(&h), (20.0, 10.0, 3.0), "the defaults");
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc), "the design is untouched");
+        assert_eq!(h.app.session.undo.len(), undo, "no undo step");
+        // A changed value is previewed again.
+        h.app.plugin_menu.dialogs[0].fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "length").unwrap().1 = Input::Number(30.0);
+        previewed(&mut h);
+        assert_eq!(size(&h), (30.0, 10.0, 3.0));
+        // Preview off: nothing is drawn. A read entry or a native tool is never previewed here.
+        h.app.plugin_menu.dialogs[0].preview = false;
+        previewed(&mut h);
+        assert!(!h.app.preview.active);
+        h.app.plugin_menu.dialogs[0].preview = true;
+        h.step(&json!({"start":"solid.fillet"})).unwrap();
+        assert!(preview_commands(&h.app).is_none(), "the open tool's preview is the one shown");
+        h.app.dialog = None;
+        // Run applies the same box, once.
+        previewed(&mut h);
+        run(&mut h.app).unwrap();
+        settle(&mut h);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert!(h.app.plugin_menu.dialogs.is_empty());
+        h.frames(2);
+        assert!(!h.app.preview.active, "no dialog, no preview");
         let _ = std::fs::remove_dir_all(root);
     }
 }

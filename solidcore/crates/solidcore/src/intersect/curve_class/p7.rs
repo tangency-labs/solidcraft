@@ -54,6 +54,16 @@
 //!   classification, a missing curve where it is dereferenced, and a coincident edge
 //!   whose curve is not of a kind derived from `SmBSplineCurve` (`SM_CAST_PTR` gives
 //!   `NULL`; the copy slices a line or conic to its B-spline part).
+//! - **An unclassified interval end** (not upstream, #17595). Once an interval is inside the
+//!   face, `ClassifyFaceInterval` takes an end the boundary intersections left unclassified
+//!   for a point inside the face too. Here such an end is first classified by the face's
+//!   trims (`PointClassify` at its point of the classification's UV curve, when it has one
+//!   and UV space is allowed), and stays on the edge or vertex that finds. An intersection
+//!   curve that ends on its surface's natural boundary ends on the face's edge there, also
+//!   where that edge's 3D curve lies farther from the surface than the edge's tolerance
+//!   (3.3e-3 against 2.8e-3 on an imported edge), so that the curve/edge intersection finds
+//!   no crossing; taken for inside the face, the end became a vertex 8.8e-3 short of the
+//!   edge and the intersection loop stayed open there.
 //! - **Debug-only work** (`SM_DEBUG_CODE`, `SM_DBG_WARN`, `bReportProb` messages, the
 //!   unused `AreCoincidentMaybe` angle check) is dropped; the angle is still computed.
 //! - **Topology members.** `SmEdge::GetCurve` / `GetInterval` / `IsConnectedTo`,
@@ -106,7 +116,11 @@
 //!   only locates the comparison; samples cannot grant relief.
 //!   A cut wall whose seam edge ends on a body edge 1e-7 to 1e-5 across the
 //!   seam (the cut's sketch circle that far off the edge) read as a near miss; its loop
-//!   closes at the vertex within tolerance, and no sliver lies beside the seam.
+//!   closes at the vertex within tolerance, and no sliver lies beside the seam. The
+//!   tolerance is withheld where another edge at the vertex runs beside the seam and
+//!   bounds a face with one of the seam's own edges (a sliver); an edge beside it on
+//!   other faces, the tip of another hole touching the wall along the seam (#9216), does
+//!   not withhold it.
 //! - **Recursion.** None.
 
 use std::borrow::Cow;
@@ -903,10 +917,14 @@ impl<O: ClassObject> CurveClassification<O> {
     }
 
     /// Whether an edge at the vertex end `pc` other than the curve's own edges runs beside
-    /// the curve: its middle within the vertex's tolerance of the curve. Such an edge and
-    /// the curve bound a sliver (a face between them a tolerance wide), where an edge that
-    /// leaves the vertex across the curve makes a corner. `false` where the vertex, its
-    /// edges or the curve cannot be resolved, or a drop fails.
+    /// the curve: its middle within the vertex's tolerance of the curve, and it bounds a
+    /// face that one of the curve's own edges bounds too. Such an edge and the curve bound a
+    /// sliver (a face between them a tolerance wide, which has the curve's edge on its
+    /// boundary), where an edge that leaves the vertex across the curve makes a corner. An
+    /// edge beside the curve on faces none of the curve's edges bound (the tip of another
+    /// hole's wall touching the face's wall along the seam, #9216) bounds no such face.
+    /// Where the own edges' faces cannot be resolved, every edge beside counts. `false`
+    /// where the vertex, its edges or the curve cannot be resolved, or a drop fails.
     ///
     /// # Errors
     ///
@@ -940,10 +958,30 @@ impl<O: ClassObject> CurveClassification<O> {
                 _ => None,
             })
             .collect();
+        // the faces an edge bounds (none where one cannot be resolved)
+        let faces_of = |e: EdgeId| -> Result<Vec<FaceId>> {
+            let Ok(edge) = b.edge(e) else {
+                return Ok(Vec::new());
+            };
+            let mut faces = Vec::new();
+            for eu in &edge.edgeuses {
+                if let Some(Some(f)) = ignored(crate::topology::edgeuse::p1::face(b, *eu))? {
+                    faces.push(f);
+                }
+            }
+            Ok(faces)
+        };
+        let mut own_faces = Vec::new();
+        for &e in &own {
+            own_faces.extend(faces_of(e)?);
+        }
         let Some(edges) = ignored(vertex::edges(b, v, None))? else {
             return Ok(false);
         };
         for e in edges.into_iter().filter(|e| !own.contains(e)) {
+            if !own_faces.is_empty() && !faces_of(e)?.iter().any(|f| own_faces.contains(f)) {
+                continue;
+            }
             let Ok(edge) = b.edge(e) else { continue };
             let Some(other) = edge.curve.as_ref() else {
                 continue;
@@ -1984,6 +2022,36 @@ fn classify_face_interval_on<O: ClassObject>(
         // when the classification was done through the endPoints
         if !did_mid {
             ivl.mid.set_class_object(PointClassType::Face, Some(face));
+        }
+
+        // Not upstream (#17595; see the module's Deviations): an end the boundary
+        // intersections left unclassified is classified by the face's trims before it is
+        // taken for a point inside the face
+        let ends = [ivl.interval.min(), ivl.interval.max()];
+        for (end, t) in [&mut ivl.start, &mut ivl.end].into_iter().zip(ends) {
+            if end.point_class() != PointClassType::Unknown || !ctx.uv_space_okay {
+                continue;
+            }
+            let Some(uv_curve) = context_uv_curve1(access.geometry(), ctx)? else {
+                continue;
+            };
+            let uv = uv_curve.evaluate_point(k, t)?;
+            let mut on_trims = *end;
+            access.point_classify(
+                k,
+                face,
+                Point2::new(uv.x, uv.y),
+                ctx.src_zone_tol_3d,
+                false,
+                true,
+                &mut on_trims,
+            )?;
+            if matches!(
+                on_trims.point_class(),
+                PointClassType::Edge | PointClassType::Vertex
+            ) {
+                *end = on_trims;
+            }
         }
 
         // set any StartPoint or EndPoint with face (or no) classifications to the

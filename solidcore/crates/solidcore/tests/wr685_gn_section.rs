@@ -106,10 +106,11 @@ fn corner_surface(
             },
         )
         .unwrap();
-    // (a plain B-spline without `fillet_round_as_definition`)
-    let solidcore::surface::surface::SurfaceKind::BSpline(s) = s.into_kind() else {
-        panic!("the G^n section is a B-spline without the definition flag");
+    // the round is its definition; its net is the G^n section's B-spline
+    let solidcore::surface::surface::SurfaceKind::ProceduralBlend(s) = s.into_kind() else {
+        panic!("the G^n section is not its definition");
     };
+    let s = s.net().copy();
     (g, s)
 }
 

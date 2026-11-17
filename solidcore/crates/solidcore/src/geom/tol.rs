@@ -426,12 +426,12 @@ pub fn xsect_tol_3d_from_zones(k: &Kernel, zone1: f64, zone2: f64) -> f64 {
     xsect_tol3d(k, zone1 + zone2)
 }
 
-/// The tolerance below which two circles or parallel cylinders that overlap past
-/// touching touch on the boolean's path: the system zone tolerance, 1e-5 by default.
-/// Not upstream (WR-787, #15429): one value for every site that decides the contact (the
-/// walls, the rims, the curve/surface classifier), whatever tolerances earlier operations
-/// grew the edges and faces to, so the same two holes give the same topology whatever
-/// came before. The touching point midway lies δ/2 from each operand, so below it the
+/// The tolerance below which two circles or parallel cylinders, or a circle and a line in
+/// its plane, that overlap past touching touch on the boolean's path: the system zone
+/// tolerance, 1e-5 by default. Not upstream (WR-787, #15429, #14599): one value for every
+/// site that decides the contact (the walls, the rims, the curve/surface classifier),
+/// whatever tolerances earlier operations grew the edges and faces to, so the same two
+/// holes give the same topology whatever came before. The touching point midway lies δ/2 from each operand, so below it the
 /// point lies within the approximation tolerance (half the zone tolerance) of both, as
 /// the intersection curves through it do. At the intersection tolerance (twice the zone
 /// tolerance) two through holes overlapping by 1.02e-5 to 1.99e-5 came out a valid solid
