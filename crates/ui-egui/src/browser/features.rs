@@ -892,6 +892,14 @@ mod tests {
         h.settle();
         let left: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
         assert_eq!(left, ids[2..], "Delete takes the same two");
+
+        // A row lit only by a picked face of its body counts as outside: the right-click
+        // selects the feature itself.
+        h.app.run("select.set", json!({"items": [{"type": "face", "body": "B2", "index": 0, "point": [0, 0, 0]}]})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: ids[2] }], "a picked face is not the feature");
     }
 
     /// The same for sketch rows, whose menu is the sketch's own: outside the selection a
@@ -932,6 +940,22 @@ mod tests {
         h.settle();
         let left: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
         assert_eq!(left, ids[2..], "Delete takes the same two");
+
+        // A sketch and another feature selected: the sketch's Copy and Delete take both.
+        let block = h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"body_name":"Block"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row(ids[2])})).unwrap();
+        h.step(&json!({"click": row(block), "ctrl": true})).unwrap();
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Copy"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.clipboard.len(), 2, "Copy takes the sketch and the box");
+        h.step(&json!({"click": row(ids[2]), "button": "right"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+        h.settle();
+        assert!(h.app.session.doc.features.is_empty(), "Delete takes the same two");
     }
 
     #[test]
