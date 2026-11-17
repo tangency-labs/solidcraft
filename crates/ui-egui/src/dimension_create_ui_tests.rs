@@ -515,7 +515,7 @@ fn escape_invalid_correction_and_seed_enter_do_not_create_partial_dimensions() {
     assert_eq!(h.app.session.doc.to_json(), original);
     assert_eq!(h.app.session.undo.len(), undo);
     place(&mut h, &[[0., 0.], [20., 0.]], [10., 5.]);
-    type_value(&mut h, "unknown_length");
+    type_value(&mut h, "unknown_length + 5 mm");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(crate::dim_view::editing());
     assert_eq!(h.app.session.doc.to_json(), original);
@@ -2205,7 +2205,8 @@ fn dimension_create_variable_seeds_its_current_value() {
     let doc = &h.app.session.doc;
     assert!(doc.param("breite").is_some());
     let sk = doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
-    assert!(sk.constraints.iter().any(|c| c.param.as_deref() == Some("breite") && c.kind.value().is_some_and(|v| (v - 25.0).abs() < 1e-6)));
+    assert!(sk.constraints.iter().any(|c| c.param.as_deref().and_then(|p| doc.param(p)).is_some_and(|p| p.expr == "breite")
+        && c.kind.value().is_some_and(|v| (v - 25.0).abs() < 1e-6)));
 
     // An already created dimension also keeps its size and changes its name in one step.
     let mut h = line([30., 0.]);

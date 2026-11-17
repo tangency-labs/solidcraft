@@ -732,6 +732,7 @@ fn dimension_value_or_definition(
     source: &solidcraft_engine::doc::Document,
     param: &str,
     typed: &str,
+    measured: Option<&str>,
 ) -> String {
     let name = typed.trim();
     let definition = format!("{name} = 1");
@@ -743,7 +744,13 @@ fn dimension_value_or_definition(
     {
         return typed.to_string();
     }
-    source.param(param).map_or_else(|| typed.to_string(), |p| format!("{name} = {}", p.expr))
+    if let Some(p) = source.param(param) {
+        let length = solidcraft_engine::doc::expr::unit_info(&p.unit).is_some_and(|(k, _)| k == solidcraft_engine::doc::expr::Kind::Length);
+        let expr = if length { crate::length_input::stored(source, &p.expr) } else { p.expr.clone() };
+        format!("{name} = {expr}")
+    } else {
+        measured.map_or_else(|| typed.to_string(), |expr| format!("{name} = {expr}"))
+    }
 }
 
 /// Set dimension parameter `param` to the expression typed for it, in the parameter's unit.
@@ -1384,7 +1391,7 @@ fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     match done {
         Some(true) => {
             let source = e.draft.as_ref().map_or(app.session.doc.as_ref(), |draft| draft.preview_doc.as_ref());
-            let submitted = dimension_value_or_definition(&app.session.doc, source, &e.param, &e.expr);
+            let submitted = dimension_value_or_definition(&app.session.doc, source, &e.param, &e.expr, e.driven.as_ref().map(|_| e.expr.as_str()));
             let result = if let Some(draft) = &e.draft {
                 if draft.valid(app) {
                     draft
@@ -1524,12 +1531,24 @@ mod tests {
     fn variable_creation_only_uses_free_parameter_names() {
         let mut doc = solidcraft_engine::doc::Document::new("Test");
         doc.add_user_param("width", "20 mm", Some("mm"), None).unwrap();
-        let name = |typed: &str| dimension_value_or_definition(&doc, &doc, "width", typed);
+        let name = |typed: &str| dimension_value_or_definition(&doc, &doc, "width", typed, None);
         assert_eq!(name("breite"), "breite = 20 mm");
         assert_eq!(name("width"), "width", "existing names remain references");
         assert_eq!(name("sin"), "sin", "reserved functions are not new variables");
         assert_eq!(name("12width"), "12width", "invalid names keep normal validation");
         assert_eq!(name("breite = 50 mm"), "breite = 50 mm", "explicit definitions are unchanged");
+        let mut inch = solidcraft_engine::doc::Document::new("Inch");
+        inch.units = "in".into();
+        let length = inch.new_model_param("30", "mm");
+        assert_eq!(dimension_value_or_definition(&inch, &inch, &length, "height", None), "height = 30 mm",
+            "a legacy bare model length remains millimetres in an inch design");
+        let angle = inch.new_model_param("45", "deg");
+        assert_eq!(dimension_value_or_definition(&inch, &inch, &angle, "sweep", None), "sweep = 45",
+            "non-length expressions are unchanged");
+        assert_eq!(dimension_value_or_definition(&inch, &inch, "missing", "driven", Some("20 mm")), "driven = 20 mm",
+            "driven dimensions use the measured expression when the source has no parameter");
+        assert_eq!(dimension_value_or_definition(&inch, &inch, "missing", "driven = 25 mm", Some("20 mm")), "driven = 25 mm",
+            "an explicit definition is never replaced");
     }
 
     /// #11057: a value typed before its target keeps a 30 px gap from the pointer, and near the
