@@ -1666,11 +1666,16 @@ impl SolveApp {
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
             _ => r,
         };
-        if let Ok(v) = &r {
-            if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") {
-                plugins::persist_grants(self);
+        // A grant taken back here that the shared store still holds is not taken back: say so.
+        let r = match r {
+            Ok(v) if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") => {
+                let saved = plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
+                saved.map(|()| v)
             }
+            r => r,
+        };
+        if let Ok(v) = &r {
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -4292,7 +4297,9 @@ impl SolveApp {
         match control::handle(self, ctx, &req) {
             control::Outcome::Done(v) => {
                 if self.preferences.plugin_grants != self.session.plugin_state.grants {
-                    plugins::persist_grants(self);
+                    if let Err(e) = plugins::persist_grants(self) {
+                        log::warn!("plugins: {e}");
+                    }
                     plugin_slots::invalidate(self);
                 }
                 let _ = reply.send(v);

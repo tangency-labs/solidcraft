@@ -59,9 +59,19 @@ fn read_record(path: &Path) -> Option<Grants> {
     serde_json::from_slice::<Grants>(&bytes).ok().filter(valid_record)
 }
 
-/// Every readable record in the store of `plugins`, by plugin id. An absent store is empty.
+/// Whether the active file scope lets this session reach the store of `plugins`. A store outside
+/// the scope is neither read nor written, as any other file there.
+fn in_scope(plugins: &Path) -> bool {
+    solidcraft_io::vfs::check(&folder(plugins).to_string_lossy()).is_ok()
+}
+
+/// Every readable record in the store of `plugins`, by plugin id. An absent store, or one outside
+/// the active file scope, is empty.
 pub fn read_all(plugins: &Path) -> BTreeMap<String, Grants> {
     let mut records = BTreeMap::new();
+    if !in_scope(plugins) {
+        return records;
+    }
     let Ok(entries) = std::fs::read_dir(folder(plugins)) else { return records };
     for entry in entries.flatten().take(MAX_ENTRIES) {
         if records.len() >= MAX_RECORDS {
@@ -82,6 +92,8 @@ pub fn write(plugins: &Path, id: &str, grants: &Grants) -> Result<(), String> {
         return Err(format!("`{id}`: not a plugin approval that can be stored"));
     }
     let dir = folder(plugins);
+    // The scope must allow the record before its folder is created.
+    solidcraft_io::vfs::check_new(&dir.join(format!("{id}.json")).to_string_lossy()).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let mut grants = grants.clone();
     grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
@@ -106,7 +118,9 @@ pub fn delete(plugins: &Path, id: &str) -> Result<(), String> {
     if !valid_id(id) {
         return Err(format!("`{id}` is not a plugin id"));
     }
-    match std::fs::remove_file(folder(plugins).join(format!("{id}.json"))) {
+    let record = folder(plugins).join(format!("{id}.json"));
+    solidcraft_io::vfs::check_new(&record.to_string_lossy()).map_err(|e| e.to_string())?;
+    match std::fs::remove_file(record) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
         _ => Ok(()),
     }
@@ -147,6 +161,10 @@ impl Synced {
     /// Take in what another program changed since the last look: each record that differs from
     /// what was last seen replaces (or, deleted, removes) that plugin's grants in `working`.
     pub fn refresh(&mut self, plugins: &Path, working: &mut BTreeMap<String, Grants>) {
+        // A store the file scope refuses reads as empty; that is no change by another program.
+        if !in_scope(plugins) {
+            return;
+        }
         let now = stamp(plugins);
         if now.is_some() && now == self.stamp {
             return;
@@ -168,6 +186,15 @@ impl Synced {
         }
         self.grants = stored;
         self.stamp = now;
+    }
+
+    /// Delete the record of plugin `id`, including one this host never read (a store outside its
+    /// file scope, or written since the last look).
+    pub fn forget(&mut self, plugins: &Path, id: &str) -> Result<(), String> {
+        delete(plugins, id)?;
+        self.grants.remove(id);
+        self.stamp = None;
+        Ok(())
     }
 
     /// Write what changed in `working` since the last look: a changed record, or the deletion

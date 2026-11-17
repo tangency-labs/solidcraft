@@ -55,7 +55,7 @@ Omitting `approve` grants nothing, including on replacement. Providing `approve`
 stored set; stale grants cannot survive replacement. The engine stores grants after publication and
 `plugin.run` checks them against the manifest. Desktop preferences persist the grants per plugin id,
 and the plugins folder's `.grants` store keeps them between command-line and headless MCP sessions
-(`plugin::grant_store`); `plugin.revoke` deletes one plugin's record.
+started with `--keep-plugin-approvals` (`plugin::grant_store`); `plugin.revoke` deletes one plugin's record.
 Removal validates the id, confines deletion to the host's plugin directory and removes its stored
 grants. These operations do not edit the design.
 

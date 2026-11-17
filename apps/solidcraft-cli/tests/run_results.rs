@@ -1013,20 +1013,34 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
     }
 }
 
-/// `--plugins-dir`: a plugin installed and approved in one run keeps its approvals in the next,
-/// until they are revoked; nothing outside that folder is read or written.
+/// `--keep-plugin-approvals`: a plugin installed and approved in one run keeps its approvals in the
+/// next, until they are revoked. Without it (the default) approvals last for the run; nothing
+/// outside `--plugins-dir` is read or written.
 #[test]
-fn plugin_approvals_are_kept_between_runs_in_the_plugins_folder() {
+fn plugin_approvals_are_kept_between_runs_only_when_asked() {
     let scratch = Scratch::new();
     let plugins = scratch.0.join("plugins");
     let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":1_000_000,"memory_mib":256,"deadline_ms":30000}}});
     let zip = scratch.0.join("sample.zip");
     let bytes = solidcraft_engine::io::safe_zip::write(&[("plugin.json", manifest.to_string().as_bytes()), ("plugin.wasm", b"inert bytes")]).unwrap();
     std::fs::write(&zip, bytes).unwrap();
-    let exec = |command: &str, params: Value| cli().arg("--plugins-dir").arg(&plugins).args(["exec", command, &params.to_string()]).output().unwrap();
+    let run = |keep: bool, command: &str, params: Value| {
+        let mut cli = cli();
+        cli.arg("--plugins-dir").arg(&plugins);
+        if keep {
+            cli.arg("--keep-plugin-approvals");
+        }
+        cli.args(["exec", command, &params.to_string()]).output().unwrap()
+    };
+    let exec = |command: &str, params: Value| run(true, command, params);
     let inspect = json!({"path": plugins.join("sample")});
-    json_output(exec("plugin.install", json!({"path": zip, "approve": {"memory_mib": 256}})));
+    // The default: approved for that run only, nothing stored.
+    json_output(run(false, "plugin.install", json!({"path": zip, "approve": {"memory_mib": 256}})));
+    assert!(plugins.join("sample").is_dir() && !plugins.join(".grants").exists());
+    assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false);
+    json_output(exec("plugin.install", json!({"path": zip, "replace": true, "approve": {"memory_mib": 256}})));
     assert!(plugins.join(".grants/sample.json").is_file());
+    assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false, "not read without the flag");
     assert_eq!(json_output(exec("plugin.inspect", inspect.clone()))["within_host_limits"], true, "the approved memory, in a later run");
     let listed = json_output(exec("plugin.grants", json!({})));
     assert_eq!((listed["grants"][0]["status"].as_str(), listed["grants"][0]["memory_mib"].as_u64()), (Some("current"), Some(256)));
@@ -1038,8 +1052,15 @@ fn plugin_approvals_are_kept_between_runs_in_the_plugins_folder() {
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("--plugins-dir"));
     }
-    let connected = cli().arg("--plugins-dir").arg(&plugins).args(["exec", "plugin.grants", "{}", "--connect", "127.0.0.1:1"]).output().unwrap();
-    assert!(String::from_utf8_lossy(&connected.stderr).contains("controls local sessions"), "refused before any connection attempt");
+    for flag in ["--plugins-dir", "--keep-plugin-approvals"] {
+        let mut connected = cli();
+        connected.arg(flag);
+        if flag == "--plugins-dir" {
+            connected.arg(&plugins);
+        }
+        let connected = connected.args(["exec", "plugin.grants", "{}", "--connect", "127.0.0.1:1"]).output().unwrap();
+        assert!(String::from_utf8_lossy(&connected.stderr).contains("control local sessions"), "{flag}: refused before any connection attempt");
+    }
 }
 
 /// `run --save` over a design another SolidCraft has open (#16199): the save still happens, and

@@ -1230,6 +1230,29 @@ mod importers {
         assert!(after_revoke.execute("plugin.revoke", &json!({"id": "../smp"})).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn a_removal_whose_approvals_cannot_be_taken_back_keeps_the_package_installed() {
+        let (_, root) = installed("stored-remove", &[]);
+        let plugins = root.join("plugins");
+        let (package, version) = API.split_once('@').unwrap();
+        let component = wat::parse_str(include_str!("importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        let manifest = importer_manifest("smp", &["smp"], true).to_string();
+        let zip = solidcraft_io::safe_zip::write(&[("plugin.json", manifest.as_bytes()), ("importer.wasm", &component)]).unwrap();
+        let original = put(&root, "smp.zip", &zip);
+        stored_session(&plugins).execute("plugin.install", &json!({"path": original, "approve": {"input_folder": true}})).unwrap();
+        let record = plugins.join(".grants/smp.json");
+        // A file scope that reaches the package but not the grant store: the record cannot be
+        // deleted, so nothing is removed and the error says why.
+        let mut s = stored_session(&plugins);
+        let scope = solidcraft_io::vfs::PathScope::new([plugins.join("smp")]);
+        let refused = solidcraft_io::vfs::scoped(Some(scope), || s.execute("plugin.remove", &json!({"id": "smp"})));
+        assert!(refused.unwrap_err().to_string().contains("approvals"));
+        assert!(record.is_file() && plugins.join("smp/plugin.json").is_file());
+        s.execute("plugin.remove", &json!({"id": "smp"})).unwrap();
+        assert!(!record.exists() && !plugins.join("smp").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 mod install_zip {
@@ -1606,6 +1629,24 @@ mod stored_grants {
         assert!(!plugins.join("evil.json").exists() && !dir.join("bad.json").exists());
         grant_store::delete(&plugins, "absent").unwrap();
         std::fs::remove_dir_all(plugins).unwrap();
+    }
+
+    #[test]
+    fn a_store_outside_the_file_scope_is_neither_read_nor_written() {
+        let (plugins, elsewhere) = (root("scope"), root("scope-elsewhere"));
+        grant_store::write(&plugins, "gears", &approved(&["file"])).unwrap();
+        let (mut synced, mut working) = (Synced::default(), BTreeMap::new());
+        synced.refresh(&plugins, &mut working);
+        solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([elsewhere.clone()])), || {
+            assert!(grant_store::read_all(&plugins).is_empty());
+            assert!(grant_store::write(&plugins, "bolts", &approved(&[])).is_err());
+            assert!(grant_store::delete(&plugins, "gears").is_err());
+            synced.refresh(&plugins, &mut working);
+        });
+        assert_eq!(working.keys().collect::<Vec<_>>(), ["gears"], "a store out of reach is no revocation");
+        assert_eq!(grant_store::read_all(&plugins).keys().collect::<Vec<_>>(), ["gears"]);
+        std::fs::remove_dir_all(plugins).unwrap();
+        std::fs::remove_dir_all(elsewhere).unwrap();
     }
 
     #[test]

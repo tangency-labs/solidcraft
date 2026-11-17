@@ -87,7 +87,7 @@ Preferences does not restore a removed package. Removing a plugin preserves its 
 Approved grants and removal survive closing or resetting Preferences. Grants are host preferences,
 never design data; preferences retain at most 256 plugin ids, four command groups and 32 folders per id.
 The desktop app keeps them in the plugins folder's grant store too, which the command line and headless
-MCP share (see [Headless use](#headless-use)). The browser Plugins page remains desktop-only.
+MCP share when they run with `--keep-plugin-approvals` (see [Headless use](#headless-use)). The browser Plugins page remains desktop-only.
 
 The command surface exposes management without opening dialogs:
 
@@ -109,21 +109,24 @@ Direct requests use a worker to keep the window responsive.
 ## Headless use
 
 `solidcraft-cli` (`run`, `exec`, `eval` and the other local commands) and `solidcraft-cli mcp --headless`
-use the same installed plugins and the same approvals as the desktop app. A plugin installed and
-approved in one run, or in the desktop app, is used by a later run without installing it again:
+use the same installed plugins as the desktop app. By default the approvals given in a run last for
+that run only. With `--keep-plugin-approvals` they use the same approvals as the desktop app: a
+plugin installed and approved in one such run, or in the desktop app, is used by a later one without
+installing it again:
 
 ```sh
 solidcraft-cli exec plugin.install '{"path":"importer.zip","dry_run":true}'      # review: permissions, limits, approval
-solidcraft-cli exec plugin.install '{"path":"importer.zip","approval":"…","archive":"…","approve":{"memory_mib":2048,"input_folder":true}}'
-solidcraft-cli run import.json                                                   # a later run: file.import uses those approvals
+solidcraft-cli --keep-plugin-approvals exec plugin.install '{"path":"importer.zip","approval":"…","archive":"…","approve":{"memory_mib":2048,"input_folder":true}}'
+solidcraft-cli --keep-plugin-approvals run import.json                           # a later run: file.import uses those approvals
 ```
 
 - **Where they are kept.** Installed plugins are in the per-user plugins folder (`plugins` in
-  SolidCraft's data folder: `%LOCALAPPDATA%\SolidCraft`, `~/Library/Application Support/SolidCraft` or
-  `~/.local/share/solidcraft`), and their approvals in its hidden `.grants` folder, one
-  `<plugin id>.json` record per plugin. `--plugins-dir DIR` points a run at another folder: a CI job or
-  a script can keep its own plugins and approvals there, apart from the user's. With `mcp`, it needs
-  `--headless`; a connected desktop app uses its own plugins.
+  SolidCraft's data folder: `%LOCALAPPDATA%\SolidCraft`, `~/Library/Application Support/SolidCraft`, or
+  on Linux `$XDG_DATA_HOME/solidcraft`, which is `~/.local/share/solidcraft` when `XDG_DATA_HOME` is
+  not set), and their approvals in its hidden `.grants` folder, one `<plugin id>.json` record per
+  plugin. `--plugins-dir DIR` points a run at another folder: a CI job or a script can keep its own
+  plugins, and with `--keep-plugin-approvals` its own approvals, there, apart from the user's. With
+  `mcp`, both need `--headless`; a connected desktop app uses its own plugins.
 - **What a record allows.** A record holds what was approved at install: command groups, folders,
   memory and `input_folder`, bound to the exact manifest and component reviewed (`package_hash`).
   A changed package, even one whose files were edited in place, runs only after it is installed and
@@ -137,8 +140,8 @@ solidcraft-cli run import.json                                                  
   same calls work from `solidcraft-cli exec`, a `run` script, MCP and the desktop app's control channel:
 
   ```sh
-  solidcraft-cli exec plugin.grants
-  solidcraft-cli --plugins-dir ci/plugins exec plugin.revoke '{"id":"dutchman"}'
+  solidcraft-cli --keep-plugin-approvals exec plugin.grants
+  solidcraft-cli --keep-plugin-approvals --plugins-dir ci/plugins exec plugin.revoke '{"id":"dutchman"}'
   ```
 - **Several programs at once.** A record is written whole and renamed into place, so a program
   reading the store sees the old record or the new one. A running desktop app or MCP server takes in
@@ -182,8 +185,8 @@ Preferences and the Plugins menu share `plugin_install::start(app)` in
 draws the confirmation screen and submits `plugin.install` with the reviewed `approval` and `archive` hashes and selected `approve` object.
 Successful installation persists grants in desktop preferences and the shared grant store; successful
 removal and `plugin.revoke` delete them. `SolveApp::share_plugin_grants`, called once after the
-preferences load, starts sharing; `solidcraft_engine::plugin::configure_process_grant_store` does the
-same for every session of a headless process.
+preferences load, starts sharing; `solidcraft_engine::plugin::configure_process_plugins` does the
+same for every session of a headless process started with `--keep-plugin-approvals`.
 There is one package reader and one installation confirmation screen.
 
 `plugin_menu::list` in `crates/ui-egui/src/plugin_menu.rs` and Preferences use the same package

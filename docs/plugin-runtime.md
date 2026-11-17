@@ -238,8 +238,9 @@ zero, fractional and out-of-range values are refused. The CLI reads it once befo
 local sessions. Omit the flag to use the original ceilings. `--connect` and non-headless `mcp`
 refuse this flag because the connected desktop owns its preferences. GUI preferences and CLI
 startup files are separate user settings; a package or saved design cannot supply either.
-Approvals given at install are shared instead: these processes read and write the same grant store
-as the desktop app, or the one in `--plugins-dir DIR` ([Headless use](plugins.md#headless-use)).
+Approvals given at install last for the run; with `--keep-plugin-approvals` these processes read
+and write the same grant store as the desktop app, or the one in `--plugins-dir DIR`
+([Headless use](plugins.md#headless-use)).
 
 Both host and manifest accept positive integer fuel through 18446744073709551615 (`u64::MAX`),
 without conversion through floating-point controls. Memory accepts 1..4096 MiB: the remaining
