@@ -1562,9 +1562,9 @@ pub fn one_piece(run: &[Piece], tolerance: f64) -> Result<(Piece, f64), Error> {
                 control,
                 ..
             } => {
-                let at = |t: f64| {
-                    bspline::point(*degree, knots, control, t).unwrap_or([f64::NAN, f64::NAN])
-                };
+                // Checked once, not at every point.
+                let spline = bspline::Checked::new(*degree, knots, control)?;
+                let at = |t: f64| spline.point(t).unwrap_or([f64::NAN, f64::NAN]);
                 let mut out: Vec<Point> = Vec::new();
                 for stretch in bspline::breaks(*degree, knots, control)?.windows(2) {
                     if let [from, to] = stretch {

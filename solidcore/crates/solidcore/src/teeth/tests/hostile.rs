@@ -82,6 +82,7 @@ const PUBLIC: &[&str] = &[
     "pair::Pair::gap_at",
     "pair::Pair::through",
     "pair::Pair::through_a_cycle",
+    "shaft_spline::module_for_major_radius",
     "shaft_spline::same_size",
     "shaft_spline::fit_to_shaft_within",
     "shaft_spline::tool_margin",
@@ -1298,6 +1299,18 @@ fn sweep_shaft_spline(s: &mut Sweep, dice: &mut Dice) {
         ];
         for made in found.into_iter().flatten() {
             assert!(made.is_finite(), "a cutter radius at {v}");
+        }
+        let module = shaft_spline::module_for_major_radius;
+        let name = "shaft_spline::module_for_major_radius";
+        let modules = [
+            s.call(name, || module(v, 0.5, 0.0, 15.0)),
+            s.call(name, || module(20.0, v, 0.0, 15.0)),
+            s.call(name, || module(20.0, 0.5, v, 15.0)),
+            s.call(name, || module(20.0, 0.5, 0.0, v)),
+            s.call(name, || module(arg(k + 1), arg(k + 2), arg(k + 3), v)),
+        ];
+        for made in modules.into_iter().flatten() {
+            assert!(made.is_finite() && made > 0.0, "a module at {v}: {made}");
         }
     }
 }

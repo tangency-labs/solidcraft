@@ -653,7 +653,7 @@ fn new_parts(f: &Feature, st: &mut ModelState, n: &SplineNumbers, plan: &SplineP
 /// `length`; `radius` is that of the tops of its teeth.
 #[allow(clippy::too_many_arguments)]
 fn chamfered_ends(part: Traced, radius: f64, size: f64, margin: f64, length: f64, seam: f64, outside: bool, key: &str) -> Result<Traced> {
-    let seat = Seat { body: String::new(), plane: Plane::XY, inward: 1.0, radius, room: length, face: None };
+    let seat = Seat { body: String::new(), plane: Plane::XY, inward: 1.0, radius, room: length, face: None, at: Vec3::new(radius, 0.0, 0.0) };
     let chamfer = Chamfer { radius, radial: size, axial: size, past: 0.0, flush: None };
     let section = chamfer_section(&chamfer, margin, outside).ok_or_else(|| {
         DocError::Invalid(if outside {
@@ -702,6 +702,8 @@ struct Seat {
     /// Which face of the body, as it was before the feature, the round face is (None where that is not known
     /// exactly): the face a surface the spline rebuilds over it stands for.
     face: Option<usize>,
+    /// A point of the round face: where it was picked, brought onto the face's cylinder.
+    at: Vec3,
 }
 
 impl Seat {
@@ -818,7 +820,56 @@ fn seat_at(st: &ModelState, component: u64, p: Vec3, start: Option<Vec3>, bore: 
         };
         on_it.then_some(face)
     });
-    Ok(Seat { body, plane, inward, radius: cyl.radius, room, face })
+    // The pick, brought onto the cylinder along its radius.
+    let off = p - cyl.axis_point;
+    let across = off - k * off.dot(k);
+    let at = if across.len() > 0.0 { p + across * (cyl.radius / across.len() - 1.0) } else { p };
+    Ok(Seat { body, plane, inward, radius: cyl.radius, room, face, at })
+}
+
+/// The seat after its round face has moved `by` out from the axis (into a bore: a negative `by`): the face has the
+/// new radius, and the point on it has moved with it.
+fn moved_seat(seat: &Seat, by: f64) -> Seat {
+    let off = seat.at - seat.plane.origin;
+    let k = seat.plane.normal();
+    let across = off - k * off.dot(k);
+    let at = if across.len() > 0.0 { seat.at + across * (by / across.len()) } else { seat.at };
+    Seat { radius: seat.radius + by, at, ..seat.clone() }
+}
+
+/// Moves the seat's round face along its outward normal by `by` with the kernel's face move (what Offset Face
+/// does): the face goes onto the cylinder of the new radius, and every face next to it is carried on, or cut back,
+/// on its own surface. What opens in the round face (a hole across a shaft, a keyway, a flat, a set screw's hole in
+/// a hub) therefore stays open through the new surface, with its own walls, and a round on an end follows at its
+/// own size. The face keeps its name. Kept from the last rebuilds as the cuts are ([`KeptChange`]).
+fn move_round_face(st: &mut ModelState, seat: &Seat, by: f64, key: &str) -> Result<()> {
+    let body = &seat.body;
+    let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Invalid(format!("the body `{body}` is gone")))?;
+    let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid(format!("the body `{body}` is gone"))) };
+    let input = mb.traced();
+    let kept = {
+        let all = KEPT_CHANGES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        all.iter().find(|k| k.key == key && k.input.same(&input.body)).map(|k| k.output.clone())
+    };
+    let nb = match kept {
+        Some(found) => found,
+        None => {
+            let nb = kernel::offset_faces(&input.body, &[seat.at], by)?;
+            let mut all = KEPT_CHANGES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if all.first().is_some_and(|k| spline_of(&k.key) != spline_of(key)) {
+                all.clear();
+            }
+            if all.len() >= MOST_KEPT {
+                drop(all.remove(0));
+            }
+            all.push(KeptChange { input: input.body.clone(), key: key.to_string(), output: nb.clone(), tool: None });
+            nb
+        }
+    };
+    if let Some(slot) = st.bodies.get_mut(i) {
+        *slot = mb.remade(Traced::step(nb, &[&input]));
+    }
+    Ok(())
 }
 
 /// Says that the faces the tools' face called `role` left on the body called `body` stand for the body's own
@@ -1134,6 +1185,104 @@ fn stands_over(st: &ModelState, seat: &Seat, above: f64, from: f64, to: f64) -> 
     }
 }
 
+/// The radius the rounded ends of the tooth spaces must reach out past, from [`stands_over`]'s reading: a reading
+/// that could not be made is refused, not taken as nothing standing there. A shoulder taller than the teeth would
+/// otherwise stand over tools that stop short of it, and the spaces would end shut beneath it.
+fn cutter_way_out(over: Option<f64>) -> Result<f64> {
+    over.ok_or_else(|| {
+        DocError::Invalid(
+            "`cutter_diameter`: what stands past the end of the teeth, where the cutter runs out, could not be read from the shaft: end the teeth further from the step, or leave `cutter_diameter` out (the spaces then end square)"
+                .into(),
+        )
+    })
+}
+
+/// Whether the seat's round face is a whole band, read off the exact body: every face of the body on the seat's
+/// cylinder is bounded only by circles across the axis on that cylinder (its ends) and by straight lines along the
+/// axis (seams). A hole across a shaft, a flat, a keyway or a set screw's hole in a hub that opens in the face
+/// leaves other edges in it. None where it cannot be read: the body is not found, or no face of it lies on the
+/// cylinder.
+fn whole_band(st: &ModelState, seat: &Seat) -> Option<bool> {
+    let body = &st.bodies.iter().find(|b| b.name == seat.body)?.body;
+    let (k, o, r) = (seat.plane.normal(), seat.plane.origin, seat.radius);
+    let near = 1e-6 * (1.0 + r);
+    let on_axis = |p: Vec3| {
+        let off = p - o;
+        (off - k * off.dot(k)).len() <= near
+    };
+    let faces: Vec<usize> = (0..body.face_count())
+        .filter(|f| match kernel::face_surface(body, *f) {
+            Some(kernel::FaceSurface::Cylinder { origin, axis, radius }) => {
+                (radius - r).abs() <= near && (*axis).cross(k).len() <= 1e-9 && on_axis(origin)
+            }
+            _ => false,
+        })
+        .collect();
+    if faces.is_empty() {
+        return None;
+    }
+    let record = body.record();
+    let point = |v: u32| {
+        let [x, y, z] = record.vertices.get(usize::try_from(v).ok()?)?.point;
+        Some(Vec3::new(x, y, z))
+    };
+    let bounds_the_band = |e: usize| {
+        // An end of the band: a circle across the axis, about it, of the cylinder's radius.
+        if let Some(c) = kernel::edge_circle(body, e) {
+            return (c.radius - r).abs() <= near && (*c.axis).cross(k).len() <= 1e-6 && on_axis(c.center);
+        }
+        // A seam: a straight line along the axis.
+        let Some(edge) = record.edges.get(e) else { return false };
+        let [a, b] = edge.vertices;
+        match (point(a), point(b)) {
+            (Some(a), Some(b)) => {
+                let d = b - a;
+                matches!(edge.curve, solidcore_record::brep::Curve::Line { .. }) && d.len() > near && d.cross(k).len() <= 1e-6 * d.len()
+            }
+            _ => false,
+        }
+    };
+    Some(faces.iter().all(|f| kernel::face_edge_indices(body, *f).into_iter().all(&bounds_the_band)))
+}
+
+/// Builds a shaft's round face up by `by` where the grown face must pass something larger that stands next to
+/// one of its ends (a collar, a larger step), which a face moved on the whole body cannot. The stretch of the body
+/// the face runs along is taken out of the body: cut off at the plane of an end where the body goes on past the
+/// face, and reaching `before` past the near end and `after` past the far end where the shaft has its own end
+/// there (with a chamfer or a round on it). In the stretch nothing stands in the face's way: the face is moved as
+/// on a shaft of its own (the kernel call of [`move_round_face`]), what opens in it carried on and a round on its
+/// end following; then the stretch is joined on again.
+fn grow_stretch(st: &mut ModelState, seat: &Seat, by: f64, before: f64, after: f64) -> Result<()> {
+    let body = &seat.body;
+    let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Invalid(format!("the body `{body}` is gone")))?;
+    let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid(format!("the body `{body}` is gone"))) };
+    let input = mb.traced();
+    let (_, _, across) = extent_in(&input.body, seat).ok_or_else(|| DocError::Invalid("the shaft's size could not be read".into()))?;
+    // A round block over the stretch, wider than the body and than the grown face.
+    let slab = Region2 { outer: Loop2::circle(Vec2::ZERO, across + seat.radius + by.abs() + 1.0), holes: Vec::new() };
+    let (from, to) = seat.span(-before, seat.room + after);
+    let block = extruded(&seat.plane, &slab, from, to, &Joints::default(), "block over the shaft's round face")?;
+    let tool = built_round(block, &slab, "outside", "inner");
+    let part = kernel::boolean(&input.body, &tool.body, BoolOp::Intersect)?
+        .ok_or_else(|| DocError::Invalid("nothing of the shaft lies along its round face".into()))?;
+    let part = Traced::step(part, &[&input, &tool]);
+    let moved = Traced::step(kernel::offset_faces(&part.body, &[seat.at], by)?, &[&part]);
+    // What lies past the stretch; nothing where the stretch is the whole body.
+    let out = match kernel::boolean(&input.body, &tool.body, BoolOp::Cut)? {
+        Some(rest) => {
+            let rest = Traced::step(rest, &[&input, &tool]);
+            let joined = kernel::boolean(&rest.body, &moved.body, BoolOp::Union)?
+                .ok_or_else(|| DocError::Invalid("joining the shaft's round stretch on again left nothing".into()))?;
+            Traced::step(joined, &[&rest, &moved])
+        }
+        None => moved,
+    };
+    if let Some(slot) = st.bodies.get_mut(i) {
+        *slot = mb.remade(out);
+    }
+    Ok(())
+}
+
 /// Whether the body leaves the stretch just past the seat's end empty within `radius` of the axis: a chamfer
 /// that wide at a bore's step cuts into no wall there.
 fn beside_clear(st: &ModelState, seat: &Seat, radius: f64) -> bool {
@@ -1277,53 +1426,73 @@ fn cut_shaft(st: &mut ModelState, n: &SplineNumbers, plan: &SplinePlan, seat: &S
     let near = past_end(st, seat, false, root);
     let far = if resized || teeth_end { past_end(st, &beyond, false, root) } else { End::shut(old_radius) };
     let seam = seam_angle(n, plan, false);
+    // How far a tool that takes the whole round face runs on past one of its ends: past an end the body ends at,
+    // and through what the shaft has on its end (a chamfer, a round). At a shoulder and at a neck it stops with
+    // the face.
+    let past = |e: &End| {
+        if e.end > 0.0 {
+            e.end + margin
+        } else if e.free {
+            margin
+        } else {
+            0.0
+        }
+    };
     if resized && top > seat.radius {
-        // A sleeve over the whole face, from its one end to its other, reaching a little into the shaft: what
-        // lies inside the shaft (a bore, a hole across) stays as it is.
-        let (from, to) = seat.span(0.0, seat.room);
-        change_kept(st, &seat.body, &format!("{key}|built"), BoolOp::Union, "building the shaft up", || {
-            let inner = seat.radius - margin;
-            let holes = if inner > 0.0 { vec![Loop2::circle(Vec2::ZERO, inner)] } else { Vec::new() };
-            let sleeve = Region2 { outer: Loop2::circle(Vec2::ZERO, top), holes };
-            let body = extruded(&seat.plane, &sleeve, from, to, &Joints::default(), "sleeve that builds the shaft up")?;
-            // Its outside is the shaft's surface from now on: `side`, as a cylinder's wall is called.
-            Ok(built_round(body, &sleeve, "side", "inner"))
+        // The round face itself moves out to the major diameter, and every face next to it is carried on on its
+        // own surface: a hole across the shaft, a keyway or a flat stays open through the new surface, with its own
+        // walls, as if the shaft had been that large when they were cut, and a round on an end follows at its own
+        // size. (A sleeve joined over the face would close what opens in it.)
+        //
+        // A face moved on the whole body cannot pass something larger that stands next to one of its ends (a
+        // collar, a larger step). Whether it would is read off the exact body, within the growth's own length past
+        // each end that is not open; such a face is moved on its own stretch of the body.
+        let reach = top - old_radius + margin;
+        let passes = [(&near, seat), (&far, &beyond)]
+            .into_iter()
+            .any(|(e, at)| !e.open && stands_over(st, at, old_radius, -reach, 0.0).is_some_and(|r| r > old_radius + tol && r < top + tol));
+        let grown = if passes {
+            grow_stretch(st, seat, top - seat.radius, past(&near), past(&far))
+        } else {
+            move_round_face(st, seat, top - seat.radius, &format!("{key}|moved"))
+        };
+        grown.map_err(|e| {
+            let size = if n.form == crate::shaft_spline::SplineForm::Involute { "module" } else { "major_diameter" };
+            DocError::Invalid(format!(
+                "`{size}` makes the spline {} mm across, larger than the shaft's {} mm, and the shaft's round face could not be moved out to it ({e}): give the shaft that diameter where it is made, or tick Fixed diameter (leave `{size}` out, so the spline takes the shaft's own diameter)",
+                show_mm(2.0 * top),
+                show_mm(2.0 * seat.radius)
+            ))
         })?;
         for (e, at, which) in [(&near, seat, "near"), (&far, &beyond, "far")] {
-            if e.end > 0.0 {
-                // The shaft's own end (its chamfer or round, made at the old size) is built up with it, square, to
-                // the end of the body: a ring from just inside the rim of the shaft's end face. A plain chamfer
-                // is cut again below, at the new size.
-                let (from, to) = at.span(-e.end, 0.0);
-                let rim = e.rim;
-                change_kept(
-                    st,
-                    &seat.body,
-                    &format!("{key}|built {which} end|{}|{rim}", e.end),
-                    BoolOp::Union,
-                    "building the shaft's end up",
-                    || {
-                        let inner = rim - margin;
-                        let holes = if inner > 0.0 { vec![Loop2::circle(Vec2::ZERO, inner)] } else { Vec::new() };
-                        let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, top), holes };
-                        let body = extruded(&at.plane, &ring, from, to, &Joints::default(), "ring that builds the shaft's end up")?;
-                        Ok(built_round(body, &ring, "side", "inner"))
-                    },
-                )?;
+            // A plain chamfer on an end went with the moved face along its own cone, which meets the new surface
+            // further into the face: the chamfer is larger now. The end is built up square again, to the end of
+            // the body: a ring from just inside the rim of the shaft's end face, reaching as far into the face as
+            // the cone does. The chamfer is cut again below, at its own size.
+            if !(e.end > 0.0 && e.cone && old_radius > e.rim) {
+                continue;
             }
+            let carried = e.end * (top - old_radius) / (old_radius - e.rim);
+            let (from, to) = at.span(-e.end, carried);
+            let rim = e.rim;
+            change_kept(
+                st,
+                &seat.body,
+                &format!("{key}|built {which} end|{}|{rim}|{carried}", e.end),
+                BoolOp::Union,
+                "building the shaft's end up",
+                || {
+                    let inner = rim - margin;
+                    let holes = if inner > 0.0 { vec![Loop2::circle(Vec2::ZERO, inner)] } else { Vec::new() };
+                    let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, top), holes };
+                    let body = extruded(&at.plane, &ring, from, to, &Joints::default(), "ring that builds the shaft's end up")?;
+                    Ok(built_round(body, &ring, "side", "inner"))
+                },
+            )?;
         }
     } else if resized {
         // A plain ring over the whole face, running on past an end the body ends at, and through what the shaft
         // has on its end. At a shoulder and at a neck it stops with the face.
-        let past = |e: &End| {
-            if e.end > 0.0 {
-                e.end + margin
-            } else if e.free {
-                margin
-            } else {
-                0.0
-            }
-        };
         let (from, to) = seat.span(-past(&near), seat.room + past(&far));
         change_kept(st, &seat.body, &format!("{key}|turned|{from}|{to}"), BoolOp::Cut, "turning the shaft down", || {
             let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, seat.radius + depth + margin), holes: vec![Loop2::circle(Vec2::ZERO, top)] };
@@ -1340,7 +1509,7 @@ fn cut_shaft(st: &mut ModelState, n: &SplineNumbers, plan: &SplinePlan, seat: &S
     // had it from the start.
     let made;
     let seat = if resized {
-        made = Seat { radius: top, ..seat.clone() };
+        made = moved_seat(seat, top - seat.radius);
         &made
     } else {
         seat
@@ -1403,7 +1572,7 @@ fn cut_shaft(st: &mut ModelState, n: &SplineNumbers, plan: &SplinePlan, seat: &S
         // comes out as an open slot; a tool that reached only past the teeth would bore under the step and leave a
         // ring of it over the spaces.
         let above = top.max(seat.radius);
-        let over = stands_over(st, seat, above, length, length + diameter / 2.0).unwrap_or(above);
+        let over = cutter_way_out(stands_over(st, seat, above, length, length + diameter / 2.0))?;
         let out_to = over + margin;
         if over > above {
             // The cutter's section must lie on one side of its axis: a step higher than the cutter's centre is
@@ -1799,20 +1968,52 @@ fn cut_bore(st: &mut ModelState, n: &SplineNumbers, plan: &SplinePlan, seat: &Se
     let seam = seam_angle(n, plan, true);
     // The spline's numbers win: a bore wider than the tips of the hub's teeth is first filled in to them.
     if seat.radius > minor + tol {
-        let sleeve = Region2 { outer: Loop2::circle(Vec2::ZERO, seat.radius + margin), holes: vec![Loop2::circle(Vec2::ZERO, minor)] };
-        let (from, to) = seat.span(0.0, length);
-        let body = extruded(&seat.plane, &sleeve, from, to, &Joints::default(), "sleeve that fills the bore")?;
-        // Its hole is the bore from now on: the tops of the hub's teeth.
-        change(st, &seat.body, &built_round(body, &sleeve, "outside", "bore"), BoolOp::Union, "filling the bore")?;
+        // A bore that is a whole band is filled with a plain sleeve over the teeth. A bore with anything opening
+        // in it is moved instead, so that what opens in it stays open.
+        let moved = whole_band(st, seat) != Some(true);
+        // Where the teeth stop short of the bore's far end, a moved bore is cut back to its own size from the end of
+        // the teeth on: what lies past the bore's far end says how far that cut may run.
+        let rest = if moved && !teeth_end { Some(past_end(st, &beyond, true, major)) } else { None };
+        if moved {
+            // The bore's own face moves in to the tops of the hub's teeth, and every face next to it is carried on
+            // on its own surface: a set screw's hole or a keyway that opens in the bore stays open, with its own
+            // walls, as if the bore had been that small when they were cut.
+            move_round_face(st, seat, old_radius - minor, &format!("{}|moved", tool_key(n, seat))).map_err(|e| {
+                DocError::Invalid(format!(
+                    "the hub's teeth reach in to {} mm across, less than the bore's {} mm, and the bore's face, which has something opening in it (a set screw's hole, a keyway), could not be moved in that far ({e}): give the bore that diameter where it is made",
+                    show_mm(2.0 * minor),
+                    show_mm(2.0 * old_radius)
+                ))
+            })?;
+        } else {
+            // A bore that is a whole band: a plain sleeve in it over the teeth. (It would close what opens in a
+            // bore: such a bore is moved instead, above.)
+            let sleeve = Region2 { outer: Loop2::circle(Vec2::ZERO, seat.radius + margin), holes: vec![Loop2::circle(Vec2::ZERO, minor)] };
+            let (from, to) = seat.span(0.0, length);
+            let body = extruded(&seat.plane, &sleeve, from, to, &Joints::default(), "sleeve that fills the bore")?;
+            // Its hole is the bore from now on: the tops of the hub's teeth.
+            change(st, &seat.body, &built_round(body, &sleeve, "outside", "bore"), BoolOp::Union, "filling the bore")?;
+        }
         for (e, at) in [(&near, seat), (&far, &beyond)] {
             if e.end > 0.0 && e.cone {
                 // The bore's own entry (a chamfer, made at the old size) is filled with it, square, to the end
-                // of the body; the chamfer is cut again below, at the new size.
+                // of the body; the chamfer is cut again below, at the new size. A moved face took the chamfer with
+                // it along the chamfer's own cone, which meets the new bore further in: the ring reaches as far.
+                let carried = if moved && e.rim > old_radius { e.end * (old_radius - minor) / (e.rim - old_radius) } else { 0.0 };
                 let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, e.rim + margin), holes: vec![Loop2::circle(Vec2::ZERO, minor)] };
-                let (from, to) = at.span(-e.end, 0.0);
+                let (from, to) = at.span(-e.end, carried);
                 let body = extruded(&at.plane, &ring, from, to, &Joints::default(), "ring that fills the bore's entry")?;
                 change(st, &seat.body, &built_round(body, &ring, "outside", "bore"), BoolOp::Union, "filling the bore's entry")?;
             }
+        }
+        if let Some(e) = rest {
+            // Past the teeth the bore keeps its own size: a round plug of the bore's own radius is cut out again
+            // from the end of the teeth to the bore's far end, and a little past it where the bore opens out there.
+            let past = if e.open { margin } else { 0.0 };
+            let plug = Region2 { outer: Loop2::circle(Vec2::ZERO, old_radius), holes: Vec::new() };
+            let (from, to) = seat.span(length, seat.room + past);
+            let body = extruded(&seat.plane, &plug, from, to, &Joints::default(), "plug that keeps the rest of the bore")?;
+            change(st, &seat.body, &built_round(body, &plug, "bore", "inner"), BoolOp::Cut, "keeping the rest of the bore")?;
         }
         // The filled bore is still the bore: it keeps the name the bore's own face had.
         also_from(st, &seat.body, "bore", seat.face);
@@ -1865,4 +2066,22 @@ fn cut_bore(st: &mut ModelState, n: &SplineNumbers, plan: &SplinePlan, seat: &Se
     let (from, to) = seat.span(before, stop);
     let body = extruded(&seat.plane, &plug, from, to, &joints, "plug that cuts the hub's teeth")?;
     change(st, &seat.body, &built(body, &|s| names.get(s).cloned(), ["start", "end"]), BoolOp::Cut, "the hub's spline")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A reading of what stands past the end of the teeth that could not be made is refused in words that name the
+    /// cutter and the way out: it is never taken as nothing standing there.
+    #[test]
+    fn an_unread_shoulder_past_the_teeth_is_refused_not_taken_as_none() {
+        assert_eq!(cutter_way_out(Some(14.5)).ok(), Some(14.5));
+        let words = match cutter_way_out(None) {
+            Err(DocError::Invalid(words)) => words,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert!(words.starts_with("`cutter_diameter`"), "{words}");
+        assert!(words.contains("could not be read") && words.contains("leave `cutter_diameter` out"), "{words}");
+    }
 }

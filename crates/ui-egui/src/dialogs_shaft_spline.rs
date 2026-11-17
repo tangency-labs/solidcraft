@@ -372,6 +372,11 @@ pub struct Spline {
     /// Only for a feature saved without one that is found again (a script may leave it out): it keeps the end
     /// it has until a face is picked. A new spline needs the face.
     pub start_optional: [bool; 2],
+    /// For the shaft, then the bore of a reopened feature whose start face is not shown: the round face the
+    /// dialog reopened with and the start the feature has saved. It is sent while that round face is picked and
+    /// no start face is, so the spline keeps its end; a start picked in the row wins, and picking another round
+    /// face drops it.
+    pub saved_start: [Option<(Sel, Vec3)>; 2],
     /// For the Shaft row, then the Bore row: the row holds a face that is not a round face of its kind, as
     /// [`sort_picks`] last read it. The command then goes to the engine as it is, which says what is wrong
     /// with the pick; asking for the start face first would point at the wrong row.
@@ -455,6 +460,7 @@ impl Spline {
             started_cutter: Some(mm(40.0)),
             sorted: None,
             start_optional: [false; 2],
+            saved_start: [None, None],
             not_round: [false; 2],
         }
     }
@@ -612,11 +618,8 @@ impl Spline {
         let teeth = number("teeth")?;
         let addendum = number("addendum")?;
         let shift = number("profile_shift").unwrap_or(0.0);
-        // The tips' circle: the pitch circle (module times teeth) and the addendum and the shift
-        // each side, in modules.
-        let across = teeth + 2.0 * (addendum + shift);
-        let module = diameter / across;
-        (across.is_finite() && across > 0.0 && module.is_finite()).then_some(module)
+        // The kernel's own sizing: the module that puts the tips on the shaft's circle.
+        solidcraft_engine::doc::shaft_spline::module_for_major_radius(teeth, addendum, shift, diameter / 2.0)
     }
 
     /// The command's parameters: each row as typed (its unit made explicit as the design reads
@@ -657,25 +660,31 @@ impl Spline {
         for (part, (face, start, face_key, start_key, face_label, start_label, needed)) in starts.into_iter().enumerate() {
             let Some(face) = face else { continue };
             p[face_key] = face_point(face, face_label)?;
-            match start {
-                Some(start) => p[start_key] = face_point(start, start_label)?,
-                None if [self.start_optional, self.not_round].iter().any(|flags| flags.get(part).copied().unwrap_or(false)) => {}
-                None => return Err(Bad { key: None, words: tr(needed).to_string() }),
+            let flag = |flags: [bool; 2]| flags.get(part).copied().unwrap_or(false);
+            // A reopened feature's saved start, while the round face it was reopened with is picked.
+            let saved = self.saved_start.get(part).and_then(Option::as_ref).filter(|(sel, _)| flag(self.start_optional) && sel == face);
+            match (start, saved) {
+                (Some(start), _) => p[start_key] = face_point(start, start_label)?,
+                (None, Some((_, at))) => p[start_key] = pt(*at),
+                (None, None) if flag(self.start_optional) || flag(self.not_round) => {}
+                (None, None) => return Err(Bad { key: None, words: tr(needed).to_string() }),
             }
         }
         if picks.shaft.is_some() && self.cutter {
             read(doc, &self.cutter_diameter, CUTTER.unit).map_err(|why| bad(CUTTER.key, CUTTER.label, &why))?;
             p[CUTTER.key] = json!(typed(&self.cutter_diameter, CUTTER.unit));
         }
-        // Each chamfer goes with the part it is cut on, and only where it has a size.
+        // Each chamfer goes with the part it is cut on, unless its row is a plain 0. An expression that works
+        // out to 0 today is sent all the same, so the feature keeps it: the rebuild cuts no chamfer of size 0,
+        // and one cut later when a parameter it names grows. A negative size is sent, and the command refuses it.
         for (wanted, f, text) in
             [(self.has_part(picks, false), END_CHAMFER, &self.end_chamfer), (self.has_part(picks, true), ENTRY_CHAMFER, &self.entry_chamfer)]
         {
             if !wanted {
                 continue;
             }
-            let size = read(doc, text, f.unit).map_err(|why| bad(f.key, f.label, &why))?;
-            if size > 0.0 {
+            read(doc, text, f.unit).map_err(|why| bad(f.key, f.label, &why))?;
+            if !plain_zero(text) {
                 p[f.key] = json!(typed(text, f.unit));
             }
         }
@@ -685,6 +694,12 @@ impl Spline {
     /// Reads a newly picked face, once per pick: the shaft's radius (see [`Spline::fit_radius`]), and
     /// how long each picked face is, which the Length the dialog put in itself must fit.
     fn sync_picks(&mut self, s: &Session, picks: Picks<'_>) {
+        // Another round face picked: the start a reopened feature saved for that part no longer applies.
+        for (slot, pick) in self.saved_start.iter_mut().zip([picks.shaft, picks.bore]) {
+            if slot.as_ref().is_some_and(|(sel, _)| Some(sel) != pick) {
+                *slot = None;
+            }
+        }
         let new_shaft = match picks.shaft {
             None => {
                 self.shaft_radius = None;
@@ -757,10 +772,7 @@ impl Spline {
     /// otherwise worked out again by the engine.
     pub fn work_for(&self, doc: &Document, picks: Picks<'_>) -> Arc<Worked> {
         let params = self.params_for(doc, picks);
-        let key = match &params {
-            Ok(p) => p.to_string(),
-            Err(e) => format!("{e:?}"),
-        };
+        let key = work_key(&params);
         if let Some(w) = self.worked.as_ref().filter(|w| w.key == key) {
             return Arc::clone(w);
         }
@@ -769,6 +781,12 @@ impl Spline {
             Ok((p, Arc::new(preview)))
         });
         Arc::new(Worked { key, result })
+    }
+
+    /// Whether the values changed since they were last worked out, refused or not: a refused value left as it is
+    /// asks for no more frames.
+    fn stale(&self, doc: &Document, picks: Picks<'_>) -> bool {
+        self.worked.as_ref().is_none_or(|w| w.key != work_key(&self.params_for(doc, picks)))
     }
 
     /// Works out what the values make when they changed, and keeps the last good preview.
@@ -830,6 +848,14 @@ const ALL_KEYS: &[&str] = &[
     "tooth_width",
 ];
 
+/// The key a result is kept by ([`Worked`]): the parameters as text, or the refusal of a row.
+fn work_key(params: &Result<Value, Bad>) -> String {
+    match params {
+        Ok(p) => p.to_string(),
+        Err(e) => format!("{e:?}"),
+    }
+}
+
 /// A row's text as the command's number: a length in mm, an angle in degrees, or a plain number.
 fn read(doc: &Document, text: &str, unit: Unit) -> Result<f64, String> {
     if text.trim().is_empty() {
@@ -838,6 +864,15 @@ fn read(doc: &Document, text: &str, unit: Unit) -> Result<f64, String> {
     let v = crate::length_input::eval(doc, text, value_kind(unit)).map_err(|e| e.to_string())?;
     let v = if unit == Unit::Angle { v.to_degrees() } else { v };
     if v.is_finite() { Ok(v) } else { Err(tr("shaft_spline.empty").to_string()) }
+}
+
+/// Whether a row's text is a plain number 0, with or without a unit ("0", "0 mm", "0.0in"): no chamfer. An
+/// expression, one that names a parameter or works something out, is not, even where it comes to 0.
+fn plain_zero(text: &str) -> bool {
+    let text = text.trim();
+    let digits = text.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(text.len());
+    let (Some(number), Some(unit)) = (text.get(..digits), text.get(digits..)) else { return false };
+    number.parse::<f64>().is_ok_and(|v| v == 0.0) && solidcraft_engine::doc::expr::unit_info(unit).is_some()
 }
 
 /// How the expressions of a row are read.
@@ -1031,6 +1066,11 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
     // A saved spline keeps the end it has where no start face is shown: OK runs without one there.
     let shown = |input: usize| d.inputs.get(input).is_some_and(|i| !i.items.is_empty());
     spline.start_optional = [shaft.is_some() && !shown(SHAFT_START), bore.is_some() && !shown(BORE_START)];
+    // Where the saved start face is not shown, the start the feature has goes with the command again, so OK
+    // does not move the end of the teeth to the end nearest the round face's pick.
+    let held = |input: usize| d.inputs.get(input).and_then(|i| i.items.first().cloned());
+    spline.saved_start = [(SHAFT, SHAFT_START, shaft_start), (BORE, BORE_START, bore_start)]
+        .map(|(face, start, saved)| saved.as_ref().filter(|_| !shown(start)).and_then(|at| held(face).map(|sel| (sel, at.0))));
     // A shaft spline saved without its size keeps the shaft's diameter; one saved with it keeps
     // the number typed.
     let sized = if spline.kind == 0 { module.is_some() } else { major_diameter.is_some() };
@@ -1214,7 +1254,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, s: &mut Spline, inputs: &[SelInpu
     }
     readouts(ui, doc, s);
     // A changed value is worked out on the next frame, which this asks for.
-    if s.params_for(doc, picks).map(|p| p.to_string()).ok() != s.worked.as_ref().and_then(|w| w.result.as_ref().ok()).map(|(p, _)| p.to_string()) {
+    if s.stale(doc, picks) {
         ui.ctx().request_repaint();
     }
     enter
@@ -1387,13 +1427,15 @@ fn place(rect: Rect, p: &SplinePreview, view: View) -> Place {
     }
 }
 
-/// Points of a circle about the axis within the view, as screen points.
+/// Points of a circle about the axis within the view, as screen points: the whole circle in the whole view
+/// (centred on the axis), the arc that can be seen in a close-up.
 fn circle_points(place: &Place, r: f64, rect: Rect) -> Vec<Pos2> {
+    let whole = place.centre == [0.0, 0.0];
     // Across the view from its centre: the arc that can be seen, with some to spare.
     let seen = (f64::from(rect.width().max(rect.height())) / place.scale).max(0.0);
-    let half = if r > 0.0 { (seen / r).min(std::f64::consts::PI) } else { std::f64::consts::PI };
+    let half = if r > 0.0 && !whole { (seen / r).min(std::f64::consts::PI) } else { std::f64::consts::PI };
     let at = place.centre[1].atan2(place.centre[0]);
-    let at = if place.centre == [0.0, 0.0] { 0.0 } else { at };
+    let at = if whole { 0.0 } else { at };
     let steps = 160;
     (0..=steps).map(|k| place.at(polar(r, at - half + 2.0 * half * f64::from(k) / f64::from(steps)))).collect()
 }

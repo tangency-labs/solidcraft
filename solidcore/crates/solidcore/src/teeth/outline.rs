@@ -171,10 +171,9 @@ impl Piece {
                 ..
             } => {
                 // Each stretch between two knots is one polynomial: smooth, so halving finds its
-                // bends.
-                let at = |t: f64| {
-                    bspline::point(*degree, knots, control, t).unwrap_or([f64::NAN, f64::NAN])
-                };
+                // bends. The spline is checked once, not at every point.
+                let spline = bspline::Checked::new(*degree, knots, control)?;
+                let at = |t: f64| spline.point(t).unwrap_or([f64::NAN, f64::NAN]);
                 let mut out = Vec::new();
                 for stretch in bspline::breaks(*degree, knots, control)?.windows(2) {
                     if let [from, to] = stretch {

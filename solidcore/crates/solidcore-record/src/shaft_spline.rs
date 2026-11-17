@@ -310,6 +310,8 @@ pub struct MasterPlaced {
     pub shaft_arc: MasterArc,
     /// The arc that stands in the hub's outline for what was changed.
     pub hub_arc: MasterArc,
+    /// `hub_arc` turned by the hub's start, so that it lies over the shaft.
+    pub hub_arc_on_shaft: MasterArc,
 }
 
 /// What the numbers make, before any body is touched.
@@ -325,6 +327,13 @@ pub struct SplinePlan {
     pub made: SplineMade,
     /// The master spline as the kernel placed it.
     pub master: Option<MasterPlaced>,
+    /// The angle from one tooth to the next of the teeth as counted, in radians: a full turn over
+    /// the count of teeth. Not the outline's own pitch angle, which is a full turn once a master
+    /// spline is cut in.
+    pub tooth_pitch: f64,
+    /// The angle of the middle of a tooth that stands, in radians counter-clockwise from the x
+    /// axis: tooth 0, or with a master spline the tooth opposite it.
+    pub tooth_at: f64,
 }
 
 /// One tooth space of a shaft as a region closed above by a circle about the axis: what a cutter

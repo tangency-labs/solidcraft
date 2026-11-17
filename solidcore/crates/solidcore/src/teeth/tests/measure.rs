@@ -98,6 +98,36 @@ fn the_gap_is_the_gap_found_the_slow_way() -> Result<(), Error> {
 }
 
 #[test]
+fn a_corner_at_a_repeated_point_is_judged_by_the_chords_on_either_side() -> Result<(), Error> {
+    // A thin counter-clockwise triangle whose tip is given twice: the chord between the two is
+    // of no length. Above the tip, apart from it, a small square.
+    let triangle = Body::new(
+        vec![[-1.0, -0.01], [0.0, 0.0], [0.0, 0.0], [-1.0, 0.01]],
+        Material::Inside,
+    )?;
+    let square = Body::new(
+        vec![
+            [0.009, 0.099],
+            [0.011, 0.099],
+            [0.011, 0.101],
+            [0.009, 0.101],
+        ],
+        Material::Inside,
+    )?;
+    // The parts do not overlap: the square's nearest corner is this far from the tip.
+    let expected = 0.009_f64.hypot(0.099);
+    for (a, b) in [(&triangle, &square), (&square, &triangle)] {
+        let found = gap(a, b, 0.2)?.expect("within reach");
+        assert!(
+            found.distance > 0.0 && (found.distance - expected).abs() < 1e-12,
+            "{} for {expected}",
+            found.distance
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn a_long_bar_beside_a_fine_wheel_is_measured_rightly() -> Result<(), Error> {
     // A bar of four chords, one of them 400 mm long, 0.25 mm from a circle of 20,000 chords.
     let bar = Body::new(

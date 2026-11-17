@@ -490,3 +490,131 @@ fn the_rows_start_from_a_picked_shaft_and_a_typed_size_stays() {
     typed.sync_picks(&session, picks);
     assert_eq!(typed.values[1].get("major_diameter").map(String::as_str), Some("26 mm"));
 }
+
+/// A chamfer row that names a parameter or works something out is sent even where it comes to 0 today, so the
+/// feature keeps the expression and a chamfer comes when the parameter grows; only a plain 0 is no chamfer. A
+/// negative size is sent too, and the command refuses it.
+#[test]
+fn a_chamfer_given_by_an_expression_is_sent_even_where_it_comes_to_zero() {
+    let mut session = Session::default();
+    session.execute("parameters.add", &json!({"name": "c", "expression": "0 mm"})).unwrap();
+    let doc = &session.doc;
+    let typed = |text: &str| json!(crate::length_input::expression(doc, text, ValueKind::Length));
+    let mut s = Spline::new(doc);
+    s.kind = 1;
+    s.make = 2;
+    s.end_chamfer = "c".into();
+    s.entry_chamfer = "c * 2".into();
+    let p = s.command_params(doc, Picks::default()).unwrap();
+    assert_eq!((p.get("end_chamfer").cloned(), p.get("entry_chamfer").cloned()), (Some(typed("c")), Some(typed("c * 2"))), "{p}");
+    // The command takes it, keeps both expressions on the feature, and cuts no chamfer while they come to 0.
+    let mut scratch = session.scratch();
+    scratch.execute(COMMAND, &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    assert!(
+        matches!(scratch.doc.features.last().map(|f| &f.kind), Some(FeatureKind::ShaftSpline { end_chamfer: Some(_), entry_chamfer: Some(_), .. })),
+        "the feature keeps the chamfers' expressions"
+    );
+    // A plain 0, with or without a unit, is no chamfer: nothing is sent.
+    for zero in ["0", "0 mm", "0.0mm", " 0.00 "] {
+        s.end_chamfer = zero.into();
+        s.entry_chamfer = zero.into();
+        let p = s.command_params(doc, Picks::default()).unwrap_or_else(|b| panic!("{zero:?}: {b:?}"));
+        assert!(p.get("end_chamfer").is_none() && p.get("entry_chamfer").is_none(), "{zero:?}: {p}");
+    }
+    // A negative size goes to the command, which says what is wrong with it.
+    s.end_chamfer = "-1 mm".into();
+    let p = s.command_params(doc, Picks::default()).unwrap();
+    assert_eq!(p.get("end_chamfer").cloned(), Some(typed("-1 mm")), "{p}");
+    let refused = session.scratch().execute(COMMAND, &p).unwrap_err().to_string();
+    assert!(refused.contains("`end_chamfer` must be from 0"), "{refused}");
+}
+
+/// A reopened spline whose start face is not shown sends the start it has saved while its own round face is
+/// picked, so OK keeps the end of its teeth; a start picked in the row wins, and another round face drops it.
+#[test]
+fn a_reopened_spline_keeps_its_saved_start_until_another_face_is_picked() {
+    let (session, sel, start) = picked_shaft();
+    let doc = &session.doc;
+    let shaft = Picks { shaft: Some(&sel), ..Picks::default() };
+    // The saved start is on the shaft's bottom end, far from the pick near its top.
+    let bottom = Vec3::new(5.0, 0.0, 0.0);
+    let mut s = Spline::new(doc);
+    s.kind = 1;
+    s.cutter = false;
+    s.start_optional = [true, false];
+    s.saved_start = [Some((sel.clone(), bottom)), None];
+    s.sync_picks(&session, shaft);
+    s.fit = true;
+    assert!(s.saved_start[0].is_some(), "the face reopened with is still picked");
+    let p = s.command_params(doc, shaft).unwrap();
+    assert_eq!(p.get("shaft_start"), Some(&pt(bottom)), "{p}");
+    // The command keeps the start at the bottom, not at the end nearest the pick.
+    let mut scratch = session.scratch();
+    scratch.execute(COMMAND, &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    match scratch.doc.features.last().map(|f| &f.kind) {
+        Some(FeatureKind::ShaftSpline { shaft_start: Some(at), .. }) => assert_eq!(pt(at.0), pt(bottom)),
+        other => panic!("no Shaft Spline with a start: {other:?}"),
+    }
+    // A start picked in the row wins.
+    let p = s.command_params(doc, Picks { shaft_start: Some(&start), ..shaft }).unwrap();
+    assert_eq!(p.get("shaft_start"), Some(&pt(Vec3::new(5.0, 0.0, 60.0))), "{p}");
+    // Another round face picked: the saved start is not sent, and the dialog drops it.
+    let other = Sel::Face { body: "Shaft".into(), index: 0, point: Vec3::new(-15.0, 0.0, 30.0) };
+    let elsewhere = Picks { shaft: Some(&other), ..Picks::default() };
+    s.fit = false;
+    let p = s.command_params(doc, elsewhere).unwrap();
+    assert!(p.get("shaft_start").is_none(), "{p}");
+    s.sync_picks(&session, elsewhere);
+    assert!(s.saved_start[0].is_none());
+}
+
+/// A value the engine refuses, left as it is, is not worked out again: the dialog asks for another frame only
+/// while the values differ from the ones last worked out.
+#[test]
+fn a_refused_value_left_as_it_is_asks_for_no_more_frames() {
+    let doc = Document::default();
+    let picks = Picks::default();
+    assert!(Spline::new(&doc).stale(&doc, picks), "nothing worked out yet");
+    let mut s = Spline::new(&doc);
+    // Hub teeth that reach into the shaft's root fillets.
+    s.set("hub_addendum", "0.85");
+    s.refresh(&doc, picks);
+    assert!(s.worked.as_ref().is_some_and(|w| w.result.is_err()), "refused");
+    assert!(!s.stale(&doc, picks), "nothing changed since it was refused");
+    s.set("hub_addendum", "0.9");
+    assert!(s.stale(&doc, picks), "a changed value is worked out again");
+}
+
+/// The whole view draws each circle whole, the largest too: its first and last points meet.
+#[test]
+fn the_whole_view_draws_every_circle_whole() {
+    let doc = Document::default();
+    let mut s = Spline::new(&doc);
+    s.kind = 1;
+    s.make = 2;
+    let w = s.work(&doc);
+    let Ok((_, preview)) = &w.result else { panic!("{:?}", w.result) };
+    let rect = Rect::from_min_size(pos2(20.0, 30.0), vec2(240.0, 180.0));
+    let at = place(rect, preview, View::Whole);
+    assert!(preview.circles.iter().any(|(c, _)| *c == SplineCircle::HubOutside), "the hub's outside is drawn");
+    for (which, r) in &preview.circles {
+        let points = circle_points(&at, *r, rect);
+        let ends = points.first().copied().zip(points.last().copied());
+        assert!(ends.is_some_and(|(a, b)| a.distance(b) < 0.01), "{which:?}: {ends:?}");
+    }
+}
+
+/// The size that fits a picked shaft is the kernel's: the module that puts the tips of the teeth on the shaft's
+/// circle. A diameter that is no size makes none.
+#[test]
+fn the_size_that_fits_a_shaft_is_the_kernels_and_a_diameter_that_is_no_size_makes_none() {
+    let doc = Document::default();
+    let s = Spline::new(&doc);
+    // 20 teeth and an addendum of 0.5: 30 mm across over 21 modules.
+    let module = s.size_fitting(&doc, 0, 30.0);
+    assert_eq!(module, solidcraft_engine::doc::shaft_spline::module_for_major_radius(20.0, 0.5, 0.0, 15.0));
+    assert!(module.is_some_and(|m| (m - 30.0 / 21.0).abs() < 1e-12), "{module:?}");
+    for diameter in [0.0, -30.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(s.size_fitting(&doc, 0, diameter), None, "{diameter}");
+    }
+}

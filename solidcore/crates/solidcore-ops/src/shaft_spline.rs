@@ -40,6 +40,18 @@ pub fn fit_to_shaft_within(numbers: &mut SplineNumbers, radius: f64) {
     numbers.major_diameter = fitted.major_diameter;
 }
 
+/// The module that puts the tips of involute teeth on the circle of radius `radius` (mm), with
+/// the addendum and the profile shift in modules. None where no positive finite module does.
+#[must_use]
+pub fn module_for_major_radius(
+    teeth: f64,
+    addendum: f64,
+    profile_shift: f64,
+    radius: f64,
+) -> Option<f64> {
+    planner::module_for_major_radius(teeth, addendum, profile_shift, radius)
+}
+
 /// How far a radius of the spline may be from a picked face's own and still be taken as the same
 /// (mm).
 #[must_use]
@@ -123,7 +135,9 @@ pub fn bezier_pieces(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore_record::shaft_spline::{OutlinePiece, SplineForm, SplineMake, ToothRole};
+    use solidcore_record::shaft_spline::{
+        OutlinePiece, SplineForm, SplineMake, SplineMaster, ToothRole,
+    };
 
     /// A straight-sided spline of six teeth, 28 over 23 mm, 6 mm wide: a shaft and its hub.
     fn straight() -> SplineNumbers {
@@ -196,6 +210,81 @@ mod tests {
             .any(|piece| matches!(piece, OutlinePiece::Arc { .. } | OutlinePiece::Line { .. })));
         assert!(space_section(&made.shaft, f64::NAN, 14.5).is_err());
         assert!(space_section(&made.shaft, 0.0, 13.0).is_err());
+    }
+
+    #[test]
+    fn the_plan_carries_the_pitch_of_the_teeth_and_the_tooth_a_close_up_shows() {
+        let tau = std::f64::consts::TAU;
+        // Without a master spline: tooth 0, on angle 0.
+        let plain = plan(&straight()).unwrap();
+        assert_eq!(plain.tooth_pitch.to_bits(), (tau / 6.0).to_bits());
+        assert_eq!(plain.tooth_at.to_bits(), 0.0_f64.to_bits());
+        for (form, angle) in [
+            (SplineMaster::ToothOut, 0.0),
+            (SplineMaster::ToothOut, 47.0),
+            (SplineMaster::WideTooth, -100.0),
+        ] {
+            let made = plan(&SplineNumbers {
+                master: form,
+                master_angle: Some(angle),
+                ..straight()
+            })
+            .unwrap();
+            // The outline is one period of the whole ring, a full turn; the teeth as counted are
+            // a sixth of one.
+            assert_eq!(made.shaft.pitch_angle.to_bits(), tau.to_bits());
+            assert_eq!(made.tooth_pitch.to_bits(), (tau / 6.0).to_bits());
+            let m = made.master.unwrap();
+            // The tooth opposite the master spline.
+            let opposite = (m.tooth + 3) % 6;
+            let at = m.turn + made.tooth_pitch * f64::from(opposite);
+            assert_eq!(made.tooth_at.to_bits(), at.to_bits(), "{form:?} {angle}");
+            // The hub's arc laid over the shaft: turned by the hub's start.
+            assert_eq!(
+                m.hub_arc_on_shaft.radius.to_bits(),
+                m.hub_arc.radius.to_bits()
+            );
+            let start = m.hub_arc.start + made.hub_start;
+            let end = m.hub_arc.end + made.hub_start;
+            assert_eq!(m.hub_arc_on_shaft.start.to_bits(), start.to_bits());
+            assert_eq!(m.hub_arc_on_shaft.end.to_bits(), end.to_bits());
+        }
+    }
+
+    #[test]
+    fn the_module_for_a_radius_puts_the_tips_on_it() {
+        // 20 teeth, addendum 0.5: the tips lie at the module times 10.5.
+        let module = module_for_major_radius(20.0, 0.5, 0.0, 15.0).unwrap();
+        assert_eq!(module.to_bits(), (2.0 * 15.0 / 21.0_f64).to_bits());
+        // With a profile shift of 0.25 the tips lie at the module times 10.75.
+        let shifted = module_for_major_radius(20.0, 0.5, 0.25, 15.0).unwrap();
+        assert_eq!(shifted.to_bits(), (2.0 * 15.0 / 21.5_f64).to_bits());
+        for (teeth, addendum, shift, radius) in [
+            (20.0, 0.5, 0.0, 0.0),
+            (20.0, 0.5, 0.0, -15.0),
+            (20.0, 0.5, 0.0, f64::NAN),
+            (20.0, 0.5, 0.0, f64::INFINITY),
+            (20.0, -10.5, 0.0, 15.0),
+            (20.0, -20.0, 0.0, 15.0),
+            (f64::NAN, 0.5, 0.0, 15.0),
+            (20.0, 0.5, f64::INFINITY, 15.0),
+            (1e-300, 0.0, 0.0, f64::MAX),
+        ] {
+            assert_eq!(
+                module_for_major_radius(teeth, addendum, shift, radius),
+                None,
+                "{teeth} {addendum} {shift} {radius}"
+            );
+        }
+        // A spline fitted to a shaft takes the same module.
+        let mut numbers = SplineNumbers {
+            form: SplineForm::Involute,
+            teeth: 20,
+            module: None,
+            ..straight()
+        };
+        fit_to_shaft_within(&mut numbers, 15.0);
+        assert_eq!(numbers.module.map(f64::to_bits), Some(module.to_bits()));
     }
 
     #[test]

@@ -21,6 +21,7 @@ const NOT_A_SPLINE: Error = Error::Invalid {
 /// empty, and no knot inside the range repeated more often than the degree (the curve would break
 /// there).
 pub fn range(degree: usize, knots: &[f64], control: &[Point]) -> Result<(f64, f64), Error> {
+    visited(knots.len().saturating_add(control.len()));
     let n = control.len();
     if !(1..=MAX_DEGREE).contains(&degree)
         || n <= degree
@@ -68,13 +69,25 @@ pub fn point(degree: usize, knots: &[f64], control: &[Point], t: f64) -> Result<
     while span < last_span && knots.get(span + 1).is_some_and(|&next| next <= t) {
         span += 1;
     }
-    let mut d: Vec<Point> = control
-        .get(span - degree..=span)
-        .ok_or(NOT_A_SPLINE)?
-        .to_vec();
+    visited(span - degree + 1);
+    de_boor(degree, knots, control, span, t)
+}
+
+/// The point at `t` (already in the range) of a spline that [`range`] accepted, on the span `span`
+/// (de Boor's steps).
+fn de_boor(
+    degree: usize,
+    knots: &[f64],
+    control: &[Point],
+    span: usize,
+    t: f64,
+) -> Result<Point, Error> {
+    visited((degree + 1) * (degree + 2) / 2);
+    let first = span.checked_sub(degree).ok_or(NOT_A_SPLINE)?;
+    let mut d: Vec<Point> = control.get(first..=span).ok_or(NOT_A_SPLINE)?.to_vec();
     for round in 1..=degree {
         for j in (round..=degree).rev() {
-            let i = j + span - degree;
+            let i = j + first;
             let (lo, hi) = (
                 *knots.get(i).ok_or(NOT_A_SPLINE)?,
                 *knots.get(i + 1 + degree - round).ok_or(NOT_A_SPLINE)?,
@@ -92,6 +105,80 @@ pub fn point(degree: usize, knots: &[f64], control: &[Point], t: f64) -> Result<
         }
     }
     d.get(degree).copied().ok_or(NOT_A_SPLINE)
+}
+
+/// A spline that [`range`] has accepted, to be evaluated at many parameters without checking it
+/// again: [`Checked::point`] gives exactly what [`point`] gives, and finds the span of a parameter
+/// by halving instead of walking the knots from the start.
+pub(super) struct Checked<'a> {
+    degree: usize,
+    knots: &'a [f64],
+    control: &'a [Point],
+    from: f64,
+    to: f64,
+}
+
+impl<'a> Checked<'a> {
+    /// The spline, if `degree`, `knots` and `control` describe one (see [`range`]).
+    pub(super) fn new(
+        degree: usize,
+        knots: &'a [f64],
+        control: &'a [Point],
+    ) -> Result<Checked<'a>, Error> {
+        let (from, to) = range(degree, knots, control)?;
+        Ok(Checked {
+            degree,
+            knots,
+            control,
+            from,
+            to,
+        })
+    }
+
+    /// The point at the parameter `t`, which is taken into the spline's range, as [`point`] gives
+    /// it.
+    pub(super) fn point(&self, t: f64) -> Result<Point, Error> {
+        if t.is_nan() {
+            return Err(NOT_A_SPLINE);
+        }
+        let t = t.max(self.from).min(self.to);
+        // The span of `t`: the last knot at or before it among those that start a span of the
+        // range, as `point` finds it. The knots are in order, so halving finds the same one.
+        let last_span = self.control.len().saturating_sub(1);
+        let (mut low, mut high) = (self.degree, last_span);
+        let mut halvings = 1;
+        while low < high {
+            halvings += 1;
+            // The upper of the two middles, so that `low` moves up with every step.
+            let between = high - low;
+            let middle = low + between / 2 + between % 2;
+            if self.knots.get(middle).is_some_and(|&k| k <= t) {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        visited(halvings);
+        de_boor(self.degree, self.knots, self.control, low, t)
+    }
+}
+
+/// Counts the knots and control points looked at, for the tests that bound the work of sampling a
+/// spline.
+#[cfg(test)]
+fn visited(count: usize) {
+    let count = u64::try_from(count).unwrap_or(u64::MAX);
+    VISITED.with(|v| v.set(v.get().saturating_add(count)));
+}
+
+/// Outside the tests nothing is counted.
+#[cfg(not(test))]
+fn visited(_count: usize) {}
+
+#[cfg(test)]
+thread_local! {
+    /// How many knots and control points the spline functions have looked at on this thread.
+    pub(super) static VISITED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// The knots inside a spline's range where one polynomial piece ends and the next begins, with the

@@ -778,6 +778,161 @@ fn the_shaft_is_turned_down_or_built_up_to_the_spline_and_keeps_its_name() {
     }
 }
 
+/// A hole across the shaft, a keyway and a flat, all clear of the 20 mm the teeth of [`straight`] take from the top
+/// of a 60 mm shaft, and each cut right through whatever radius the shaft has.
+fn openings(s: &mut Session) {
+    run(s, "solid.cylinder", json!({"radius": 2, "height": 80, "axis": "Y", "base": [0, -40, 20], "operation": "cut", "targets": ["Shaft"]}));
+    run(s, "solid.box", json!({"length": 40, "width": 4, "height": 10, "corner": [9, -2, 26], "operation": "cut", "targets": ["Shaft"]}));
+    run(s, "solid.box", json!({"length": 40, "width": 80, "height": 8, "corner": [-49, -40, 4], "operation": "cut", "targets": ["Shaft"]}));
+}
+
+/// What opens in a shaft's round face stays open when the spline resizes the shaft: the hole, the keyway and the
+/// flat are carried to the new surface along their own walls. Cutting them before the spline gives the very solid
+/// that cutting them after it gives, whether the shaft is built up or turned down.
+#[test]
+fn what_opens_in_a_shaft_stays_open_when_the_spline_resizes_it() {
+    for radius in [12.0, 16.0] {
+        let spline = with(straight(), json!({"shaft_face": [radius, 0, 55]}));
+        let mut before = Session::default();
+        let c = shaft(&mut before, radius, 60.0);
+        openings(&mut before);
+        run(&mut before, CMD, spline.clone());
+        assert!(notes(&before).is_empty(), "{radius}: {:?}", notes(&before));
+        let mut after = Session::default();
+        shaft(&mut after, radius, 60.0);
+        run(&mut after, CMD, spline);
+        openings(&mut after);
+        assert!(notes(&after).is_empty(), "{radius}: {:?}", notes(&after));
+        assert_close(&format!("a {radius} mm shaft, cut before the spline and after it"), volume(&mut before, "Shaft"), volume(&mut after, "Shaft"));
+        // Just under the new 14 mm surface: open in the hole, the keyway and the flat, whole beside them.
+        assert_eq!(material_at(&before, "Shaft", 13.5, 20.0, &[90.0, 270.0]), [false, false], "{radius}: the hole across");
+        assert_eq!(material_at(&before, "Shaft", 13.5, 31.0, &[0.0]), [false], "{radius}: the keyway");
+        assert_eq!(material_at(&before, "Shaft", 13.5, 8.0, &[180.0]), [false], "{radius}: the flat");
+        assert_eq!(material_at(&before, "Shaft", 13.5, 20.0, &[0.0, 180.0]), [true, true], "{radius}: the shaft beside the hole");
+        assert_eq!(material_at(&before, "Shaft", 14.5, 20.0, &[0.0]), [false], "{radius}: the shaft is the spline's 28 mm");
+        // The surface is still the shaft's own.
+        let fs = faces(&mut before, "Shaft");
+        assert!(
+            fs.iter().any(|f| stem(&f.name) == format!("F{c}:side") && f.radius.is_some_and(|r| (r - 14.0).abs() < 1e-9)),
+            "{radius}: the shaft's surface keeps its name at the new radius: {fs:?}"
+        );
+    }
+}
+
+/// A chamfer or a round the shaft has on its far end keeps its own size when the shaft is built up, with a hole
+/// across the shaft and without one: the same solid as a chamfer or a round of that size made on the larger shaft
+/// after the spline.
+#[test]
+fn a_chamfer_or_a_round_on_the_end_of_a_shaft_keeps_its_size_when_the_shaft_is_built_up() {
+    let hole = |s: &mut Session| {
+        run(s, "solid.cylinder", json!({"radius": 2, "height": 80, "axis": "Y", "base": [0, -40, 20], "operation": "cut", "targets": ["Shaft"]}));
+    };
+    for (tool, size) in [("solid.chamfer", "distance"), ("solid.fillet", "radius")] {
+        let on_the_end = |s: &mut Session, radius: f64| {
+            let mut p = json!({"edges": [[radius, 0, 0]], size: 1});
+            if tool == "solid.chamfer" {
+                p = with(p, json!({"tangent_chain": false}));
+            }
+            run(s, tool, p);
+        };
+        for holed in [true, false] {
+            let mut before = Session::default();
+            shaft(&mut before, 12.0, 60.0);
+            if holed {
+                hole(&mut before);
+            }
+            on_the_end(&mut before, 12.0);
+            run(&mut before, CMD, with(straight(), json!({"shaft_face": [12, 0, 55]})));
+            assert!(notes(&before).is_empty(), "{tool}, hole {holed}: {:?}", notes(&before));
+            let mut after = Session::default();
+            shaft(&mut after, 12.0, 60.0);
+            run(&mut after, CMD, with(straight(), json!({"shaft_face": [12, 0, 55]})));
+            if holed {
+                hole(&mut after);
+            }
+            on_the_end(&mut after, 14.0);
+            assert!(notes(&after).is_empty(), "{tool}, hole {holed}: {:?}", notes(&after));
+            assert_close(
+                &format!("{tool} on the far end (hole {holed}), made before the spline and after it"),
+                volume(&mut before, "Shaft"),
+                volume(&mut after, "Shaft"),
+            );
+            assert_eq!(material_at(&before, "Shaft", 13.5, 20.0, &[90.0, 270.0]), [!holed, !holed], "{tool}: the hole across, where there is one");
+        }
+    }
+}
+
+/// A shaft whose spline is larger than the collar next to its round face grows past the collar, and what opens in
+/// the round face stays open there too: the same solid as cutting the openings after the spline.
+#[test]
+fn a_shaft_grows_past_the_collar_next_to_it_and_what_opens_in_it_stays_open() {
+    let collar = |s: &mut Session| {
+        run(s, "solid.cylinder", json!({"radius": 16, "height": 10, "base": [0, 0, -10], "operation": "join", "targets": ["Shaft"]}));
+    };
+    // 34 mm across over a 32 mm collar.
+    let large = with(straight(), json!({"shaft_face": [12, 0, 55], "major_diameter": 34, "minor_diameter": 29, "tooth_width": 7}));
+    let mut plain = Session::default();
+    shaft(&mut plain, 12.0, 60.0);
+    collar(&mut plain);
+    run(&mut plain, CMD, large.clone());
+    assert!(notes(&plain).is_empty(), "{:?}", notes(&plain));
+    assert_eq!(material_at(&plain, "Shaft", 16.5, 20.0, &[0.0, 90.0]), [true, true], "the shaft is larger than its collar now");
+    assert_eq!(material_at(&plain, "Shaft", 16.5, -5.0, &[0.0]), [false], "the collar keeps its own size");
+    let mut before = Session::default();
+    shaft(&mut before, 12.0, 60.0);
+    collar(&mut before);
+    openings(&mut before);
+    run(&mut before, CMD, large.clone());
+    assert!(notes(&before).is_empty(), "{:?}", notes(&before));
+    let mut after = Session::default();
+    shaft(&mut after, 12.0, 60.0);
+    collar(&mut after);
+    run(&mut after, CMD, large);
+    openings(&mut after);
+    assert!(notes(&after).is_empty(), "{:?}", notes(&after));
+    assert_close("a shaft next to a collar, cut before the spline and after it", volume(&mut before, "Shaft"), volume(&mut after, "Shaft"));
+    assert_eq!(material_at(&before, "Shaft", 16.5, 20.0, &[90.0, 270.0]), [false, false], "the hole across");
+    assert_eq!(material_at(&before, "Shaft", 16.5, 20.0, &[0.0, 180.0]), [true, true], "the shaft beside the hole");
+}
+
+/// What opens in a hub's bore stays open when the bore is narrowed to the tops of the hub's teeth: a set screw's
+/// hole cut before the spline gives the very solid that cutting it after the spline gives, where the teeth run
+/// the whole bore and where they stop short of its far end (the bore then keeps its own size past them).
+#[test]
+fn what_opens_in_a_bore_stays_open_when_the_spline_narrows_it() {
+    let screw_holes = |s: &mut Session, thick: f64| {
+        // One within the 20 mm of the teeth, and one past them where the hub is long enough.
+        run(s, "solid.cylinder", json!({"radius": 1.5, "height": 80, "axis": "Y", "base": [0, -40, 10], "operation": "cut", "targets": ["Hub"]}));
+        if thick > 26.0 {
+            run(s, "solid.cylinder", json!({"radius": 1.5, "height": 80, "axis": "X", "base": [-40, 0, 25], "operation": "cut", "targets": ["Hub"]}));
+        }
+    };
+    let minor = planned(&numbers(6, 28.0, 6.0)).hub.least_radius;
+    assert!(minor < 12.5, "the test's bore of 13 mm must be wider than the tops of the hub's teeth at {minor}");
+    for thick in [20.0, 30.0] {
+        let spline = with(straight(), json!({"bore_face": [13, 0, 5], "bore_start": [15, 0, 0]}));
+        let mut before = Session::default();
+        ring(&mut before, 22.0, 13.0, 0.0, thick);
+        screw_holes(&mut before, thick);
+        run(&mut before, CMD, spline.clone());
+        assert!(notes(&before).is_empty(), "{thick}: {:?}", notes(&before));
+        let mut after = Session::default();
+        ring(&mut after, 22.0, 13.0, 0.0, thick);
+        run(&mut after, CMD, spline);
+        screw_holes(&mut after, thick);
+        assert!(notes(&after).is_empty(), "{thick}: {:?}", notes(&after));
+        assert_close(
+            &format!("a hub {thick} mm long, drilled before the spline and after it"),
+            volume(&mut before, "Hub"),
+            volume(&mut after, "Hub"),
+        );
+        if thick > 26.0 {
+            // Past the teeth the bore keeps its own 13 mm.
+            assert_eq!(material_at(&before, "Hub", 12.5, 27.0, &[45.0]), [false], "{thick}: the bore past the teeth");
+        }
+    }
+}
+
 #[test]
 fn a_size_left_out_or_given_to_its_last_places_is_the_shaft_own() {
     let want = cut_shaft_volume(15.0, 60.0, shaft_area(&numbers(6, 30.0, 6.0)), 20.0);
@@ -1508,6 +1663,43 @@ fn the_preview_refuses_what_the_command_refuses_in_the_same_words() {
         let turn = preview.master.as_ref().expect("a master spline").turn.to_radians();
         let pitches = (preview.tooth_at - turn) / preview.pitch;
         assert!((pitches - pitches.round()).abs() < 1e-9 && (0.0..6.0).contains(&pitches.round()), "{form}: {pitches} pitches from the turn");
+    }
+}
+
+/// The drawing's pitch, the tooth its close-up shows and the master spline's arcs are the kernel plan's own numbers,
+/// copied bit for bit: the engine works out no angle of its own.
+#[test]
+fn the_preview_takes_the_pitch_the_tooth_and_the_arcs_from_the_kernel_plan() {
+    let plain = planned(&numbers(6, 28.0, 6.0));
+    assert_eq!((plain.tooth_pitch.to_bits(), plain.tooth_at.to_bits()), ((TAU / 6.0).to_bits(), 0.0_f64.to_bits()));
+    let preview = shaft_spline_preview(&straight()).expect("the preview draws it");
+    assert_eq!((preview.pitch.to_bits(), preview.tooth_at.to_bits()), (plain.tooth_pitch.to_bits(), plain.tooth_at.to_bits()));
+    for (form, master) in [("tooth_out", SplineMaster::ToothOut), ("wide_tooth", SplineMaster::WideTooth)] {
+        for angle in [0.0, 47.0, -100.0] {
+            let p = with(straight(), json!({"make": "both", "hub_diameter": 40, "master_spline": form, "master_angle": angle}));
+            let preview = shaft_spline_preview(&p).expect("the preview draws it");
+            let made = planned(&SplineNumbers { master, master_angle: Some(angle), ..numbers(6, 28.0, 6.0) });
+            let m = made.master.as_ref().expect("a master spline");
+            // The plan's numbers are the ones the engine used to work out itself.
+            assert_eq!(made.tooth_pitch.to_bits(), (TAU / 6.0).to_bits(), "{form} {angle}");
+            assert_eq!(made.tooth_at.to_bits(), (m.turn + made.tooth_pitch * f64::from((m.tooth + 3) % 6)).to_bits(), "{form} {angle}");
+            assert_eq!(m.hub_arc_on_shaft.start.to_bits(), (m.hub_arc.start + made.hub_start).to_bits(), "{form} {angle}");
+            assert_eq!(m.hub_arc_on_shaft.end.to_bits(), (m.hub_arc.end + made.hub_start).to_bits(), "{form} {angle}");
+            // And the preview copies them.
+            assert_eq!(
+                (preview.pitch.to_bits(), preview.tooth_at.to_bits()),
+                (made.tooth_pitch.to_bits(), made.tooth_at.to_bits()),
+                "{form} {angle}"
+            );
+            let drawn = preview.master.as_ref().expect("a master spline");
+            for (got, want) in [(drawn.shaft_arc, m.shaft_arc), (drawn.hub_arc, m.hub_arc_on_shaft)] {
+                assert_eq!(
+                    [got.radius, got.start, got.end].map(f64::to_bits),
+                    [want.radius, want.start, want.end].map(f64::to_bits),
+                    "{form} {angle}"
+                );
+            }
+        }
     }
 }
 

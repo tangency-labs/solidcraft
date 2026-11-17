@@ -4,7 +4,7 @@
 //! whichever module made them; and parts placed where they are not numbers refused by the
 //! measurement.
 
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, TAU};
 
 use super::common::{check_outline, Dice};
 use crate::teeth::involute::{spline_pair, External, Fit};
@@ -280,6 +280,96 @@ fn what_is_not_a_spline_is_refused() {
         &[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]
     )); // breaks at 0.5
     assert!(bspline::point(degree, &knots, &control, f64::NAN).is_err());
+}
+
+#[test]
+fn a_checked_spline_gives_exactly_the_points_bspline_point_gives() -> Result<(), Error> {
+    let mut dice = Dice(0x5B1);
+    let mut compared = 0;
+    for round in 0..600 {
+        let degree = 1 + round % bspline::MAX_DEGREE;
+        let n = degree + 1 + dice.roll() % 30;
+        // Knots in order, each value up to `degree` times, every other spline with clamped ends.
+        let mut knots: Vec<f64> = Vec::new();
+        let mut k = (dice.roll() % 100) as f64 / 10.0 - 5.0;
+        while knots.len() < n + degree + 1 {
+            for _ in 0..=(dice.roll() % degree) {
+                if knots.len() < n + degree + 1 {
+                    knots.push(k);
+                }
+            }
+            k += (1 + dice.roll() % 50) as f64 / 7.0;
+        }
+        if round % 2 == 0 {
+            let (from, to) = (knots[degree], knots[n]);
+            knots[..degree].fill(from);
+            knots[n + 1..].fill(to);
+        }
+        let control: Vec<Point> = (0..n)
+            .map(|_| {
+                [
+                    (dice.roll() % 10_000) as f64 / 100.0 - 50.0,
+                    (dice.roll() % 10_000) as f64 / 100.0 - 50.0,
+                ]
+            })
+            .collect();
+        let checked = bspline::Checked::new(degree, &knots, &control);
+        assert_eq!(
+            checked.is_ok(),
+            bspline::range(degree, &knots, &control).is_ok(),
+            "round {round}"
+        );
+        let Ok(spline) = checked else { continue };
+        let (from, to) = bspline::range(degree, &knots, &control)?;
+        // Every knot, the middles between them, beyond either end, and places in between.
+        let mut places = knots.clone();
+        places.extend(knots.windows(2).map(|w| 0.5 * (w[0] + w[1])));
+        places.extend([from - 1.0, to + 1.0, f64::NEG_INFINITY, f64::INFINITY]);
+        places.extend((0..40).map(|_| from + (to - from) * (dice.roll() % 1001) as f64 / 1000.0));
+        for t in places {
+            let expected = bspline::point(degree, &knots, &control, t)?;
+            let found = spline.point(t)?;
+            assert!(
+                expected[0].to_bits() == found[0].to_bits()
+                    && expected[1].to_bits() == found[1].to_bits(),
+                "round {round}, degree {degree}, at {t}: {found:?} for {expected:?}"
+            );
+            compared += 1;
+        }
+        assert!(spline.point(f64::NAN).is_err());
+    }
+    assert!(compared > 20_000, "{compared}");
+    Ok(())
+}
+
+#[test]
+fn a_long_spline_is_cut_into_chords_without_checking_it_at_every_point() -> Result<(), Error> {
+    // A spline of degree 1 with 2,000 spans along a quarter circle: one tooth of four.
+    let spans = 2_000_usize;
+    let control: Vec<Point> = (0..=spans)
+        .map(|i| {
+            let a = -FRAC_PI_4 + FRAC_PI_2 * i as f64 / spans as f64;
+            [a.cos(), a.sin()]
+        })
+        .collect();
+    let knots: Vec<f64> = (0..spans + 3)
+        .map(|j| j.saturating_sub(1).min(spans) as f64)
+        .collect();
+    let piece = Piece::Spline {
+        degree: 1,
+        knots,
+        control,
+        role: Role::Tip,
+    };
+    bspline::VISITED.with(|v| v.set(0));
+    let outline = Outline::new(4, vec![piece], 1e-3)?;
+    let visited = bspline::VISITED.with(std::cell::Cell::get);
+    // Each span is evaluated 41 times, each time looking at about 15 knots and control points,
+    // and the whole spline (4,004 of them) is checked a few times: at most 1,500 for each span.
+    // Checking the whole spline again at every evaluation looks at more than 300 million.
+    assert!(visited <= 3_000_000, "{visited}");
+    assert_eq!(outline.points().len(), 4 * 8 * spans);
+    Ok(())
 }
 
 #[test]

@@ -149,6 +149,16 @@ pub struct SplinePlan {
     pub made: SplineMade,
     /// The master spline as placed.
     pub master: Option<master_spline::MasterSpline>,
+    /// The angle from one tooth to the next of the teeth as counted, in radians: a full turn over
+    /// the count of teeth. Not the outline's own pitch angle, which is a full turn once a master
+    /// spline is cut in.
+    pub tooth_pitch: f64,
+    /// The angle of the middle of a tooth that stands, in radians counter-clockwise from the x
+    /// axis: tooth 0, or with a master spline the tooth opposite it.
+    pub tooth_at: f64,
+    /// With a master spline: the arc that stands in the hub's outline for what was changed,
+    /// turned by the hub's start so that it lies over the shaft.
+    pub hub_arc_on_shaft: Option<master_spline::Span>,
 }
 
 /// The numbers a shaft spline comes to. Diameters and gaps in millimetres.
@@ -643,6 +653,27 @@ fn straight_pair(n: &SplineNumbers) -> Result<Made, SplineRefusal> {
     Ok(Made { pair, made })
 }
 
+/// The module that puts the tips of involute teeth on the circle of radius `radius`: the tips lie
+/// at half the module times the teeth, and the addendum and the profile shift in modules, so the
+/// module is `2 radius / (teeth + 2 (addendum + profile_shift))`. None where that divisor or the
+/// module is not a positive finite number.
+#[must_use]
+pub fn module_for_major_radius(
+    teeth: f64,
+    addendum: f64,
+    profile_shift: f64,
+    radius: f64,
+) -> Option<f64> {
+    let across = teeth + 2.0 * (addendum + profile_shift);
+    if across.is_finite() && across > 0.0 {
+        let module = 2.0 * radius / across;
+        if module.is_finite() && module > 0.0 {
+            return Some(module);
+        }
+    }
+    None
+}
+
 /// For a spline cut on a shaft that is there, the size left out is the shaft's own: the spline's
 /// major diameter is the diameter of the shaft, whose radius is `radius`. For involute teeth that
 /// fixes the module (the circle of the tips is the pitch circle and, each side, the addendum and
@@ -652,11 +683,12 @@ fn fit_to_shaft(n: &mut SplineNumbers, radius: f64) {
     match n.form {
         SplineForm::Involute if n.module.is_none() => {
             // The same values the plan takes where they are left out.
-            let across = f64::from(n.teeth)
-                + 2.0 * (n.addendum.unwrap_or(0.5) + n.profile_shift.unwrap_or(0.0));
-            if across.is_finite() && across > 0.0 {
-                n.module = Some(2.0 * radius / across);
-            }
+            n.module = module_for_major_radius(
+                f64::from(n.teeth),
+                n.addendum.unwrap_or(0.5),
+                n.profile_shift.unwrap_or(0.0),
+                radius,
+            );
         }
         SplineForm::Straight | SplineForm::Serration if n.major_diameter.is_none() => {
             n.major_diameter = Some(2.0 * radius);
@@ -837,9 +869,24 @@ pub fn plan(n: &SplineNumbers) -> Result<SplinePlan, SplineRefusal> {
         made.master_turn = Some(keyed.placement.turn.to_degrees());
         placed = Some(keyed);
     }
+    // The teeth as counted, a tooth to a pitch: with a master spline the outline is one period of
+    // the whole ring, a full turn, so its own pitch angle is not this.
+    let tooth_pitch = std::f64::consts::TAU / f64::from(n.teeth.max(1));
+    let tooth_at = placed.as_ref().map_or(0.0, |keyed| {
+        let opposite = keyed.placement.tooth.saturating_add(n.teeth.max(1) / 2) % n.teeth.max(1);
+        keyed.placement.turn + tooth_pitch * f64::from(opposite)
+    });
+    let hub_arc_on_shaft = placed.as_ref().map(|keyed| master_spline::Span {
+        radius: keyed.hub_arc.radius,
+        start: keyed.hub_arc.start + pair.second_start,
+        end: keyed.hub_arc.end + pair.second_start,
+    });
     Ok(SplinePlan {
         pair,
         made,
         master: placed,
+        tooth_pitch,
+        tooth_at,
+        hub_arc_on_shaft,
     })
 }

@@ -692,12 +692,25 @@ impl<'a> Grid<'a> {
                 [0.0, 0.0]
             }
         };
+        // The normal of chord `k` or, where repeated points make it a chord of no length, of the
+        // first chord with a length met going on from it by `step` (1 forwards, n - 1 backwards).
+        let with_length = |k: usize, step: usize| {
+            let mut k = k % n.max(1);
+            for _ in 0..n {
+                let m = normal(k);
+                if m[0] != 0.0 || m[1] != 0.0 {
+                    return m;
+                }
+                k = (k + step) % n.max(1);
+            }
+            [0.0, 0.0]
+        };
         // At a corner the two chords that meet there decide together.
         let (corner, [nx, ny]) = if t <= 0.0 {
-            let (m, k) = (normal(i + n - 1), normal(i));
+            let (m, k) = (with_length(i + n - 1, n.saturating_sub(1)), normal(i));
             (self.point(i), [m[0] + k[0], m[1] + k[1]])
         } else if t >= 1.0 {
-            let (m, k) = (normal(i), normal(i + 1));
+            let (m, k) = (normal(i), with_length(i + 1, 1));
             (self.point(i + 1), [m[0] + k[0], m[1] + k[1]])
         } else {
             (self.point(i), normal(i))

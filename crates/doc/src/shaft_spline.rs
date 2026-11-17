@@ -8,7 +8,7 @@
 //! kernel's own, as data. This file computes no geometry: the tooth outlines, the checks of the numbers and the
 //! numbers they come to are the kernel's.
 
-pub use solidcore_ops::shaft_spline::{bezier_pieces, fit_to_shaft_within, outline_points, same_size, space_section};
+pub use solidcore_ops::shaft_spline::{bezier_pieces, fit_to_shaft_within, module_for_major_radius, outline_points, same_size, space_section};
 pub(crate) use solidcore_ops::shaft_spline::{cutter_radius, tool_margin};
 pub use solidcore_record::shaft_spline::{
     MasterArc, MasterPlaced, OutlinePiece, SpaceSection, SplineCorner, SplineForm, SplineMade, SplineMake, SplineMaster, SplineNumbers, SplinePlan,

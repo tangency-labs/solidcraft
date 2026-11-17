@@ -266,13 +266,20 @@ pub fn record_plan(p: &ks::SplinePlan) -> SplinePlan {
         hub: record_outline(&p.pair.second.outline),
         hub_start: p.pair.second_start,
         made: record_made(&p.made),
-        master: p.master.as_ref().map(|m| MasterPlaced {
-            tooth: m.placement.tooth,
-            turn: m.placement.turn,
-            middle: m.middle,
-            shaft_arc: record_arc(&m.shaft_arc),
-            hub_arc: record_arc(&m.hub_arc),
-        }),
+        master: p
+            .master
+            .as_ref()
+            .zip(p.hub_arc_on_shaft.as_ref())
+            .map(|(m, on_shaft)| MasterPlaced {
+                tooth: m.placement.tooth,
+                turn: m.placement.turn,
+                middle: m.middle,
+                shaft_arc: record_arc(&m.shaft_arc),
+                hub_arc: record_arc(&m.hub_arc),
+                hub_arc_on_shaft: record_arc(on_shaft),
+            }),
+        tooth_pitch: p.tooth_pitch,
+        tooth_at: p.tooth_at,
     }
 }
 
