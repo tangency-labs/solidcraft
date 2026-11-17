@@ -449,7 +449,7 @@ pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
 }
 
 /// Delete's label in a feature's menu: how many features it deletes when that is more than one.
-fn delete_label(count: usize) -> String {
+pub(crate) fn delete_label(count: usize) -> String {
     match count {
         1 => solidcraft_ui_text::tr_label("Delete").to_string(),
         n => solidcraft_ui_text::format("timeline.delete_many", &[("count", &n.to_string())]),
@@ -1240,8 +1240,15 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
                 click_feature(app, order, step, modifiers);
             }
             history_bar::Action::Edit(id) => app.edit_feature(id),
-            // The same menu as the browser's, so the control channel reports it (#10745).
-            history_bar::Action::Menu { step, at } => crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: step }),
+            // The same menu as the browser's, so the control channel reports it (#10745). A
+            // right-click outside the selection selects that feature first, as the vertical
+            // History does, so the menu acts on what is highlighted.
+            history_bar::Action::Menu { step, at } => {
+                if !selected_feature_ids(app).contains(&step) {
+                    select_one(app, step);
+                }
+                crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: step });
+            }
             history_bar::Action::Seek { slot, before } => {
                 let slot = position(slot, before);
                 let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
@@ -2897,7 +2904,8 @@ mod tests {
         assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["B", "C", "D", "E", "F"]));
     }
 
-    /// Copy on a feature outside the selection copies that feature alone.
+    /// Copy on a feature outside the selection copies that feature alone: the right-click
+    /// selects it first.
     #[test]
     fn copy_on_an_unselected_feature_copies_only_it() {
         let mut h = two_boxes(false);
@@ -2905,11 +2913,11 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
         h.step(&json!({"widget": "Copy"})).unwrap();
         assert_eq!(copied(&h), ["Second"]);
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Second"]));
         // Ctrl+click again takes a feature back out of the selection.
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
-        let first = h.app.session.doc.find_feature("First").map(|f| f.id).unwrap();
-        assert_eq!(super::selected_feature_ids(&h.app), [first]);
+        h.step(&json!({"click": {"handle": "timeline:First"}, "ctrl": true})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:First"}, "ctrl": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Second"]));
     }
     fn three_boxes(left: bool) -> Harness {
         let mut h = two_boxes(left);
@@ -2971,6 +2979,30 @@ mod tests {
             assert_eq!(names(&h), ["Third"], "left: {left}");
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(names(&h), ["First", "Second", "Third"], "left: {left}");
+        }
+    }
+
+    /// A right-click on a feature outside the selection selects that feature alone, so its
+    /// menu acts on what is highlighted; a right-click inside the selection keeps it. The same
+    /// in both timelines.
+    #[test]
+    fn a_right_click_outside_the_selection_selects_that_feature() {
+        for left in [false, true] {
+            let mut h = three_boxes(left);
+            h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
+            assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["First", "Second"]), "inside keeps it, left: {left}");
+            assert!(h.widget("Delete 2 Selected Features").is_some(), "left: {left}");
+            h.step(&json!({"key": "Escape"})).unwrap();
+
+            h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+            assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Third"]), "outside selects it alone, left: {left}");
+            assert!(h.widget("Delete 2 Selected Features").is_none(), "left: {left}");
+            h.step(&json!({"widget": if left { "Suppress Feature" } else { "Suppress Features" }})).unwrap();
+            h.settle();
+            let suppressed: Vec<&str> = h.app.session.doc.features.iter().filter(|f| f.suppressed).map(|f| f.name.as_str()).collect();
+            assert_eq!(suppressed, ["Third"], "left: {left}");
         }
     }
 
