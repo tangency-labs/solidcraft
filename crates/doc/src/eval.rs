@@ -816,6 +816,11 @@ impl ModelState {
         self.kept_separate.get(&feature).copied()
     }
 
+    /// What living hinge `feature` cut: its slots, rows and the slots it left out.
+    pub fn living_hinge_report(&self, feature: u64) -> Option<&living_hinge::HingeReport> {
+        self.living_hinges.get(&feature)
+    }
+
     /// Each edge fillet `feature` tapered (a point on it) with the radius spline it was given.
     pub fn tapered(&self, feature: u64) -> Option<&[(Vec3, kernel::Taper)]> {
         self.tapered.get(&feature).map(Vec::as_slice)
@@ -921,6 +926,8 @@ pub struct ModelState {
     /// How the pieces a join split off into bodies of their own touched the others (by feature
     /// id), for its notice.
     kept_separate: BTreeMap<u64, KeptSeparate>,
+    /// What each living hinge cut (by feature id), for its result.
+    living_hinges: BTreeMap<u64, living_hinge::HingeReport>,
     /// For a feature saved before format 14 that split a body, a digest of the later features'
     /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
     /// the state stands for the feature only while those picks are the same.
@@ -2560,6 +2567,8 @@ struct Change {
     tapered: Option<Vec<(Vec3, kernel::Taper)>>,
     /// A join's touching pieces it kept as bodies of their own.
     kept_separate: Option<KeptSeparate>,
+    /// A living hinge's report.
+    living_hinge: Option<living_hinge::HingeReport>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
 }
@@ -2607,6 +2616,7 @@ impl ModelState {
             && others_same(&self.fitted, &before.fitted, feature)
             && self.tapered.keys().filter(|k| **k != feature).eq(before.tapered.keys().filter(|k| **k != feature))
             && others_same(&self.kept_separate, &before.kept_separate, feature)
+            && others_same(&self.living_hinges, &before.living_hinges, feature)
             && others_same(&self.named_faces, &before.named_faces, feature)
             && serde_json::to_string(&self.threads).ok() == serde_json::to_string(&before.threads).ok();
         if !same_rest {
@@ -2638,6 +2648,7 @@ impl ModelState {
             fitted: self.fitted.get(&feature).cloned(),
             tapered: self.tapered.get(&feature).cloned(),
             kept_separate: self.kept_separate.get(&feature).copied(),
+            living_hinge: self.living_hinges.get(&feature).cloned(),
             named_faces: self.named_faces.get(&feature).cloned(),
         })
     }
@@ -2674,6 +2685,10 @@ impl ModelState {
         next.kept_separate.remove(&feature);
         if let Some(k) = change.kept_separate {
             next.kept_separate.insert(feature, k);
+        }
+        next.living_hinges.remove(&feature);
+        if let Some(r) = &change.living_hinge {
+            next.living_hinges.insert(feature, r.clone());
         }
         next.named_faces.remove(&feature);
         if let Some(p) = &change.named_faces {
@@ -10318,11 +10333,11 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::LivingHinge { targets, .. } => {
-            // The report reaches the model state with the model cache's map (a later commit).
-            let (tools, _report) = living_hinge::tools(doc, vals, f, st, warning)?;
+            let (tools, report) = living_hinge::tools(doc, vals, f, st, warning)?;
             // An area beside the plate's material changes nothing: say so, as a cut does.
             let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
             apply_traced(doc, st, f, tools, Operation::Cut, &crate::plain(targets))?;
+            st.living_hinges.insert(f.id, report);
             if !before.is_empty() && st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body)) {
                 append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the depth".into());
             }
