@@ -29,7 +29,8 @@ pub struct SheetSceneParams {
 /// dimension's lines and arrowheads (object: the dimension), each note of a view (object: the
 /// note), each view's label (object: the view) and each balloon's circle, number and leader (object:
 /// the balloon), then each parts list's and revision table's (object: the table), then each note on
-/// the sheet and each fill and each sheet sketch, then the title block's (object: the sheet).
+/// the sheet, each revision tag's triangle and text (object: the tag), each fill and each sheet
+/// sketch, then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -53,6 +54,7 @@ impl JsonSchema for SheetPaperScene {
                 ObjectKind::RevisionTable,
                 ObjectKind::Fill,
                 ObjectKind::Sketch,
+                ObjectKind::RevisionTag,
                 ObjectKind::TitleBlock,
             ],
             true,
@@ -172,6 +174,15 @@ pub struct SheetSceneBalloon {
     pub row_status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub item: Option<String>,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One revision tag on the sheet: whether it is in the scene, with why not, or why its text is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneTag {
+    pub tag: String,
     pub drawn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
@@ -410,6 +421,9 @@ pub struct SheetSceneResult {
     pub balloons: Vec<SheetSceneBalloon>,
     /// Each table on the sheet, by id.
     pub tables: Vec<SheetSceneTable>,
+    /// Each revision tag on the sheet, in the drawing's order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<SheetSceneTag>,
     /// The views, dimensions, notes, balloons and sketches a deferred drawing shows as they last were.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,

@@ -77,6 +77,7 @@ pub enum CheckedKind {
     TitleBlock,
     /// A view's label: its id is the view's.
     ViewLabel,
+    RevisionTag,
 }
 
 /// The record a finding names.

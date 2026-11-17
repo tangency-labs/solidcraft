@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::ids;
-use solidcraft_geom::revision::{Field, ModelVersion, RevisionRecord, RevisionRow, Tag, TagText};
+use solidcraft_geom::revision::{Field, ModelVersion, RevisionRecord, RevisionRow, Tag};
 
 use super::CommandSpec;
 use crate::params::bad;
@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&TAG_ADD_CONTRACT)
         .output(output_schema_for::<RevisionsResult>)
-        .params("row: a row's id; sheet: id or name; at: [x, y] on paper; size_mm?: its side, 1 to 50 (default 5); text?: shown in place of the row's revision → {tag, rows, next, tags: [{tag, row, sheet, at, size_mm, shows, lost}]}. A triangle on the sheet once scene text lands."),
+        .params("row: a row's id; sheet: id or name; at: [x, y] on paper; size_mm?: its side, 1 to 50 (default 5); text?: shown in place of the row's revision → {tag, rows, next, tags: [{tag, row, sheet, at, size_mm, shows, lost}]}. Drawn on the sheet as a triangle round what it shows, its place the centroid."),
     CommandSpec::new(TAG_EDIT, "Edit Revision Tag", crate::checked!("drawing.revision.tag.edit", tag_edit))
         .icon("edit")
         .in_drawing()
@@ -205,9 +205,7 @@ fn tag_delete(s: &mut Session, p: &Value) -> Result<Value> {
 /// Every tag of `record`: what the revision commands and `drawing.inspect` list.
 pub(super) fn tags(record: &RevisionRecord) -> Vec<TagResult> {
     let tag = |t: &Tag| {
-        let shows = match record.tag_text(t) {
-            TagText::Revision(text) | TagText::Override(text) | TagText::Lost(text) => text,
-        };
+        let shows = crate::drawing_revision_paper::shows(record, t);
         TagResult {
             tag: ids::encode(t.id),
             row: ids::encode(t.row),

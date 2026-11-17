@@ -370,3 +370,54 @@ fn a_sheets_delete_takes_its_tags_and_hostile_tags_are_refused() {
     refused(&mut s, TAG_EDIT, json!({"tag": "0000000000000", "set": {"at": [0.0, 0.0]}}));
     refused(&mut s, TAG_DELETE, json!({"tag": "0000000000000"}));
 }
+
+/// A tag draws on its sheet as one revision tag group, its triangle and the revision it shows, and
+/// the scene lists it as drawn. Its own text replaces the revision; a deleted row leaves it drawn as
+/// it was; a tag too small for its text keeps its triangle and says why; a tag on another sheet is
+/// in that sheet's scene only; a deleted tag leaves the scene.
+#[test]
+fn a_revision_tag_draws_on_its_sheet() {
+    let mut s = drawing_session();
+    let row = add(&mut s, json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let tag = run(&mut s, TAG_ADD, json!({"row": row, "sheet": sheet, "at": [100.0, 50.0], "size_mm": 10.0}))["tag"].as_str().unwrap().to_string();
+    let scene = |s: &mut Session, sheet: &str| {
+        let reply = s.execute("drawing.scene", &json!({"sheet": sheet})).unwrap();
+        let schema = output_schema_for::<crate::schema::drawing_scene::SheetSceneResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+        reply
+    };
+    // Each revision tag group's object and the kinds of its items.
+    let drawn = |reply: &Value| -> Vec<(Value, Vec<String>)> {
+        let kinds = |g: &Value| g["items"].as_array().unwrap().iter().map(|i| i["kind"].as_str().unwrap().to_string()).collect();
+        let groups = reply["scene"]["groups"].as_array().unwrap().iter().filter(|g| g["kind"] == "revision_tag");
+        groups.map(|g| (g["object"].clone(), kinds(g))).collect()
+    };
+    // A paper scene names its groups' objects by number.
+    let object = json!(s.drawing("test").unwrap().revisions.tags()[0].id);
+    let shown = scene(&mut s, &sheet);
+    assert_eq!(drawn(&shown), [(object.clone(), vec!["stroke".to_string(), "text".to_string()])], "{shown}");
+    assert_eq!(shown["tags"], json!([{"tag": tag, "drawn": true}]));
+    assert!(shown["objects"].as_array().unwrap().iter().any(|o| o["kind"] == "revision_tag" && o["object"] == json!(tag)));
+
+    // Its own text, then its row deleted: drawn as it was.
+    run(&mut s, TAG_EDIT, json!({"tag": tag, "set": {"text": "AB"}}));
+    run(&mut s, DELETE, json!({"row": row}));
+    let lost = scene(&mut s, &sheet);
+    assert_eq!((drawn(&lost).len(), &lost["tags"]), (1, &json!([{"tag": tag, "drawn": true}])), "{lost}");
+
+    // Too small for its text: its triangle alone, and why.
+    run(&mut s, TAG_EDIT, json!({"tag": tag, "set": {"size_mm": 1.0}}));
+    let small = scene(&mut s, &sheet);
+    assert_eq!(drawn(&small), [(object, vec!["stroke".to_string()])], "{small}");
+    assert!(small["tags"][0]["why"].as_str().is_some_and(|why| why.contains("at least")), "{small}");
+
+    // On another sheet: only there.
+    let other = s.execute("drawing.sheet.add", &json!({"name": "Other"})).unwrap()["sheet"].as_str().unwrap().to_string();
+    run(&mut s, TAG_EDIT, json!({"tag": tag, "set": {"sheet": "Other", "size_mm": 10.0}}));
+    assert!(drawn(&scene(&mut s, &sheet)).is_empty() && scene(&mut s, &sheet).get("tags").is_none());
+    assert_eq!(drawn(&scene(&mut s, &other)).len(), 1);
+
+    run(&mut s, TAG_DELETE, json!({"tag": tag}));
+    assert!(drawn(&scene(&mut s, &other)).is_empty());
+}
