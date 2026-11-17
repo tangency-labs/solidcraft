@@ -7,6 +7,9 @@
     solidcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
     solidcraft-<version>-windows-<arch>-portable.zip   solidcraft.exe + solidcraft-cli.exe + licences
     SolidCraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
+    solidcraft-<version>-windows-policy-templates.zip  solidcraft.admx + en-US/solidcraft.adml for
+                                                       Intune and Group Policy (x64 job only; the
+                                                       templates are the same for every arch)
 
   The binaries link the C runtime statically (+crt-static), so nothing else needs installing.
   The icon comes from $env:SOLIDCRAFT_ICONS (solidcraft.ico, made by `solidcraft-cli icon`), or
@@ -167,6 +170,25 @@ if ($Arch -eq 'x64' -and -not $PortableOnly) {
   $Exe = Join-Path $Dist "SolidCraft-$Version-windows-$Arch.exe"
   Copy-Item (Join-Path $Stage 'solidcraft.exe') $Exe
   $Outputs += $Exe
+}
+
+# ---- administrative templates (x64) ------------------------------------------------------------
+# packaging/windows/policies as it is: the .admx at the top and en-US\solidcraft.adml, the layout
+# PolicyDefinitions uses, so an admin copies the zip's contents in or uploads both files to Intune.
+if ($Arch -eq 'x64' -and -not $PortableOnly) {
+  $Policies = Join-Path $Root 'packaging\windows\policies'
+  $Templates = Join-Path $Dist "solidcraft-$Version-windows-policy-templates.zip"
+  Remove-Item -Force $Templates -ErrorAction SilentlyContinue
+  Compress-Archive -Path (Join-Path $Policies 'solidcraft.admx'), (Join-Path $Policies 'en-US') -DestinationPath $Templates
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $zip = [IO.Compression.ZipFile]::OpenRead($Templates)
+  try { $entries = @($zip.Entries | Where-Object { $_.Length -gt 0 } | ForEach-Object { $_.FullName -replace '\\', '/' }) }
+  finally { $zip.Dispose() }
+  foreach ($want in 'solidcraft.admx', 'en-US/solidcraft.adml') {
+    if ($entries -notcontains $want) { throw "$Templates has no $want (it holds: $($entries -join ', '))" }
+  }
+  Write-Output "ok $(Split-Path -Leaf $Templates): $($entries -join ', ')"
+  $Outputs += $Templates
 }
 
 if ($CanRun) {
