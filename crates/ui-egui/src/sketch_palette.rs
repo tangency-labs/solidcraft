@@ -502,8 +502,13 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::ui_kit::Panel::pinned_footer(ui, "shared_sketch_palette_footer", 2, draw_footer).response.rect.height()
         };
         let top = ui.cursor().top();
-        let options =
-            egui::ScrollArea::vertical().id_salt("sc_palette_options").min_scrolled_height(0.0).auto_shrink([false, true]).show(ui, draw_body);
+        let t = Tokens::get();
+        let body_inset = egui::Margin::symmetric((t.space_12 - t.space_4) as i8, t.space_6 as i8);
+        let options = egui::ScrollArea::vertical()
+            .id_salt("sc_palette_options")
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| egui::Frame::NONE.inner_margin(body_inset).show(ui, draw_body));
         crate::scenario::publish_rect("sketch_palette:options", options.inner_rect);
         crate::panel_runtime::report_content_extent(ui, top, options.content_size.y + footer_height, false);
     });
@@ -1197,5 +1202,18 @@ mod tests {
         let idx = sk.curve_index(&circle).unwrap();
         assert!(!sk.curves[idx].construction, "the previously selected circle stays a normal curve");
         set_mode(&mut h.app, 0);
+    }
+
+    #[test]
+    fn sketch_palette_body_has_consistent_padding() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        let options = crate::scenario::rect_of("sketch_palette:options").expect("options scroll area rect");
+        let header = crate::scenario::rect_of("sketch_palette:status_header").expect("status header rect");
+        let t = Tokens::get();
+        let expected_x = t.space_12 - t.space_4;
+        assert!(header.left() - options.left() >= expected_x - 0.5, "body left inset matches footer/dialog padding");
+        assert!(header.top() - options.top() >= t.space_6 - 0.5, "body top inset gives breathing room below header");
     }
 }
