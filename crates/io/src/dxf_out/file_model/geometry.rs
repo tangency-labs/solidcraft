@@ -1291,9 +1291,9 @@ mod tests {
                 (370, vec!["-1"]),
                 (90, vec!["2"]),
                 (70, vec!["129"]),
-                (10, vec!["8", "12"]),
-                (20, vec!["-5", "-5"]),
-                (42, vec!["1", "1"]),
+                (10, vec!["8.0", "12.0"]),
+                (20, vec!["-5.0", "-5.0"]),
+                (42, vec!["1.0", "1.0"]),
             ] {
                 assert_eq!(values(bulges[0], code), expected);
             }
@@ -1316,7 +1316,7 @@ mod tests {
                     assert_eq!(values(text, code), [expected]);
                 }
             }
-            for (name, expected) in [("$EXTMIN", [(10, "8"), (20, "-7"), (30, "0.0")]), ("$EXTMAX", [(10, "14"), (20, "1"), (30, "0.0")])] {
+            for (name, expected) in [("$EXTMIN", [(10, "8.0"), (20, "-7.0"), (30, "0.0")]), ("$EXTMAX", [(10, "14.0"), (20, "1.0"), (30, "0.0")])] {
                 let index = pairs.iter().position(|pair| *pair == (9, name)).unwrap();
                 assert_eq!(&pairs[index + 1..index + 4], &expected);
             }
