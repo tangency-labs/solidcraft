@@ -1695,3 +1695,86 @@ fn a_whole_turn_a_rounding_short_of_a_quarter_line_has_its_form_from_it() {
         assert_eq!(domain[0], [q, q + 4.0], "seam at {start}");
     }
 }
+
+/// A narrow lune between two meridians, up one to a pole and down the other to the opposite
+/// pole, keeps its width round the axis wherever the loop starts and wherever the lune lies,
+/// including across angle 0: the point found afresh past each pole is moved onto the branch of
+/// the point before it.
+#[test]
+fn a_lune_between_two_poles_keeps_its_width_round_the_axis() {
+    let r = 10.0f64;
+    let sphere = Surface::Sphere {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let meridian = |a: f64| Curve::Circle {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [a.cos(), a.sin(), 0.],
+            y_axis: [0., 0., 1.],
+        },
+        radius: r,
+    };
+    for &(centre, width) in &[
+        (0.0, 0.2),
+        (0.0, 0.02),
+        (std::f64::consts::PI, 0.2),
+        (1.0, 0.5),
+        (-0.05, 0.3),
+        (6.2, 0.4),
+    ] {
+        let (a, b) = (
+            meridian(centre - width / 2.0),
+            meridian(centre + width / 2.0),
+        );
+        let loops = [
+            (
+                "up a, down b",
+                vec![
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], false),
+                ],
+            ),
+            (
+                "up b, down a",
+                vec![
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], false),
+                ],
+            ),
+            (
+                "from a's middle",
+                vec![
+                    (&a, [0., FRAC_PI_2], true),
+                    (&b, [-FRAC_PI_2, FRAC_PI_2], false),
+                    (&a, [-FRAC_PI_2, 0.], true),
+                ],
+            ),
+            (
+                "from b's middle",
+                vec![
+                    (&b, [-FRAC_PI_2, 0.], false),
+                    (&a, [-FRAC_PI_2, FRAC_PI_2], true),
+                    (&b, [0., FRAC_PI_2], false),
+                ],
+            ),
+        ];
+        for (name, lune) in loops {
+            let [u, v] = form::extent(&sphere, &[lune], 1e-9)
+                .unwrap()
+                .expect("an extent");
+            assert!(
+                (u[1] - u[0] - width).abs() < 1e-9,
+                "centre {centre}, width {width}, {name}: {u:?}"
+            );
+            assert!(
+                (v[0] + FRAC_PI_2).abs() < 1e-9 && (v[1] - FRAC_PI_2).abs() < 1e-9,
+                "centre {centre}, width {width}, {name}: {v:?}"
+            );
+        }
+    }
+}

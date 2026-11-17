@@ -1128,8 +1128,24 @@ fn extent_in(
                 // across the axis), and a nearest-point search started there settles on the
                 // pole itself, the nearest point on that side: a meridian back out of the pole,
                 // and the edge after it, would read as all pole and bound nothing. The point is
-                // found over the whole surface until the loop is off the pole again.
-                let q = at(t, if on_pole { None } else { prev })?;
+                // found over the whole surface until the loop is off the pole again, then moved
+                // the whole periods that bring it nearest the point before the pole, so the loop
+                // stays on one branch across the pole (a narrow lune across angle 0 keeps its
+                // width instead of reading as the rest of the turn).
+                let q = if on_pole {
+                    let mut q = at(t, None)?;
+                    if let Some(p) = prev {
+                        for d in 0..2 {
+                            if let Some(Some(per)) = period.get(d) {
+                                let k = ((ix(&p, d) - ix(&q, d)) / per).round();
+                                *ixm(&mut q, d) = ix(&q, d) + k * per;
+                            }
+                        }
+                    }
+                    q
+                } else {
+                    at(t, prev)?
+                };
                 // At a pole the collapsed parameter is anything: it bounds nothing.
                 let pole = match eval.pole_within(q, reach) {
                     Ok(p) => p,
