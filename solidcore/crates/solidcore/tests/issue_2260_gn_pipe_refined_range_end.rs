@@ -88,7 +88,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "ssi_tangent_curve_tracer",
     "ssi_trace_tangent_curves_once",
     "surface_continuity_checks_last_v_knot",
-    "sweep_statuses_pass_on",
     "uv_trim_corner_end_points_only",
 ];
 

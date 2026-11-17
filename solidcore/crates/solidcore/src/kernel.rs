@@ -638,16 +638,6 @@ pub struct UpstreamFixes {
     /// removes it, so the trim passes the check (#2129). Off by default for pinned SMLib
     /// compatibility.
     pub bspline_trim_preserves_uv_spans: bool,
-    /// Extrusions, revolutions, sweeps, lofts and the station sweeps (`SmPrimitiveCreation`,
-    /// `SmTopologySweep`, the translational and rotational sweep geometry and `SM_API`'s
-    /// primitive wrappers) pass on the statuses SMLib drops: a failed evaluation, copy,
-    /// transform, trim, reparameterization, knot or degree edit, face or edge construction,
-    /// stitch or orientation returns its error instead of the sweep carrying on with an
-    /// unset value and reporting success (WR-662, #2009 group C; tangency-labs/smlib
-    /// c8f6a31). Complements the path-curve statuses pivot selection and path extension
-    /// always return (#483), and the planar-path sweep and profile placement statuses
-    /// that always return (WR-632). Off by default for pinned parity.
-    pub sweep_statuses_pass_on: bool,
     /// Surface/surface intersection and proto-topology pass on the statuses SMLib drops;
     /// where a helper answers a question it answers "no" when a point it compares cannot
     /// be evaluated, instead of comparing unset values (`IsPointOnCurve`, `AddStartPoint`'s
