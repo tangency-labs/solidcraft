@@ -60,7 +60,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.fillet_removal_takes_ring_fillets = true;
 }
 
 fn read(k: &mut Kernel) -> Brep {

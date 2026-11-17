@@ -5463,13 +5463,12 @@ impl RailTrimAccess<FilletObject> for SessionObjects<'_> {
         &mut self,
         k: &mut Kernel,
         solver: FilletObject,
-        executive: &mut FilletExecutive<FilletObject>,
+        _executive: &mut FilletExecutive<FilletObject>,
     ) -> Result<bool> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
-        let lone = executive.solvers.len() == 1;
-        self.rolled_rails_on_their_faces(k, id, lone)
+        self.rolled_rails_on_their_faces(k, id)
     }
 }
 

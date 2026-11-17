@@ -5943,6 +5943,7 @@ version = "0.44.0"
 dependencies = [
  "image",
  "log",
+ "serde",
  "serde_json",
  "solidcore-record",
  "solidcraft-engine",

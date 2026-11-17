@@ -2347,8 +2347,8 @@ mod tests {
                     BooleanFailure::SolidLeaks { face },
                 )
                 .into_error(),
-                "boolean::merge::p4::manifold_boolean: the union would delete face 7 and merge \
-                 the solid it bounds into the outside",
+                "boolean::merge::p4::manifold_boolean: the union deleted face 7 and the solid \
+                 it bounded merged into the outside",
                 ErrorKind::Failed,
                 SM_ERR,
             ),

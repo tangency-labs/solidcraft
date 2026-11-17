@@ -644,7 +644,7 @@ fn overflow_goes_first() {
     }
 }
 
-/// The capi's `rounds_at_a_concave_face_corner_are_mitred` (`fixes.fillet_mitre_concave_face_corners`,
+/// The capi's `rounds_at_a_concave_face_corner_are_mitred` (WR-642,
 /// fork 4f06e72): each edge loses (convex) or gains (concave) the spandrel r²(1 - π/4) along its
 /// length, and in the quadrant beyond both walls the mitred rounds take or add r³(5/3 - π/2): a
 /// 60 x 40 x 10 plate's 30 x 20 x 5 pocket rim at r2 (15 faces) and r5 (11), a 60 x 60 x 5 plate's
@@ -788,7 +788,7 @@ fn an_edge_tag_crosses_a_cliff_overflow() {
     }
 }
 
-/// Solidcore alone: the pocket rim chamfered 5.5, as `fillet_mitre_concave_face_corners`' own test
+/// Solidcore alone: the pocket rim chamfered 5.5, as WR-642's own test
 /// does it, with `keep_operand_uv_trims` on too, on the body the boolean gives:
 /// 21000 - (50 d² + 4/3 d³) = 19265.666666667 (the fork, and the same body through the flat
 /// arrays). Before WR-654's B-spline run-on it was refused: error 3, Corner Edge Computation
@@ -803,7 +803,6 @@ fn pocket_chamfer_on_a_boolean_body() {
     let p = Point3::new;
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.keep_operand_uv_trims = true;
     let plate = create_box(&mut k, Point3::ZERO, 60.0, 40.0, 10.0).unwrap();
     let cut = create_box(&mut k, p(15.0, 10.0, 5.0), 30.0, 20.0, 6.0).unwrap();
