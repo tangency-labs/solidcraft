@@ -106,7 +106,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_mitre_concave_face_corners = true;
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
-    f.simple_coincidence_crossing_is_point = true;
     f.fillet_trim_status = true;
     f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;

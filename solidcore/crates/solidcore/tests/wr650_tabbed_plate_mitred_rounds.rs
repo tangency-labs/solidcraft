@@ -185,7 +185,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.shell_edges_on_analytics_exact = true;
-    k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_tangent_curve_tracer = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
