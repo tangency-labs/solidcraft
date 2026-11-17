@@ -247,6 +247,31 @@ pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>>
     Ok(imp)
 }
 
+/// `records` with `notes` about the file added to its warnings (what a check of the bodies its
+/// import `imp` made found: `imp` is [`records_import`]'s of `records`), and that import with
+/// them as file issues after the records' own, as [`records_import`] makes it of the new records.
+/// It is kept in the recent imports under the new records, so the design's evaluation of them
+/// does not make the bodies again.
+pub fn records_noted(mut records: ImportRecords, imp: &StepImport, notes: Vec<String>) -> Result<(ImportRecords, Arc<StepImport>)> {
+    if notes.is_empty() {
+        let imp = records_import_shared(&records)?;
+        return Ok((records, imp));
+    }
+    // The records' own warnings come first among the import's warnings and its issues.
+    let at = records.warnings.len();
+    let mut noted = imp.clone();
+    let issues = notes.iter().map(|w| ImportIssue { kind: IssueKind::File, item: None, part: String::new(), faces: 0, times: 1, detail: w.clone() });
+    let issue_at = at.min(noted.report.issues.len());
+    noted.report.issues.splice(issue_at..issue_at, issues);
+    let warning_at = at.min(noted.warnings.len());
+    noted.warnings.splice(warning_at..warning_at, notes.iter().cloned());
+    records.warnings.extend(notes);
+    let text = records_text(&records)?;
+    let noted = Arc::new(noted);
+    super::remember(super::text_key(&text), false, &noted, text.len() <= super::KEEP_SMALL_BYTES);
+    Ok((records, noted))
+}
+
 /// The records' serialised form: what an import kept as records is, as STEP text is what a STEP
 /// import is (its cache key and its bodies' certificates are of this).
 pub fn records_text(records: &ImportRecords) -> Result<String> {

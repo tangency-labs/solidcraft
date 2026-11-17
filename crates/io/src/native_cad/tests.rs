@@ -701,7 +701,9 @@ fn washer_stating(volume: f64, centre: [f64; 3]) -> String {
 }
 
 /// A part whose bodies measure what its file states imports with no warning about it; one whose
-/// file states another volume or centre is named, with both figures.
+/// file states another volume or centre is named, with both figures, as an issue about the file in
+/// the import's report (what the History tooltip, the status line and Copy Warning Message show)
+/// and once among the open's warnings.
 #[test]
 fn a_part_that_measures_other_than_its_file_says_is_named() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
@@ -709,8 +711,21 @@ fn a_part_that_measures_other_than_its_file_says_is_named() {
     let m = solidcraft_kernel::measure(&ours.bodies[0].body).unwrap();
     let (v, c) = (m.volume, [m.centroid.x, m.centroid.y, m.centroid.z]);
     let checked = |text: String| {
-        let (_, warnings, _) = cadmpeg_step_records(text.as_bytes(), "washer.step").unwrap();
-        warnings.into_iter().filter(|w| w.contains("the file states")).collect::<Vec<_>>()
+        let f = crate::step_import_feature_read(text.as_bytes(), "washer.step", crate::StepNames::default(), crate::StepReader::Cadmpeg).unwrap();
+        let issues: Vec<String> = f
+            .import
+            .report
+            .issues
+            .iter()
+            .filter(|i| i.kind == solidcraft_kernel::IssueKind::File && i.detail.contains("the file states"))
+            .map(|i| i.detail.clone())
+            .collect();
+        let warned: Vec<&String> = f.warnings.iter().filter(|w| w.contains("the file states")).collect();
+        assert_eq!(warned, issues.iter().collect::<Vec<_>>(), "the open's warnings say each once");
+        // The design keeps it with its records: an evaluation of them reports it too.
+        let solidcraft_doc::FeatureKind::Import { records: Some(records), .. } = &f.kind else { panic!("an import kept as records") };
+        assert_eq!(solidcraft_kernel::records_import(records).unwrap().report, f.import.report);
+        issues
     };
     assert_eq!(checked(washer_stating(v, c)), Vec::<String>::new(), "the washer as its file states it");
     let volume = checked(washer_stating(v * 1.1, c));
@@ -742,8 +757,8 @@ fn a_placed_parts_centre_is_checked_in_its_own_coordinates() {
              #306=PROPERTY_DEFINITION_REPRESENTATION(#300,#301);\n"
         );
         let at = text.rfind("ENDSEC;").unwrap();
-        let (_, warnings, _) = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
-        warnings.into_iter().filter(|w| w.contains("the file states")).collect::<Vec<_>>()
+        let (records, _, _) = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
+        records.warnings.into_iter().filter(|w| w.contains("the file states")).collect::<Vec<_>>()
     };
     assert_eq!(stating(own), Vec::<String>::new());
     assert_eq!(stating(world).len(), 1, "the world centre is not the part's own");
@@ -755,6 +770,6 @@ fn a_placed_parts_centre_is_checked_in_its_own_coordinates() {
          #304=DERIVED_UNIT((#305));\n#305=DERIVED_UNIT_ELEMENT(#1,3.);\n\
          #306=PROPERTY_DEFINITION_REPRESENTATION(#300,#301);\n";
     let at = text.rfind("ENDSEC;").unwrap();
-    let (_, warnings, _) = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
-    assert!(!warnings.iter().any(|w| w.contains("the file states")), "{warnings:?}");
+    let (records, warnings, _) = cadmpeg_step_records(format!("{}{props}{}", &text[..at], &text[at..]).as_bytes(), "cylinder_placed.step").unwrap();
+    assert!(!records.warnings.iter().chain(&warnings).any(|w| w.contains("the file states")), "{warnings:?}");
 }

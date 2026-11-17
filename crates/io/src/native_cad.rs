@@ -447,17 +447,22 @@ mod convert {
             "step" => "",
             other => other,
         };
-        let (records, origins) = super::traced_records(&ir, &product, system, format == "step");
+        let (mut records, origins) = super::traced_records(&ir, &product, system, format == "step");
         if records.bodies.is_empty() {
             let why = records.warnings.first().map(|w| format!(" ({w})")).unwrap_or_default();
             return Err(format!("{name}: this {format} file has no solids that can be imported{why}"));
         }
         // The file's own figures for its parts, checked against the bodies (built once: the
-        // design's evaluation finds them in the recent imports).
+        // design's evaluation finds them in the recent imports). A part that differs is a warning
+        // about the file kept with its records, so the import's report (the History tooltip, the
+        // status line, Copy Warning Message) has it, as SolidCraft's reader reports the file.
         if !ir.model.declared_measures.is_empty()
             && let Ok(imp) = solidcraft_kernel::records_import_shared(&records)
         {
-            warnings.extend(super::validation::check(&ir, &records, &origins, &imp));
+            let notes = super::validation::check(&ir, &records, &origins, &imp);
+            if !notes.is_empty() {
+                records = solidcraft_kernel::records_noted(records, &imp, notes).map_err(|e| e.to_string())?.0;
+            }
         }
         Ok((records, warnings, format == "fcstd"))
     }
