@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&TAG_ADD_CONTRACT)
         .output(output_schema_for::<RevisionsResult>)
-        .params("row: a row's id; sheet: id or name; at: [x, y] on paper; size_mm?: its side, 1 to 50 (default 5); text?: shown in place of the row's revision → {tag, rows, next, tags: [{tag, row, sheet, at, size_mm, shows, lost}]}. Drawn on the sheet as a triangle round what it shows, its place the centroid."),
+        .params("row: a row's id; sheet: id or name; at: [x, y] on paper; size_mm?: its side, 1 to 50 (default 8.3, for a 2.5 mm revision); text?: shown in place of the row's revision → {tag, rows, next, tags: [{tag, row, sheet, at, size_mm, shows, lost}]}. Drawn on the sheet as a triangle round what it shows, its place the centroid."),
     CommandSpec::new(TAG_EDIT, "Edit Revision Tag", crate::checked!("drawing.revision.tag.edit", tag_edit))
         .icon("edit")
         .in_drawing()

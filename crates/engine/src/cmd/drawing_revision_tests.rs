@@ -300,7 +300,7 @@ fn a_revision_tag_sits_on_a_sheet_and_shows_its_row() {
     let tag = added["tag"].as_str().unwrap().to_string();
     assert_eq!(
         added["tags"],
-        json!([{"tag": tag, "row": row, "sheet": sheet, "at": [100.0, 50.0], "size_mm": 5.0, "shows": "1", "lost": false}]),
+        json!([{"tag": tag, "row": row, "sheet": sheet, "at": [100.0, 50.0], "size_mm": 8.3, "shows": "1", "lost": false}]),
         "{added}"
     );
     assert_eq!(listed(&mut s)["tags"][0]["tag"], json!(tag));
