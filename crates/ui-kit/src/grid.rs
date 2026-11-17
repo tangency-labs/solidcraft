@@ -1345,7 +1345,7 @@ fn paste_block<S: GridSource>(
             if row >= rows && !grows {
                 let fitted = rows.saturating_sub(range.rows.0);
                 out.notice =
-                    Some(solidcraft_ui_text::format("grid.paste_cut_off", &[("rows", &fitted.to_string()), ("total", &block.len().to_string())]));
+                    Some(solidcraft_ui_text::format("ui.grid_paste_cut_off", &[("rows", &fitted.to_string()), ("total", &block.len().to_string())]));
                 break;
             }
         }
