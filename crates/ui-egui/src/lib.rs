@@ -508,6 +508,9 @@ pub struct Services {
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
     pub pick_save: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
+    /// Whether a design path can be kept by this host. Native hosts can omit this; browser
+    /// hosts refuse memory-only paths before a command reports that a design was saved.
+    pub can_persist_design: Option<Box<dyn Fn(&str) -> bool>>,
     /// Open a dialog for one file of a kind (its name, its extensions): on macOS a dialog allows
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
@@ -1529,6 +1532,18 @@ impl SolveApp {
         }
         if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
+        }
+        // The browser's VFS also holds temporary files. Refuse a design save into one
+        // before the command marks the tab saved or tells the user it was saved (#18522).
+        if matches!(id, "file.save" | "file.save_as") {
+            let path = params.get("path").and_then(Value::as_str).or(self.session.path.as_deref()).map(str::to_owned);
+            if let Some(path) = path
+                && self.services.can_persist_design.as_ref().is_some_and(|keep| !keep(&path))
+            {
+                let result = Err(format!("{path}: this browser cannot keep a design at that path; use Save As to choose a file"));
+                self.finish_command(id, &result);
+                return result;
+            }
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
         if matches!(id, "edit.undo" | "edit.redo" | "timeline.play") {
