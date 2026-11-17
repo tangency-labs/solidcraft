@@ -113,7 +113,7 @@ Format and example: [docs/scripts.md](docs/scripts.md). Pages can also be driven
 Plugins add separately distributed behaviour without compiling that behaviour into SolidCraft.
 The initial runtime loads **WebAssembly components**, explicitly requested by the user. Merely
 installing a folder, enabling it in Preferences, or opening a design never executes plugin code.
-The interface is experimental: WIT package `craft:plugin@0.1.0`, capability `commands@0.1`. While
+The interface is experimental: WIT package `craft:plugin@0.2.0`, capability `commands@0.2` (plugins built for 0.1 still run). While
 it is 0.x a minor version may break the one before it; the host refuses a plugin that needs a
 capability it does not have, in plain words. Review a plugin again after an update. The desktop app and headless CLI use the same commands. Browser
 execution, automatic downloads and updates, custom panels, and plugin-defined parametric feature

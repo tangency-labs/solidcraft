@@ -111,9 +111,14 @@ pub fn describe(session: &Session) -> Vec<ImporterInfo> {
 }
 
 /// Run `importer` on `path` and make its design this session's, as a new design that is not saved
-/// anywhere yet. Nothing changes unless the whole import succeeds; a trap names the plugin and file.
+/// anywhere yet. Nothing changes unless the whole import succeeds; a failure starts with the
+/// plugin's name and the file's.
 pub fn import_file(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
     let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.into());
+    convert(session, importer, path, options).map_err(super::messages::named(&importer.name, Some(&file)))
+}
+
+fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Value) -> Result<ImportedDesign> {
     let package = read_package(&importer.folder)?;
     if package.manifest.id != importer.plugin_id || session.disabled_plugins.contains(&importer.plugin_id) {
         return Err(error("plugin is disabled or was replaced; open the file again"));
@@ -170,16 +175,13 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
                 .join()
                 .map_err(|_| HostError::Trap { reason: "the import stopped unexpectedly".into() })?
         });
-        let imported = result.map_err(|e| match e {
-            HostError::Trap { reason } => HostError::Trap { reason: format!("{} failed on {file}: {reason}", package.manifest.name) },
-            e => e,
-        })?;
+        let imported = result?;
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
         }
         let mut doc = solidcraft_io::read_design(&imported.design).map_err(|e| HostError::InvalidInput {
             field: "design".into(),
-            reason: format!("{} wrote a design SolidCraft can't read: {e}", package.manifest.name),
+            reason: format!("it wrote a design SolidCraft can't read: {e}"),
         })?;
         if let Some(stem) = Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned())
             && doc.name.trim().is_empty()
@@ -209,7 +211,7 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
     }
     #[cfg(not(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64"))))]
     {
-        let _ = (package, input_folder, file);
+        let _ = (package, input_folder);
         Err(error("opening a file with an importer plugin needs the desktop app"))
     }
 }
