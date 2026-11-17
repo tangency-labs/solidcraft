@@ -143,3 +143,15 @@ fn a_plate_added_by_timeline_edit_gets_a_fresh_key() {
     run(&mut s, "timeline.edit", json!({"feature": "Joints", "set": {"tab_plates": [wall, {"body": "Wall2"}]}}));
     assert_eq!(keys(&s), (vec![Some(1), Some(4), Some(2)], 5));
 }
+
+#[test]
+fn a_sheet_convert_of_a_plate_before_the_tab_slot_skips_its_pairs() {
+    let mut s = fixture_f();
+    tab_slot(&mut s, json!({})).unwrap();
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    run(&mut s, "sheet.convert", json!({"body": "Bottom", "face": [80, 50, 0]}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    let id = s.doc.features.iter().find(|f| f.name == "Joints").map(|f| f.id).unwrap();
+    let error = s.model.result(id).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("Bottom is sheet metal") && error.contains("no_plate_joint"), "{error}");
+}
