@@ -8,7 +8,6 @@
 //! the parts were read, whichever thread finished first, so a window shows the same warnings in
 //! the same order every time.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use super::{ImportIssue, IssueKind};
@@ -87,17 +86,22 @@ fn settle(jobs: &[Job], outcomes: &[Outcome]) -> Settled {
 /// when given, and under the run's own token; then say what they found.
 fn run(shared: &Shared, jobs: &[Job], workers: usize, scope: Option<Arc<crate::validation::Scope>>, over: Option<solidcraft_smlib::stop::Stop>) {
     let own = shared.stop.clone();
-    let outcomes: Vec<Outcome> = solidcraft_smlib::stop::scoped(over, || {
-        own.within(|| {
-            crate::validation::within(scope, || {
-                crate::par::map_on_threads(jobs, workers.max(1), check)
-                    .into_iter()
-                    .map(|o| o.unwrap_or_else(|| Outcome::NeedsRepair("SMLib's check could not run: it failed in the kernel".into())))
-                    .collect()
+    // Whatever happens here, a waiter is woken: a panic outside the per-check guard ends the run
+    // as stopped (its list incomplete) instead of leaving `wait` blocked.
+    let settled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let outcomes: Vec<Outcome> = solidcraft_smlib::stop::scoped(over, || {
+            own.within(|| {
+                crate::validation::within(scope, || {
+                    crate::par::map_on_threads(jobs, workers.max(1), check)
+                        .into_iter()
+                        .map(|o| o.unwrap_or_else(|| Outcome::NeedsRepair("SMLib's check could not run: it failed in the kernel".into())))
+                        .collect()
+                })
             })
-        })
-    });
-    shared.finish(settle(jobs, &outcomes));
+        });
+        settle(jobs, &outcomes)
+    }));
+    shared.finish(settled.unwrap_or_else(|_| Settled { issues: Arc::default(), stopped: true }));
 }
 
 struct Shared {
@@ -105,8 +109,6 @@ struct Shared {
     stop: solidcraft_smlib::stop::Stop,
     settled: Mutex<Option<Settled>>,
     done: Condvar,
-    /// A window has said what the checks found ([`ImportChecks::announce`]).
-    announced: AtomicBool,
 }
 
 impl Shared {
@@ -166,12 +168,7 @@ impl PartialEq for ImportChecks {
 
 impl ImportChecks {
     fn shared(settled: Option<Settled>) -> (ImportChecks, Arc<Shared>) {
-        let shared = Arc::new(Shared {
-            stop: solidcraft_smlib::stop::Stop::new(),
-            settled: Mutex::new(settled),
-            done: Condvar::new(),
-            announced: AtomicBool::new(false),
-        });
+        let shared = Arc::new(Shared { stop: solidcraft_smlib::stop::Stop::new(), settled: Mutex::new(settled), done: Condvar::new() });
         (ImportChecks(Some(Arc::new(Handle(shared.clone())))), shared)
     }
 
@@ -206,6 +203,11 @@ impl ImportChecks {
         checks
     }
 
+    /// The checks ended stopped by a token: their list is not complete.
+    pub fn stopped(&self) -> bool {
+        self.0.as_ref().and_then(|h| h.0.settled()).is_some_and(|s| s.stopped)
+    }
+
     /// No part was checked (none to check, or the report was read from a saved design).
     pub fn is_empty(&self) -> bool {
         self.0.is_none()
@@ -234,13 +236,5 @@ impl ImportChecks {
                 (!s.stopped).then_some(s.issues)
             }
         }
-    }
-
-    /// What the checks found, once, to whoever asks first after they end with a part to repair
-    /// (a window's notice of it); `None` before, after, or when every part passes.
-    pub fn announce(&self) -> Option<Arc<Vec<ImportIssue>>> {
-        let h = self.0.as_ref()?;
-        let issues = self.issues().filter(|i| !i.is_empty())?;
-        (!h.0.announced.swap(true, Ordering::AcqRel)).then_some(issues)
     }
 }

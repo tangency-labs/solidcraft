@@ -1802,6 +1802,10 @@ mod tests {
         let id = r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));
         let report = s.model.result(id).and_then(|f| f.import_report.clone()).expect("the import's check is pending or done");
         report.settled().expect("the check ends");
+        // A copy of the model evaluated beside it (a scratch evaluation) takes no notice from it.
+        let mut copy = s.model.clone();
+        copy.settle_import_checks();
+        assert_eq!(copy.take_import_notices(), [id]);
         s.model.settle_import_checks();
         let result = s.model.result(id).unwrap();
         let warning = result.warning.clone().unwrap_or_default();

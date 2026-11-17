@@ -1611,6 +1611,10 @@ impl StepReading {
         let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
         let mut report = rd.report(&warnings);
         let jobs = std::mem::take(&mut rd.check_jobs);
+        // A check the caller's token stopped stops the import, as a stopped read does.
+        if self.single && rd.check_outcomes.iter().any(|o| matches!(o, checks::Outcome::Stopped)) {
+            return Err(crate::watch::cancelled_error("STEP import"));
+        }
         report.checks =
             if self.single { checks::ImportChecks::ran(&jobs, &rd.check_outcomes) } else { checks::ImportChecks::start(jobs, rd.workers, over) };
         if rd.bodies.is_empty() {

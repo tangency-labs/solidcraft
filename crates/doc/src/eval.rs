@@ -1540,6 +1540,8 @@ pub struct Model {
     /// Imports whose SMLib check found a part to repair after they were shown, not yet taken by
     /// a window ([`Model::take_import_notices`]), in the order their checks were settled.
     import_notices: Vec<u64>,
+    /// The import check runs this model has put in `import_notices`, by feature.
+    told_imports: Vec<(u64, kernel::ImportChecks)>,
     pub param_errors: BTreeMap<String, String>,
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
@@ -3229,14 +3231,22 @@ impl Model {
     /// its warning, as an import that waited for them has them. An import whose checks found a
     /// part to repair, that no one was told of yet, joins [`Self::take_import_notices`] (in
     /// history order). Checks still running are left to a later call.
+    ///
+    /// Which runs were told of is this model's own record ([`Self::import_notices`]), kept with
+    /// its copies, so a copy evaluated beside it (a scratch or look-ahead evaluation) cannot take
+    /// a notice from it, and a result restored from the evaluation cache is not told of twice.
     pub fn settle_import_checks(&mut self) {
-        let found = &mut self.import_notices;
+        let (found, told) = (&mut self.import_notices, &mut self.told_imports);
         for r in &mut self.results {
             let Some(report) = r.import_report.as_ref() else { continue };
             if report.checks.is_empty() || report.checking() {
                 continue;
             }
-            let fresh = report.checks.announce().is_some();
+            let run = &report.checks;
+            let fresh = run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
+            if fresh {
+                told.push((r.id, run.clone()));
+            }
             let settled = report.current().into_owned();
             r.warning = import_warning(&settled.issues.iter().map(|i| i.detail.as_str()).collect::<Vec<_>>());
             r.import_report = (!settled.issues.is_empty()).then(|| Arc::new(settled));

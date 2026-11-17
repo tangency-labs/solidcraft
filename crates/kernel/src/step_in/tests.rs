@@ -999,10 +999,9 @@ fn a_part_placed_twice_rigidly_is_checked_once_and_counted_twice() {
 }
 
 /// #17697 review: the import returns before SMLib's check of its parts ends; what the check
-/// finds is in the report once every check has ended, the same as a waiting import says, and a
-/// window is told of it once.
+/// finds is in the report once every check has ended, the same as a waiting import says.
 #[test]
-fn the_check_runs_after_a_shared_import_returns_and_reports_once() {
+fn the_check_runs_after_a_shared_import_returns_and_reports_when_done() {
     let text = lifted_bezier_block(2.2e-3);
     let imp = step_import_shared(&text).unwrap();
     assert!(!imp.report.checks.is_empty(), "the part is still to check");
@@ -1012,9 +1011,8 @@ fn the_check_runs_after_a_shared_import_returns_and_reports_once() {
     assert_eq!(settled.issues, waited.report.issues, "the same issues as an import that waits");
     assert!(!imp.report.checking());
     assert_eq!(imp.report.current().issues, settled.issues, "settled, the report shows what the checks found");
-    let first = imp.report.checks.announce().expect("a window is told once");
-    assert_eq!(first.len(), 1);
-    assert_eq!(imp.report.checks.announce(), None, "and only once");
+    assert_eq!(imp.report.checks.issues().map(|i| i.len()), Some(1));
+    assert!(!imp.report.checks.stopped());
 }
 
 /// #17697 review: what the checks find is in the order the parts were read, however the threads
