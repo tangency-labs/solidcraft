@@ -55,6 +55,41 @@ pub fn tools(session: &mut Session, name: Option<&str>) -> Vec<PluginTool> {
     found
 }
 
+/// See [`super::describe_entry`].
+pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
+    if crate::find_command(id).is_some() {
+        return Ok(None);
+    }
+    let Some((plugin, name)) = id.split_once('.') else { return Ok(None) };
+    if !valid_id(plugin) || !valid_id(name) || session.disabled_plugins.contains(plugin) {
+        return Ok(None);
+    }
+    let folders = import::package_folders(session);
+    let Some(folder) = folders.get(plugin) else { return Ok(None) };
+    let manifest = with_installed(session, folder, || import::read_manifest(folder))?;
+    let Some(runtime) = manifest.runtime else { return Ok(None) };
+    let Some(entry) = runtime.entries.iter().find(|e| e.name == name) else { return Ok(None) };
+    Ok(Some(match entry.kind {
+        EntryKind::Command => {
+            let inputs = craft_plugin::strict_input_schema(&entry.input_schema);
+            json!({"id":id,"label":name,"kind":"command","plugin":plugin,
+                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs; as a tool, the inputs alone",
+                "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
+                    "approval":{"type":"string"},"params":inputs.clone()}},
+                "tool":{"name":id,"input":inputs},
+                "output":{},"effect":entry.effect,"slots":entry.slots})
+        }
+        EntryKind::Importer => {
+            let tool = importer_schema(entry);
+            json!({"id":id,"label":name,"kind":"importer","plugin":plugin,"extensions":entry.extensions,
+                "params":format!("an importer, not a command: open a file with file.import {{path, format: \"{id}\", options}} or doc.open {{path}}, or call the tool {id} {{path, options}}"),
+                "input":tool.clone(),
+                "tool":{"name":id,"input":tool},
+                "output":{},"effect":entry.effect,"slots":entry.slots})
+        }
+    }))
+}
+
 /// An importer tool's arguments: the file, and the options the importer declares.
 fn importer_schema(entry: &Entry) -> Value {
     let extensions: Vec<String> = entry.extensions.iter().map(|e| format!(".{e}")).collect();

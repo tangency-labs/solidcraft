@@ -203,7 +203,9 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
     }
     let mut plugins = Vec::new();
     for path in s.plugin_state.packages.values() {
-        if let Ok(package) = plugin::read_package(path) {
+        // An installed plugin is listed whatever folders the caller may use: the plugins folder
+        // is the app's own (an inspected package elsewhere is read through the caller's scope).
+        if let Ok(package) = plugin::with_installed(s, path, || plugin::read_package(path)) {
             let commands = package
                 .manifest
                 .runtime

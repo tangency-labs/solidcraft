@@ -315,9 +315,16 @@ beside the built-in tools, so an agent can find and use what a plugin offers wit
   approval as every other tool call, and it always asks, whatever the permission mode or an earlier
   **Always allow**: running a plugin's code needs your go each time.
 
+- **Described like commands.** `engine.describe` (MCP `describe_command`) of `<plugin>.<entry>`
+  returns the entry with the same schema as `tools/list` (`tool.input`): a command entry as the
+  `<plugin>.<entry>` command (`approval` and `params`), an importer as the tool that opens its files,
+  with `file.import` named.
+
 Installed plugins are read with the app's own authority (a tool names a plugin, never a path), so
-an agent confined to its folders can still list and call them; the files a plugin reads or writes
-stay within its grants and the agent's folders.
+an agent confined to its folders (only the folder of its input file, say) still sees them in
+`plugin.list`, `plugin.tools` and `engine.describe`, and `doc.open` and `file.import` still find an
+installed importer. The input file itself must be in the agent's folders; when it isn't, the
+refusal names it. The files a plugin reads or writes stay within its grants and the agent's folders.
 
 ## Checking and testing a plugin
 

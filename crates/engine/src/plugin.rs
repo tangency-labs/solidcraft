@@ -493,17 +493,9 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true})))
 }
 
+/// `engine.describe` of an installed, enabled plugin's entry: a command entry as the
+/// `<plugin>.<entry>` command, an importer as the tool that opens its files; each with the
+/// schema `tools/list` gives it. Read with the app's authority, whatever the caller's folders.
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
-    if crate::find_command(id).is_some() {
-        return Ok(None);
-    }
-    let Some((package, name)) = id.split_once('.') else { return Ok(None) };
-    let Some(path) = s.plugin_state.packages.get(package) else { return Ok(None) };
-    let package = read_package(path)?;
-    let Some(runtime) = package.manifest.runtime else { return Ok(None) };
-    let Some(entry) = runtime.entries.iter().find(|e| e.name == name && e.kind == EntryKind::Command) else { return Ok(None) };
-    Ok(Some(json!({"id":id,"label":name,"params":"approval, params: declared entry inputs",
-        "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
-            "approval":{"type":"string"},"params":entry.input_schema}},
-        "output":{},"effect":entry.effect,"slots":entry.slots})))
+    tools::describe(s, id)
 }

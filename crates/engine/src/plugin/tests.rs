@@ -538,7 +538,8 @@ mod native {
         assert_eq!(entry["commands"], json!(["sample.make"]));
         assert_eq!(entry["manifest"]["runtime"]["entries"][0]["input_schema"], schema);
         let description = s.execute("engine.describe", &json!({"command":"sample.make"})).unwrap();
-        assert_eq!(description["input"]["properties"]["params"], schema);
+        assert_eq!(description["input"]["properties"]["params"], craft_plugin::strict_input_schema(&schema), "as strict as the check");
+        assert_eq!(description["tool"]["input"], description["input"]["properties"]["params"], "the tool takes the inputs alone");
         assert_eq!(description["effect"], "edit");
         assert!(s.doc.features.is_empty());
         assert!(s.execute("sample.make", &json!({"params":{}})).is_err());
@@ -1205,6 +1206,38 @@ mod importers {
         assert!(s.execute("doc.open", &json!({"path": stl})).map_or(true, |r| r.get("loss_report").is_none()));
         assert_eq!(s.execute("file.import", &json!({"path": stl})).unwrap()["format"], "smp.convert");
         assert_eq!(s.execute("doc.open", &json!({"path": stl, "format": "smp.convert"})).unwrap()["bodies"], 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An agent that may use only the folder of its input file still sees and uses the installed
+    /// importer: the registry is the app's, not the agent's (finding 2 of a new-user walk). The
+    /// input file itself is still checked, and refused with the path named.
+    #[test]
+    fn an_agent_with_only_its_input_folder_lists_describes_and_uses_an_installed_importer() {
+        let (mut s, root) = installed("scoped", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &design());
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let outside = elsewhere.join("other.smp");
+        std::fs::write(&outside, design()).unwrap();
+        let scope = solidcraft_io::vfs::PathScope::new([root.join("files")]);
+        solidcraft_io::vfs::scoped(Some(scope), || {
+            let listed = s.execute("plugin.list", &json!({})).unwrap();
+            assert_eq!(listed["importers"][0]["id"], "smp.convert", "{listed}");
+            assert_eq!(listed["plugins"].as_array().unwrap().len(), 1, "{listed}");
+            let tools = s.execute("plugin.tools", &json!({})).unwrap();
+            assert_eq!(tools["tools"][0]["name"], "smp.convert", "{tools}");
+            // Described as the tool tools/list gives (finding 9): its schema, not "unknown command".
+            let described = s.execute("engine.describe", &json!({"command":"smp.convert"})).unwrap();
+            assert_eq!(described["kind"], "importer");
+            assert_eq!(described["tool"]["input"], tools["tools"][0]["input_schema"]);
+            assert_eq!(described["input"]["required"], json!(["path"]));
+            assert_eq!(s.execute("doc.open", &json!({"path": file})).unwrap()["format"], "smp.convert");
+            assert_eq!(s.execute("file.import", &json!({"path": file, "format": "smp.convert"})).unwrap()["bodies"], 1);
+            let refused = s.execute("file.import", &json!({"path": outside.to_string_lossy(), "format": "smp.convert"})).unwrap_err().to_string();
+            assert!(refused.contains("other.smp") || refused.contains("elsewhere"), "the input file's own refusal names it: {refused}");
+            assert!(!refused.contains("no installed"), "{refused}");
+        });
         std::fs::remove_dir_all(root).unwrap();
     }
 
