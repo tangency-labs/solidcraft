@@ -316,7 +316,7 @@ const VOLUME_TOL: f64 = 0.02;
 #[test]
 fn rim_chamfer_near_the_radius_is_certified_in_bounded_work() {
     let (r, h, c) = (10.0_f64, 20.0_f64, 9.99_f64);
-    let mut k = kernel(|f| f.fillet_round_as_definition = true);
+    let mut k = kernel(|_| {});
     let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), r, h).unwrap();
     let rim = top_rim(&k, &b);
     let token = CancelToken::after_polls(RIM_CHAMFER_POLLS);
