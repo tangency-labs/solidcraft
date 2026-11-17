@@ -563,7 +563,7 @@ impl Drawing {
 
     /// A drawing a newer build saved: it opens with what this build can read of it. Everything in a
     /// drawing refuses a field it doesn't know, so what it can't read shows as a top-level field,
-    /// a source or a sheet that doesn't read, which stays out and is named in
+    /// a source, a sheet or a sketch that doesn't read, which stays out and is named in
     /// [`NewerDrawing::not_understood`]; [`Drawing::to_json`] writes it all back, with the file's
     /// format. It takes at least one sheet this build can read to open.
     fn from_newer(mut v: Value, version: u32, applied: Option<Vec<String>>, newer: crate::format::Newer) -> Result<Drawing> {

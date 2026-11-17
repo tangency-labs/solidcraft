@@ -2253,6 +2253,26 @@ fn a_view_sketch_keeps_its_view_edges_to_the_edge_references_rules() {
     assert!(refusal(&serde_json::to_value(&on_sheet).unwrap()).contains("not supported yet: sheet sketch links"));
 }
 
+/// A flat pattern view draws its body's flat, not the model's edges ([`ViewKind::no_model_edges`]):
+/// its sketch holds no link to them, in memory or in a file, and a link read on it anyway is lost
+/// with that reason and keeps its line.
+#[test]
+fn a_flat_pattern_views_sketch_holds_no_view_edges() {
+    let (doc, model, id, view) = view_edge_design();
+    let (mut d, link) = with_view_edge(&doc, &model, id, Vec3::new(80.0, 0.0, 15.0), &[]);
+    let source = d.sources[0].id;
+    let flat = ViewKind::Flat { source, body: "Box".into(), turn: view::QuarterTurn::None };
+    Arc::make_mut(d.views.iter_mut().find(|v| v.id == view).unwrap()).kind = flat;
+    let why = "a flat pattern view draws its body's flat, not the model's edges";
+    assert!(d.validate().unwrap_err().to_string().contains(why));
+    assert!(refusal(&serde_json::to_value(&d).unwrap()).contains(why));
+    let mut sketch = view_sketch(&d);
+    let before = linked_line(&sketch, &link);
+    let states = doc.refresh_view_links(&model, &d, view, &mut sketch).unwrap();
+    assert!(matches!(&states[0].status, dimension::Status::Unmeasurable(said) if said.starts_with(why)), "{states:?}");
+    assert!(sketch.link(&link).unwrap().lost);
+    assert_eq!(linked_line(&sketch, &link), before);
+}
 /// A newer build's drawing whose sketch this build can't read opens without that sketch, names it,
 /// and writes it back on save, as it does a sheet or a source it can't read.
 #[test]

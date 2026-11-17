@@ -1072,7 +1072,7 @@ fn draw_dimensions(
     let one = |at: usize, record: &Arc<Dimension>| match read.as_ref().map(|all| all.get(at)) {
         Ok(Some(resolved)) => {
             // On a view that draws none of the model's edges, it has no place to draw.
-            let placed = !d.view(record.view).is_some_and(|view| crate::drawing_view::no_model_edges(view).is_some());
+            let placed = !d.view(record.view).is_some_and(|view| view.kind.no_model_edges().is_some());
             let paper = frame(record.view)
                 .filter(|_| placed)
                 .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &lettering));
@@ -1171,7 +1171,7 @@ fn drawn_notes(
             pending: false,
         };
         // A leader on a view that draws none of the model's edges has no place to end.
-        if note.paths().next().is_some() && d.view(view).and_then(crate::drawing_view::no_model_edges).is_some() {
+        if note.paths().next().is_some() && d.view(view).and_then(|view| view.kind.no_model_edges()).is_some() {
             return DrawnDimension { why: Some(NO_PLACE.to_string()), ..base };
         }
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
@@ -1214,7 +1214,7 @@ fn drawn_balloons(
         let kind = ObjectKind::Balloon;
         let base = DrawnDimension { dimension: balloon.id, view, kind, row: None, status, group: None, fonts: Vec::new(), why, pending: false };
         // Its leader ends on the model, which a view that draws none of its edges has no place for.
-        if d.view(view).and_then(crate::drawing_view::no_model_edges).is_some() {
+        if d.view(view).and_then(|view| view.kind.no_model_edges()).is_some() {
             return DrawnDimension { row: Some(row), why: Some(NO_PLACE.to_string()), ..base };
         }
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return DrawnDimension { row: Some(row), ..base } };

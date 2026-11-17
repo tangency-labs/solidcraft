@@ -189,6 +189,13 @@ pub(super) fn check_drawing(drawing: &Drawing) -> Result<()> {
     check_budget(drawing.sketches.iter().map(AsRef::as_ref))?;
     for record in &drawing.sketches {
         check_payload(record)?;
+        // A link points at the model, so only a sketch on a view that draws the model's edges has any.
+        if let Owner::View(view) = record.owner
+            && !record.sketch.links.is_empty()
+            && let Some(why) = drawing.view(view).and_then(|view| view.kind.no_model_edges())
+        {
+            return Err(invalid(why));
+        }
     }
     Ok(())
 }
@@ -364,10 +371,18 @@ impl crate::Document {
     /// followed to its model edge as `model` (this design's) has it now: its curves moved to where
     /// the view sees the edge, in the view plane's coordinates. A link whose edge is gone, hidden,
     /// split or not seen face on is marked lost and keeps its last curves: the sketch never fails
-    /// for it. Edge names are worked out once per body for the call. `Err` only for a view the
-    /// drawing doesn't have.
+    /// for it. Edge names are worked out once per body for the call. On a view that draws no model
+    /// edges ([`super::view::ViewKind::no_model_edges`]) each link is lost with that reason. `Err`
+    /// only for a view the drawing doesn't have.
     pub fn refresh_view_links(&self, model: &crate::Model, drawing: &Drawing, view: u64, sketch: &mut Sketch) -> Result<Vec<ViewLinkState>> {
         let basis = drawing.resolve_view(view)?.basis;
+        if let Some(why) = drawing.view(view).and_then(|view| view.kind.no_model_edges()) {
+            let ids: Vec<String> = sketch.links.iter().map(|link| link.id.clone()).collect();
+            for id in &ids {
+                sketch.set_link_lost(id, true);
+            }
+            return Ok(ids.into_iter().map(|link| ViewLinkState { link, status: Status::Unmeasurable(why.into()), warning: None }).collect());
+        }
         let mut lookup = Lookup::new(self, model);
         let links = sketch.links.clone();
         Ok(links
