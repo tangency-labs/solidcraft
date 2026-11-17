@@ -108,7 +108,7 @@ use crate::nurbs::crv_tool::p2::KnotMap;
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::index::at;
 use crate::nurbs::knots::Side;
-use crate::nurbs::math::{srf_power_basis_eval_derivs, MAX_DERIVATIVE};
+use crate::nurbs::math::{gamma, srf_power_basis_eval_derivs, MAX_DERIVATIVE, UNIT};
 use crate::nurbs::srf_adv::p1::{create_skin_spine, SkinDerivs, SkinSpineOptions, SpineAlignment};
 use crate::nurbs::srf_adv::p5::{
     create_skin_srf_boundary_continuity_mapped, BoundaryContinuity, SkinBoundaryOptions,
@@ -2250,18 +2250,181 @@ fn coons_side<'a>(
     Some((uv, srf))
 }
 
+/// The largest angle [`coons_side_angle`] measured, with a bound on its rounding error.
+#[derive(Debug, Clone, Copy)]
+struct SideAngle {
+    /// The largest computed angle (radians) over the stations measured.
+    max: f64,
+    /// An a-priori bound on `|max - exact|`, where `exact` is the largest angle the same
+    /// stations have in exact arithmetic (patch evaluated exactly from its control net,
+    /// against the computed side normals); `PI` where no bound is known.
+    err: f64,
+}
+
+/// The rounding data of a patch the angle bound needs: `(eu, ev)`, bounds on the
+/// absolute error of a computed first derivative in u and v anywhere on the patch.
+///
+/// The derivative is `sum_ij N'_i(u) N_j(v) P_ij` (the patch is non-rational), from the
+/// Cox-de Boor triangle and its first-derivative row. Each basis value is formed by `p`
+/// levels of at most 6 operations on knot differences `u - t`, whose rounding is absolute,
+/// at most `u * T` (`T` the largest knot magnitude), and is divided by a knot span of at
+/// least `h` (the smallest positive knot gap): each level's relative error is within
+/// `gamma(6) * (1 + 2 T / h)`. The derivative row multiplies by `p` over a span of at least
+/// `h`, with `sum_i |N'_i| <= 2 p / h` and `sum_j N_j = 1`, and the tensor sum adds
+/// `(p + 1)(q + 1)` products. So `|du - fl(du)| <= gamma(K) (R_u + R_v) (2 p / h_u) M`
+/// with `K = 8 (p + q + 2) + 2 (p + 1)(q + 1)`, `R = 1 + 2 T / h` per direction and `M`
+/// the largest control point magnitude; `K` and the factor 2 in `R` are overcounts.
+fn coons_derivative_errors(patch: &BSplineSurface) -> Option<(f64, f64)> {
+    let nurb = patch.gw_nurb()?;
+    let gap_and_size = |knots: &[f64]| -> Option<(f64, f64)> {
+        let mut gap = f64::INFINITY;
+        let mut size = 0.0_f64;
+        for w in knots.windows(2) {
+            if let [a, b] = w {
+                let d = b - a;
+                if d > 0.0 && d < gap {
+                    gap = d;
+                }
+            }
+        }
+        for t in knots {
+            size = size.max(t.abs());
+        }
+        (gap.is_finite() && gap > 0.0).then_some((gap, size))
+    };
+    let (hu, tu) = gap_and_size(nurb.u_knots())?;
+    let (hv, tv) = gap_and_size(nurb.v_knots())?;
+    let (p, q) = (nurb.p(), nurb.q());
+    let mut m = 0.0_f64;
+    for row in nurb.cpts() {
+        for c in row {
+            m = m.max(c.x.abs() + c.y.abs() + c.z.abs());
+        }
+    }
+    let g = gamma(8 * (p + q + 2) + 2 * (p + 1) * (q + 1));
+    let r = (1.0 + 2.0 * tu / hu) + (1.0 + 2.0 * tv / hv);
+    let (pf, qf) = (p as f64, q as f64);
+    let eu = g * r * (2.0 * pf / hu) * m;
+    let ev = g * r * (2.0 * qf / hv) * m;
+    (eu.is_finite() && ev.is_finite()).then_some((eu, ev))
+}
+
+/// The rounding bound of one station's angle: `du`, `dv` the computed derivatives (each
+/// within `eu`, `ev` of exact), `normal` the computed unit patch normal, `side_normal` the
+/// computed side normal (taken as exact: the same vector in every candidate) and `angle`
+/// the computed angle.
+///
+/// * the cross product: `|fl(du x dv) - du_x x dv_x| <= eu |dv| + (|du| + eu) ev + 2 gamma(2)
+///   (|du| + eu)(|dv| + ev)`; over `|du_x x dv_x|`, at least the computed length less that,
+///   this is the sine of the direction error, which is at most `PI / 2` times it;
+/// * unitizing adds `gamma(2)` to the direction;
+/// * the cosine `|n . m|` of unit `n`, `m` is within `gamma(3) |n||m| + ||n||m| - 1|` of
+///   the computed one, with `|n| = 1 +- gamma(6)` and `|m|` within `gamma(3)` of its
+///   computed length;
+/// * `acos` moves a cosine error `e` by at most `2 e / sin` where `sin^2 >= 8 e`, else by
+///   at most `PI sqrt(e)` (`acos` is 1/2-Holder with constant `PI / sqrt 2`); the library
+///   `acos` is taken within 2 ulp.
+fn coons_station_error(
+    du: Vec3,
+    dv: Vec3,
+    (eu, ev): (f64, f64),
+    side_normal: Vec3,
+    cos: f64,
+    angle: f64,
+) -> f64 {
+    let (a, b) = (du.length() + eu, dv.length() + ev);
+    let cross_err = eu * dv.length() + a * ev + 2.0 * gamma(2) * a * b;
+    let cross_len = du.cross(dv).length() * (1.0 - gamma(3)) - cross_err;
+    if cross_len.is_nan() || cross_len <= 0.0 || cross_err >= cross_len {
+        return PI;
+    }
+    let dir = 0.5 * PI * (cross_err / cross_len) + gamma(2);
+    let m_len = side_normal.length();
+    let m_dev = (m_len - 1.0).abs() + gamma(3) * m_len;
+    let n_dev = gamma(6);
+    let e_cos = gamma(3) * (1.0 + n_dev) * (1.0 + m_dev) + n_dev + m_dev + n_dev * m_dev;
+    let sin_sq = 1.0 - cos * cos;
+    let from_cos = if sin_sq >= 8.0 * e_cos {
+        2.0 * e_cos / sin_sq.sqrt()
+    } else {
+        PI * e_cos.sqrt()
+    };
+    let total = dir + from_cos + 4.0 * UNIT * angle;
+    if total.is_finite() {
+        total
+    } else {
+        PI
+    }
+}
+
+/// The stations [`coons_side_angle`] measures a side at, along `along` (the side's
+/// interval in direction `dir`): four a knot span, so a miss between control points is
+/// seen, and 33 evenly spaced where that would be fewer.
+///
+/// Not the fork, which spaces `4 * spans + 1` stations evenly: on a graded knot vector
+/// (an n-sided patch's spans halve towards its corners, down to `1/2048` of the side)
+/// even spacing steps over the short spans, and a refined copy whose projected rows bend
+/// the patch inside them read as tangent as the bare patch (WR-713: analytic034's sides
+/// leave the cylinder by 26 degrees inside the last span, against 20 at the corner).
+fn coons_stations(patch: &BSplineSurface, dir: SurfParamType, along: &Extent1d) -> Vec<f64> {
+    let even = |count: usize| -> Vec<f64> {
+        (0..count)
+            .map(|kk| along.evaluate(kk as f64 / (count - 1) as f64))
+            .collect()
+    };
+    let Some(nurb) = patch.gw_nurb() else {
+        let spans = patch
+            .number_control_points(dir)
+            .saturating_sub(patch.degree(dir));
+        return even((4 * spans + 1).max(33));
+    };
+    let knots = if dir == SurfParamType::U {
+        nurb.u_knots()
+    } else {
+        nurb.v_knots()
+    };
+    let mut breaks: Vec<f64> = vec![along.min()];
+    for &t in knots {
+        if t > along.min() && t < along.max() && breaks.last().is_some_and(|b| t > *b) {
+            breaks.push(t);
+        }
+    }
+    breaks.push(along.max());
+    let spans = breaks.len() - 1;
+    if 4 * spans + 1 < 33 {
+        return even(33);
+    }
+    let mut stations = Vec::new();
+    for w in breaks.windows(2) {
+        if let [a, b] = w {
+            for j in 0..4 {
+                stations.push(a + (b - a) * (f64::from(j) / 4.0));
+            }
+        }
+    }
+    stations.push(along.max());
+    stations
+}
+
 /// The fork's `sm_CoonsSideAngle`: the largest angle (radians) between a Coons patch's
 /// normal and the normals of the surfaces along its sides, at four stations a knot
-/// span (33 at least). Sides are ordered left (u min), bottom (v min), right (u max),
+/// span (33 at least, [`coons_stations`]). Sides are ordered left (u min), bottom (v min), right (u max),
 /// top (v max); a side with no surface is skipped, and so is a station where the
 /// patch has no normal (a degenerate side's point).
+///
+/// Not the fork: the result carries a rounding bound ([`SideAngle::err`], the largest
+/// [`coons_station_error`] over the stations, since the error of a maximum is at most
+/// the largest error of its terms), which [`make_coons_patch_tangent_to_sides`] uses to
+/// tell a real difference between candidates from rounding.
 fn coons_side_angle(
     k: &crate::kernel::Kernel,
     patch: &BSplineSurface,
     uv_curves: &[Option<BSplineCurve>],
     surfaces: &[Option<&SmSurface>],
-) -> Result<f64> {
+) -> Result<SideAngle> {
     let mut max_angle = 0.0;
+    let mut max_err = 0.0_f64;
+    let deriv_err = coons_derivative_errors(patch);
     let domain = patch.natural_uv_domain();
     let su = Extent1d::from_min_max(domain.min.x, domain.max.x);
     let sv = Extent1d::from_min_max(domain.min.y, domain.max.y);
@@ -2276,13 +2439,7 @@ fn coons_side_angle(
         } else {
             SurfParamType::V
         };
-        // four stations a knot span, so a miss between control points is seen
-        let spans = patch
-            .number_control_points(dir)
-            .saturating_sub(patch.degree(dir));
-        let stations = (4 * spans + 1).max(33);
-        for kk in 0..stations {
-            let s = along.evaluate(kk as f64 / (stations - 1) as f64);
+        for s in coons_stations(patch, dir, along) {
             let uv = match ii {
                 LEFT => Point2::new(su.min(), s),
                 BOT => Point2::new(s, sv.min()),
@@ -2314,9 +2471,17 @@ fn coons_side_angle(
             if angle > max_angle {
                 max_angle = angle;
             }
+            let err = match deriv_err {
+                Some(e) => coons_station_error(du, dv, e, side_normal, cos, angle),
+                None => PI,
+            };
+            max_err = max_err.max(err);
         }
     }
-    Ok(max_angle)
+    Ok(SideAngle {
+        max: max_angle,
+        err: max_err,
+    })
 }
 
 /// The fork's `sm_RefineToSpans`: knots inserted in `param`'s direction until no span
@@ -2492,6 +2657,16 @@ fn project_coons_side_rows(
 /// until every side reads within tolerance. Returns the first copy within it, or else
 /// the one nearest it if that is nearer than `patch`; `None` when `patch` is rational,
 /// within tolerance already, or no copy is nearer.
+///
+/// Not the fork: the fork keeps a copy only when its largest angle is strictly smaller.
+/// Refinement leaves the corner normals where they are (they are set by the shared
+/// loop curves), so where the largest angle sits at a corner every copy reads the same
+/// angle up to rounding, and the fork's choice was decided by about `1e-14` of it
+/// (WR-713: analytic028 kept the bare bicubic patch). Here two largest angles within
+/// the sum of their rounding bounds ([`coons_station_error`]) are tied, and a tie goes
+/// to the finer copy: the refinement's intent, with a largest angle at most that sum
+/// above the coarser one's. The choice depends only on the computed values, so it is
+/// deterministic.
 fn make_coons_patch_tangent_to_sides(
     k: &crate::kernel::Kernel,
     patch: &BSplineSurface,
@@ -2511,13 +2686,16 @@ fn make_coons_patch_tangent_to_sides(
     let mut best_angle = coons_side_angle(k, patch, uv_curves, surfaces)?;
     let mut best = None;
     let mut spans = 8;
-    while spans <= 64 && best_angle > target {
+    while spans <= 64 && best_angle.max > target {
         let mut attempt = patch.clone();
         refine_to_spans(&mut attempt, SurfParamType::U, spans)?;
         refine_to_spans(&mut attempt, SurfParamType::V, spans)?;
         project_coons_side_rows(k, &mut attempt, uv_curves, surfaces)?;
         let angle = coons_side_angle(k, &attempt, uv_curves, surfaces)?;
-        if angle < best_angle {
+        // Not the fork (`angle < best_angle`): maxima within their rounding bounds of each
+        // other are tied, and a tie goes to the finer attempt.
+        let tied = (angle.max - best_angle.max).abs() <= angle.err + best_angle.err;
+        if tied || angle.max < best_angle.max {
             best_angle = angle;
             best = Some(attempt);
         }

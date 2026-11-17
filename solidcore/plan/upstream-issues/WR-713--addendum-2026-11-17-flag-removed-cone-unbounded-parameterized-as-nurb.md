@@ -23,7 +23,7 @@ Running with the fix always on exposed further defects in the same constructors.
   - The kept cone of a truncated offset runs from the cone's own STEP heights. Upstream placed it as if the bottom were at the origin, which for an unbounded cone gives another cone.
   - A copied offset rebuilds its polar circle on the offset cone. Upstream kept the original's circle, which is off the offset by the offset distance.
 
-- **Results:** 4,522 goldens rows move (against main after the WR-662 retirement, #18066):
+- **Results:** 4,545 goldens rows move (against main after the WR-662 retirement, #18066):
 
   | Unit | Rows |
   |---|---|
@@ -32,16 +32,17 @@ Running with the fix always on exposed further defects in the same constructors.
   | `surface.cone_p2` | 27 |
   | `surface.cone_p3` | 14 |
   | `intersect.api_intersectors` | 8 |
-  | `nurbs.b_spline_surface_n_lib_p2` | 6 |
+  | `nurbs.b_spline_surface_n_lib_p2` | 28 |
   | `primitive.api_primitives` | 6 |
   | `surface.surf_of_extrusion_p2` | 1 |
+  | `topology.brep_p1` | 1 |
 
   `crates/goldens/tests/wr704_wr713_cone_moves.rs` (ignored; it runs on the inventory of moved rows) certifies every row by closed form or certificate, with no sampling:
-  - 4,027 rows are CLOSER: the new output meets the closed form and the old one does not.
-  - 495 rows are EQUAL: both outputs meet it.
-  - No row is FARTHER.
+  - 4,035 rows are CLOSER: the new output meets the closed form and the old one does not.
+  - 508 rows are EQUAL: both outputs meet it.
+  - 1 row is FARTHER: `nurbs.b_spline_surface_n_lib_p2` analytic064 (below).
 
-  179 rows change a built cone into a refusal, each for inputs that define no cone, decided in closed form from the input numbers: 165 unbounded cones with a semi-angle of exactly 90 degrees (a plane), 13 with a zero axis (no direction), and one cylinder of radius 0 (a line). Two `surface.cone_p2` trims refuse where main succeeded; they rest on reading an axis of `(0, -1e-300, 0)` as the direction `-Y`, a convention (main replaced it by `Z`). That convention, with reading a huge axis `(0, -1e300, 1)` as its direction and an axis of `5e-13` (below upstream's unitize threshold) likewise, carries 32 moved rows in all (2 `cone_p1`, 16 `cone_p2`, 14 `cone_p3`), listed in the proof's module documentation; they are argued, not proven. The 6 `nurbs.b_spline_surface_n_lib_p2` corner blends are certified for G0; their G1 against main is open (see the PR).
+  179 rows change a built cone into a refusal, each for inputs that define no cone, decided in closed form from the input numbers: 165 unbounded cones with a semi-angle of exactly 90 degrees (a plane), 13 with a zero axis (no direction), and one cylinder of radius 0 (a line). Two `surface.cone_p2` trims refuse where main succeeded; they rest on reading an axis of `(0, -1e-300, 0)` as the direction `-Y`, a convention (main replaced it by `Z`). That convention, with reading a huge axis `(0, -1e300, 1)` as its direction and an axis of `5e-13` (below upstream's unitize threshold) likewise, carries 32 moved rows in all (2 `cone_p1`, 16 `cone_p2`, 14 `cone_p3`), listed in the proof's module documentation; they are argued, not proven. The 28 `nurbs.b_spline_surface_n_lib_p2` corner blends are certified for G0, and for G1 by the sup-norm angle on each side against the neighbour's implicit normal. That sup is corner-saturated (the shared loop curves fix it at the corners), so EQUAL there says the corners agree, not the side interiors. 12 moved because the neighbour did; 16 because the Coons refinement in `make_coons_patch_tangent_to_sides` no longer decides by rounding: per-side maxima within the a-priori rounding bound of `coons_side_angle` are tied, and a tie takes the finer refinement (deterministic), and the side angle is sampled per knot span so graded sliver spans are not stepped over. One row is FARTHER: analytic064 (torus), by 5.2e-5 in `sin` inside the sliver span next to a corner. `crates/goldens/tests/wr713_coons_tie_finer.rs` checks analytic028 takes the refined patch. The tie rule also moves one `topology.brep_p1` row (`vase_rev_corner_blend_3`, a corner blend on surface-of-revolution faces, which take a finer patch); its neighbours have no implicit form and it is not certified.
   
   The certificates:
   - Built cones are checked net by net with `implicit::lies_on`.

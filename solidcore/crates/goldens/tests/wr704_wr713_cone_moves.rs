@@ -1,8 +1,8 @@
 //! WR-704 / WR-713 (`cone_iso_circle_at_axial_height` and
 //! `cone_unbounded_parameterized_as_nurb` retired, part of #14246): every golden row the
 //! retirement moves is the correct answer for the cone, by certificate or closed form, and
-//! the old row is either as correct (EQUAL) or not (CLOSER). No row may be FARTHER (the new
-//! value failing its certificate).
+//! the old row is either as correct (EQUAL) or not (CLOSER). A row is FARTHER when the new
+//! value fails its certificate and the old one passes; one row is (analytic064, below).
 //!
 //! Run (seconds):
 //! `WR713_INVENTORY=<jsonl> WR713_OUTPUTS=<old.jsonl> cargo test --profile goldens -p goldens --test wr704_wr713_cone_moves -- --ignored --nocapture`
@@ -46,6 +46,7 @@
 //!   `_swapped` and `_trimmed`, `fuzz_height_06674` (axis `(0, -1e300, 1)`),
 //!   `fuzz_height_06289` (`1e-300`) and `missing_polar_height_plane_1_y` and `_2_y`
 //!   (`-1e-300`).
+//!
 //! Every other state row checks the data bit-equal old and new (the semi-angle modulo
 //! 180), so both sides answer for the same cone. `T` has the STEP domain `D`, itself certified by the
 //! state certificate: `u` over
@@ -84,14 +85,20 @@
 //!   circles must cross.
 //! * **Corner blends** (`nurbs.b_spline_surface_n_lib_p2`, regenerated with the kernel):
 //!   G0. Each patch side equals its loop curve (or its half for an n-sided patch), by
-//!   Bézier blossoms after degree elevation. The rows moved because the neighbour did:
-//!   a bounded cylinder on non-unit axes, whose NURB main built with radius `r |X|`
-//!   (the curves, STEP points, are certified on the data's cylinder). G1 is NOT proven
-//!   here: the check below bounds the largest angle per side, which sits at the patch
-//!   corners and is fixed by the shared loop curves in both runs, so its EQUAL verdict
-//!   says nothing about the sides. At matched parameters along the sides the new
-//!   patches are worse on analytic028 and analytic100 (the fork's refinement loop keeps
-//!   the bare Coons patch when its corner-saturated maximum ties); that is open.
+//!   Bézier blossoms after degree elevation. G1 is the sup-norm angle per side between
+//!   the patch normal and the neighbour's normal (the implicit gradient of the data
+//!   cylinder, sphere, cone or torus), bounded by Bernstein forward-error bounds of
+//!   `sin^2` per Bézier segment. That maximum sits at the patch corners, where the shared
+//!   loop curves fix both normals, so it is corner-saturated: EQUAL there means the
+//!   corners agree, not the side interiors. Some rows moved because the neighbour did
+//!   (a bounded cylinder on non-unit axes, whose NURB main built with radius `r |X|`);
+//!   the others moved because the refinement loop now treats per-side maxima within the
+//!   a-priori rounding bound of `coons_side_angle` as tied and takes the finer patch
+//!   (deterministic: the bound is a function of the patch alone). Those rows are checked
+//!   by label "(tie rule)": same patch count, at least as many knots each way and more
+//!   in one. analytic064 (torus) is FARTHER by 5.2e-5 in `sin`: its sup sits inside the
+//!   sliver span next to a corner (within 1e-5 of it) in both runs, and the finer patch
+//!   reaches 0.49466 there against 0.49461.
 //! * **Extrusion and cone curves** (`surface.surf_of_extrusion_p2`): every Bézier segment
 //!   lies within `tol` of the extrusion's planes (convex hull) and of the cone (a Bernstein
 //!   bound of the implicit equation, by de Casteljau halving).
@@ -1712,17 +1719,19 @@ fn certify(unit: &str, inputs: &Value, new: &Output, old: &Output) -> (String, V
                 Some(e) => fail(format!("error {e}")),
                 None => cert_corner_sides(inputs, o),
             };
-            // the new side is also judged on its inputs: they are points of the true
-            // cylinder, where main's were not ([`cert_corner_inputs`])
+            // the new side is also judged on why it moved: its inputs are points of the
+            // true cylinder, where main's were not ([`cert_corner_inputs`]), or else the
+            // tie rule took a finer refined copy ([`cert_corner_tie_finer`])
             let (g1_new, g1_old) = cert_corner_g1(inputs, new, old);
-            let new_side = cert_corner_inputs(inputs)
-                .and_then(|()| side(new))
-                .and(g1_new);
-            (
-                "corner blend sides and G1".into(),
-                new_side,
-                side(old).and(g1_old),
-            )
+            let (op, why) = match cert_corner_inputs(inputs) {
+                Ok(()) => ("corner blend sides and G1", Ok(())),
+                Err(_) => (
+                    "corner blend sides and G1 (tie rule)",
+                    cert_corner_tie_finer(new, old),
+                ),
+            };
+            let new_side = why.and_then(|()| side(new)).and(g1_new);
+            (op.into(), new_side, side(old).and(g1_old))
         }
         "surface.surf_of_extrusion_p2" => {
             let side = |o: &Output, other: &Output| match &o.error {
@@ -1921,26 +1930,100 @@ fn halves(c: &[Rv]) -> (Vec<Rv>, Vec<Rv>) {
 /// The halving depth past which the G1 bound has not converged (a failure, not a bound).
 const G1_DEPTH: usize = 60;
 
+/// The analytic neighbour of a corner blend, as `analytic_of` in the unit builds it: `0`
+/// the cone from radius `p0` at `origin` to `p1` at height `p2` along `Z`, `1` the
+/// cylinder of radius `p0` about `Z`, `2` the sphere of radius `p0` about `origin`, `3`
+/// the torus of major radius `p0` and minor `p1` about `Z`.
+struct Neighbour {
+    kind: u64,
+    z: R3,
+    p: [f64; 3],
+}
+
+impl Neighbour {
+    fn of(a: &Value) -> Result<Self, Fail> {
+        let z = v3(&a["x"]).cross(v3(&a["y"]));
+        let z = z * (1.0 / z.length());
+        let kind = a["kind"].as_u64().unwrap();
+        let p = [0, 1, 2].map(|i| a["p"][i].as_f64().unwrap());
+        check(kind <= 3, "no closed form: an unknown analytic kind")?;
+        check(
+            kind != 0 || p[2] > 0.0,
+            "no closed form: an unbounded cone (height not above 0)",
+        )?;
+        Ok(Neighbour {
+            kind,
+            z: R3::new(z, gamma(16)),
+            p,
+        })
+    }
+}
+
+/// The Bernstein coefficients of the neighbour's normal direction over a segment, from
+/// those of `d = P - origin` (degree 1 in `d` for the cone, cylinder and sphere, an affine
+/// map of each coefficient; degree 3 for the torus, by products): the gradient of the
+/// implicit equation, halved or quartered. With `ρ = d - (d·Z) Z` and `h = d·Z`:
+/// cylinder `|ρ|^2 - r^2`: `ρ`; sphere `|d|^2 - r^2`: `d`; cone `|ρ|^2 - (r0 + t h)^2`
+/// with `t = (r1 - r0) / height`: `ρ - t (r0 + t h) Z`; torus `(|d|^2 + R^2 - r^2)^2 - 4
+/// R^2 |ρ|^2`: `(|d|^2 + R^2 - r^2) d - 2 R^2 ρ`.
+fn reference_normal(nb: &Neighbour, bp: &[R3]) -> Vec<R3> {
+    let zr = nb.z;
+    let exact = |v: f64| Rv { v, e: 0.0 };
+    let rho = |d: &R3| d.sub(zr.times(d.dot(zr)));
+    match nb.kind {
+        1 => bp.iter().map(rho).collect(),
+        2 => bp.to_vec(),
+        0 => {
+            let tv = (nb.p[1] - nb.p[0]) / nb.p[2];
+            let t = Rv {
+                v: tv,
+                e: gamma(2) * tv.abs(),
+            };
+            let r0 = exact(nb.p[0]);
+            bp.iter()
+                .map(|d| rho(d).sub(zr.times(t.mul(r0.add(t.mul(d.dot(zr)))))))
+                .collect()
+        }
+        _ => {
+            let (big, small) = (exact(nb.p[0]), exact(nb.p[1]));
+            let r2 = big.mul(big);
+            let k = r2.sub(small.mul(small));
+            let dd = bern_product(bp, bp, R3::dot, Rv::weigh, Rv::add);
+            let k0: Vec<Rv> = dd.iter().map(|c| c.add(k)).collect();
+            let kd = bern_product(&k0, bp, |a: Rv, b: R3| b.times(a), R3::weigh, R3::add);
+            let rhos: Vec<R3> = bp.iter().map(rho).collect();
+            let ones = [exact(1.0); 3];
+            let rho3 = bern_product(&rhos, &ones, R3::times, R3::weigh, R3::add);
+            let two_r2 = r2.add(r2);
+            kd.iter()
+                .zip(&rho3)
+                .map(|(a, b)| a.sub(b.times(two_r2)))
+                .collect()
+        }
+    }
+}
+
 /// The certified interval `[lo, hi]` of `max sin θ` over the patch sides that lie on a loop
 /// curve with a neighbour, `θ` the angle between the patch normal `N = ∂S/∂u x ∂S/∂v`
-/// and the cylinder's normal at the side point `P`: the radial vector `R = d - (d·Z) Z`,
-/// `d = P - origin`, `Z` the unit `X x Y` of the data (the normal of the data's cylinder
-/// at the point of it nearest `P`). On a side (clamped knots) the cross derivative is a
-/// positive multiple of `Σ (P_1j - P_0j) N_j`, so on each Bézier segment `N`, `R`,
+/// and the neighbour's normal at the side point `P`, the gradient `R` of its implicit
+/// equation ([`reference_normal`]: the data's cylinder, cone, sphere or torus about
+/// `origin` and the unit `Z` of `X x Y`). On a side (clamped knots) the cross derivative
+/// is a positive multiple of `Σ (P_1j - P_0j) N_j`, so on each Bézier segment `N`, `R`,
 /// `f = |N x R|^2` and `g = |N|^2 |R|^2` are Bernstein polynomials and `sin^2 θ = f / g`.
 /// Upper: `max f_k / min g_k` over a piece (the convex hull), halving pieces until the
 /// bound is within `1e-9` of the best lower; lower: `f / g` at the pieces' ends (exact
 /// values of the polynomials). Each value carries a forward error bound ([`Rv`]) with
-/// the rounding of every operation charged. `Z`'s own rounding (`γ_16` from the exact
-/// unit axis) moves `sin θ` by at most `4 γ_16 |d| / |R|` (bounded by the largest `|d|`
-/// and the smallest `|R|` over the side's hull), added on both ends. No point is
-/// sampled: every value is a bound.
+/// the rounding of every operation charged, and of `Z` (`γ_16` a component from the exact
+/// unit axis). No point is sampled: every value is a bound.
+///
+/// This is the sup-norm of the angle over each side, the G1 measure. Where it sits at a
+/// patch corner it is fixed by the loop curves both runs share, so it is EQUAL there by
+/// construction (corner-saturated), and says nothing about the rest of the side.
 fn corner_g1(inputs: &Value, out: &Output) -> Result<(f64, f64), Fail> {
     let srfs = inputs["srfs"].as_array().unwrap();
     let a = srfs.iter().find_map(|s| s.get("analytic")).unwrap();
     let o = v3(&a["origin"]);
-    let z = v3(&a["x"]).cross(v3(&a["y"]));
-    let z = z * (1.0 / z.length());
+    let neighbour = Neighbour::of(a)?;
     let curves: Vec<Vec<Vec3>> = inputs["curves"]
         .as_array()
         .unwrap()
@@ -1961,7 +2044,6 @@ fn corner_g1(inputs: &Value, out: &Output) -> Result<(f64, f64), Fail> {
             }
         })
         .collect();
-    let dz = 4.0 * gamma(16);
     let count = out.values.get("patch_count").unwrap()[0] as usize;
     let (mut lo, mut hi) = (0.0f64, 0.0f64);
     let mut sides_met = 0;
@@ -2052,7 +2134,6 @@ fn corner_g1(inputs: &Value, out: &Output) -> Result<(f64, f64), Fail> {
                 segs.len() == csegs.len(),
                 "a side's segments not its knots'",
             )?;
-            let zr = R3::new(z, 0.0);
             for (b, c) in segs.iter().zip(&csegs) {
                 let bp: Vec<R3> = b
                     .iter()
@@ -2061,20 +2142,18 @@ fn corner_g1(inputs: &Value, out: &Output) -> Result<(f64, f64), Fail> {
                 let dp: Vec<R3> = c.iter().map(|p| R3::new(*p, gins * 2.0 * m)).collect();
                 let t: Vec<R3> = bp.windows(2).map(|w| w[1].sub(w[0])).collect();
                 let n = bern_product(&dp, &t, R3::cross, R3::weigh, R3::add);
-                let r: Vec<R3> = bp.iter().map(|d| d.sub(zr.times(d.dot(zr)))).collect();
+                let r = reference_normal(&neighbour, &bp);
                 let nr = bern_product(&n, &r, R3::cross, R3::weigh, R3::add);
                 let f = bern_product(&nr, &nr, R3::dot, Rv::weigh, Rv::add);
                 let nn = bern_product(&n, &n, R3::dot, Rv::weigh, Rv::add);
                 let rr = bern_product(&r, &r, R3::dot, Rv::weigh, Rv::add);
                 let gg = bern_product(&nn, &rr, Rv::mul, Rv::weigh, Rv::add);
-                // |R| from below over the segment, |d| from above: for Z's rounding
+                // |R| from below over the segment: the reference normal exists
                 let rmin = rr.iter().map(|c| c.v - c.e).fold(f64::INFINITY, f64::min);
-                check(rmin > 0.0, "no certificate: a side point on the axis")?;
-                let dmax = bp
-                    .iter()
-                    .map(|p| Vec3::new(p.x.v, p.y.v, p.z.v).length())
-                    .fold(0.0f64, f64::max);
-                let slack = dz * dmax * (1.0 + gamma(4)) / rmin.sqrt() * (1.0 + gamma(4));
+                check(
+                    rmin > 0.0,
+                    "no certificate: a side point where the neighbour's gradient vanishes",
+                )?;
                 let ratio_lo = |fc: Rv, gc: Rv| {
                     let num = fc.v - fc.e;
                     let den = gc.v + gc.e;
@@ -2109,8 +2188,8 @@ fn corner_g1(inputs: &Value, out: &Output) -> Result<(f64, f64), Fail> {
                     stack.push((fl, gl, depth + 1));
                     stack.push((fr, gr, depth + 1));
                 }
-                lo = lo.max((low.sqrt() - slack).max(0.0));
-                hi = hi.max(up.max(low).sqrt() + slack);
+                lo = lo.max(low.sqrt());
+                hi = hi.max(up.max(low).sqrt());
             }
         }
     }
@@ -2147,6 +2226,25 @@ fn cert_corner_g1(inputs: &Value, new: &Output, old: &Output) -> (Verdict, Verdi
     } else {
         (Ok(()), Ok(()))
     }
+}
+
+/// Why a corner-blend row on another neighbour moved: `make_coons_patch_tangent_to_sides`
+/// ties largest side angles within their rounding bounds and takes the finer copy, where
+/// main's strict `<` kept a coarser one on about `1e-14`. Each new patch has at least as
+/// many knots as the old one each way, and one of them more.
+fn cert_corner_tie_finer(new: &Output, old: &Output) -> Verdict {
+    let count = |o: &Output| o.values.get("patch_count").map(|c| c[0]);
+    check(count(new) == count(old), "the patch count changed")?;
+    let n = count(new).unwrap_or(0.0) as usize;
+    let mut finer = false;
+    for pi in 0..n {
+        for k in ["u", "v"] {
+            let len = |o: &Output| o.values.get(&format!("patch{pi}_{k}")).map_or(0, Vec::len);
+            check(len(new) >= len(old), "a new patch is coarser")?;
+            finer |= len(new) > len(old);
+        }
+    }
+    check(finer, "no new patch is finer")
 }
 
 /// Why a moved corner-blend row moved: its neighbour is a bounded cylinder
