@@ -1372,9 +1372,10 @@ fn unsolved_cell_top(
 /// and bounded (1.) and, unsolved at the limits, bounded by its net's subpatch over the
 /// cell, the hull raised by the net's distance from the surface ([`blend_net_slack`]); its
 /// cells are solved on the face's own surface by the fork's rules and decided (4.) by
-/// [`cell_monotone`], as any face that is not a B-spline open both ways (which reads a
-/// blend's net, [`patch_base`]). A cell of it with no solution goes on to 4. as a
-/// B-spline's does, not straight to its loose box.
+/// [`cell_monotone`], as any face that is not a B-spline open both ways. That reads a
+/// blend's net ([`patch_base`]), which lies within the slack of the surface, so once a cell
+/// is passed over so the result is raised by twice the slack. A cell of it with no
+/// solution goes on to 4. as a B-spline's does, not straight to its loose box.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1469,6 +1470,9 @@ fn face_directed_max_with<'b>(
     } else {
         None
     };
+    // (#16394) how far the face's greatest may lie above `best` for the blend cells passed
+    // over as monotone by their net (4.): `2 x` the net's slack once any was, else 0
+    let mut net_monotone_raise = 0.0_f64;
     let mut cells: Vec<(Extent2d, u32)> = vec![(*uv_domain, 0)];
     let mut divided = 0usize;
     while let Some((cell, depth)) = cells.pop() {
@@ -1546,13 +1550,22 @@ fn face_directed_max_with<'b>(
         }
         // (a cell whose subpatch gives no solution, its greatest value on its sides, is
         // left to the tests below and its parts, as one whose greatest is outside the face)
-        // A B-spline's subpatch is its own surface; any other face, a blend's too (whose
-        // `patch` is its net's), is decided by [`cell_monotone`].
+        // A B-spline's subpatch is its own surface; any other face is decided by
+        // [`cell_monotone`], which for a blend reads its net ([`patch_base`]), not the
+        // surface (#16394). The net monotone over the cell, the surface's greatest in it
+        // is at most the net's on the cell's sides and the face's boundary plus the slack,
+        // which is at most the surface's there plus twice the slack: the search's result
+        // is raised by that once at the end, not per cell (a walk up the net through
+        // several such cells ends where the net is no higher than the surface plus the
+        // slack, on the face's boundary or in a cell decided otherwise).
         let monotone = match &patch {
             Some((patch, _)) if by_patch => patch_monotone(patch, dir),
             _ => cell_monotone(k, surface, &cell, dir)?,
         };
         if monotone {
+            if !by_patch {
+                net_monotone_raise = net_monotone_raise.max(2.0 * slack);
+            }
             continue;
         }
         let exhausted = depth >= limits.max_depth || {
@@ -1614,7 +1627,7 @@ fn face_directed_max_with<'b>(
             }
         }
     }
-    Ok(best)
+    Ok(best + net_monotone_raise)
 }
 
 // ---- #16394: cells wholly outside the face (rule 5 of the trimmed-face search) -------------

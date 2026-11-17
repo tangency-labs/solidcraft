@@ -43,7 +43,12 @@ Updates: WR-588
   a blend's cell by `cell_monotone`, as for every face that is not a B-spline open both
   ways; the net's subpatch above is not taken for it directly. (`cell_monotone` reads the
   B-spline base `patch_base` gives, which for a procedural blend or ball patch is its net, as
-  the fork's `sm_CellMonotone` does through `IsKindOf(SmBSplineSurface)`.)
+  the fork's `sm_CellMonotone` does through `IsKindOf(SmBSplineSurface)`.) The net, not the
+  surface, is then monotone over the cell: the surface's greatest in it is at most the
+  net's on the cell's sides and the face's boundary plus the bound, so at most the
+  surface's there plus twice the bound. Once any blend cell is passed over so, the search's
+  result is raised by twice the bound (once, not per cell: a walk up the net through such
+  cells ends on the face's boundary or in a cell decided otherwise).
 - **After the merge with #13753:** a blend face keeps the fork's rules 2 and 3 on its
   solve (the control-point rules of #13753 are for a B-spline open both ways), and an
   unsolved cell at the limits counts with the net's hull raised by `unsolved_cell_top`'s
