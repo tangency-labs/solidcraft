@@ -177,6 +177,7 @@ pub struct WorkCounters {
     orient_boxes: Cell<u64>,
     ball_certified_roots: Cell<u64>,
     blends_recertified: Cell<u64>,
+    vertex_drops: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -339,6 +340,14 @@ impl WorkCounters {
         self.blends_recertified.get()
     }
 
+    /// Face vertices a curve being classified on a face is solved against (the drops of
+    /// `CurveClassification::intersect_vertices_in`): each vertex not passed over as out of
+    /// the curve's reach. Not the fork's.
+    #[must_use]
+    pub fn vertex_drops(&self) -> u64 {
+        self.vertex_drops.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -359,6 +368,13 @@ impl WorkCounters {
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
         self.blends_recertified.set(0);
+        self.vertex_drops.set(0);
+    }
+
+    /// Counts one vertex a classified curve is solved against.
+    pub(crate) fn add_vertex_drop(&self) {
+        self.vertex_drops
+            .set(self.vertex_drops.get().saturating_add(1));
     }
 
     /// Counts one face pair examined for intersection.
@@ -551,7 +567,7 @@ pub struct UpstreamFixes {
     pub curve_loop_normal_from_area: bool,
     /// `create_fillet_brep` refuses blends that take the whole of a face they roll on (`FacesOutlastTheirBlends`, no room) (WR-320, #879).
     pub fillet_refuse_face_consuming_blends: bool,
-    /// `create_fillet_brep` refuses blends whose bands on a face they share overlap away from any corner that trims them (a rail of one inside the band between the other's filleted edge and its rail: both vertical edges of a box end rounded past half its width), with `FilletErrorType::NoRoom`, where upstream builds a body that is not closed (WR-542; the fork's tangency-labs/smlib@c0d74ee, `BandsClearOtherRails`). A rail is sampled only between its end vertices, where the corners have placed them: the rails are not trimmed yet and run on past their corners' mitres, so a run-on crossing another blend's band refused a valid round (WR-649, #1984; the fork's tangency-labs/smlib@d548305).
+    /// `create_fillet_brep` refuses blends whose bands on a face they share overlap away from any corner that trims them (a rail of one inside the band between the other's filleted edge and its rail: both vertical edges of a box end rounded past half its width), with `FilletErrorType::NoRoom`, where upstream builds a body that is not closed (WR-542; the fork's tangency-labs/smlib@c0d74ee, `BandsClearOtherRails`). A rail is sampled only between its end vertices, where the corners have placed them: the rails are not trimmed yet and run on past their corners' mitres, so a run-on crossing another blend's band refused a valid round (WR-649, #1984; the fork's tangency-labs/smlib@d548305). Not the fork's (#18178): where two kept rails on the face they share cross (their curves' intersection within the solvers' tolerance), the pieces the crossings cut the rail into are each judged at their middle by the same band test, so a short overlap the samples step over is refused too (a ring's outer chamfer and its hole's chamfers, whose corner mitres reach a few hundredths past the outer chamfer's rail at the ring's narrowest places), and rails that only touch are not.
     pub fillet_refuse_overlapping_bands: bool,
     /// `CalcTorusFilletGeom` revolves a linear section into a cone (WR-421, #420), stored as the `SmCone` it is: the revolution's NURBS form is copied (`SmBSplineSurface::Copy`) and passed through `CopyAndAddAnalytics`, and when that gives a cone it is the fillet surface and the rails are made on it (as a straight edge's round is stored as its cylinder); anything else stays the surface of revolution (WR-572, #1503; the fork's tangency-labs/smlib@b5743ec).
     pub fillet_chamfer_cone_on_arc: bool,

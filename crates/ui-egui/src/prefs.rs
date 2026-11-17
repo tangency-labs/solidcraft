@@ -2861,7 +2861,7 @@ fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
 }
 
 /// Read startup settings without replacing unreadable data with defaults during a UI edit.
-fn read_graphics_settings(path: &std::path::Path) -> Result<serde_json::Value, String> {
+pub(crate) fn read_graphics_settings(path: &std::path::Path) -> Result<serde_json::Value, String> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
@@ -12538,6 +12538,76 @@ mod ui_scale_regression_tests {
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
+
+    /// Safe graphics mode keeps every optional drawing feature off, whatever the saved settings
+    /// say, and leaves those settings as they were for full graphics.
+    #[test]
+    fn safe_graphics_mode_turns_each_optional_feature_off_and_keeps_the_settings() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.ambient_occlusion = true;
+        h.app.preferences.dark_parts_shading = true;
+        h.app.preferences.viewport_material_finish = true;
+        let full = |app: &SolveApp| {
+            [
+                crate::safe_graphics::ambient_occlusion(app),
+                crate::safe_graphics::dark_parts_shading(app),
+                crate::safe_graphics::material_finish(app),
+                crate::safe_graphics::blur(app),
+                crate::safe_graphics::path_tracer(app),
+            ]
+        };
+        assert_eq!(full(&h.app), [true; 5], "full graphics draws what the settings ask for");
+        let saved = h.app.prefs();
+        h.app.safe_graphics = true;
+        assert_eq!(full(&h.app), [false; 5], "ambient occlusion, dark parts shading, studio finish, blur, path tracer");
+        assert_eq!(h.app.prefs(), saved, "the saved settings are untouched");
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&saved);
+        assert!(restored.preferences.ambient_occlusion && restored.preferences.viewport_material_finish);
+    }
+
+    /// The one line over the view: Try full graphics clears the record's sticky and next flags
+    /// (other settings stay) and offers a restart; Preferences › Graphics › Start in safe
+    /// graphics mode sets the next launch only; working launches show nothing.
+    #[test]
+    fn safe_graphics_line_tries_full_graphics_and_the_preference_asks_for_one_launch() {
+        let dir = std::env::temp_dir().join(format!("sc_safe_graphics_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"backend":"vulkan","safe_graphics":{"failures":2,"sticky":true,"next":false}}"#).unwrap();
+        let saved = || -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default() };
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.services.graphics_path = Some(path.to_string_lossy().to_string());
+        h.frames(2);
+        assert!(crate::scenario::rect_of("toast:safe_graphics").is_none(), "full graphics shows no line");
+        h.app.safe_graphics = true;
+        h.frames(2);
+        assert!(crate::scenario::rect_of("toast:safe_graphics").is_some());
+        assert_eq!(crate::safe_graphics::line(&h.app), Some(crate::safe_graphics::Line::Started));
+        let button = crate::scenario::handle_at("toast:safe_graphics:button").unwrap();
+        h.call("ui.click", json!({"x":button.x,"y":button.y}));
+        assert_eq!(crate::safe_graphics::line(&h.app), Some(crate::safe_graphics::Line::FullNext));
+        let record = &saved()["safe_graphics"];
+        assert_eq!((record["sticky"].as_bool(), record["next"].as_bool(), record["failures"].as_u64()), (Some(false), Some(false), Some(2)));
+        assert_eq!(saved()["backend"], "vulkan");
+        let (_, restart) = crate::safe_graphics::line_text(&h.app, crate::safe_graphics::Line::FullNext);
+        assert_eq!(restart.is_some(), h.app.services.graphics_restart.is_some(), "a restart is offered where the host can restart");
+        h.app.safe_graphics_dismissed = true;
+        assert!(crate::safe_graphics::line(&h.app).is_none(), "closed for this launch");
+
+        crate::safe_graphics::set_next_launch(&mut h.app, true).unwrap();
+        assert_eq!(saved()["safe_graphics"]["next"], true);
+        assert_eq!(saved()["safe_graphics"]["failures"], 2, "the host's fields stay");
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        h.frames(2);
+        super::reveal_preference(&mut h, "prefs:safe_graphics_next");
+        let checkbox = crate::scenario::handle_at("prefs:safe_graphics_next").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(!h.app.safe_graphics_next);
+        assert_eq!(saved()["safe_graphics"]["next"], false);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ambient_occlusion_is_optional_persistent_and_cancelable() {
