@@ -382,18 +382,23 @@ fn parabola_and_hyperbola_edges_lie_on_their_conics() {
 }
 
 /// An edge bounded by its vertices alone (`add_edge_on`) on a closed spline whose vertex is not
-/// where the spline starts runs all the way round from that vertex: no gap at its ends.
+/// where the spline starts runs all the way round from that vertex: no gap at its ends. So does
+/// one between two vertices at that one point.
 #[test]
 fn a_closed_spline_edge_starts_at_its_vertex() {
     let square = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]];
     let curve = spline_curve(1, vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0], &square, None).unwrap();
-    let mut asm = Assembly::new(1e-6, None);
-    let v = asm.add_vertex([10.0, 10.0, 0.0]).unwrap();
-    let (e, _) = asm.add_edge_on(1, curve, [v, v]).unwrap();
-    let edge = &asm.edges[e as usize];
-    let eval = crate::kernel::CurveEval::new(&edge.curve).unwrap();
-    for t in edge.interval {
-        assert!(eval.point(t).unwrap().dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-12, "at {t}");
+    for two in [false, true] {
+        let mut asm = Assembly::new(1e-6, None);
+        let v = asm.add_vertex([10.0, 10.0, 0.0]).unwrap();
+        let w = if two { asm.add_vertex([10.0, 10.0, 0.0]).unwrap() } else { v };
+        let (e, _) = asm.add_edge_on(1, curve.clone(), [v, w]).unwrap_or_else(|m| panic!("two vertices {two}: {m}"));
+        let edge = &asm.edges[e as usize];
+        let eval = crate::kernel::CurveEval::new(&edge.curve).unwrap();
+        for t in edge.interval {
+            assert!(eval.point(t).unwrap().dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-12, "two vertices {two}: at {t}");
+        }
+        assert!((edge.interval[1] - edge.interval[0] - 4.0).abs() < 1e-12, "two vertices {two}: the whole square, {:?}", edge.interval);
     }
 }
 
