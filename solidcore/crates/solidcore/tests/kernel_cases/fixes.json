@@ -26,7 +26,6 @@
   "cone_unbounded_parameterized_as_nurb",
   "fillet_statuses_pass_on",
   "boolean_vertex_by_best_crossing",
-  "proto_edge_splits_at_captured_vertices",
   "classify_edge_interval",
   "new_edge_vertex_tolerance_covers_gap",
   "found_torus_sphere_keep_tested_nurb",
@@ -45,10 +44,8 @@
   "point_class_gap_3d_propagates_no_drop_error",
   "fillet_variable_span_follows_fillet",
   "box_face_failures_propagate",
-  "boolean_union_refuses_solid_leak",
   "simple_coincidence_crossing_is_point",
   "keep_exact_pcurves",
-  "face_swap_uv_transposes_trims",
   "closed_smooth_pole_tangent_limit",
   "fillet_chamfer_corner",
   "brep_ray_classifies_current_trims"

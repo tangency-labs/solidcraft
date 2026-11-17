@@ -94,9 +94,9 @@ pub use error::{
     Unsoundness,
 };
 pub use measure::{
-    point_distance, points_meet, Distance, EdgeCurve, EdgePoint, EdgeRayPoint, FaceCentroid,
-    FaceRayHit, GapSample, MassPropertiesEstimate, MembersClosest, Normal, PointClass, RayEntity,
-    RayHit, SquareFaceLevel,
+    point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,
+    EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample, MassPropertiesEstimate,
+    MembersClosest, Normal, PointClass, PointSetSummary, RayEntity, RayHit, SquareFaceLevel,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;

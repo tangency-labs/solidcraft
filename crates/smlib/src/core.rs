@@ -94,7 +94,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_overlapping_bands = true;
     f.ssi_tangent_curve_tracer = true;
     f.fillet_knife_edge_rounds = true;
-    f.proto_edge_splits_at_captured_vertices = true;
     f.linear_sweep_arc_is_cylinder = true;
     f.fillet_trace_reaches_rails = true;
     f.box_face_failures_propagate = true;
@@ -111,7 +110,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_statuses_pass_on = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.corner_patch_face_side_twist = true;
-    f.boolean_union_refuses_solid_leak = true;
     f.fillet_exact_round_classes = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.geometric_g2_continuity = true;
@@ -124,7 +122,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
     f.keep_exact_pcurves = true;
-    f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;
     // Held back: see `HELD_BACK`.
     f.fillet_round_ends_on_outline = false;

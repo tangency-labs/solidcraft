@@ -33,11 +33,10 @@
 //! its void flags follow the nesting): upstream's union that seals a void left the
 //! void's shell first and failed `SmBrep::AssertValid` test 12 (the fork's fix,
 //! tangency-labs/smlib `abastran/void-shell-check`; WR-265,
-//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). Opt-in
-//! (`Kernel::fixes`, off by default): with
-//! `boolean_union_refuses_solid_leak` (own design, WR-619), a union whose step 6 would
-//! delete a face between the infinite region and a solid region is refused with `SM_ERR`
-//! (the face in the error) instead of returning a body whose solid merged into the outside.
+//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). Own design
+//! (WR-619): a union whose step 6 deletes a face between the infinite region and a solid
+//! region, and which then has no solid region left (the solid merged into the outside), is
+//! refused with `SM_ERR` (the face in the error) instead of returning that body.
 //! Own design, not upstream: in step 6 a region that a deleted face joins to another, neither
 //! with merge data (no face of the other body was copied into them, as when a union fills a
 //! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
@@ -480,6 +479,17 @@ fn face_leaking_solid(b: &Brep, delete: &[FaceId]) -> Result<Option<FaceId>> {
         }
     }
     Ok(None)
+}
+
+/// Not upstream (WR-619): whether `b` has a solid region other than the infinite one.
+fn has_solid_region(b: &Brep) -> Result<bool> {
+    let infinite = b.infinite_region();
+    for r in bp::regions(b, None)? {
+        if Some(r) != infinite && void(b, r)? == 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn void(b: &Brep, r: RegionId) -> Result<i32> {
@@ -1536,15 +1546,15 @@ fn editing_stages(
             }
         }
     }
-    // Not upstream unless opted in (`fixes.boolean_union_refuses_solid_leak`, WR-619): a
-    // union never deletes a face that bounds a solid against the outside.
-    if kernels.primary.fixes.boolean_union_refuses_solid_leak
-        && operation == BooleanOperation::Union
-    {
-        if let Some(f) = face_leaking_solid(primary, &faces.delete)? {
-            return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
-        }
-    }
+    // Not upstream (WR-619): a union whose face deletion merges a solid into the outside is
+    // refused below. A face between a solid and the outside is also deleted where the other
+    // body's solid lies just across it (a coincident wall), so only a union left with no
+    // solid is refused.
+    let leak = if operation == BooleanOperation::Union {
+        face_leaking_solid(primary, &faces.delete)?
+    } else {
+        None
+    };
     let joined = joined_without_data(primary, intersector, attributes, &faces.delete)?;
     intersector.delete_faces(
         kernels,
@@ -1586,6 +1596,11 @@ fn editing_stages(
         )
     {
         intersector.post_process(kernels, primary, attributes, state, false)?;
+    }
+    if let Some(f) = leak {
+        if !has_solid_region(primary)? {
+            return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
+        }
     }
     Ok(false)
 }
