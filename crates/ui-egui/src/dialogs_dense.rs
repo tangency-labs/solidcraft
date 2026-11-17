@@ -513,7 +513,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     d => d,
                 };
                 let mut pos = order.iter().position(|o| *o == shown).unwrap_or(0);
-                combo(ui, "ex_dir", &["One Side", "Two Sides", "Symmetric"], &mut pos);
+                ui_kit::dropdown_with_keyboard_close(ui, "ex_dir", &mut pos, &["One Side", "Two Sides", "Symmetric"]);
                 if pos != order.iter().position(|o| *o == shown).unwrap_or(0) {
                     *direction = match (order.get(pos).copied().unwrap_or(0), reversed) {
                         (0, true) => 1,
@@ -1222,10 +1222,14 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
-        Kind::Section { offset, flip, hatch } => {
+        Kind::Section { offset, flip, hatch, add, edit } => {
             enter |= expr_row(ui, "Distance", offset);
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
-            if section_turns_off(&app.session, &d.inputs) && !d.extra.contains_key("plane") {
+            if edit.is_some() {
+                ui_kit::text(ui, tr("section.edit_hint"), ui_kit::Text::Hint("section_edit"));
+            } else if *add {
+                ui_kit::text(ui, tr("section.add_hint"), ui_kit::Text::Hint("section_add"));
+            } else if section_turns_off(&app.session, d.extra.contains_key("plane"), &d.inputs) {
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));
             }
         }

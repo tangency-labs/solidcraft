@@ -3,7 +3,7 @@ struct U {
     vp: mat4x4<f32>,
     back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
     screen: vec4<f32>, // viewport width, height (px), unused, silhouettes on (1)
-    clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
+    clip: array<vec4<f32>, 6>, // section planes: normal, d each, the first ones (zero normal: unused)
     cap: vec4<f32>,    // colour of the inside of cut bodies
     ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature, 6 values), parameter
     pull: vec4<f32>,   // draft pull direction
@@ -25,6 +25,7 @@ struct U {
     hatch: array<vec4<f32>, 3>,
     product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
+    plane_hatch: array<vec4<f32>, 6>, // each section plane's hatch: stripe phase pixel · xy (`section_hatch`)
     sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
 };
 
@@ -52,8 +53,24 @@ fn near_z(c: vec4<f32>) -> f32 {
 @group(2) @binding(0) var ao_depth: texture_2d<u32>;
 @group(2) @binding(1) var ao_map: texture_2d<f32>;
 
+/// How far past a plane `p` may lie and still be kept: the f32 rounding of positions, so a face
+/// lying on a plane stays whole.
+fn clip_slack(p: vec3<f32>, c: vec4<f32>) -> f32 {
+    return 1e-5 * (1.0 + abs(c.w) + length(p));
+}
+
+/// Whether the section hides `p`: it lies on the positive side of any plane.
 fn clipped(p: vec3<f32>) -> bool {
-    return length(u.clip.xyz) > 0.5 && dot(u.clip.xyz, p) > u.clip.w;
+    if (!sectioned()) { return false; }
+    for (var k = 0u; k < 6u; k++) {
+        let c = u.clip[k];
+        if (length(c.xyz) > 0.5 && dot(c.xyz, p) > c.w + clip_slack(p, c)) { return true; }
+    }
+    return false;
+}
+
+fn sectioned() -> bool {
+    return length(u.clip[0].xyz) > 0.5;
 }
 @group(0) @binding(0) var<uniform> u: U;
 // The scene's colours, 2048 entries to a row: an Rg32Uint texture rather than a storage buffer,
@@ -232,7 +249,8 @@ fn fs_solid_cut_flat(i: FOut, @builtin(front_facing) front: bool) -> CutOut {
     let t = flat_fragment(i, front);
     var o: CutOut;
     o.depth = pushed(cap_depth(t.wp, t.pos.z));
-    o.c = solid(t, front);
+    if (!past_entry(kept_span(t.wp))) { discard; }
+    o.c = vec4<f32>(0.0);
     return o;
 }
 
@@ -290,25 +308,11 @@ fn fs_ao_term_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) 
     return ao_term(t, front);
 }
 
-/// Opaque model surfaces: cut by the section plane/// Opaque model surfaces: cut by the section plane, the inside shows as a flat cap colour.
+/// Opaque model surfaces: cut by the section, the inside shows as a hatched cap.
 @fragment
 fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let c = solid(i, front);
     return c;
-}
-
-/// A section's crossing count (`Cut::count` in `view.rs`): nothing but the cut itself, so the
-/// stencil counts only the faces behind the section plane. The colour is not written.
-@fragment
-fn fs_clip(i: TOut) -> @location(0) vec4<f32> {
-    if (clipped(i.wp)) { discard; }
-    return vec4<f32>(0.0);
-}
-
-@fragment
-fn fs_clip_flat(i: FOut) -> @location(0) vec4<f32> {
-    if (clipped(i.rp + u.eye.xyz)) { discard; }
-    return vec4<f32>(0.0);
 }
 
 /// Faces where the section plane is outside every closed body (`Cut::rest`): a back face seen
@@ -332,16 +336,16 @@ struct CutOut {
     @builtin(frag_depth) depth: f32,
 };
 
-/// The section cap (where the section plane lies inside a body, drawn on the far walls' back
-/// faces) again, at the depth of the section plane rather than of the
-/// far wall, so the cut face hides what lies inside the body instead of showing it like a
-/// pane of glass.
+/// The section cap's depth (`Cut::cap`; the inside seen through the cut, drawn on the far walls'
+/// back faces where the stencil marks it) at the section plane rather than at the far wall, so
+/// the cut face hides what lies inside the body instead of showing it like a pane of glass.
 @fragment
 fn fs_solid_cut(i: TOut, @builtin(front_facing) front: bool) -> CutOut {
     var o: CutOut;
-    // Derivatives (in `pushed`) first, before `solid` may discard.
+    // Derivatives (in `pushed`) first, before the discard.
     o.depth = pushed(cap_depth(i.wp, i.pos.z));
-    o.c = solid(i, front);
+    if (!past_entry(kept_span(i.wp))) { discard; }
+    o.c = vec4<f32>(0.0);
     return o;
 }
 
@@ -355,18 +359,105 @@ fn pushed(z: f32) -> f32 {
     return clamp(z - select(-push, push, reversed()), 0.0, 1.0);
 }
 
-/// Depth of the section plane on the view ray through `wp` (a far wall seen through the cut),
-/// never behind the wall itself (`z`).
+fn view_ray(wp: vec3<f32>) -> vec3<f32> {
+    if (u.eye.w > 0.5) { return wp - u.eye.xyz; }
+    return -u.back.xyz;
+}
+
+/// The stretch `lo < t < hi` of the view ray `wp + view_ray(wp) * t` the section keeps (inside
+/// every plane), and the plane `k` it comes in through (6: none).
+struct Span {
+    lo: f32,
+    hi: f32,
+    k: u32,
+};
+
+fn kept_span(wp: vec3<f32>) -> Span {
+    let dir = view_ray(wp);
+    var s = Span(-1e30, 1e30, 6u);
+    for (var k = 0u; k < 6u; k++) {
+        let c = u.clip[k];
+        if (length(c.xyz) < 0.5) { continue; }
+        // Kept: n·(wp + dir·t) <= d + slack, t·dn <= r.
+        let dn = dot(c.xyz, dir);
+        let r = c.w + clip_slack(wp, c) - dot(c.xyz, wp);
+        if (abs(dn) < 1e-9) {
+            if (r < 0.0) { return Span(1e30, -1e30, 6u); }
+        } else if (dn > 0.0) {
+            s.hi = min(s.hi, r / dn);
+        } else if (r / dn > s.lo) {
+            s.lo = r / dn;
+            s.k = k;
+        }
+    }
+    return s;
+}
+
+/// Whether the fragment lies past where its view ray comes into what the section keeps, that
+/// point in front of the eye: the surfaces that say whether the point is inside a body (the cap).
+fn past_entry(s: Span) -> bool {
+    return s.k < 6u && s.lo < 0.0 && s.lo < s.hi && (u.eye.w < 0.5 || s.lo > -1.0);
+}
+
+/// Depth of the cut on the view ray through `wp` (a far wall seen through the cut), never
+/// behind the wall itself (`z`): where the ray comes into what the section keeps.
 fn cap_depth(wp: vec3<f32>, z: f32) -> f32 {
-    var dir = -u.back.xyz;
-    if (u.eye.w > 0.5) { dir = wp - u.eye.xyz; }
-    let dn = dot(u.clip.xyz, dir);
-    if (abs(dn) < 1e-9) { return z; }
-    let p = wp + dir * ((u.clip.w - dot(u.clip.xyz, wp)) / dn);
-    let c = u.vp * vec4<f32>(p, 1.0);
+    let s = kept_span(wp);
+    if (!past_entry(s)) { return z; }
+    let c = u.vp * vec4<f32>(wp + view_ray(wp) * s.lo, 1.0);
     if (c.w <= 0.0) { return z; }
     if (reversed()) { return clamp(c.z / c.w, z, 1.0); }
     return clamp(c.z / c.w, 0.0, z);
+}
+
+/// The cut face in its body's colour ("from component" colouring), tinted toward the cap colour
+/// so it reads as a cut, hatched at the angle of the plane it lies on; by part, toward the body's
+/// own hatch colour, a turned part's stripes a quarter turn round. With the hatch off (`u.cap.a`
+/// 0), plain in the body's own colour.
+fn cap_color(i: TOut) -> vec4<f32> {
+    if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
+    var tint = u.cap.rgb;
+    var s = u.plane_hatch[min(kept_span(i.wp).k, 5u)].xy;
+    if ((i.h & 255u) > 0u) {
+        let k = (i.h & 255u) - 1u;
+        tint = u.hatch[min(k >> 1u, 2u)].rgb;
+        if ((k & 1u) == 1u) { s = vec2<f32>(-s.y, s.x); }
+    }
+    let base = mix(i.c.rgb, tint, 0.35);
+    let h = fract(dot(i.pos.xy, s));
+    return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
+}
+
+/// The section's crossing count (`Cut::count` in `view.rs`): each surface past where its view ray
+/// comes into what the section keeps steps the stencil, back faces up and front faces down,
+/// leaving whether that point (the cap) is inside a body. The colour is not written.
+@fragment
+fn fs_section_count(i: TOut) -> @location(0) vec4<f32> {
+    if (!past_entry(kept_span(i.wp))) { discard; }
+    return vec4<f32>(0.0);
+}
+
+@fragment
+fn fs_section_count_flat(i: FOut) -> @location(0) vec4<f32> {
+    if (!past_entry(kept_span(i.rp + u.eye.xyz))) { discard; }
+    return vec4<f32>(0.0);
+}
+
+/// The cap where the count says the cut lies inside a body (`Cut::fill`): the nearest back face
+/// past where the view ray comes into what the section keeps, in its cut colour. That face may be
+/// hidden itself, where the material behind the cut reaches past another plane before its far
+/// wall.
+@fragment
+fn fs_section_fill(i: TOut) -> @location(0) vec4<f32> {
+    if (!past_entry(kept_span(i.wp))) { discard; }
+    return cap_color(i);
+}
+
+@fragment
+fn fs_section_fill_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    if (!past_entry(kept_span(t.wp))) { discard; }
+    return cap_color(t);
 }
 
 fn solid(i: TOut, front: bool) -> vec4<f32> {
@@ -376,23 +467,7 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     let ndv = dot(normalize(i.n), normalize(u.back.xyz));
     let fw = fwidth(ndv);
     if (clipped(i.wp)) { discard; }
-    if (!front && length(u.clip.xyz) > 0.5) {
-        // The cut face in its body's colour ("from component" colouring), tinted toward the
-        // cap colour so it reads as a cut, hatched at 45 degrees on screen; by part, toward the
-        // body's own hatch colour and at its angle (45 or 135 degrees). With the hatch off
-        // (`u.cap.a` 0), plain in the body's own colour.
-        if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
-        var tint = u.cap.rgb;
-        var turn = 1.0;
-        if ((i.h & 255u) > 0u) {
-            let k = (i.h & 255u) - 1u;
-            tint = u.hatch[min(k >> 1u, 2u)].rgb;
-            turn = select(1.0, -1.0, (k & 1u) == 1u);
-        }
-        let base = mix(i.c.rgb, tint, 0.35);
-        let h = fract((i.pos.x + turn * i.pos.y) / 9.0);
-        return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
-    }
+    if (!front && sectioned()) { return cap_color(i); }
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {
         return analysis(i, k);
     }
@@ -426,18 +501,18 @@ fn fs_ground_ao(i: TOut) -> @location(0) vec4<f32> {
     return vec4<f32>(0.0, 0.0, 0.0, 1.0 - occlusion(i));
 }
 
-/// The AO prepass's depth of an opaque surface's fragment.
+/// The AO prepass's depth of an opaque surface's fragment, at its own depth: a section's caps
+/// neither cast nor take occlusion (a cap's depth on a back face behind a kept face would be a
+/// wall in mid-air, darkening the faces beside the cut).
 fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
-    var depth = i.pos.z;
-    if (!front && length(u.clip.xyz) > 0.5) { depth = cap_depth(i.wp, i.pos.z); }
-    return AoDepth(depth, bitcast<u32>(depth));
+    return AoDepth(i.pos.z, bitcast<u32>(i.pos.z));
 }
 
 /// The term for an opaque surface's fragment, on the prepass's depth. A section's cut face has none.
 fn ao_term(i: TOut, front: bool) -> vec4<f32> {
     if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
-    if (!front && length(u.clip.xyz) > 0.5) { return vec4<f32>(1.0); }
+    if (!front && sectioned()) { return vec4<f32>(1.0); }
     return vec4<f32>(occlusion_term(i));
 }
 
