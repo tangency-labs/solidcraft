@@ -2,7 +2,7 @@
 //! `cone_unbounded_parameterized_as_nurb` retired, part of #14246): every golden row the
 //! retirement moves is the correct answer for the cone, by certificate or closed form, and
 //! the old row is either as correct (EQUAL) or not (CLOSER). A row is FARTHER when the new
-//! value fails its certificate and the old one passes; one row is (analytic064, below).
+//! value fails its certificate and the old one passes; none is.
 //!
 //! Run (seconds):
 //! `WR713_INVENTORY=<jsonl> WR713_OUTPUTS=<old.jsonl> cargo test --profile goldens -p goldens --test wr704_wr713_cone_moves -- --ignored --nocapture`
@@ -94,11 +94,25 @@
 //!   (a bounded cylinder on non-unit axes, whose NURB main built with radius `r |X|`);
 //!   the others moved because the refinement loop now treats per-side maxima within the
 //!   a-priori rounding bound of `coons_side_angle` as tied and takes the finer patch
-//!   (deterministic: the bound is a function of the patch alone). Those rows are checked
-//!   by label "(tie rule)": same patch count, at least as many knots each way and more
-//!   in one. analytic064 (torus) is FARTHER by 5.2e-5 in `sin`: its sup sits inside the
-//!   sliver span next to a corner (within 1e-5 of it) in both runs, and the finer patch
-//!   reaches 0.49466 there against 0.49461.
+//!   (deterministic: the bound is a function of the patch alone). Those rows, by label
+//!   "(tie rule)", are checked twice before G1 decides the class. First the refinement
+//!   replays ([`replay_coons`]): every counted station's derivative and angle bounds
+//!   enclose the exact values (enclosed here from the candidate's net and knots), the side
+//!   maxima are the stations', and the rule (a certain gain, or a tie with no side
+//!   certainly worse, goes to the finer copy) picks the logged copy, which the output
+//!   holds bit for bit. Then main's patch is found among the candidates, and on every side
+//!   both certify, the new copy is not certainly worse than main's
+//!   ([`cert_coons_against_main`]). analytic064 (torus), whose refined copies are
+//!   certainly worse along two sides, keeps main's bare patch, and analytic111 the 32-span
+//!   copy main took (three ties, then a certain loss); neither moves.
+//!   [`coons_refinements_replay_with_honest_bounds`] replays them, analytic028 and
+//!   `topology.brep_p1`'s `vase_rev_corner_blend_3` and `Endcap_corner_blend_3`.
+//! * **Whole-solid corner blends** (`topology.brep_p1`, label "Coons replay, stations"):
+//!   the neighbours have no implicit form, so only the replay and the comparison with
+//!   main's candidate apply. `Endcap_corner_blend_3` moves: main took a refined copy whose
+//!   station maximum on one side (1.1353) is certainly above the bare patch's
+//!   (1.0752 ± 0.0034); the veto keeps the bare patch. CLOSER at the stations, which is a
+//!   sampled measure (ARGUED, not a sup-norm bound).
 //! * **Extrusion and cone curves** (`surface.surf_of_extrusion_p2`): every Bézier segment
 //!   lies within `tol` of the extrusion's planes (convex hull) and of the cone (a Bernstein
 //!   bound of the implicit equation, by de Casteljau halving).
@@ -128,6 +142,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use goldens::case::repo_root;
+use goldens::units::{nurbs_b_spline_surface_n_lib_p2 as nlib, topology_brep_p1 as bp1};
 use goldens::{golden, registry, CaseContext, Output};
 use serde_json::Value;
 use solidcore::geom::axis2_placement::Axis2Placement;
@@ -136,6 +151,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::{Point2, Vec3, EFF_ZERO, INFINITE_PARAMETER, PI};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::b_spline_surface_n_lib::p2::{CoonsCandidateLog, CoonsTangencyLog};
 use solidcore::nurbs::math::{gamma, CPoint, NOW};
 use solidcore::nurbs::{crv_basic, srf_basic};
 use solidcore::surface::cone::Cone;
@@ -1502,7 +1518,8 @@ fn moved_cone_rows_are_proven() {
                 unit.id(),
                 case.name
             );
-            let (op, vn, vo) = certify(unit.id(), &case.inputs, &new, &old);
+            let logs = coons_logs(unit.id(), &case, &new);
+            let (op, vn, vo) = certify(unit.id(), &case.inputs, &new, &old, &logs);
             if std::env::var("WR713_SHOW").is_ok_and(|w| w.split(',').any(|w| w == case.name)) {
                 println!(
                     "SHOW {} {}\n  new {:?} {:?}\n  old {:?} {:?}",
@@ -1633,7 +1650,13 @@ fn assert_same_identity(inputs: &Value, new: &Output, old: &Output) {
     }
 }
 
-fn certify(unit: &str, inputs: &Value, new: &Output, old: &Output) -> (String, Verdict, Verdict) {
+fn certify(
+    unit: &str,
+    inputs: &Value,
+    new: &Output,
+    old: &Output,
+    logs: &[CoonsTangencyLog],
+) -> (String, Verdict, Verdict) {
     match unit {
         "surface.cone_p1" => {
             let op = inputs["op"].as_str().unwrap_or("?").to_owned();
@@ -1721,17 +1744,23 @@ fn certify(unit: &str, inputs: &Value, new: &Output, old: &Output) -> (String, V
             };
             // the new side is also judged on why it moved: its inputs are points of the
             // true cylinder, where main's were not ([`cert_corner_inputs`]), or else the
-            // tie rule took a finer refined copy ([`cert_corner_tie_finer`])
+            // refinement's rule chose another copy: it replays with honest bounds, and
+            // the new copy is not certainly worse at the stations than main's
+            // ([`cert_coons_against_main`]); G1 decides the class
             let (g1_new, g1_old) = cert_corner_g1(inputs, new, old);
             let (op, why) = match cert_corner_inputs(inputs) {
                 Ok(()) => ("corner blend sides and G1", Ok(())),
                 Err(_) => (
                     "corner blend sides and G1 (tie rule)",
-                    cert_corner_tie_finer(new, old),
+                    cert_coons_against_main(logs, new, old).0,
                 ),
             };
             let new_side = why.and_then(|()| side(new)).and(g1_new);
             (op.into(), new_side, side(old).and(g1_old))
+        }
+        "topology.brep_p1" if !logs.is_empty() => {
+            let (vn, vo) = cert_coons_against_main(logs, new, old);
+            ("corner blend (Coons replay, stations)".into(), vn, vo)
         }
         "surface.surf_of_extrusion_p2" => {
             let side = |o: &Output, other: &Output| match &o.error {
@@ -2226,25 +2255,6 @@ fn cert_corner_g1(inputs: &Value, new: &Output, old: &Output) -> (Verdict, Verdi
     } else {
         (Ok(()), Ok(()))
     }
-}
-
-/// Why a corner-blend row on another neighbour moved: `make_coons_patch_tangent_to_sides`
-/// ties largest side angles within their rounding bounds and takes the finer copy, where
-/// main's strict `<` kept a coarser one on about `1e-14`. Each new patch has at least as
-/// many knots as the old one each way, and one of them more.
-fn cert_corner_tie_finer(new: &Output, old: &Output) -> Verdict {
-    let count = |o: &Output| o.values.get("patch_count").map(|c| c[0]);
-    check(count(new) == count(old), "the patch count changed")?;
-    let n = count(new).unwrap_or(0.0) as usize;
-    let mut finer = false;
-    for pi in 0..n {
-        for k in ["u", "v"] {
-            let len = |o: &Output| o.values.get(&format!("patch{pi}_{k}")).map_or(0, Vec::len);
-            check(len(new) >= len(old), "a new patch is coarser")?;
-            finer |= len(new) > len(old);
-        }
-    }
-    check(finer, "no new patch is finer")
 }
 
 /// Why a moved corner-blend row moved: its neighbour is a bounded cylinder
@@ -3872,4 +3882,525 @@ fn same_angle(new: &Output, old: &Output) -> bool {
     let a = |o: &Output| o.values.get("out").and_then(|v| v.first().copied());
     let st = |o: &Output| first(&o.values, "status");
     st(new) == Some(SUCCESS) && st(old) == Some(SUCCESS) && a(new).is_some() && a(new) == a(old)
+}
+
+// ---- Coons refinement replay (WR-713 tie rule) --------------------------------------------
+
+impl Rv {
+    fn exact(v: f64) -> Self {
+        Rv { v, e: 0.0 }
+    }
+    /// `|A / B - a / b| <= (e_a + |a / b| e_b) / (|b| - e_b)`, unbounded where the divisor's
+    /// enclosure holds zero.
+    fn div(self, q: Self) -> Self {
+        let v = self.v / q.v;
+        let lo = q.v.abs() - q.e;
+        if lo.is_nan() || lo <= 0.0 {
+            return Rv {
+                v,
+                e: f64::INFINITY,
+            };
+        }
+        Rv {
+            v,
+            e: err_up((self.e + v.abs() * q.e) / lo + UNIT_RO * v.abs()),
+        }
+    }
+    /// `|sqrt X - sqrt x| <= min(e / sqrt x, sqrt e)` for `X >= 0` within `e` of `x`.
+    fn sqrt(self) -> Self {
+        let v = self.v.max(0.0).sqrt();
+        let prop = if v > 0.0 {
+            (self.e / v).min(self.e.sqrt())
+        } else {
+            self.e.sqrt()
+        };
+        Rv {
+            v,
+            e: err_up(prop + UNIT_RO * v),
+        }
+    }
+}
+
+/// The span `a` the evaluator takes at `t` (`KnotVector::find_span`, `Side::Left` inside:
+/// `t_a <= t < t_(a+1)`; at or past either end the end span, moved inwards past spans
+/// shorter than `1e-12`). Written here from the definition, not called.
+fn eval_span(knots: &[f64], p: usize, t: f64) -> usize {
+    let m = knots.len() - 1;
+    if t >= knots[m - p] {
+        let mut i = m - p - 1;
+        while knots[i + 1] < knots[i] + 1e-12 && i > p {
+            i -= 1;
+        }
+        return i;
+    }
+    if t <= knots[p] {
+        let mut i = p;
+        while knots[i + 1] < knots[i] + 1e-12 && i < m - p - 1 {
+            i += 1;
+        }
+        return i;
+    }
+    (p..m - p)
+        .find(|&a| knots[a] <= t && t < knots[a + 1])
+        .unwrap()
+}
+
+/// Enclosures of the B-spline basis values `N_(a-p+k, p)(t)` and their first derivatives on
+/// span `a`, by the Cox-de Boor recurrence and `N' = p (N_(i, p-1) / (t_(i+p) - t_i) -
+/// N_(i+1, p-1) / (t_(i+p+1) - t_(i+1)))`, in [`Rv`] arithmetic from the exact knots.
+fn basis_rv(knots: &[f64], p: usize, a: usize, t: f64) -> (Vec<Rv>, Vec<Rv>) {
+    let kn = |i: usize| Rv::exact(knots[i]);
+    let tt = Rv::exact(t);
+    let mut n = vec![Rv::exact(1.0)];
+    let mut lower = Vec::new();
+    for d in 1..=p {
+        if d == p {
+            lower.clone_from(&n);
+        }
+        // n[k] is N_(a-(d-1)+k, d-1); next[k] is N_(a-d+k, d)
+        let next: Vec<Rv> = (0..=d)
+            .map(|k| {
+                let i = a + k - d;
+                let mut s = Rv::exact(0.0);
+                if k >= 1 {
+                    let w = tt.sub(kn(i)).div(kn(i + d).sub(kn(i)));
+                    s = s.add(w.mul(n[k - 1]));
+                }
+                if k < d {
+                    let w = kn(i + d + 1).sub(tt).div(kn(i + d + 1).sub(kn(i + 1)));
+                    s = s.add(w.mul(n[k]));
+                }
+                s
+            })
+            .collect();
+        n = next;
+    }
+    let pf = Rv::exact(p as f64);
+    let d = (0..=p)
+        .map(|k| {
+            if p == 0 {
+                return Rv::exact(0.0);
+            }
+            let i = a + k - p;
+            let mut s = Rv::exact(0.0);
+            if k >= 1 {
+                s = s.add(pf.mul(lower[k - 1]).div(kn(i + p).sub(kn(i))));
+            }
+            if k < p {
+                s = s.sub(pf.mul(lower[k]).div(kn(i + p + 1).sub(kn(i + 1))));
+            }
+            s
+        })
+        .collect();
+    (n, d)
+}
+
+/// Enclosures of the exact first derivatives of a non-rational patch at `uv`, on the spans
+/// the evaluator takes: `sum N'_i(u) N_j(v) P_ij` and `sum N_i(u) N'_j(v) P_ij`.
+fn exact_derivatives(patch: &BSplineSurface, uv: Point2) -> Result<(R3, R3), Fail> {
+    let Some(nurb) = patch.gw_nurb() else {
+        return fail("no NURB form");
+    };
+    check(!patch.is_rational(), "a rational candidate")?;
+    let (p, q) = (nurb.p(), nurb.q());
+    let (uk, vk) = (nurb.u_knots(), nurb.v_knots());
+    let (a, b) = (eval_span(uk, p, uv.x), eval_span(vk, q, uv.y));
+    let (nu, du) = basis_rv(uk, p, a, uv.x);
+    let (nv, dv) = basis_rv(vk, q, b, uv.y);
+    let zero = R3::new(Vec3::new(0.0, 0.0, 0.0), 0.0);
+    let (mut su, mut sv) = (zero, zero);
+    for (k, (nuk, duk)) in nu.iter().zip(&du).enumerate() {
+        for (l, (nvl, dvl)) in nv.iter().zip(&dv).enumerate() {
+            let c = nurb.cpt(a - p + k, b - q + l).unwrap();
+            let pt = R3::new(Vec3::new(c.x, c.y, c.z), 0.0);
+            su = su.add(pt.times(duk.mul(*nvl)));
+            sv = sv.add(pt.times(nuk.mul(*dvl)));
+        }
+    }
+    Ok((su, sv))
+}
+
+/// `|computed - exact|` at most, for `exact` in the enclosure `enc`.
+fn enclosed_distance(computed: Vec3, enc: R3) -> f64 {
+    let c = |x: f64, r: Rv| (x - r.v).abs() + r.e;
+    let (a, b, d) = (
+        c(computed.x, enc.x),
+        c(computed.y, enc.y),
+        c(computed.z, enc.z),
+    );
+    (a * a + b * b + d * d).sqrt() * (1.0 + gamma(8))
+}
+
+/// What a replay of one refinement found.
+#[derive(Debug, Default, Clone, Copy)]
+struct Replay {
+    /// stations whose bound was checked
+    stations: usize,
+    /// the largest checked derivative distance over its claimed bound
+    deriv_ratio: f64,
+    /// the largest half-width of an angle enclosure over the station's claimed bound
+    angle_ratio: f64,
+    /// candidates taken on a tie, kept on a certain loss, taken on a certain gain,
+    /// refused for a certainly worse side inside a tie, and compared on no common side
+    ties_taken: usize,
+    losses: usize,
+    gains: usize,
+    vetoed: usize,
+    no_common_side: usize,
+}
+
+/// The largest angle and bound over the sides in `voting`, as `SideAngle::sup_over`.
+fn sup_over(sides: &[Option<(f64, f64)>; 4], voting: impl Fn(usize) -> bool) -> Option<(f64, f64)> {
+    let mut sup: Option<(f64, f64)> = None;
+    for (ii, s) in sides.iter().enumerate() {
+        let Some((max, err)) = *s else { continue };
+        if !voting(ii) {
+            continue;
+        }
+        sup = Some(match sup {
+            None => (max, err),
+            Some((m, e)) => (if max > m { max } else { m }, e.max(err)),
+        });
+    }
+    sup
+}
+
+/// Replays one `make_coons_patch_tangent_to_sides` run from its log and checks it.
+///
+/// * **Honest bounds.** At every station that counts (`err < PI`), the exact first
+///   derivatives of the candidate (enclosed here, [`exact_derivatives`]) are within the
+///   claimed `(eu, ev)` of the computed ones, and the exact angle between the exact patch
+///   normal `du x dv` and the logged side normal (its cosine enclosed in [`Rv`] arithmetic,
+///   then `acos` of the ends, widened for the library's rounding) is inside
+///   `[angle - err, angle + err]`. So each station's bound encloses the angle its own
+///   arithmetic is meant to measure; nothing is taken from the kernel's bound arithmetic.
+/// * **Sides.** Each side's `(max, err)` is the largest angle and bound over its counted
+///   stations, bit for bit.
+/// * **The rule.** From the bare patch, each refined copy (spans 8, 16, 32, 64, while the
+///   held sup is above the target) is compared over the sides both certify: taken when
+///   its sup is certainly smaller, or tied within the sum of the bounds and no common side
+///   certainly worse; the replayed choice is the logged one, and the loop stops where it
+///   did.
+fn replay_coons(log: &CoonsTangencyLog) -> Result<Replay, Fail> {
+    let mut r = Replay::default();
+    for (ci, c) in log.candidates.iter().enumerate() {
+        let mut sides: [Option<(f64, f64)>; 4] = [None; 4];
+        for st in &c.stations {
+            check(st.side < 4, "a station on no side")?;
+            if st.err >= PI {
+                continue;
+            }
+            let (Some(angle), Some((_, m)), Some((eu, ev))) =
+                (st.angle, st.neighbour, st.derivative_errors)
+            else {
+                return fail(format!(
+                    "candidate {ci}: a counted station without its data"
+                ));
+            };
+            let (dux, dvx) = exact_derivatives(&c.patch, st.uv)?;
+            let (gu, gv) = (enclosed_distance(st.du, dux), enclosed_distance(st.dv, dvx));
+            within(&format!("candidate {ci} du at {:?}", st.uv), gu, eu)?;
+            within(&format!("candidate {ci} dv at {:?}", st.uv), gv, ev)?;
+            r.deriv_ratio = r.deriv_ratio.max(gu / eu).max(gv / ev);
+            // the angle in [0, PI / 2] between the lines of `du x dv` and `m`, as
+            // `atan(|n x m| / |n . m|)`: well conditioned at every angle, unlike `acos`
+            let nx = dux.cross(dvx);
+            let mr = R3::new(m, 0.0);
+            let y = nx.cross(mr);
+            let y = y.dot(y).sqrt();
+            let x = nx.dot(mr);
+            let (ylo, yhi) = ((y.v - y.e).max(0.0), y.v + y.e);
+            let (xlo, xhi) = ((x.v.abs() - x.e).max(0.0), x.v.abs() + x.e);
+            let lo = (ylo / xhi).atan() * (1.0 - 8.0 * UNIT_RO);
+            let hi = if xlo > 0.0 {
+                ((yhi / xlo).atan() * (1.0 + 8.0 * UNIT_RO)).min(0.5 * PI * (1.0 + 4.0 * UNIT_RO))
+            } else {
+                0.5 * PI * (1.0 + 4.0 * UNIT_RO)
+            };
+            check(
+                lo.is_finite() && hi.is_finite(),
+                format!("candidate {ci}: no angle enclosure at {:?}", st.uv),
+            )?;
+            within(
+                &format!("candidate {ci} angle at {:?} below its bound", st.uv),
+                angle - lo,
+                st.err,
+            )?;
+            within(
+                &format!("candidate {ci} angle at {:?} above its bound", st.uv),
+                hi - angle,
+                st.err,
+            )?;
+            r.angle_ratio = r.angle_ratio.max((angle - lo).max(hi - angle) / st.err);
+            r.stations += 1;
+            let s = &mut sides[st.side];
+            *s = Some(match *s {
+                None => (angle, st.err),
+                Some((mx, e)) => (if angle > mx { angle } else { mx }, e.max(st.err)),
+            });
+        }
+        let bits =
+            |s: &[Option<(f64, f64)>; 4]| s.map(|x| x.map(|(a, b)| (a.to_bits(), b.to_bits())));
+        check(
+            bits(&sides) == bits(&c.sides),
+            format!("candidate {ci}: the logged sides are not its stations'"),
+        )?;
+        let want = if ci == 0 { 0 } else { 8 << (ci - 1) };
+        check(
+            c.spans == want,
+            format!("candidate {ci} has {} spans", c.spans),
+        )?;
+    }
+    let Some(bare) = log.candidates.first() else {
+        return fail("no candidate");
+    };
+    let mut held = bare.sides;
+    let mut chosen = None;
+    let mut next = 1;
+    while next <= 4 && sup_over(&held, |_| true).is_some_and(|(m, _)| m > log.target) {
+        let Some(c) = log.candidates.get(next) else {
+            return fail(format!(
+                "the loop measured candidate {next}, the log has none"
+            ));
+        };
+        let joint = sup_over(&c.sides, |ii| held[ii].is_some())
+            .zip(sup_over(&held, |ii| c.sides[ii].is_some()));
+        if let Some(((a, ea), (b, eb))) = joint {
+            let tied = (a - b).abs() <= ea + eb;
+            let worse = c.sides.iter().zip(&held).any(|pair| match pair {
+                (Some((x, ex)), Some((y, ey))) => x - y > ex + ey,
+                _ => false,
+            });
+            if !tied && a < b {
+                r.gains += 1;
+            } else if tied && !worse {
+                r.ties_taken += 1;
+            } else if tied {
+                r.vetoed += 1;
+            } else {
+                r.losses += 1;
+            }
+            if (!tied && a < b) || (tied && !worse) {
+                held = c.sides;
+                chosen = Some(next);
+            }
+        } else {
+            r.no_common_side += 1;
+        }
+        next += 1;
+    }
+    check(
+        next == log.candidates.len(),
+        format!(
+            "the loop stops after {next} candidates, the log has {}",
+            log.candidates.len()
+        ),
+    )?;
+    check(
+        chosen == log.chosen,
+        format!("replayed choice {chosen:?}, logged {:?}", log.chosen),
+    )?;
+    Ok(r)
+}
+
+/// A candidate's values as the runners write a surface: control points `x y z w` row by
+/// row, then the u and the v knots.
+fn patch_values(c: &CoonsCandidateLog) -> Vec<f64> {
+    let nurb = c.patch.gw_nurb().unwrap();
+    let mut v = Vec::new();
+    for row in nurb.cpts() {
+        for p in row {
+            v.extend([p.x, p.y, p.z, p.w]);
+        }
+    }
+    v.extend_from_slice(nurb.u_knots());
+    v.extend_from_slice(nurb.v_knots());
+    v
+}
+
+/// Whether `hay` holds `needle` as a run, value by value within `rel` relatively.
+fn holds_run(hay: &[f64], needle: &[f64], rel: f64) -> bool {
+    let same =
+        |a: f64, b: f64| a.to_bits() == b.to_bits() || (a - b).abs() <= rel * a.abs().max(b.abs());
+    !needle.is_empty()
+        && hay
+            .windows(needle.len())
+            .any(|w| w.iter().zip(needle).all(|(a, b)| same(*a, *b)))
+}
+
+/// An output's surfaces as one array: `out` (a B-rep's `put_surface` blocks) or each
+/// `patch<j>_` of a corner blend, control points then knots.
+fn surface_values(o: &Output) -> Vec<f64> {
+    if let Some(out) = o.values.get("out") {
+        return out.clone();
+    }
+    let n = o.values.get("patch_count").map_or(0, |c| c[0] as usize);
+    let mut v = Vec::new();
+    for j in 0..n {
+        for k in ["cpts", "u", "v"] {
+            v.extend_from_slice(&o.values[&format!("patch{j}_{k}")]);
+        }
+    }
+    v
+}
+
+/// The index of the candidate whose patch `o` holds (`0` the bare patch), within `rel`.
+fn candidate_in(log: &CoonsTangencyLog, o: &Output, rel: f64) -> Option<usize> {
+    let hay = surface_values(o);
+    log.candidates
+        .iter()
+        .position(|c| holds_run(&hay, &patch_values(c), rel))
+}
+
+/// The Coons logs of `case`'s run with the kernel's log on; the run's output must be
+/// `new` bit for bit (keeping the log changes no result).
+fn coons_logs(unit: &str, case: &goldens::case::Case, new: &Output) -> Vec<CoonsTangencyLog> {
+    let mut k = Kernel::default();
+    *k.coons_tangency_log.borrow_mut() = Some(Vec::new());
+    let out = match unit {
+        "nurbs.b_spline_surface_n_lib_p2" => nlib::run_case_on(&k, case).unwrap(),
+        "topology.brep_p1" => bp1::run_case_on(&mut k, case).unwrap(),
+        _ => return Vec::new(),
+    };
+    let bits = |o: &Output| -> Vec<(String, Vec<u64>)> {
+        o.values
+            .iter()
+            .map(|(key, v)| (key.clone(), v.iter().map(|x| x.to_bits()).collect()))
+            .collect()
+    };
+    assert_eq!(
+        bits(&out),
+        bits(new),
+        "{}: the logged run differs",
+        case.name
+    );
+    let logs = k.coons_tangency_log.borrow().clone().unwrap();
+    logs
+}
+
+/// The replay certificate of a row whose corner patches went through the refinement: every
+/// log replays ([`replay_coons`]), and `o` holds each log's chosen patch, bit for bit.
+fn cert_coons_replay(logs: &[CoonsTangencyLog], o: &Output) -> Result<Replay, Fail> {
+    check(!logs.is_empty(), "no refinement ran")?;
+    let mut total = Replay::default();
+    for (li, log) in logs.iter().enumerate() {
+        let r = replay_coons(log).map_err(|f| Fail {
+            why: format!("refinement {li}: {}", f.why),
+            ..f
+        })?;
+        let want = log.chosen.unwrap_or(0);
+        check(
+            candidate_in(log, o, 0.0) == Some(want),
+            format!("refinement {li}: the output does not hold candidate {want}"),
+        )?;
+        total.stations += r.stations;
+        total.deriv_ratio = total.deriv_ratio.max(r.deriv_ratio);
+        total.angle_ratio = total.angle_ratio.max(r.angle_ratio);
+        total.ties_taken += r.ties_taken;
+        total.losses += r.losses;
+        total.gains += r.gains;
+        total.vetoed += r.vetoed;
+        total.no_common_side += r.no_common_side;
+    }
+    Ok(total)
+}
+
+/// The cases the replay is checked on outside the inventory: analytic028 (all sides tie:
+/// the finest copy), analytic064 (two sides certainly worse on every copy: the bare
+/// patch), analytic111 (three ties, then a certain loss at 64 spans: the 32-span copy, the
+/// one main took), `vase_rev_corner_blend_3` (its sups tie within
+/// the radian its left and right sides leave, but its bottom side, read to `3e-5`, is
+/// certainly ten degrees worse on every copy: the bare patch) and `Endcap_corner_blend_3`
+/// (likewise on its bottom side, 1.1353 against 1.0752 ± 0.0034: the bare patch, where
+/// main took a refined copy).
+#[test]
+fn coons_refinements_replay_with_honest_bounds() {
+    let ctx = CaseContext {
+        root: repo_root(),
+        seeds: SEEDS,
+    };
+    let want = [
+        ("nurbs.b_spline_surface_n_lib_p2", "analytic028", Some(4)),
+        ("nurbs.b_spline_surface_n_lib_p2", "analytic064", None),
+        ("nurbs.b_spline_surface_n_lib_p2", "analytic111", Some(3)),
+        ("topology.brep_p1", "vase_rev_corner_blend_3", None),
+        ("topology.brep_p1", "Endcap_corner_blend_3", None),
+    ];
+    let mut seen = 0;
+    for unit in registry() {
+        for case in unit.cases(&ctx).unwrap() {
+            let Some(&(_, _, chosen)) = want
+                .iter()
+                .find(|(u, c, _)| *u == unit.id() && *c == case.name)
+            else {
+                continue;
+            };
+            let new = unit.run_rust(&case).unwrap();
+            let logs = coons_logs(unit.id(), &case, &new);
+            assert_eq!(logs.len(), 1, "{}", case.name);
+            let r = cert_coons_replay(&logs, &new)
+                .unwrap_or_else(|f| panic!("{}: {}", case.name, f.why));
+            println!("{} chosen {:?} {r:?}", case.name, logs[0].chosen);
+            for c in &logs[0].candidates {
+                println!("  spans {} sides {:?}", c.spans, c.sides);
+            }
+            assert_eq!(logs[0].chosen, chosen, "{}", case.name);
+            assert!(r.stations > 0);
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, want.len());
+}
+
+/// A B-rep row whose corner patch moved: the new side replays ([`cert_coons_replay`]); the
+/// old (main's) output must hold one of this run's candidates (main refined the same patch
+/// the same way, and chose by a strict `<` of uncertified maxima), and the two choices are
+/// compared on the certified side data of the replay, which [`replay_coons`] showed to
+/// enclose the stations' exact angles. A side fails where the other's sup is certainly
+/// smaller, or where the sups tie and some side of it is certainly worse; with neither,
+/// both pass (EQUAL at the stations, which sample each side four times a knot span and
+/// densely towards its corners: ARGUED, not a sup-norm bound between them).
+fn cert_coons_against_main(
+    logs: &[CoonsTangencyLog],
+    new: &Output,
+    old: &Output,
+) -> (Verdict, Verdict) {
+    if let Err(f) = cert_coons_replay(logs, new) {
+        return (Err(f), Ok(()));
+    }
+    let (mut vn, mut vo) = (Ok(()), Ok(()));
+    for (li, log) in logs.iter().enumerate() {
+        let i = log.chosen.unwrap_or(0);
+        let Some(j) = candidate_in(log, old, 1e-12) else {
+            return (
+                fail(format!(
+                    "refinement {li}: main's patch is none of this run's candidates"
+                )),
+                Ok(()),
+            );
+        };
+        let (si, sj) = (log.candidates[i].sides, log.candidates[j].sides);
+        let joint = sup_over(&si, |ii| sj[ii].is_some()).zip(sup_over(&sj, |ii| si[ii].is_some()));
+        let worse = |x: &[Option<(f64, f64)>; 4], y: &[Option<(f64, f64)>; 4]| {
+            x.iter().zip(y).any(|pair| match pair {
+                (Some((a, ea)), Some((b, eb))) => a - b > ea + eb,
+                _ => false,
+            })
+        };
+        let Some(((a, ea), (b, eb))) = joint else {
+            continue;
+        };
+        let tied = (a - b).abs() <= ea + eb;
+        let what = format!("refinement {li}: candidate {i} (new) against {j} (main)");
+        if (!tied && a > b) || (tied && worse(&si, &sj)) {
+            vn = fail(format!(
+                "{what}: the new patch is certainly worse ({a} +- {ea} against {b} +- {eb})"
+            ));
+        } else if (!tied && b > a) || (tied && worse(&sj, &si)) {
+            vo = fail(format!(
+                "{what}: main's patch is certainly worse ({b} +- {eb} against {a} +- {ea})"
+            ));
+        }
+    }
+    (vn, vo)
 }

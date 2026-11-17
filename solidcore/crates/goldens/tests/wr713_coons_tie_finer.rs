@@ -10,8 +10,7 @@
 use goldens::case::repo_root;
 use goldens::{registry, CaseContext};
 
-#[test]
-fn analytic028_takes_the_refined_patch() {
+fn run(name: &str) -> goldens::Output {
     let ctx = CaseContext {
         root: repo_root(),
         seeds: 16,
@@ -24,9 +23,35 @@ fn analytic028_takes_the_refined_patch() {
         .cases(&ctx)
         .unwrap()
         .into_iter()
-        .find(|c| c.name == "analytic028")
-        .expect("case analytic028");
-    let out = unit.run_rust(&case).unwrap();
+        .find(|c| c.name == name)
+        .expect("the case");
+    unit.run_rust(&case).unwrap()
+}
+
+/// The knot count of `key` (a block-summed array in the goldens, a plain one here).
+fn knots(out: &goldens::Output, key: &str) -> usize {
+    out.values[key].len()
+}
+
+/// analytic064 (a torus neighbour) keeps main's patch (149 by 143 knots). Its refined
+/// copies' largest angles (0.51721 rad, `4.2e-6` along a side whose first span is
+/// `4.9e-4` long) sat between the evenly spaced stations, which read every candidate as
+/// the corner's 0.51715, so the tie took a finer copy (177 by 171 knots, the goldens line
+/// of 3102961cd) that is farther from tangent there. The corner stations see the rise,
+/// and the side normal is taken at the side's own point, so the bare patch is kept.
+#[test]
+fn analytic064_keeps_the_patch_its_refinements_do_not_beat() {
+    let out = run("analytic064");
+    assert_eq!(
+        (knots(&out, "patch0_u"), knots(&out, "patch0_v")),
+        (149, 143),
+        "not main's patch"
+    );
+}
+
+#[test]
+fn analytic028_takes_the_refined_patch() {
+    let out = run("analytic028");
     let u_knots = &out.values["patch0_u"];
     let v_knots = &out.values["patch0_v"];
     // the bare bicubic patch has 8 knots each way; a refined copy has 64 spans
