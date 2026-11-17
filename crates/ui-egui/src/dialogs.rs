@@ -4406,13 +4406,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // #10620: the card widens to fit its widest label in the current language. The body
     // publishes the extra it needs under this key each pass; the card applies it next pass,
     // so the label column grows and the control column keeps its design width. Manager cards
-    // keep their approved fixed width.
+    // keep their approved fixed width, except Sheet Metal Rules, whose "Bend Deduction at 90°"
+    // (#6794) needs the room in English too.
     let manager = matches!(
         d.kind,
         Kind::Material { .. }
             | Kind::Appearance(_)
             | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })
-            | Kind::Sheet(crate::dialogs_sheet::Sm::Rules { .. })
             | Kind::Plastic(crate::dialogs_plastic::Pl::Rules { .. })
     );
     let grow_key = egui::Id::unique(("sc_dialog_label_grow", raw_title));
