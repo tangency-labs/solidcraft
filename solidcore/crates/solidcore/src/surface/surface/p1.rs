@@ -25,6 +25,7 @@
 //! | [`Surface::approx_eq`], [`Surface::base_eq`]      | `operator==` (virtual), `SmSurface::operator==`  |
 //! | [`Surface::set_owner`], [`Surface::face`]         | `SetOwner`, `GetFace`                            |
 //! | [`Surface::calculate_bounding_box`], [`SurfaceBoxes`] | `CalculateBoundingBox` (base body)           |
+//! | [`Surface::certified_bounding_box`] | not upstream: a box that bounds the surface over a domain and shrinks with it |
 //! | [`Surface::approximate_size`]                     | `ApproximateSize`                                |
 //! | [`validate_surface_cache`], [`make_surface_cache`], [`make_trim_srf_cache`], [`cache_tolerances`] | `CacheMakeOrValidate` |
 //! | [`make_trim_srf_cache_with_face`], [`get_surface_cache_with_face`] | `CacheMakeOrValidate(SM_OC_TRIMSRF)`, `smsurf_GetSurfaceCache` of a face's surface |
@@ -2182,6 +2183,40 @@ impl Surface {
             None,
             None,
         )
+    }
+
+    /// A box that provably holds every point of the surface over `uv_domain`, or `None`
+    /// when none is known (not upstream; for clearance proofs, which split a domain until
+    /// its boxes are clear: the normal box of [`Surface::calculate_bounding_box`] is the
+    /// whole control net's, whatever the domain). It is the box of the control points of
+    /// the piece over `uv_domain` ([`BSplineSurface::piece_box`]) of the net the surface is
+    /// evaluated on: a B-spline's own, or the NURB of a cone, sphere, torus, surface of
+    /// revolution or surface of extrusion, made when missing. Every other kind has none
+    /// here: a plane is bounded by the corners of a cell, and the rest are not their
+    /// control net (an offset, a blend's approximation) or have only a base surface's.
+    ///
+    /// # Errors
+    ///
+    /// Those of making a missing NURB.
+    pub fn certified_bounding_box(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+    ) -> Result<Option<Extent3d>> {
+        Ok(match self.kind() {
+            SurfaceKind::BSpline(s) => s.piece_box(uv_domain),
+            SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
+            | SurfaceKind::SurfOfRevolution(_) => {
+                self.analytic_base_with_nurb(k)?.piece_box(uv_domain)
+            }
+            SurfaceKind::SurfOfExtrusion(_) => {
+                self.extrusion_base_with_nurb(k)?.piece_box(uv_domain)
+            }
+            _ => None,
+        }
+        .filter(Extent3d::is_defined))
     }
 
     /// [`Surface::calculate_bounding_box`] with upstream's optional basis guesses
