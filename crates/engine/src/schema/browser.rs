@@ -180,12 +180,14 @@ pub struct DocumentUnitsResult {
 
 /// The most keys, entries or paths a browser list may name, as the handlers cap them.
 const MAX_LIST: usize = 10_000;
-/// The longest item key, in bytes.
-const MAX_KEY_BYTES: usize = 256;
+/// The longest item key, in characters (as JSON Schema's `maxLength` counts), so that a body
+/// of any name the rename commands take can be named by its key.
+const MAX_KEY_CHARS: usize = 256;
 /// The deepest placement path, in occurrence ids.
 const MAX_PATH: usize = 64;
-/// The longest group or body name, in bytes.
-const MAX_NAME_BYTES: usize = 128;
+/// The longest name `browser.group`, `view.save`, `browser.rename_group`, `view.rename` and
+/// `body.rename` take, in characters.
+const MAX_NAME_CHARS: usize = 128;
 
 /// The folders the browser lists items in, which a group or a move is in.
 const FOLDERS: [&str; 3] = ["bodies", "sketches", "construction"];
@@ -309,7 +311,7 @@ pub struct GroupName(pub String);
 impl<'de> Deserialize<'de> for GroupName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(n) if n.trim().len() > MAX_NAME_BYTES => Err(D::Error::custom(whole("`name` is too long"))),
+            Value::String(n) if n.trim().chars().count() > MAX_NAME_CHARS => Err(D::Error::custom(whole("`name` is too long"))),
             Value::String(n) => Ok(GroupName(n)),
             _ => Err(D::Error::custom("must be text")),
         }
@@ -321,19 +323,19 @@ impl JsonSchema for GroupName {
         "GroupName".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "A name of at most 128 bytes once surrounding spaces are cut.", "type": "string"})
+        json_schema!({"description": "A name of at most 128 characters once surrounding spaces are cut.", "type": "string"})
     }
 }
 
-/// A name of 1 to 128 bytes once surrounding spaces are cut, as `browser.rename_group` and
-/// `body.rename` read `name`.
+/// A name of 1 to 128 characters once surrounding spaces are cut, as `browser.rename_group`,
+/// `view.rename` and `body.rename` read `name`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NewName(pub String);
 
 impl<'de> Deserialize<'de> for NewName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(n) if !n.trim().is_empty() && n.trim().len() <= MAX_NAME_BYTES => Ok(NewName(n)),
+            Value::String(n) if !n.trim().is_empty() && n.trim().chars().count() <= MAX_NAME_CHARS => Ok(NewName(n)),
             _ => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
         }
     }
@@ -344,7 +346,7 @@ impl JsonSchema for NewName {
         "NewName".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "Text of 1 to 128 bytes once surrounding spaces are cut.", "type": "string"})
+        json_schema!({"description": "Text of 1 to 128 characters once surrounding spaces are cut.", "type": "string"})
     }
 }
 
@@ -423,7 +425,7 @@ fn some_bodies<'de, D: Deserializer<'de>>(d: D) -> Result<Option<BodyNames>, D::
 }
 
 /// What `entries` in `cmd/browser.rs` reads of a list of groups (numbers) and item keys
-/// (strings): at most 10000, no key empty or over 256 bytes. `key` names the parameter in the
+/// (strings): at most 10000, no key empty or over 256 characters. `key` names the parameter in the
 /// messages.
 fn browser_entries(value: Value, key: &str) -> Result<Vec<BrowserEntry>, String> {
     let list = match value {
@@ -437,7 +439,7 @@ fn browser_entries(value: Value, key: &str) -> Result<Vec<BrowserEntry>, String>
         _ => None,
     };
     let list = list.ok_or_else(|| whole(format!("`{key}` must be a list of item keys (strings) and group ids (numbers)")))?;
-    if list.len() > MAX_LIST || list.iter().any(|e| e.as_item().is_some_and(|k| k.is_empty() || k.len() > MAX_KEY_BYTES)) {
+    if list.len() > MAX_LIST || list.iter().any(|e| e.as_item().is_some_and(|k| k.is_empty() || k.chars().count() > MAX_KEY_CHARS)) {
         return Err(whole(format!("`{key}` has bad keys")));
     }
     Ok(list)
@@ -481,7 +483,7 @@ impl<'de> Deserialize<'de> for GroupedItems {
 }
 
 fn entries_schema(description: &str, group_ids: bool, min_items: u32) -> Schema {
-    let item = json!({"type": "string", "minLength": 1, "maxLength": MAX_KEY_BYTES});
+    let item = json!({"type": "string", "minLength": 1, "maxLength": MAX_KEY_CHARS});
     let entry = if group_ids { json!({"anyOf": [item, {"type": "integer", "minimum": 0}]}) } else { item };
     json_schema!({"description": description, "type": "array", "items": entry, "minItems": min_items, "maxItems": MAX_LIST})
 }
@@ -560,7 +562,7 @@ pub struct BrowserGroupParams {
     /// levels).
     #[serde(default)]
     pub parent: Option<GroupId>,
-    /// The group's name, at most 128 bytes. Default: "Group" and the next number in the folder.
+    /// The group's name, at most 128 characters. Default: "Group" and the next number in the folder.
     #[serde(default)]
     pub name: Option<GroupName>,
     /// The items to put in it, by key; they leave the other groups they were in.
@@ -692,13 +694,13 @@ pub struct BrowserOrdered {
 }
 
 /// A list of item keys (strings, or numbers read as text), as `keys` in `cmd/browser.rs` reads
-/// one: at most 10000, no key empty or over 256 bytes.
+/// one: at most 10000, no key empty or over 256 characters.
 fn item_keys(value: Value, key: &str) -> Result<Vec<Value>, String> {
     let list = match value {
         Value::Array(a) if a.iter().all(|x| x.is_string() || x.as_u64().is_some()) => a,
         _ => return Err(whole(format!("`{key}` must be a list of item keys"))),
     };
-    let bad_key = |x: &Value| x.as_str().is_some_and(|k| k.is_empty() || k.len() > MAX_KEY_BYTES);
+    let bad_key = |x: &Value| x.as_str().is_some_and(|k| k.is_empty() || k.chars().count() > MAX_KEY_CHARS);
     if list.len() > MAX_LIST || list.iter().any(bad_key) { Err(whole(format!("`{key}` has bad keys"))) } else { Ok(list) }
 }
 
@@ -726,7 +728,7 @@ fn keys_schema(description: &str) -> Schema {
     json_schema!({
         "description": description,
         "type": "array",
-        "items": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": MAX_KEY_BYTES}, {"type": "integer", "minimum": 0}]},
+        "items": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": MAX_KEY_CHARS}, {"type": "integer", "minimum": 0}]},
         "maxItems": MAX_LIST
     })
 }
@@ -951,6 +953,11 @@ impl JsonSchema for Visible {
 fn some_visible<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Visible>, D::Error> {
     Visible::deserialize(d).map(Some)
 }
+
+/// `browser.toggle_planes` and `browser.toggle_reference` take no parameters: an empty object.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BrowserToggleParams {}
 
 /// Show or hide what is in the Browser: name one kind of target (`items`, `joints`, `features`,
 /// `folder`, `tree_folders` or `paths`). Saved with the design and undone like any other
@@ -1214,7 +1221,7 @@ fn some_view<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ViewKey>, D::Erro
     ViewKey::deserialize(d).map(Some)
 }
 
-/// The name `view.save` gives a view: at most 128 bytes once surrounding spaces are cut; nothing
+/// The name `view.save` gives a view: at most 128 characters once surrounding spaces are cut; nothing
 /// left means the next free "Named View" number.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SavedViewName(pub String);
@@ -1222,7 +1229,7 @@ pub struct SavedViewName(pub String);
 impl<'de> Deserialize<'de> for SavedViewName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(n) if n.trim().len() > MAX_NAME_BYTES => Err(D::Error::custom(whole("`name` is too long"))),
+            Value::String(n) if n.trim().chars().count() > MAX_NAME_CHARS => Err(D::Error::custom(whole("`name` is too long"))),
             Value::String(n) => Ok(SavedViewName(n)),
             _ => Err(D::Error::custom("must be text")),
         }
@@ -1234,7 +1241,7 @@ impl JsonSchema for SavedViewName {
         "SavedViewName".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "A name of at most 128 bytes once surrounding spaces are cut.", "type": "string"})
+        json_schema!({"description": "A name of at most 128 characters once surrounding spaces are cut.", "type": "string"})
     }
 }
 
@@ -1292,7 +1299,7 @@ pub struct ViewSaveParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ViewCamera")]
     pub camera: Option<ViewCamera>,
-    /// The view's name, at most 128 bytes once surrounding spaces are cut. Default: "Named View"
+    /// The view's name, at most 128 characters once surrounding spaces are cut. Default: "Named View"
     /// and the first number no view's name has. A value that is not text is reported, though the
     /// handler would read it as left out.
     #[serde(default)]

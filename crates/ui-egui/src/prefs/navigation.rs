@@ -1,6 +1,8 @@
 //! Navigation preferences, composed from indexed shared controls and canonical figures.
 use super::*;
 
+/// The Navigation page of Preferences: the preset, mouse buttons, Orbit around, orbit style, wheel
+/// and trackpad settings (the two-finger twist among them) and the view settings.
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_page(ui, |ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
@@ -118,6 +120,8 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         crate::scenario::publish_target("prefs:nav_drag_keeps_mode", keeps.rect);
         let wrap = setting::orbit_cursor_wrap(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.orbit_cursor_wrap.help"));
         crate::scenario::publish_target("prefs:orbit_cursor_wrap", wrap.rect);
+        let unrolls = setting::upright_orbit_unrolls(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.upright_orbit_unrolls.help"));
+        crate::scenario::publish_target("prefs:upright_orbit_unrolls", unrolls.rect);
         setting::radial_context_menu(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.navigation.radial_help"));
         let label = app.tr("Middle double-click");
         let width = ui_kit::ContentWidth::label(ui, label);
@@ -244,6 +248,7 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     crate::scenario::publish_target("prefs:trackpad_pan", response.rect);
                 });
                 setting::orbit_reverse(app, ui);
+                setting::trackpad_twist_turns(app, ui);
                 let response = setting::zoom_stop_at_model(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.zoom_stop_at_model_tip"));
                 crate::scenario::publish_target("prefs:zoom_stop_at_model", response.rect);
             });
@@ -290,7 +295,6 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_section(ui, "navigation_view", app.tr("ui.tab_view"), |ui| {
         let options = [
             ui_kit::PictureChoice { key: "Signed axes", label: app.tr("prefs.navigation.axes_signed"), figure: paint_signed_axes },
-            ui_kit::PictureChoice { key: "Cube", label: app.tr("prefs.navigation.cube_compact"), figure: ui_kit::paint_navigation_cube },
             ui_kit::PictureChoice { key: "Custom", label: solidcraft_ui_text::tr_label("Custom"), figure: ui_kit::paint_navigation_custom },
         ];
         if let Some(index) = ui_kit::settings_picture_choices_sized(
@@ -304,7 +308,7 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ) {
             app.preferences.navigator_style = NavigatorStyle::ALL.get(index).copied().unwrap_or_default();
         }
-        if let Some(all) = ["Signed axes", "Cube", "Custom"]
+        if let Some(all) = ["Signed axes", "Custom"]
             .into_iter()
             .map(|key| crate::scenario::rect_of(&format!("prefs:navigator:{key}")))
             .collect::<Option<Vec<_>>>()
@@ -332,11 +336,15 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         let (label, note) = (app.tr("prefs.navigator_fit").to_owned(), app.tr("prefs.navigator_fit_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.navigator_fit).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:navigator_fit", response.rect);
+        let (label, note) = (app.tr("prefs.keep_hover_while_navigating").to_owned(), app.tr("prefs.keep_hover_while_navigating_note").to_owned());
+        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.keep_hover_while_navigating).backing_on_hover_text(note);
+        crate::scenario::publish_target("prefs:keep_hover_while_navigating", response.rect);
         let (label, note) = (app.tr("prefs.invert_navigator_arrows").to_owned(), app.tr("prefs.invert_navigator_arrows_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_navigator_arrows).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:invert_navigator_arrows", response.rect);
         let (label, note) = (app.tr("prefs.invert_curved_roll_arrows").to_owned(), app.tr("prefs.invert_curved_roll_arrows_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_curved_roll_arrows).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:invert_curved_roll_arrows", response.rect);
+        setting::browser_arrow_keys(app, ui);
     });
 }

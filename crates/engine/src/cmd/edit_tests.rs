@@ -648,6 +648,56 @@ fn timeline_folders_are_command_backed_saved_undoable_and_follow_feature_ids() {
     assert!(s.doc.timeline_groups.is_empty());
 }
 
+/// #14884: deleting the last feature behind the rollback marker leaves the marker at the end of
+/// the history. Nothing is rolled back then, but the commands that move bodies, features and
+/// placements into a component still refused as if it were. While a feature is still behind the
+/// marker, they keep refusing.
+#[test]
+fn deleting_the_last_feature_behind_the_marker_lets_things_move_into_a_component() {
+    for command in ["component.from_bodies", "component.move_bodies", "component.move_features", "browser.reparent", "occurrence.reparent"] {
+        let mut s = Session::default();
+        let part = run(&mut s, "component.create", json!({"name": "Part"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let other = run(&mut s, "component.create", json!({"name": "Other"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "name": "BoxA"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "operation": "new_body", "name": "BoxB"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 50, 0], "operation": "new_body", "name": "BoxC"}));
+        run(&mut s, "timeline.rollback", json!({"position": 1}));
+        run(&mut s, "timeline.delete", json!({"feature": "BoxB"}));
+        assert_eq!(s.doc.marker, Some(s.doc.features.len() - 1), "{command}: BoxC is behind the marker");
+        let body = s.model.state().bodies.first().map(|b| b.name.clone()).expect("BoxA's body");
+        let params = match command {
+            "component.from_bodies" => json!({"bodies": [body]}),
+            "component.move_bodies" | "browser.reparent" => json!({"bodies": [body], "component": part["component"]}),
+            "component.move_features" => json!({"features": ["BoxA"], "component": part["component"]}),
+            _ => json!({"occurrence": part["occurrence"], "parent": other["component"]}),
+        };
+        let refused = s.execute(command, &params).unwrap_err().to_string();
+        assert!(refused.contains("finish timeline rollback"), "{command}: BoxC is still behind the marker: {refused}");
+        run(&mut s, "timeline.delete", json!({"feature": "BoxC"}));
+        assert_eq!(s.doc.marker, Some(s.doc.features.len()), "{command}: the marker stays at the end of the history");
+        let reply = run(&mut s, command, params);
+        assert!(!s.doc.marker.is_some_and(|m| m < s.doc.features.len()), "{command}: nothing is behind the marker afterwards");
+        let target = part["component"].as_u64();
+        match command {
+            "occurrence.reparent" => {
+                let moved = s.doc.occurrences.iter().find(|o| Some(o.id) == part["occurrence"].as_u64()).expect("Part's placement");
+                assert_eq!(Some(moved.parent), other["component"].as_u64(), "{command}: Part sits in Other now");
+            }
+            "component.move_features" => {
+                assert_eq!(s.doc.find_feature("BoxA").map(|f| f.component), target, "{command}: BoxA is in Part now");
+            }
+            _ => {
+                let expected = if command == "component.from_bodies" { reply["components"][0]["component"].as_u64() } else { target };
+                let moved = s.model.state().bodies.iter().find(|b| b.name == body).map(|b| s.doc.model_body_component(b));
+                assert_eq!(moved, expected, "{command}: the body is in the target component now");
+                assert_ne!(moved, Some(0), "{command}: the body left the root component");
+            }
+        }
+    }
+}
+
 /// #9373: editing a feature inside a timeline folder left the id of the edit's trial feature in
 /// the folder and gave that id out again, so every edit there added it once more, and a feature
 /// made later took it and was listed twice: the saved design then would not open. Edited, the
@@ -1237,6 +1287,44 @@ fn counted_body_names_stay_when_the_timeline_changes() {
     assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "E")]));
 }
 
+/// A design saved before body names were pinned, and saved rolled back, is pinned as it opens
+/// for the features after the marker too (#14008): a body made at the marker does not take the
+/// number of a later body, so the later bodies keep the names they were saved with and a combine
+/// that names them still joins the same bodies.
+#[test]
+fn counted_body_names_after_the_marker_stay_in_a_design_saved_before_pinning() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40), ("D", 50)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "name": name}));
+    }
+    run(&mut s, "solid.combine", json!({"target": "Body3", "tools": ["Body4"], "operation": "join", "name": "Join"}));
+    // As a file written before names were pinned: no stored names, and rolled back to after A.
+    let mut doc = (*s.doc).clone();
+    for f in &mut doc.features {
+        f.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    doc.marker = Some(1);
+    let mut s = Session::opened_at(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap(), None, None);
+    assert_eq!(s.doc.find_feature("C").map(|f| f.body_names.clone()), Some(vec!["Body3".to_string()]));
+    assert!(["Body1", "Body2", "Body3", "Body4"].iter().all(|n| s.doc.reserved_body_names.contains(*n)));
+    // Opening changed nothing the user can see: the design is still rolled back, and not dirty.
+    assert_eq!(s.doc.marker, Some(1));
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(!s.is_dirty());
+    assert!(s.undo.is_empty());
+
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0], "name": "N"}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    let st = s.model.state();
+    let names: Vec<(String, String)> =
+        st.bodies.iter().map(|b| (b.name.clone(), s.doc.feature(b.feature).map(|f| f.name.clone()).unwrap_or_default())).collect();
+    let want: Vec<(String, String)> =
+        [("Body1", "A"), ("Body5", "N"), ("Body2", "B"), ("Body3", "C")].iter().map(|(b, f)| (b.to_string(), f.to_string())).collect();
+    assert_eq!(names, want, "C and D are joined into Body3, N takes a new number");
+    assert!(s.doc.features.iter().all(|f| s.model.result(f.id).is_some_and(|r| r.error.is_none())));
+}
+
 /// Pinning reads each feature's bodies once and keeps them with the state it read them from;
 /// the names it pins and reserves, and the fingerprints it leaves, are those of reading every
 /// feature's bodies again: random boxes (named and counted), moves, suppressions, deletions,
@@ -1458,7 +1546,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     run(&mut s, "timeline.rename", json!({"feature": "Shelf", "name": "Ledge"}));
     run(&mut s, "timeline.rename", json!({"feature": "Guide", "name": "Rail"}));
     assert_eq!(plane_link(&s), "Ledge");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Rail"]);
     assert_eq!(s.selection, [Sel::Plane { name: "Ledge".into() }]);
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
@@ -1471,7 +1559,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(plane_link(&s), "Shelf");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Guide"], "the hidden plane stays hidden");
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
     assert!((projected_z(&mut s) - 20.0).abs() < 1e-9);
@@ -1572,6 +1660,34 @@ fn a_move_before_a_long_history_of_one_body_fits_a_window_threads_stack() {
         .unwrap()
         .join();
     assert!(moved.is_ok());
+}
+
+/// A fillet on the curved top edge of an extruded spline profile certifies its blend with
+/// series whose coefficient tables, held inline, filled a window thread's 1 MB stack before the
+/// kernel finished (#16147, #16489). On a thread with that stack, the design is built and the
+/// fillet's result is its own, not an aborted process.
+#[test]
+fn a_fillet_on_a_spline_edge_fits_a_window_threads_stack() {
+    let built = std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let mut s = Session::default();
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": "profile"}));
+            run(&mut s, "sketch.spline.fit_point", json!({"points": [[10, 10], [15, 14], [20, 15.5], [25, 14], [30, 10]]}));
+            run(&mut s, "sketch.line", json!({"points": [[30, 10], [10, 10]]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": "profile", "distance": 20, "operation": "new", "name": "boss", "body_name": "boss"}));
+            run(
+                &mut s,
+                "solid.fillet",
+                json!({"body": "boss", "edges": [[20.0, 15.5, 20.0]], "radius": 1, "tangent_chain": false, "name": "top_fillet"}),
+            );
+            let fillet = s.doc.features.last().map(|f| f.id).unwrap();
+            assert!(s.model.result(fillet).is_some());
+        })
+        .unwrap()
+        .join();
+    assert!(built.is_ok());
 }
 
 #[test]
@@ -1702,6 +1818,12 @@ fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     assert_eq!((s.doc.to_json(), s.undo.len()), before);
     let spec = crate::find_command("ui.toggle_visibility").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("V"), "", false));
+    // Dialog OK likewise (#17416): it has no default key; the user binds one.
+    let error = s.execute("ui.dialog_ok", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.dialog_ok").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (None, "", false));
 }
 
 #[test]
@@ -2317,6 +2439,45 @@ fn sketch_entities_name_their_sketch() {
     assert_eq!(it["sketch"], json!(s.active_sketch.unwrap()), "{it}");
 }
 
+/// #18233: Select All takes every shown body; in an open sketch, every curve of the sketch
+/// (construction ones too) and its points on no curve, not projected geometry or the origin.
+/// It replaces the selection and is no undo step.
+#[test]
+fn select_all_takes_the_shown_bodies_or_the_open_sketchs_own_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "solid.box", json!({"body_name": "Stowed", "corner": [60, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "browser.visibility", json!({"items": ["Stowed"], "visible": false}));
+    run(&mut s, "select.set", json!({"items": [{"type": "face", "body": "Block", "index": 0}]}));
+    let undo = s.undo.len();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 2);
+    assert_eq!(s.selection, ["Block", "Spare"].map(|name| Sel::Body { name: name.into() }));
+    assert_eq!(s.undo.len(), undo, "no undo step");
+
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 0], "body": "Block"}]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 20], [40, 20]], "ids": ["rail"], "connect": false}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 30], [40, 30]], "ids": ["guide"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.point", json!({"point": [50, 50], "id": "pin", "connect": false}));
+    let undo = s.undo.len();
+    let doc = s.doc.to_json();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 3);
+    let mut got: Vec<String> = s.selection.iter().map(|x| format!("{x:?}")).collect();
+    got.sort();
+    let mut want: Vec<String> = [
+        Sel::SketchCurve { id: "guide".into(), sketch: None },
+        Sel::SketchCurve { id: "rail".into(), sketch: None },
+        Sel::SketchPoint { id: "pin".into() },
+    ]
+    .iter()
+    .map(|x| format!("{x:?}"))
+    .collect();
+    want.sort();
+    assert_eq!(got, want, "the projected edge and the origin stay out");
+    assert_eq!((s.doc.to_json(), s.undo.len()), (doc, undo), "selecting edits nothing");
+}
+
 #[test]
 fn construction_points_report_their_position() {
     let mut s = Session::default();
@@ -2381,4 +2542,32 @@ fn hostile_params_and_stale_selections_never_fail_badly() {
     for v in [json!(null), json!([]), json!("x"), json!(f64::MAX), json!({"detail": null})] {
         assert!(s.execute("selection.get", &v).is_ok(), "{v}");
     }
+}
+
+/// A feature's or a folder's name is 1…128 characters, as the refusal says, not 128 bytes of its
+/// UTF-8: a hundred `ł` (200 bytes) is taken, 129 characters are not.
+#[test]
+fn feature_and_folder_names_count_characters_not_bytes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    let base = s.doc.find_feature("Base").unwrap().id;
+    let group = run(&mut s, "timeline.group", json!({"name": "Housing", "features": [base]}))["group"].as_u64().unwrap();
+    let long = "ł".repeat(100);
+    run(&mut s, "timeline.rename", json!({"feature": base, "name": long}));
+    assert_eq!(s.doc.features.iter().find(|f| f.id == base).map(|f| f.name.as_str()), Some(long.as_str()));
+    run(&mut s, "timeline.rename_group", json!({"group": group, "name": long}));
+    assert_eq!(s.doc.timeline_groups[0].name, long);
+    let too_long = "ł".repeat(129);
+    for (command, params) in
+        [("timeline.rename", json!({"feature": base, "name": too_long})), ("timeline.rename_group", json!({"group": group, "name": too_long}))]
+    {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("1…128 characters"), "{command}: {error}");
+    }
+    // A new folder is given such a name too.
+    let made = run(&mut s, "timeline.group", json!({"name": too_long.chars().skip(1).collect::<String>()}))["group"].as_u64().unwrap();
+    assert_eq!(s.doc.timeline_groups.iter().find(|g| g.id == made).map(|g| g.name.chars().count()), Some(128));
+    // A design with such names is saved and opens again.
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).map_err(|e| e.to_string());
+    assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
 }

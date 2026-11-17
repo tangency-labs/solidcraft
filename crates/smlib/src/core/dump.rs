@@ -51,7 +51,7 @@ pub(super) fn failed(k: &Kernel, call: &str, why: &str, inputs: Inputs<'_>) {
     let stem = format!("{n:06}-{}", safe(call));
     let mut text = format!("{call} -> {why}\nnumeric arguments are not recorded\n");
     for &(what, body) in inputs {
-        let bytes = serialise(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner));
+        let bytes = serialise(k, &body.kernel());
         match bytes {
             Ok(b) => {
                 let name = format!("{stem}-{what}.smb");
@@ -103,6 +103,13 @@ plain!(
 );
 
 impl<T> Answer for Option<T> {}
+
+/// Points classified one by one ([`super::classify_points`]): the first point's refusal is the call's.
+impl Answer for Vec<Result<crate::PointClass>> {
+    fn refusal(&self) -> Option<String> {
+        self.iter().find_map(|r| r.as_ref().err().map(Error::to_string))
+    }
+}
 
 /// The calls running now, in the order they started.
 static IN_FLIGHT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());

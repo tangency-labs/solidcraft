@@ -185,8 +185,18 @@ pub fn unit_info(u: &str) -> Option<(Kind, f64)> {
     match u.trim() {
         "" | "none" | "unitless" => Some((Kind::Unitless, 1.0)),
         "°" | "degree" | "degrees" => Some((Kind::Angle, std::f64::consts::PI / 180.0)),
-        t => UNITS.iter().find(|(n, _, _)| *n == t).map(|(_, k, s)| (*k, *s)),
+        t => {
+            let t = canonical_unit(t);
+            UNITS.iter().find(|(n, _, _)| *n == t).map(|(_, k, s)| (*k, *s))
+        }
     }
+}
+
+/// The spelling `UNITS` lists a unit under. The micro prefix is typed as the micro sign (U+00B5,
+/// what the Option key gives on a Mac) or as the Greek letter mu (U+03BC, what a Greek layout and
+/// most text on the web use): both are a micrometre.
+fn canonical_unit(name: &str) -> &str {
+    if name == "\u{3bc}m" { "\u{b5}m" } else { name }
 }
 
 /// How unit-less numbers are read: millimetres / degrees by default.
@@ -263,6 +273,8 @@ impl Value {
             _ => {
                 let hint = if k == Kind::Unitless && self.len == 1 && self.ang == 0 {
                     " (a count needs a unit-less value: divide by a length, e.g. `floor(L / (210 mm))`)"
+                } else if k == Kind::Length && self.len > 1 && self.ang == 0 {
+                    " (a length needs a 1D value: divide by a length, e.g. `(L * L) / (1 mm)`, or set the parameter's Unit to none in Parameters)"
                 } else {
                     ""
                 };
@@ -327,10 +339,20 @@ pub fn round_reported(v: f64) -> f64 {
 }
 
 fn unit(name: &str) -> Option<Value> {
+    let name = canonical_unit(name);
     UNITS.iter().find(|(n, _, _)| *n == name).map(|(_, k, s)| match k {
         Kind::Angle => Value::angle(*s),
         _ => Value::length(*s),
     })
+}
+
+const INCH_MM: f64 = 25.4;
+const FOOT_MM: f64 = 304.8;
+
+/// Whether `id` names a length unit of this size in millimetres, whatever its spelling (`in` and
+/// `inch`).
+fn is_length_unit(id: &str, mm: f64) -> bool {
+    unit(id).is_some_and(|u| u.len == 1 && u.ang == 0 && u.v == mm)
 }
 
 fn is_constant(id: &str) -> bool {
@@ -631,11 +653,12 @@ pub fn is_literal(s: &str) -> bool {
     }
 }
 
-/// Is the expression a bare number without a unit, like `20` or `-1.5`? A leading `=` only marks
+/// Is the expression a bare number without a unit, like `20`, `-1.5` or `2,5`? A leading `=` only marks
 /// a formula (#4681), so `=20` is the same bare number.
 pub fn is_bare_number(s: &str) -> bool {
-    let number = s.trim().strip_prefix('=').unwrap_or(s);
-    is_literal(s) && number.trim().trim_start_matches(['-', '+']).trim().parse::<f64>().is_ok()
+    // One number token, as the lexer reads it, so a decimal comma (`2,5`) and a mixed number
+    // (`2 1/8`) count like `2.5` and `2.125`.
+    is_literal(s) && lex(s).is_ok_and(|toks| matches!(toks.as_slice(), [Tok::Num(_)] | [Tok::Op('-' | '+'), Tok::Num(_)]))
 }
 
 /// Is `s` shaped like a parameter name: a letter or `_`, then letters, digits and `_`? The shape
@@ -771,8 +794,10 @@ impl Parser<'_> {
                 base = mul(base, d, true)?;
             }
             if self.unit_at(self.pos) {
+                let feet = matches!(self.peek(), Some(Tok::Id(id)) if is_length_unit(id, FOOT_MM));
                 let u = self.power(false)?;
-                return mul(base, u, false);
+                let whole = mul(base, u, false)?;
+                return if feet { self.with_inches(whole) } else { Ok(whole) };
             }
         }
         if let Some(Tok::Op('^')) = self.peek() {
@@ -784,6 +809,25 @@ impl Parser<'_> {
             return pow(base, e);
         }
         Ok(base)
+    }
+    /// Feet written with inches after them (`5' 3"`, `5 ft 3 1/2 in`) are one length, as sizes are
+    /// said: 5 ft and 3 in, not their product. Anything else after the feet is left to the caller.
+    fn with_inches(&mut self, feet: Value) -> Result<Value, DocError> {
+        let start = self.pos;
+        if feet.len != 1 || feet.ang != 0 || !matches!(self.toks.get(start), Some(Tok::Num(_))) {
+            return Ok(feet);
+        }
+        let fraction = matches!((self.toks.get(start + 1), self.toks.get(start + 2)), (Some(Tok::Op('/')), Some(Tok::Num(_))));
+        if !matches!(self.toks.get(start + if fraction { 3 } else { 1 }), Some(Tok::Id(id)) if is_length_unit(id, INCH_MM)) {
+            return Ok(feet);
+        }
+        let inches = self.power(true)?;
+        if inches.len != 1 || inches.ang != 0 {
+            // `3 in^2` and the like: not inches to add.
+            self.pos = start;
+            return Ok(feet);
+        }
+        Ok(Value { v: feet.v + inches.v, ..feet })
     }
     /// Whether the operand starting at token `i` is divided by: a `/` before it, past any signs.
     fn after_division(&self, i: usize) -> bool {
@@ -896,6 +940,15 @@ fn modulo(a: Value, b: Value, d: Defaults) -> Result<Value, DocError> {
     let (x, y) = (scale_bare(a, len, ang, d), scale_bare(b, len, ang, d));
     if y == 0.0 {
         return Err(DocError::Expr("modulo by zero".into()));
+    }
+    // Unit conversion leaves the quotient an ulp or two off a whole number (`3 in % 1 in` divides
+    // 76.2 mm by 25.4 mm), and the exact remainder is then almost a whole divisor instead of 0. A
+    // quotient that close to a whole number is that number, so the remainder is 0. Past 1e12 the
+    // quotient has no fraction left to judge, so the exact remainder stands.
+    let q = x / y;
+    let nearest = q.round();
+    if nearest != 0.0 && nearest.abs() < 1e12 && (q - nearest).abs() <= 4.0 * f64::EPSILON * nearest.abs() {
+        return Ok(Value { v: 0.0, len, ang });
     }
     Ok(Value { v: x.rem_euclid(y), len, ang })
 }
@@ -1497,6 +1550,21 @@ mod tests {
         assert!(!e.contains("divide"), "{e}");
     }
 
+    /// A squared or higher-dimension length where a length is expected names the fix (#17257).
+    #[test]
+    fn a_squared_length_where_a_length_is_expected_says_to_divide_by_a_length() {
+        let e = ev("width * width", Kind::Length).unwrap_err().to_string();
+        assert!(
+            e.contains("expected a length, got a value in length^2")
+                && e.contains("divide by a length, e.g. `(L * L) / (1 mm)`, or set the parameter's Unit to none in Parameters"),
+            "{e}"
+        );
+        let e = ev("width ^ 3", Kind::Length).unwrap_err().to_string();
+        assert!(e.contains("expected a length, got a value in length^3") && e.contains("divide by a length"), "{e}");
+        let e = ev("45 deg", Kind::Length).unwrap_err().to_string();
+        assert!(!e.contains("divide"), "{e}");
+    }
+
     #[test]
     fn errors() {
         assert!(ev("width + ang", Kind::Length).is_err());
@@ -1676,6 +1744,19 @@ mod tests {
         }
     }
 
+    /// A micrometre typed with the Greek letter mu (U+03BC) is the same unit as with the micro sign
+    /// (U+00B5): both spell `um`.
+    #[test]
+    fn a_micrometre_is_the_same_with_either_mu() {
+        for (e, want) in [("5 \u{3bc}m", 0.005), ("5 \u{b5}m", 0.005), ("5\u{3bc}m + 1 um", 0.006), ("1 mm / 1 \u{3bc}m", 1000.0)] {
+            let v = eval_with(e, &|_| Err(DocError::Expr("no names".into()))).unwrap();
+            let got = if v.kind() == Some(Kind::Length) { v.v } else { v.to_kind(Kind::Unitless).unwrap() };
+            assert!((got - want).abs() < 1e-12, "{e}: {got}");
+        }
+        assert_eq!(unit_info("\u{3bc}m"), unit_info("um"));
+        assert_eq!(reserved_kind("\u{3bc}m"), Some("unit"));
+    }
+
     /// A reserved name is refused by saying what kind of word it is.
     #[test]
     fn a_reserved_name_is_refused_by_its_kind() {
@@ -1747,5 +1828,69 @@ mod tests {
         assert_eq!(reported_value(Value::length(50.8)), 50.8);
         assert_eq!(round_reported(reported_value(Value::angle(30f64.to_radians()))), 30.0);
         assert_eq!(reported_value(Value::num(4.0)), 4.0);
+    }
+
+    /// `mod` of a value by a whole-number fraction of itself is 0 even when unit conversion leaves
+    /// the quotient an ulp or two off: `3 in % 1 in` is 25.39999999999999 mm without that.
+    #[test]
+    fn mod_ignores_float_noise_in_the_quotient() {
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        let rem = |e: &str| eval_with(e, &look).unwrap().v;
+        for e in [
+            "3 in % 1 in",
+            "mod(3 in, 0.5 in)",
+            "mod(-3 in, 1 in)",
+            "mod(76.2 mm, 1 in)",
+            "mod(0.3, 0.1)",
+            "mod(1, 0.1)",
+            "mod(7 mm, 0.7 mm)",
+            "mod(0.9 rad, 0.3 rad)",
+            "mod(3 in, -1 in)",
+        ] {
+            assert_eq!(rem(e), 0.0, "{e}");
+        }
+        // A real remainder is untouched, including a tiny one and one against a huge quotient.
+        for (e, want) in [
+            ("mod(7, 3)", 1.0),
+            ("mod(-1, 3)", 2.0),
+            ("mod(5, -3)", 2.0),
+            ("mod(3.0000001, 1)", 3.0000001 % 1.0),
+            ("mod(1e20, 3)", 1e20_f64.rem_euclid(3.0)),
+            ("mod(2.5 in, 1 in)", 12.7),
+            ("mod(1e-9, 3)", 1e-9),
+        ] {
+            assert!((rem(e) - want).abs() < 1e-9 * want.abs().max(1.0), "{e} gave {}", rem(e));
+        }
+    }
+
+    #[test]
+    fn feet_and_inches_written_together_are_one_length() {
+        // `5'3"` is 5 ft 3 in, as such sizes are written; it used to multiply the two lengths.
+        let inch = 25.4;
+        for (s, inches) in [
+            ("5'3\"", 63.0),
+            ("5' 3\"", 63.0),
+            ("5 ft 3 in", 63.0),
+            ("5 ft 3 inch", 63.0),
+            ("5 ft 3 1/2 inch", 63.5),
+            ("5 ft 1/2 inch", 60.5),
+            ("5′3″", 63.0),
+            ("5' 3 1/2\"", 63.5),
+            ("5' 1/2\"", 60.5),
+            ("-5'3\"", -63.0),
+            ("2 * 5'3\"", 126.0),
+            ("5'3\" + 1\"", 64.0),
+            ("1 1/2' 6\"", 24.0),
+        ] {
+            let v = ev(s, Kind::Length).unwrap_or_else(|e| panic!("{s}: {e}"));
+            assert!((v - inches * inch).abs() < 1e-9, "{s} is {v}");
+        }
+        assert!((ev("5'3\" / 1\"", Kind::Unitless).unwrap() - 63.0).abs() < 1e-9);
+        // Unchanged: a sign between them subtracts, a bare number or another unit after the feet
+        // multiplies, and inches with a power are an area.
+        assert!((ev("5' - 3\"", Kind::Length).unwrap() - 57.0 * inch).abs() < 1e-9);
+        assert_eq!(ev("5' 3", Kind::Length).unwrap(), 5.0 * 304.8 * 3.0);
+        assert_eq!(ev("5' 3 mm", Kind::Length).ok(), None);
+        assert_eq!(eval_with("5' 3\"^2", &|_| Err(DocError::Expr(String::new()))).unwrap().len, 3);
     }
 }

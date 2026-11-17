@@ -57,8 +57,14 @@
 //! **The pieces.** The edge is cut at the pcurves' knots (exact values: a pcurve's polynomial
 //! changes exactly there). A piece is taken as one polynomial only where both pcurves' `(u, v)`
 //! enclosures over the whole piece meet no interior knot line of their nets: that is proved,
-//! not found by a root to rounding. A piece whose enclosure meets one is halved, at most
-//! `MAX_CELL_DEPTH` times, and meanwhile bounded directly: the enclosures of `P` and `Q` over
+//! not found by a root to rounding. A piece whose enclosure meets one is cut, at most
+//! `MAX_CELL_DEPTH` times, and meanwhile bounded directly. Where a line's crossing is found
+//! (bisection on the pcurve's point between the piece's ends; at the nearer end where the line
+//! lies in the enclosure's rounding there) within `SLIVER` (a sixteenth) of the piece of one
+//! of its ends, as a line through a pcurve's knot is, that share of the piece is cut off that
+//! end, so the rest is one cell at once and the end part shrinks sixteen times per cut, not
+//! twice; otherwise the piece is halved. The crossing is a guess: every part is proved one cell or
+//! not as any piece is. Bounded directly: the enclosures of `P` and `Q` over
 //! the whole piece (the hull over the cells it meets) give an angle of at most
 //! `atan(|P|_hi / Q_lo)` on it, and its middle point is a witness as above. So a piece around
 //! a crossing, or along a knot line, is decided by its enclosure and never by the
@@ -167,9 +173,9 @@
 //!
 //! Deviations: no upstream counterpart. `bernstein_roots` (used by `sweep::stations`)
 //! recurses at most `MAX_DEPTH` (48) deep and `MAX_SUBDIVISIONS` (4096) times per call; a piece
-//! is halved at most `MAX_CELL_DEPTH` (48) times to find its cells and `MAX_SPLITS` (12) times
-//! to bound it, on an explicit stack; each piece between the pcurves' knots evaluates at most
-//! `MAX_POINTS` (one million) points of a cross product of degree at most `MAX_DEGREE` (4096).
+//! is cut at most `MAX_CELL_DEPTH` (48) times to find its cells (halved, or a sixteenth cut
+//! off an end a knot line runs through) and `MAX_SPLITS` (12) times to bound it, on an explicit stack; each piece
+//! between the pcurves' knots evaluates at most `MAX_POINTS` (one million) points of a cross product of degree at most `MAX_DEGREE` (4096).
 
 use crate::blend::fillet_section::definition_box::{definition_partials_over_box, gn_def_face_of};
 use crate::blend::fillet_section::interval::Ivl;
@@ -186,6 +192,9 @@ use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, Brep, EdgeId, EdgeuseId};
 
 const OP: &str = "query::tangent_edge";
+
+/// Bisection steps that place a knot line's crossing on a part ([`Use::crossing`]).
+const CROSSING_STEPS: usize = 60;
 
 /// Most points the decision evaluates on one piece between the pcurves' knots.
 const MAX_POINTS: usize = 1_000_000;
@@ -261,7 +270,12 @@ fn norm(a: I3) -> Ivl {
 /// The knot spans `k` (`u[k] < u[k + 1]`, `p <= k < n`) of a knot vector of degree `p` with
 /// `n` control points whose interval meets `[lo, hi]`; past the domain, its end span.
 fn spans_meeting(u: &[f64], p: usize, n: usize, lo: f64, hi: f64) -> Vec<usize> {
-    let mut out: Vec<usize> = (p..n)
+    // the knots ascend, so the spans meeting `[lo, hi]` are those from the last with
+    // `u[k + 1] < lo` (exclusive) to the last with `u[k] <= hi`: found by bisection, then each
+    // tested as before (a NaN end finds none)
+    let first = u.partition_point(|&x| x < lo).saturating_sub(1).max(p);
+    let last = u.partition_point(|&x| x <= hi).min(n);
+    let mut out: Vec<usize> = (first..last)
         .filter(|&k| match (u.get(k), u.get(k + 1)) {
             (Some(&a), Some(&b)) => a < b && a <= hi && b >= lo,
             _ => false,
@@ -952,6 +966,58 @@ impl Use {
         Ok(angle_between(def_n, net_n).map_or(Margin::Loose, Margin::Bounded))
     }
 
+    /// Where in `(s0, s1)` the pcurve meets a knot line of the net its box over the part
+    /// crosses: the first such line's crossing, found by bisection on the pcurve's point (the
+    /// middle of its enclosure) between the part's ends, where they lie on its two sides;
+    /// `None` where no line is crossed between the ends. A guess only: the parts it cuts are
+    /// each proved one cell (or not) as any part is.
+    fn crossing(&self, s0: f64, s1: f64) -> Result<Option<f64>> {
+        let Some(UvBox { u, v, .. }) = self.uv_box(Ivl::new(s0, s1))? else {
+            return Ok(None);
+        };
+        let at = |t: f64| -> Result<Option<(f64, f64)>> {
+            Ok(self
+                .uv_box(Ivl::from(t))?
+                .map(|UvBox { u, v, .. }| (u.mid(), v.mid())))
+        };
+        let (Some(start), Some(end)) = (at(s0)?, at(s1)?) else {
+            return Ok(None);
+        };
+        let [lu, lv] = &self.lines;
+        for (lines, along, first_coord) in [(lu, u, true), (lv, v, false)] {
+            let coord = |p: (f64, f64)| if first_coord { p.0 } else { p.1 };
+            // the lines ascend: the first strictly inside the box, by bisection
+            let first = lines.partition_point(|&x| x <= along.lo);
+            if let Some(&l) = lines.get(first).filter(|&&l| l < along.hi) {
+                let side = |p: (f64, f64)| coord(p) < l;
+                if side(start) == side(end) {
+                    // the line within the box but not between the ends' points: in the box's
+                    // rounding at an end (a line through the pcurve's knot), taken at the
+                    // nearer end
+                    let (ds, de) = ((coord(start) - l).abs(), (coord(end) - l).abs());
+                    return Ok(Some(if ds <= de { s0 } else { s1 }));
+                }
+                let (mut lo, mut hi) = (s0, s1);
+                for _ in 0..CROSSING_STEPS {
+                    let mid = 0.5 * (lo + hi);
+                    if !(mid > lo && mid < hi) {
+                        break;
+                    }
+                    let Some(m) = at(mid)? else {
+                        return Ok(None);
+                    };
+                    if side(m) == side(start) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                return Ok(Some(0.5 * (lo + hi)));
+            }
+        }
+        Ok(None)
+    }
+
     /// Whether the pcurve over `t` stays in one knot cell of the net (its `(u, v)` box meets
     /// no interior knot line), so `F` is one polynomial there; a plane's net is one cell.
     fn one_cell(&self, t: Ivl) -> Result<bool> {
@@ -1267,6 +1333,29 @@ fn pieces(breaks: &[f64]) -> Vec<(f64, f64)> {
             _ => None,
         })
         .collect()
+}
+
+/// The share of a part cut off the end a knot line runs through. Not smaller: a part much
+/// wider than its distance from the line can leave a blend's definition unenclosed over it
+/// (`a_procedural_round_s_edges_carry_its_margin` stays undecided at 1e-6), and at a sixteenth
+/// each cut gains four halvings.
+const SLIVER: f64 = 1.0 / 16.0;
+
+/// Where to cut `[s0, s1]` for a knot line's crossing at `at` within `SLIVER` of the part of
+/// one of its ends (a line through the pcurve's knot, met only in the box's rounding there):
+/// `SLIVER` of the part from that end, leaving the rest clear of the line. `None` for a
+/// crossing farther inside, which is halved towards as before (a cut on the line itself would
+/// put the line at the parts' ends, where a blend's definition may not be enclosed).
+fn crossing_cut(s0: f64, s1: f64, at: f64) -> Option<f64> {
+    let d = SLIVER * (s1 - s0);
+    let cut = if at - s0 < d {
+        s0 + d
+    } else if s1 - at < d {
+        s1 - d
+    } else {
+        return None;
+    };
+    (s0 < cut && cut < s1).then_some(cut)
 }
 
 /// An upper bound of the Lebesgue constant of `n` Chebyshev points, `1 + (2/pi) ln n`
@@ -1662,7 +1751,32 @@ fn decide(
                     } else {
                         part.depth < MAX_CELL_DEPTH
                     };
-                    if can_split && mid > s0 && mid < s1 {
+                    // a part whose box meets a knot line only in its rounding at an end (a line
+                    // through the pcurve's knot): a sixteenth cut off that end, so the rest is one
+                    // cell at once and the end part shrinks four halvings' worth per cut; any
+                    // other part halved as before
+                    let cut = if one_cell || !can_split {
+                        None
+                    } else {
+                        match pair.a.crossing(s0, s1)? {
+                            Some(at) => Some(at),
+                            None => pair.c.crossing(s0, s1)?,
+                        }
+                        .and_then(|at| crossing_cut(s0, s1, at))
+                    };
+                    if let Some(cut) = cut {
+                        let (depth, splits, unenclosed) =
+                            (part.depth + 1, part.splits, part.unenclosed);
+                        for (lo, hi) in [(cut, s1), (s0, cut)] {
+                            stack.push(Part {
+                                s0: lo,
+                                s1: hi,
+                                depth,
+                                splits,
+                                unenclosed,
+                            });
+                        }
+                    } else if can_split && mid > s0 && mid < s1 {
                         let (depth, splits) = if one_cell {
                             (part.depth, part.splits + 1)
                         } else {
@@ -2582,7 +2696,6 @@ mod tests {
         use crate::primitive::api_primitives::{create_box, create_cylinder};
         use crate::query::api_queries::{edge_closest_point, get_edges};
         use crate::topology::face;
-        k.fixes.fillet_round_as_definition = true;
         let plate = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
         let mut pipe = create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
         let phi = 4.0_f64.to_radians();
@@ -2635,18 +2748,13 @@ mod tests {
 
     /// `wr698`'s `circle_root` (a pipe's root on a plate rounded r 2 by the ball's exact
     /// circle, a procedural blend whose definition is enclosed): on its edges along the root,
-    /// each piece's margin is bounded, halved where it is too loose. Where the pipe's foot
-    /// crosses its net's C1 quarter knot (u = 15.708, multiplicity 2, near `s` = 87.22) the
-    /// definition's feet box is taken cell by cell (the C1-knot follow-up to
-    /// tangency-labs/solidcraft#14284, a use of order 1): edge 35 is Tangent, every part
-    /// enclosed (before it, 3 parts there were not and both edges were Undecided (pi, pi) at
-    /// 87.04, #15005). Edge 46 keeps one piece not enclosed, pinned exactly: where the foot sits
-    /// on the knot at the piece's start (s = 87.2234028), the guesses' first box lies just past
-    /// the line (by 2e-10 in u), so the cell path is not taken; Krawczyk's iterations grow the
-    /// box across it and the one solve refuses it, as before. Edge 46 is then Undecided at
-    /// 87.2234 (margin pi) with 2 parts not enclosed in its decision; this test's halving leaves
-    /// that one piece, [87.22340, 87.22345], refused by the definition box's typed "the
-    /// enclosure is not proved". Taking such a box cell by cell is tangency-labs/solidcraft#15183.
+    /// each piece's margin is bounded, halved where it is too loose, and both edges are
+    /// Tangent. Where the pipe's foot crosses its net's C1 quarter knot (u = 15.708,
+    /// multiplicity 2, near `s` = 87.22) the definition's feet box is taken cell by cell (the
+    /// C1-knot follow-up to tangency-labs/solidcraft#14284, a use of order 1), also where the
+    /// foot sits on the knot just outside the guesses' box and the one solve's contraction
+    /// reaches the line (tangency-labs/solidcraft#15183, edge 46 at `s` = 87.2234). Before
+    /// them, both edges were Undecided (pi, pi) at 87.04 with 3 parts not enclosed (#15005).
     #[test]
     #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     fn a_procedural_round_s_edges_carry_its_margin() {
@@ -2692,38 +2800,9 @@ mod tests {
             seen.push((e, verdict, counts.not_enclosed, left));
         }
         eprintln!("circle_root edges: {seen:?}");
-        // the definition's partials refused, exactly: definition_box's typed refusal (#14932)
-        let refused = concat!(
-            ": partials Failed(Failure { operation: ",
-            "\"blend::fillet_section::definition_box\", entity: None, ",
-            "reason: Blend(Failed(\"the enclosure is not proved\"))"
-        );
-        let pi = std::f64::consts::PI;
-        let pinned = |e: &EdgeId,
-                      verdict: &Option<Tangency>,
-                      not_enclosed: usize,
-                      left: &[(f64, f64, [String; 2])]| {
-            match format!("{e:?}").as_str() {
-                "EdgeId(35)" => {
-                    *verdict == Some(Tangency::Tangent) && not_enclosed == 0 && left.is_empty()
-                }
-                "EdgeId(46)" => {
-                    let undecided = matches!(verdict, Some(Tangency::Undecided { margin, at, .. })
-                        if margin.to_bits() == pi.to_bits() && (at - 87.2234).abs() < 1e-4);
-                    let parts = left.len() == 1
-                        && left.iter().all(|(s0, s1, why)| {
-                            *s0 >= 87.22340
-                                && *s1 <= 87.22345
-                                && why.iter().any(|w| w.contains(refused))
-                        });
-                    undecided && not_enclosed == 2 && parts
-                }
-                _ => false,
-            }
-        };
-        let all = seen
-            .iter()
-            .all(|(e, verdict, not_enclosed, left)| pinned(e, verdict, *not_enclosed, left));
+        let all = seen.iter().all(|(_, verdict, not_enclosed, left)| {
+            *verdict == Some(Tangency::Tangent) && *not_enclosed == 0 && left.is_empty()
+        });
         assert!(seen.len() == 2 && all, "{seen:?}");
     }
 

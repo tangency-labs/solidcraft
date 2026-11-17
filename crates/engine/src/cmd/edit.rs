@@ -17,7 +17,10 @@ use crate::schema::edit::{
     TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
     TimelineUngroupParams, TimelineUngrouped,
 };
-use crate::schema::select::{PartialPick, SelectClearParams, SelectClearResult, SelectItem, SelectSetParams, SelectSetResult, read_item};
+use crate::schema::select::{
+    PartialPick, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
+    SelectMode, SelectSetParams, SelectSetResult, read_item,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
@@ -46,6 +49,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TOGGLE_VISIBILITY_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::ToggleVisibilityResult>)
         .params("Show or hide what is selected in the app. Headless calls are refused without changing the design; browser.visibility takes explicit items"),
+    CommandSpec::new("ui.dialog_ok", "Dialog OK", crate::checked!("ui.dialog_ok", dialog_ok))
+        .icon("finish")
+        .noundo()
+        .doc_only()
+        .contract(&DIALOG_OK_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::DialogOkResult>)
+        .params("Runs OK in the feature dialog open in the app, as Enter does; bind it to a key in Preferences. Only the app has a dialog: called here it is refused, and changes nothing"),
     CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
         .icon("undo")
         .key("Ctrl+Z")
@@ -79,7 +89,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .contract(&RESTORE_CHECKPOINT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
-        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring or forgetting uses it and every later checkpoint up: take a new one to go back again"),
+        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring uses it and every later checkpoint up: take a new one to go back again. Forgetting drops only it"),
     CommandSpec::new("timeline.compute_all", "Compute All", crate::checked!("timeline.compute_all", compute_all))
         .at("SOLID", "MODIFY")
         .icon("compute")
@@ -192,7 +202,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("timeline.inspect", "Inspect Feature", crate::checked!("timeline.inspect", inspect_feature))
         .icon("inspect")
-        .noundo()
+        .noundo().read_only()
         .contract(&INSPECT_CONTRACT)
         .output(crate::schema::output_schema_for::<TimelineInspectResult>)
         .params(
@@ -204,19 +214,34 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SELECT_SET_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
-    CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
+    CommandSpec::new("select.filter", "Selection filter", crate::checked!("select.filter", select_filter)).icon("select").noundo().doc_only()
+        .contract(&SELECT_FILTER_CONTRACT).output(output_schema_for::<SelectFilterResult>)
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
     CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
         .icon("select")
         .noundo()
         .contract(&SELECT_CLEAR_CONTRACT)
         .output(output_schema_for::<SelectClearResult>),
-    CommandSpec::new("select.same_look", "Select Same Look", select_same_look).icon("select").noundo().doc_only()
+    CommandSpec::new("select.same_look", "Select Same Look", crate::checked!("select.same_look", select_same_look))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&SAME_LOOK_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
+    CommandSpec::new("select.all", "Select All", crate::checked!("select.all", select_all))
+        .icon("select")
+        .key("Ctrl+A")
+        .noundo()
+        .contract(&SELECT_ALL_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
+const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
+const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
+const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
@@ -287,6 +312,16 @@ const TOGGLE_VISIBILITY_CONTRACT: crate::schema::TypedContract<crate::schema::ed
 /// it runs in `SolveApp::start`, and its key can be moved in Preferences › Shortcuts.
 fn toggle_visibility(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.toggle_visibility acts on the app's selection; use browser.visibility in a headless session".into()))
+}
+
+const DIALOG_OK_CONTRACT: crate::schema::TypedContract<crate::schema::edit::DialogOkParams> = crate::schema::TypedContract::new();
+
+/// Dialog OK (#17416) confirms the app's open dialog, which only the app has: it does so in
+/// `SolveApp::start` and never reaches this.
+fn dialog_ok(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other(
+        "ui.dialog_ok runs OK in the dialog open in the app; a headless session has no dialog: run the dialog's command itself".into(),
+    ))
 }
 
 const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
@@ -418,8 +453,10 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.rename";
     let id = feature_id(s, p.get("feature"), cmd)?;
-    let name =
-        str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    let name = str_(p, "name")
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && n.chars().count() <= 128)
+        .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     let old = s.doc.feature(id).map(|f| f.name.clone()).ok_or_else(|| bad(cmd, "feature"))?;
     if s.doc.features.iter().any(|f| f.name == name && f.id != id) {
         return Err(bad(cmd, format!("another feature is called `{name}`")));
@@ -624,11 +661,8 @@ fn folders_with(
 /// A new folder named `name` holding `features` and `joints`, inside the folder `parent` (`None`:
 /// at the history's root), as `timeline.group` makes it. Returns its id.
 pub(crate) fn new_folder(s: &mut Session, name: &str, features: Vec<u64>, joints: Vec<u64>, parent: Option<u64>, cmd: &str) -> Result<u64> {
-    // Folder names are 1…128 bytes, as `timeline.rename_group` takes them.
-    let mut name = name.trim().to_string();
-    while name.len() > 128 {
-        name.pop();
-    }
+    // Folder names are 1…128 characters, as `timeline.rename_group` takes them.
+    let name: String = name.trim().chars().take(128).collect();
     let name = if name.is_empty() { format!("Folder{}", s.doc.timeline_groups.len() + 1) } else { name };
     let id = s.doc_mut().allocate_id()?;
     let (folders, broken) = folders_with(&s.doc, solidcraft_doc::TimelineGroup { id, name, parent, features, joints }, &[]);
@@ -667,7 +701,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|name| !name.is_empty()) {
-        Some(name) if name.len() <= 128 => name.to_string(),
+        Some(name) if name.chars().count() <= 128 => name.to_string(),
         Some(_) => return Err(bad(cmd, "`name` must be 1…128 characters")),
         None => format!("Folder{}", s.doc.timeline_groups.len() + 1),
     };
@@ -752,7 +786,7 @@ fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
     let id = timeline_group_id(s, p, cmd)?;
     let name = str_(p, "name")
         .map(str::trim)
-        .filter(|name| !name.is_empty() && name.len() <= 128)
+        .filter(|name| !name.is_empty() && name.chars().count() <= 128)
         .ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if let Some(group) = s.doc_mut().timeline_groups.iter_mut().find(|group| group.id == id) {
         group.name = name.to_string();
@@ -920,14 +954,15 @@ fn feature_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
 /// renamed (#1109). The suppressed feature keeps its own too: the counter passes the names of
 /// suppressed features by, so a body made meanwhile does not take `Body1` and lose it again when
 /// the feature is back.
-fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
+fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>, Vec<usize>)> {
     let made = |f: &Feature| -> Vec<String> {
         s.model.result(f.id).map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect()).unwrap_or_default()
     };
     let makes_counted = |f: &Feature| (0..made(f).len()).any(|i| super::browser::counted(f, i));
     let first = s.doc.features.iter().position(|f| ids.contains(&f.id) && !f.suppressed && makes_counted(f));
     let Some(at) = first else { return Vec::new() };
-    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f))).collect()
+    let left_out = |f: &Feature| s.model.result(f.id).map(|r| r.state.pattern_left_out(f.id).to_vec()).unwrap_or_default();
+    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f), left_out(f))).collect()
 }
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
@@ -954,9 +989,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
-    for (id, made) in &keep {
+    for (id, made, left_out) in &keep {
         if let Some(f) = doc.feature_mut(*id) {
-            f.pin_body_names(made);
+            f.pin_body_names(made, left_out);
         }
     }
     for id in &ids {
@@ -1469,9 +1504,45 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
         super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
-    // New face points: their faces' names now.
-    if nf.kind.face_points() != f.kind.face_points() {
+    // A body Pattern's copy names move with the bodies they copy (#12114). Names the edit gives
+    // are in the order the copies are made, as they always were: they are read that way, not
+    // moved by source, and stored source by source once the pattern has run. A pattern of several
+    // bodies whose names were not yet stored as its copies have them (a design made in memory,
+    // before a command stored them) takes its copies' names first, so each moves with its own.
+    if let FeatureKind::Pattern { bodies: old, .. } = &f.kind {
+        if set.get("body_names").is_some() {
+            nf.pattern_names_in_order = nf.pins_every_body_name();
+        } else {
+            if f.pins_every_body_name() && !f.pattern_names_in_order {
+                let made: Vec<String> = s
+                    .model
+                    .result(id)
+                    .filter(|r| r.error.is_none() && !r.skipped)
+                    .map(|r| r.state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect())
+                    .unwrap_or_default();
+                if !made.is_empty() && made.len() != nf.body_names.len() {
+                    nf.body_names = made;
+                }
+            }
+            nf.keep_pattern_names_with_sources(old);
+        }
+    }
+    // New face points: their faces' names now. So are the points an edit sends even when they
+    // equal the stored ones: that is how a broken reference is picked again (#16661), where
+    // the stored name would be kept and fail the same way. An edit that sends no point (a new
+    // thickness) leaves the names alone.
+    if nf.kind.face_points() != f.kind.face_points() || f.kind.face_point_fields().iter().any(|path| sets_path(set, path)) {
         nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
+    }
+    // A new To or From Object pick measures against the placements shown now (#16732).
+    if let (FeatureKind::Extrude { extent: a, .. }, FeatureKind::Extrude { extent: b, .. }) = (&nf.kind, &f.kind)
+        && (a.to != b.to || a.from != b.from)
+    {
+        let before = s.model.state_before(id);
+        super::component::pin_picked_placements_in(s, &mut nf.kind, nf.component, &before);
+    }
+    if !sets_path(set, "extent.from_level") {
+        keep_from_level_on_the_same_face(s, &f, &mut nf);
     }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
@@ -1481,6 +1552,11 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(EngineError::Other(e));
     }
     reply(cmd, TimelineEditResult { feature: id, recomputed: s.model.last_recomputed, restored: s.model.last_restored, param_warnings: Vec::new() })
+}
+
+/// Whether `set` sends the field at `path`, a dotted path into nested objects (`extent.to`).
+fn sets_path(set: &Value, path: &str) -> bool {
+    path.split('.').try_fold(set, |at, key| at.get(key)).is_some()
 }
 
 /// Complete a partial script pick without changing the stored selection type or reinterpreting
@@ -1575,20 +1651,12 @@ fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
         mode: String,
     }
     let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.filter", e.to_string()))?;
-    if !matches!(request.mode.as_str(), "body" | "face" | "component") {
-        return Err(bad("select.filter", "mode must be body, face or component"));
-    }
-    Ok(json!({"mode": request.mode}))
+    let mode = SelectMode::parse(&request.mode).ok_or_else(|| bad("select.filter", "mode must be body, face or component"))?;
+    reply("select.filter", SelectFilterResult { mode, param_warnings: Vec::new() })
 }
 
 fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Request {
-        body: Option<String>,
-        face: Option<usize>,
-    }
-    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.same_look", e.to_string()))?;
+    let request: SameLookParams = serde_json::from_value(p.clone()).map_err(|e| bad("select.same_look", e.to_string()))?;
     let selected = s.selection.last();
     let name = request
         .body
@@ -1617,6 +1685,39 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("select.same_look", "too many objects"));
     }
     select_set(s, &json!({"items":items}))
+}
+
+/// In an open sketch, every curve of it (construction ones too) and every point of it on no
+/// curve, leaving out its origin and projected geometry; outside a sketch, every shown body.
+fn select_all(s: &mut Session, _p: &Value) -> Result<Value> {
+    let all: Vec<Sel> = match s.active_sketch {
+        Some(id) => {
+            let sk = super::sketch_store::read(&s.doc, id)?;
+            let own = sk.curves.iter().filter(|c| c.link.is_none());
+            let on_curve = |q: usize| own.clone().any(|c| c.kind.uses(q));
+            own.clone()
+                .map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None })
+                .chain(
+                    sk.points
+                        .iter()
+                        .enumerate()
+                        .filter(|(q, p)| p.link.is_none() && p.id != "origin" && !on_curve(*q))
+                        .map(|(_, p)| Sel::SketchPoint { id: p.id.clone() }),
+                )
+                .take(10_001)
+                .collect()
+        }
+        None => {
+            let hidden = &s.visibility.hidden_bodies;
+            s.world_state()?.bodies.iter().filter(|b| !hidden.contains(&b.name)).take(10_001).map(|b| Sel::Body { name: b.name.clone() }).collect()
+        }
+    };
+    if all.len() > 10_000 {
+        return Err(bad("select.all", "too many items"));
+    }
+    s.selection = all;
+    s.refresh_display();
+    reply("select.all", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -2055,6 +2156,21 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     keys
 }
 
+/// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
+/// that keeps its From face: the same pick, or a pick of a face on the same plane, found as the
+/// build finds it in the model before the feature. A From picked on another plane is a new
+/// choice, so it starts on that face, as a new extrude does. `after`'s face names and picked
+/// placements must already be its own.
+fn keep_from_level_on_the_same_face(s: &Session, before: &Feature, after: &mut Feature) {
+    let FeatureKind::Extrude { extent: was, .. } = &before.kind else {
+        return;
+    };
+    let keep = was.from_level && solidcraft_doc::same_extrude_from_face(&s.doc, &s.model.state_before(before.id), before, after);
+    if let FeatureKind::Extrude { extent, .. } = &mut after.kind {
+        extent.from_level = keep;
+    }
+}
+
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2065,6 +2181,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let constructor = super::features::COMMANDS
         .iter()
         .chain(super::features_more::COMMANDS)
+        .chain(super::cell_grid::COMMANDS)
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
         .chain(super::surface_boundary::COMMANDS)
@@ -2132,6 +2249,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("old_surface_start").or_insert_with(|| json!(true));
     }
+    // The Hole window sends no tolerance class: an edit that gives none keeps the hole's while its
+    // new thread takes it, and drops it with a size that doesn't (#16336).
+    if let FeatureKind::Hole { thread_class: Some(class), .. } = &old.kind
+        && cid == "solid.hole"
+        && let Some(parameters) = params.as_object_mut()
+        && !parameters.contains_key("thread_class")
+        && let Some(tapped) = parameters.get("thread").and_then(Value::as_str).and_then(solidcraft_doc::parse_tapped_thread)
+        && tapped.check_class(class).is_ok()
+    {
+        parameters.insert("thread_class".into(), json!(class));
+    }
     // Members keep their names through an edit, unless it gives them another name.
     if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
         && cid == "frame.member"
@@ -2140,7 +2268,20 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("names").or_insert_with(|| json!(names));
     }
+    // A hole's and a primitive's `targets` are the bodies it takes part in: an edit that names
+    // them changes them (#17623), rather than the old participants overriding them.
+    let targets_are_participants = matches!(
+        old.kind,
+        FeatureKind::Hole { .. }
+            | FeatureKind::Box { .. }
+            | FeatureKind::Cylinder { .. }
+            | FeatureKind::Sphere { .. }
+            | FeatureKind::Torus { .. }
+            | FeatureKind::Cone { .. }
+    ) && params.get("participants").is_none()
+        && params.get("targets").and_then(Value::as_array).is_some_and(|t| !t.is_empty());
     if !old.participants.is_empty()
+        && !targets_are_participants
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("participants").or_insert_with(|| json!(old.participants));
@@ -2177,7 +2318,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(parameters) = params.as_object_mut() {
         parameters.remove("name");
     }
-    let r = spec.run_nested(&mut trial, &params)?;
+    let r = {
+        // Offset Plane has no parameter mapping in `frames::map_local`: its constructor maps
+        // the complete definition, or captures a face directly in the authoring frame.
+        let _world = (spec.id == "construct.plane.offset").then(crate::frames::world_geometry);
+        spec.run_nested(&mut trial, &params)
+    }?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
@@ -2203,6 +2349,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         after.to_body_apart = before.to_body_apart;
     }
+    keep_from_level_on_the_same_face(s, &old, &mut new);
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
@@ -2383,7 +2530,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         slot.edge_names = new.edge_names;
         slot.face_names = new.face_names;
         slot.param_names = param_names;
-        if params.get("participants").is_some() {
+        if params.get("participants").is_some() || targets_are_participants {
             slot.participants = new.participants;
         }
     }

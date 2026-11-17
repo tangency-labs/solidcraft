@@ -1,5 +1,23 @@
 use super::*;
 
+/// A chamfer refused for room is told about its offset, not a fillet's rolling ball (#12128);
+/// a round keeps the ball's words.
+#[test]
+fn a_chamfer_refused_for_room_is_worded_as_a_chamfer() {
+    let at = Some([204.518, -3.018, 13.2]);
+    for kind in [FitKind::Distance, FitKind::Scale] {
+        for why in
+            [RoomReason::BallDoesNotFit, RoomReason::BallsFold, RoomReason::OffsetCollapses, RoomReason::FaceConsumed, RoomReason::RailLeavesFace]
+        {
+            let text = Error::TooLarge { size: 2.5, kind, at, why: Some(why) }.to_string();
+            assert!(!text.contains("ball") && !text.contains("roll"), "{kind:?} {why:?}: {text}");
+            assert!(text.contains("chamfer") || text.contains("offset"), "{kind:?} {why:?}: {text}");
+        }
+    }
+    let round = Error::TooLarge { size: 2.5, kind: FitKind::Radius, at, why: Some(RoomReason::BallDoesNotFit) }.to_string();
+    assert!(round.contains("the rolling ball does not fit a face it rolls on"), "{round}");
+}
+
 #[test]
 fn box_end_to_end() {
     let b = Brep::make_box([1.0, 2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
@@ -77,6 +95,25 @@ fn calls_from_many_threads_are_serialised() {
 /// The dump folder is process-wide: the tests that set it take turns.
 static DUMP_DIR_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// `current_call` may return no snapshot while another test changes its process-wide registry.
+/// Tests that require a snapshot run alone, with only the worker calls they control.
+fn in_own_process(test: &str, f: impl FnOnce()) {
+    const CHILD: &str = "SOLIDCRAFT_SMLIB_TEST_CHILD";
+    if std::env::var(CHILD).as_deref() == Ok(test) {
+        f();
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--nocapture", "--test-threads=1"])
+        .env(CHILD, test)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{test}: {}\n{stdout}\n{stderr}", output.status);
+    assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"), "child must execute the selected test: {stdout}");
+}
+
 /// Entry points that ask no kernel, so have nothing to say here.
 const NO_KERNEL: [&str; 14] = [
     "inertia_tensor",
@@ -95,7 +132,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 65] = [
+const ANSWERING: [&str; 68] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -133,15 +170,18 @@ const ANSWERING: [&str; 65] = [
     "stitch",
     "offset_sheet",
     "classify_point",
+    "classify_points",
     "mass_properties",
     "bounds",
     "edge_face_distance",
+    "curve_face_gap_bound",
     "area",
     "is_manifold_solid",
     "tagged",
     "history",
     "check",
     "check_owned",
+    "check_stitched",
     "make_cylinder",
     "make_sphere",
     "make_cone",
@@ -251,13 +291,17 @@ fn every_entry_point_answers() {
     says("stitch", sheet.stitch(0.1));
     says("offset_sheet", sheet.offset_sheet(1.0));
     says("classify_point", a.classify_point([1.0; 3]));
+    says("classify_points", a.classify_points(&[[1.0; 3], [f64::NAN; 3]]));
     says("mass_properties", a.mass_properties(1e-6));
     says("bounds", a.bounds());
     says("edge_face_distance", a.edge_face_distance(0, 0));
+    let spline = solidcore_record::brep::Curve::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[0.0; 3], [1.0; 3]] };
+    says("curve_face_gap_bound", a.curve_face_gap_bound(&spline, [0.0, 1.0], 0, 1e-3));
     says("area", a.area(1e-6));
     says("is_manifold_solid", a.is_manifold_solid());
     says("history", says("tagged", a.tagged(0)).unwrap().history());
     says("check", a.check(CheckLevel::All));
+    says("check_stitched", a.check_stitched(CheckLevel::All));
     says("check_owned", a.try_clone().and_then(|c| c.check_owned(CheckLevel::All)));
     says("make_cylinder", Brep::make_cylinder([0.0; 3], 1.0, 1.0));
     says("make_sphere", Brep::make_sphere([0.0; 3], 1.0));
@@ -319,31 +363,32 @@ fn only_a_failing_call_serialises_its_inputs() {
 }
 
 /// A failing solidcore call leaves its inputs and what failed, and an answered one leaves nothing;
-/// the call in flight is named, and gone after. A folder is process-wide, so this test is the one
-/// that sets it.
+/// the call in flight is named, and gone after. Its process has no unrelated registry writers.
 #[test]
 fn a_failing_solidcore_call_leaves_a_dump_and_names_itself() {
-    let _dumps = DUMP_DIR_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let dir = std::env::temp_dir().join(format!("solidcraft-smlib-core-dump-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    core::dump::set_dir(Some(dir.clone()));
-    let a = core::make_box([0.0; 3], [10.0; 3]).unwrap();
-    let seen: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-    let r: Result<()> = core::with_body("smlib_test_failure", &a, |_, _| {
-        *seen.lock().unwrap() = core::dump::current();
-        Err(solidcore::SolidError::invalid_input("test", "refused"))
+    in_own_process("tests::a_failing_solidcore_call_leaves_a_dump_and_names_itself", || {
+        let _dumps = DUMP_DIR_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = std::env::temp_dir().join(format!("solidcraft-smlib-core-dump-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        core::dump::set_dir(Some(dir.clone()));
+        let a = core::make_box([0.0; 3], [10.0; 3]).unwrap();
+        let seen: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+        let r: Result<()> = core::with_body("smlib_test_failure", &a, |_, _| {
+            *seen.lock().unwrap() = core::dump::current();
+            Err(solidcore::SolidError::invalid_input("test", "refused"))
+        });
+        core::dump::set_dir(None);
+        assert!(r.is_err());
+        assert!(seen.lock().unwrap().as_deref().is_some_and(|c| c.contains("smlib_test_failure")), "{seen:?}");
+        assert!(!core::dump::current().is_some_and(|c| c.contains("smlib_test_failure")), "no longer in flight");
+        let got: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        let text = got.iter().find(|n| n.ends_with("-smlib_test_failure.txt")).unwrap_or_else(|| panic!("{got:?}"));
+        assert!(std::fs::read_to_string(dir.join(text)).unwrap().contains("refused"));
+        let smb = got.iter().find(|n| n.ends_with("-smlib_test_failure-brep.smb")).unwrap_or_else(|| panic!("{got:?}"));
+        let back = core::file::read(&dir.join(smb), false).unwrap();
+        assert!((core::volume(&back, 1e-7).unwrap() - 1000.0).abs() < 1e-6);
+        let _ = std::fs::remove_dir_all(&dir);
     });
-    core::dump::set_dir(None);
-    assert!(r.is_err());
-    assert!(seen.lock().unwrap().as_deref().is_some_and(|c| c.contains("smlib_test_failure")), "{seen:?}");
-    assert!(!core::dump::current().is_some_and(|c| c.contains("smlib_test_failure")), "no longer in flight");
-    let got: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
-    let text = got.iter().find(|n| n.ends_with("-smlib_test_failure.txt")).unwrap_or_else(|| panic!("{got:?}"));
-    assert!(std::fs::read_to_string(dir.join(text)).unwrap().contains("refused"));
-    let smb = got.iter().find(|n| n.ends_with("-smlib_test_failure-brep.smb")).unwrap_or_else(|| panic!("{got:?}"));
-    let back = core::file::read(&dir.join(smb), false).unwrap();
-    assert!((core::volume(&back, 1e-7).unwrap() - 1000.0).abs() < 1e-6);
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// SMLib may end an edge at a parameter of its own (a knot its vertex lies at, where its drop onto
@@ -359,17 +404,86 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
     let edge = TrimEdge { curve: &line, nurbs: None, interval: [0.0, 1.0], vertices: [0, 1], tolerance: 1e-5 };
     let theirs = [0.0, 1.0 - 2e-8];
     let pc = Curve2::Spline { knots: vec![0.0, 0.0, theirs[1], theirs[1]], points: vec![[0.0, 0.0], [1.0, 0.0]] };
-    let mapped = crate::pcurves::on_our_interval(pc.clone(), &edge, theirs, edge.tolerance).unwrap();
+    let mapped = crate::pcurves::on_our_interval(pc.clone(), &edge, theirs, edge.tolerance, [0.0; 2]).unwrap();
     assert_eq!(mapped.interval(), Some([0.0, 1.0]));
     assert_eq!(solidcore_ops::pcurve::eval(&mapped, 1.0), Some([1.0, 0.0]));
     // 0.02 mm along the edge is past its 1e-5 mm.
-    let err = crate::pcurves::on_our_interval(pc, &edge, [0.0, 0.99], edge.tolerance).unwrap_err();
+    let err = crate::pcurves::on_our_interval(pc, &edge, [0.0, 0.99], edge.tolerance, [0.0; 2]).unwrap_err();
     assert!(err.contains("SMLib moved an edge's interval") && err.contains("tolerance"), "{err}");
     // Held at 0.03 mm, as an edge 0.01 mm off its surface is, the same end is within it.
     let short = Curve2::Spline { knots: vec![0.0, 0.0, 0.99, 0.99], points: vec![[0.0, 0.0], [1.0, 0.0]] };
-    let held = crate::pcurves::on_our_interval(short, &edge, [0.0, 0.99], 0.03).unwrap();
+    let held = crate::pcurves::on_our_interval(short.clone(), &edge, [0.0, 0.99], 0.03, [0.0; 2]).unwrap();
     assert_eq!(held.interval(), Some([0.0, 1.0]));
     assert_eq!(solidcore_ops::pcurve::eval(&held, 1.0), Some([1.0, 0.0]));
+    // Within the tolerance of the vertex at that end (the caller covering the gap), the move is
+    // mapped too; that of the vertex at the other end does not reach it.
+    let reached = crate::pcurves::on_our_interval(short.clone(), &edge, [0.0, 0.99], edge.tolerance, [0.0, 0.03]).unwrap();
+    assert_eq!(reached.interval(), Some([0.0, 1.0]));
+    let err = crate::pcurves::on_our_interval(short, &edge, [0.0, 0.99], edge.tolerance, [0.03, 0.0]).unwrap_err();
+    assert!(err.contains("SMLib moved an edge's interval"), "{err}");
+}
+
+/// A closed tube (a square of side 10 round z, degree 1, its seam at the middle of the side
+/// y = 0) whose face below a cut runs up the seam to a vertex there and back along two edges: a
+/// line on the side y = 0 leaving the vertex into the face, and a polyline round the tube back
+/// to it. The line starts 15 nm across the seam (a RailCore V6 hotend's spline tube has an edge
+/// whose first 25 nm lie across its seam), so SMLib drops that piece of it and starts the edge
+/// on the seam, about 15 nm along. Past the edge's 1e-5 mm the move was refused and the face
+/// left out; within its vertex's tolerance, whose gap the reader covers, the pcurve is mapped
+/// onto the edge's own interval.
+#[test]
+fn an_edge_starting_a_hair_across_a_closed_patchs_seam_keeps_its_interval() {
+    use solidcore_ops::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
+    use solidcore_record::brep::{Curve, Curve2, Surface};
+    let ring = [[5.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0], [5.0, 0.0]];
+    let u_knots = vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.0];
+    let surface = Surface::Spline {
+        u_knots: u_knots.clone(),
+        v_knots: vec![0.0, 0.0, 5.0, 5.0],
+        points: ring.iter().map(|&[x, y]| vec![[x, y, 0.0], [x, y, 5.0]]).collect(),
+    };
+    let (h, across) = (2.5, 1.5e-5);
+    let (bottom, cut, far) = ([5.0, 0.0, 0.0], [5.0, 0.0, h], [9.0, 0.0, 3.5]);
+    let curves = [
+        // The bottom rim, from the seam round.
+        Curve::Spline { knots: u_knots.clone(), points: ring.iter().map(|&[x, y]| [x, y, 0.0]).collect() },
+        // The seam, up to the vertex.
+        Curve::Line { start: bottom, end: cut },
+        // Into the face from just across the seam.
+        Curve::Line { start: [5.0 - across, 0.0, h], end: far },
+        // Round the tube and back to the vertex from the seam's other side.
+        Curve::Spline {
+            knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 5.0],
+            points: vec![far, [10.0, 0.0, 3.5], [10.0, 10.0, 3.5], [0.0, 10.0, 3.5], [0.0, 0.0, 3.5], cut],
+        },
+    ];
+    let intervals = [[0.0, 5.0], [0.0, 1.0], [0.0, 1.0], [0.0, 5.0]];
+    let ends = [[0, 0], [0, 1], [1, 2], [2, 1]];
+    let line = |a: [f64; 2], b: [f64; 2], t: [f64; 2]| Some(Curve2::Spline { knots: vec![t[0], t[0], t[1], t[1]], points: vec![a, b] });
+    let face = |reach: Vec<f64>| TrimFace {
+        surface: &surface,
+        nurbs: None,
+        domain: [[0.0, 5.0], [0.0, 5.0]],
+        edges: (0..4).map(|k| TrimEdge { curve: &curves[k], nurbs: None, interval: intervals[k], vertices: ends[k], tolerance: 1e-5 }).collect(),
+        vertices: vec![bottom, cut, far],
+        vertex_tolerances: reach,
+        loops: vec![vec![
+            TrimUse { edge: 0, forward: true, pcurve: line([0.0, 0.0], [5.0, 0.0], [0.0, 5.0]) },
+            TrimUse { edge: 1, forward: true, pcurve: line([5.0, 0.0], [5.0, h], [0.0, 1.0]) },
+            TrimUse { edge: 3, forward: false, pcurve: None },
+            TrimUse { edge: 2, forward: false, pcurve: None },
+            TrimUse { edge: 1, forward: false, pcurve: line([0.0, 0.0], [0.0, h], [0.0, 1.0]) },
+        ]],
+        tolerance: 1e-5,
+    };
+    let err = crate::pcurves::SmlibTrims.trims(&face(Vec::new())).unwrap_err();
+    assert!(err.contains("SMLib moved an edge's interval"), "{err}");
+    let pcs = crate::pcurves::SmlibTrims.trims(&face(vec![1e-5, 1e-4, 1e-5])).unwrap();
+    let pc = &pcs[0][3];
+    assert_eq!(pc.interval(), Some([0.0, 1.0]));
+    // It starts on the seam, at the vertex's height.
+    let [u, v] = solidcore_ops::pcurve::eval(pc, 0.0).unwrap();
+    assert!(u.abs() < 1e-9 && (v - h).abs() < 1e-4, "{u} {v}");
 }
 
 /// An edge whose curve runs 2.5 um past its vertex and its face's patch (as Poppy Humanoid's
@@ -405,6 +519,7 @@ fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
         domain: [[0.0, 1.0], [0.0, 1.0]],
         edges,
         vertices: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 2.0], [0.0, 10.0, 2.0]],
+        vertex_tolerances: vec![1e-5; 4],
         loops: vec![(0..4).map(|k| TrimUse { edge: k, forward: true, pcurve: None }).collect()],
         tolerance: 1e-5,
     };
@@ -432,6 +547,19 @@ fn call_held_open(body: &str) -> (std::sync::mpsc::Sender<()>, std::thread::Join
     (release, held)
 }
 
+/// An unrelated call may have the same name as the dump test's call. It must not affect the
+/// test's assertions about when its own call starts and ends.
+#[test]
+fn the_dump_test_is_independent_of_other_running_calls() {
+    let (release, held) = call_held_open("smlib_test_failure");
+    let result = std::panic::catch_unwind(a_failing_solidcore_call_leaves_a_dump_and_names_itself);
+    release.send(()).unwrap();
+    held.join().unwrap().unwrap();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}
+
 /// Runs `f` on another thread and gives its answer; a failure here rather than a test that hangs
 /// when `f` waits for a call that does not end. The limit is no measure of speed: `f` is free to
 /// take all of it, and only a wait with no end fails.
@@ -447,22 +575,27 @@ fn answered<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
 /// or still open, blocked here on a channel, while another makes and measures a body of its own.
 #[test]
 fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
-    let (release, held) = call_held_open("held_open");
-    let volume = answered(|| {
-        let a = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
-        let b = Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap();
-        a.boolean(&b, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap()
+    in_own_process("tests::a_kernel_call_that_does_not_end_holds_up_no_other_call", || {
+        let (release, held) = call_held_open("held_open_by_no_other_call");
+        let volume = answered(|| {
+            let a = Brep::make_box([0.0; 3], [10.0; 3]).unwrap();
+            let b = Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap();
+            a.boolean(&b, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap()
+        });
+        assert!((volume - 1500.0).abs() < 1e-6, "{volume}");
+        assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call")), "the call still runs");
+        // And one holds up no other held open beside it.
+        let (release_too, held_too) = call_held_open("held_open_too_by_no_other_call");
+        assert!(current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") && c.contains("held_open_too_by_no_other_call")));
+        for (release, held) in [(release, held), (release_too, held_too)] {
+            release.send(()).unwrap();
+            held.join().unwrap().unwrap();
+        }
+        assert!(
+            !current_call().is_some_and(|c| c.contains("held_open_by_no_other_call") || c.contains("held_open_too_by_no_other_call")),
+            "neither is in flight any more"
+        );
     });
-    assert!((volume - 1500.0).abs() < 1e-6, "{volume}");
-    assert!(current_call().is_some_and(|c| c.contains("held_open")), "the call still runs");
-    // And one holds up no other held open beside it.
-    let (release_too, held_too) = call_held_open("held_open_too");
-    assert!(current_call().is_some_and(|c| c.contains("held_open") && c.contains("held_open_too")));
-    for (release, held) in [(release, held), (release_too, held_too)] {
-        release.send(()).unwrap();
-        held.join().unwrap().unwrap();
-    }
-    assert!(!current_call().is_some_and(|c| c.contains("held_open")), "neither is in flight any more");
 }
 
 /// Bodies are made and used on whichever kernel is free, at the same time on several threads, and
@@ -470,7 +603,7 @@ fn a_kernel_call_that_does_not_end_holds_up_no_other_call() {
 /// kernel is used once it is free, and two bodies from different kernels go into one boolean.
 #[test]
 fn bodies_move_between_kernels_and_calls_run_side_by_side() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_beside_moved_bodies");
     let on_second = answered(|| Brep::make_box([5.0, 0.0, 0.0], [10.0; 3]).unwrap());
     release.send(()).unwrap();
     held.join().unwrap().unwrap();
@@ -504,7 +637,7 @@ fn bodies_move_between_kernels_and_calls_run_side_by_side() {
 /// away and the other call and later ones go on.
 #[test]
 fn a_panic_beside_a_running_call_costs_only_its_own_kernel() {
-    let (release, held) = call_held_open("held_open");
+    let (release, held) = call_held_open("held_open_beside_a_panic");
     let r: Result<()> = core::run("panicking", |_| panic!("on purpose"));
     assert!(matches!(r, Err(Error::Internal(_))), "{r:?}");
     let v = answered(|| Brep::make_box([0.0; 3], [2.0; 3]).unwrap().volume(1e-7).unwrap());
@@ -635,4 +768,87 @@ fn every_call_starts_clean_on_any_kernel() {
     let held = hold_a_kernel();
     assert_eq!(core::run("draw", draw).unwrap(), first, "another kernel");
     drop(held);
+}
+
+/// The sites in this crate that still make a bare status ([`Error::Status`], "SMLib failed (status
+/// n)") for a failure that has no type yet: a set that only shrinks. A failure solidcore-ops types
+/// travels as its refusal ([`Error::Refused`]), never as a new status; a site that goes lowers its
+/// file's count here (a file that reaches none drops its line). Counted in the crate's code: every
+/// use of `Error::Status`, called or point-free (`.map_err(Error::Status)`), but not in comments,
+/// match patterns, `*tests.rs` files or the top-level `#[cfg(test)] mod name { .. }` blocks (a
+/// `#[cfg(test)]` item of another kind, or a `mod name;` declaration, hides no code).
+#[test]
+fn status_sites_only_shrink() {
+    const SITES: &[(&str, usize)] =
+        &[("core/blend.rs", 9), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+    /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
+    /// `}` alone at the start of a line).
+    fn code_lines(text: &str) -> Vec<&str> {
+        let lines: Vec<&str> = text.lines().collect();
+        let (mut out, mut i) = (Vec::new(), 0);
+        while i < lines.len() {
+            let next = lines.get(i + 1).copied().unwrap_or("");
+            let inline_mod = ["mod ", "pub mod ", "pub(crate) mod "].iter().any(|p| next.starts_with(p)) && next.ends_with(" {");
+            if lines[i] == "#[cfg(test)]" && inline_mod {
+                i += 2;
+                while i < lines.len() && lines[i] != "}" {
+                    i += 1;
+                }
+                i += 1;
+                continue;
+            }
+            out.push(lines[i]);
+            i += 1;
+        }
+        out
+    }
+    /// The uses of `Error::Status` in `line` that make a status (not a match pattern).
+    fn uses(line: &str) -> usize {
+        const NAME: &str = "Error::Status";
+        line.match_indices(NAME)
+            .filter(|(i, _)| {
+                let rest = &line[i + NAME.len()..];
+                if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+                    return false;
+                }
+                let Some(args) = rest.strip_prefix('(') else { return true };
+                let after = args.find(')').map_or("", |j| args[j + 1..].trim_start());
+                !(after.starts_with("=>") || after.starts_with("if ") || after.starts_with('|'))
+            })
+            .count()
+    }
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, usize)>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+        entries.sort();
+        for p in entries {
+            if p.is_dir() {
+                walk(&p, root, out);
+                continue;
+            }
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            if !name.ends_with(".rs") || name.ends_with("tests.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&p).unwrap();
+            let n: usize = code_lines(&text).into_iter().filter(|l| !l.trim_start().starts_with("//")).map(uses).sum();
+            if n > 0 {
+                out.push((p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"), n));
+            }
+        }
+    }
+    // the counter itself: a point-free use counts, a pattern does not, nor a test module
+    assert_eq!(uses("    .map_err(Error::Status)?;"), 1);
+    assert_eq!(uses("        Error::Status(s) => s,"), 0);
+    assert_eq!(uses("        Err(Error::Status(1001))"), 1);
+    let module = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn b() { Error::Status(1) }\n}\nfn c() {}\n#[cfg(test)]\nmod more_tests;\n#[cfg(test)]\nconst X: u8 = 0;";
+    assert_eq!(code_lines(module), ["fn a() {}", "fn c() {}", "#[cfg(test)]", "mod more_tests;", "#[cfg(test)]", "const X: u8 = 0;"]);
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = Vec::new();
+    walk(&root, &root, &mut found);
+    let expected: Vec<(String, usize)> = SITES.iter().map(|&(f, n)| (f.to_owned(), n)).collect();
+    for (file, n) in &found {
+        let listed = SITES.iter().find(|(f, _)| f == file).map_or(0, |&(_, m)| m);
+        assert!(*n <= listed, "{file} makes {n} bare statuses, {listed} listed: carry the typed refusal (Error::Refused), not a new status");
+    }
+    assert_eq!(found, expected, "fewer bare statuses than listed: lower the counts in SITES");
 }

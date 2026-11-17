@@ -261,6 +261,7 @@ fn search(
     let mut r = Reports {
         array: reports,
         level,
+        failed: false,
     };
     let mut result = CoincidenceResult {
         found: true,

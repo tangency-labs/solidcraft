@@ -285,9 +285,22 @@ fn switches_design(step: &Value) -> Option<&'static str> {
     SWITCHES_DESIGN.into_iter().find(|id| is_command(command(step), id))
 }
 
+/// Package I/O runs through the dedicated worker, so it cannot share a synchronous batch.
+fn has_plugin_management_steps(steps: &[Value]) -> bool {
+    steps
+        .iter()
+        .any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.install") || id.eq_ignore_ascii_case("plugin.remove")))
+}
+
 /// Why `engine.batch` refuses these steps before running any: a step loads a file or switches
 /// to another design (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
+    if steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"))) {
+        return Some(solidcraft_ui_text::tr("ui.plugin_standalone").into());
+    }
+    if has_plugin_management_steps(steps) {
+        return Some(solidcraft_ui_text::tr("ui.plugin_management_standalone").into());
+    }
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
     }
@@ -410,6 +423,13 @@ fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
 /// and the steps before it stay. Its words are the engine script's, or the panel error when a step
 /// is a panel command.
 fn script(app: &mut SolveApp, p: &Value) -> Outcome {
+    let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
+    if steps.is_some_and(|steps| steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run")))) {
+        return err(solidcraft_ui_text::tr("ui.plugin_standalone"));
+    }
+    if steps.is_some_and(|steps| has_plugin_management_steps(steps)) {
+        return err(solidcraft_ui_text::tr("ui.plugin_management_standalone"));
+    }
     let steps = match solidcraft_engine::script_steps(p) {
         Ok(steps) => steps,
         Err(e) => return err(e),
@@ -739,12 +759,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.help" => with(p, |q| ui_help(app, ctx, q)),
         "ui.selectOther" => wrap(crate::select_other::control(app, p)),
         "ui.menuPick" => with(p, |q: params::MenuPick| wrap(crate::context_menu::pick(app, &q.item))),
-        "ui.rename" => with(p, |q: params::Rename| {
-            if crate::context_menu::finish_rename(app, q.text.as_deref(), q.commit) {
-                ok(json!({"done": true}))
-            } else {
-                err("no rename in progress")
-            }
+        "ui.rename" => with(p, |q: params::Rename| match crate::context_menu::finish_rename(app, q.text.as_deref(), q.commit) {
+            Ok(()) => ok(json!({"done": true})),
+            Err(e) => err(e),
         }),
         "ui.window" => with(p, |q: params::Action| match crate::titlebar::window_action(app, ctx, q.action.as_deref().unwrap_or("")) {
             Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),
@@ -995,6 +1012,7 @@ fn ui_inspect(app: &SolveApp) -> Outcome {
         "windows": open_windows(app),
         "status": app.status.as_ref().map(|(text, _, error)| json!({"text": text, "error": error})),
         "hover": app.viewport.hover,
+        "snap_points": crate::snap_wake::inspect(app),
         "renderer": if app.viewport.gpu.is_some() { "gpu" } else { "cpu" },
         "frame_ms": app.frame_ms,
         "draw": app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok().map(|d| json!({
@@ -1933,8 +1951,8 @@ mod tests {
             assert!(takeover.is_err());
             assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), second);
             h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-            assert!(h.app.panel_runtime().is_none());
-            assert!(!h.app.universal_panel_host_enabled());
+            assert!(h.app.panel_runtime().is_some());
+            assert!(h.app.universal_panel_host_enabled());
         }
     }
 
@@ -2136,7 +2154,9 @@ mod tests {
         assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), before);
         click_visible_guard(&mut h, &guard);
         h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-        assert!(h.app.panel_runtime().is_none());
+        let layout = h.app.panel_runtime().unwrap().layout().layout();
+        let browser = solidcraft_engine::panels::InstanceId::new("browser").unwrap();
+        assert!(layout.instance(&browser).is_ok(), "the workspace restores production panels after teardown");
     }
 
     #[test]

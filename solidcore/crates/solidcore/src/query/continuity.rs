@@ -20,6 +20,10 @@
 //! give the teeth of a comb: a curve's curvature vector `κ N`, and a surface's normal curvature along one of its parameter lines
 //! times its normal, `(n · S_tt / |S_t|²) n`.
 //!
+//! The two faces need not be in one body: [`continuity_on`] and [`continuity_over`] take each
+//! face use in its own B-rep and the curve to measure along, for the seam where two separate
+//! sheets meet (one sheet's edge over the part the other's runs with it).
+//!
 //! What is not proved: the drops find the nearest point of each surface from the given guess
 //! (a gap is never smaller than the true one only where the drop found the nearest foot), and
 //! the values are evaluated in floating point with no bound on their error.
@@ -32,8 +36,9 @@ use crate::eval::normal_section::normal_section;
 use crate::eval::{Partials, MAX_PARTIAL_ORDER};
 use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3};
+use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
+use crate::nurbs::knots::Side as Span;
 use crate::query::brep as qbrep;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -165,6 +170,157 @@ fn side(
     }))
 }
 
+/// Which side of a face a point lies on ([`point_side`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaceSide {
+    /// Where the face's normal points (in the sense of its upward face use).
+    Front,
+    /// The other way.
+    Back,
+    /// Within the tolerance of the face's surface.
+    On,
+}
+
+/// Which side of face `f` the point `p` lies on: `p` dropped on the face's surface (its whole
+/// natural domain, untrimmed), and the offset from the foot read along the unit normal there in
+/// the sense of the face's upward use (the side the face's normal points to, as a sheet's
+/// shell uses it): [`FaceSide::Front`] past `tol` that way, [`FaceSide::Back`] past it the other,
+/// [`FaceSide::On`] within it. `None` where the drop fails or the normal there is zero.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a point not finite, a tolerance not finite or negative, a
+/// face without a surface or without a face use; [`SolidError::Unsupported`] for a face use
+/// whose orientation is unknown; those of the drop and the evaluations.
+pub fn point_side(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    p: Point3,
+    tol: f64,
+) -> Result<Option<FaceSide>> {
+    if !tol.is_finite() || tol < 0.0 || !finite(p) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a point or tolerance that is not finite",
+        ));
+    }
+    let fu = crate::topology::face::p2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP, "a face without a face use"))?;
+    let sign = sense(b, fu, f)?;
+    let s = surface_of(b, f)?;
+    let Some(one) = side(k, s, sign, p, None)? else {
+        return Ok(None);
+    };
+    let along = (p - one.foot).dot(one.normal);
+    Ok(Some(if along > tol {
+        FaceSide::Front
+    } else if along < -tol {
+        FaceSide::Back
+    } else {
+        FaceSide::On
+    }))
+}
+
+/// The principal curvatures of a face at a point ([`principal_curvatures`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Principal {
+    /// The foot of the point on the face's surface.
+    pub point: Point3,
+    /// The unit normal there, in the sense of the face's upward use.
+    pub normal: Vec3,
+    /// The larger principal curvature, 1/mm, positive where the surface bends away from
+    /// `normal` (convex seen from where the normal points: a sphere's outside reads `1 / r`).
+    pub k1: f64,
+    /// The smaller principal curvature.
+    pub k2: f64,
+    /// Gaussian curvature, 1/mm²: `k1 * k2`, independent of the face's orientation.
+    pub gaussian: f64,
+    /// Mean curvature, 1/mm: `(k1 + k2) / 2`, convex positive against `normal`.
+    pub mean: f64,
+    /// The unit tangent direction of `k1`.
+    pub d1: Vec3,
+    /// The unit tangent direction of `k2`.
+    pub d2: Vec3,
+}
+
+/// The principal curvatures of face `f` where `p` drops on its surface (its natural domain,
+/// untrimmed): the surface's own (`EvaluateGeometric`, positive where it bends towards its
+/// natural normal `Su x Sv`), read against the face's upward use's normal and signed convex
+/// positive (each negated and the two exchanged where the use runs with the natural normal), so
+/// `k1 >= k2` and a sphere's outside reads `1 / r` twice. `None` where the drop fails, the
+/// normal is zero, the kernel marks the point singular (a pole), or the surface's forms
+/// degenerate there. Gaussian curvature is independent of the face's orientation; mean
+/// curvature has the same convex-positive sign convention as the principal curvatures.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a point not finite, a face without a surface or without a
+/// face use; [`SolidError::Unsupported`] for a face use whose orientation is unknown; those of
+/// the drop; an unported evaluation or a cancellation.
+pub fn principal_curvatures(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    p: Point3,
+) -> Result<Option<Principal>> {
+    if !finite(p) {
+        return Err(SolidError::invalid_input(OP, "a point that is not finite"));
+    }
+    let fu = crate::topology::face::p2::upward_faceuse(b, f)?
+        .ok_or_else(|| SolidError::invalid_input(OP, "a face without a face use"))?;
+    let sign = sense(b, fu, f)?;
+    let s = surface_of(b, f)?;
+    let Some(one) = side(k, s, sign, p, None)? else {
+        return Ok(None);
+    };
+    if s.is_singularity(k, one.uv, EFF_ZERO, false)?.singular {
+        return Ok(None);
+    }
+    let g = match s.evaluate_geometric(k, one.uv, Span::Left, Span::Left) {
+        Ok(g) => g,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    // the kernel's bend towards the natural normal; convex positive against the use's normal
+    let (k1, k2, d1, d2) = if sign > 0.0 {
+        (
+            -g.principle_curvature2,
+            -g.principle_curvature1,
+            g.principle_curvature_vector2,
+            g.principle_curvature_vector1,
+        )
+    } else {
+        (
+            g.principle_curvature1,
+            g.principle_curvature2,
+            g.principle_curvature_vector1,
+            g.principle_curvature_vector2,
+        )
+    };
+    let gaussian = g.gaussian_curvature;
+    let mean = -sign * g.normal_curvature;
+    if !(k1.is_finite()
+        && k2.is_finite()
+        && gaussian.is_finite()
+        && mean.is_finite()
+        && finite(d1)
+        && finite(d2))
+    {
+        return Ok(None);
+    }
+    Ok(Some(Principal {
+        point: one.foot,
+        normal: one.normal,
+        k1,
+        k2,
+        gaussian,
+        mean,
+        d1,
+        d2,
+    }))
+}
+
 /// The continuity measure across edge `e` at its curve's parameter `t`, between the faces of
 /// `faceuses` (face a's use, then face b's), each normal in its use's sense. `guess`: each
 /// face's parameters to drop from (the last station's), or none. `None` where the station says
@@ -184,17 +340,38 @@ pub fn continuity_at(
     t: f64,
     guess: [Option<Point2>; 2],
 ) -> Result<Option<ContinuityAt>> {
+    let [fa, fb] = faceuses;
+    continuity_on(k, edge_curve(b, e)?, t, [(b, fa), (b, fb)], guess)
+}
+
+/// Edge `e`'s curve.
+fn edge_curve(b: &Brep, e: EdgeId) -> Result<&Curve> {
+    b.edge(e)?
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))
+}
+
+/// [`continuity_at`] at parameter `t` of `curve`, between two face uses each in its own B-rep
+/// (`sides`: face a's, then face b's): the seam where two separate sheets meet along a curve
+/// of one of them, measured as an edge between two faces of one body is.
+///
+/// # Errors
+///
+/// As [`continuity_at`], for each side in its own B-rep.
+pub fn continuity_on(
+    k: &Kernel,
+    curve: &Curve,
+    t: f64,
+    sides: [(&Brep, FaceuseId); 2],
+    guess: [Option<Point2>; 2],
+) -> Result<Option<ContinuityAt>> {
     if !t.is_finite() {
         return Err(SolidError::invalid_input(
             OP,
             "an edge parameter that is not finite",
         ));
     }
-    let curve = b
-        .edge(e)?
-        .curve
-        .as_ref()
-        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
     let d = curve.evaluate(k, t, 1, true, false)?;
     let (Some(&point), Some(&d1)) = (d.first(), d.get(1)) else {
         return Err(SolidError::query_failed(
@@ -207,9 +384,9 @@ pub fn continuity_at(
         return Ok(None);
     }
     let tangent = d1 * (1.0 / speed);
-    let mut sides = Vec::with_capacity(2);
+    let mut feet = Vec::with_capacity(2);
     let mut jets = Vec::with_capacity(2);
-    for (&fu, g) in faceuses.iter().zip(guess) {
+    for (&(b, fu), g) in sides.iter().zip(guess) {
         let f = b
             .faceuse(fu)?
             .face
@@ -229,11 +406,11 @@ pub fn continuity_at(
         let Some(jet) = normal_section(&d, one.normal, across * (1.0 / len)) else {
             return Ok(None);
         };
-        sides.push(one);
+        feet.push(one);
         jets.push(jet.values());
     }
     let (Some(a), Some(bb), Some(ja), Some(jb)) =
-        (sides.first(), sides.get(1), jets.first(), jets.get(1))
+        (feet.first(), feet.get(1), jets.first(), jets.get(1))
     else {
         return Err(SolidError::query_failed(
             OP,
@@ -381,11 +558,49 @@ pub fn continuity_along(
     faceuses: [FaceuseId; 2],
     stations: usize,
 ) -> Result<Vec<ContinuityStation>> {
+    let [fa, fb] = faceuses;
     let interval = b.edge(e)?.interval;
+    continuity_over(
+        k,
+        edge_curve(b, e)?,
+        interval,
+        [0.0, 1.0],
+        [(b, fa), (b, fb)],
+        stations,
+    )
+}
+
+/// [`continuity_on`] at `stations` even steps over the part `part` of `interval` (fractions of
+/// it, `[start, end]`; `[0, 1]` is the whole), its ends included, each station's drops
+/// starting from the last one's feet; each station's [`ContinuityStation::edge_fraction`] is
+/// its fraction of `interval`. The seam of two separate sheets over the part of one's edge
+/// where the other's runs with it ([`Curve::proved_overlap`]). Stations that say nothing are
+/// left out.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a part not finite; those of [`continuity_on`].
+pub fn continuity_over(
+    k: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    part: [f64; 2],
+    sides: [(&Brep, FaceuseId); 2],
+    stations: usize,
+) -> Result<Vec<ContinuityStation>> {
+    let [f0, f1] = part;
+    if !(f0.is_finite() && f1.is_finite()) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a part of an edge that is not finite",
+        ));
+    }
     let mut out = Vec::new();
     let mut guess: [Option<Point2>; 2] = [None, None];
-    for f in fractions(stations, false) {
-        let Some(m) = continuity_at(k, b, e, faceuses, interval.evaluate(f), guess)? else {
+    for step in fractions(stations, false) {
+        // the whole interval's fractions exactly as they are: `0 + 1 * step` is `step`
+        let f = f0 + (f1 - f0) * step;
+        let Some(m) = continuity_on(k, curve, interval.evaluate(f), sides, guess)? else {
             continue;
         };
         guess = [Some(m.uv[0]), Some(m.uv[1])];
@@ -475,4 +690,107 @@ pub fn iso_comb(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernel::KernelOptions;
+    use crate::primitive::api_primitives::create_plane;
+    use crate::primitive::api_primitives::{create_cylinder, create_sphere};
+    use crate::topology::face::p1::turn_over;
+
+    /// A point above a flat sheet and one below are on its two sides, one on it is on it; the
+    /// sheet turned over ([`turn_over`]) swaps the two sides, the point on it still on it, and
+    /// turned over again they are as they were.
+    #[test]
+    fn points_above_and_below_a_sheet_are_on_its_two_sides() {
+        let mut k = Kernel::new(&KernelOptions::default());
+        let mut b = create_plane(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0).unwrap();
+        let f = b.face_list()[0];
+        let at = |b: &Brep, z: f64| {
+            point_side(&k, b, f, Point3::new(1.0, 1.0, z), 1e-9)
+                .unwrap()
+                .unwrap()
+        };
+        let (up, down) = (at(&b, 3.0), at(&b, -3.0));
+        assert!(
+            matches!(
+                (up, down),
+                (FaceSide::Front, FaceSide::Back) | (FaceSide::Back, FaceSide::Front)
+            ),
+            "{up:?} {down:?}"
+        );
+        assert_eq!(at(&b, 0.0), FaceSide::On);
+        turn_over(&k, &mut b, f).unwrap();
+        assert_eq!((at(&b, 3.0), at(&b, -3.0)), (down, up), "point_side swaps");
+        assert_eq!(at(&b, 0.0), FaceSide::On);
+        turn_over(&k, &mut b, f).unwrap();
+        assert_eq!((at(&b, 3.0), at(&b, -3.0)), (up, down));
+        assert!(point_side(&k, &b, f, Point3::new(f64::NAN, 0.0, 0.0), 1e-9).is_err());
+    }
+
+    /// The principal curvatures of `b` at `p`, from the face whose foot of `p` is nearest.
+    fn principal_of(k: &Kernel, b: &Brep, p: Point3) -> Principal {
+        b.face_list()
+            .iter()
+            .filter_map(|&f| principal_curvatures(k, b, f, p).unwrap())
+            .min_by(|x, y| x.point.distance(p).total_cmp(&y.point.distance(p)))
+            .unwrap()
+    }
+
+    /// A sphere of radius 4 seen from outside: both principal curvatures 1/4.
+    #[test]
+    fn a_sphere_bends_by_its_inverse_radius_both_ways() {
+        let mut k = Kernel::new(&KernelOptions::default());
+        let b = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 4.0).unwrap();
+        let pr = principal_of(&k, &b, Point3::new(3.0, 4.0, 5.0));
+        assert!(
+            (pr.k1 - 0.25).abs() < 1e-9 && (pr.k2 - 0.25).abs() < 1e-9,
+            "{pr:?}"
+        );
+        assert!((pr.point.length() - 4.0).abs() < 1e-9, "{pr:?}");
+    }
+
+    /// A cylinder of radius 3 from outside: 1/3 round it, 0 along it.
+    #[test]
+    fn a_cylinder_bends_round_and_not_along() {
+        let mut k = Kernel::new(&KernelOptions::default());
+        let b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 3.0, 10.0).unwrap();
+        let pr = principal_of(&k, &b, Point3::new(5.0, 0.0, 5.0));
+        assert!((pr.k1 - 1.0 / 3.0).abs() < 1e-9, "{pr:?}");
+        assert!(pr.k2.abs() < 1e-9, "{pr:?}");
+        // the curved direction runs round the axis, square to it
+        assert!(pr.d1.z.abs() < 1e-9, "{pr:?}");
+    }
+
+    /// The saddle `z = x y` (a bilinear patch over [-1, 1]^2) at its middle: one curvature up,
+    /// one down, 1 each.
+    #[test]
+    fn a_saddle_bends_both_ways() {
+        use crate::geom::tol::USE_DEFAULT;
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::topology::brep::p3::new_brep;
+        use crate::topology::brep::sheet::face_on;
+        let mut k = Kernel::new(&KernelOptions::default());
+        let patch = BSplineSurface::create_bilinear_surface(
+            Point3::new(-1.0, -1.0, 1.0),
+            Point3::new(1.0, -1.0, -1.0),
+            Point3::new(-1.0, 1.0, -1.0),
+            Point3::new(1.0, 1.0, 1.0),
+        )
+        .unwrap();
+        let surface = Surface::from(patch);
+        let bx = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
+        let f = face_on(&mut k, &mut b, surface, &bx).unwrap();
+        let pr = principal_curvatures(&k, &b, f, Point3::new(0.0, 0.0, 0.5))
+            .unwrap()
+            .unwrap();
+        assert!(pr.k1 > 0.0 && pr.k2 < 0.0, "{pr:?}");
+        assert!(
+            (pr.k1 - 1.0).abs() < 1e-9 && (pr.k2 + 1.0).abs() < 1e-9,
+            "{pr:?}"
+        );
+    }
 }

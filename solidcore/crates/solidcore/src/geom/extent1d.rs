@@ -65,9 +65,9 @@
 //!   `SetMinMax` rejects it and leaves the caller's extent untouched).
 //!   Optional out-params are always computed (they have no side effects).
 //! - Status codes: `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; `SM_ERR`
-//!   is [`SolidError::Upstream`] with code 1001. `Intersect` and the non-periodic
-//!   branch of `IntersectPeriodic` leave an `Init()` interval as the result when they
-//!   fail; the Rust error carries no result (it is always [`Extent1d::new`]).
+//!   is a typed [`crate::error::geom::GeomFailure`] (status 1001). `Intersect`
+//!   and the non-periodic branch of `IntersectPeriodic` leave an `Init()` interval
+//!   as the result when they fail; the Rust error carries no result (it is always [`Extent1d::new`]).
 //! - `ClampVector` keeps upstream's in/out arrays (`SetSize` keeps the existing
 //!   prefix and zero-fills, unbounded dimensions are not written, counts are
 //!   incremented); arrays shorter than the dimension (undefined behaviour upstream)
@@ -86,9 +86,6 @@ use crate::math::{
     is_infinite_param, max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_DEG, INFINITE_PARAMETER,
     UNDEF_DOUBLE,
 };
-
-// Upstream status `SM_ERR`.
-use crate::error::SM_ERR;
 
 /// Classification of a value against an interval (`SmExtentPointType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -397,11 +394,13 @@ impl Extent1d {
     /// (`Intersect`; upstream then sets the result to `Init()`).
     pub fn intersect(&self, other: &Self) -> Result<Self> {
         if self.are_disjoint(other, 0.0) {
-            return Err(SolidError::Upstream {
-                operation: "geom::extent1d::Extent1d::intersect",
-                code: SM_ERR,
-                entity: None,
-            });
+            return Err(SolidError::geom(
+                "geom::extent1d::Extent1d::intersect",
+                crate::error::geom::GeomFailure::Disjoint {
+                    a: [self.min, self.max],
+                    b: [other.min, other.max],
+                },
+            ));
         }
         Ok(Self {
             min: max2(self.min, other.min),
@@ -1061,7 +1060,15 @@ mod tests {
         assert_eq!(a.union(&b), Extent1d::from_min_max(0.0, 3.0));
         assert_eq!(a.intersect(&b).ok(), Some(Extent1d::from_min_max(1.0, 2.0)));
         let c = Extent1d::from_min_max(5.0, 6.0);
-        assert!(a.intersect(&c).is_err());
+        let disjoint = a.intersect(&c).unwrap_err();
+        assert_eq!(
+            disjoint.geom_failure(),
+            Some(&crate::error::geom::GeomFailure::Disjoint {
+                a: [0.0, 2.0],
+                b: [5.0, 6.0]
+            })
+        );
+        assert_eq!(disjoint.upstream_status(), Some(crate::error::SM_ERR));
         assert!(a.are_disjoint(&c, 0.0));
         assert!(!a.are_disjoint(&Extent1d::from_min_max(2.0, 3.0), 0.0));
         assert_eq!(a.distance_from(-1.0), 1.0);

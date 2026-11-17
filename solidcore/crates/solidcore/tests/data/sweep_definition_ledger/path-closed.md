@@ -1,1 +1,1 @@
-#2572: a closed path's frame chain is corrected at the closure (`create_b_vectors` averages it back to the first normal), which the closed form of slice 2 does not state, so its wall keeps no sweep definition yet.
+#2572: a closed path whose transported frame does not close still needs the fitted frame chain's closure correction. Closed general splines also lack a certified frame. Closed paths of lines and arcs whose transported frame closes now keep an exact sweep definition.

@@ -7,8 +7,9 @@
 //! untrusted: every count and nesting depth is capped, and what cannot be read becomes a
 //! warning rather than a failure wherever the rest of the file is still usable.
 
-pub(crate) mod p21;
+pub mod p21;
 mod parallel;
+mod tessellated;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -23,10 +24,11 @@ use p21::{Entity, Exchange, Param};
 /// The representation the file's unlisted topology is read as, under an id the reader keeps for
 /// it (it is used only when the file's representations hold nothing to read).
 const UNLISTED: u64 = u64::MAX;
-/// Whether an item of representation `rep` is read as a body: a solid or surface model, and in
-/// the file's unlisted topology ([`UNLISTED`]) a shell or face on its own too.
+/// Whether an item of representation `rep` is read as a body: a solid or surface model, a
+/// tessellated one (AP242 triangles, read as a mesh body or named in a warning), and in the file's
+/// unlisted topology ([`UNLISTED`]) a shell or face on its own too.
 fn body_item(rep: u64, name: &str) -> bool {
-    solidcore_step::topology::is_solid_item(name) || (rep == UNLISTED && solidcore_step::topology::is_body_item(name))
+    solidcore_step::topology::is_solid_item(name) || tessellated::is_name(name) || (rep == UNLISTED && solidcore_step::topology::is_body_item(name))
 }
 
 /// Deepest assembly nesting followed.
@@ -68,6 +70,8 @@ pub struct ImportedBody {
     /// too, naming each face left out): `body` is an open surface body of the solid's exact faces
     /// but those.
     pub refused: Option<String>,
+    /// The file marks the body invisible (`INVISIBILITY`), so the design starts with it hidden.
+    pub hidden: bool,
 }
 
 /// One product occurrence in the file's assembly tree.
@@ -79,8 +83,25 @@ pub struct StepNode {
     /// Indices into [`StepImport::bodies`] of this product's own bodies.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bodies: Vec<usize>,
+    /// The STEP item (solid entity id) each of `bodies` was read from: which solid of the file
+    /// a body is, whatever number a reader gives it. Empty in designs saved before it was kept.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<u64>,
+    /// This product's solids that were not imported (the reader could not read them), each at
+    /// its place among the product's solids in file order: a body index is never reused for
+    /// the solid after one that failed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<LeftOut>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<StepNode>,
+}
+
+/// A solid of a product that was not imported: its place among the product's solids in file
+/// order (the imported ones are `bodies`, in that order, around it), and its STEP item.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeftOut {
+    pub at: usize,
+    pub item: u64,
 }
 
 /// Result of [`step_import`].
@@ -286,6 +307,12 @@ struct Reader {
     color_names: HashMap<u64, String>,
     /// Opacity of styled items with a transparency (1 = opaque).
     opacity: HashMap<u64, f32>,
+    /// Styled item → the item it styles.
+    styled_items: HashMap<u64, u64>,
+    /// Items, styled items and representations an `INVISIBILITY` record lists.
+    invisible_targets: HashSet<u64>,
+    /// Items whose bodies the file marks invisible, after resolving the targets above.
+    invisible: HashSet<u64>,
     /// Items that gave no part: reported once when the file could not be read, else (the
     /// body could not be made) at every instance, as the message says.
     unreadable: HashMap<u64, Option<String>>,
@@ -342,6 +369,9 @@ impl Reader {
             colors: HashMap::new(),
             color_names: HashMap::new(),
             opacity: HashMap::new(),
+            styled_items: HashMap::new(),
+            invisible_targets: HashSet::new(),
+            invisible: HashSet::new(),
             unreadable: HashMap::new(),
             once: HashSet::new(),
             shown: HashMap::new(),
@@ -458,6 +488,9 @@ impl Reader {
                     }
                 }
                 "STYLED_ITEM" | "OVER_RIDING_STYLED_ITEM" => {
+                    if let Some(item) = rf(2) {
+                        self.styled_items.insert(id, item);
+                    }
                     if let Some(item) = rf(2)
                         && let Some((c, name)) = self.find_colour(p.get(1))
                     {
@@ -472,9 +505,41 @@ impl Reader {
                         }
                     }
                 }
+                "INVISIBILITY" => {
+                    if let Some(items) = p.first().and_then(Param::as_list) {
+                        self.invisible_targets.extend(items.iter().filter_map(Param::as_ref_id));
+                    }
+                }
                 _ => {}
             }
         }
+        // An INVISIBILITY record names styled items, representations or layers; a representation
+        // hides every item it lists, including the representations it is linked to, and a layer
+        // (PRESENTATION_LAYER_ASSIGNMENT) every item assigned to it.
+        let mut invisible = HashSet::new();
+        for target in std::mem::take(&mut self.invisible_targets) {
+            let mut queue = vec![self.styled_items.get(&target).copied().unwrap_or(target)];
+            let mut seen = HashSet::new();
+            while let Some(target) = queue.pop() {
+                if !seen.insert(target) {
+                    continue;
+                }
+                if let Some(layer) = self.ex.get(target).filter(|e| e.name() == "PRESENTATION_LAYER_ASSIGNMENT") {
+                    let assigned = layer.params().get(2).and_then(Param::as_list).unwrap_or(&[]);
+                    queue.extend(assigned.iter().filter_map(Param::as_ref_id).map(|i| self.styled_items.get(&i).copied().unwrap_or(i)));
+                    continue;
+                }
+                if let Some((items, _)) = self.reps.get(&target) {
+                    invisible.extend(items.iter().copied());
+                    if let Some(links) = self.rep_links.get(&target) {
+                        queue.extend(links.iter().copied());
+                    }
+                } else {
+                    invisible.insert(target);
+                }
+            }
+        }
+        self.invisible = invisible;
         for (d, r) in sdrs {
             if let Some(&pd) = pds.get(&d) {
                 self.pd_reps.entry(pd).or_default().push(r);
@@ -713,6 +778,15 @@ impl Reader {
         if name.is_empty() { format!("solid #{item}") } else { format!("solid '{name}'") }
     }
 
+    fn failure_label(&self, item: u64, batch: usize) -> String {
+        if self.ex.get(item).is_some_and(tessellated::is_item) {
+            let product = self.batches.get(batch).map_or("Import", |b| b.product.as_str());
+            format!("product '{product}', tessellated item #{item}")
+        } else {
+            self.label(item)
+        }
+    }
+
     /// Bodies of a representation's items (following mapped items), placed by `m`.
     fn rep_bodies(&mut self, rep: u64, m: &M4, path: &[String], product: &str, instance: Option<&str>, out: &mut Vec<usize>, depth: usize) {
         if depth > MAX_ASSEMBLY_DEPTH {
@@ -838,7 +912,8 @@ impl Reader {
             }
             if let Some(again) = self.unreadable.get(&item) {
                 if let Some(msg) = again.clone() {
-                    self.refused(item, &msg);
+                    let label = self.failure_label(item, p.batch);
+                    self.note(IssueKind::Refused, Some(item), 0, format!("{label}: not imported: {msg}"));
                 }
                 continue;
             }
@@ -977,18 +1052,16 @@ impl Reader {
                         source_item: item,
                         face_origin,
                         refused: part.refused.clone(),
+                        hidden: self.invisible.contains(&item),
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {
-                    if read {
-                        let label = self.label(item);
-                        self.note(IssueKind::NotImported, Some(item), 0, format!("{label}: not imported: {msg}"));
-                    } else {
-                        self.refused(item, &msg);
-                    }
+                    let label = if tessellated::is_item(e) { format!("product '{product}', tessellated item #{item}") } else { self.label(item) };
+                    let kind = if read { IssueKind::NotImported } else { IssueKind::Refused };
+                    self.note(kind, Some(item), 0, format!("{label}: not imported: {msg}"));
                     // Later instances don't read the item again.
                     if !self.oriented.contains_key(&item) {
-                        self.unreadable.insert(item, (!read).then_some(msg));
+                        self.unreadable.insert(item, (!read || tessellated::is_item(e)).then_some(msg));
                     }
                 }
             }
@@ -1017,14 +1090,25 @@ impl Reader {
         ImportReport { parts, solids, issues }
     }
 
-    /// Planned-solid indices (a node's `bodies` after the walk) as body indices, leaving out
-    /// the ones that failed.
-    fn remap(&self, planned: &[usize]) -> Vec<usize> {
-        planned.iter().filter_map(|i| self.made.get(*i).copied().flatten()).collect()
+    /// Planned-solid indices (a node's `bodies` after the walk) as body indices and the STEP
+    /// item of each, and the planned solids that failed, at their place among `planned`.
+    fn remap(&self, planned: &[usize]) -> (Vec<usize>, Vec<u64>, Vec<LeftOut>) {
+        let (mut bodies, mut items, mut left_out) = (Vec::new(), Vec::new(), Vec::new());
+        for (at, i) in planned.iter().enumerate() {
+            let Some(p) = self.plan.get(*i) else { continue };
+            match self.made.get(*i).copied().flatten() {
+                Some(b) => {
+                    bodies.push(b);
+                    items.push(self.bodies.get(b).map_or(p.item, |b| b.source_item));
+                }
+                None => left_out.push(LeftOut { at, item: p.item }),
+            }
+        }
+        (bodies, items, left_out)
     }
 
     fn remap_node(&self, n: &mut StepNode) {
-        n.bodies = self.remap(&n.bodies);
+        (n.bodies, n.items, n.left_out) = self.remap(&n.bodies);
         for c in &mut n.children {
             self.remap_node(c);
         }
@@ -1090,7 +1174,8 @@ impl Reader {
 
     fn node(&mut self, pd: u64, local: M4, world: M4, path: &[String], instance: Option<&str>, depth: usize, stack: &mut Vec<u64>) -> StepNode {
         let name = self.product_name(pd);
-        let mut node = StepNode { name: name.clone(), transform: local, bodies: Vec::new(), children: Vec::new() };
+        let mut node =
+            StepNode { name: name.clone(), transform: local, bodies: Vec::new(), items: Vec::new(), left_out: Vec::new(), children: Vec::new() };
         if self.stop() {
             return node;
         }
@@ -1312,11 +1397,7 @@ impl StepReading {
             Err(e) => return Err(KernelError::Invalid(e)),
         };
         let mut rd = Reader::new(ex.clone(), workers);
-        rd.solid_items = ex
-            .entities
-            .values()
-            .filter(|e| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL"))
-            .count();
+        rd.solid_items = ex.entities.values().filter(|e| solidcore_step::topology::is_solid_item(e.name()) || tessellated::is_item(e)).count();
         rd.watch = watch.clone();
         solidcraft_profile::scope("import", "step.index", || rd.index());
         // Roots: product definitions that are nobody's component.
@@ -1336,7 +1417,7 @@ impl StepReading {
             .iter()
             .flat_map(|(r, (items, _))| items.iter().map(move |i| (*r, *i)))
             .filter(|(_, i)| !rd.used_items.contains(i))
-            .filter(|(_, i)| ex.get(*i).is_some_and(|e| solidcore_step::topology::is_solid_item(e.name())))
+            .filter(|(_, i)| ex.get(*i).is_some_and(|e| solidcore_step::topology::is_solid_item(e.name()) || tessellated::is_item(e)))
             .map(|(r, _)| r)
             .collect();
         loose.sort();
@@ -1348,7 +1429,7 @@ impl StepReading {
             for r in loose {
                 rd.rep_bodies(r, &identity, &[], "Import", None, &mut bodies, 0);
             }
-            tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
+            tree.push(StepNode { name: "Import".into(), transform: identity, bodies, items: Vec::new(), left_out: Vec::new(), children: Vec::new() });
         }
         // Topology outside every representation (bare geometry files, or ones whose topology no
         // representation lists): its unlisted solids, shells and faces, read in the file's one
@@ -1366,7 +1447,14 @@ impl StepReading {
                 rd.node_items = rd.used_items.clone();
                 rd.visits = 0;
                 rd.rep_bodies(UNLISTED, &identity, &[], "Import", None, &mut bodies, 0);
-                tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
+                tree.push(StepNode {
+                    name: "Import".into(),
+                    transform: identity,
+                    bodies,
+                    items: Vec::new(),
+                    left_out: Vec::new(),
+                    children: Vec::new(),
+                });
             }
         }
         let single = workers <= 1;
@@ -1398,10 +1486,14 @@ impl StepReading {
         for n in &mut tree {
             rd.remap_node(n);
         }
-        tree.retain(|n| !n.bodies.is_empty() || !n.children.is_empty());
+        // A product whose only solid failed stays, so the tree still says where that solid was.
+        tree.retain(|n| !n.bodies.is_empty() || !n.left_out.is_empty() || !n.children.is_empty());
         let ex = rd.ex.clone();
         if let Some(first) = ex.duplicates.first() {
             rd.warn(format!("{} entity ids are defined twice (first #{first}); the first definitions were used", ex.duplicates.len()));
+        }
+        if let Some(warning) = solidcore_record::step::protocol::declared(&ex.schemas).warning {
+            rd.warn(warning);
         }
         let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
         let report = rd.report(&warnings);

@@ -53,6 +53,10 @@ impl Walk for crate::document::Operation {}
 impl Walk for solidcraft_kernel::Continuity {}
 impl Walk for solidcraft_kernel::DraftCorner {}
 impl Walk for crate::document::Direction {}
+impl Walk for crate::document::CellGridMode {}
+impl Walk for solidcore_record::cell_grid::CellShape {}
+impl Walk for solidcore_record::cell_grid::DotGrid {}
+impl Walk for solidcore_record::cell_grid::Clip {}
 impl Walk for crate::document::FilletFit {}
 impl Walk for crate::document::FilletCorner {}
 impl Walk for crate::document::FilletTurn {}
@@ -61,6 +65,7 @@ impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}
 impl Walk for crate::document::CoilSection {}
 impl Walk for crate::document::ThinSide {}
+impl Walk for crate::document::PickedPlacement {}
 impl Walk for crate::document::ExtendMode {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
@@ -405,7 +410,7 @@ impl PlaneRef {
             return;
         }
         match self {
-            Self::Construction { feature } => f(Ref::Feature(feature)),
+            Self::Construction { feature, .. } => f(Ref::Feature(feature)),
             Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs(f, depth + 1),
             Self::ThroughPoint { base, point } => {
                 base.walk_feature_refs(f, depth + 1);
@@ -445,7 +450,7 @@ impl PlaneRef {
             return;
         }
         match self {
-            Self::Construction { feature } => f(Ref::Feature(feature)),
+            Self::Construction { feature, .. } => f(Ref::Feature(feature)),
             Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs_mut(f, depth + 1),
             Self::ThroughPoint { base, point } => {
                 base.walk_feature_refs_mut(f, depth + 1);
@@ -490,6 +495,7 @@ impl GeoRef {
         match self {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs(f, depth + 1),
+            Self::Snap { of, .. } => of.walk_feature_refs(f, depth + 1),
             Self::Point { .. }
             | Self::Datum { .. }
             | Self::Origin
@@ -509,6 +515,7 @@ impl GeoRef {
         match self {
             Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs_mut(f, depth + 1),
+            Self::Snap { of, .. } => of.walk_feature_refs_mut(f, depth + 1),
             Self::Point { .. }
             | Self::Datum { .. }
             | Self::Origin

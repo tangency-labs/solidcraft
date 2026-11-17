@@ -1,0 +1,275 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 22.5,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                45.0,
+                5.0,
+                12.5
+              ],
+              "start": [
+                25.0,
+                5.0,
+                12.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                45.0,
+                35.0,
+                12.5
+              ],
+              "start": [
+                45.0,
+                5.0,
+                12.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                25.0,
+                35.0,
+                12.5
+              ],
+              "start": [
+                45.0,
+                35.0,
+                12.5
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                25.0,
+                5.0,
+                12.5
+              ],
+              "start": [
+                25.0,
+                35.0,
+                12.5
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "center": [
+                30.0,
+                20.0,
+                15.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 2.5,
+              "reference": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b6"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "17439-cylinder-cavity-along-x-touching-the-floor",
+  "expected": {
+    "body_count": 1,
+    "center_of_mass": [
+      35.0,
+      20.0,
+      23.879142
+    ],
+    "method": "box 20 x 30 x 22.5 = 13500 less the whole cylinder r 2.5, h 10 = pi 2.5^2 10 = 196.349541, which lies inside the box and touches its boundary only along line(s) of no area: V = 13303.650459. Centre of mass: (13500 (35, 20, 23.75) - 196.349541 c) / V, c the cylinder's centre (35, 20, 15); one body with two shells (outer and the void)",
+    "shells": 2,
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#17439"
+    ],
+    "volume_mm3": 13303.650459,
+    "what": "a box less a cylinder cavity along x (x 30 to 40, axis at y 20, z 15) whose side touches the box's z = 12.5 floor along a line: one solid with a void touching the outer shell along the line"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 10,
+      "vertices": 12
+    }
+  },
+  "records": "17439-cylinder-cavity-along-x-touching-the-floor.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3646.3495408529675,
+      "body_count": 1,
+      "edges": 14,
+      "faces": 9,
+      "vertices": 10,
+      "volume_mm3": 13303.650459133112
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#17439"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a box less a cylinder cavity along x (x 30 to 40, axis at y 20, z 15) whose side touches the box's z = 12.5 floor along a line: one solid with a void touching the outer shell along the line",
+  "why_not": []
+}

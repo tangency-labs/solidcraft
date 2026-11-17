@@ -12,12 +12,17 @@
 
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::FitKind;
+use solidcore::curve::curve::Curve;
 use solidcore::error::SolidError;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
-use solidcore::math::Point3;
+use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::math::{Point3, Vec3};
+use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 use solidcore::surface::procedural_blend::chamfer::ChamferSize;
+use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::{edge, Brep, EdgeId};
 
 /// Every fix on but `geometric_g2_continuity`, as ops runs.
@@ -178,4 +183,115 @@ fn an_equal_chamfer_too_large_names_its_radius() {
     };
     assert!((radius - 1.0).abs() <= 1e-9, "{radius}");
     assert!((r.named.unwrap() - 1.0).abs() <= 1e-9, "{:?}", r.named);
+}
+
+/// The polygon through `corners` swept `h` along z, and the midpoints of its top edges.
+fn prism(k: &mut Kernel, corners: &[(f64, f64)], h: f64) -> (Brep, Vec<[f64; 3]>) {
+    let n = corners.len();
+    let line = |a: (f64, f64), b: (f64, f64)| {
+        Curve::from(
+            create_line_segment(Vec3::new(a.0, a.1, 0.0), Vec3::new(b.0, b.1, 0.0)).unwrap(),
+        )
+    };
+    let curves: Vec<Curve> = (0..n)
+        .map(|i| line(corners[i], corners[(i + 1) % n]))
+        .collect();
+    let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+    let b = create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), h, true).unwrap();
+    let mids = (0..n)
+        .map(|i| {
+            let (a, c) = (corners[i], corners[(i + 1) % n]);
+            [(a.0 + c.0) / 2.0, (a.1 + c.1) / 2.0, h]
+        })
+        .collect();
+    (b, mids)
+}
+
+/// The corners of a regular `n`-gon of circumradius `r`.
+fn regular(n: usize, r: f64) -> Vec<(f64, f64)> {
+    (0..n)
+        .map(|i| {
+            let a = std::f64::consts::TAU * i as f64 / n as f64;
+            (r * a.cos(), r * a.sin())
+        })
+        .collect()
+}
+
+/// Chamfers the top edges of the prism over `corners` listed in `which` (all when `None`) by
+/// `d`; the body and the result.
+fn chamfer_top(
+    corners: &[(f64, f64)],
+    h: f64,
+    d: f64,
+    which: Option<&[usize]>,
+) -> (Brep, Result<(), SolidError>) {
+    let mut k = kernel();
+    let (mut b, mids) = prism(&mut k, corners, h);
+    let edges: Vec<EdgeId> = mids
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| which.is_none_or(|w| w.contains(i)))
+        .map(|(_, &p)| pick(&k, &b, p))
+        .collect();
+    let result = {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_chamfers_along(
+            &k,
+            &edges,
+            &vec![ChamferSize::Distances([d, d]); edges.len()],
+            &[],
+        )
+        .unwrap();
+        s.create_corners(&k, None).unwrap();
+        for corner in s.fillet_corners().unwrap() {
+            s.set_corner_bevel(corner, true).unwrap();
+        }
+        s.do_filleting(&mut k, None)
+    };
+    (b, result)
+}
+
+/// #16645: chamfering every edge of a long outline (128 edges) builds, as it did before the band
+/// check compared every pair of bands. The result is a mitred chamfer all round: the 128 walls,
+/// the top and the bottom and 128 chamfer faces, five edge rings of 128 (the bottom, the
+/// verticals, the chamfers' feet, their tops and the mitres between them), three vertex rings of
+/// 128; the volume is the prism less `P d^2 / 2 - K d^3 / 3` for the perimeter `P` and
+/// `K = n tan(pi / n)` (the area `A(delta)` of the outline offset inwards by `delta` is
+/// `A - P delta + K delta^2`, and the removed depth at `delta` is `d - delta`).
+#[test]
+fn chamfering_all_128_edges_of_an_outline_builds() {
+    let (n, r, h, d) = (128_usize, 60.0_f64, 20.0_f64, 1.0_f64);
+    let (b, result) = chamfer_top(&regular(n, r), h, d, None);
+    result.unwrap();
+    assert_eq!(b.faces().ids().count(), 2 + 2 * n);
+    assert_eq!(b.edge_list().len(), 5 * n);
+    assert_eq!(b.vertices().ids().count(), 3 * n);
+    let nf = n as f64;
+    let area = 0.5 * nf * r * r * (std::f64::consts::TAU / nf).sin();
+    let perimeter = 2.0 * nf * r * (std::f64::consts::PI / nf).sin();
+    let k_sum = nf * (std::f64::consts::PI / nf).tan();
+    let want = area * h - (perimeter * d * d / 2.0 - k_sum * d * d * d / 3.0);
+    let k = kernel();
+    let mut b = b;
+    let store = AttributeStore::new();
+    let key_of = |_| ObjectKey(0);
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &key_of,
+    };
+    let v = brep_volume(&k, &mut b, 1e-9, &attrs).unwrap();
+    assert!(
+        ((v - want) / want).abs() <= 1e-6,
+        "volume {v} against {want}"
+    );
+}
+
+/// The band check still refuses bands that overlap, where the box test prunes nothing: the two
+/// long top edges of a 100 x 4 plate chamfered by 3 each leave bands that cross on the 4-wide top
+/// face. The pair shares no vertex, so the check reaches it; its boxes overlap.
+#[test]
+fn chamfering_two_edges_of_a_plate_past_its_width_is_refused() {
+    let plate = [(0.0, 0.0), (100.0, 0.0), (100.0, 4.0), (0.0, 4.0)];
+    let (_, result) = chamfer_top(&plate, 10.0, 3.0, Some(&[0, 2]));
+    assert!(result.is_err(), "built");
 }

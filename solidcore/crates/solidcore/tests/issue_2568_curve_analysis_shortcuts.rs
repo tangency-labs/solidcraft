@@ -19,8 +19,7 @@
 )] // test helpers
 
 use solidcore::curve::curve::Curve;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves::{create_circle, create_line_segment};
 use solidcore::sweep::api_brep::create_linear_sweep;
@@ -29,7 +28,7 @@ use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, Kernel};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -40,10 +39,7 @@ fn read_smb(bytes: Vec<u8>) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().ok()?;
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -67,35 +63,25 @@ fn lines(k: &mut Kernel, make: &dyn Fn() -> Brep, level: CheckLevel) -> Vec<Stri
     }
 }
 
-/// A kernel with the shortcuts `on` or off, with the default fixes or (`checks`) with
-/// the curve check's opt-in fixes, which read the radius search's results and measure
-/// UV trims on their surfaces.
-fn kernel(on: bool, checks: bool) -> Kernel {
-    let mut k = Kernel {
+/// A kernel with the shortcuts `on` or off.
+fn kernel(on: bool) -> Kernel {
+    Kernel {
         memoize_curve_caches: on,
         ..Kernel::default()
-    };
-    if checks {
-        k.fixes.bspline_check_min_radius = true;
-        k.fixes.uv_trim_checks_on_surface = true;
-        k.fixes.curve_check_zero_speed_tangent_end = true;
     }
-    k
 }
 
 /// Checks the body `make` builds with the shortcuts on (twice) and off at levels 1 and
-/// 2, with and without the curve check's opt-in fixes: the same lines.
+/// 2: the same lines.
 fn assert_same(name: &str, make: &dyn Fn() -> Brep) {
-    for checks in [false, true] {
-        for level in [CheckLevel::Level1, CheckLevel::Level2] {
-            let full = lines(&mut kernel(false, checks), make, level);
-            let mut on = kernel(true, checks);
-            let first = lines(&mut on, make, level);
-            let kept = lines(&mut on, make, level);
-            let at = format!("{name} at {level:?}, opt-in checks {checks}");
-            assert_eq!(first, full, "{at}: shortcuts on");
-            assert_eq!(kept, full, "{at}: from the kept results");
-        }
+    for level in [CheckLevel::Level1, CheckLevel::Level2] {
+        let full = lines(&mut kernel(false), make, level);
+        let mut on = kernel(true);
+        let first = lines(&mut on, make, level);
+        let kept = lines(&mut on, make, level);
+        let at = format!("{name} at {level:?}");
+        assert_eq!(first, full, "{at}: shortcuts on");
+        assert_eq!(kept, full, "{at}: from the kept results");
     }
 }
 
@@ -157,10 +143,9 @@ fn extruded_circles_check_the_same_with_and_without_the_shortcuts() {
 }
 
 /// The checks of the bodies at level 2, twice each (a body checked again after an edit
-/// elsewhere, as SolidCraft re-checks), timed, with the shortcuts on or off and the
-/// curve check's opt-in fixes (SolidCraft sets them).
+/// elsewhere, as SolidCraft re-checks), timed, with the shortcuts on or off.
 fn time_checks(bodies: &mut [Brep], shortcuts: bool) -> f64 {
-    let mut k = kernel(shortcuts, true);
+    let mut k = kernel(shortcuts);
     let start = Instant::now();
     for _ in 0..2 {
         for b in bodies.iter_mut() {

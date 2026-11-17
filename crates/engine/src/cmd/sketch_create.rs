@@ -13,15 +13,20 @@ macro_rules! text_style_doc {
     };
 }
 
-use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, slot_parts};
+use super::sketch::{
+    add_c, circumcircle, corner_arg, edit, ids_of, length_expr, mark_construction, place_point, req_parg, slot_parts, slot_width,
+    slot_width_dimension,
+};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
 use crate::schema::sketch_create::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
     ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams, InfiniteLineParams, LineTypeResult,
-    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineRemovePointParams, SplineRemovePointResult, SplineReverseParams,
-    SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult, ThreeTangentCircleParams, TwoTangentCircleParams,
+    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineHandlesParams, SplineHandlesResult, SplineInsertPointParams,
+    SplineInsertPointResult, SplineRemovePointParams, SplineRemovePointResult, SplineResetHandlesParams, SplineResetHandlesResult,
+    SplineReverseParams, SplineReverseResult, TextChange, TextEditsResult, TextExpressions, TextResult, ThreeTangentCircleParams,
+    TwoTangentCircleParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -52,6 +57,9 @@ const TEXT_CONTRACT: TypedContract<SketchTextParams> = TypedContract::new();
 const EDIT_TEXT_CONTRACT: TypedContract<EditTextParams> = TypedContract::new();
 const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
 const SPLINE_REMOVE_POINT_CONTRACT: TypedContract<SplineRemovePointParams> = TypedContract::new();
+const SPLINE_INSERT_POINT_CONTRACT: TypedContract<SplineInsertPointParams> = TypedContract::new();
+const SPLINE_HANDLES_CONTRACT: TypedContract<SplineHandlesParams> = TypedContract::new();
+const SPLINE_RESET_HANDLES_CONTRACT: TypedContract<SplineResetHandlesParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.line.midpoint", "Midpoint Line", crate::checked!("sketch.line.midpoint", midpoint_line))
@@ -91,21 +99,21 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_POINT_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
-        .params(concat!("center: slot centre, end: one arc centre, width; returns centre_line and middle", created_doc!())),
+        .params(concat!("center: slot centre, end: one arc centre, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_line and middle", created_doc!())),
     CommandSpec::new("sketch.slot.arc_three_point", "Three Point Arc Slot", crate::checked!("sketch.slot.arc_three_point", arc_slot_three))
         .at("SKETCH", "CREATE")
         .icon("arc_slot")
         .enabled(in_sketch)
         .contract(&ARC_SLOT_THREE_CONTRACT)
         .output(output_schema_for::<ArcSlotResult>)
-        .params(concat!("start, through, end: points on the centre arc, width; returns centre_arc and middle", created_doc!())),
+        .params(concat!("start, through, end: points on the centre arc, width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_arc and middle", created_doc!())),
     CommandSpec::new("sketch.slot.arc_center", "Center Point Arc Slot", crate::checked!("sketch.slot.arc_center", arc_slot_center))
         .at("SKETCH", "CREATE")
         .icon("arc_slot_center")
         .enabled(in_sketch)
         .contract(&ARC_SLOT_CENTER_CONTRACT)
         .output(output_schema_for::<ArcSlotResult>)
-        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc and middle", created_doc!())),
+        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width: number or expression (an expression naming a parameter is a dimension driven by it); returns centre_arc and middle", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", crate::checked!("sketch.ellipse", ellipse))
         .at("SKETCH", "CREATE")
         .icon("ellipse")
@@ -113,7 +121,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ELLIPSE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!(
-        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius. Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
+        "center, major: end of the major axis [x,y] (a coordinate of either may be an expression over the design's parameters: the point follows them), minor: a point the ellipse passes through on the minor side [x,y] | minor_radius: number or expression (an expression naming a parameter is a dimension driven by it). Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", crate::checked!("sketch.spline.fit_point", spline_fit))
@@ -122,7 +130,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SPLINE_FIT_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: [[x,y] or point refs…] (2…500): the spline passes through them, periodic?: boolean (default false); periodic cubic fit closes smoothly through at least 3 distinct samples", created_doc!())),
+        .params(concat!("points: [[x,y] or point refs…] (2…500): the spline passes through them; each fit point has an editable tangent handle whose direction and length control curvature, periodic?: boolean (default false); periodic cubic fit closes smoothly through at least 3 distinct samples", created_doc!())),
     CommandSpec::new("sketch.spline.control_point", "Control Point Spline", crate::checked!("sketch.spline.control_point", spline_cv3))
         .at("SKETCH", "CREATE")
         .icon("spline_cv")
@@ -137,9 +145,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_CONTROL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!("points: control points (2…500), degree 5", created_doc!())),
-    CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", spline_insert_point)
+    CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", crate::checked!("sketch.spline.insert_point", spline_insert_point))
         .icon("spline")
         .enabled(in_sketch)
+        .contract(&SPLINE_INSERT_POINT_CONTRACT)
+        .output(output_schema_for::<SplineInsertPointResult>)
         .params("curve: fit point spline id, at: [x,y]: a fit point is inserted where the curve passes nearest to it, between its neighbours (the curve still runs through it and all its old points; constraints on them stay); end?: start|end: `at` becomes the spline's new first or last point instead, and the curve runs on to it (refused when that end is joined to other geometry). Control point splines take no new points yet. Returns point: the new point's id"),
     CommandSpec::new("sketch.spline.remove_point", "Remove Spline Point", crate::checked!("sketch.spline.remove_point", spline_remove_point))
         .icon("spline")
@@ -147,6 +157,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_REMOVE_POINT_CONTRACT)
         .output(output_schema_for::<SplineRemovePointResult>)
         .params("curve: spline id, point: one of its points (a point id, or the curve's start or end such as s1.end): the spline runs through (or over) its other points only, and the point goes with the constraints on it unless another curve uses it. Fit point, control point and closed splines. Refused for a closed spline's closing point, for an end joined to other geometry or held by a constraint, when fewer than 2 points would be left (3 on a closed spline), and for a projected, offset or patterned spline. Returns curve, point: the point's id, deleted: whether the point went too"),
+    CommandSpec::new("sketch.spline.handles", "Add Tangent Handles", crate::checked!("sketch.spline.handles", spline_handles))
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_HANDLES_CONTRACT)
+        .output(output_schema_for::<SplineHandlesResult>)
+        .params("curve: fit point spline id: gives it a tangent handle at each fit point (a free point joined to it by a construction line) where the curve already runs, so its shape does not change until a handle is moved; moving a fit point moves the handles nobody has turned with it. In the app a selected spline shows its handles and the first drag of one adds them. Refused for a spline that has handles already, a control point, projected, offset, patterned or equation spline. Returns curve, handles: the handle point ids in fit point order"),
+    CommandSpec::new("sketch.spline.reset_handles", "Reset Tangent Handles", crate::checked!("sketch.spline.reset_handles", spline_reset_handles))
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_RESET_HANDLES_CONTRACT)
+        .output(output_schema_for::<SplineResetHandlesResult>)
+        .params("curve: fit point spline id: removes its tangent handles (the handle points, their construction lines and the constraints on them), so the curve runs through its fit points as if the handles had never been moved; selected, it shows them again where they start. Refused for a spline without tangent handles. Returns curve, removed: the removed handle point ids in fit point order"),
     CommandSpec::new("sketch.spline.reverse", "Reverse Spline Direction", crate::checked!("sketch.spline.reverse", spline_reverse))
         .icon("spline")
         .enabled(in_sketch)
@@ -438,15 +460,33 @@ pub(super) fn text_link<'a>(sk: &'a Sketch, entity: &str) -> Option<&'a str> {
 
 /// Transform a text source as a unit; generated outlines remain linked and editable.
 pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: f64, center: Vec2, copy: bool) -> Result<Vec<usize>> {
+    let (sin, cos) = rotation.sin_cos();
+    let place = move |q: Vec2| {
+        let q = q - center;
+        center + Vec2::new(q.x * cos - q.y * sin, q.x * sin + q.y * cos) + translate
+    };
+    transform_text(sk, "sketch.move", link, &place, rotation, 1.0, copy)
+}
+
+/// Place a text source as a unit: its baseline start goes where `place` takes it, its angle
+/// turns by `rotation` and its height scales by `factor`. Generated outlines remain linked and
+/// editable.
+pub(super) fn transform_text(
+    sk: &mut Sketch,
+    cmd: &str,
+    link: &str,
+    place: &dyn Fn(Vec2) -> Vec2,
+    rotation: f64,
+    factor: f64,
+    copy: bool,
+) -> Result<Vec<usize>> {
     let Some(LinkSource::Text { text, at, height, angle, font, style, mut exprs }) = sk.link(link).map(|l| l.source.clone()) else {
-        return Err(bad("sketch.move", "the selected source is not text"));
+        return Err(bad(cmd, "the selected source is not text"));
     };
     if style.path.is_some() {
-        return Err(bad("sketch.move", "a text on a path follows its curve: move the curve, or take the text off it"));
+        return Err(bad(cmd, "a text on a path follows its curve: move the curve, or take the text off it"));
     }
-    let q = at - center;
-    let (sin, cos) = rotation.sin_cos();
-    let moved = center + Vec2::new(q.x * cos - q.y * sin, q.x * sin + q.y * cos) + translate;
+    let moved = place(at);
     // What the move changes is a number now, not the expression it was; the rest stays.
     if (moved.x - at.x).abs() > 1e-12 {
         exprs.x = None;
@@ -457,7 +497,10 @@ pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: 
     if rotation.abs() > 1e-12 {
         exprs.angle = None;
     }
-    let (at, angle) = (moved, angle + rotation);
+    if (factor - 1.0).abs() > 1e-12 {
+        exprs.height = None;
+    }
+    let (at, height, angle) = (moved, height * factor, angle + rotation);
     let geom = solidcraft_sketch::text_geometry_styled(font.as_deref(), &text, at, height, angle, &style, None)?;
     let source = LinkSource::Text { text, at, height, angle, font, style, exprs };
     let link = if copy {
@@ -465,7 +508,7 @@ pub(super) fn move_text(sk: &mut Sketch, link: &str, translate: Vec2, rotation: 
     } else {
         sk.set_link_source(link, source);
         if sk.update_link(link, &geom)? {
-            return Err(bad("sketch.move", "moving text must preserve its outline topology; edit the text source first"));
+            return Err(bad(cmd, "moving text must preserve its outline topology; edit the text source first"));
         }
         link.to_owned()
     };
@@ -619,7 +662,10 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
         let (sp, cons) = if order <= 1 {
             let c1 = sk.add_point(qa + ta * (l / 3.0), None)?;
             let c2 = sk.add_point(qb + tb * (l / 3.0), None)?;
-            let sp = sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false, nurbs: None }, None)?;
+            let sp = sk.add_curve(
+                CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() },
+                None,
+            )?;
             let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: sp })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: sp })?];
             (sp, cons)
         } else {
@@ -641,7 +687,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
                 });
             }
             let degree = u8::try_from(cps.len().saturating_sub(1)).map_err(|_| bad(cmd, "the blend curve needs too many control points"))?;
-            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false, nurbs: None }, None)?;
+            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false, nurbs: None, handles: Vec::new() }, None)?;
             (sp, Vec::new())
         };
         solve_new_only(sk, first_new);
@@ -701,10 +747,14 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.ellipse";
-    let (c, m) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "major")?);
+    // The centre and the major end follow the parameters a coordinate typed as an expression
+    // names, and a minor radius typed as one is a dimension driven by them, as for a circle.
+    let ((c, ec), (m, em)) = (corner_arg(&s.doc, p, "center", cmd)?, corner_arg(&s.doc, p, "major", cmd)?);
     let u = (m - c).normalized().ok_or_else(|| bad(cmd, "the major axis end must differ from the centre"))?;
     let a = c.dist(m);
-    let r = match (num(p, "minor_radius"), p.get("minor").and_then(crate::params::vec2)) {
+    let typed = if p.get("minor_radius").is_some_and(Value::is_string) { Some(length_expr(s, p, "minor_radius", cmd)?) } else { None };
+    let size = typed.as_ref().and_then(|(_, e)| e.clone());
+    let r = match (typed.map(|(r, _)| r).or_else(|| num(p, "minor_radius")), p.get("minor").and_then(crate::params::vec2)) {
         (Some(r), _) => r,
         (None, Some(q)) => {
             // Minor radius so the ellipse passes through q.
@@ -726,13 +776,21 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Bool(b)) => *b,
         Some(_) => return Err(bad(cmd, "`axes` must be true or false")),
     };
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = sk.add_point(c, None)?;
         let mi = sk.add_point(m, None)?;
+        place_point(sk, Some(&ci), ec);
+        place_point(sk, Some(&mi), em);
         let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
         mark_construction(sk, &[e], p);
+        let mut cons = Vec::new();
+        if let Some(expr) = &size {
+            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+            let pname = doc.new_model_param(expr, &unit);
+            cons.push(sk.add_constraint(ConstraintKind::Radius { c: e, value: r }, Some(pname))?);
+        }
         if !axes {
-            return Ok((ids_of(sk, &[e]), Vec::new()));
+            return Ok((ids_of(sk, &[e]), cons));
         }
         // Its major and minor axes, construction lines through the centre that bisects both:
         // the major one ends at the major end, the minor one is perpendicular to it and ends
@@ -746,12 +804,12 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
                 cu.construction = true;
             }
         }
-        let cons = vec![
+        cons.extend([
             add_c(sk, ConstraintKind::Midpoint { p: ci, l: major })?,
             add_c(sk, ConstraintKind::Midpoint { p: ci, l: minor })?,
             add_c(sk, ConstraintKind::Perpendicular { a: minor, b: major })?,
             add_c(sk, ConstraintKind::PointOnCurve { p: n1, c: e })?,
-        ];
+        ]);
         Ok((ids_of(sk, &[e]), cons))
     })?;
     drawn(out, info)
@@ -795,7 +853,7 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
         {
             pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
         }
-        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: None }, None)?;
+        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: None, handles: Vec::new() }, None)?;
         mark_construction(sk, &[c], p);
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
@@ -821,7 +879,7 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(e)) if e == "end" => Some(false),
         Some(_) => return Err(bad(cmd, "`end` must be start or end")),
     };
-    let (point, info) = edit(s, p, cmd, false, |sk, _| {
+    let ((point, curve), info) = edit(s, p, cmd, false, |sk, _| {
         let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?;
         let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
         let new = match end {
@@ -829,9 +887,11 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
             Some(at_start) => sk.extend_spline(c, at, at_start),
         }
         .map_err(|e| bad(cmd, e.to_string()))?;
-        sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))
+        let point = sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))?;
+        Ok((point, id.to_string()))
     })?;
-    Ok(json!({"point": point, "curve": p.get("curve"), "sketch": info}))
+    let reply = SplineInsertPointResult { point, curve, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// One point taken out of a spline (#10783).
@@ -847,6 +907,58 @@ fn spline_remove_point(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((name, deleted))
     })?;
     let reply = SplineRemovePointResult { curve: id, point, deleted, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn spline_handles(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.handles";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
+    let (handles, info) = edit(s, p, cmd, false, |sk, _| {
+        let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        if matches!(sk.curves.get(c).map(|x| &x.kind), Some(CurveKind::Spline { handles, .. }) if !handles.is_empty()) {
+            return Err(bad(cmd, format!("`{id}` already has tangent handles")));
+        }
+        sk.add_spline_handles(c).map_err(|e| bad(cmd, e.to_string()))?;
+        Ok(match sk.curves.get(c).map(|x| &x.kind) {
+            Some(CurveKind::Spline { handles, .. }) => handles.iter().filter_map(|h| sk.points.get(*h).map(|p| p.id.clone())).collect(),
+            _ => Vec::new(),
+        })
+    })?;
+    let reply = SplineHandlesResult { curve: id, handles, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn spline_reset_handles(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.reset_handles";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
+    let (removed, info) = edit(s, p, cmd, false, |sk, _| {
+        let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        let (spline, handles) = match sk.curves.get(c) {
+            Some(curve) => match &curve.kind {
+                CurveKind::Spline { handles, .. } => (curve.id.clone(), handles.clone()),
+                _ => return Err(bad(cmd, format!("`{id}` is not a spline"))),
+            },
+            None => return Err(bad(cmd, format!("unknown curve `{id}`"))),
+        };
+        if handles.is_empty() {
+            return Err(bad(cmd, format!("`{id}` has no tangent handles")));
+        }
+        let removed: Vec<String> = handles.iter().filter_map(|h| sk.points.get(*h).map(|q| q.id.clone())).collect();
+        // Removing the construction lines takes the handles with them: the spline lets go of its
+        // handle points, which then belong to no curve and go with the constraints on them.
+        let guides: Vec<usize> =
+            sk.curves.iter().enumerate().filter(|(_, x)| x.spline_handle_of.as_deref() == Some(spline.as_str())).map(|(i, _)| i).collect();
+        sk.remove_curves(&guides);
+        let cleared = sk
+            .curve_index(&spline)
+            .and_then(|i| sk.curves.get(i))
+            .is_some_and(|x| matches!(&x.kind, CurveKind::Spline { handles, .. } if handles.is_empty()));
+        if !cleared || removed.iter().any(|h| sk.resolve_point(h).is_some()) {
+            return Err(bad(cmd, format!("`{id}`'s tangent handles could not be removed")));
+        }
+        Ok(removed)
+    })?;
+    let reply = SplineResetHandlesResult { curve: id, removed, sketch: info, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -934,12 +1046,21 @@ pub(super) fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
                 None
             }
         }
-        CurveKind::Spline { ref pts, control, periodic, .. } => {
+        CurveKind::Spline { ref pts, control, periodic, ref handles, .. } => {
             let q: Vec<Vec2> = pts.iter().filter_map(|i| sk.point(*i)).collect();
+            let tangent_handles: Vec<Vec2> = handles.iter().filter_map(|i| sk.point(*i)).collect();
             if pts.last() == Some(&pi) {
-                solidcraft_sketch::spline_end_tangent_mode(&q, control, periodic, true)
+                if handles.is_empty() {
+                    solidcraft_sketch::spline_end_tangent_mode(&q, control, periodic, true)
+                } else {
+                    solidcraft_sketch::spline_end_tangent_with_handles(&q, &tangent_handles, periodic, true)
+                }
             } else if pts.first() == Some(&pi) {
-                solidcraft_sketch::spline_end_tangent_mode(&q, control, periodic, false).map(|t| -t)
+                if handles.is_empty() {
+                    solidcraft_sketch::spline_end_tangent_mode(&q, control, periodic, false).map(|t| -t)
+                } else {
+                    solidcraft_sketch::spline_end_tangent_with_handles(&q, &tangent_handles, periodic, false).map(|t| -t)
+                }
             } else {
                 None
             }
@@ -1166,15 +1287,11 @@ fn circle_three_tan(s: &mut Session, p: &Value) -> Result<Value> {
     tangent_circle(s, p, "sketch.circle.three_tangent", 3, None)
 }
 
-fn width(p: &Value, cmd: &str) -> Result<f64> {
-    num(p, "width").filter(|w| *w > 1e-9).ok_or_else(|| bad(cmd, "`width` must be positive"))
-}
-
 fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.center_point";
     let (c, e) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "end")?);
-    let w = width(p, cmd)?;
-    reply(slot_parts(s, p, cmd, c * 2.0 - e, e, w)?)
+    let (w, driven) = slot_width(s, p, cmd)?;
+    reply(slot_parts(s, p, cmd, c * 2.0 - e, e, w, driven.as_deref())?)
 }
 
 /// Arc slot around `o` (centre-line radius `r`) from angle `t0` sweeping `sweep` (> 0).
@@ -1183,7 +1300,9 @@ fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
 /// construction chords to both cap centres held equal, so it stays halfway along the arc however
 /// the slot is edited or dragged. On the arc's circle equal chords leave two places (the middle
 /// and the point opposite); the solver keeps the one it is drawn at. The middle adds no freedom.
-fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, sweep: f64, w: f64) -> Result<Value> {
+/// `width` is the slot's width and, when it names parameters, its expression ([`slot_width`]).
+fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, sweep: f64, width: (f64, Option<String>)) -> Result<Value> {
+    let (w, driven) = width;
     let h = w / 2.0;
     if h >= r {
         return Err(bad(cmd, "the slot is wider than its centre arc's diameter"));
@@ -1195,7 +1314,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
     let at = |t: f64, rr: f64| o + Vec2::from_angle(t) * rr;
     let mut centre_arc = None;
     let mut middle = None;
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let oc = sk.add_point(o, None)?;
         let ps = sk.add_point(at(t0, r), None)?;
         let pe = sk.add_point(at(t1, r), None)?;
@@ -1229,6 +1348,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
             }
         }
         cons.push(add_c(sk, ConstraintKind::Equal { a: to_s, b: to_e })?);
+        cons.extend(slot_width_dimension(sk, doc, cap_e, w, driven.as_deref())?);
         middle = sk.points.get(mid).map(|q| q.id.clone());
         Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
     })?;
@@ -1238,7 +1358,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
 fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.arc_three_point";
     let (a, t, b) = (req_vec2(cmd, p, "start")?, req_vec2(cmd, p, "through")?, req_vec2(cmd, p, "end")?);
-    let w = width(p, cmd)?;
+    let w = slot_width(s, p, cmd)?;
     let (o, r) = circumcircle(a, t, b).ok_or_else(|| bad(cmd, "the points are collinear"))?;
     let ang = |q: Vec2| (q - o).angle();
     let span = |from: f64, to: f64| (to - from).rem_euclid(std::f64::consts::TAU);
@@ -1250,7 +1370,7 @@ fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {
 fn arc_slot_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.arc_center";
     let (o, a) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "start")?);
-    let w = width(p, cmd)?;
+    let w = slot_width(s, p, cmd)?;
     let r = o.dist(a);
     if r < 1e-9 {
         return Err(bad(cmd, "the points must differ from the centre"));
@@ -1319,6 +1439,110 @@ mod blend_tests {
     fn sketch(s: &Session) -> solidcraft_sketch::Sketch {
         let id = s.active_sketch.unwrap();
         s.model.state().sketch(id).unwrap().sketch.clone()
+    }
+
+    /// #6502: Reset Tangent Handles takes a spline's handles, their construction lines and the
+    /// constraints on them away, so the curve runs through its fit points as before.
+    #[test]
+    fn reset_tangent_handles_gives_back_the_spline_through_its_fit_points() {
+        let mut s = new_sketch();
+        let spline_id =
+            ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[-40, 0], [-15, 20], [15, -10], [40, 10]]}))["curves"])[0].clone();
+        assert!(s.execute("sketch.spline.reset_handles", &json!({"curve": spline_id})).is_err(), "nothing to reset yet");
+        let constraints = sketch(&s).constraints.len();
+        let points = sketch(&s).points.len();
+        let given = run(&mut s, "sketch.spline.handles", json!({"curve": spline_id}));
+        let turned = given["handles"][1].as_str().unwrap().to_string();
+        let at = {
+            let sk = sketch(&s);
+            sk.resolve_point(&turned).and_then(|i| sk.point(i)).unwrap()
+        };
+        run(&mut s, "sketch.drag", json!({"entity": turned, "from": [at.x, at.y], "to": [at.x - 3.0, at.y + 8.0]}));
+        run(&mut s, "sketch.drag_end", json!({}));
+        let guide = sketch(&s).curves.iter().find(|c| c.spline_handle_of.as_deref() == Some(spline_id.as_str())).unwrap().id.clone();
+        run(&mut s, "sketch.dimension", json!({"entities": [guide], "value": 6}));
+        assert!(sketch(&s).constraints.len() > constraints, "the guide is dimensioned");
+        // The dimension may move the fit point too; the reset keeps the fit points where they are.
+        let fit_before: Vec<Vec2> = {
+            let sk = sketch(&s);
+            let CurveKind::Spline { pts, .. } = &sk.curves[sk.curve_index(&spline_id).unwrap()].kind else { panic!("a fit spline") };
+            pts.iter().map(|p| sk.point(*p).unwrap()).collect()
+        };
+
+        let reset = run(&mut s, "sketch.spline.reset_handles", json!({"curve": spline_id}));
+        assert_eq!(reset["removed"].as_array().map(Vec::len), Some(4), "{reset}");
+        let sk = sketch(&s);
+        let CurveKind::Spline { pts, handles, .. } = &sk.curves[sk.curve_index(&spline_id).unwrap()].kind else { panic!("a fit spline") };
+        assert!(handles.is_empty(), "no handles left");
+        assert!(sk.curves.iter().all(|c| c.spline_handle_of.is_none()), "no tangent lines left");
+        assert!(reset["removed"].as_array().unwrap().iter().all(|h| sk.resolve_point(h.as_str().unwrap()).is_none()), "the handle points went");
+        assert_eq!(sk.points.len(), points);
+        assert_eq!(sk.constraints.len(), constraints, "the guide's dimension went with it");
+        let fit_after: Vec<Vec2> = pts.iter().map(|p| sk.point(*p).unwrap()).collect();
+        assert_eq!(fit_after, fit_before, "the fit points stay");
+        drop(sk);
+        assert!(s.execute("sketch.spline.reset_handles", &json!({"curve": spline_id})).is_err(), "twice is refused");
+        run(&mut s, "edit.undo", json!({}));
+        let sk = sketch(&s);
+        assert!(
+            matches!(&sk.curves[sk.curve_index(&spline_id).unwrap()].kind, CurveKind::Spline { handles, .. } if handles.len() == 4),
+            "undo brings them back"
+        );
+    }
+
+    #[test]
+    fn fit_spline_handles_are_visible_lines_and_accept_existing_constraints() {
+        let mut s = new_sketch();
+        let spline_id = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [8, 6], [17, 2], [25, 10]]}))["curves"])[0].clone();
+        assert!(
+            matches!(&sketch(&s).curves[sketch(&s).curve_index(&spline_id).unwrap()].kind, CurveKind::Spline { handles, .. } if handles.is_empty()),
+            "no handles until asked"
+        );
+        let given = run(&mut s, "sketch.spline.handles", json!({"curve": spline_id}));
+        assert_eq!(given["handles"].as_array().map(Vec::len), Some(4), "{given}");
+        assert!(s.execute("sketch.spline.handles", &json!({"curve": spline_id})).is_err(), "twice is refused");
+        let sk = sketch(&s);
+        let spline_index = sk.curve_index(&spline_id).unwrap();
+        let CurveKind::Spline { pts, handles, .. } = &sk.curves[spline_index].kind else { panic!("expected a fit spline") };
+        assert_eq!(handles.len(), pts.len());
+        let tangent_lines: Vec<_> = sk.curves.iter().filter(|curve| curve.spline_handle_of.as_deref() == Some(spline_id.as_str())).collect();
+        assert_eq!(tangent_lines.len(), pts.len());
+        assert!(tangent_lines.iter().all(|curve| curve.construction));
+        let handle_id = tangent_lines[0].id.clone();
+        let angle_handle_id = tangent_lines[1].id.clone();
+        let final_handle = *handles.last().unwrap();
+        let final_fit_point = *pts.last().unwrap();
+        assert!(
+            matches!(tangent_lines.last().map(|curve| &curve.kind), Some(CurveKind::Line { a, b }) if *a == final_handle && *b == final_fit_point)
+        );
+        drop(sk);
+        let before = s.doc.to_json();
+        assert!(
+            s.execute("sketch.trim", &json!({"curve": &handle_id, "at": [4, 3]})).is_err(),
+            "a tangent construction line cannot be trimmed independently of its spline"
+        );
+        assert_eq!(s.doc.to_json(), before);
+
+        let reference_id = ids(&run(&mut s, "sketch.line", json!({"points": [[40, 0], [40, 20]]}))["curves"])[0].clone();
+        run(&mut s, "sketch.constraint.perpendicular", json!({"a": handle_id, "b": reference_id}));
+        let solved = sketch(&s);
+        let handle = solved.curve_index(&handle_id).unwrap();
+        let reference = solved.curve_index(&reference_id).unwrap();
+        let direction = |index: usize| match solved.curves[index].kind {
+            CurveKind::Line { a, b } => solved.point(b).unwrap() - solved.point(a).unwrap(),
+            ref other => panic!("expected a line, got {other:?}"),
+        };
+        assert!(direction(handle).dot(direction(reference)).abs() < 1e-7);
+
+        let angle_reference = ids(&run(&mut s, "sketch.line", json!({"points": [[50, 0], [50, 20]]}))["curves"])[0].clone();
+        run(&mut s, "sketch.dimension", json!({"entities": [angle_handle_id, angle_reference], "type": "angle", "value": "90 deg"}));
+        let sketch = sketch(&s);
+        assert!(
+            sketch
+                .constraints
+                .iter()
+                .any(|constraint| { matches!(constraint.kind, solidcraft_sketch::ConstraintKind::Angle { .. }) && constraint.param.is_some() })
+        );
     }
 
     fn factorial(n: usize) -> f64 {
@@ -1610,13 +1834,17 @@ mod blend_tests {
         let mut broken = solidcraft_sketch::Sketch::new();
         let p0 = broken.add_point(Vec2::new(1.0, 1.0), None).unwrap();
         let p1 = broken.add_point(Vec2::ZERO, None).unwrap();
-        let l = broken.add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false, nurbs: None }, None).unwrap();
+        let l = broken
+            .add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false, nurbs: None, handles: Vec::new() }, None)
+            .unwrap();
         broken.points[p0].pos = Vec2::new(f64::NAN, 4.0);
         assert!(super::joint_derivatives(&broken, l, p1, 2, true, "a", "sketch.blend_curve").is_err(), "non-finite geometry");
         let mut flat = solidcraft_sketch::Sketch::new();
         let q0 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
         let q1 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
-        let d = flat.add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false, nurbs: None }, None).unwrap();
+        let d = flat
+            .add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false, nurbs: None, handles: Vec::new() }, None)
+            .unwrap();
         let e = super::joint_derivatives(&flat, d, q0, 2, true, "a", "sketch.blend_curve").unwrap_err().to_string();
         assert!(e.contains("no tangent"), "{e}");
         assert!(solidcraft_geom::hermite_bezier(Vec2::ZERO, Vec2::X, &[Vec2::Y; 5], &[Vec2::Y; 5]).is_none(), "no order above g4");

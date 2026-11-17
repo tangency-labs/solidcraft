@@ -401,15 +401,6 @@ fn pinned() -> BTreeMap<String, BTreeSet<String>> {
                 "fillets/2903-original-rim-round.json:b0",
             ],
         ),
-        // a torus label whose frame is off its form's own first sweep row past the rounding
-        // `evaluates_as` derives (margin 1.69, tests/issue_3185_label_margins.rs)
-        (
-            label(
-                "torus -> rational_spline",
-                &["major_radius", "minor_radius"],
-            ),
-            &["sweeps/4280-circular-pattern-of-sweep-cut-groove-on-hub.json:b46"],
-        ),
         // an extruded circle the flat hop left a spline, proved a cylinder
         (
             label("rational_spline -> cylinder", &["radius"]),
@@ -582,7 +573,7 @@ fn parity(stride: usize) {
         // differs is pinned above, and the rest must be identical or within rounding.
         assert_eq!(
             (t.bodies - t.identical - t.rounding_only, t.rounding_only),
-            (pinned.len(), 36),
+            (pinned.len(), 37), // 37 with fillets/15437's block (within rounding)
             "bodies that differ, bodies within rounding"
         );
         // the largest rounding difference, relative (#3137: 4.885e-16)

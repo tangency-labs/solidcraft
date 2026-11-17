@@ -53,7 +53,7 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
-pub(crate) use panel::{finish_shared, left_inset, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
+pub(crate) use panel::{finish_shared, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
 pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
 
 /// Most entries kept in the conversation; older ones are dropped.
@@ -474,12 +474,8 @@ pub struct AgentChat {
     pub panel_rect: Option<egui::Rect>,
     /// A pointer press in the transcript owns keys just like a focused text editor.
     keyboard_owned: bool,
-    /// The panel forgets its own width the next time it is drawn, so the preference applies.
-    pub(crate) forget_width: bool,
     /// Select All (Ctrl+A) in the transcript took the whole conversation (#10676).
     all_selected: bool,
-    /// Unreserved sheet space, shared by the actual dock and its drag preview.
-    pub(crate) dock_space: Option<egui::Rect>,
     /// The last message sent, kept to send again after a sign-in (its files too).
     last: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
     /// Files for the next message (pictures, text files, imported parts), shown as chips.
@@ -618,7 +614,6 @@ impl AgentChat {
     pub(crate) fn swap_document(&mut self, other: &mut Self) {
         std::mem::swap(self, other);
         std::mem::swap(&mut self.open, &mut other.open);
-        std::mem::swap(&mut self.forget_width, &mut other.forget_width);
         std::mem::swap(&mut self.following_document, &mut other.following_document);
         std::mem::swap(&mut self.settings, &mut other.settings);
         std::mem::swap(&mut self.control_starter, &mut other.control_starter);
@@ -636,7 +631,6 @@ impl AgentChat {
         self.panel_rect = None;
         self.keyboard_owned = false;
         self.all_selected = false;
-        self.dock_space = None;
         self.drop_rect = None;
     }
 
@@ -2248,6 +2242,10 @@ fn pump_tools(app: &mut SolveApp) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
         };
+        if let Err(error) = crate::plugins::normalize_request(&app.session, &req.method, &mut req.params) {
+            refuse(req, error);
+            continue;
+        }
         let undo_len = app.session.undo.len();
         let Some(turn) = app.agent_chat.turn.as_mut() else {
             refuse(req, "the agent chat has no message in progress".into());
@@ -2266,8 +2264,14 @@ fn pump_tools(app: &mut SolveApp) {
         let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
         let tool = gate::tool_key(&req.method, &req.params);
         let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
+        let plugin_run = req
+            .params
+            .get("command")
+            .or_else(|| req.params.get("id"))
+            .and_then(Value::as_str)
+            .is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"));
         let verdict = match gate::request(&req.method, &req.params, undo_left) {
-            gate::Verdict::Ask(_) if mode == agents::Mode::All || always => gate::Verdict::Run { change: true },
+            gate::Verdict::Ask(_) if !plugin_run && (mode == agents::Mode::All || always) => gate::Verdict::Run { change: true },
             gate::Verdict::Run { change: true } if mode == agents::Mode::Ask && !always => {
                 gate::Verdict::Ask(gate::describe(&req.method, &req.params))
             }
@@ -2848,21 +2852,19 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     if p.get("toggle").and_then(Value::as_bool) == Some(true) {
         toggle(app);
     }
-    if let Some(s) = p.get("side").and_then(Value::as_str) {
-        if !matches!(s, "left" | "right") {
-            return Err("side must be left or right".into());
-        }
-        app.preferences.agent_chat_side = s.into();
-    }
-    if let Some(m) = p.get("minimized").and_then(Value::as_bool) {
-        app.preferences.agent_chat_minimized = m;
-    }
     if let Some(w) = p.get("popped").and_then(Value::as_bool) {
         app.preferences.agent_chat_popped = w;
     }
-    if let Some(w) = p.get("width").and_then(Value::as_f64).filter(|w| w.is_finite()) {
-        app.preferences.agent_chat_width = (w as f32).clamp(panel::MIN_WIDTH, panel::MAX_WIDTH);
-        app.agent_chat.forget_width = true;
+    let side = match p.get("side").and_then(Value::as_str) {
+        Some("left") => Some(solidcraft_engine::panels::Zone::Left),
+        Some("right") => Some(solidcraft_engine::panels::Zone::Right),
+        Some(_) => return Err("side must be left or right".into()),
+        None => None,
+    };
+    let width = p.get("width").and_then(Value::as_f64).filter(|width| width.is_finite()).map(|width| width as f32);
+    let collapsed = p.get("minimized").and_then(Value::as_bool);
+    if (side.is_some() || width.is_some() || collapsed.is_some()) && !app.preferences.agent_chat_popped {
+        crate::panel_runtime::place_assistant(app, side, width, collapsed).map_err(solidcraft_engine::panels::commands::error_text)?;
     }
     if let Some(path) = p.get("attach").and_then(Value::as_str) {
         attach_path(app, path)?;
@@ -2986,11 +2988,8 @@ pub fn status(app: &SolveApp) -> Value {
         "modes": c.modes.iter().map(|(id, name)| json!({"id": id, "name": name})).collect::<Vec<_>>(),
         "mode": c.mode,
         "open": c.open,
-        "side": app.preferences.agent_chat_side,
-        "minimized": app.preferences.agent_chat_minimized,
         "popped": app.preferences.agent_chat_popped,
         "window": app.preferences.agent_chat_window,
-        "width": app.preferences.agent_chat_width,
         "state": c.state().id(),
         "agent": c.agent,
         "images": c.images,
