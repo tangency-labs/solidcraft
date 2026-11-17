@@ -1846,6 +1846,8 @@ impl FilletSession<'_> {
             }
         }
         let mut kept_rounds: BTreeSet<usize> = BTreeSet::new();
+        // #18646: each kept piece of a round's face, with its round
+        let mut piece_round: BTreeMap<FaceId, usize> = BTreeMap::new();
 
         // each round's side of the body (the fork's ce748fa): a
         // convex blend's sheet lies in the material it takes off, a concave blend's (an open
@@ -2069,6 +2071,7 @@ impl FilletSession<'_> {
                     with_kernel_callbacks(k, &mut sheet, |k, b, env| delete(k, b, env, p))?;
                 } else if let Some(&i) = round_of.get(&s) {
                     kept_rounds.insert(i);
+                    piece_round.insert(p, i);
                 }
             }
         }
@@ -2126,12 +2129,38 @@ impl FilletSession<'_> {
             }
             lamina_edges = kept_lamina;
         }
+        // #18646: the faces each rail lies on, and the faces of its round's own edge. A rail
+        // lies on the surface of every face coplanar with the one its round rolls on: two
+        // rounds on two faces of one plane, apart, each have a rail on both. When a face
+        // of its round's edge is among those it lies on, it is the rail of those faces
+        // alone; another face of the plane is not the one it rolls on, and its extension
+        // would not close on that face.
+        let mut on_faces: Vec<Vec<FaceId>> = Vec::with_capacity(lamina_edges.len());
+        for &e in &lamina_edges {
+            let mut on = Vec::new();
+            for &f in &target_faces {
+                if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
+                    on.push(f);
+                }
+            }
+            let mut own: Vec<FaceId> = Vec::new();
+            for s in edge::faces(&sheet, e, None)? {
+                let round = piece_round.get(&s).or_else(|| round_of.get(&s));
+                if let Some(&be) = round.and_then(|&i| blended_edges.get(i)) {
+                    own.extend(edge::faces(self.objects.target, be, None)?);
+                }
+            }
+            if on.iter().any(|f| own.contains(f)) {
+                on.retain(|f| own.contains(f));
+            }
+            on_faces.push(on);
+        }
         let mut extensions: Vec<Extension> = Vec::new();
         let mut along: Vec<Curve> = Vec::new();
         for &f in &target_faces {
             let mut rails = Vec::new();
-            for &e in &lamina_edges {
-                if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
+            for (&e, on) in lamina_edges.iter().zip(&on_faces) {
+                if on.contains(&f) {
                     let start = edge::start_vertex(&sheet, e)?
                         .ok_or_else(|| SolidError::blend_missing(OP, "the edge's start vertex"))?;
                     let end = edge::end_vertex(&sheet, e)?
