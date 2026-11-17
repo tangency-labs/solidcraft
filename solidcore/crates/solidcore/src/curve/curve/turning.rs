@@ -435,18 +435,21 @@ fn bezier_points(vals: &[f64], u: &[f64], a: f64, b: f64) -> Option<Vec<(f64, f6
 /// (#17987) `past`, for a curve that evaluates past its knots: where `[lo, hi]` runs
 /// below the domain's start or above its end, one more piece covers that part, the
 /// polynomial of the span the evaluation takes there extended (`KnotVector::find_span`:
-/// the first or last span at least `1e-12` wide),
-/// extracted by [`bezier_points`] over the part. A rational extension's Bezier weights
-/// may then be zero or negative even where its weight polynomial is positive: such a
-/// part is halved until each half's weights are certified positive (`w_min > 0`), at
-/// most [`MAX_DEPTH`] times. A half that never gets there (the weight has a zero there,
-/// a pole of the curve) keeps `w_min <= 0`, and `isolate` refuses it.
+/// the first or last span at least `1e-12` wide), extracted by [`bezier_points`] over
+/// the part. A rational extension's Bezier weights may then be zero or negative even
+/// where its weight polynomial is positive: while both end weights (the weight at the
+/// part's ends) are certified positive, such a part is halved until each half's weights
+/// are (`w_min > 0`), at most [`MAX_DEPTH`] levels and [`MAX_NODES`] halvings. A part
+/// whose weight is not positive at an end (past a pole, or at one) is not halved; it, or
+/// a half that never gets there (a zero of the weight inside, a pole), keeps
+/// `w_min <= 0`, and `isolate` refuses it.
 ///
 /// # Errors
 ///
 /// `InvalidInput` for a non-finite or non-positive weight, a non-finite point or knot,
 /// decreasing knots, too few knots for the control points, or a degree at or above
-/// `nurbs_crv::MAX_DEGREE` (as Bezier extraction refuses); those of `find_span`.
+/// `nurbs_crv::MAX_DEGREE` (as Bezier extraction refuses), or a rational extension that
+/// needs more than [`MAX_NODES`] halvings; those of `find_span`.
 fn bspline_pieces(
     nl: &NlCurve,
     axis: usize,
@@ -524,6 +527,7 @@ fn bspline_pieces(
     // Taken from the end: reversed, so the pieces keep the spans' order.
     spans.reverse();
     let mut pieces = Vec::new();
+    let mut splits = 0;
     while let Some((j, t0, t1, halvings)) = spans.pop() {
         let u = knots.get(j + 1 - p..=j + p).ok_or_else(short)?;
         let support = j - p..=j;
@@ -550,8 +554,26 @@ fn bspline_pieces(
         let w_min = hs.iter().fold(f64::INFINITY, |m, &(_, w, _, ew)| {
             m.min((w - ew) * (1.0 - gamma(3)))
         });
+        // The end weights are the weight at `t0` and `t1`: where one is not certified
+        // positive, halving cannot help.
+        let end_positive =
+            |h: Option<&(f64, f64, f64, f64)>| h.is_some_and(|&(_, w, _, ew)| w - ew > 0.0);
         let mid = 0.5 * t0 + 0.5 * t1;
-        if rational && halvings > 0 && w_min <= 0.0 && t0 < mid && mid < t1 {
+        if rational
+            && halvings > 0
+            && w_min <= 0.0
+            && end_positive(hs.first())
+            && end_positive(hs.last())
+            && t0 < mid
+            && mid < t1
+        {
+            splits += 1;
+            if splits > MAX_NODES {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a rational extension's weights need more halvings than allowed",
+                ));
+            }
             spans.push((j, mid, t1, halvings - 1));
             spans.push((j, t0, mid, halvings - 1));
             continue;
