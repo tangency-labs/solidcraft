@@ -86,7 +86,8 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     }
     check_tree(&records.tree, records.bodies.len(), 0, &mut 0)?;
     let mut bodies = Vec::with_capacity(records.bodies.len());
-    let mut report = ImportReport { parts: records.bodies.len(), ..ImportReport::default() };
+    // A part placed again is one part: its copies are not counted again.
+    let mut report = ImportReport { parts: records.bodies.iter().filter(|r| r.copy_of.is_none()).count(), ..ImportReport::default() };
     let mut warnings = records.warnings.clone();
     for w in &records.warnings {
         report.issues.push(ImportIssue { kind: IssueKind::File, item: None, part: String::new(), faces: 0, times: 1, detail: w.clone() });
@@ -146,7 +147,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             continue;
         };
         let body = body.with_color(r.color).with_face_sources(Some(Arc::new(sources)));
-        if part.closed {
+        if part.closed && r.copy_of.is_none() {
             report.solids += 1;
         }
         if r.copy_of.is_none() {

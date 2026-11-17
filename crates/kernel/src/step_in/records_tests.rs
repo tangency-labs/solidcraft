@@ -156,7 +156,7 @@ fn an_open_record_marked_closed_is_still_open() {
 
 /// A copy of a record body is that body's part placed again: the same faces and volume where its
 /// own placement puts it, and the same file item and face sources, so the design knows both as one
-/// part. The copy carries no record of its own.
+/// part, and the import's report counts it once. The copy carries no record of its own.
 #[test]
 fn a_copy_is_the_same_part_placed_again() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
@@ -179,6 +179,7 @@ fn a_copy_is_the_same_part_placed_again() {
     let (ma, mb) = (measure(&a.body).unwrap(), measure(&b.body).unwrap());
     assert!((mb.centroid.y - ma.centroid.y - 40.0).abs() < 1e-9 && (mb.volume - ma.volume).abs() < 1e-9, "{ma:?} {mb:?}");
     assert_eq!(ma.faces, mb.faces);
+    assert_eq!((imp.report.parts, imp.report.solids), (1, 1), "one part, placed twice");
 }
 
 /// A copy of a body that comes after it, of itself, or of another copy is left out with the
