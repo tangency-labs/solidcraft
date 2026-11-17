@@ -1,4 +1,10 @@
 //! Regression for a closed C0-split spline whose outward offset loses a piece.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 use solidcore::curve::{
     composite_curve::{CompositeCurve, OffsetCornerType, OffsetParams},
     curve::Curve,
