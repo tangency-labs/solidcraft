@@ -16,24 +16,27 @@ use solidcore::nurbs::srf_basic::{
     falloff_weight as kernel_falloff, Direction, FalloffShape, Surface as NurbSurface,
 };
 use solidcore::nurbs::srf_deviation::certified_distance;
-use solidcore::nurbs::srf_match::match_boundary;
+use solidcore::nurbs::srf_match::{match_boundary, match_plane as kernel_match_plane};
 pub use solidcore::nurbs::srf_match::{MatchOrder, MatchRows, SeamBounds};
 use solidcore::SolidError;
 use solidcore::Vec3;
 use solidcore_record::brep::{
-    knot_domain, Brep, Curve2, Loop, Natural, Surface, MAX_SPLINE_DEGREE,
+    knot_domain, Brep, Curve2, Face, Loop, Natural, OrientedEdge, Surface, MAX_SPLINE_DEGREE,
 };
 
 use std::borrow::Cow;
 
 use solidcore::topology::brep::sheet::editable_sheet;
+use solidcore::topology::face::p1::calculate_uv_domain_from_uv_trim_curves;
 
 use crate::body::Body;
 use crate::error::status;
+use crate::session::with_body;
 use crate::session::{read_body, run};
-use crate::surface::{record, sheet as sheet_of};
+use crate::surface::{record, sheet_starting};
 use crate::sweep::coord_ok;
 use crate::{Error, Result};
+use solidcore::surface::side::BoxSide;
 
 /// The most sample points a rebuild fits (rows times columns).
 pub const REBUILD_MAX_SAMPLES: usize = 1 << 20;
@@ -91,6 +94,25 @@ pub(crate) fn editable(sheet: &Brep) -> Result<Cow<'_, Brep>> {
     }
 }
 
+/// The side of `sheet`'s box its one face's loop starts on (the kernel's `first_side`), so an
+/// edit makes its sheet again listing the edges in its order: an edit changes no topology, and a
+/// client names an edge by its index in the record. `None` for a record of other than one face.
+///
+/// # Errors
+/// [`Error::Record`] for a record the kernel refuses; the kernel's error.
+fn first_side(sheet: &Brep) -> Result<Option<BoxSide>> {
+    if sheet.faces.len() != 1 {
+        return Ok(None);
+    }
+    let (body, _) = Body::from_record(sheet, true)?;
+    with_body("surface_cvs::first_side", &body, |k, b| {
+        let Some(&f) = b.face_list().first() else {
+            return Ok(None);
+        };
+        solidcore::topology::brep::sheet::first_side(k, b, f)
+    })
+}
+
 /// The control net of `sheet`'s surface (a planar or analytic sheet's after [`editable`]): its
 /// Euclidean points, their weights and the points tied together.
 ///
@@ -140,6 +162,7 @@ fn tied(ties: &[Vec<(usize, usize)>], p: (usize, usize)) -> Vec<(usize, usize)> 
 /// past the coordinate bound; the kernel's status otherwise.
 pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Brep> {
     let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
     let ((u, v), net) = untrimmed(&sheet)?;
     let mut surface = kernel_surface(u, v, net)?;
     let ties = net_of(&surface, sheet.tolerance)?.ties;
@@ -153,8 +176,387 @@ pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Br
         }
     }
     record(run("surface_cvs::move_cvs", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&surface), first)
     }))
+}
+
+/// Face `face` of the body record `body` as a one-face sheet with a control net, as
+/// [`editable`] makes a sheet of a one-face record: an analytic or planar face through the
+/// kernel's `editable_sheet` (its exact NURBS form over its whole box, a plane's Coons spline),
+/// a face on a B-spline surface as the sheet on that surface's whole box (refused, as
+/// [`untrimmed`] refuses, where the face is not that box).
+///
+/// # Errors
+/// [`Error::Argument`] for a face past the record's list; [`Error::Record`] for a record the
+/// kernel refuses; [`Error::Unsupported`] for a face that is not its surface's whole box or has
+/// no exact NURBS form; the kernel's status.
+fn face_sheet(body: &Brep, face: usize) -> Result<Brep> {
+    let Some(rf) = body.faces.get(face) else {
+        return Err(Error::Argument);
+    };
+    let (kb, order) = Body::from_record(body, true)?;
+    let f = crate::order::face(&order, face)?;
+    let sheet = read_body("surface_cvs::face_sheet", &kb, |k, b| {
+        Ok(editable_sheet(k, b, f).map_err(status))
+    })??;
+    if let Some(s) = sheet {
+        return Ok(Body::new(s).to_record()?.0);
+    }
+    // a face on a B-spline surface: the sheet on its surface, when the face is its whole box
+    let alone = Brep {
+        faces: vec![rf.clone()],
+        ..body.clone()
+    };
+    let ((u, v), net) = untrimmed(&alone)?;
+    let surface = kernel_surface(u, v, net)?;
+    record(run("surface_cvs::face_sheet", |k| {
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&surface), None)
+    }))
+}
+
+/// The control net of face `face` of the body record `body`, as a sheet of it has it
+/// ([`face_sheet`]): the net [`move_face_cvs`] moves, its ties included.
+///
+/// # Errors
+/// As [`face_sheet`] and [`control_net`].
+pub fn face_net(body: &Brep, face: usize) -> Result<Net> {
+    control_net(&face_sheet(body, face)?)
+}
+
+/// The side of the parameter box `domain` a pcurve lies on: its control points all on
+/// `u = umin` (left), `u = umax` (right), `v = vmin` (bottom) or `v = vmax` (top); `None` for a
+/// pcurve off the sides (or a rational one).
+fn side_in(domain: [[f64; 2]; 2], pcurve: &Curve2) -> Option<Boundary> {
+    let Curve2::Spline { points: uv, .. } = pcurve else {
+        return None;
+    };
+    let [[u0, u1], [v0, v1]] = domain;
+    let on = |k: usize, at: f64| uv.iter().all(|p| p.get(k) == Some(&at));
+    if on(0, u0) {
+        Some(Boundary::Left)
+    } else if on(0, u1) {
+        Some(Boundary::Right)
+    } else if on(1, v0) {
+        Some(Boundary::Bottom)
+    } else if on(1, v1) {
+        Some(Boundary::Top)
+    } else {
+        None
+    }
+}
+
+/// The one edge loop of `face` with each use's side of the face's box ([`side_in`]).
+///
+/// # Errors
+/// [`Error::Unsupported`] for a face with holes or a use off its box's sides.
+fn sided_loop(face: &Face) -> Result<Vec<(&OrientedEdge, Boundary)>> {
+    let [Loop::Edges { edges }] = face.loops.as_slice() else {
+        return Err(Error::Unsupported("a face with holes"));
+    };
+    edges
+        .iter()
+        .map(|e| {
+            side_in(face.domain, &e.pcurve)
+                .map(|s| (e, s))
+                .ok_or(Error::Unsupported("a trimmed face"))
+        })
+        .collect()
+}
+
+/// Whether control point `(i, j)` of a `rows` by `cols` net lies on the box side `side`'s
+/// boundary row (the row its side's edge is the curve of).
+fn on_side(side: Boundary, (i, j): (usize, usize), rows: usize, cols: usize) -> bool {
+    match side {
+        Boundary::Left => i == 0,
+        Boundary::Right => i + 1 == rows,
+        Boundary::Bottom => j == 0,
+        Boundary::Top => j + 1 == cols,
+    }
+}
+
+/// The body record `body` with face `face`'s control points `moves` moved as [`move_cvs`] moves
+/// a sheet's (`((i, j), to)`, the points tied to each moving with it): the face's surface the
+/// moved one, every edge on a side whose boundary row moved the moved surface's edge there, and
+/// each other face using such an edge given its pcurves again on its own surface. The record's
+/// faces, edges and vertices stay where they are and each face's loops keep their uses, so a
+/// client's face and edge indices stay valid. The kernel makes the moved surface, its edges and
+/// every pcurve; ops only puts them into the record.
+///
+/// A neighbour of a moved edge is kept on its surface: a planar one takes the edge while it stays
+/// in its plane (within the body's tolerance); one on a curved surface is not rebuilt yet.
+///
+/// # Errors
+/// As [`face_sheet`] and [`move_cvs`]; [`Error::Unsupported`] for a moved edge that leaves the
+/// plane of a face it bounds, a moved edge on a face that is not planar, or a face with holes;
+/// [`Error::Record`] for a result the kernel refuses; the kernel's status.
+pub fn move_face_cvs(
+    body: &Brep,
+    face: usize,
+    moves: &[((usize, usize), [f64; 3])],
+) -> Result<Brep> {
+    let sheet = face_sheet(body, face)?;
+    let net = control_net(&sheet)?;
+    let moved = move_cvs(&sheet, moves)?;
+    let mut picked: Vec<(usize, usize)> = Vec::new();
+    for &(p, _) in moves {
+        picked.extend(tied(&net.ties, p));
+    }
+    splice(body, face, &moved, |side| {
+        picked.iter().any(|&p| on_side(side, p, net.rows, net.cols))
+    })
+}
+
+/// The body record `body` with face `face`'s picked control points moved by `delta` (and with a
+/// `falloff` the points around them by their weight of it), as [`move_net`] moves a sheet's, and
+/// the edges and faces about it rebuilt as [`move_face_cvs`] rebuilds them: an edge moves where a
+/// point of its boundary row moves by any weight.
+///
+/// # Errors
+/// As [`move_face_cvs`] and [`move_net`].
+pub fn move_face_net(
+    body: &Brep,
+    face: usize,
+    picks: &Picks,
+    delta: [f64; 3],
+    falloff: Option<Falloff>,
+) -> Result<Brep> {
+    let sheet = face_sheet(body, face)?;
+    let net = control_net(&sheet)?;
+    let weights = net_weights(net.rows, net.cols, picks, falloff)?;
+    let moved = move_net(&sheet, picks, delta, falloff)?;
+    let mut picked: Vec<(usize, usize)> = Vec::new();
+    for i in 0..net.rows {
+        for j in 0..net.cols {
+            let w = i
+                .checked_mul(net.cols)
+                .and_then(|r| r.checked_add(j))
+                .and_then(|n| weights.get(n));
+            if w.is_some_and(|&w| w > 0.0) {
+                picked.extend(tied(&net.ties, (i, j)));
+            }
+        }
+    }
+    splice(body, face, &moved, |side| {
+        picked.iter().any(|&p| on_side(side, p, net.rows, net.cols))
+    })
+}
+
+/// [`move_face_cvs`]'s record: face `face` of `body` on the surface of the one-face sheet
+/// `moved` (its sheet, its edges on the same sides of the box), the edges on the sides
+/// `changed` says moved taken from `moved`, the faces they bound given their pcurves again.
+fn splice(
+    body: &Brep,
+    face: usize,
+    moved: &Brep,
+    changed: impl Fn(Boundary) -> bool,
+) -> Result<Brep> {
+    let tol = body.tolerance;
+    let [new_face] = moved.faces.as_slice() else {
+        return Err(Error::Argument);
+    };
+    let old_face = body.faces.get(face).ok_or(Error::Argument)?;
+    let old_loop = sided_loop(old_face)?;
+    let new_loop = sided_loop(new_face)?;
+    let mut out = body.clone();
+    // the moved edges, by their record index, with whether their direction turns over
+    let mut moved_edges: Vec<(usize, bool)> = Vec::new();
+    for (old_use, side) in &old_loop {
+        if !changed(*side) {
+            continue;
+        }
+        let (new_use, _) = new_loop
+            .iter()
+            .find(|(_, s)| s == side)
+            .ok_or(Error::Unsupported(
+                "the moved face's sides differ from the face's",
+            ))?;
+        let e = usize::try_from(old_use.edge).map_err(|_| Error::Argument)?;
+        if moved_edges.iter().any(|&(m, _)| m == e) {
+            continue;
+        }
+        let ne = usize::try_from(new_use.edge).map_err(|_| Error::Argument)?;
+        let src = moved.edges.get(ne).ok_or(Error::Argument)?;
+        // the loop runs round the face the same way on both surfaces, so the edge turns over
+        // where the two uses on one side run opposite ways
+        let turned = new_use.forward != old_use.forward;
+        let dst = out.edges.get_mut(e).ok_or(Error::Argument)?;
+        dst.curve = src.curve.clone();
+        dst.nurbs.clone_from(&src.nurbs);
+        dst.interval = src.interval;
+        dst.tolerance = dst.tolerance.max(src.tolerance);
+        if turned {
+            dst.vertices.swap(0, 1);
+        }
+        // the vertices where the moved edge has them
+        let [a, b] = dst.vertices;
+        let [sa, sb] = src.vertices;
+        for (v, sv) in [(a, sa), (b, sb)] {
+            let point = moved
+                .vertices
+                .get(usize::try_from(sv).map_err(|_| Error::Argument)?)
+                .ok_or(Error::Argument)?
+                .point;
+            if let Some(x) = usize::try_from(v)
+                .ok()
+                .and_then(|v| out.vertices.get_mut(v))
+            {
+                x.point = point;
+            }
+        }
+        moved_edges.push((e, turned));
+    }
+    // every use of a turned edge runs the other way along it
+    for &(e, turned) in &moved_edges {
+        if !turned {
+            continue;
+        }
+        let refs = out.edges.get(e).map(|x| x.uses.clone()).unwrap_or_default();
+        for r in refs {
+            if let Some(u) = use_mut(&mut out, r.face, r.r#loop, r.position) {
+                u.forward = !u.forward;
+            }
+        }
+        if let Some(x) = out.edges.get_mut(e) {
+            for r in &mut x.uses {
+                r.upper = !r.upper;
+            }
+        }
+    }
+    // the edited face on the moved surface: the use of each moved edge the moved sheet's pcurve
+    // on its side (exact: the edge is the sheet's, and runs the same way now), every other made
+    // again on the surface (a kept edge has its own parameter, not the sheet's)
+    let mut exact = Vec::new();
+    {
+        let f = out.faces.get_mut(face).ok_or(Error::Argument)?;
+        f.surface = new_face.surface.clone();
+        f.nurbs.clone_from(&new_face.nurbs);
+        f.domain = new_face.domain;
+        if let Some(Loop::Edges { edges }) = f.loops.first_mut() {
+            for (p, (u, (_, side))) in edges.iter_mut().zip(&old_loop).enumerate() {
+                let moved_here = moved_edges
+                    .iter()
+                    .any(|&(e, _)| usize::try_from(u.edge).is_ok_and(|x| x == e));
+                let same = new_loop
+                    .iter()
+                    .find(|(n, s)| moved_here && s == side && n.forward == u.forward);
+                if let Some((n, _)) = same {
+                    u.pcurve = n.pcurve.clone();
+                    exact.push(p);
+                }
+            }
+        }
+    }
+    let mut refit = vec![face];
+    for &(e, _) in &moved_edges {
+        for r in out.edges.get(e).map(|x| x.uses.clone()).unwrap_or_default() {
+            let n = usize::try_from(r.face).map_err(|_| Error::Argument)?;
+            if !refit.contains(&n) {
+                let planar = out.faces.get(n).is_some_and(|f| {
+                    matches!(
+                        f.surface,
+                        Surface::Plane { .. } | Surface::PlaneThrough { .. }
+                    ) && f.nurbs.is_none()
+                });
+                if !planar {
+                    return Err(Error::Unsupported(
+                        "a moved edge bounds a face that is not planar, which is not rebuilt yet",
+                    ));
+                }
+                refit.push(n);
+            }
+        }
+    }
+    let moved_set: Vec<usize> = moved_edges.iter().map(|&(e, _)| e).collect();
+    for &n in &refit {
+        let kept = if n == face { exact.as_slice() } else { &[] };
+        let pcurves = face_pcurves(&out, n, &moved_set, tol, n == face, kept)?;
+        let f = out.faces.get_mut(n).ok_or(Error::Argument)?;
+        for (l, ps) in f.loops.iter_mut().zip(pcurves) {
+            if let Loop::Edges { edges } = l {
+                for (u, p) in edges.iter_mut().zip(ps) {
+                    u.pcurve = p;
+                }
+            }
+        }
+    }
+    // each rebuilt neighbour's box around its new loops, the kernel's
+    let neighbours: Vec<usize> = refit.iter().copied().filter(|&n| n != face).collect();
+    if !neighbours.is_empty() {
+        let (kb, order) = Body::from_record(&out, true)?;
+        for n in neighbours {
+            let f = crate::order::face(&order, n)?;
+            let d = with_body("surface_cvs::move_face_cvs", &kb, |k, b| {
+                calculate_uv_domain_from_uv_trim_curves(k, b, f, false, false, false).map(|o| {
+                    let (lo, hi) = (o.domain.min(), o.domain.max());
+                    Ok::<_, Error>([[lo.x, hi.x], [lo.y, hi.y]])
+                })
+            })??;
+            if let Some(face) = out.faces.get_mut(n) {
+                face.domain = d;
+            }
+        }
+    }
+    // the result as the kernel takes it
+    Body::from_record(&out, false)?;
+    Ok(out)
+}
+
+/// The use at `(face, loop, position)` of `b`.
+fn use_mut(b: &mut Brep, face: u32, l: u32, position: u32) -> Option<&mut OrientedEdge> {
+    let f = b.faces.get_mut(usize::try_from(face).ok()?)?;
+    let Loop::Edges { edges } = f.loops.get_mut(usize::try_from(l).ok()?)? else {
+        return None;
+    };
+    edges.get_mut(usize::try_from(position).ok()?)
+}
+
+/// The pcurves of face `n`'s loops on its surface, the kernel's ([`crate::pcurve`]): a use of
+/// an edge not in `moved` keeps its given pcurve; on the edited face (`edited`), whose surface
+/// changed, only the uses of its first loop at the positions `kept` (the moved sheet's own) do,
+/// the rest made again. A moved edge that is not on the surface within `tol` is refused as
+/// leaving the face's plane.
+fn face_pcurves(
+    b: &Brep,
+    n: usize,
+    moved: &[usize],
+    tol: f64,
+    edited: bool,
+    kept: &[usize],
+) -> Result<Vec<Vec<Curve2>>> {
+    let f = b.faces.get(n).ok_or(Error::Argument)?;
+    let mut loops = Vec::new();
+    for (li, l) in f.loops.iter().enumerate() {
+        let Loop::Edges { edges } = l else {
+            loops.push(Vec::new());
+            continue;
+        };
+        let mut uses = Vec::new();
+        for (p, u) in edges.iter().enumerate() {
+            let i = usize::try_from(u.edge).map_err(|_| Error::Argument)?;
+            let e = b.edges.get(i).ok_or(Error::Argument)?;
+            uses.push(crate::pcurve::EdgeUse {
+                edge: u.edge,
+                curve: e.nurbs.as_ref().unwrap_or(&e.curve),
+                interval: e.interval,
+                forward: u.forward,
+                tolerance: e.tolerance,
+                given: if edited {
+                    (li == 0 && kept.contains(&p)).then_some(&u.pcurve)
+                } else {
+                    (!moved.contains(&i)).then_some(&u.pcurve)
+                },
+            });
+        }
+        loops.push(uses);
+    }
+    let surface = f.nurbs.as_ref().unwrap_or(&f.surface);
+    let domain = edited.then_some(f.domain);
+    crate::pcurve::pcurves_within(surface, &loops, tol, domain).map_err(|e| match e {
+        crate::pcurve::Error::Failed(_) if !edited => {
+            Error::Unsupported("a moved edge leaves the plane of a face it bounds")
+        }
+        _ => Error::Unsupported("the moved face's edges have no pcurves on it"),
+    })
 }
 
 /// What [`move_net`] moves: whole rows (u indices), whole columns (v indices) or single control
@@ -275,6 +677,7 @@ pub fn move_net(
         return Err(Error::Argument);
     }
     let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
     let ((u, v), record_net) = untrimmed(&sheet)?;
     let mut surface = kernel_surface(u, v, record_net)?;
     let net = net_of(&surface, sheet.tolerance)?;
@@ -299,7 +702,7 @@ pub fn move_net(
         .collect();
     let moved = record(run("surface_cvs::move_net", |k| {
         surface.displace_cpts(&moves, Vec3::new(delta[0], delta[1], delta[2]))?;
-        sheet_of(k, BSplineSurface::from_gw_nurb(&surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&surface), first)
     }))?;
     if !control_net(&moved)?
         .points
@@ -337,6 +740,7 @@ pub fn rebuild(
     tol: f64,
 ) -> Result<(Brep, f64)> {
     let sheet = editable(sheet)?;
+    let first = first_side(&sheet)?;
     let ((u, v), points) = untrimmed(&sheet)?;
     if points.is_rational() {
         return Err(Error::Unsupported(
@@ -422,7 +826,7 @@ pub fn rebuild(
         return Err(Error::PastTolerance { bound });
     }
     let made = record(run("surface_cvs::rebuild", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&fit))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&fit), first)
     }))?;
     Ok((made, bound))
 }
@@ -430,9 +834,9 @@ pub fn rebuild(
 /// `sheet` with the control rows next to its record edge `edge` moved so the edge meets record
 /// edge `target` of `other` at `order` (the kernel's
 /// [`solidcore::nurbs::srf_match::match_boundary`]: at most `rows.rows` rows from the edge move,
-/// the rows the order does not fix following by `rows.blend`, G2's row along the normal only, the
-/// sheet refined first where its knots cannot carry the target), and the seam after, measured at
-/// the edge's stations. Both sheets are one untrimmed face (as [`control_net`] reads them), each
+/// the rows the order does not fix following by `rows.blend`, G2's correction normal at each
+/// station, the sheet refined first where its knots cannot carry the target), and the seam after,
+/// measured at the edge's stations. Both sheets are one untrimmed face (as [`control_net`] reads them), each
 /// edge a side of its face's box. Refused when the seam would be worse than before in a measure
 /// the order holds: past both what it was and `held`, the caller's floor for that measure (the
 /// gap, the angle, the curvature jump), so rounding at a seam already held is not "worse".
@@ -460,6 +864,7 @@ pub fn match_edge(
     }
     let side = side_of(sheet, edge)?;
     let target_side = side_of(other, target)?;
+    let first = first_side(sheet)?;
     let ((u, v), points) = untrimmed(sheet)?;
     let ((tu, tv), tpoints) = untrimmed(other)?;
     // spline sheets on polynomial surfaces only, as before rational nets were read
@@ -489,7 +894,91 @@ pub fn match_edge(
         ));
     }
     let made = record(run("surface_cvs::match_edge", |k| {
-        sheet_of(k, BSplineSurface::from_gw_nurb(&matched.surface))
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&matched.surface), first)
+    }))?;
+    Ok((made, after))
+}
+
+/// A plane a sheet's edge is matched to as its plane of symmetry ([`match_plane`]): a point on
+/// it and its normal (any length but none).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MirrorPlane {
+    /// A point on the plane.
+    pub origin: [f64; 3],
+    /// Its normal.
+    pub normal: [f64; 3],
+}
+
+/// `sheet` with the control rows next to its record edge `edge` moved so the sheet meets its own
+/// mirror image in `plane` at `order` (the kernel's
+/// [`solidcore::nurbs::srf_match::match_plane`]: the edge row put on the plane, at G1 and G2 the
+/// next row square to it, which makes the sheet curvature continuous with its mirror too; at
+/// most `rows.rows` rows from the edge move, the rows the order does not fix following by
+/// `rows.blend`), and the seam with the mirror after, measured at the edge's stations. The sheet
+/// is one untrimmed face (as [`control_net`] reads it), the edge a side of its face's box.
+/// Refused when the seam would be worse than before in a measure the order holds, past both what
+/// it was and `held`, as [`match_edge`] refuses.
+///
+/// # Errors
+/// As [`control_net`]; [`Error::Argument`] for an edge past the record's list or not a side of
+/// its face's box, a plane not finite or past the coordinate bound, a floor in `held` negative or
+/// not finite, and the kernel's refusals of the input (a normal of no length, an edge that does
+/// not leave the plane to one side, rows outside 1..=3 or below what the order fixes, a blend
+/// outside 0..=1, knots not clamped); [`Error::Unsupported`] for a match that would leave the seam
+/// worse; the kernel's status otherwise.
+pub fn match_plane(
+    sheet: &Brep,
+    edge: usize,
+    plane: MirrorPlane,
+    order: MatchOrder,
+    rows: MatchRows,
+    held: SeamBounds,
+) -> Result<(Brep, SeamBounds)> {
+    if ![held.gap, held.angle, held.curvature]
+        .iter()
+        .all(|t| t.is_finite() && *t >= 0.0)
+        || !coord_ok(&plane.origin)
+        || !coord_ok(&plane.normal)
+    {
+        return Err(Error::Argument);
+    }
+    let side = side_of(sheet, edge)?;
+    let first = first_side(sheet)?;
+    let ((u, v), points) = untrimmed(sheet)?;
+    if points.is_rational() {
+        return Err(Error::Argument);
+    }
+    let surface = kernel_surface(u, v, points)?;
+    let v3 = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z);
+    let matched = run("surface_cvs::match_plane", |_| {
+        Ok(
+            match kernel_match_plane(
+                &surface,
+                side,
+                v3(plane.origin),
+                v3(plane.normal),
+                order,
+                rows,
+            ) {
+                Ok(m) => Ok(m),
+                Err(SolidError::InvalidInput { .. }) => Err(Error::Argument),
+                Err(e) => return Err(e),
+            },
+        )
+    })??;
+    let (before, after) = (matched.before, matched.after);
+    let worse = |now: f64, was: f64, floor: f64| now > was.max(floor);
+    let k = order.order();
+    if worse(after.gap, before.gap, held.gap)
+        || (k >= 1 && worse(after.angle, before.angle, held.angle))
+        || (k >= 2 && worse(after.curvature, before.curvature, held.curvature))
+    {
+        return Err(Error::Unsupported(
+            "the match would leave the seam worse than it was",
+        ));
+    }
+    let made = record(run("surface_cvs::match_plane", |k| {
+        sheet_starting(k, BSplineSurface::from_gw_nurb(&matched.surface), first)
     }))?;
     Ok((made, after))
 }

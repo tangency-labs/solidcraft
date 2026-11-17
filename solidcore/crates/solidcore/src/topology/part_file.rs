@@ -62,8 +62,6 @@
 
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
-#[cfg(test)]
-use crate::geom::attribute::ObjectKey;
 use crate::geom::attribute::{ids, Attribute, AttributeHandle, AttributeStore, Behavior, TagData};
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
@@ -842,11 +840,9 @@ mod tests {
         assert!(s.good());
     }
 
-    fn key_of(_: usize, _: EntityRef) -> ObjectRef {
-        ObjectRef {
-            type_code: 0,
-            key: ObjectKey(0),
-        }
+    /// Typed identities, one per object, as production readers give them.
+    fn key_of(_: usize, e: EntityRef) -> ObjectRef {
+        crate::topology::loopuse::notify_ref(e)
     }
 
     fn read(text: &str) -> Result<Part> {

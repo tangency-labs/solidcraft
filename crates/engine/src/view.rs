@@ -1439,7 +1439,7 @@ fn plane_face_anchor<'a>(
         PlaneRef::Offset { base, .. } | PlaneRef::ThroughPoint { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => {
             plane_face_anchor(doc, base, depth + 1)
         }
-        PlaneRef::Construction { feature } if depth < 32 => match &doc.feature(feature.0)?.kind {
+        PlaneRef::Construction { feature, .. } if depth < 32 => match &doc.feature(feature.0)?.kind {
             solidcraft_doc::FeatureKind::ConstructionPlane { plane } => plane_face_anchor(doc, plane, depth + 1),
             _ => None,
         },
