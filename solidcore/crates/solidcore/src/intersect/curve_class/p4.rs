@@ -2461,6 +2461,7 @@ mod tests {
     /// into `Inside`; other types pass through.
     #[test]
     fn distinct_end_type_keeps_genuine_end_touches() {
+        use ExtentPointType::{Both, End, Inside, Start};
         let k = Kernel::default();
         let curve = Curve::from(Line::from_points(
             Point3::new(0.0, 0.0, 1_234_567.0),
@@ -2473,7 +2474,6 @@ mod tests {
         let ty = |param: f64, ty: ExtentPointType| {
             distinct_end_type(&k, &curve, &ivl, param, ty, tol).expect("type")
         };
-        use ExtentPointType::{Both, End, Inside, Start};
         // genuine end touches: close in 3D, or exactly on the end
         assert_eq!(ty(1e-9 / len, Start), Start);
         assert_eq!(ty(1.0 - 1e-9 / len, End), End);

@@ -2074,7 +2074,7 @@ mod tests {
     #[test]
     fn seam_walk_without_an_entry_is_not_yet_healable() {
         let text = include_str!("../../../../fixtures/heal.face_props/stage3_classify.json");
-        let all: serde_json::Value = serde_json::from_str(text).unwrap();
+        let all: Value = serde_json::from_str(text).unwrap();
         let c = all["cases"]
             .as_array()
             .unwrap()
