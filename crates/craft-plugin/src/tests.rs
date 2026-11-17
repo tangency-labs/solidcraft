@@ -240,6 +240,15 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!([".f3d"]), "extensions");
     refused(&|v| v["runtime"]["entries"][0]["extensions"] = json!(["f3d", "f3d"]), "extensions");
     refused(&|v| v["runtime"]["entries"][0]["effect"] = json!("read"), "effect");
+    // An importer opens a file as a new design: that is its effect, whether it says so, says
+    // nothing, or says `edit` as manifests written before `open` did; a command never opens.
+    assert_eq!(runtime.entries[0].effect, Effect::Open);
+    assert_eq!(serde_json::to_value(&runtime.entries[0]).unwrap()["effect"], "open");
+    for declared in ["open", "edit"] {
+        let mut value = importer();
+        value["runtime"]["entries"][0]["effect"] = json!(declared);
+        assert_eq!(parse(&value).unwrap().runtime.unwrap().entries[0].effect, Effect::Open, "{declared}");
+    }
     refused(&|v| v["runtime"]["entries"].as_array_mut().unwrap().push(json!({"name":"make"})), "runtime.entries");
     refused(&|v| v["runtime"]["commands"] = json!(["app.make"]), "runtime.commands");
     refused(&|v| v["runtime"]["limits"]["stack_kib"] = json!(1 << 20), "stack_kib");
@@ -254,6 +263,7 @@ fn an_importer_claims_extensions_needs_formats_and_never_mixes_with_commands() {
         assert!(matches!(parse(&value), Err(HostError::InvalidManifest { field: f, .. }) if f.contains(field)), "{field}");
     };
     command(&|v| v["runtime"]["entries"] = json!([{"name":"make","extensions":["f3d"]}]), "extensions");
+    command(&|v| v["runtime"]["entries"] = json!([{"name":"make","effect":"open"}]), "effect");
     command(&|v| v["runtime"]["permissions"] = json!({"input_folder":true}), "input_folder");
     command(&|v| v["capabilities"] = json!(["commands@0.1", "evaluate@0.1"]), "capabilities");
     command(&|v| v["runtime"]["limits"] = json!({"fuel":1,"memory_mib":1,"deadline_ms":60000}), "deadline_ms");
