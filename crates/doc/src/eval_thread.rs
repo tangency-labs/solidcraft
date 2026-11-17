@@ -963,7 +963,7 @@ fn cut_grouped(st: &ModelState, selected: &[ThreadOn], continuous_flanks: bool) 
         let body = kernel::boolean(&original.body, &tool, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the threads removed everything".into()))?;
         // The check also keeps a bad shoulder trim on the established per-face fallback path.
         super::check_feature_body(&body)?;
-        let faces = crate::lineage::Lineage::numbered_faces(tool.face_count(), "groove");
+        let faces = crate::lineage::Lineage::unnamed_faces(tool.face_count());
         let lineage = original.traced().lineage.and_then(|lineage| crate::lineage::Lineage::step(&body, &[&lineage, &faces]));
         checked.push((original.name.clone(), body.clone()));
         if let Some(slot) = next.bodies.get_mut(index) {
@@ -1027,7 +1027,7 @@ fn cut_with_flanks(
         let faces = sleeve.face_count();
         let filled =
             kernel::boolean(&input.body, &sleeve, BoolOp::Union)?.ok_or_else(|| DocError::Invalid("narrowing the hole removed everything".into()))?;
-        let unnamed = crate::lineage::Lineage::numbered_faces(faces, "fill");
+        let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
         let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&filled, &[&l, &unnamed]));
         input = Traced { body: filled, lineage, recipe: None };
         groove_radius = r_min;
@@ -1045,11 +1045,11 @@ fn cut_with_flanks(
     // Preserve historical construction order when rebuilding an older feature.
     let chamfer = |mut input: Traced| -> Result<Traced> {
         if tip != ThreadTip::None {
-            for (k, cone) in tip_cones(&t, radius, ends, (tip, from_side), angle, depth, taper)?.into_iter().enumerate() {
+            for cone in tip_cones(&t, radius, ends, (tip, from_side), angle, depth, taper)? {
                 let faces = cone.face_count();
                 let cut =
                     kernel::boolean(&input.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
-                let unnamed = crate::lineage::Lineage::numbered_faces(faces, &format!("tip{k}"));
+                let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
                 let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
                 input = Traced { body: cut, lineage, recipe: None };
             }
@@ -1094,7 +1094,7 @@ fn cut_with_flanks(
     let (nb, groove_faces, checked) = made?;
     let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
     // The groove's faces have no role to name them by.
-    let groove = crate::lineage::Lineage::numbered_faces(groove_faces, "groove");
+    let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
     let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
     let nb = Traced { body: nb, lineage, recipe: None };
     let nb = if continuous_flanks { nb } else { chamfer(nb)? };

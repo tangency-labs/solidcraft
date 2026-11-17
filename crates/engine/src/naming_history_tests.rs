@@ -1006,18 +1006,27 @@ fn a_sketch_on_a_face_of_a_two_sided_cut_keeps_its_attachment() {
     assert_eq!(error(&cold, "OnLower"), None);
 }
 
-/// A sketch on the end face of a turned part keeps its attachment after a Thread cut the side
-/// (#18460): the groove's faces are named by the feature, not by sampling the faces around them.
+/// A sketch and an offset plane on the end face of a turned part keep their attachment after a
+/// modelled Thread on its side (#18460): the groove's faces, named from geometry, no longer take
+/// the name of the end face beside them, which left the end face without a name of its own.
 #[test]
-fn a_sketch_on_the_end_face_of_a_threaded_revolve_keeps_its_attachment() {
+fn a_sketch_and_a_plane_on_the_end_face_of_a_threaded_revolve_keep_their_attachment() {
     let mut s = Session::default();
+    // The XZ sketch's vertical runs along -Z: a round bar of radius 4 from z = -20 to z = 0.
     run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Profile"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [4, 20]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.revolve", json!({"axis": "y", "angle": "360 deg", "body_name": "Part"}));
-    run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "designation": "M8", "length": 10, "from": [4, 0, 0]}));
-    let made = s.execute("sketch.create", &json!({"plane": {"face": [1.0, 0.0, 20.0]}, "name": "OnEnd"}));
-    let refused = made.err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(refused.is_empty(), "the sketch on the end face was refused: {refused}");
-    assert_eq!(error(&s, "OnEnd"), None);
+    run(&mut s, "solid.thread", json!({"face": [4, 0, -10], "designation": "M8", "length": 10, "from": [4, 0, -20], "modeled": true}));
+    for (name, attach) in [
+        ("OnEnd", ("sketch.create", json!({"plane": {"face": [1, 0, 0]}, "name": "OnEnd"}))),
+        ("Above", ("construct.plane.offset", json!({"base": {"face": [1, 0, 0]}, "offset": 5, "name": "Above"}))),
+    ] {
+        let refused = s.execute(attach.0, &attach.1).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(refused.is_empty(), "{name} on the end face was refused: {refused}");
+        if attach.0 == "sketch.create" {
+            run(&mut s, "sketch.finish", json!({}));
+        }
+        assert_eq!(error(&s, name), None);
+    }
 }
