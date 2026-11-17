@@ -3721,9 +3721,6 @@ mod tests {
         assert!(switcher(&mut h), "and the switcher shows");
     }
 
-    /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
-    /// those that can still be shown, nothing from a stale memory, and nothing at all when the
-    /// preference is off.
     /// #18264: cancelling a new sketch closes its view instead of leaving a tab that says the
     /// sketch no longer exists; so does undoing a finished sketch away, and Reopen does not bring
     /// either back. A finished sketch that stays keeps its view.
@@ -3731,6 +3728,11 @@ mod tests {
     fn a_view_closes_when_its_sketch_is_cancelled_or_undone_away() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        // Test change (#18264): editing a sketch opens a view of its own only while the strip shows
+        // views (the owner asked that it not by default), and this test is about closing such a
+        // view, so it runs with views as tabs on. With both off no sketch view opens at all, which
+        // `a_design_tab_shows_no_view_switcher_until_it_has_a_second_view` checks.
+        h.app.preferences.design_views_as_tabs = true;
         let sketch_views = |h: &crate::scenario::Harness| h.app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Sketch).count();
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
         h.frames(2);
@@ -3759,6 +3761,9 @@ mod tests {
         assert_eq!(h.app.docs.views.len(), 1);
     }
 
+    /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
+    /// those that can still be shown, nothing from a stale memory, and nothing at all when the
+    /// preference is off.
     #[test]
     fn a_design_gets_its_remembered_views_back_when_the_preference_is_on() {
         let dir = std::env::temp_dir().join(format!("solidcraft-documents-views-{}", std::process::id()));
