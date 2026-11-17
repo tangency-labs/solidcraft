@@ -1443,6 +1443,12 @@ impl SolveApp {
             self.ui.layout = p.layout;
             self.preferences = p;
         }
+        // Preserve an explicit choice from document-browser builds predating the preference.
+        if v.get("preferences").and_then(|p| p.get("show_document_browser")).is_none()
+            && let Some(collapsed) = v.get("document_library").and_then(|p| p.get("collapsed")).and_then(Value::as_bool)
+        {
+            self.preferences.show_document_browser = !collapsed;
+        }
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
         crate::plugins::sync_policy(self);

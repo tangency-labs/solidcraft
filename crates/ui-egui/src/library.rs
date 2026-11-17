@@ -123,7 +123,6 @@ pub struct LibraryState {
     pinned_roots: Vec<PathBuf>,
     highlights: BTreeMap<PathBuf, Highlight>,
     current: PathBuf,
-    collapsed: bool,
     search: String,
     focused: Option<bool>,
     refresh_on_return: bool,
@@ -141,7 +140,7 @@ pub struct LibraryState {
 
 impl LibraryState {
     pub fn prefs(&self) -> Value {
-        json!({"root": self.root, "collapsed": self.collapsed, "recent_roots": self.recent_roots, "pinned_roots": self.pinned_roots, "highlights": self.highlights})
+        json!({"root": self.root, "recent_roots": self.recent_roots, "pinned_roots": self.pinned_roots, "highlights": self.highlights})
     }
 
     pub fn load(&mut self, value: Option<&Value>) {
@@ -175,7 +174,6 @@ impl LibraryState {
             }
         }
         self.trim_history();
-        let collapsed = value.get("collapsed").and_then(Value::as_bool).unwrap_or(false);
         if let Some(root) = value.get("root").and_then(Value::as_str).filter(|p| !p.is_empty() && p.len() <= 32_768) {
             let root = PathBuf::from(root);
             if !value.get("recent_roots").is_some_and(Value::is_array) {
@@ -184,7 +182,6 @@ impl LibraryState {
             self.root = Some(root.clone());
             self.navigate(root);
         }
-        self.collapsed = collapsed;
     }
 
     fn set_highlight(&mut self, path: &Path, color: Option<Highlight>) {
@@ -242,7 +239,6 @@ impl LibraryState {
     fn set_root(&mut self, root: PathBuf) {
         self.remember_root(root.clone());
         self.root = Some(root.clone());
-        self.collapsed = false;
         self.folders_expanded = false;
         self.folder_menu = None;
         self.navigate(root);
@@ -294,7 +290,7 @@ impl LibraryState {
         }
     }
 
-    fn poll(&mut self, ctx: &egui::Context) {
+    fn poll(&mut self, ctx: &egui::Context, visible: bool) {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(rx) = &self.pending {
             match rx.try_recv() {
@@ -324,7 +320,7 @@ impl LibraryState {
         }
         #[cfg(target_arch = "wasm32")]
         let _ = ctx;
-        if self.refresh_on_return && !self.collapsed && !self.loading() {
+        if self.refresh_on_return && visible && !self.loading() {
             self.refresh();
         }
     }
@@ -452,6 +448,7 @@ fn choose_folder(app: &mut SolveApp) {
     app.pick_folder(|app, path| {
         if let Some(path) = path {
             app.library.set_root(PathBuf::from(path));
+            app.preferences.show_document_browser = true;
         }
     });
 }
@@ -743,6 +740,7 @@ fn contents(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
         });
         if let Some(path) = selected {
             app.library.set_root(path);
+            app.preferences.show_document_browser = true;
         }
         ui.separator();
     }
@@ -848,7 +846,7 @@ pub(super) fn app_bar_toggle(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::
     }
     let t = solidcraft_theme::Tokens::get();
     let response = ui.interact(rect, ui.scope_id().with("document_browser_toggle"), egui::Sense::click());
-    let label = if app.library.collapsed { solidcraft_ui_text::tr("library.show") } else { solidcraft_ui_text::tr("library.hide") };
+    let label = if app.preferences.show_document_browser { solidcraft_ui_text::tr("library.hide") } else { solidcraft_ui_text::tr("library.show") };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
     crate::scenario::publish_handle("library:toggle", rect.center());
     crate::scenario::publish_rect("library:toggle", rect);
@@ -861,7 +859,7 @@ pub(super) fn app_bar_toggle(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::
     crate::icons::paint_app_bar(ui.painter(), rect.shrink(4.0), "document_browser", 1.0);
     if response.on_hover_text(label).clicked() {
         ui.memory_mut(|memory| memory.request_focus(ui.scope_id().with("document_browser_toggle")));
-        app.library.collapsed = !app.library.collapsed;
+        app.preferences.show_document_browser = !app.preferences.show_document_browser;
     }
     true
 }
@@ -884,11 +882,11 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         actions::dialog(app, ui.ctx());
         return;
     }
-    app.library.poll(ui.ctx());
+    app.library.poll(ui.ctx(), app.preferences.show_document_browser);
     if std::mem::take(&mut app.library.listing_changed) {
         crate::home::refresh_document_thumbnails(&mut app.home, &app.library.listing.identities);
     }
-    if app.library.collapsed {
+    if !app.preferences.show_document_browser {
         actions::dialog(app, ui.ctx());
         return;
     }
@@ -919,6 +917,23 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn document_browser_is_hidden_until_explicitly_enabled() {
+        let mut h = Harness::new();
+        h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
+        h.app.home.open = false;
+        h.frames(3);
+        assert!(!h.app.preferences.show_document_browser);
+        assert!(crate::scenario::rect_of("library:panel").is_none());
+        h.step(&json!({"click": {"handle": "library:toggle"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.preferences.show_document_browser);
+        assert!(crate::scenario::rect_of("library:panel").is_some());
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.show_document_browser);
+    }
 
     #[test]
     fn thumbnail_sizes_fit_grid_and_preserve_large_layout() {
@@ -965,7 +980,7 @@ mod tests {
 
     fn wait(app: &mut SolveApp) {
         for _ in 0..200 {
-            app.library.poll(&egui::Context::default());
+            app.library.poll(&egui::Context::default(), app.preferences.show_document_browser);
             if !app.library.loading() {
                 return;
             }
@@ -975,6 +990,7 @@ mod tests {
     }
 
     fn folder_picker(h: &mut Harness, path: Option<String>) {
+        h.app.preferences.show_document_browser = true;
         h.app.services.pick_folder = Some(Box::new(move || Box::pin(std::future::ready(path.clone()))));
     }
 
@@ -994,7 +1010,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         h.app.library.pending = Some(rx);
         tx.send(Err("scan failed".into())).unwrap();
-        h.app.library.poll(&h.ctx);
+        h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
         assert!(h.app.library.listing.entries.is_empty());
         h.app.library.refresh();
         wait(&mut h.app);
@@ -1002,7 +1018,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         h.app.library.pending = Some(rx);
         drop(tx);
-        h.app.library.poll(&h.ctx);
+        h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
         assert!(h.app.library.listing.entries.is_empty());
         h.app.library.refresh();
         wait(&mut h.app);
@@ -1323,6 +1339,7 @@ mod tests {
     #[test]
     fn returning_to_app_refreshes_external_changes_once_and_preserves_search() {
         let mut h = Harness::new();
+        h.app.preferences.show_document_browser = true;
         h.app.library.set_root(h.dir.clone());
         wait(&mut h.app);
         h.app.library.search = "external".into();
@@ -1330,7 +1347,7 @@ mod tests {
         assert!(!h.app.library.refresh_on_return);
         h.app.library.focus(false);
         std::fs::write(h.dir.join("External.solidcraft"), b"test listing").unwrap();
-        h.app.library.poll(&h.ctx);
+        h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
         assert!(h.app.library.visible().is_empty(), "no scans while away");
         h.app.library.focus(true);
         wait(&mut h.app);
@@ -1339,7 +1356,7 @@ mod tests {
         std::fs::write(h.dir.join("External second.solidcraft"), b"test listing").unwrap();
         for _ in 0..5 {
             h.app.library.focus(true);
-            h.app.library.poll(&h.ctx);
+            h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
             assert!(!h.app.library.loading());
         }
         assert_eq!(h.app.library.visible().len(), 1, "focused frames do not rescan");
@@ -1378,15 +1395,15 @@ mod tests {
         h.app.library.pending = Some(rx);
         h.app.library.focus(false);
         h.app.library.focus(true);
-        h.app.library.poll(&h.ctx);
+        h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
         assert!(h.app.library.refresh_on_return);
-        h.app.library.collapsed = true;
+        h.app.preferences.show_document_browser = false;
         tx.send(Ok(Listing::default())).unwrap();
-        h.app.library.poll(&h.ctx);
+        h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
         assert!(!h.app.library.loading());
         assert!(h.app.library.refresh_on_return);
         std::fs::write(h.dir.join("Added while hidden.solidcraft"), b"listing").unwrap();
-        h.app.library.collapsed = false;
+        h.app.preferences.show_document_browser = true;
         wait(&mut h.app);
         assert_eq!(h.app.library.visible().len(), 1);
         assert!(!h.app.library.refresh_on_return);
@@ -1540,7 +1557,7 @@ mod tests {
             assert_eq!(crate::scenario::handle_at("library:insert_mesh"), Some(before));
             assert!(h.widget("Mesh").is_some());
             assert!(h.widget("STEP").is_some());
-            h.app.library.collapsed = true;
+            h.app.preferences.show_document_browser = false;
             h.frames(3);
             assert!(crate::scenario::handle_at("library:insert_mesh").is_none());
             assert!(crate::scenario::handle_at("library:insert_step").is_none());
@@ -1555,7 +1572,7 @@ mod tests {
                 folder_picker(&mut h, None);
                 h.app.library.set_root(h.dir.clone());
                 wait(&mut h.app);
-                h.app.library.collapsed = collapsed;
+                h.app.preferences.show_document_browser = !collapsed;
                 let saved = h.app.library.prefs();
                 let design = h.app.session.doc.to_json();
                 h.call("ui.set", json!({"layout":mode}));
@@ -1784,7 +1801,7 @@ mod tests {
         go_home(&mut h.app);
         wait(&mut h.app);
         assert_eq!(h.app.library.current, h.dir);
-        h.app.library.collapsed = true;
+        h.app.preferences.show_document_browser = false;
         h.app.library.set_highlight(&h.dir.join("labelled.solidcraft"), Some(Highlight::Green));
         h.app.home.forget("removed-from-home.solidcraft");
         let prefs = h.app.prefs();
@@ -1793,7 +1810,7 @@ mod tests {
         wait(&mut restored);
         assert_eq!(restored.library.root.as_ref(), Some(&h.dir));
         // Root restoration must preserve the saved collapsed setting.
-        assert!(restored.library.collapsed);
+        assert!(!restored.preferences.show_document_browser);
         assert_eq!(restored.library.highlights, h.app.library.highlights);
         assert_eq!(restored.home.forgotten, h.app.home.forgotten);
         folder_picker(&mut h, None);
@@ -1887,14 +1904,14 @@ mod tests {
         assert!(h.widget("Design 00000.solidcraft").is_some());
         assert!(h.widget("Design 09999.solidcraft").is_none());
         h.step(&json!({"click":{"handle":"library:toggle"}})).unwrap();
-        assert!(h.app.library.collapsed);
+        assert!(!h.app.preferences.show_document_browser);
         h.frames(3);
         assert!(crate::scenario::rect_of("library:panel").is_none());
         assert!(h.widget("Search documents").is_none());
         assert!(h.widget("Show documents").is_some());
         let collapsed_toggle = crate::scenario::rect_of("library:toggle").unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
-        assert!(!h.app.library.collapsed);
+        assert!(h.app.preferences.show_document_browser);
         h.frames(3);
         assert!(crate::scenario::rect_of("library:panel").is_some());
         assert_eq!(crate::scenario::rect_of("library:toggle"), Some(collapsed_toggle));

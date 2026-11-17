@@ -400,13 +400,14 @@ mod tests {
     #[test]
     fn highlight_submenu_sets_replaces_and_clears_without_loading_or_writing_design() {
         let mut h = Harness::new();
+        h.app.preferences.show_document_browser = true;
         h.app.home.open = false;
         h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
         let e = entry(&h);
         let before = std::fs::read(&e.path).unwrap();
         h.app.library.set_root(h.dir.clone());
         for _ in 0..200 {
-            h.app.library.poll(&h.ctx);
+            h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
             if !h.app.library.loading() {
                 break;
             }
@@ -458,12 +459,13 @@ mod tests {
     fn thumbnail_context_menu_has_supported_actions_and_escape_closes_it() {
         for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
+            h.app.preferences.show_document_browser = true;
             h.call("ui.set", json!({"layout":mode}));
             h.app.services.pick_folder = Some(Box::new(|| Box::pin(std::future::ready(None))));
             let e = entry(&h);
             h.app.library.set_root(h.dir.clone());
             for _ in 0..200 {
-                h.app.library.poll(&h.ctx);
+                h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
                 if !h.app.library.loading() {
                     break;
                 }
@@ -523,7 +525,7 @@ mod tests {
         crate::documents::new_design(&mut h.app);
         h.app.library.set_root(h.dir.clone());
         for _ in 0..200 {
-            h.app.library.poll(&h.ctx);
+            h.app.library.poll(&h.ctx, h.app.preferences.show_document_browser);
             if !h.app.library.loading() {
                 break;
             }

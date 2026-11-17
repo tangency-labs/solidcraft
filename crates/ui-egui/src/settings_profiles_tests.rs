@@ -37,7 +37,11 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 105, "include document browser sizing and the selected bodies' hidden edges among the current portable settings");
+    assert_eq!(
+        keys.len(),
+        107,
+        "include document browser visibility and sizing and the repeated-shortcut preference among the current portable settings"
+    );
     for key in [
         "nav",
         "maya_horizontal_zoom",
@@ -54,6 +58,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "nav_bridge_port",
         "language",
         "library_thumbnail_size",
+        "show_document_browser",
         "suppress_sketch_snap",
     ] {
         assert!(keys.contains(&key), "{key} belongs in a profile");
@@ -865,7 +870,9 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",
+        "shortcut_again_ends_tool",
         "shortcut_cycles_modes",
+        "show_document_browser",
         "show_selected_hidden_edges",
         "sketch_align_points",
         "sketch_auto_dimensions",
@@ -910,7 +917,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 105);
+    assert_eq!(expected.len(), 107);
     assert_eq!(actual, expected);
 }
 

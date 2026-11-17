@@ -399,6 +399,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.history_in_browser,
                 "history_in_browser",
             );
+            layout_check(
+                ui,
+                app.tr("library.show"),
+                app.tr("library.show_help"),
+                &mut app.preferences.show_document_browser,
+                "show_document_browser",
+            );
             let sizes = crate::library::ThumbnailSize::ALL;
             let options = [
                 ui_kit::PictureChoice { key: "small", label: app.tr(sizes[0].label()), figure: |p, rect| document_browser_preview(p, rect, 0.2) },

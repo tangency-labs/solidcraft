@@ -1050,6 +1050,8 @@ preference_settings! {
     }
     /// Show Home on an ordinary empty launch and after closing the last design.
     show_home_on_startup: bool = true, PAGE_GENERAL;
+    /// Show the optional document browser beside the design.
+    show_document_browser: bool = false, PAGE_LAYOUT;
     /// Preview card density in the document browser; Large preserves the existing layout.
     library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
     /// Units of new designs.
@@ -1780,6 +1782,9 @@ preference_settings! {
     sketch_construction_lines: bool = true, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
+    /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
+    /// starts the tool or dialog again.
+    shortcut_again_ends_tool: bool = true, PAGE_SKETCH;
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
@@ -5112,6 +5117,45 @@ mod tests {
             h.call("ui.prefs", json!({"button": button}));
             assert_eq!(h.app.preferences.show_home_on_startup, button == "cancel");
             h.call("ui.prefs", json!({"open": "General"}));
+        }
+    }
+
+    #[test]
+    fn document_browser_visibility_defaults_hidden_and_preserves_explicit_choices() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert!(!app.preferences.show_document_browser);
+        for saved in [json!({}), json!({"preferences": {}}), json!({"document_library": {"root": "/legacy/CAD"}})] {
+            app.load_prefs(&saved.to_string());
+            assert!(!app.preferences.show_document_browser);
+        }
+        for collapsed in [true, false] {
+            app.load_prefs(&json!({"preferences": {}, "document_library": {"collapsed": collapsed}}).to_string());
+            assert_eq!(app.preferences.show_document_browser, !collapsed);
+            for visible in [false, true] {
+                app.load_prefs(&json!({"preferences": {"show_document_browser": visible}, "document_library": {"collapsed": collapsed}}).to_string());
+                assert_eq!(app.preferences.show_document_browser, visible, "the canonical preference wins over legacy state");
+                let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+                restored.load_prefs(&app.prefs());
+                assert_eq!(restored.preferences.show_document_browser, visible);
+            }
+        }
+        super::reset_preferences(&mut app.preferences, super::PAGE_LAYOUT);
+        assert!(!app.preferences.show_document_browser);
+    }
+
+    #[test]
+    fn document_browser_visibility_checkbox_obeys_cancel_and_ok() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        for button in ["cancel", "ok"] {
+            h.call("ui.prefs", json!({"open": "Layout"}));
+            h.app.prefs_window.shell.filter = "Show documents".into();
+            h.frames(3);
+            h.step(&json!({"click": {"handle": "prefs:show_document_browser"}})).unwrap();
+            assert!(h.app.preferences.show_document_browser);
+            h.call("ui.prefs", json!({"button": button}));
+            assert_eq!(h.app.preferences.show_document_browser, button == "ok");
         }
     }
 
@@ -8691,6 +8735,7 @@ mod tests {
                 ("sketch_construction_lines", "prefs.sketch_construction_lines"),
                 ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
                 ("sketch_auto_locate", "prefs.sketch.auto_locate"),
+                ("shortcut_again_ends_tool", "prefs.sketch.shortcut_again_ends_tool"),
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
                 ("project_options_dialog", "prefs.sketch.project_options"),
