@@ -380,3 +380,31 @@ fn parabola_and_hyperbola_edges_lie_on_their_conics() {
         assert!(eval.point(t).unwrap().dist(want) < 1e-9, "hyperbola at {t}");
     }
 }
+
+/// An edge bounded by its vertices alone (`add_edge_on`) on a closed spline whose vertex is not
+/// where the spline starts runs all the way round from that vertex: no gap at its ends.
+#[test]
+fn a_closed_spline_edge_starts_at_its_vertex() {
+    let square = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]];
+    let curve = spline_curve(1, vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0], &square, None).unwrap();
+    let mut asm = Assembly::new(1e-6, None);
+    let v = asm.add_vertex([10.0, 10.0, 0.0]).unwrap();
+    let (e, _) = asm.add_edge_on(1, curve, [v, v]).unwrap();
+    let edge = &asm.edges[e as usize];
+    let eval = crate::kernel::CurveEval::new(&edge.curve).unwrap();
+    for t in edge.interval {
+        assert!(eval.point(t).unwrap().dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-12, "at {t}");
+    }
+}
+
+/// A line edge bounded by its vertices alone is as long as the vertices are apart, whatever the
+/// line's parameter scale: a 1 mm edge on a line 1e13 mm long between its points is taken.
+#[test]
+fn a_line_edges_length_does_not_depend_on_its_parameter_scale() {
+    for end in [1.0, 1e13] {
+        let mut asm = Assembly::new(1e-6, None);
+        let (a, b) = (asm.add_vertex([0.0, 0.0, 0.0]).unwrap(), asm.add_vertex([1.0, 0.0, 0.0]).unwrap());
+        let line = BCurve::Line { start: [0.0, 0.0, 0.0], end: [end, 0.0, 0.0] };
+        assert!(asm.add_edge_on(1, line, [a, b]).is_ok(), "a line to {end}");
+    }
+}
