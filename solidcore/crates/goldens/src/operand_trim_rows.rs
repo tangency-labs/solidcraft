@@ -9,8 +9,9 @@
 //!   for this branch, so the run is the row. With each listed moved value put back to main's
 //!   (7d4445c0c) value, it has the digest of main's output blinded alike: every value but the
 //!   trims and the listed ones is main's, bit for bit.
-//! * **Soundness.** The result body passes `check_brep` level 2 and, a manifold solid, has a
-//!   volume proved positive ([`validation::soundness`]).
+//! * **Soundness.** The result body's `check_brep` level 2 reports no line main's same body
+//!   does not ([`level2_within_main`]: four `fc*` bodies carry main's base-geometry
+//!   warnings) ([`validation::soundness`]).
 //! * **Trims on edges.** Every trim the body holds lies on its edge within the edge's
 //!   tolerance, and its edge within that of the trim's image
 //!   ([`crate::trims_on_edges`], rounded interval arithmetic).
@@ -200,12 +201,20 @@ fn edge_faces(b: &Brep, e: EdgeId) -> Vec<FaceId> {
     out
 }
 
+/// `e`'s start and end vertex, read through its uses (`GetVertices`): a body an operation
+/// returns without `Brep::refresh_cached_topology` (a feature body) can hold a stale
+/// `Edge::vertices` pair naming a vertex no longer in the arena.
+fn edge_ends(b: &Brep, e: EdgeId) -> Vec<VertexId> {
+    let (s, t) = solidcore::topology::edge::start_end_vertices(b, e).unwrap();
+    s.into_iter().chain(t).collect()
+}
+
 /// The edges ending at `v`.
 fn vertex_edges(b: &Brep, v: VertexId) -> Vec<EdgeId> {
     solidcore::topology::brep::p1::edges(b, None)
         .unwrap()
         .into_iter()
-        .filter(|&e| b.edge(e).unwrap().vertices.contains(&v))
+        .filter(|&e| edge_ends(b, e).contains(&v))
         .collect()
 }
 
@@ -277,12 +286,18 @@ enum Site {
     FaceSample { f: usize, s: usize, c: usize },
     /// The tolerance of the edge numbered `e` in the geometry record (`graph`'s walk order).
     EdgeTolerance { e: usize },
+    /// Bound `c` (`u0, v0, u1, v1`) of the UV domain of the face numbered `f` in the
+    /// geometry record (`graph`'s walk order).
+    FaceDomain { f: usize, c: usize },
+    /// A bound of the natural UV domain of face `f`'s surface in the record.
+    RecordDomain { f: usize },
 }
 
-/// The site of blinded record index `i`.
-fn record_site(rec: &[f64], i: usize) -> Site {
-    let mut j = 2;
-    for e in 0..rec[1] as usize {
+/// The site of record index `i`: the edge count at `head`, each edge use taking `slot`
+/// values (`1` a blinded trim, `0` a record written without trims).
+fn record_site_in(rec: &[f64], i: usize, head: usize, slot: usize) -> Site {
+    let mut j = head + 1;
+    for e in 0..rec[head] as usize {
         let n = curve_block(rec, j);
         if i < j + n {
             let mut at = j + 3;
@@ -304,13 +319,16 @@ fn record_site(rec: &[f64], i: usize) -> Site {
         }
         j += n;
         let uses = rec[j] as usize;
-        j += 1 + uses;
+        j += 1 + slot * uses;
     }
     let faces = rec[j] as usize;
     j += 1;
     for f in 0..faces {
         let n = surface_block(rec, j);
         if i < j + n {
+            if i > j && i < j + 5 {
+                return Site::RecordDomain { f };
+            }
             let mut at = j + 5;
             for s in 0..9 {
                 if rec[at] == 0.0 {
@@ -347,7 +365,12 @@ fn geometry_site(ints: &[i64], i: usize) -> Site {
     if r < 4 * nv {
         return Site::Vertex { v: r / 4, c: r % 4 };
     }
-    let r = r - 4 * nv - 5 * nf;
+    let r = r - 4 * nv;
+    if r < 5 * nf {
+        assert!(r % 5 < 4, "geometry[{i}] is a face's tolerance");
+        return Site::FaceDomain { f: r / 5, c: r % 5 };
+    }
+    let r = r - 5 * nf;
     assert!(
         r < 3 * ne && r % 3 == 2,
         "geometry[{i}] is not a vertex's or an edge's tolerance"
@@ -364,8 +387,8 @@ fn edge_need(b: &Brep, certs: &[crate::trims_on_edges::TrimCertificate], e: Edge
     }
     let rec = b.edge(e).unwrap();
     let cn = curve_nurbs(rec.curve.as_ref().unwrap()).unwrap();
-    for v in &rec.vertices {
-        let at = b.vertex(*v).unwrap().point;
+    for v in edge_ends(b, e) {
+        let at = b.vertex(v).unwrap().point;
         let mut nearest_end = f64::INFINITY;
         for s in [rec.interval.min(), rec.interval.max()] {
             let c = curve_derivs_over(&cn, Ivl::from(s), 0, None).unwrap()[0];
@@ -390,7 +413,6 @@ pub(crate) fn certify_row(
     new_digest: u64,
     moved: &[Moved],
 ) -> Vec<Class> {
-    let mut k = Kernel::default();
     // replay
     assert_eq!(
         blinded_digest(out, moved, false),
@@ -402,25 +424,191 @@ pub(crate) fn certify_row(
         main_digest,
         "{name}: more than the listed values moved"
     );
-    // soundness
-    let s = validation::soundness(&mut k, b).unwrap();
-    if !s.sound() {
-        eprintln!("UNSOUND {name}: {:?}", s.check.lines());
+    certify_body(name, out, "", b, None, &[], moved, true)
+}
+
+/// [`digest`] of `out` as it is (no trims blinded: a record written without them) with each
+/// moved value's slot set to `main` (`put_main`), each first checked to hold `now`.
+pub(crate) fn plain_digest(out: &Output, moved: &[Moved], put_main: bool) -> u64 {
+    let mut values = out.values.clone();
+    for &(key, i, main, now) in moved {
+        let a = values.get_mut(key).unwrap_or_else(|| panic!("no {key}"));
+        assert!(
+            a[i] == now || (a[i].is_nan() && now.is_nan()),
+            "{key}[{i}] is {:e}, not {now:e}",
+            a[i]
+        );
+        if put_main {
+            a[i] = main;
+        }
     }
+    digest(&values, &out.ints)
+}
+
+include!("operand_trim_rows/level2_main.rs");
+
+/// `line` with each parenthesised figure group (`(offset=…, tolerance=…)`) masked: the
+/// test, its entity kind and its message, without the measured figures.
+fn masked(line: &str) -> String {
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(open) = rest.find('(') {
+        let Some(close) = rest[open..].find(')').map(|c| open + c) else {
+            break;
+        };
+        out.push_str(&rest[..open]);
+        let group = &rest[open..=close];
+        out.push_str(if group.contains('=') { "(..)" } else { group });
+        rest = &rest[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Level 2 lines of a row's body that main's does not report and this change does not
+/// certify: (case, body prefix, line, the open defects that block it). The row is NOT
+/// certified while it is listed; the entry fails once its line is gone.
+///
+/// `single_face_fillet1019_6`: face test #34 flags edges e21/e24 (feature body: e5/e8), which
+/// only share vertex 14, as partially coincident. Their geometry is main's bit for bit; e24's
+/// tolerance is 1.49e-3 here, 2.89e-3 on main, where the lazy trim refit ratchet (#18162)
+/// raised it, and test #34's verdict on this pair flips with the tolerance (fires at 1.4e-3,
+/// 1.49e-3, 2.5e-3, 4e-3; not at 2e-3, 2.89e-3: #18212).
+const BLOCKED_LEVEL2: &[(&str, &str, &str, &str)] = &[
+    (
+        "single_face_fillet1019_6",
+        "base_",
+        "SmFace::Test #34 Face has partially Coincident Edges: Face has partially Coincident Edges. [owner SmFace]",
+        "#18162, #18212",
+    ),
+    (
+        "single_face_fillet1019_6",
+        "feature0_",
+        "SmFace::Test #34 Face has partially Coincident Edges: Face has partially Coincident Edges. [owner SmFace]",
+        "#18162, #18212",
+    ),
+];
+
+/// `check_brep` level 2 of a row's body, `lines`, against main's for the same body
+/// (`MAIN_LEVEL2`, keyed by case and body prefix; a body not listed had none): every line is
+/// one of main's, each of main's taken once, so no test fails that did not on main, nor more
+/// often. A line that is not main's verbatim may take a main line of the same test whose
+/// figures differ ([`masked`]): a warning on a trim (a 2D curve's cusp offset) whose trim
+/// this branch copies instead of re-dropping. A line neither takes must be, verbatim, one of
+/// `operand`'s, the input model's level 2 before the operation (each taken once): the
+/// warning of an operand trim this branch copies where main re-dropped it.
+fn level2_within_main(name: &str, prefix: &str, lines: &[String], operand: &[String]) {
+    let main: &[&str] = MAIN_LEVEL2
+        .iter()
+        .find(|(c, p, _)| *c == name && *p == prefix)
+        .map_or(&[], |e| e.2);
+    let mut left: Vec<&str> = main.to_vec();
+    let mut unmatched = Vec::new();
+    for (c, p, line, open) in BLOCKED_LEVEL2 {
+        if *c == name && *p == prefix {
+            assert!(
+                lines.iter().any(|l| l == line),
+                "{name} {prefix}: blocked line gone, remove its BLOCKED_LEVEL2 entry: {line}"
+            );
+            eprintln!("  level 2: BLOCKED on {open}, not certified: {line}");
+        }
+    }
+    for l in lines {
+        if BLOCKED_LEVEL2
+            .iter()
+            .any(|(c, p, line, _)| *c == name && *p == prefix && line == l)
+        {
+            continue;
+        }
+        match left.iter().position(|m| m == l) {
+            Some(i) => {
+                left.remove(i);
+            }
+            None => unmatched.push(l),
+        }
+    }
+    let mut copied: Vec<&String> = operand.iter().collect();
+    for l in unmatched {
+        let m = masked(l);
+        if let Some(i) = left.iter().position(|x| masked(x) == m) {
+            eprintln!("  level 2, figures moved: main {:?}, now {l:?}", left[i]);
+            left.remove(i);
+            continue;
+        }
+        // a warning of a trim copied from the operand: the input model reports it, figures
+        // and all, before the operation
+        let i = copied
+            .iter()
+            .position(|x| *x == l)
+            .unwrap_or_else(|| panic!("{name} {prefix}: check_brep level 2 line not on main: {l}"));
+        eprintln!("  level 2, the input model's own line (a copied trim): {l:?}");
+        copied.remove(i);
+    }
+    eprintln!(
+        "  level 2: {} lines, all main's ({} of main's not repeated)",
+        lines.len(),
+        left.len()
+    );
+}
+
+/// Classes the moved values of one body of a row whose digests are already replayed:
+/// `out`'s arrays `{prefix}record` (`topology.brep_mirror`'s geometry record; with
+/// `blinded` a status first and each trim one slot, else written without trims) and
+/// `{prefix}geometry` / `{prefix}graph` (`graph`'s), of the body `b` (see the module docs).
+/// The body's `check_brep` level 2 lines must be main's ([`level2_within_main`]); when `b`
+/// is the export's copy (its faces' `loops` and loops' `edges` dropped, so the lists'
+/// owners no longer hold), the check runs on `raw`, the body as the operation returned it.
+pub(crate) fn certify_body(
+    name: &str,
+    out: &Output,
+    prefix: &str,
+    b: &mut Brep,
+    raw: Option<&mut Brep>,
+    operand: &[String],
+    moved: &[Moved],
+    blinded: bool,
+) -> Vec<Class> {
+    let mut k = Kernel::default();
+    // soundness
+    let s = validation::soundness(&mut k, raw.unwrap_or(b)).unwrap();
+    level2_within_main(name, prefix, &s.check.lines(), operand);
     // moved values
+    let (rk, gk) = (format!("{prefix}record"), format!("{prefix}geometry"));
+    let (head, slot) = if blinded { (1, 1) } else { (0, 0) };
     let record = out
         .values
-        .get("record")
-        .map(|r| blind_record(r))
+        .get(&rk)
+        .map(|r| if blinded { blind_record(r) } else { r.clone() })
         .unwrap_or_default();
-    let geometry = out.values.get("geometry").cloned().unwrap_or_default();
-    let graph = out.ints.get("graph").cloned().unwrap_or_default();
+    let geometry = out.values.get(&gk).cloned().unwrap_or_default();
+    let graph = out
+        .ints
+        .get(&format!("{prefix}graph"))
+        .cloned()
+        .unwrap_or_default();
     let edges = solidcore::topology::brep::p1::edges(b, None).unwrap();
     let faces = solidcore::topology::brep::p1::faces(b, None).unwrap();
-    let walked_edges = crate::units::boolean_merge_p1::Canon::reachable(b)
-        .edges
-        .items;
+    let walked = crate::units::boolean_merge_p1::Canon::reachable(b);
+    let walked_edges = walked.edges.items;
+    let walked_faces = walked.faces.items;
     let certs = certify_brep(&k, b).unwrap_or_else(|e| panic!("{name}: {e}"));
+    // the faces whose domain moved, each classed with its moved samples
+    let mut domain_faces: Vec<FaceId> = Vec::new();
+    let mut sample_class: Vec<(FaceId, Class)> = Vec::new();
+    // this body's moved values, keyed `record` / `geometry`
+    let moved: Vec<Moved> = moved
+        .iter()
+        .filter_map(|&(key, i, m, n)| {
+            if key == rk {
+                Some(("record", i, m, n))
+            } else if key == gk {
+                Some(("geometry", i, m, n))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let moved = moved.as_slice();
     let mut classes = Vec::new();
     // a point is classed once, all its moved coordinates put back together
     let mut done: Vec<(&str, usize)> = Vec::new();
@@ -428,7 +616,7 @@ pub(crate) fn certify_row(
     let mut touched: Vec<EdgeId> = Vec::new();
     for &(key, i, _, _) in moved {
         let site = match key {
-            "record" => record_site(&record, i),
+            "record" => record_site_in(&record, i, head, slot),
             "geometry" => geometry_site(&graph, i),
             _ => panic!("{name}: a moved {key} value"),
         };
@@ -471,7 +659,22 @@ pub(crate) fn certify_row(
                     main_of("record", start + 3, now.z),
                 );
                 eprintln!("  face {f} sample {s}: main {main:?}, now {now:?}");
-                classes.push(point_class(&k, b, &faces[f..=f], main, now));
+                let class = point_class(&k, b, &faces[f..=f], main, now);
+                sample_class.push((faces[f], class));
+                classes.push(class);
+            }
+            Site::FaceDomain { f, c } => {
+                let (m, n) = (main_of("geometry", i, geometry[i]), geometry[i]);
+                let fid = walked_faces[f];
+                let d = b.face(fid).unwrap().uv_domain;
+                let at = [d.min().x, d.min().y, d.max().x, d.max().y];
+                assert_eq!(at[c], n, "{name}: face {f} domain {c}");
+                eprintln!("  face {} domain {c}: main {m:e}, now {n:e}", fid.index());
+                domain_faces.push(fid);
+            }
+            Site::RecordDomain { f } => {
+                eprintln!("  face {f} record domain: index {i}");
+                domain_faces.push(faces[f]);
             }
             Site::EdgeTolerance { e } => {
                 let eid = walked_edges[e];
@@ -543,6 +746,31 @@ pub(crate) fn certify_row(
                 classes.push(point_class(&k, b, &faces, main, now));
             }
         }
+    }
+    // a moved domain bound moves the face's samples taken on it: it is classed as the most
+    // distant of the face's moved samples, and one at least must have moved
+    domain_faces.sort();
+    domain_faces.dedup();
+    for f in domain_faces {
+        let of_face: Vec<Class> = sample_class
+            .iter()
+            .filter(|(g, _)| *g == f)
+            .map(|(_, c)| *c)
+            .collect();
+        assert!(
+            !of_face.is_empty(),
+            "{name}: face {} domain moved, no sample of it moved",
+            f.index()
+        );
+        let class = if of_face.contains(&Class::Farther) {
+            Class::Farther
+        } else if of_face.contains(&Class::Equal) {
+            Class::Equal
+        } else {
+            Class::Closer
+        };
+        eprintln!("  face {} domain: {class:?}", f.index());
+        classes.push(class);
     }
     // trims on the touched edges: every other value is the main's (the digests), its trims
     // read the same in the record
@@ -616,6 +844,95 @@ mod local_operation {
             ROWS.len()
         );
         assert_eq!(ROWS.len(), 67);
+    }
+}
+
+/// The `blend.feature_executive` rows the copy moves (6). The unit writes, for the base B-rep
+/// and each feature B-rep, `topology.brep_mirror`'s geometry record without trims and
+/// `graph`; each row is replayed with [`plain_digest`] (nothing blinded: every moved value is
+/// listed), and each body's moved values are classed by [`certify_body`]: edge and vertex
+/// tolerances against the trims' certified bounds, edge and surface samples by enclosed
+/// distances, a moved surface domain as the samples it moves.
+mod feature_executive {
+    use super::{certify_body, plain_digest, Class, BLOCKED_LEVEL2};
+    use crate::units::blend_feature_executive::{result_breps, Runner};
+    use crate::UnitDiff;
+
+    struct Row {
+        case: &'static str,
+        main: u64,
+        new: u64,
+        moved: &'static [super::Moved],
+    }
+
+    include!("operand_trim_rows/feature_executive.rs");
+
+    #[test]
+    #[ignore = "not yet certified: fillet_group_fillet1019_rb23 edge 7's trim bound 1.48459e-4 \
+                is over its tolerance 1.48453e-4 (trims_on_edges' end piece doubles the \
+                trim end's 7.42e-5 offset from the edge end)"]
+    fn feature_executive_rows_are_certified() {
+        let (mut closer, mut equal) = (0, 0);
+        for row in ROWS {
+            let case = crate::case::regression_case(&Runner, row.case);
+            let out = Runner.run_rust(&case).unwrap();
+            assert_eq!(
+                plain_digest(&out, row.moved, false),
+                row.new,
+                "{}: not the row",
+                row.case
+            );
+            assert_eq!(
+                plain_digest(&out, row.moved, true),
+                row.main,
+                "{}: more than the listed values moved",
+                row.case
+            );
+            let (mut input, mut base, features) = result_breps(&case);
+            // the input model's own level 2: a trim this branch copies carries its warnings
+            let operand = solidcore::topology::brep::validation::soundness(
+                &mut solidcore::kernel::Kernel::default(),
+                &mut input,
+            )
+            .unwrap()
+            .check
+            .lines();
+            let mut bodies = vec![("base_".to_string(), &mut base)];
+            let mut features: Vec<_> = features.into_iter().map(Option::unwrap).collect();
+            for (i, f) in features.iter_mut().enumerate() {
+                bodies.push((format!("feature{i}_"), f));
+            }
+            for (prefix, (raw, b)) in bodies {
+                for c in certify_body(
+                    row.case,
+                    &out,
+                    &prefix,
+                    b,
+                    Some(raw),
+                    &operand,
+                    row.moved,
+                    false,
+                ) {
+                    match c {
+                        Class::Closer => closer += 1,
+                        Class::Equal => equal += 1,
+                        Class::Farther => panic!("{}: a moved value is farther", row.case),
+                    }
+                }
+            }
+        }
+        let blocked: Vec<&str> = ROWS
+            .iter()
+            .map(|r| r.case)
+            .filter(|c| BLOCKED_LEVEL2.iter().any(|b| b.0 == *c))
+            .collect();
+        eprintln!(
+            "{} rows ({} certified, blocked: {blocked:?}): moved values closer {closer}, \
+             equal {equal}",
+            ROWS.len(),
+            ROWS.len() - blocked.len()
+        );
+        assert_eq!(ROWS.len(), 6);
     }
 }
 

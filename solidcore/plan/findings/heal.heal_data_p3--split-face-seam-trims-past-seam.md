@@ -41,3 +41,5 @@ is present.
 
 **PR:** tangency-labs/solidcraft#17896. Not fixed there: the trims on edge uses 1 and 11
 are main's, unchanged.
+
+**Issue:** tangency-labs/solidcraft#18197 tracks the fix.
