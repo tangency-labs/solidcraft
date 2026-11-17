@@ -1,0 +1,10 @@
+Updates: WR-662 (`WR-662--sweep-ssi-proto-inversion-drop-statuses.md`)
+
+#### WR-662 (update, 2026-11-17). The removal's rows, re-measured on the current main
+
+The 2026-11-12 addendum (`WR-662--addendum-2026-11-12-flag-removed-sweep-statuses-pass-on.md`) counted 69 moved rows. Blessed again against main at 2745087ce (tangency-labs/solidcraft#18402, which carries that change), `sweep_statuses_pass_on`'s removal moves 85 rows, every one to a status. Main's result at each row was measured (`check_brep` level 2, face count, `is_manifold_solid`, and for blends whether a blend face was made):
+
+- `primitive.primitive_creation_p1`, 29 rows; `sweep.api_brep`, 4; `surface.api_surfaces`, 10; `sweep.trans_sweep_geometry`, 6: as in that addendum.
+- `primitive.primitive_creation_p2`, 21 rows (that addendum counted 11): `gen0027`, `gen0041`, `gen0046`, `gen0082`, `gen0105`, `gen0112`, `gen0119`, `gen0123`, `gen0134`, `gen0135`, `gen0158`, `gen0175`, `gen0216`, `gen0230`, `gen0235`, `line_back_2_5e-5_off_the_last_mid_start_cap`, `review3_start_cap_bowtie`, `ub50_taper_end_cap_offsets_of_a_loop_enclosing_nothing`, `ub50_taper_line_and_its_reverse`, `ub50_taper_line_back_through_the_last_mid`, `ub50_taper_two_identical_lines`. MEASURED: every row but two returned 0 faces, nothing built; `review3_start_cap_bowtie` returned a 1-face open sheet where a capped sweep was asked; `gen0041` and `gen0158` were refusals on main already (1001, a `RelateConflict`) and now stop at the earlier passed-on status (1007).
+- `primitive.api_primitives`, 15 rows. MEASURED: the 7 `blend_*` rows and `gen0201`, `gen0219`, `gen0288`, `gen1010`, `gen1099` returned success with the box unchanged (6 faces) and no blend face, so the blend asked for was not made; `cyl_box_len_above_effzero` fails level 2 (bad loop orientation, zero-area loops), `cyl_box_len_huge` is a 1-face open sheet where a closed body was asked, and `cyl_box_outside_huge` fails level 2 (a degenerate face and a seam crossing).
+- The follow-up of that addendum stands: the adjacent-edge blends fail in `create_skinned_surface` ("the boundary continuity cannot be met"); the refusal reports a blend main did not make.
