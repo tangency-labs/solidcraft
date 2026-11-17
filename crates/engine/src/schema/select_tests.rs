@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use super::{
     EdgeLoopParams, SameLookParams, SelectAllParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem,
-    SelectMode, SelectSetParams, SelectSetResult, read_item,
+    SelectMode, SelectSetParams, SelectSetResult, SharpEdgesParams, read_item,
 };
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -13,8 +13,9 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SelectSetParams>(), &["add", "items"]);
     assert_keys(input_schema_for::<SelectClearParams>(), &[]);
     assert_keys(input_schema_for::<SelectFilterParams>(), &["mode"]);
-    assert_keys(input_schema_for::<SameLookParams>(), &["body", "face"]);
     assert_keys(input_schema_for::<EdgeLoopParams>(), &["add", "body", "edge", "face"]);
+    assert_keys(input_schema_for::<SameLookParams>(), &["body", "face"]);
+    assert_keys(input_schema_for::<SharpEdgesParams>(), &["add", "angle_deg", "body"]);
 }
 
 /// #16536: `select.filter` takes one of three words and answers it, and says so: the published

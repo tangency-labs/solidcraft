@@ -778,6 +778,8 @@ impl Body {
         if let Some(kept) = self.ops.get() {
             return kept.as_ref();
         }
+        // solidcore-ops' calls on this body run with the kernel's fix set.
+        solidcraft_smlib::start();
         // Converted outside the cell: a failure callback that asked about this body again
         // would otherwise reenter the cell while it is being filled.
         match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
