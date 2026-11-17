@@ -225,8 +225,9 @@ fn a_centred_extent_arrow_shows_its_own_side_and_turns_with_flip() {
 fn a_reopened_pattern_along_a_slanted_first_direction_keeps_its_arrow() {
     let mut h = Harness::new();
     h.run(&json!([
-        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Cube"}}},
-        {"call": "engine.execute", "params": {"command": "solid.pattern.rectangular", "params": {"bodies": ["Cube"], "dir1": [0.6, 0.8, 0], "count1": 2, "spacing1": 20, "name": "Pattern"}}},
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"corner": [0, 0, 0], "length": 60, "width": 40, "height": 5, "name": "Plate"}}},
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"corner": [8, 6, 5], "length": 8, "width": 8, "height": 6, "operation": "join", "name": "Boss"}}},
+        {"call": "engine.execute", "params": {"command": "solid.pattern.rectangular", "params": {"features": ["Boss"], "dir1": [0.6, 0.8, 0], "count1": 2, "spacing1": 20, "name": "Pattern"}}},
         {"call": "ui.view", "params": {"view": "iso"}},
         {"call": "ui.editFeature", "params": {"feature": "Pattern"}}
     ]))

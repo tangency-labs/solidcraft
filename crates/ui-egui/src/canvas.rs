@@ -782,8 +782,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         if let Some(spacing2) = spacing2 {
             let before = spacing2.clone();
             // Text that is no length yet has no arrow to draw.
-            let ts = match crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite()) {
-                Some(l2) => drag_arrow(
+            let l2 = crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite());
+            let ts = l2.and_then(|l2| {
+                drag_arrow(
                     &app.session.doc,
                     ui,
                     painter,
@@ -798,9 +799,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                     0.0,
                     decimals,
                     spacing2,
-                ),
-                None => None,
-            };
+                )
+            });
             // A solid pattern's Spacing 2 has its box at the tip, as Spacing has (#8523); with
             // no tip it stays beside the base, below Extent 2's, so typing goes on in it.
             if solid_pattern {
