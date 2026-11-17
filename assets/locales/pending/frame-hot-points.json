@@ -1,0 +1,74 @@
+{
+  "en": {
+    "prefs.frame_hot_points": "Hot points on the section",
+    "prefs.frame_hot_points_tip": "While Frame Member is open, the section is drawn at the start of the first line with a point at each anchor. Click a point to put it on the line, or drag the line's marker to any point of the section. Off: the section is placed by the Anchor in the dialog only.",
+    "ui.frame_hot_point_tip": "Click to put this point of the section on the line",
+    "ui.frame_locate_tip": "Drag to put another point of the section on the line",
+    "ui.frame_offset_a": "Offset A",
+    "ui.frame_offset_b": "Offset B"
+  },
+  "de": {
+    "prefs.frame_hot_points": "Fangpunkte am Querschnitt",
+    "prefs.frame_hot_points_tip": "Solange Rahmenelement geöffnet ist, wird der Querschnitt am Anfang der ersten Linie mit einem Punkt an jedem Anker gezeichnet. Klicken Sie auf einen Punkt, um ihn auf die Linie zu setzen, oder ziehen Sie die Markierung der Linie auf einen beliebigen Punkt des Querschnitts. Aus: Der Querschnitt wird nur über den Anker im Dialog platziert.",
+    "ui.frame_hot_point_tip": "Klicken, um diesen Punkt des Querschnitts auf die Linie zu setzen",
+    "ui.frame_locate_tip": "Ziehen, um einen anderen Punkt des Querschnitts auf die Linie zu setzen",
+    "ui.frame_offset_a": "Versatz A",
+    "ui.frame_offset_b": "Versatz B"
+  },
+  "ar": {
+    "prefs.frame_hot_points": "نقاط نشطة على المقطع",
+    "prefs.frame_hot_points_tip": "أثناء فتح عنصر هيكلي، يُرسم المقطع عند بداية الخط الأول مع نقطة عند كل نقطة إرساء. انقر على نقطة لوضعها على الخط، أو اسحب علامة الخط إلى أي نقطة من المقطع. عند الإيقاف: يوضع المقطع بواسطة نقطة الإرساء في مربع الحوار فقط.",
+    "ui.frame_hot_point_tip": "انقر لوضع هذه النقطة من المقطع على الخط",
+    "ui.frame_locate_tip": "اسحب لوضع نقطة أخرى من المقطع على الخط",
+    "ui.frame_offset_a": "الإزاحة A",
+    "ui.frame_offset_b": "الإزاحة B"
+  },
+  "he": {
+    "prefs.frame_hot_points": "נקודות חמות על החתך",
+    "prefs.frame_hot_points_tip": "כל עוד איבר מסגרת פתוח, החתך מצויר בתחילת הקו הראשון עם נקודה בכל נקודת עיגון. לחץ על נקודה כדי להציב אותה על הקו, או גרור את הסמן של הקו לכל נקודה בחתך. כבוי: החתך ממוקם לפי נקודת העיגון שבתיבת הדו-שיח בלבד.",
+    "ui.frame_hot_point_tip": "לחץ כדי להציב נקודה זו של החתך על הקו",
+    "ui.frame_locate_tip": "גרור כדי להציב נקודה אחרת של החתך על הקו",
+    "ui.frame_offset_a": "היסט A",
+    "ui.frame_offset_b": "היסט B"
+  },
+  "ja": {
+    "prefs.frame_hot_points": "断面のホットポイント",
+    "prefs.frame_hot_points_tip": "フレーム部材を開いている間、最初の線の始点に断面を描き、各基準点に点を表示します。点をクリックするとその点が線上に置かれます。線のマーカーを断面の任意の点へドラッグすることもできます。オフ: 断面はダイアログの基準点だけで配置されます。",
+    "ui.frame_hot_point_tip": "クリックすると断面のこの点を線上に置きます",
+    "ui.frame_locate_tip": "ドラッグすると断面の別の点を線上に置きます",
+    "ui.frame_offset_a": "オフセット A",
+    "ui.frame_offset_b": "オフセット B"
+  },
+  "ko": {
+    "prefs.frame_hot_points": "단면의 핫 포인트",
+    "prefs.frame_hot_points_tip": "프레임 부재가 열려 있는 동안 첫 번째 선의 시작점에 단면을 그리고 각 기준점에 점을 표시합니다. 점을 클릭하면 그 점이 선 위에 놓입니다. 선의 마커를 단면의 아무 점으로나 끌 수도 있습니다. 끔: 단면은 대화 상자의 기준점로만 배치됩니다.",
+    "ui.frame_hot_point_tip": "클릭하면 단면의 이 점을 선 위에 놓습니다",
+    "ui.frame_locate_tip": "끌면 단면의 다른 점을 선 위에 놓습니다",
+    "ui.frame_offset_a": "오프셋 A",
+    "ui.frame_offset_b": "오프셋 B"
+  },
+  "vi": {
+    "prefs.frame_hot_points": "Điểm nóng trên mặt cắt",
+    "prefs.frame_hot_points_tip": "Khi Phần tử khung kết cấu đang mở, mặt cắt được vẽ ở đầu đường thứ nhất với một điểm tại mỗi điểm neo. Nhấp vào một điểm để đặt nó lên đường, hoặc kéo dấu của đường tới bất kỳ điểm nào của mặt cắt. Tắt: mặt cắt chỉ được đặt theo Điểm neo trong hộp thoại.",
+    "ui.frame_hot_point_tip": "Nhấp để đặt điểm này của mặt cắt lên đường",
+    "ui.frame_locate_tip": "Kéo để đặt một điểm khác của mặt cắt lên đường",
+    "ui.frame_offset_a": "Độ lệch A",
+    "ui.frame_offset_b": "Độ lệch B"
+  },
+  "zh": {
+    "prefs.frame_hot_points": "截面上的热点",
+    "prefs.frame_hot_points_tip": "框架构件打开时，在第一条线的起点绘制截面，并在每个基准点处显示一个点。单击某点即可将其放在线上，也可以把线的标记拖到截面上的任意点。关闭：截面只按对话框中的基准点放置。",
+    "ui.frame_hot_point_tip": "单击将截面的此点放在线上",
+    "ui.frame_locate_tip": "拖动将截面的另一点放在线上",
+    "ui.frame_offset_a": "偏移 A",
+    "ui.frame_offset_b": "偏移 B"
+  },
+  "es": {
+    "prefs.frame_hot_points": "Puntos calientes en la sección",
+    "prefs.frame_hot_points_tip": "Mientras Miembro estructural está abierto, la sección se dibuja al inicio de la primera línea con un punto en cada anclaje. Haz clic en un punto para ponerlo sobre la línea, o arrastra el marcador de la línea a cualquier punto de la sección o fuera de ella. Desactivado: la sección se coloca solo con el Anclaje del diálogo.",
+    "ui.frame_hot_point_tip": "Haz clic para poner este punto de la sección sobre la línea",
+    "ui.frame_locate_tip": "Arrastra para poner otro punto de la sección sobre la línea",
+    "ui.frame_offset_a": "Desfase A",
+    "ui.frame_offset_b": "Desfase B"
+  }
+}

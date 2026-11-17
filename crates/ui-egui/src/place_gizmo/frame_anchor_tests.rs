@@ -1,0 +1,241 @@
+//! Frame Member's hot points: the section at the first line's start with a dot per anchor; a
+//! click sets the anchor, the marker's drag sets `locate` or snaps to a dot; off, or with
+//! unfinished values, nothing is drawn.
+
+use serde_json::{Value, json};
+use solidcraft_engine::Sel;
+use solidcraft_engine::doc::frame::{Anchor, SectionView};
+
+use super::*;
+use crate::dialogs_frame::{ANCHORS, Member};
+use crate::scenario::Harness;
+
+/// A post: a 3D sketch line from the origin straight up, seen from the top, close enough that a
+/// 40 mm tube's dots stand well apart, with Frame Member open on it (the default rect tube).
+fn post() -> Harness {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Post path"})).unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d": true})).unwrap();
+    h.app.run("sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.settle();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.step(&json!({"call": "ui.camera", "params": {"target": [0, 0, 0], "distance": 250}})).unwrap();
+    h.step(&json!({"start": "frame.member"})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Post path").unwrap().id;
+    let id = h.app.session.doc.sketch(sketch).unwrap().wires[0].id.clone();
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::ExternalSketchCurve { sketch, id }];
+    h.settle();
+    h
+}
+
+fn member(h: &mut Harness) -> &mut Member {
+    match &mut h.app.dialog.as_mut().expect("a dialog is open").kind {
+        Kind::Frame(m) => m,
+        k => panic!("a Frame Member dialog, not {k:?}"),
+    }
+}
+
+fn locate(h: &Harness) -> Option<Value> {
+    h.app.dialog.as_ref().expect("a dialog is open").extra.get("locate").cloned()
+}
+
+fn index(name: &str) -> usize {
+    ANCHORS.iter().position(|(n, _)| *n == name).unwrap()
+}
+
+/// The section the open dialog puts on its line, as the engine lays it out.
+fn view(h: &Harness) -> SectionView {
+    let d = h.app.dialog.as_ref().expect("a dialog is open");
+    let Kind::Frame(m) = &d.kind else { panic!("a Frame Member dialog") };
+    let (_, p) = crate::dialogs_frame::commands(&h.app, m, &d.inputs, &d.extra).unwrap().remove(0);
+    solidcraft_engine::cmd::frame::member_section_view(&h.app.session, &p).unwrap()
+}
+
+fn point(v: &SectionView, a: Anchor) -> Vec2 {
+    v.anchors().into_iter().find(|(b, _)| *b == a).unwrap().1
+}
+
+fn world(p: Vec3) -> Value {
+    json!({"world": [p.x, p.y, p.z]})
+}
+
+fn near(a: [f64; 2], b: [f64; 2]) -> bool {
+    (a[0] - b[0]).hypot(a[1] - b[1]) < 1.0
+}
+
+fn drag(h: &mut Harness, to: Value) {
+    h.step(&json!({"drag": [{"handle": "frame_anchor:position"}, to], "steps": 12})).unwrap();
+    h.settle();
+}
+
+#[test]
+fn the_dialog_order_of_anchors_is_the_engines() {
+    let names: Vec<String> = Anchor::ALL.iter().map(|a| serde_json::to_value(a).unwrap().as_str().unwrap().to_string()).collect();
+    let dialog: Vec<&str> = ANCHORS.iter().map(|(n, _)| *n).collect();
+    assert_eq!(dialog, names);
+}
+
+/// On by default: the section's hot points and the line's marker are published; anchors on one
+/// point share a dot (a tube's origin, centre and centroid), and the marker sits on the anchor in
+/// use.
+#[test]
+fn the_hot_points_and_the_marker_are_published_on_the_first_line() {
+    let mut h = post();
+    assert!(h.app.preferences.frame_hot_points, "on by default");
+    for name in ["origin", "top_left", "top", "top_right", "left", "right", "bottom_left", "bottom", "bottom_right", "position"] {
+        assert!(h.at(&json!({"handle": format!("frame_anchor:{name}")})).is_ok(), "frame_anchor:{name} is published");
+    }
+    for name in ["center", "centroid"] {
+        assert!(h.at(&json!({"handle": format!("frame_anchor:{name}")})).is_err(), "{name} shares the origin's dot");
+    }
+    let origin = h.at(&json!({"handle": "frame_anchor:origin"})).unwrap();
+    let marker = h.at(&json!({"handle": "frame_anchor:position"})).unwrap();
+    assert!(near(origin, marker), "the marker sits on the origin, the default anchor: {origin:?} {marker:?}");
+    let (tl, br) = (h.at(&json!({"handle": "frame_anchor:top_left"})).unwrap(), h.at(&json!({"handle": "frame_anchor:bottom_right"})).unwrap());
+    assert!((tl[0] - br[0]).hypot(tl[1] - br[1]) > 60.0, "the dots stand apart: {tl:?} {br:?}");
+}
+
+/// A click on a hot point makes it the anchor and drops a located point; the section moves so
+/// that point sits on the line, and the picked line stays picked.
+#[test]
+fn clicking_a_hot_point_sets_the_anchor_and_drops_locate() {
+    let mut h = post();
+    h.app.dialog.as_mut().unwrap().extra.insert("locate".into(), json!([5.0, 5.0]));
+    h.settle();
+    h.step(&json!({"click": {"handle": "frame_anchor:top_left"}})).unwrap();
+    h.settle();
+    assert_eq!(member(&mut h).anchor, index("top_left"));
+    assert_eq!(locate(&h), None, "the located point is dropped");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "the click picked nothing in the view");
+    let (tl, marker) = (h.at(&json!({"handle": "frame_anchor:top_left"})).unwrap(), h.at(&json!({"handle": "frame_anchor:position"})).unwrap());
+    assert!(near(tl, marker), "the top left corner is on the line now: {tl:?} {marker:?}");
+    let c = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["anchor"], json!("top_left"), "{}", c[0].1);
+    assert!(c[0].1.get("locate").is_none(), "{}", c[0].1);
+}
+
+/// Dragging the marker to a free point of the section puts that point on the line (`locate`, as
+/// the engine reads it); dragging it onto a hot point takes that anchor instead.
+#[test]
+fn dragging_the_marker_locates_a_free_point_or_snaps_to_a_hot_point() {
+    let mut h = post();
+    let v = view(&h);
+    // Clear of every dot: 12 mm or more from each on a 40 mm tube.
+    let p = Vec2::new(v.at.x + 10.0, v.at.y + 7.0);
+    drag(&mut h, world(v.world(p)));
+    let [x, y] = v.locate_of(p);
+    let got = locate(&h).expect("the drag located a point");
+    let got: Vec<f64> = got.as_array().unwrap().iter().map(|n| n.as_f64().unwrap()).collect();
+    assert!((got[0] - x).abs() < 0.1 + 1e-9 && (got[1] - y).abs() < 0.1 + 1e-9, "locate {got:?}, the point is {x}, {y}");
+    let marker = h.at(&json!({"handle": "frame_anchor:position"})).unwrap();
+    assert!(h.at(&json!({"handle": "frame_anchor:origin"})).is_ok_and(|o| !near(o, marker)), "the section moved off the origin");
+
+    // Onto a dot: its anchor, and no located point.
+    let v = view(&h);
+    drag(&mut h, world(v.world(point(&v, Anchor::BottomRight))));
+    assert_eq!(member(&mut h).anchor, index("bottom_right"));
+    assert_eq!(locate(&h), None, "a snapped drag leaves no located point");
+    let (br, marker) = (h.at(&json!({"handle": "frame_anchor:bottom_right"})).unwrap(), h.at(&json!({"handle": "frame_anchor:position"})).unwrap());
+    assert!(near(br, marker), "the bottom right corner is on the line: {br:?} {marker:?}");
+}
+
+/// The marker drags past the section's outline too: a 40 mm tube put 50 mm off its line, the
+/// line 50 mm below the tube's bottom (L8 "a 50mm de la linea").
+#[test]
+fn dragging_the_marker_past_the_section_puts_the_member_off_the_line() {
+    let mut h = post();
+    let v = view(&h);
+    let bottom = point(&v, Anchor::Bottom);
+    let p = Vec2::new(bottom.x, bottom.y - 50.0);
+    drag(&mut h, world(v.world(p)));
+    let [x, y] = v.locate_of(p);
+    let got = locate(&h).expect("the drag located a point");
+    let got: Vec<f64> = got.as_array().unwrap().iter().map(|n| n.as_f64().unwrap()).collect();
+    assert!((got[0] - x).abs() < 0.1 + 1e-9 && (got[1] - y).abs() < 0.1 + 1e-9, "locate {got:?}, the point is {x}, {y}");
+    let v = view(&h);
+    assert!((point(&v, Anchor::Bottom).y - v.at.y - 50.0).abs() < 0.1 + 1e-9, "the tube's bottom is 50 mm from the line");
+}
+
+/// Offset A and B move the section from its anchor by a typed length: Bottom Middle and Offset B
+/// 50 mm put the tube's bottom 50 mm above the line. A drag rewrites them, a click on a hot point
+/// empties them, both empty is no located point, and a value that is not a length is refused.
+#[test]
+fn offset_fields_move_the_member_from_its_anchor() {
+    let mut h = post();
+    member(&mut h).anchor = index("bottom");
+    member(&mut h).offset = [String::new(), "50 mm".into()];
+    h.settle();
+    let v = view(&h);
+    assert!((point(&v, Anchor::Bottom).y - v.at.y - 50.0).abs() < 1e-9, "the tube's bottom is 50 mm from the line");
+    assert!((point(&v, Anchor::Bottom).x - v.at.x).abs() < 1e-9, "and not moved sideways");
+    let c = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["locate"], json!([0.0, -70.0]), "{}", c[0].1);
+
+    // A drag rewrites the offset: the line 10 mm left of the bottom middle moves the tube 10 mm right.
+    let p = Vec2::new(point(&v, Anchor::Bottom).x - 10.0, point(&v, Anchor::Bottom).y - 30.0);
+    drag(&mut h, world(v.world(p)));
+    let off = member(&mut h).offset.clone();
+    let mm = |t: &str| crate::length_input::eval(&h.app.session.doc, t, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((mm(&off[0]) - 10.0).abs() < 0.1 + 1e-9 && (mm(&off[1]) - 30.0).abs() < 0.1 + 1e-9, "{off:?}");
+
+    // A hot point empties them; both empty is no located point.
+    h.step(&json!({"click": {"handle": "frame_anchor:top_left"}})).unwrap();
+    h.settle();
+    assert_eq!(member(&mut h).offset, [String::new(), String::new()]);
+    assert_eq!(locate(&h), None);
+
+    // Not a length: refused, naming the fields, and the member is not moved.
+    member(&mut h).offset = ["abc".into(), String::new()];
+    h.settle();
+    let err = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap_err();
+    assert!(err.contains("Offset A"), "{err}");
+    // The rows are labelled A and B, not the world's X and Y.
+    assert!(h.at(&json!({"handle": "dialog:ui.frame_offset_a"})).is_ok() && h.at(&json!({"handle": "dialog:ui.frame_offset_b"})).is_ok());
+    assert_eq!(solidcraft_ui_text::tr_label("ui.frame_offset_a"), "Offset A");
+    assert_eq!(locate(&h), None);
+}
+
+/// Off, the dialog behaves as before: no section, no hot points, no marker.
+#[test]
+fn with_the_preference_off_nothing_is_drawn() {
+    let mut h = post();
+    h.app.preferences.frame_hot_points = false;
+    h.settle();
+    for name in ["origin", "top_left", "position"] {
+        assert!(h.at(&json!({"handle": format!("frame_anchor:{name}")})).is_err(), "frame_anchor:{name} is not published");
+    }
+    assert_eq!(member(&mut h).anchor, 0);
+    assert_eq!(locate(&h), None);
+}
+
+/// Unfinished or refused values show nothing and never panic: no line picked, a dimension that
+/// is not a length, zero, negative or overflowing; a section with no size or not a number.
+#[test]
+fn unfinished_or_hostile_values_show_nothing() {
+    let mut h = post();
+    let lines = std::mem::take(&mut h.app.dialog.as_mut().unwrap().inputs[0].items);
+    h.settle();
+    assert!(h.at(&json!({"handle": "frame_anchor:position"})).is_err(), "no line, no section");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = lines;
+    for bad in ["abc", "0 mm", "-3 mm", "1e999 mm", ""] {
+        let m = member(&mut h);
+        m.dims[m.kind][0] = bad.into();
+        h.settle();
+        assert!(h.at(&json!({"handle": "frame_anchor:position"})).is_err(), "a width of `{bad}` shows no section");
+        assert!(h.app.dialog.is_some(), "the dialog is still open");
+    }
+    let v = SectionView {
+        start: Vec3::new(f64::NAN, 0.0, 0.0),
+        end: Vec3::new(0.0, 0.0, 1.0),
+        x: Vec3::new(1.0, 0.0, 0.0),
+        y: Vec3::new(0.0, 1.0, 0.0),
+        regions: Vec::new(),
+        at: Vec2::new(0.0, 0.0),
+        origin: Vec2::new(0.0, 0.0),
+        mirror: false,
+    };
+    assert!(laid_out(v.clone()).is_none(), "a start that is not a number");
+    assert!(laid_out(SectionView { start: Vec3::new(0.0, 0.0, 0.0), ..v }).is_none(), "a section with no size");
+}
