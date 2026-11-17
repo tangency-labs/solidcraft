@@ -33,12 +33,12 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
 
-use super::canvas::CanvasPlane;
+use super::canvas::{CanvasPlane, plane_schema};
 use super::check::{located, whole};
 use super::frame::SketchSolve;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::{LengthExpr, Point2, present};
+use super::types::{LengthExpr, Point2, Point3, PointExpr3, present};
 use crate::params;
 
 /// The words of `sketch.create`'s refusals, as `plane_frame` and `flip_param` give them.
@@ -219,7 +219,24 @@ pub struct SketchPlane(pub Value);
 
 impl<'de> Deserialize<'de> for SketchPlane {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        CanvasPlane::deserialize(d).map(|plane| SketchPlane(plane.0))
+        let value = Value::deserialize(d)?;
+        // An explicit plane's origin may be length expressions (#8192): the rest is read as a
+        // plane at the origin, and whether the expressions work out is the handler's to say.
+        let numbers = match &value {
+            Value::Object(o) if !o.contains_key("face") => match o.get("origin") {
+                Some(origin @ Value::Array(a)) if a.iter().any(Value::is_string) => {
+                    PointExpr3::deserialize(origin)
+                        .map_err(|_| D::Error::custom(whole("`origin` must be a point [x, y, z] of numbers or length expressions")))?;
+                    let mut at_zero = value.clone();
+                    at_zero["origin"] = json!([0, 0, 0]);
+                    at_zero
+                }
+                _ => value.clone(),
+            },
+            _ => value.clone(),
+        };
+        CanvasPlane::deserialize(&numbers).map_err(|e| D::Error::custom(e.to_string()))?;
+        Ok(SketchPlane(value))
     }
 }
 
@@ -228,7 +245,13 @@ impl JsonSchema for SketchPlane {
         "SketchPlane".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        CanvasPlane::json_schema(generator)
+        let point = generator.subschema_for::<Point3>();
+        let origin = generator.subschema_for::<PointExpr3>();
+        plane_schema(
+            &point,
+            json!({"anyOf": [origin, {"type": "null"}]}),
+            "A plane: XY, XZ or YZ (or Top, Front or Right; any case), a construction plane's name or feature id, a picked planar face {\"face\": [x, y, z], \"body\"?, \"index\"?, \"path\"?, \"fixed\"?}, or an explicit plane {\"origin\"?, \"x_dir\", \"y_dir\"}: two directions [x, y, z] that aren't parallel and an origin in mm, each coordinate a number or a length expression (default: the origin); an origin with parameters in it is kept, and the sketch follows them.",
+        )
     }
 }
 
@@ -1102,8 +1125,14 @@ pub struct SolveResult {
     pub status: SolveOutcome,
     /// The degrees of freedom left (0: fully constrained).
     pub dof: usize,
+    /// The planar sketch's own degrees of freedom, its drawn 3D curves' left out (#10608).
+    pub planar_dof: usize,
     /// The constraints still violated after a failed solve, by id.
     pub failing: Vec<String>,
+    /// The 3D constraints' solve (#10608): `{ok, dof, failing, ...}`, or null for a sketch with no
+    /// drawn 3D curves. Its freedoms are counted in `dof`.
+    #[schemars(with = "Option<serde_json::Map<String, Value>>")]
+    pub wires_solve: Value,
     /// How many profiles the sketch has.
     pub profiles: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

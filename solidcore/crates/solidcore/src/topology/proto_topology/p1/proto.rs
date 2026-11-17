@@ -22,6 +22,7 @@ use crate::intersect::point_class::{
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
+use crate::nurbs::math::gamma;
 use crate::query::face::p2 as face_p2;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::edgeuse::p1 as eu1;
@@ -39,6 +40,7 @@ const OP_REMOVE_COINCIDENT: &str =
 /// two combinable edge definitions, in units of their summed tolerances (upstream's).
 pub const ED_TOL_FACTOR: f64 = 5.0;
 const OP_POSITION: &str = "topology::proto_topology::p1::find_position_from_pcs";
+const OP_SET_POSITION: &str = "topology::proto_topology::p1::VertexDefinition::set_position";
 const OP_EVALUATE: &str = "topology::proto_topology::p1::ProtoTopologyManager::proto_edge_evaluate";
 const OP_SRC_TOPO: &str = "topology::proto_topology::p1::VertexDefinition::set_src_topo";
 const OP_DEGEN: &str = "topology::proto_topology::p1::find_ed_on_degen_face";
@@ -945,6 +947,10 @@ pub struct VertexDefinition<O> {
     /// placed this definition crosses its source edge; `-1` when no such crossing placed
     /// it ([`VertexDefinition::place_by_crossing`]).
     crossing_sine: f64,
+    /// Not upstream (WR-306): the certain hull points of the curves this definition
+    /// absorbed (`resolve_proto_edge`), each with the error bound of its coordinates,
+    /// which [`VertexDefinition::set_position`] keeps within the tolerance.
+    absorbed_hull: Vec<(Point3, f64)>,
 }
 
 /// Not upstream (WR-410; the SolidCraft fork's `sm_CrossingError`): how far along its
@@ -992,6 +998,7 @@ impl<O: ClassObject> VertexDefinition<O> {
             final_vtx1: None,
             final_vtx2: None,
             crossing_sine: -1.0,
+            absorbed_hull: Vec::new(),
         };
 
         if !vd.pc1.are_parameters_set() {
@@ -1212,9 +1219,59 @@ impl<O: ClassObject> VertexDefinition<O> {
         }
     }
 
-    /// Sets the position (`SetPosition`).
-    pub fn set_position(&mut self, position: Point3) {
+    /// Not upstream (WR-306): the tolerance this definition needs at `position` to keep
+    /// every absorbed hull point ([`VertexDefinition::absorb_hull`]) covered, by the same
+    /// rounded distance `resolve_proto_edge` took it in by,
+    /// `|p - position| * (1 + gamma(8)) + 2 * err`, and never below its tolerance now;
+    /// `None` when a distance is not finite.
+    #[must_use]
+    pub fn covering_tolerance(&self, k: &Kernel, position: Point3) -> Option<f64> {
+        let mut needed = self.tolerance(k);
+        for &(p, err) in &self.absorbed_hull {
+            let d = p.distance(position) * (1.0 + gamma(8)) + 2.0 * err;
+            if !d.is_finite() {
+                return None;
+            }
+            needed = max2(needed, d);
+        }
+        Some(needed)
+    }
+
+    /// Sets the position (`SetPosition`). Not upstream (WR-306): the tolerance then grows,
+    /// never shrinks, to [`VertexDefinition::covering_tolerance`] at the new position, so
+    /// each curve the definition absorbed stays within its tolerance.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Failed`] (a topology failure) when a hull point's distance from
+    /// `position` is not finite; the definition is left unchanged then.
+    pub fn set_position(&mut self, k: &Kernel, position: Point3) -> Result<()> {
+        let needed = self.covering_tolerance(k, position).ok_or_else(|| {
+            SolidError::topology_failed(
+                OP_SET_POSITION,
+                "a vertex definition holding an absorbed curve cannot move to a position \
+                 at no finite distance from it",
+            )
+        })?;
         self.position = position;
+        if needed > self.tolerance(k) {
+            self.tol = needed;
+        }
+        Ok(())
+    }
+
+    /// Not upstream (WR-306): records the certain hull points (each with the error bound
+    /// of its coordinates) of a curve this definition absorbed, for
+    /// [`VertexDefinition::set_position`] to keep covered.
+    pub fn absorb_hull(&mut self, points: impl IntoIterator<Item = (Point3, f64)>) {
+        self.absorbed_hull.extend(points);
+    }
+
+    /// Not upstream (WR-306): the hull points recorded by
+    /// [`VertexDefinition::absorb_hull`].
+    #[must_use]
+    pub fn absorbed_hull(&self) -> &[(Point3, f64)] {
+        &self.absorbed_hull
     }
 
     /// Sets the owning proto vertex (`SetProtoVertex`).
@@ -1790,6 +1847,16 @@ pub struct ProtoVertex {
     /// The SMLib fork's `m_bAbsorbedProtoEdge`: a degenerate proto edge of ours was dropped,
     /// so our vertices stand for its curve (WR-306, opt-in).
     absorbed_proto_edge: bool,
+    /// Not upstream (#16637): the computed points (positions and object points) of the
+    /// vertex definitions combined away at this proto vertex, the attached curve ends
+    /// evaluated when it combined them, and the points of the definitions that remained
+    /// when it moved, which every write of its position covers
+    /// ([`ProtoVertex::set_position`]).
+    absorbed_points: Vec<Point3>,
+    /// Not upstream (#16637): a point to absorb here (of a definition combined away or an
+    /// attached curve end) could not be computed, so `absorbed_points` is incomplete and
+    /// `resolve_proto_vertex` leaves the position where upstream puts it.
+    absorbed_unbounded: bool,
 }
 
 impl ProtoVertex {
@@ -1798,6 +1865,53 @@ impl ProtoVertex {
     #[must_use]
     pub const fn absorbed_proto_edge(&self) -> bool {
         self.absorbed_proto_edge
+    }
+
+    /// Not upstream (#16637): the computed points (positions and object points) of the
+    /// vertex definitions combined away at this proto vertex, the attached curve ends
+    /// evaluated when it combined them, and the points of the definitions that remained
+    /// when it moved.
+    #[must_use]
+    pub fn absorbed_points(&self) -> &[Point3] {
+        &self.absorbed_points
+    }
+
+    /// Not upstream (#16637): whether a point to absorb here could not be computed (so
+    /// [`ProtoVertex::absorbed_points`] is incomplete).
+    #[must_use]
+    pub const fn absorbed_unbounded(&self) -> bool {
+        self.absorbed_unbounded
+    }
+
+    /// Not upstream (#16637): records the computed points of vertex definitions combined
+    /// away at this proto vertex, and whether every point of them was computed. It does not
+    /// change the tolerance: the caller places the vertex ([`ProtoVertex::set_position`])
+    /// or covers the points where it is ([`ProtoVertex::cover_absorbed`]).
+    pub fn absorb(&mut self, points: &[Point3], bounded: bool) {
+        self.absorbed_points.extend_from_slice(points);
+        self.absorbed_unbounded = self.absorbed_unbounded || !bounded;
+    }
+
+    /// Not upstream (#16637): widens the tolerance to reach every absorbed point from the
+    /// position: the largest computed distance, rounded up by `γ_4` for the distance's own
+    /// rounding. Distances between computed points only, no stored gap and no estimate.
+    /// A non-finite distance (a non-finite position, or a distance that overflows) never
+    /// widens, so the tolerance stays finite; that point is then not covered, so it marks
+    /// the absorbed points unbounded ([`ProtoVertex::absorbed_unbounded`]: no later move).
+    pub fn cover_absorbed(&mut self) {
+        use crate::nurbs::math::gamma;
+        let mut reach = 0.0_f64;
+        for &at in &self.absorbed_points {
+            let r = self.position.distance(at) * (1.0 + gamma(4));
+            if !r.is_finite() {
+                self.absorbed_unbounded = true;
+            } else if r > reach {
+                reach = r;
+            }
+        }
+        if reach > self.tol {
+            self.tol = reach;
+        }
     }
 
     /// Marks a degenerate proto edge of this proto vertex as dropped (the fork's
@@ -1812,9 +1926,17 @@ impl ProtoVertex {
         self.position
     }
 
-    /// Sets the position (through `GetPosition`'s reference).
+    /// Sets the position (through `GetPosition`'s reference). Not upstream (#16637): the
+    /// tolerance then grows to cover every absorbed point from there
+    /// ([`ProtoVertex::cover_absorbed`]); with none absorbed it is upstream's write. A
+    /// vertex that absorbed points is not moved to a non-finite position, from which no
+    /// distance to them could be measured: it stays where it is, still covering them.
     pub fn set_position(&mut self, position: Point3) {
-        self.position = position;
+        let finite = position.x.is_finite() && position.y.is_finite() && position.z.is_finite();
+        if finite || self.absorbed_points.is_empty() {
+            self.position = position;
+        }
+        self.cover_absorbed();
     }
 
     /// The tolerance (`GetTolerance`, as an `SmZoneTol3d`).
@@ -2188,20 +2310,172 @@ pub struct ProtoTopologyManager<O> {
     pe_store: Vec<Option<ProtoEdge>>,
     /// Every proto face made.
     pf_store: Vec<Option<ProtoFace<O>>>,
-    /// Not upstream: `SmProtoEdge::Resolve` splits a self-loop proto edge even when
-    /// its vertex definition is on a vertex (`true`, the default and upstream's
-    /// behaviour); `false` drops such a proto edge instead (tangency-labs/solidcore#480,
-    /// see `topology::proto_topology::p2`).
-    split_self_loops_on_vertices: bool,
     /// Not upstream (WR-619): final vertices `(vertex, max_gap, speck_start, speck_end)`
     /// whose collapsed speck definition `SmEdgeDefinition::Imprint` skipped, so
     /// `ImprintIntersections` grows each vertex's tolerance to cover the speck's span.
     skipped_speck_vertices: Vec<(O, f64, Point3, Point3)>,
+    /// Not upstream: the contact points a rule has proved one point
+    /// ([`ProtoTopologyManager::set_declared_contacts`]).
+    declared_contacts: Vec<DeclaredContact>,
+    /// Not upstream: the uncertainty regions of the points each listed proto vertex was
+    /// made of or took in ([`ProtoTopologyManager::find_proto_vertex_within`]).
+    regions: Vec<(ProtoVertexId, DeclaredContact)>,
     /// Not upstream (#15718): pairs (B-rep 1's edge, B-rep 2's edge) of line edges whose
     /// two ends lie within their intersection tolerance of each other, end for end: one
     /// coincident interval, so a point where the two cross is no event and gets no vertex
     /// definition ([`ProtoTopologyManager::set_coincident_edges`]).
     coincident_edges: Vec<(O, O)>,
+    /// Not upstream (WR-214): the first refusal of a proto edge from a proto vertex back
+    /// to itself whose curve leaves its ends' reach of a definition on a vertex; the
+    /// Boolean returns it once every proto edge is resolved
+    /// ([`ProtoTopologyManager::take_self_loop_refusal`]).
+    self_loop_refusal: Option<SolidError>,
+}
+
+/// Not upstream: a contact point that a rule of the intersector proves one point although
+/// it spans more than the combined tolerance of the points in it (docs/booleans.md, "One
+/// point or two"): every point within `radius` of the segment from `a` to `b`. Two points
+/// both in it may share a proto vertex however far apart they are
+/// ([`ProtoTopologyManager::find_proto_vertex_within`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DeclaredContact {
+    /// One end of the segment.
+    pub a: Point3,
+    /// The other end.
+    pub b: Point3,
+    /// How far from the segment its points reach.
+    pub radius: f64,
+}
+
+impl DeclaredContact {
+    /// The uncertainty region of a point `p` known to `tolerance` that a curve fixes on an
+    /// edge of unit direction `along` there (docs/booleans.md, "One point or two"): across
+    /// the edge the point is known to `tolerance`, along it only to the enclosed reach
+    /// (the tolerance over the sine of the crossing angle:
+    /// [`crate::curve::curve::Curve::crossing_reach`]; `limit`, the capture distance, how
+    /// far proto vertices are looked for at all, where none is proved or it is longer).
+    /// `reach` is that reach with how far the edge strays from the line through `p` along
+    /// `along` within it ([`crate::curve::curve::Curve::stray_from_line`]), so the region is
+    /// the segment that far either way along the edge, widened by the tolerance and the
+    /// stray; a stray enclosed over a longer reach bounds it over `limit` too. With no
+    /// enclosure of the edge (`None`) the region is the ball of `limit` and the tolerance:
+    /// every point the lookup considers.
+    #[must_use]
+    pub fn of_crossing(
+        p: Point3,
+        tolerance: f64,
+        along: Vec3,
+        reach: Option<(f64, f64)>,
+        limit: f64,
+    ) -> Self {
+        match reach {
+            Some((reach, stray)) => {
+                let reach = reach.min(limit);
+                Self {
+                    a: p - along * reach,
+                    b: p + along * reach,
+                    radius: (tolerance + stray) * (1.0 + gamma(1)),
+                }
+            }
+            None => Self {
+                a: p,
+                b: p,
+                radius: (tolerance + limit) * (1.0 + gamma(1)),
+            },
+        }
+    }
+
+    /// The region of a point with no crossing angle: the ball of its tolerance.
+    #[must_use]
+    pub const fn of_point(p: Point3, tolerance: f64) -> Self {
+        Self {
+            a: p,
+            b: p,
+            radius: tolerance,
+        }
+    }
+
+    /// Whether this region and `other` are not proved apart: a lower bound of the distance
+    /// between their segments is within the sum of their radii. The bound is the gap
+    /// between the two segments' projections onto one direction, which no pair of their
+    /// points is closer than whatever the direction, with the projections' rounding
+    /// (`γ_4` of each point's distance from `other.a` times the direction's length)
+    /// taken off. The direction is that of the closest pair found by clamping each
+    /// segment's foot on the other in turn: only where to look, so a pair an ill-conditioned
+    /// solve gets wrong (near-parallel segments) gives a smaller bound, never a larger one.
+    /// The regions are taken for overlapping in doubt. A NaN is apart.
+    #[must_use]
+    pub fn overlaps(&self, other: &Self) -> bool {
+        let (d1, d2, r) = (self.b - self.a, other.b - other.a, self.a - other.a);
+        let (a, e, f) = (d1.dot(d1), d2.dot(d2), d2.dot(r));
+        let unit = |x: f64| x.clamp(0.0, 1.0);
+        let (s, t) = if a <= 0.0 && e <= 0.0 {
+            (0.0, 0.0)
+        } else if a <= 0.0 {
+            (0.0, unit(f / e))
+        } else {
+            let c = d1.dot(r);
+            if e <= 0.0 {
+                (unit(-c / a), 0.0)
+            } else {
+                let b = d1.dot(d2);
+                let denom = a * e - b * b;
+                let mut s = if denom > 0.0 {
+                    unit((b * f - c * e) / denom)
+                } else {
+                    0.0
+                };
+                let mut t = (b * s + f) / e;
+                if t < 0.0 {
+                    t = 0.0;
+                    s = unit(-c / a);
+                } else if t > 1.0 {
+                    t = 1.0;
+                    s = unit((b - c) / a);
+                }
+                (s, t)
+            }
+        };
+        let w = self.a + d1 * s - (other.a + d2 * t);
+        let width = w.length();
+        // the points relative to `other.a`, each difference rounded once per coordinate
+        let rb = self.b - other.a;
+        let least = if width > 0.0 {
+            let mine = (r.dot(w)).min(rb.dot(w));
+            let theirs = d2.dot(w).max(0.0);
+            let rounding = gamma(4) * width * (r.length() + rb.length() + d2.length());
+            let gap = (mine - theirs) * (1.0 - gamma(1)) - rounding;
+            if gap > 0.0 || gap.is_nan() {
+                gap / width * (1.0 - gamma(4))
+            } else {
+                0.0
+            }
+        } else {
+            width
+        };
+        let reach = (self.radius + other.radius) * (1.0 + gamma(1));
+        !(least.is_nan() || least > reach)
+    }
+
+    /// Whether `p` is within the radius of the segment, by an upper bound of its distance:
+    /// the parameter of the nearest point is clamped to the segment, so any rounding of it
+    /// only moves that point along the segment (the distance is at least the true one, as
+    /// the true nearest point is no farther); the difference and the norm round by `γ_4`
+    /// of `|p - a| + |b - a|`. A NaN distance is out.
+    #[must_use]
+    pub fn holds(&self, p: Point3) -> bool {
+        let along = self.b - self.a;
+        let w = p - self.a;
+        let len2 = along.dot(along);
+        let t = if len2 > 0.0 {
+            (w.dot(along) / len2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let distance = ((w - along * t).length() + gamma(4) * (w.length() + along.length()))
+            * (1.0 + gamma(2));
+        !(distance.is_nan() || distance > self.radius)
+    }
 }
 
 fn push_store<T>(store: &mut Vec<Option<T>>, item: T) -> Result<u32> {
@@ -2259,26 +2533,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             pv_store: Vec::new(),
             pe_store: Vec::new(),
             pf_store: Vec::new(),
-            split_self_loops_on_vertices: true,
             skipped_speck_vertices: Vec::new(),
+            declared_contacts: Vec::new(),
+            regions: Vec::new(),
             coincident_edges: Vec::new(),
+            self_loop_refusal: None,
         })
-    }
-
-    /// Whether resolving a proto edge from a proto vertex back to itself splits it
-    /// even when its vertex definition is on a vertex in either B-rep (`true`, the
-    /// default, as upstream). Not upstream.
-    #[must_use]
-    pub const fn split_self_loops_on_vertices(&self) -> bool {
-        self.split_self_loops_on_vertices
-    }
-
-    /// Sets [`ProtoTopologyManager::split_self_loops_on_vertices`]; the Boolean's
-    /// topology intersector sets it to `false` when
-    /// `Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate` is on
-    /// (tangency-labs/solidcore#480, WR-214). Not upstream.
-    pub fn set_split_self_loops_on_vertices(&mut self, split: bool) {
-        self.split_self_loops_on_vertices = split;
     }
 
     /// Sets the coincident line edge pairs (B-rep 1's edge, B-rep 2's edge): two straight
@@ -2307,6 +2567,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     #[must_use]
     pub fn skipped_speck_vertices(&self) -> &[(O, f64, Point3, Point3)] {
         &self.skipped_speck_vertices
+    }
+
+    /// Takes the refusal a proto edge from a proto vertex back to itself left
+    /// (WR-214): its curve leaves its ends' reach of a definition on a vertex, so it can be
+    /// neither split nor dropped. Not upstream.
+    pub fn take_self_loop_refusal(&mut self) -> Option<SolidError> {
+        self.self_loop_refusal.take()
+    }
+
+    /// Records the first such refusal (WR-214).
+    pub(crate) fn note_self_loop_refusal(&mut self, refusal: SolidError) {
+        if self.self_loop_refusal.is_none() {
+            self.self_loop_refusal = Some(refusal);
+        }
     }
 
     /// Records a final vertex whose collapsed speck definition was skipped at imprint.
@@ -2408,10 +2682,24 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// Empties the three lists without deleting anything (`Reset`).
     pub fn reset(&mut self) {
+        self.declared_contacts.clear();
+        self.regions.clear();
         self.pvs.clear();
         self.pes.clear();
         self.pfs.clear();
         self.skipped_speck_vertices.clear();
+    }
+
+    /// Not upstream: notes `region`, the uncertainty region of a point `pv` was made of or
+    /// took in, so that later points are compared with it.
+    pub fn note_region(&mut self, pv: ProtoVertexId, region: DeclaredContact) {
+        self.regions.push((pv, region));
+    }
+
+    /// Not upstream: the contact points proved one point
+    /// ([`DeclaredContact`]), set before the face pairs' proto vertices are made.
+    pub fn set_declared_contacts(&mut self, contacts: Vec<DeclaredContact>) {
+        self.declared_contacts = contacts;
     }
 
     // ---- simple access ---------------------------------------------------------------
@@ -2689,6 +2977,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 vertex_defs: Vec::new(),
                 proto_edges: Vec::new(),
                 absorbed_proto_edge: false,
+                absorbed_points: Vec::new(),
+                absorbed_unbounded: false,
             },
         )
         .map(ProtoVertexId)
@@ -2723,6 +3013,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 vertex_defs: vec![vd_id],
                 proto_edges: Vec::new(),
                 absorbed_proto_edge: false,
+                absorbed_points: Vec::new(),
+                absorbed_unbounded: false,
             },
         )
         .map(ProtoVertexId)
@@ -3065,7 +3357,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             };
             let count = self.pv(Some(pv))?.vertex_defs.len() as f64;
             let p = self.pv_mut(pv)?;
-            p.position += (new - old) / count;
+            // (#16637: through `set_position`, so a vertex that absorbed definitions keeps
+            // covering them)
+            p.set_position(p.position + (new - old) / count);
             p.tol = max2(p.tol, vd_tol);
         }
         Ok(())
@@ -3140,7 +3434,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// Merges `other` into `pv` (`CombineProtoVertex`): the larger tolerance, all of
     /// `other`'s vertex definitions (re-owned, still listed at `other`), the position
     /// averaged over the definitions (`other` contributing its own position once per
-    /// definition), and `other`'s proto edges re-pointed and listed at `pv`.
+    /// definition), and `other`'s proto edges re-pointed and listed at `pv`. Not upstream:
+    /// the uncertainty regions of `other`'s points, and (#16637) `other`'s absorbed points,
+    /// which are listed at `pv` too, the averaged position covering all of them
+    /// ([`ProtoVertex::set_position`]).
     ///
     /// # Errors
     ///
@@ -3154,6 +3451,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let this = self.pv_mut(pv)?;
         this.tol = max2(this.tol, o.tol);
         this.absorbed_proto_edge = this.absorbed_proto_edge || o.absorbed_proto_edge;
+        // Not upstream (#16637): the definitions `other` combined away are this one's
+        // (covered where the position is written below).
+        this.absorb(&o.absorbed_points, !o.absorbed_unbounded);
 
         // the average of all VDs, starting with what is here already
         let mut ave_pos = (this.vertex_defs.len() as f64) * this.position;
@@ -3164,7 +3464,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
         let this = self.pv_mut(pv)?;
         let num_vds = this.vertex_defs.len();
-        this.position = ave_pos / num_vds as f64;
+        this.set_position(ave_pos / num_vds as f64);
 
         // Replace pOtherPV with 'this' in all of pOtherPV's ProtoEdges.
         for &pe in &o.proto_edges {
@@ -3174,6 +3474,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv_mut(pv)?
             .proto_edges
             .extend_from_slice(&o.proto_edges);
+
+        // Not upstream: `pv` now holds `other`'s points, so it keeps their uncertainty
+        // regions ([`ProtoTopologyManager::find_proto_vertex_within`]).
+        for (of, _) in &mut self.regions {
+            if *of == other {
+                *of = pv;
+            }
+        }
         Ok(())
     }
 
@@ -3443,6 +3751,151 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
         Ok((ret_val, min_dist))
+    }
+
+    /// Not upstream: the closest listed proto vertex containing `position` (as
+    /// [`ProtoTopologyManager::find_proto_vertex`]) that is not provably farther from it than
+    /// their combined tolerance: the proto vertex's tolerance plus `tolerance`, the point's
+    /// (zone tolerance), unless a [`DeclaredContact`] holds both. The capture distance only
+    /// says where to look; two points farther apart than their tolerances reach are two
+    /// points (docs/booleans.md, "One point or two"), and a rule that proves them one
+    /// contact point declares it ([`ProtoTopologyManager::set_declared_contacts`]). The
+    /// distance is taken as at least its rounded value shrunk by `γ_4` (three differences,
+    /// three squares, a sum and a root), so only pairs proved apart are refused; a NaN
+    /// distance is apart.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a deleted listed proto vertex.
+    pub fn find_proto_vertex_within(
+        &self,
+        k: &Kernel,
+        position: Point3,
+        tolerance: f64,
+        region: Option<&DeclaredContact>,
+    ) -> Result<Option<ProtoVertexId>> {
+        let point = DeclaredContact::of_point(position, tolerance);
+        let region = region.unwrap_or(&point);
+        let mut ret_val = None;
+        let mut min_dist = BIG_DOUBLE;
+        for &id in &self.pvs {
+            let pv = self.pv(Some(id))?;
+            if !face_p2::proto_vertex_contains_point(self, pv, position) {
+                continue;
+            }
+            let this_dist = face_p2::proto_vertex_distance_to(pv, position);
+            let combined = (pv.tolerance(k) + tolerance) * (1.0 + gamma(1));
+            let excess = this_dist * (1.0 - gamma(4)) - combined;
+            let apart = excess.is_nan() || excess > 0.0;
+            // (the proto vertex's own ball, and the regions of the points it holds)
+            let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
+            let one_region = || {
+                region.overlaps(&own)
+                    || self
+                        .regions
+                        .iter()
+                        .any(|(of, r)| *of == id && region.overlaps(r))
+            };
+            if apart
+                && !one_region()
+                && !self
+                    .declared_contacts
+                    .iter()
+                    .any(|c| c.holds(position) && c.holds(pv.position))
+            {
+                continue;
+            }
+            if this_dist < min_dist {
+                ret_val = Some(id);
+                min_dist = this_dist;
+            }
+        }
+        Ok(ret_val)
+    }
+
+    /// Not upstream: combines every two listed proto vertices that one point does not
+    /// tell apart (docs/booleans.md, "One point or two"). A point is taken in by the
+    /// closest proto vertex its region is not proved apart from
+    /// ([`ProtoTopologyManager::find_proto_vertex_within`]); a proto vertex made after it,
+    /// or a second one its region also reaches, stays another proto vertex although the
+    /// point may lie at either, so the two are not proved two places. After the face pairs'
+    /// proto vertices are made, each noted region is compared with every other listed proto
+    /// vertex within the capture distance of the region's point, as that lookup does (the
+    /// proto vertex's own ball and the regions of the points it holds), and the two are
+    /// combined (as `SplitIntersectingProtoEdges` combines and deletes), until no region
+    /// reaches a second proto vertex. A proto edge between the two becomes a self-loop,
+    /// which [`ProtoTopologyManager::resolve_proto_edge`] drops within its ends' reach or
+    /// refuses.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a deleted listed proto vertex; those of
+    /// [`ProtoTopologyManager::combine_proto_vertex`] and the removal (passed on with
+    /// `pass`, as the combine of `SplitIntersectingProtoEdges`).
+    pub fn combine_proto_vertices_not_proved_apart(
+        &mut self,
+        k: &Kernel,
+        pass: bool,
+    ) -> Result<()> {
+        // sweeps over the regions until one combines nothing (each combine removes a
+        // listed proto vertex, so there are at most as many as proto vertices)
+        let mut combined = true;
+        while combined {
+            combined = false;
+            let mut i = 0;
+            while let Some(&(of, region)) = self.regions.get(i) {
+                let other = if self.pvs.contains(&of) {
+                    self.proto_vertex_not_apart_from(k, of, &region)?
+                } else {
+                    None
+                };
+                let Some(gone) = other else {
+                    i += 1;
+                    continue;
+                };
+                // (the same region is compared again: its proto vertex now holds more)
+                ignore_soft(passed_on(self.combine_proto_vertex(of, gone), pass)?)?;
+                self.pv_mut(gone)?.clear_vertex_definitions();
+                ignore_soft(passed_on(self.remove_proto_vertex(gone), pass)?)?;
+                self.delete_proto_vertex_object(gone);
+                // (a region whose proto vertex is gone without a combine reaches nothing)
+                self.regions.retain(|(at, _)| *at != gone);
+                combined = true;
+            }
+        }
+        Ok(())
+    }
+
+    /// Not upstream: a listed proto vertex other than `of` that `region` is not proved
+    /// apart from, looked for as [`ProtoTopologyManager::find_proto_vertex_within`] does
+    /// (within the capture distance of the region's point; its own ball, or a region of a
+    /// point it holds).
+    fn proto_vertex_not_apart_from(
+        &self,
+        k: &Kernel,
+        of: ProtoVertexId,
+        region: &DeclaredContact,
+    ) -> Result<Option<ProtoVertexId>> {
+        let centre = region.a + (region.b - region.a) * 0.5;
+        for &id in &self.pvs {
+            if id == of {
+                continue;
+            }
+            let pv = self.pv(Some(id))?;
+            if !face_p2::proto_vertex_contains_point(self, pv, centre) {
+                continue;
+            }
+            let own = DeclaredContact::of_point(pv.position, pv.tolerance(k));
+            if region.overlaps(&own)
+                || self
+                    .regions
+                    .iter()
+                    .any(|(at, r)| *at == id && region.overlaps(r))
+            {
+                return Ok(Some(id));
+            }
+        }
+        Ok(None)
     }
 
     /// The first edge definition (of the listed proto edges) whose B-rep `which`
@@ -3988,6 +4441,86 @@ mod tests {
 
         m.delete_proto_edge_object(gone);
         assert!(m.proto_vertex(start).unwrap().proto_edges().is_empty());
+    }
+
+    /// Two segments crossing at an angle of 1e-9 (their determinant rounds to zero, and the
+    /// closest pair the clamped solve finds is 1e-9 apart) are not proved apart, however
+    /// small the radii; parallel segments 1e-6 apart are, with radii of 1e-7; a NaN is
+    /// apart.
+    #[test]
+    fn near_parallel_crossing_regions_are_not_proved_apart() {
+        let seg = |a: Point3, b: Point3, radius: f64| DeclaredContact { a, b, radius };
+        let one = seg(
+            Point3::new(-1.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            1e-12,
+        );
+        let other = seg(
+            Point3::new(-0.5, -1e-9, 0.0),
+            Point3::new(1.5, 1e-9, 0.0),
+            1e-12,
+        );
+        assert!(one.overlaps(&other));
+        assert!(other.overlaps(&one));
+        let parallel = seg(
+            Point3::new(-0.5, 1e-6, 0.0),
+            Point3::new(1.5, 1e-6, 0.0),
+            1e-7,
+        );
+        assert!(!one.overlaps(&parallel));
+        assert!(!parallel.overlaps(&one));
+        let ball = DeclaredContact::of_point(Point3::new(0.3, 2e-7, 0.0), 1e-7);
+        assert!(!one.overlaps(&ball));
+        assert!(DeclaredContact::of_point(Point3::new(0.3, 0.9e-7, 0.0), 1e-7).overlaps(&one));
+        let nan = DeclaredContact::of_point(Point3::new(f64::NAN, 0.0, 0.0), 1.0);
+        assert!(!one.overlaps(&nan));
+    }
+
+    /// A proto vertex combined into another hands over the uncertainty regions of its
+    /// points: a point that only the combined-away proto vertex's region reached is found
+    /// at the survivor after the combine, as before it.
+    #[test]
+    fn a_combined_proto_vertex_keeps_the_regions_of_its_points() {
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let tol = 1e-6;
+        let kept = m.new_proto_vertex(Point3::ZERO, tol).unwrap();
+        let gone = m
+            .new_proto_vertex(Point3::new(1e-4, 0.0, 0.0), tol)
+            .unwrap();
+        m.add_proto_vertex(kept);
+        m.add_proto_vertex(gone);
+        // a crossing at `gone` known only to 4e-4 along x
+        m.note_region(
+            gone,
+            DeclaredContact::of_crossing(
+                Point3::new(1e-4, 0.0, 0.0),
+                tol,
+                Vec3::X,
+                Some((4e-4, 0.0)),
+                1e-3,
+            ),
+        );
+        let query = Point3::new(4.5e-4, 0.0, 0.0);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, query, tol, None).unwrap(),
+            Some(gone)
+        );
+        m.combine_proto_vertex(kept, gone).unwrap();
+        m.remove_proto_vertex(gone).unwrap();
+        m.delete_proto_vertex_object(gone);
+        // (no vertex definitions to average: the survivor keeps its own position)
+        m.proto_vertex_mut(kept).unwrap().set_position(Point3::ZERO);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, query, tol, None).unwrap(),
+            Some(kept)
+        );
+        // a point the region does not reach stays apart
+        let off = Point3::new(4.5e-4, 1e-4, 0.0);
+        assert_eq!(
+            m.find_proto_vertex_within(&k, off, tol, None).unwrap(),
+            None
+        );
     }
 
     #[test]

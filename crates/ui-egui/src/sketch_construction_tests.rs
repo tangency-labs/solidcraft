@@ -268,6 +268,56 @@ fn a_typed_length_and_offset_shift_a_segment() {
     assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Length { .. })));
 }
 
+/// The text painted in the last frame: a value box draws its content as text.
+fn painted_text(h: &Harness) -> Vec<String> {
+    h.shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Text(t) => Some(t.galley.job.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The X-line's Length box starts at infinity (#17052): the ∞ is the box's placeholder, not a
+/// value in it. So the box holds no value until the user types one, a typed size is the whole
+/// value, and clearing the box brings the infinity back.
+#[test]
+fn a_construction_length_box_holds_the_infinity_as_its_placeholder() {
+    let mut h = sketch();
+    h.app.preferences.sketch_construction_lines = true;
+    h.settle();
+    h.step(&json!({"click":{"handle":"panel:SKETCH:CREATE"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"create_family:Construction Line"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"dropdown:sketch.construction_line.horizontal"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!(tool.dims[0].label, "Length");
+    assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("", false), "the ∞ is a placeholder, not a value in the box");
+    assert!(painted_text(&h).iter().any(|t| t.contains('\u{221e}')), "the box shows the infinity");
+
+    // A typed size is the whole value: no ∞ keeps it from parsing.
+    digit(&mut h, '2');
+    digit(&mut h, '5');
+    h.frames(2);
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("25", true), "the typed size is the whole value");
+
+    // Clearing it: the box is the infinite line again, and shows the ∞ it started with.
+    for _ in 0..3 {
+        h.step(&json!({"key":"Backspace"})).unwrap();
+        h.frames(2);
+    }
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!(tool.dims[0].value, "", "a cleared box holds no value");
+    assert!(painted_text(&h).iter().any(|t| t.contains('\u{221e}')), "the cleared box shows the infinity again");
+}
+
 #[test]
 fn construction_family_menu_and_preference() {
     for enabled in [true, false] {
@@ -319,7 +369,7 @@ fn a_waiting_length_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
         let tool = h.app.tool.as_ref().unwrap();
         let labels: Vec<_> = tool.dims.iter().map(|b| b.label).collect();
         assert_eq!(labels[0], "Length", "{id}");
-        assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("\u{221e}", false), "{id}");
+        assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("", false), "{id}: the ∞ is a placeholder, not a value");
         if id.ends_with("horizontal") {
             assert_eq!(labels, vec!["Length", "Offset"], "{id}");
         } else {

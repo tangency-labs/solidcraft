@@ -226,7 +226,9 @@ pub(crate) fn immediate_wheel(
     for event in &input.events {
         let egui::Event::MouseWheel { unit, delta, modifiers, phase, source, .. } = event else { continue };
         let modifier_zoom = claims_scroll(*modifiers, zoom_modifier);
-        if !modifier_zoom && modifiers.matches_any(options.zoom_modifier) {
+        // A gesture always ends, whatever keys are down by then (#16460).
+        let closes = matches!(phase, egui::TouchPhase::End | egui::TouchPhase::Cancel);
+        if !modifier_zoom && !closes && modifiers.matches_any(options.zoom_modifier) {
             continue;
         }
         out.modifier_scroll |= modifier_zoom;
@@ -420,11 +422,21 @@ pub(crate) fn axis_wheel(ctx: &egui::Context, page_height: f32) -> (f32, f32, f3
 }
 
 /// Give this frame's wheel to the widget under the pointer that uses it itself (a value field
-/// stepping its number, `value_step`): no scroll area or camera under it moves as well.
+/// stepping its number, `value_step`): no scroll area or camera under it moves as well. A
+/// gesture's `Start` and `End` stay, with nothing to scroll: the camera follows the bracket
+/// around a trackpad gesture, and an `End` taken here would leave the view navigating, with
+/// every pick off, until the next gesture (#16460).
 pub(crate) fn claim_wheel(ctx: &egui::Context) {
     ctx.input_mut(|i| {
         i.smooth_scroll_delta = egui::Vec2::ZERO;
-        i.events.retain(|e| !matches!(e, egui::Event::MouseWheel { .. }));
+        i.events.retain_mut(|e| match e {
+            egui::Event::MouseWheel { phase: egui::TouchPhase::Move, .. } => false,
+            egui::Event::MouseWheel { delta, .. } => {
+                *delta = egui::Vec2::ZERO;
+                true
+            }
+            _ => true,
+        });
     });
 }
 
@@ -467,7 +479,10 @@ fn zoom_point(app: &mut SolveApp, rect: Rect, point: Option<Pos2>, surface: bool
         let (o, d) = proj.ray(p);
         let n = app.cam.back();
         let den = d.dot(n);
-        if den.abs() > 1e-9 { o + d * ((app.cam.target - o).dot(n) / den) } else { app.cam.target }
+        // The point on the cursor's ray at the target's depth, never behind the eye or far off: a ray
+        // nearly parallel to that plane would otherwise send the anchor, and the target, far away (#16628).
+        let t = (app.cam.target - o).dot(n) / den;
+        if den.abs() > 1e-9 && t.is_finite() && (t >= 0.0 || proj.cam.fov <= 0.0) { o + d * t } else { app.cam.target }
     })
 }
 
@@ -550,7 +565,7 @@ fn zoom_key(key: egui::Key) -> Option<bool> {
 }
 
 /// View keys (#1541): the arrows turn the view 15° (with Shift a quarter turn, as the navigation
-/// cube's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
+/// navigator's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
 /// selected face, plane or sketch. PageUp/PageDown and +/− zoom (#717). Held longer than a tap,
 /// an arrow keeps turning the view at a steady rate (`step_key_hold`); the operating system's key
 /// repeat does nothing. Not while a menu, the command box or a focused widget has the keys.
@@ -560,6 +575,16 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     let menu_open = view_keys_blocked(app, ctx, None);
     let ctrl = mods.command || mods.ctrl;
     if mods.alt || menu_open {
+        return false;
+    }
+    // The Browser has the keyboard (its last click was on a row): plain arrows move through its
+    // tree instead of turning the view (#17931).
+    if app.preferences.browser_arrow_keys
+        && matches!(key, Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown)
+        && !ctrl
+        && !mods.shift
+        && app.tree.content.browser_focused()
+    {
         return false;
     }
     let result = crate::render_workspace::result_active(app);
@@ -673,7 +698,7 @@ pub(crate) struct CameraInput {
     pub primary_pressed: bool,
     /// The pointer is over this view and available for canvas input.
     pub inside: bool,
-    /// The axis view or navigation cube's rectangle.
+    /// The axis view or navigator's rectangle.
     pub axes: Rect,
     pub pinch: f32,
     pub pan: egui::Vec2,
@@ -690,6 +715,24 @@ pub(crate) struct CameraInput {
 /// selectable, so a press that would start a selection navigates as on empty space; with
 /// `caps.orbit` off, bindings that orbit do nothing and pan and zoom work as usual.
 pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::Response, caps: NavCaps) -> CameraInput {
+    let input = handle_input(app, ui, rect, resp, caps);
+    hold_perspective_distance(app);
+    input
+}
+
+/// The one place a perspective eye is kept off the target, whichever input moved the camera (#16628).
+pub(crate) fn hold_perspective_distance(app: &mut SolveApp) {
+    if app.view_fov() > 0.0 {
+        let min = crate::viewport::min_zoom_distance(app);
+        let mut cam = app.cam;
+        cam.fov = app.view_fov();
+        cam.hold_min_distance(min);
+        app.cam.target = cam.target;
+        app.cam.distance = cam.distance;
+    }
+}
+
+fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::Response, caps: NavCaps) -> CameraInput {
     // A framed Render image and its gray letterbox share input ownership, but
     // camera deltas and anchors use the exact image projection's pixel scale.
     let input_rect = rect;
@@ -1413,8 +1456,8 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     if app.preferences.free_orbit {
         target = snapped_quarter_roll(target, free);
     }
-    // The cursor, origin and view-centre pivots stay still; the axis gizmo has no pivot (it orbits about the
-    // view centre, see `axis_view`).
+    // The cursor, origin and view-centre pivots stay still. The axis gizmo uses the origin when selected;
+    // otherwise it orbits about the camera target, see `axis_view`.
     let pivot = if around_cursor {
         match app.preferences.orbit_around {
             crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
@@ -1475,21 +1518,47 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
         return;
     }
     // The drag's whole turn so far, applied to the camera it began with: the view depends on
-    // where the pointer is, not on the path it took, so fast or erratic drags (a pitch held at
-    // straight up or down for a while, many tiny steps) can't drift. Anything else that moves
+    // where the pointer is, not on the path it took (once the view is upright; while it stands
+    // up, each step turns through the roll it has then), so fast or erratic drags (a pitch held
+    // at straight up or down for a while, many tiny steps) can't drift. Anything else that moves
     // the camera meanwhile (a wheel zoom, a new pivot) starts the sum again from there.
     let from = match app.viewport.orbit_from {
         Some(f) if f.last == app.cam && f.pivot == pivot => f,
         _ => OrbitFrom { start: app.cam, dx: 0.0, dy: 0.0, pivot, last: app.cam },
     };
-    let (dx, dy) = (from.dx + dx, from.dy + dy);
+    if !app.preferences.upright_orbit_unrolls {
+        // Off: a rolled view keeps its roll and turns about the world's up axis, as before.
+        let (dx, dy) = (from.dx + dx, from.dy + dy);
+        app.cam = from.start;
+        match pivot {
+            Some(p) => app.cam.orbit_about(dx, dy, p),
+            None => app.cam.orbit(dx, dy),
+        }
+        app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
+        return;
+    }
+    // A rolled view (facing a sketch on a tilted plane rolls it to square the sketch's axes)
+    // stands upright again as the pointer moves: the upright orbit turns about the world's up
+    // axis, and kept rolled (upside down, say) the model turned against the pointer and never
+    // stood up again. Each step turns the way it goes on screen through the roll the view has,
+    // and takes the roll a step nearer upright at a steady rate, so short strokes add up as one
+    // long drag does.
+    let roll = (app.cam.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    let (sin, cos) = roll.sin_cos();
+    let unroll = (dx.hypot(dy) * std::f64::consts::PI / UNROLL_TRAVEL).min(roll.abs());
+    let (dx, dy) = (from.dx + dx * cos + dy * sin, from.dy + dy * cos - dx * sin);
     app.cam = from.start;
-    match pivot {
-        Some(p) => app.cam.orbit_about(dx, dy, p),
-        None => app.cam.orbit(dx, dy),
+    let keep = pivot.map(|p| (p, app.cam.frame_coords(p)));
+    app.cam.orbit(dx, dy);
+    app.cam.roll = roll - roll.signum() * unroll;
+    if let Some((p, coords)) = keep {
+        app.cam.place(p, coords);
     }
     app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
 }
+
+/// How far (points) the pointer goes in an upright orbit while an upside-down view stands upright.
+const UNROLL_TRAVEL: f64 = 240.0;
 
 /// The point an orbit turns about, by Orbit around: the view's centre ([`view_middle`]), the world origin, or the
 /// model point under `at` when the turn began. `kept` is what the turn began with: its point and, for the view's
@@ -1595,8 +1664,8 @@ pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
     p.is_finite().then_some(p)
 }
 
-/// An orbit drag so far: the camera it began with, the pointer's total motion since, the pivot
-/// and the camera that produced.
+/// An orbit drag so far: the camera it began with, its total turn since (the pointer's motion,
+/// taken through the view's roll), the pivot and the camera that produced.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OrbitFrom {
     start: Camera,
@@ -1616,6 +1685,10 @@ pub(crate) fn orbit_about(app: &mut SolveApp, _rect: egui::Rect, dx: f64, dy: f6
 fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
     if !app.preferences.free_orbit {
         app.cam.orbit(dx, dy);
+    } else if app.preferences.free_orbit_upright && app.preferences.upright_orbit_unrolls {
+        // The same preference as the upright orbit's: the pointer is read through the view's
+        // roll, so a view rolled on its side still follows it. Free orbit keeps the roll.
+        app.cam.orbit_unlimited_through_roll(dx, dy);
     } else if app.preferences.free_orbit_upright {
         app.cam.orbit_unlimited(dx, dy);
     } else {
@@ -1722,6 +1795,63 @@ mod tests {
         input.events = vec![event(egui::TouchPhase::End, egui::MouseWheelSource::Trackpad)];
         super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
         assert!(!gesture && !bracketed, "the End closes the gesture and its bracket");
+    }
+
+    /// #16460: a gesture's `End` closes it even when a widget took the frame's wheel or Ctrl
+    /// is held by then; otherwise the view stays navigating and nothing can be picked.
+    #[test]
+    fn a_trackpad_gesture_ends_after_a_claimed_wheel_or_with_ctrl_held() {
+        let options = egui::InputOptions::default();
+        let event = |phase, modifiers| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(8.0, 12.0),
+            modifiers,
+            phase,
+        };
+        for (end_mods, claimed) in [(egui::Modifiers::NONE, true), (egui::Modifiers { ctrl: true, command: true, ..Default::default() }, false)] {
+            let mut gesture = false;
+            let mut bracketed = false;
+            let mut coast = super::TrackpadCoast::default();
+            let ctx = egui::Context::default();
+            let mut input = egui::InputState::default();
+            input.events = vec![event(egui::TouchPhase::Start, egui::Modifiers::NONE)];
+            super::immediate_wheel(&input, options, 600.0, &mut gesture, &mut bracketed, &mut coast, crate::prefs::TrackpadScroll::ShiftOrbits, None);
+            assert!(gesture && bracketed);
+            let raw = egui::RawInput {
+                events: vec![event(egui::TouchPhase::Move, end_mods), event(egui::TouchPhase::End, end_mods)],
+                ..Default::default()
+            };
+            let mut events = Vec::new();
+            let _ = ctx.run_ui(raw, |ui| {
+                if claimed {
+                    super::claim_wheel(ui.ctx());
+                }
+                events = ui.input(|i| i.events.clone());
+            });
+            if claimed {
+                assert!(
+                    events
+                        .iter()
+                        .all(|e| matches!(e, egui::Event::MouseWheel { delta, phase: egui::TouchPhase::End, .. } if *delta == egui::Vec2::ZERO)),
+                    "{events:?}"
+                );
+            }
+            let mut input = egui::InputState::default();
+            input.events = events;
+            let raw = super::immediate_wheel(
+                &input,
+                options,
+                600.0,
+                &mut gesture,
+                &mut bracketed,
+                &mut coast,
+                crate::prefs::TrackpadScroll::ShiftOrbits,
+                None,
+            );
+            assert!(!gesture && !bracketed, "the End closes the gesture (claimed: {claimed})");
+            assert_eq!(raw.pan, egui::Vec2::ZERO, "a claimed wheel moves nothing");
+        }
     }
 
     #[test]
@@ -1875,6 +2005,140 @@ mod tests {
         }
     }
 
+    /// Free orbit with the upright turn on a rolled view (#12458): upright, upside down or on its
+    /// side, the near side of the model goes the way the pointer does, and the roll is kept.
+    #[test]
+    fn free_orbit_upright_follows_the_pointer_on_a_rolled_view() {
+        use super::*;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        for roll in [0.0, std::f64::consts::PI, std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2, 0.7, -2.3] {
+            for (dx, dy) in [(6.0, 0.0), (-6.0, 0.0), (0.0, 6.0), (0.0, -6.0), (4.0, 3.0)] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                app.preferences.orbit_around = OrbitAround::ViewCentre;
+                app.preferences.free_orbit = true;
+                app.preferences.free_orbit_upright = true;
+                app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+                let near = app.cam.target + app.cam.back() * 10.0;
+                orbit(&mut app, rect, dx, dy, None);
+                // Screen right is the camera's right, screen down is against its up.
+                let moved = app.cam.frame_coords(near);
+                let (mx, my) = (moved.x, -moved.y);
+                let along = (mx * dx + my * dy) / (mx.hypot(my) * dx.hypot(dy));
+                // A turn about the up axis moves the near side less than a tilt does (by the cosine of
+                // the elevation), so a slanted drag is followed closely, not exactly.
+                assert!(along > 0.95, "roll {roll}, drag ({dx}, {dy}): the near side went ({mx}, {my})");
+                let kept = (app.cam.roll - roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                assert!(kept.abs() < 1e-6, "roll {roll} became {}", app.cam.roll);
+            }
+        }
+        // Off, free orbit's upright turn is the one before, rolled or not.
+        for roll in [0.0, std::f64::consts::FRAC_PI_2, 0.7] {
+            let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+            app.preferences.orbit_around = OrbitAround::ViewCentre;
+            app.preferences.free_orbit = true;
+            app.preferences.free_orbit_upright = true;
+            app.preferences.upright_orbit_unrolls = false;
+            app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+            let mut expected = app.cam;
+            expected.orbit_unlimited(5.0, -3.0);
+            orbit(&mut app, rect, 5.0, -3.0, None);
+            assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.roll), (expected.yaw, expected.pitch, expected.roll), "roll {roll}");
+        }
+    }
+
+    /// The upright orbit on a rolled view (#12458): the model turns the way the pointer goes on
+    /// screen, the roll eases to zero within 240 points of travel in one drag or many strokes, an
+    /// unrolled view orbits as before, and a Look At sketch view that comes out upside down
+    /// stands upright and can then be turned to look from above.
+    #[test]
+    fn upright_orbit_from_a_rolled_view_turns_with_the_pointer_and_stands_up() {
+        use super::*;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        // Where a point in front of the view centre goes on screen for a short drag right (on the
+        // view's axis, so the roll easing off does not move it).
+        let first_step = |roll: f64| {
+            let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+            app.preferences.orbit_around = OrbitAround::ViewCentre;
+            app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+            let p = app.cam.target + app.cam.back() * 10.0;
+            let before = app.cam.to_screen(p, 800.0, 600.0, 100.0);
+            orbit(&mut app, rect, 4.0, 0.0, None);
+            let after = app.cam.to_screen(p, 800.0, 600.0, 100.0);
+            match (before, after) {
+                (Some(b), Some(a)) => (a.0 - b.0, a.1 - b.1),
+                _ => panic!("point left the screen"),
+            }
+        };
+        let (upright, rolled) = (first_step(0.0), first_step(std::f64::consts::PI));
+        let dot = (upright.0 * rolled.0 + upright.1 * rolled.1) / (upright.0.hypot(upright.1) * rolled.0.hypot(rolled.1));
+        assert!(dot > 0.99, "a rolled view turns against the pointer: {upright:?} vs {rolled:?}");
+        // One long drag, or many short strokes (each a new drag), stand it up within 240 points.
+        for strokes in [false, true] {
+            for roll in [std::f64::consts::PI, -2.0, 0.9] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                app.preferences.orbit_around = OrbitAround::ViewCentre;
+                app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+                for _ in 0..16 {
+                    if strokes {
+                        app.viewport.orbit_from = None;
+                    }
+                    orbit(&mut app, rect, 15.0, 0.0, None);
+                }
+                assert!(app.cam.roll.abs() < 1e-9, "roll {roll} stays {} (strokes {strokes})", app.cam.roll);
+                assert!(app.cam.up_dir().z > 0.0);
+            }
+        }
+        // An unrolled view orbits exactly as before.
+        let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+        app.preferences.orbit_around = OrbitAround::ViewCentre;
+        app.cam = Camera { yaw: 0.4, pitch: 0.5, ..Default::default() };
+        let mut expected = app.cam;
+        expected.orbit(30.0, -20.0);
+        orbit(&mut app, rect, 10.0, -5.0, None);
+        orbit(&mut app, rect, 20.0, -15.0, None);
+        assert!(app.cam.back().dist(expected.back()) < 1e-9);
+        assert_eq!(app.cam.roll, 0.0);
+        // Look At a sketch on XY turned -130° about X comes out upside down (#12458): a drag up
+        // and a little sideways stands it upright, and dragging down then looks from above.
+        let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+        app.preferences.orbit_around = OrbitAround::ViewCentre;
+        let (sin, cos) = (-130f64).to_radians().sin_cos();
+        let (x, y) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, cos, sin));
+        app.cam = crate::dialogs::square_sketch_axes(app.cam.looking_from(x.cross(y)), x, y);
+        assert!(app.cam.roll.abs() > 3.0, "the sketch view is not upside down: roll {}", app.cam.roll);
+        for (dx, dy, steps) in [(4.0, -16.0, 16), (2.0, 16.0, 10), (0.0, 16.0, 20)] {
+            for _ in 0..steps {
+                orbit(&mut app, rect, dx, dy, None);
+            }
+        }
+        assert!(app.cam.roll.abs() < 1e-9, "the sketch view stays rolled: {}", app.cam.roll);
+        assert!(app.cam.up_dir().z > 0.0 && app.cam.pitch > 0.5, "not looking from above: pitch {}", app.cam.pitch);
+        // Off, the upright orbit is the one before: a rolled view keeps its roll and turns about
+        // the world's up axis, about the view centre, the origin or the point under the cursor
+        // alike, in orthographic and perspective.
+        let cursor = Vec3::new(5.0, -1.0, 2.0);
+        for fov in [0.0, 0.6] {
+            for around in [OrbitAround::ViewCentre, OrbitAround::Origin, OrbitAround::Cursor] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                assert!(app.preferences.upright_orbit_unrolls, "standing a rolled view up is the default");
+                app.preferences.upright_orbit_unrolls = false;
+                app.preferences.orbit_around = around;
+                app.viewport.orbit_pivot = Some(cursor);
+                app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.4, pitch: 0.5, roll: std::f64::consts::PI, fov, ..Default::default() };
+                let mut expected = app.cam;
+                match around {
+                    OrbitAround::ViewCentre => expected.orbit(30.0, -20.0),
+                    OrbitAround::Origin => expected.orbit_about(30.0, -20.0, Vec3::ZERO),
+                    OrbitAround::Cursor => expected.orbit_about(30.0, -20.0, cursor),
+                }
+                orbit(&mut app, rect, 10.0, -5.0, None);
+                orbit(&mut app, rect, 20.0, -15.0, None);
+                assert_eq!(app.cam, expected, "the old upright orbit changed ({around:?}, fov {fov})");
+                assert_eq!(app.cam.roll, std::f64::consts::PI);
+            }
+        }
+    }
+
     #[test]
     fn clamped_drag_stays_reversible_and_restarts_after_free_orbit() {
         use super::*;
@@ -1882,7 +2146,8 @@ mod tests {
         for fov in [0.0, 0.6] {
             let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
             app.preferences.orbit_around = OrbitAround::Origin;
-            app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), pitch: 1.4, roll: 0.7, fov, ..Default::default() };
+            // Unrolled: a rolled view stands upright as the drag goes, so it does not come back rolled.
+            app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), pitch: 1.4, fov, ..Default::default() };
             let start = app.cam;
             for (dx, dy) in [(120.0, 400.0), (90.0, -200.0), (-210.0, -200.0)] {
                 orbit(&mut app, rect, dx, dy, None);
@@ -1892,12 +2157,14 @@ mod tests {
             app.preferences.free_orbit = true;
             orbit(&mut app, rect, 0.0, 80.0, None);
             assert!((app.cam.back().dot(start.back()) - 0.64_f64.cos()).abs() < 1e-9);
+            // Free orbit left the view rolled: the upright drag that follows turns the way the
+            // pointer goes on screen, through that roll.
             let mut next = app.cam;
-            next.orbit_about(10.0, 20.0, Vec3::ZERO);
+            let (sin, cos) = app.cam.roll.sin_cos();
+            next.orbit_about(10.0 * cos + 20.0 * sin, 20.0 * cos - 10.0 * sin, Vec3::ZERO);
             app.preferences.free_orbit = false;
             orbit(&mut app, rect, 10.0, 20.0, None);
             assert!(app.cam.back().dist(next.back()) < 1e-9);
-            assert!(app.cam.target.dist(next.target) < 1e-9);
         }
     }
 
@@ -3343,6 +3610,45 @@ mod view_key_tests {
         assert!(crate::keymap::RESERVED.contains(&crate::keymap::key_name(egui::Key::Num8, egui::Modifiers::COMMAND).as_str()));
     }
 
+    /// #17931: with the Browser holding the keyboard (its last click was on a row) the plain arrows
+    /// do not turn the view, so the tree can take them; a click in the view hands them back, and
+    /// the `browser_arrow_keys` preference turns this off.
+    #[test]
+    fn arrows_leave_the_view_alone_while_the_browser_has_focus() {
+        let mut h = Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "base": [30, 0, 0]})).unwrap();
+        h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.preferences.browser_arrow_keys, "on by default");
+        assert!(!h.app.tree.content.browser_focused(), "nothing is focused yet");
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() > 0.1, "the view turns before the Browser has focus: {yaw}");
+        h.step(&json!({"click": {"handle": "row:Body1"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.tree.content.browser_focused(), "a click on a row gives the Browser the keyboard");
+        let (yaw, pitch) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() < 1e-9 && pitch.abs() < 1e-9, "the view does not turn: {yaw} {pitch}");
+        for _ in 0..2 {
+            h.step(&json!({"key": "ArrowDown"})).unwrap();
+            h.frames(2);
+        }
+        let selected = format!("{:?}", h.app.session.selection);
+        assert!(selected.contains("Body2"), "Down moves the selection through the rows: {selected}");
+        let (_, pitch) = turned(&mut h, json!({"key": "ArrowUp"}));
+        assert!(pitch.abs() < 1e-9, "nor does Up: {pitch}");
+        h.app.preferences.browser_arrow_keys = false;
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() > 0.1, "with the preference off the arrows turn the view again: {yaw}");
+        h.app.preferences.browser_arrow_keys = true;
+        h.step(&json!({"click": {"world": [5, 5, 10]}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.tree.content.browser_focused(), "a click in the view takes the keyboard back");
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(yaw.abs() > 0.1, "and the arrows turn the view: {yaw}");
+    }
+
     /// #16601: in an orthographic view, zooming to the cursor and orbiting around it never move the target along
     /// the view direction, and a pick still finds the model when the target has been placed far along it.
     #[test]
@@ -3377,6 +3683,64 @@ mod view_key_tests {
             assert!(proj.cam.fov <= 0.0, "shift {shift}: the pick must use the orthographic ray");
             let hits = pick_cached(&mut h.app, &proj, rect.center());
             assert!(hits.iter().any(|hit| matches!(hit, Hit::Face { .. })), "shift {shift}: no pick");
+        }
+    }
+
+    /// #16628: in perspective, zooming in never collapses the eye onto the target, and the target stays
+    /// near the model, for a run of wheel steps at the centre and for a seeded mix of orbit, scroll and pinch.
+    #[test]
+    fn perspective_zoom_in_keeps_a_minimum_distance_and_the_model_in_view() {
+        use super::*;
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
+        h.app.ui.perspective = true;
+        h.app.preferences.zoom_to_cursor = true;
+        h.app.preferences.zoom_stop_at_model = false;
+        h.settle();
+        let rect = h.app.viewport.rect.expect("the viewport");
+        let min = crate::viewport::min_zoom_distance(&h.app);
+        let inside = |app: &SolveApp| app.cam.target.dist(Vec3::ZERO) < 60.0 + 3.0 * app.cam.distance.max(0.0);
+        let centre = rect.center();
+        h.app.cam = Camera::default();
+        for i in 0..35 {
+            h.call("ui.scroll", json!({"x": centre.x, "y": centre.y, "delta": 120.0}));
+            h.settle();
+            let (d, t) = (h.app.cam.distance, h.app.cam.target);
+            assert!(d >= min - 1e-9, "step {i}: distance {d} under the bound {min}");
+            assert!(t.dist(Vec3::ZERO) < 60.0, "step {i}: the target drifted to {t:?}");
+        }
+        assert!(h.app.cam.distance < 100.0, "the wheel zoomed in: {}", h.app.cam.distance);
+        // A seeded mix of orbit, scroll and pinch keeps both.
+        let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        h.app.cam = Camera::default();
+        for i in 0..200 {
+            let at = pos2(rect.left() + 40.0 + next() as f32 * (rect.width() - 80.0), rect.top() + 40.0 + next() as f32 * (rect.height() - 80.0));
+            match (next() * 3.0) as u32 {
+                0 => {
+                    h.call("ui.drag", json!({"x0": at.x, "y0": at.y, "x1": at.x + 60.0 * (next() as f32 - 0.5), "y1": at.y + 60.0 * (next() as f32 - 0.5), "steps": 4, "button": "middle"}));
+                }
+                1 => {
+                    h.call("ui.scroll", json!({"x": at.x, "y": at.y, "delta": 120.0 * (1.0 + 3.0 * next())}));
+                }
+                _ => {
+                    let f = 1.0 + 0.5 * next();
+                    h.app.cam.zoom_at(1.0 / f, Some(h.app.cam.target));
+                    hold_perspective_distance(&mut h.app);
+                }
+            }
+            h.settle();
+            let (d, t) = (h.app.cam.distance, h.app.cam.target);
+            assert!(d >= min - 1e-9, "step {i}: distance {d} under the bound {min}");
+            assert!(t.is_finite() && inside(&h.app), "step {i}: the target drifted to {t:?}");
+            let proj = projection(&h.app, rect);
+            let on_screen = proj.to_screen(Vec3::ZERO);
+            assert!(on_screen.is_some() || d < 1.0 || h.app.cam.target.dist(Vec3::ZERO) < 40.0, "step {i}: the model left the frustum");
         }
     }
 
@@ -3539,7 +3903,7 @@ mod view_key_tests {
         assert!((turn(before, h.app.cam.yaw).abs() - 30f64.to_radians()).abs() < 1e-6);
     }
 
-    /// Ctrl+1…7 run Front … Isometric View by default, turning the view as the view cube's faces
+    /// Ctrl+1…7 run Front … Isometric View by default, turning the view as the navigator's faces
     /// do; the keys are ordinary shortcuts, so one can be moved to another command and back.
     #[test]
     fn ctrl_digits_turn_to_the_standard_views_and_can_be_rebound() {
@@ -3570,9 +3934,9 @@ mod view_key_tests {
             assert!(looks_from(&mut h, digit, view), "Ctrl+{digit} turns to {view:?}: {:?}", h.app.cam.back());
         }
         // Top moves to Ctrl+T; Ctrl+5 then does nothing, Ctrl+T turns to the top.
-        crate::keymap::bind(&mut h.app, "view.top", "Ctrl+T", false).unwrap();
+        crate::keymap::bind(&mut h.app, "view.top", "Ctrl+J", false).unwrap();
         assert!(!looks_from(&mut h, "5", StandardView::Top), "Ctrl+5 no longer turns to the top");
-        assert!(looks_from(&mut h, "T", StandardView::Top), "Ctrl+T does");
+        assert!(looks_from(&mut h, "J", StandardView::Top), "Ctrl+J does");
     }
 
     /// #1886: Ctrl+8 looks straight at the sketch; pressed again while the view faces it, it

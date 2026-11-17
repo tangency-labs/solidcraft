@@ -604,6 +604,10 @@ pub struct Joint {
     /// Distance from A's frame to B's along z, and a turn about it (radians).
     #[serde(default)]
     pub offset: f64,
+    /// Offsets along A's frame x and y, applied before the joint's motion.
+    /// Older designs keep their saved A frame and have no additional lateral offset.
+    #[serde(default)]
+    pub offset_xy: [f64; 2],
     #[serde(default)]
     pub angle: f64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -626,6 +630,18 @@ impl Joint {
     /// further than the joint needs: a relation, or any joint made as an assembly constraint.
     pub fn starts_where_it_is(&self) -> bool {
         self.kind.is_relation() || self.constraint.is_some()
+    }
+
+    /// A's attachment frame with its lateral offsets, in the frame's coordinate space.
+    /// Applying the offset here keeps its origin fixed while a revolute joint turns.
+    pub fn offset_frame_a(&self, frame: Mat) -> Mat {
+        if self.offset_xy == [0.0; 2] {
+            return frame;
+        }
+        let mut offset = IDENTITY;
+        offset[3][0] = self.offset_xy[0];
+        offset[3][1] = self.offset_xy[1];
+        mat_mul(&frame, &offset)
     }
 }
 
@@ -1186,6 +1202,45 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
         let on_part = resolve_origin(doc, st, &JointOrigin::new(o.part(), o.snap.clone()))?;
         return Ok(mat_mul(&inside_transform(doc, o)?, &on_part));
     }
+    // A face, edge or round face is found by searching the bodies' triangles, and its frame does
+    // not depend on the joint's values: kept for as long as the component's bodies are the same.
+    if matches!(o.snap, Snap::FaceCenter { .. } | Snap::Edge { .. } | Snap::CircleCenter { .. }) {
+        let kept = origin_key(doc, st, o);
+        if let Some((key, bodies)) = &kept
+            && let Some(found) = st.origin_frames.get(key, bodies)
+        {
+            return Ok(found);
+        }
+        let made = resolve_snap(doc, st, o)?;
+        st.origin_frames.note_resolved();
+        if let Some((key, bodies)) = kept {
+            st.origin_frames.put(key, made, bodies);
+        }
+        return Ok(made);
+    }
+    resolve_snap(doc, st, o)
+}
+
+/// What [`ModelState::origin_frames`] keys an origin by: its definition, its component, and each
+/// body of the component's identity and offset, with the bodies themselves to check a hit
+/// against. `None` when a body has no identity to key by.
+fn origin_key(doc: &Document, st: &ModelState, o: &JointOrigin) -> Option<((String, u64, Vec<u64>), Vec<solidcraft_kernel::Body>)> {
+    use std::hash::{Hash, Hasher};
+    let comp = component_of(doc, o.part()).ok()?;
+    let (mut bodies, mut kept) = (Vec::new(), Vec::new());
+    for b in component_bodies(doc, st, comp) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        b.name.hash(&mut h);
+        doc.model_body_offset(b).iter().flat_map(|m| m.iter().flatten()).for_each(|v| v.to_bits().hash(&mut h));
+        bodies.push(b.geometry_key()?);
+        bodies.push(h.finish());
+        kept.push(b.body.clone());
+    }
+    Some(((format!("{:?}", o.snap), comp, bodies), kept))
+}
+
+/// [`resolve_origin`] of an origin on one part, from the bodies.
+fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
     let bad = || DocError::Invalid("joint origin: degenerate frame".into());
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
@@ -1218,7 +1273,7 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
             // planes, a placement's datum) and is mapped into the side's frame — through the
             // side's exact occurrence, not `resolve_datum_in`'s first-placement mapping.
             let pl = match plane.as_ref() {
-                PlaneRef::Construction { feature } => {
+                PlaneRef::Construction { feature, .. } => {
                     if doc.feature(feature.0).map(|f| f.component) != Some(comp) {
                         return Err(DocError::Unknown(format!("construction plane is not on this component (occurrence {})", o.occurrence)));
                     }
@@ -2592,6 +2647,10 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
     };
     let params = Params::new(doc);
     for j in &joints {
+        if !j.offset_xy.iter().all(|v| v.is_finite() && v.abs() < MAX_EXPR_VALUE) {
+            sol.errors.push((j.id, j.name.clone(), "joint lateral offsets must be finite and smaller than 1e9 mm".into()));
+            continue;
+        }
         // A joint whose expressions can't be worked out (a parameter gone) is left out rather
         // than placed by numbers that no longer say what it was defined by.
         if !j.exprs.is_empty()
@@ -2602,7 +2661,7 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
         }
         match (resolve(&j.a), resolve(&j.b)) {
             (Ok(fa), Ok(fb)) => {
-                frames.insert(j.id, JointFrames::new(fa, fb));
+                frames.insert(j.id, JointFrames::new(j.offset_frame_a(fa), fb));
             }
             (Err(e), _) | (_, Err(e)) => {
                 sol.errors.push((j.id, j.name.clone(), e.to_string()));
@@ -2856,6 +2915,7 @@ pub use relations::relation_values;
 /// 0, spin B a half turn about their shared normal.
 pub fn least_turn_angle(doc: &Document, st: &ModelState, j: &Joint) -> f64 {
     let (Ok(fa), Ok(fb)) = (resolve_origin(doc, st, &j.a), resolve_origin(doc, st, &j.b)) else { return 0.0 };
+    let fa = j.offset_frame_a(fa);
     let (ta, tb) = (occurrence_world(doc, j.a.occurrence), occurrence_world(doc, j.b.occurrence));
     let mut q = j.values.clone();
     q.resize(j.kind.dofs().len(), 0.0);
@@ -3058,6 +3118,7 @@ mod tests {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                offset_xy: [0.0; 2],
                 captured: None,
                 constraint: None,
             })
@@ -3259,8 +3320,10 @@ mod tests {
         // 3. Construction plane by feature (PlaneRef::Construction: the name-overload of
         //    PlaneRef::Origin is gone — a construction plane is a feature, bound to its
         //    component).
-        let o_wp =
-            JointOrigin::new(0, Snap::Plane { plane: Box::new(PlaneRef::Construction { feature: plane_feature.into() }), pick: None, x: None });
+        let o_wp = JointOrigin::new(
+            0,
+            Snap::Plane { plane: Box::new(PlaneRef::Construction { feature: plane_feature.into(), placement: None }), pick: None, x: None },
+        );
         let m_wp = resolve_origin(&doc, &st, &o_wp).unwrap();
         assert_eq!(apply_point(&m_wp, Vec3::ZERO), Vec3::new(0.0, 0.0, 15.0));
         assert_eq!(apply_vector(&m_wp, Vec3::Z), Vec3::Z);

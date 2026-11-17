@@ -397,6 +397,71 @@ fn a_circles_forms_have_its_curvature() {
     }
 }
 
+/// An arc that starts inside a quarter and ends past the fourth quarter line on from it needs five
+/// quarters of its frame's grid, which whole run a quarter past one turn. Its form is cut to it:
+/// it starts and ends where the arc does, its joints between are the grid's quarter lines, and it
+/// has the label's point at every angle's form parameter, as a form on whole quarters has. An arc
+/// that needs four keeps them whole.
+#[test]
+fn an_arcs_form_of_five_quarters_is_cut_to_the_arc() {
+    let f = tilted();
+    let circle = Curve::Circle {
+        frame: f.clone(),
+        radius: 7.0,
+    };
+    let ellipse = Curve::Ellipse {
+        frame: f,
+        radii: [7.0, 3.0],
+    };
+    // Across the x axis; a whole turn from inside a quarter; ending 0.02 degrees past a quarter
+    // line (an edge of a face that ends within its tolerance of one); starting as far before one.
+    let past = 0.02_f64.to_radians();
+    let arcs = [
+        [1.0, 6.5],
+        [-2.5, -2.5 + TAU],
+        [30.02_f64.to_radians(), TAU + past],
+        [FRAC_PI_2 - past, 4.5 * FRAC_PI_2],
+    ];
+    for c in [&circle, &ellipse] {
+        let label = CurveEval::new(c).unwrap();
+        for [t0, t1] in arcs {
+            let (form, on) = form::curve(c, [t0, t1]).unwrap();
+            let Curve::RationalSpline { knots, homogeneous } = &form else {
+                panic!("{form:?}")
+            };
+            assert_eq!(on, [form::param(t0), form::param(t1)]);
+            assert!(on[1] - on[0] <= 4.0 + 1e-12, "more than one turn: {on:?}");
+            let q = on[0].floor();
+            let joints = [1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0].map(|k| q + k);
+            let expected: Vec<f64> = [on[0]; 3]
+                .into_iter()
+                .chain(joints)
+                .chain([on[1]; 3])
+                .collect();
+            assert_eq!(knots, &expected, "[{t0}, {t1}]");
+            assert_eq!(homogeneous.len(), 11);
+            assert!(homogeneous.iter().all(|h| h[3] > 0.0), "{homogeneous:?}");
+            let e = CurveEval::new(&form).unwrap();
+            for k in 0..=400 {
+                let t = t0 + (t1 - t0) * f64::from(k) / 400.0;
+                let s = form::param(t).clamp(on[0], on[1]);
+                let (p, want) = (e.jet(s).unwrap().point, label.jet(t).unwrap().point);
+                assert!(
+                    close(p, want, 1e-14),
+                    "[{t0}, {t1}] at {t}: {p:?} vs {want:?}"
+                );
+            }
+        }
+        // Four quarters: the grid's own, whole.
+        let (form, on) = form::curve(c, [0.2, 6.2]).unwrap();
+        let Curve::RationalSpline { knots, .. } = &form else {
+            panic!("{form:?}")
+        };
+        assert_eq!((knots[0], knots[knots.len() - 1]), (0.0, 4.0));
+        assert_eq!(on, [form::param(0.2), form::param(6.2)]);
+    }
+}
+
 /// The analytic surfaces' partials up to the fourth order agree with their first and second
 /// derivatives and are each the derivative of the order below (central differences).
 #[test]
@@ -1302,6 +1367,63 @@ fn a_face_box_reaches_its_boundary_extremes() {
         (v[0] - 10.0).abs() < 1e-9 && (v[1] - 50.0).abs() < 1e-9,
         "{v:?}"
     );
+}
+
+/// A loop that goes round a cylinder once and backs up a little (along a notch: a slot wall, the
+/// curve where two drill points meet) has a box a little wider than a turn, but it does not wind:
+/// its face is one turn wide, like any other band. A loop that goes back more than a turn (a
+/// thread's flank, a screw's cylinder down its thread) keeps its box.
+#[test]
+fn a_loop_that_goes_round_once_and_backs_up_a_little_does_not_wind() {
+    let (r, h) = (20.0f64, 60.0);
+    let cylinder = Surface::Cylinder {
+        frame: Frame {
+            origin: [0.; 3],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let ring = |z: f64| Curve::Circle {
+        frame: Frame {
+            origin: [0., 0., z],
+            x_axis: [1., 0., 0.],
+            y_axis: [0., 1., 0.],
+        },
+        radius: r,
+    };
+    let ruling = |turns: f64| {
+        let a = turns * TAU;
+        Curve::Line {
+            start: [r * a.cos(), r * a.sin(), 0.],
+            end: [r * a.cos(), r * a.sin(), h],
+        }
+    };
+    let (bottom, top) = (ring(0.), ring(h));
+    // Once round and `back` turns back: forward 1 + back turns along the bottom, up the ruling
+    // there, back `back` turns along the top, down the ruling at the start.
+    let width = |back: f64| {
+        let (up, down) = (ruling(back), ruling(0.));
+        let l = vec![
+            (&bottom, [0., (1.0 + back) * TAU], true),
+            (&up, [0., 1.], true),
+            (&top, [0., back * TAU], false),
+            (&down, [0., 1.], false),
+        ];
+        let [u, _] = form::extent(&cylinder, &[l], 1e-9)
+            .unwrap()
+            .expect("an extent");
+        u[1] - u[0]
+    };
+    for back in [0.01, 0.1, 0.5] {
+        let w = width(back);
+        assert!((w - TAU).abs() < 1e-9, "backed up {back} turn: {w}");
+        assert!(!form::winds([[0.0, w], [0.0, 1.0]]));
+    }
+    // Back more than a turn: the box is the whole loop's.
+    let w = width(1.1);
+    assert!((w - 2.1 * TAU).abs() < 1e-9, "{w}");
+    assert!(form::winds([[0.0, w], [0.0, 1.0]]));
 }
 
 /// One edge that winds 33 times round a cylinder (a plane's section of it, run on for 33 turns)
