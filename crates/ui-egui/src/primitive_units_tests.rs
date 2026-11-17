@@ -437,14 +437,21 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
 #[test]
 fn editing_a_coil_keeps_an_explicit_axis_origin_expression() {
     let mut h = design("mm");
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[5,0],"p1":[6,1]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
     h.app.run("parameters.add", json!({"name":"axis_x","expression":"30 mm"})).unwrap();
     let made = h
         .app
         .run("solid.coil", json!({"axis":{"origin":["axis_x",0,0],"dir":[0,0,1]},"diameter":20,"section_size":1,"revolutions":1,"pitch":8}))
         .unwrap();
     let id = made["feature"].as_u64().unwrap();
+    h.app.preferences.coil_preselect_axis = true;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Feature { id: sketch }, solidcraft_engine::Sel::Axis { name: "Y".into() }];
     h.app.edit_feature(id);
     h.frames(3);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs.iter().all(|input| input.items.is_empty()));
     type_into(&mut h, "pitch", "10");
     ok(&mut h);
     match &h.app.session.doc.feature(id).unwrap().kind {

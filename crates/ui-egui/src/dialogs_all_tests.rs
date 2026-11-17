@@ -1545,7 +1545,21 @@ fn coil_picks_reference_axes_in_the_browser_and_viewport() {
 }
 
 #[test]
-fn coil_can_keep_legacy_placement_on_a_preselected_face() {
+fn coil_sketch_preselection_only_fills_the_coil_dialog() {
+    let (mut h, sketch, _) = repeated_profile_fixture();
+    h.app.session.selection = vec![Sel::Feature { id: sketch }];
+    for command in ["solid.extrude", "solid.revolve", "solid.emboss"] {
+        let d = Dialog::for_command(&h.app, command).unwrap();
+        assert!(d.inputs[0].items.is_empty(), "{command}");
+    }
+    let d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    let profiles = d.inputs[0].items.profiles();
+    assert_eq!(profiles.len(), 2);
+    assert!(profiles.iter().all(|(owner, _)| *owner == sketch));
+}
+
+#[test]
+fn coil_keeps_face_placement_until_axis_preselection_is_enabled() {
     use solidcraft_engine::doc::naming;
     let mut h = Harness::new();
     h.app.run("solid.cylinder", json!({"radius": 5, "height": 10, "body_name": "Pin"})).unwrap();
@@ -1559,13 +1573,13 @@ fn coil_can_keep_legacy_placement_on_a_preselected_face() {
     assert_ne!(origin, point);
     h.app.session.selection = vec![pick.clone()];
     let d = Dialog::for_command(&h.app, "solid.coil").unwrap();
-    assert_eq!(d.inputs[1].items, vec![pick]);
-    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["base"], pt(origin));
-
-    h.app.preferences.coil_preselect_axis = false;
-    let d = Dialog::for_command(&h.app, "solid.coil").unwrap();
     assert!(d.inputs[1].items.is_empty());
     assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["base"], pt(point));
+
+    h.app.preferences.coil_preselect_axis = true;
+    let d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    assert_eq!(d.inputs[1].items, vec![pick]);
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["base"], pt(origin));
 }
 
 #[test]

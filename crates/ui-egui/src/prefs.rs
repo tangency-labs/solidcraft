@@ -1639,7 +1639,7 @@ preference_settings! {
     fillet_legacy_radius: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_radius", "prefs.fillet_legacy_radius.help");
     /// Fill the Coil axis from the selection when the dialog opens. Off keeps initial placement
     /// on the selected face or vertex and leaves Axis available for an explicit pick.
-    coil_preselect_axis: bool = true, PAGE_TOOLS => check_id_help("prefs.coil_preselect_axis", "prefs.coil_preselect_axis.help");
+    coil_preselect_axis: bool = false, PAGE_TOOLS => check_id_help("prefs.coil_preselect_axis", "prefs.coil_preselect_axis.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");

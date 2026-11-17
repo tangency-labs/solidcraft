@@ -1245,9 +1245,9 @@ impl Dialog {
         // text it edits, not its path.)
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
         for sel in preselection {
-            if accepts_sketch_profiles(&d.kind)
-                && let Sel::Feature { id } = sel
-                && d.pick_sketch(s, *id)
+            if id == "solid.coil"
+                && let Sel::Feature { id: sketch } = sel
+                && d.pick_sketch(s, *sketch)
             {
                 continue;
             }
@@ -8349,6 +8349,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             targets,
         } => {
             let mut d = start("solid.coil")?;
+            // An edit starts from the saved Coil, including when the new dialog uses preselection.
+            for input in &mut d.inputs {
+                input.items.clear();
+            }
+            d.extra.clear();
+            d.profile_selection_changed = false;
             d.kind = Kind::Primitive {
                 cmd: "solid.coil",
                 fields: vec![
