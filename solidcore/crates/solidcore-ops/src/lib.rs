@@ -22,7 +22,8 @@
 //!
 //! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
-//! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections),
+//! [`pick`] (the edge or vertex nearest a point), [`boolean`], [`stitch`], [`prism`] (planar
+//! region booleans and extrusion, prism sections),
 //! [`cell_grid`] (the cells of a grid over a profile).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
@@ -64,6 +65,7 @@ pub mod offset;
 pub mod order;
 pub mod path_export;
 pub mod pcurve;
+pub mod pick;
 pub mod prism;
 pub mod provenance;
 pub mod record_check;
@@ -80,10 +82,11 @@ pub mod untrim;
 pub mod vertex_meet;
 
 pub use blend::{
-    band_room, blend, blend_ordered, carried_faces, carried_faces_ordered, chamfer_sides,
-    chamfer_sides_ordered, edge_faces_along, edge_faces_along_ordered, fillet_variable,
-    fillet_variable_ordered, tangent_chain, BandRoom, Blend, BlendOptions, Blended, CarriedFace,
-    ChamferCorner, ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
+    band_room, blend, blend_ordered, blend_with, carried_faces, carried_faces_ordered,
+    chamfer_sides, chamfer_sides_facing, chamfer_sides_ordered, edge_faces_along,
+    edge_faces_along_ordered, fillet_variable, fillet_variable_from, fillet_variable_ordered,
+    tangent_chain, BandRoom, Blend, BlendOptions, Blended, CarriedFace, ChamferCorner,
+    ChamferSecond, Corners, EndRoom, Hole, HoleEdge, Room, SetBack, Turn,
 };
 pub use body::{
     make_box, make_cone, make_cylinder, make_sphere, make_torus, Body, Contract, TurnedOver,

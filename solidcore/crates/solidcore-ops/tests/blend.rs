@@ -34,9 +34,10 @@ use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
 use solidcore_ops::{
-    blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
-    make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
-    Error, FitKind, Order, SetBack, Turn, Unblendable,
+    blend, blend_ordered, blend_with, chamfer_sides, chamfer_sides_facing, edge_faces_along,
+    fillet_variable, fillet_variable_from, make_box, make_cone, make_cylinder, tangent_chain,
+    Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind, Order, SetBack,
+    Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
@@ -484,7 +485,9 @@ fn a_rim_round_runs_through_a_near_tangent_corner() {
 /// is M = (5/6 - pi/4) r^3: mitred, 8 M in all; swept, the section revolved a quarter turn at
 /// each, 2 pi M, its face a torus. Unequal rounds are not swept yet. Along a pocket's floor the
 /// upright edges are sharp and concave: no ball turns round them, so the swept turn is refused
-/// there and the mitre builds, 60 A - 8 M. A swept turn is a round's.
+/// there and the mitre builds, 60 A - 8 M. A swept turn is a round's. A swept turn refused is
+/// [`Error::TurnRefused`] with the kernel's reason: whether no radius builds it (the pocket)
+/// or the corner is of a kind not built yet (the unequal rounds).
 #[test]
 fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     all_fixes();
@@ -568,14 +571,24 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
     let (order, edges) = loop_edges(&b, base, 10.0);
     let unequal = [1.0, 1.5, 1.0, 1.5];
     let r = swept(&b, &order, Blend::Round, &edges, &unequal);
-    assert_eq!(r, Some(Error::CornerUnsupported));
+    // not built there yet, with the kernel's reason and the corner's point
+    assert!(
+        matches!(&r, Some(Error::TurnRefused { room: false, why, at: Some(_) })
+            if why.starts_with("a swept turn is built between constant rounds of one radius")),
+        "{r:?}"
+    );
     let r = swept(&b, &order, Blend::Chamfer, &edges, &[1.0]);
     assert_eq!(r, Some(Error::Argument));
     let p = pocket();
     let (order, edges) = loop_edges(&p, floor, 5.0);
     let before = p.to_record().unwrap().0;
     let r = swept(&p, &order, Blend::Round, &edges, &[1.0]);
-    assert_eq!(r, Some(Error::NoRoom));
+    // no radius of the rounds passes the sharp concave edge: the kernel says what would
+    assert!(
+        matches!(&r, Some(Error::TurnRefused { room: true, why, at: Some(_) })
+            if why.contains("round that edge at a radius of at least 1 first")),
+        "{r:?}"
+    );
     assert_eq!(p.to_record().unwrap().0, before);
     blend_ordered(
         &p,
@@ -634,6 +647,166 @@ fn rounds_turn_round_a_thin_tab_wider_than_its_end() {
         let v = b.volume(1e-10).unwrap();
         assert!(rel(v, 56250.0 + 66.0 * a + 8.0 * m) < 1e-9, "r {r}: {v}");
     }
+}
+
+/// [`blend_with`] takes the body's own edge indices and the options [`blend_ordered`] takes:
+/// the boss of [`rounds_turn_round_a_boss_edge_mitred_or_swept`], its four base edges picked
+/// by point ([`solidcore_ops::pick::edges`]) and rounded r 1, holds 12500 + 40 A + 8 M mitred
+/// and 12500 + 40 A + 2 pi M swept (A = 1 - pi/4, M = 5/6 - pi/4), as through the record's
+/// order.
+#[test]
+fn rounds_turn_as_asked_on_the_body_s_own_indices() {
+    all_fixes();
+    let boss = || {
+        built(|k| {
+            let plate = create_box(k, Vec3::new(0.0, 0.0, 0.0), 40.0, 30.0, 10.0)?;
+            let boss = create_box(k, Vec3::new(15.0, 10.0, 10.0), 10.0, 10.0, 5.0)?;
+            boolean_union(k, plate, boss)
+        })
+    };
+    let middles = [
+        [20.0, 10.0, 10.0],
+        [25.0, 15.0, 10.0],
+        [20.0, 20.0, 10.0],
+        [15.0, 15.0, 10.0],
+    ];
+    let (a, m) = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    for (turn, corners) in [(Turn::Mitre, 8.0 * m), (Turn::Swept, 2.0 * PI * m)] {
+        let b = boss();
+        let edges = solidcore_ops::pick::edges(&b, &middles, 1e-6)
+            .unwrap()
+            .unwrap();
+        assert_eq!(edges, middles.map(|p| edge_at(&b, p)));
+        let options = BlendOptions {
+            turn,
+            ..BlendOptions::default()
+        };
+        blend_with(
+            &b,
+            Blend::Round,
+            &edges,
+            &[1.0],
+            &[],
+            Corners::Filled,
+            options,
+        )
+        .unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{turn:?}");
+        let v = b.volume(1e-10).unwrap();
+        assert!(rel(v, 12500.0 + 40.0 * a + corners) < 1e-9, "{turn:?}: {v}");
+    }
+    // the options are checked as blend_ordered checks them
+    let b = boss();
+    let swept = BlendOptions {
+        turn: Turn::Swept,
+        ..BlendOptions::default()
+    };
+    let e = edge_at(&b, middles[0]);
+    assert_eq!(
+        blend_with(
+            &b,
+            Blend::Chamfer,
+            &[e],
+            &[1.0],
+            &[],
+            Corners::Filled,
+            swept
+        )
+        .err(),
+        Some(Error::Argument)
+    );
+}
+
+/// [`chamfer_sides_facing`] takes each edge's first distance along the face that faces the
+/// direction most: on the block's top front edge, 1 along the face facing up and 3 on the
+/// other leaves the top its 19 (of 20); facing forward (-y), its 17. Either takes
+/// d1 d2 / 2 = 1.5 off along the edge's 30, as [`chamfer_sides`] with that face named.
+#[test]
+fn chamfers_by_sides_take_the_face_facing_a_direction() {
+    all_fixes();
+    for (facing, leg) in [([0.0, 0.0, 1.0], 19.0), ([0.0, -1.0, 0.0], 17.0)] {
+        let b = block();
+        let e = top_front(&b);
+        chamfer_sides_facing(&b, &[e], 1.0, ChamferSecond::Distance(3.0), facing).unwrap();
+        assert!(rel(volume(&b), ABC - 1.5 * 30.0) < 1e-9, "{facing:?}");
+        let (k, made) = kernel_copy(&b);
+        let top = made
+            .face_list()
+            .iter()
+            .find_map(|&f| {
+                let bx = face_bounding_box(&k, &made, f, true).ok()?;
+                ((bx.min().z - 10.0).abs() < 1e-9 && (bx.max().z - 10.0).abs() < 1e-9)
+                    .then(|| bx.max().y - bx.min().y)
+            })
+            .unwrap();
+        assert!((top - leg).abs() < 1e-9, "{facing:?}: {top}");
+    }
+    // the same body as naming the face
+    let (named, faced) = (block(), block());
+    let e = top_front(&named);
+    let faces = edge_faces_along(&named, e, [0.0, 0.0, 1.0]).unwrap();
+    let top = if faces[1].1 > faces[0].1 {
+        faces[1].0
+    } else {
+        faces[0].0
+    };
+    chamfer_sides(&named, &[e], &[top], 1.0, ChamferSecond::Distance(3.0)).unwrap();
+    chamfer_sides_facing(
+        &faced,
+        &[e],
+        1.0,
+        ChamferSecond::Distance(3.0),
+        [0.0, 0.0, 1.0],
+    )
+    .unwrap();
+    assert_eq!(faced.to_record().unwrap().0, named.to_record().unwrap().0);
+    // a direction that is not finite or has no length is refused, the body untouched
+    let b = block();
+    let e = top_front(&b);
+    for facing in [[0.0; 3], [f64::NAN, 0.0, 1.0], [0.0, f64::INFINITY, 0.0]] {
+        assert_eq!(
+            chamfer_sides_facing(&b, &[e], 1.0, ChamferSecond::Distance(3.0), facing),
+            Err(Error::Argument),
+            "{facing:?}"
+        );
+    }
+    assert!(rel(volume(&b), ABC) < 1e-12);
+}
+
+/// [`fillet_variable_from`] runs the law from the end of the edge nearest a point, as
+/// [`fillet_variable`] does from that end's vertex: r from 1 to 2 along the block's top front
+/// edge from a point near (0, 0, 10) is the body that vertex gives, and from a point nearer
+/// the other end the body that end's vertex gives.
+#[test]
+fn a_variable_round_runs_from_the_end_nearest_a_point() {
+    all_fixes();
+    let (knots, radii) = ([0.0, 0.0, 1.0, 1.0], [1.0, 2.0]);
+    for (near, end) in [
+        ([1.0, -2.0, 11.0], [0.0, 0.0, 10.0]),
+        ([28.0, 3.0, 10.0], [30.0, 0.0, 10.0]),
+    ] {
+        let (by_vertex, by_point) = (block(), block());
+        let e = top_front(&by_vertex);
+        let start = vertex_at(&by_vertex, end);
+        fillet_variable(&by_vertex, e, start, 1, &knots, &radii).unwrap();
+        fillet_variable_from(&by_point, e, near, 1, &knots, &radii).unwrap();
+        assert_eq!(
+            by_point.to_record().unwrap().0,
+            by_vertex.to_record().unwrap().0,
+            "{near:?}"
+        );
+        assert!(by_point.check(CheckLevel::All).unwrap().is_valid());
+    }
+    let b = block();
+    let e = top_front(&b);
+    assert_eq!(
+        fillet_variable_from(&b, e, [f64::NAN, 0.0, 0.0], 1, &knots, &radii),
+        Err(Error::Argument)
+    );
+    assert_eq!(
+        fillet_variable_from(&b, 99, [0.0; 3], 1, &knots, &radii),
+        Err(Error::Argument)
+    );
 }
 
 #[test]

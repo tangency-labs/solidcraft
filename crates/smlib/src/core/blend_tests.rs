@@ -908,11 +908,14 @@ fn a_setback_corner_left_open_returns_its_hole() {
 /// A curvature-continuous round at the equal-area thumbweight takes off what the ball's circle
 /// does, r² (cot(α/2) - (π - α)/2) per unit length on a wedge α (solidcore#2261): on a 40 x 30 x 20
 /// box with its top back edge chamfered 5, r 2 along the chamfer's top edge (α 135°) takes
-/// 0.0860579227 per mm, along the bottom front edge (α 90°) 0.8584073464. Both in one call are
-/// refused: every edge takes the first one's thumbweight, so the other would take 17% too little
-/// or 21% too much (solidcore#2250's comment 6563419897), whichever order they come in.
+/// 0.0860579227 per mm, along the bottom front edge (α 90°) 0.8584073464. Both in one call each
+/// take their own wedge's area, whichever order they come in: solidcore resolves the equal-area
+/// thumbweight from each station's own wedge (solidcore-ops'
+/// `curvature_rounds_over_mixed_wedges_each_take_their_own_balls_area`, the same box). Before the
+/// blend was solidcore-ops', SolidCraft refused the two together, from when every edge took the
+/// first one's thumbweight (solidcore#2250's comment 6563419897).
 #[test]
-fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() {
+fn a_curvature_round_takes_its_wedges_equal_area_also_over_mixed_wedges() {
     let r = 2.0;
     let cut = |alpha: f64| r * r * (1.0 / (alpha / 2.0).tan() - (PI - alpha) / 2.0);
     let chamfered =
@@ -928,10 +931,13 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
         let removed = v0 - volume(&round, 1e-8).unwrap();
         assert!(rel(removed, 40.0 * cut(alpha)) < 1e-6, "{removed} vs {}", 40.0 * cut(alpha));
     }
+    let each = 40.0 * (cut(0.75 * PI) + cut(0.5 * PI));
     for both in [[a, b], [b, a]] {
-        let refused = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).err();
-        assert_eq!(refused, Some(Error::Unported(super::blend::CURVATURE_MIXED_WEDGES)));
-        assert!(refused.is_some_and(|e| e.to_string().contains("issuecomment-6563419897")));
+        let round = blend(&chamfered, Blend::Curvature, &both, &[r], TOL, &[], &[], Corners::Filled).unwrap();
+        let (rec, _) = native(&to_arrays(&round).unwrap()).unwrap();
+        solidcore_ops::record_check::validate(&rec).unwrap();
+        let removed = v0 - volume(&round, 1e-8).unwrap();
+        assert!(rel(removed, each) < 1e-6, "{removed} vs {each}");
     }
     // Edges of one wedge go together.
     let two = blend(&chamfered, Blend::Curvature, &[b, [20.0, 0.0, 20.0]], &[r], TOL, &[], &[], Corners::Filled).unwrap();

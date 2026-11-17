@@ -7,8 +7,10 @@
 //!   record picks ([`blend_ordered`]), two rounds that meet at a sharp side edge are mitred or
 //!   swept there ([`Turn`]).
 //! - [`chamfer_sides`]: edges chamfered with a distance along a face each, and a second
-//!   distance or an angle on the other.
-//! - [`fillet_variable`]: one edge rounded with a radius law.
+//!   distance or an angle on the other; [`chamfer_sides_facing`] takes the face of each edge
+//!   that faces a direction most.
+//! - [`fillet_variable`]: one edge rounded with a radius law, from one of its vertices or
+//!   ([`fillet_variable_from`]) from its end nearest a point.
 //! - [`edge_faces_along`]: the two faces of an edge with how far each faces a direction, for an
 //!   application choosing the face a chamfer's first distance is along.
 //! - [`tangent_chain`]: the edges a blend of some edges runs on into tangentially, on the
@@ -523,8 +525,35 @@ fn blend_failure(
     }
     match session_refusal(s, e, call) {
         Ok(r) => (r.refusal.into(), r.edge),
-        Err(e) => (failure(&e).unwrap_or_else(|| status(e)), None),
+        // a failure the kernel states in words says what the session noted of the step too
+        Err(e) => (session_failure(s, &e).unwrap_or_else(|| status(e)), None),
     }
+}
+
+/// The refusal of a swept turn the corners step noted at its vertex (the blend corner's
+/// classification with swept turns on): [`Error::TurnRefused`] with the kernel's reason, without
+/// the "Fillet Error:" that says only whose it is, and where it is; `None` for a note of another
+/// kind, or one that gives no reason.
+fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
+    let info = s.error_info();
+    let room = match info.code {
+        c if c == FilletErrorType::NoRoom as i32 => true,
+        c if c == FilletErrorType::CornerUnsupported as i32 => false,
+        _ => return None,
+    };
+    let why = info.comment.trim();
+    if why.is_empty() {
+        return None;
+    }
+    let why = why
+        .strip_prefix("Fillet Error:")
+        .map_or(why, str::trim_start)
+        .to_owned();
+    Some(Error::TurnRefused {
+        room,
+        why,
+        at: info.location.map(|p| [p.x, p.y, p.z]),
+    })
 }
 
 /// The kernel's refusal of an edge, or of a corner's setback as too long, as the operation's,
@@ -835,6 +864,7 @@ fn pass(
             s.set_chamfer_corner(solidcore::blend::blend_corner::BlendChamferCorner::Facet);
         }
         let prepared = prepare(k, &mut s, p.edges, p.section, p.law);
+        let prepared_ok = prepared.is_ok();
         // a set-back vertex is no Ball: its corner is the one the setback is set on
         if !p.section.chamfer() {
             for &(v, _) in p.setbacks {
@@ -852,6 +882,12 @@ fn pass(
         let mut step = prepared
             .and_then(|()| s.create_corners(k, None))
             .map(|()| Ok(Vec::new()));
+        // a swept turn the corners step refused, with the kernel's reason
+        let refused_turn = if p.turn == Turn::Swept && prepared_ok && step.is_err() {
+            turn_refusal(&s)
+        } else {
+            None
+        };
         stopped.roll_overs = s.roll_overs().to_vec();
         // a vertex the corners step made no corner for, noted before a later step notes its
         // own failure over it
@@ -886,9 +922,13 @@ fn pass(
             },
             Ok(Err(refusal)) => Ok(Err(refusal)),
             Err(e) => {
-                let (error, edge) = blend_failure(&s, e, call);
-                fit_edge = edge;
-                Ok(Err(Refused::Error(error)))
+                if let Some(why) = refused_turn {
+                    Ok(Err(Refused::Error(why)))
+                } else {
+                    let (error, edge) = blend_failure(&s, e, call);
+                    fit_edge = edge;
+                    Ok(Err(Refused::Error(error)))
+                }
             }
         }
     };
@@ -1393,9 +1433,11 @@ pub fn blend(
 /// in the supplied order that does not belong to the body, for [`Turn::Swept`] with a blend
 /// other than [`Blend::Round`], and for [`ChamferCorner::Facet`] with one other than
 /// [`Blend::Chamfer`]; [`Error::Unsupported`] for the Facet without the kernel's
-/// `fillet_chamfer_corner` fix. A swept turn the kernel does not build is refused as it
-/// classifies it: [`Error::NoRoom`] at a sharp concave side edge (no radius of the rounds
-/// passes it), [`Error::CornerUnsupported`] where the blend corner does not build one yet.
+/// `fillet_chamfer_corner` fix. A swept turn the kernel does not build is
+/// [`Error::TurnRefused`] with the kernel's reason and the corner's point: `room` at a sharp
+/// concave side edge (no radius of the rounds passes it), else where the blend corner does not
+/// build one yet. A refusal the kernel gives no reason for is as it classifies it
+/// ([`Error::NoRoom`], [`Error::CornerUnsupported`]).
 pub fn blend_ordered(
     body: &Body,
     order: &crate::Order,
@@ -1416,6 +1458,27 @@ pub fn blend_ordered(
         corners,
         options,
     )
+}
+
+/// [`blend`] with the rounds turning and the chamfers closing as `options` says, as
+/// [`blend_ordered`] takes them: `edges` and each [`SetBack::vertex`] index the body's native
+/// lists.
+///
+/// # Errors
+/// The errors of [`blend`]; [`Error::Argument`] for [`Turn::Swept`] with a blend other than
+/// [`Blend::Round`] and for [`ChamferCorner::Facet`] with one other than [`Blend::Chamfer`];
+/// [`Error::Unsupported`] for the Facet without the kernel's `fillet_chamfer_corner` fix;
+/// [`Error::TurnRefused`] for a swept turn the kernel does not build.
+pub fn blend_with(
+    body: &Body,
+    kind: Blend,
+    edges: &[usize],
+    sizes: &[f64],
+    setbacks: &[SetBack],
+    corners: Corners,
+    options: BlendOptions,
+) -> Result<Blended> {
+    blend_impl(body, None, kind, edges, sizes, setbacks, corners, options)
 }
 
 /// [`blend`] and [`blend_ordered`]: the edges and setback vertices picked natively or through
@@ -2333,7 +2396,7 @@ pub fn chamfer_sides(
     distance: f64,
     second: ChamferSecond,
 ) -> Result<()> {
-    chamfer_sides_impl(body, None, edges, along, distance, second)
+    chamfer_sides_impl(body, None, edges, Along::Faces(along), distance, second)
 }
 
 /// [`chamfer_sides`] with edge and face indices taken through `order`.
@@ -2348,14 +2411,52 @@ pub fn chamfer_sides_ordered(
     distance: f64,
     second: ChamferSecond,
 ) -> Result<()> {
-    chamfer_sides_impl(body, Some(order), edges, along, distance, second)
+    chamfer_sides_impl(
+        body,
+        Some(order),
+        edges,
+        Along::Faces(along),
+        distance,
+        second,
+    )
+}
+
+/// [`chamfer_sides`] with the first distance of each edge along the one of its two faces whose
+/// outward normal at the middle of the edge faces `facing` most (the kernel's
+/// [`solidcore::blend::chamfer_side::faces_along`]; where both face it alike, the face of the
+/// edge's blend edge use): a chamfer whose first distance is along the face facing up, say.
+/// `edges` index the body's native edge list.
+///
+/// # Errors
+/// As [`chamfer_sides`]; [`Error::Argument`] for a direction that is not finite or has no
+/// length; the kernel's refusal of an edge that is not between two faces.
+pub fn chamfer_sides_facing(
+    body: &Body,
+    edges: &[usize],
+    distance: f64,
+    second: ChamferSecond,
+    facing: [f64; 3],
+) -> Result<()> {
+    if !facing.iter().all(|x| x.is_finite()) || facing.iter().all(|&x| x == 0.0) {
+        return Err(Error::Argument);
+    }
+    chamfer_sides_impl(body, None, edges, Along::Facing(facing), distance, second)
+}
+
+/// The face each edge's first distance is along.
+#[derive(Clone, Copy)]
+enum Along<'a> {
+    /// By index, one per edge.
+    Faces(&'a [usize]),
+    /// The one of each edge's faces that faces the direction most.
+    Facing([f64; 3]),
 }
 
 fn chamfer_sides_impl(
     body: &Body,
     order: Option<&crate::Order>,
     edges: &[usize],
-    along: &[usize],
+    along: Along<'_>,
     distance: f64,
     second: ChamferSecond,
 ) -> Result<()> {
@@ -2363,7 +2464,11 @@ fn chamfer_sides_impl(
         ChamferSecond::Angle(a) => a.is_finite() && a > 0.0 && a < std::f64::consts::PI,
         ChamferSecond::Distance(d) => size_ok(d),
     };
-    if edges.is_empty() || along.len() != edges.len() || !size_ok(distance) || !second_ok {
+    let along_ok = match along {
+        Along::Faces(faces) => faces.len() == edges.len(),
+        Along::Facing(_) => true,
+    };
+    if edges.is_empty() || !along_ok || !size_ok(distance) || !second_ok {
         return Err(Error::Argument);
     }
     let size = match second {
@@ -2379,12 +2484,22 @@ fn chamfer_sides_impl(
         if picked.iter().any(|e| !b.edge_list().contains(e)) {
             return Ok(Err(Error::Argument));
         }
-        let face_order = order.map_or_else(|| b.face_list(), |o| o.faces.as_slice());
         let mut faces = Vec::new();
-        for &f in along {
-            match face_order.get(f) {
-                Some(&f) if b.face_list().contains(&f) => faces.push(f),
-                _ => return Ok(Err(Error::Argument)),
+        match along {
+            Along::Faces(along) => {
+                let face_order = order.map_or_else(|| b.face_list(), |o| o.faces.as_slice());
+                for &f in along {
+                    match face_order.get(f) {
+                        Some(&f) if b.face_list().contains(&f) => faces.push(f),
+                        _ => return Ok(Err(Error::Argument)),
+                    }
+                }
+            }
+            Along::Facing([x, y, z]) => {
+                for &e in &picked {
+                    let [(f0, l0), (f1, l1)] = faces_along(k, b, e, Vec3::new(x, y, z))?;
+                    faces.push(if l1 > l0 { f1 } else { f0 });
+                }
             }
         }
         let expect = Expect::of(k, b)?;
@@ -2520,6 +2635,32 @@ pub fn fillet_variable_ordered(
     fillet_variable_impl(
         body,
         Some(order),
+        edge,
+        VariableStart::Point(start),
+        degree,
+        knots,
+        radii,
+    )
+}
+
+/// [`fillet_variable`] with the law running from the end of the edge's curve nearest `start`,
+/// as [`fillet_variable_ordered`] measures it (a tie starts at the interval's first end);
+/// `edge` indexes the body's native edge list.
+///
+/// # Errors
+/// Those of [`fillet_variable`]; [`Error::Argument`] for a start point that is not finite or
+/// an edge without a curve; the kernel's refusal of endpoint evaluation or distance.
+pub fn fillet_variable_from(
+    body: &Body,
+    edge: usize,
+    start: [f64; 3],
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+) -> Result<()> {
+    fillet_variable_impl(
+        body,
+        None,
         edge,
         VariableStart::Point(start),
         degree,
