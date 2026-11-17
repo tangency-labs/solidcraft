@@ -302,7 +302,7 @@ fn joined_revolve_arcs_keep_every_profile_origin_and_partial_turn_caps() {
     };
     let wall = vec![FaceOrigin::Profile { segment: 1 }, FaceOrigin::Profile { segment: 2 }];
     for angle in [TAU, PI] {
-        let body = crate::revolve(&Plane::XZ, std::slice::from_ref(&region), Vec2::ZERO, Vec2::Y, angle).unwrap().pop().unwrap();
+        let body = crate::revolve_joining_arcs(&Plane::XZ, std::slice::from_ref(&region), Vec2::ZERO, Vec2::Y, angle).unwrap().pop().unwrap();
         let history = body.history().unwrap();
         history.check(&body, &[]).unwrap();
         let walls: Vec<_> =

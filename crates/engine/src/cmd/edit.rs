@@ -2562,11 +2562,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         };
         parameters.entry("convention").or_insert_with(|| json!(convention));
     }
-    if let FeatureKind::Revolve { convention, .. } = &old.kind
+    if let FeatureKind::Revolve { convention, join_profile_arcs, .. } = &old.kind
         && cid == "solid.revolve"
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+        parameters.entry("join_profile_arcs").or_insert_with(|| json!(join_profile_arcs));
     }
     if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
         && cid == "solid.thread"

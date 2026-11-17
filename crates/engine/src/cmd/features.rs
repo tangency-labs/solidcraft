@@ -1624,6 +1624,11 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         None => solidcraft_doc::RevolveConvention::SketchNormal,
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "`convention` must be sketch_normal or legacy_axis_start"))?,
     };
+    let join_profile_arcs = match p.get("join_profile_arcs") {
+        None => true,
+        Some(Value::Bool(join)) => *join,
+        Some(_) => return Err(bad(cmd, "`join_profile_arcs` must be a boolean")),
+    };
     let operation = operation(p, cmd)?;
     let mut targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
     let unnamed = targets.is_empty() && string_list(cmd, p, "participants")?.is_empty();
@@ -1655,6 +1660,7 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         angle2,
         symmetric,
         convention,
+        join_profile_arcs,
         to: to.map(FacePick),
     };
     add_feature(s, &p, kind)

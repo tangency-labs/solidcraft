@@ -49,6 +49,14 @@ fn revolutions_whole_and_partial() {
 }
 
 #[test]
+fn a_stopped_revolve_refuses_before_parsing_its_profile() {
+    let stop = crate::stop::Stop::new();
+    stop.stop();
+    let r = stop.within(|| Brep::revolve_joining_arcs(&[], [0.0; 3], [0.0, 0.0, 1.0], TAU, true));
+    assert_eq!(r.err(), Some(Error::Cancelled("smlib_revolve")));
+}
+
+#[test]
 fn a_revolved_arc_split_into_pieces_keeps_one_spherical_wall() {
     // The open path in issue #18537 splits one circular sketch arc. Its pieces still
     // define one sphere; the extra face boundary used to block the handle's fillet.
@@ -58,7 +66,7 @@ fn a_revolved_arc_split_into_pieces_keeps_one_spherical_wall() {
         for offset in 0..profile.len() {
             let mut pieces = profile.clone();
             pieces.rotate_left(offset);
-            let b = Brep::revolve(&pieces, [0.0; 3], [0.0, 0.0, 1.0], angle, true).unwrap();
+            let b = Brep::revolve_joining_arcs(&pieces, [0.0; 3], [0.0, 0.0, 1.0], angle, true).unwrap();
             let record = b.to_native().unwrap();
             assert_eq!(record.faces.len(), if angle == TAU { 1 } else { 3 }, "angle {angle}, offset {offset}");
             assert_close(solid_volume(&b, "split sphere"), angle / TAU * 4.0 / 3.0 * PI * 125.0, 1e-5, "split sphere");
@@ -192,10 +200,10 @@ fn hostile_curve_lists_are_refused() {
     let bad = [Curve::Nurbs { degree: 3, points: vec![[0.0, 0.0, 0.0, 1.0]; 2], knots: vec![0.0; 6] }];
     assert_eq!(Brep::extrude(&bad, [0.0, 0.0, 1.0], 1.0, 0.0, DraftCorner::default(), true).err(), Some(Error::Argument));
     for profile in [&nan[..], &bad[..], &[]] {
-        assert_eq!(Brep::revolve(profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).err(), Some(Error::Argument));
+        assert_eq!(Brep::revolve_joining_arcs(profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).err(), Some(Error::Argument));
     }
     assert_eq!(Brep::loft(&[vec![circle([0.0; 3], 1.0)]], 1, true).err(), Some(Error::Argument));
     let sq = polygon(&[[0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]]);
-    assert_eq!(Brep::revolve(&sq, [0.0; 3], [0.0, 1.0, 0.0], 7.0, true).err(), Some(Error::Argument));
+    assert_eq!(Brep::revolve_joining_arcs(&sq, [0.0; 3], [0.0, 1.0, 0.0], 7.0, true).err(), Some(Error::Argument));
     assert_eq!(Brep::screw_sweep(&sq, [0.0; 3], [0.0, 0.0, 1.0], 0.0, 1.0, 1e-4).err(), Some(Error::Argument));
 }
