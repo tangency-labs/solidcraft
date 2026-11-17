@@ -1216,6 +1216,41 @@ fn an_l_bracket_seen_along_its_plate_has_two_up_faces_and_only_walls() {
 }
 
 #[test]
+fn a_recess_floor_reads_as_up() {
+    let mut k = Kernel::default();
+    let plate = extrude_region(
+        &mut k,
+        &xy(),
+        &rectangle(p(0.0, 0.0), p(40.0, 20.0)),
+        0.0,
+        4.0,
+    )
+    .unwrap();
+    // the pocket's bottom plane faces -z; the floor it leaves faces +z, out of the body
+    let pocket = extrude_region(
+        &mut k,
+        &xy(),
+        &rectangle(p(10.0, 5.0), p(20.0, 10.0)),
+        2.0,
+        5.0,
+    )
+    .unwrap();
+    let b = crate::boolean::api_brep::boolean_difference(&mut k, plate, pocket).unwrap();
+    let got = parallel_faces(&k, &b, &xy(), 1e-7).unwrap();
+    assert_eq!((got.walls, got.other), (8, 0), "{got:?}");
+    let mut up: Vec<_> = got.faces.iter().filter(|f| f.up).collect();
+    up.sort_by(|a, c| a.level.total_cmp(&c.level));
+    assert_eq!(up.len(), 2, "the floor and the top: {got:?}");
+    assert!((up[0].level - 2.0).abs() < 1e-12 && (up[1].level - 4.0).abs() < 1e-12);
+    let floor = up[0].regions[0].outer.signed_area().unwrap().value;
+    assert!((floor - 50.0).abs() < 1e-9, "{floor}");
+    assert_eq!(up[1].regions[0].holes.len(), 1);
+    let down: Vec<_> = got.faces.iter().filter(|f| !f.up).collect();
+    assert_eq!(down.len(), 1);
+    assert!(down[0].level.abs() < 1e-12);
+}
+
+#[test]
 fn a_plate_with_a_slanted_side_counts_it_as_other() {
     let mut k = Kernel::default();
     // a chamfer of 2 on the plate's top right edge
