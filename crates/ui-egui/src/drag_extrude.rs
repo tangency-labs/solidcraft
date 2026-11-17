@@ -32,7 +32,7 @@ const STEPS: [f64; 25] =
 fn step_scale(doc: &solidcraft_engine::doc::Document) -> f64 {
     let unit = crate::length_input::unit(doc);
     let mm_per_unit = solidcraft_engine::doc::expr::unit_info(unit).map_or(1.0, |(_, scale)| scale);
-    if unit == "in" { mm_per_unit / 10.0 } else { mm_per_unit }
+    if matches!(unit, "in" | "inch") { mm_per_unit / 10.0 } else { mm_per_unit }
 }
 
 /// The ladder position nearest to `step`, in the ladder's units.
@@ -236,6 +236,10 @@ mod tests {
         assert!((STEPS[0] * scale - 0.0254).abs() < 1e-12);
         assert_eq!(crate::length_input::shown(&session.doc, STEPS[0] * scale), "0.001 in");
         assert!((STEPS[nearest_step(0.1)] * scale - 0.254).abs() < 1e-12);
+        session.doc_mut().units = "inch".to_string();
+        let long_scale = step_scale(&session.doc);
+        assert!((long_scale - scale).abs() < 1e-12, "inch and in use identical ladder steps");
+        assert!((STEPS[0] * long_scale - 0.0254).abs() < 1e-12);
     }
 
     #[test]
