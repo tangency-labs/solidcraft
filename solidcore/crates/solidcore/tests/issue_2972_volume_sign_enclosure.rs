@@ -299,9 +299,10 @@ fn face_areas_are_enclosed_one_face_at_a_time() {
 
 /// `enclose_face_area_relative`, refined once toward a width relative to the area itself:
 /// - a cylinder's side of radius 2 and height 5 (no pole: it converges) at `rel` 1e-6 and a
-///   sphere of radius 2 at 1e-2 (the round-definition tests' `rel`) end `Reached`, at most
-///   `rel` of their upper end wide, holding their closed forms `20 pi` and `16 pi`;
-/// - the sphere at 1e-4 spends the cell budget first (its poles converge slowly): it ends
+///   sphere of radius 2 at 1e-2 (the round-definition tests' `rel`) and 1e-4 end `Reached`,
+///   at most `rel` of their upper end wide, holding their closed forms `20 pi` and `16 pi`
+///   (the sphere's cells take their partials about the cell, so 1e-4 converges in budget);
+/// - the sphere at 1e-12 spends the cell budget first (its poles converge slowly): it ends
 ///   at `Budget` within one check of [`CELL_BUDGET`] cells, wider than asked, and its band
 ///   still holds `16 pi`;
 /// - a `rel` that is not positive (or NaN), and no faces, are refused.
@@ -341,11 +342,15 @@ fn a_face_area_is_enclosed_relative_to_itself_in_one_refinement() {
     assert!(e.width() <= 1e-2 * e.hi, "sphere 1e-2: {e:?}");
     assert!(holds(&e, 16.0 * PI), "sphere 1e-2: {e:?}");
     let e = enclose_face_area_relative(&k, &mut s, &all, 1e-4).unwrap();
-    assert_eq!(e.stop, EnclosureStop::Budget, "sphere 1e-4: {e:?}");
-    assert!(e.counts.cells <= CELL_BUDGET + 1, "sphere 1e-4: {e:?}");
-    assert!(e.width() > 1e-4 * e.hi, "sphere 1e-4: {e:?}");
-    assert!(e.hi.is_finite(), "sphere 1e-4: {e:?}");
+    assert_eq!(e.stop, EnclosureStop::Reached, "sphere 1e-4: {e:?}");
+    assert!(e.width() <= 1e-4 * e.hi, "sphere 1e-4: {e:?}");
     assert!(holds(&e, 16.0 * PI), "sphere 1e-4: {e:?}");
+    let e = enclose_face_area_relative(&k, &mut s, &all, 1e-12).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Budget, "sphere 1e-12: {e:?}");
+    assert!(e.counts.cells <= CELL_BUDGET + 1, "sphere 1e-12: {e:?}");
+    assert!(e.width() > 1e-12 * e.hi, "sphere 1e-12: {e:?}");
+    assert!(e.hi.is_finite(), "sphere 1e-12: {e:?}");
+    assert!(holds(&e, 16.0 * PI), "sphere 1e-12: {e:?}");
 
     for rel in [0.0, -1.0, f64::NAN] {
         assert!(

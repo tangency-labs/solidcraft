@@ -2783,7 +2783,8 @@ mod tests {
     /// at a grid of points of the cell (each point's own interval enclosure lies inside them,
     /// so its exact partial does). Taken about the cell, each component of the first partial
     /// along the direction the weights vary in is at least `NARROWER` times narrower (7.8 to
-    /// 17 times, measured). Taken about the origin, the quotient's `w_ij S` terms are as wide
+    /// 17 times, measured). A box that is one point is enclosed exactly as before (no shift).
+    /// Taken about the origin, the quotient's `w_ij S` terms are as wide
     /// as the face's distance from the origin: the area enclosure's cells then never proved
     /// `|S_u x S_v|^2` positive, fell back to range times area, and spent the whole budget.
     #[test]
@@ -2853,5 +2854,11 @@ mod tests {
                 "P[{a}][{c}]: {n:?} against {o:?}"
             );
         }
+        // a box that is one point is enclosed as before, exactly
+        let (u, v) = (0.5 * (ua + ub), 0.5 * (va + vb));
+        assert_eq!(
+            piece_partials(cn, (ku, kv), Ivl::from(u), Ivl::from(v), lk).unwrap(),
+            nurbs_partials_within_span(cn, ku, kv, u, u, v, v, lk).unwrap()
+        );
     }
 }
