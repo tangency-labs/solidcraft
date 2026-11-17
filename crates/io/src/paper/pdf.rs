@@ -35,7 +35,7 @@ use flate2::Compression;
 use flate2::write::ZlibEncoder;
 use pdf_writer::{Date, Filter, Name, Pdf, Rect, Ref, TextStr};
 use solidcore_record::{Seg2, Vec2};
-use solidcraft_geom::paper::{Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, ObjectKind, Piece, Prepared};
+use solidcraft_geom::paper::{Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, Group, Item, ObjectKind, Piece, Prepared};
 use solidcraft_geom::prelude::*;
 
 use super::TEN_NANOMETRES;
@@ -103,14 +103,16 @@ pub fn paper_pdf_pages(scenes: &[Prepared], options: &PdfOptions) -> Result<(Vec
     }
     let date = options.output_time.map(date).transpose()?;
     let grid = grid()?;
-    let mut sheets = Vec::with_capacity(scenes.len());
+    // The pages' sizes from the scenes, as the grid will make them. Each page is put on the grid
+    // only when it is written, so one page's grid is held at a time.
+    let mut sizes = Vec::with_capacity(scenes.len());
     for scene in scenes {
-        let on = scene.on_grid(grid).map_err(|e| IoError::Invalid(e.to_string()))?;
-        let page = [on.size.x, on.size.y].map(|n| n as f64 / PER_MM * PT_PER_MM);
+        let size = grid.point(scene.size_mm()).map_err(|e| IoError::Invalid(e.to_string()))?;
+        let page = [size.x, size.y].map(|n| n as f64 / PER_MM * PT_PER_MM);
         if page.iter().any(|side| *side < MIN_PAGE_PT) {
             return Err(IoError::Invalid(format!("a sheet PDF's page is at least {MIN_PAGE_PT} pt (about 1.06 mm) a side")));
         }
-        sheets.push((on, page));
+        sizes.push(page);
     }
 
     // Object numbers in the order the objects are written: the catalog, the page tree, each page
@@ -118,12 +120,13 @@ pub fn paper_pdf_pages(scenes: &[Prepared], options: &PdfOptions) -> Result<(Vec
     // from 6.
     let mut refs = Refs(1);
     let (catalog, tree) = (refs.next()?, refs.next()?);
-    let mut pages = Vec::with_capacity(sheets.len());
-    for _ in &sheets {
+    let mut pages = Vec::with_capacity(sizes.len());
+    for _ in &sizes {
         pages.push((refs.next()?, refs.next()?));
     }
     let info = refs.next()?;
-    let layers = if options.layers { collect_layers(sheets.iter().flat_map(|(on, _)| &on.groups), &mut refs)? } else { Vec::new() };
+    let painted_kinds = scenes.iter().flat_map(|scene| scene.groups()).filter(|group| painted(group)).map(|group| group.kind);
+    let layers = if options.layers { collect_layers(painted_kinds, &mut refs)? } else { Vec::new() };
 
     let mut pdf = Pdf::new();
     {
@@ -142,9 +145,16 @@ pub fn paper_pdf_pages(scenes: &[Prepared], options: &PdfOptions) -> Result<(Vec
     }
     let count = i32::try_from(pages.len()).map_err(|_| IoError::Invalid("too many PDF pages".into()))?;
     pdf.pages(tree).kids(pages.iter().map(|(page, _)| *page)).count(count);
-    let (mut used, mut reports) = (0usize, Vec::with_capacity(sheets.len()));
-    for ((on, page), (page_id, contents)) in sheets.into_iter().zip(pages) {
-        let content = content_with_limit_and_layers(&on.groups, options.layers.then_some(layers.as_slice()), MAX_DRAWING_BYTES - used)?;
+    let (mut used, mut reports) = (0usize, Vec::with_capacity(scenes.len()));
+    for ((scene, page), (page_id, contents)) in scenes.iter().zip(sizes).zip(pages) {
+        // This page alone on the grid, written, then dropped. The grid keeps one group for each of
+        // the scene's, in order, so the scene says which of them are painted.
+        let on = scene.on_grid(grid).map_err(|e| IoError::Invalid(e.to_string()))?;
+        if on.groups.len() != scene.groups().len() {
+            return Err(IoError::Invalid("the sheet PDF: a page's groups changed on the grid".into()));
+        }
+        let groups = scene.groups().iter().zip(&on.groups).filter(|(group, _)| painted(group)).map(|(_, on)| on);
+        let content = content_with_limit_and_layers(groups, options.layers.then_some(layers.as_slice()), MAX_DRAWING_BYTES - used)?;
         used += content.len();
         let mut deflate = ZlibEncoder::new(Vec::new(), Compression::default());
         let compressed = deflate.write_all(content.as_bytes()).and_then(|()| deflate.finish());
@@ -154,7 +164,7 @@ pub fn paper_pdf_pages(scenes: &[Prepared], options: &PdfOptions) -> Result<(Vec
         {
             // This page's layers: the kinds it paints.
             let mut resources = writer.resources();
-            let mut on_page = layers.iter().filter(|layer| on.groups.iter().any(|g| painted(g) && g.kind == layer.kind)).peekable();
+            let mut on_page = layers.iter().filter(|layer| scene.groups().iter().any(|g| painted(g) && g.kind == layer.kind)).peekable();
             if on_page.peek().is_some() {
                 let mut properties = resources.insert(Name(b"Properties")).dict();
                 for layer in on_page {
@@ -212,24 +222,26 @@ struct Layer {
     tag: String,
 }
 
-/// The layers of `groups` (every page's, in page order): one a kind, numbered from `refs` and
-/// tagged `L0`, `L1`… as the kinds are first painted, so a kind is the same layer on every page.
-fn collect_layers<'a>(groups: impl IntoIterator<Item = &'a GridGroup>, refs: &mut Refs) -> Result<Vec<Layer>> {
+/// The layers of the painted groups' `kinds` (every page's, in page order): one a kind, numbered
+/// from `refs` and tagged `L0`, `L1`… as the kinds are first painted, so a kind is the same layer on
+/// every page.
+fn collect_layers(kinds: impl IntoIterator<Item = ObjectKind>, refs: &mut Refs) -> Result<Vec<Layer>> {
     let mut layers: Vec<Layer> = Vec::new();
-    for group in groups.into_iter().filter(|group| painted(group)) {
-        if layers.iter().any(|layer| layer.kind == group.kind) {
+    for kind in kinds {
+        if layers.iter().any(|layer| layer.kind == kind) {
             continue;
         }
         layers.try_reserve(1).map_err(|_| IoError::Invalid("the sheet PDF: cannot allocate its layer list".into()))?;
-        layers.push(Layer { kind: group.kind, reference: refs.next()?, tag: format!("L{}", layers.len()) });
+        layers.push(Layer { kind, reference: refs.next()?, tag: format!("L{}", layers.len()) });
     }
     Ok(layers)
 }
 
 /// Whether `group` puts any mark on this PDF's page: a stroke or a fill (text and pictures are
-/// passed over). A group with none invents no layer and doesn't interrupt a run.
-fn painted(group: &GridGroup) -> bool {
-    group.items.iter().any(|item| matches!(item, GridItem::Stroke { .. } | GridItem::Fill { .. }))
+/// passed over). A group with none invents no layer and doesn't interrupt a run. Asked of the
+/// prepared scene, whose strokes and fills each stay one on the grid.
+fn painted(group: &Group) -> bool {
+    group.items.iter().any(|item| matches!(item, Item::Stroke { .. } | Item::Fill { .. }))
 }
 
 /// The page's content stream: the scene in millimetres, scaled to points once.
@@ -238,19 +250,21 @@ fn content(groups: &[GridGroup]) -> Result<String> {
     content_with_limit(groups, MAX_DRAWING_BYTES)
 }
 
-// The private seam permits smaller test limits, never a higher production cap.
+// The private seam permits smaller test limits, never a higher production cap. The tests give it
+// painted groups only.
 #[cfg(test)]
 fn content_with_limit(groups: &[GridGroup], max_bytes: usize) -> Result<String> {
     // Numbered as a one-page document's, from 6.
-    let layers = collect_layers(groups, &mut Refs(6))?;
+    let layers = collect_layers(groups.iter().map(|group| group.kind), &mut Refs(6))?;
     content_with_limit_and_layers(groups, Some(&layers), max_bytes)
 }
 
-fn content_with_limit_and_layers(groups: &[GridGroup], layers: Option<&[Layer]>, max_bytes: usize) -> Result<String> {
+/// The content of a page's painted groups ([`painted`]), in paint order.
+fn content_with_limit_and_layers<'a>(groups: impl IntoIterator<Item = &'a GridGroup>, layers: Option<&[Layer]>, max_bytes: usize) -> Result<String> {
     let mut w = Content::new(max_bytes)?;
     w.append(&format!("q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 0 J 0 j 4 M\n"))?;
     let mut active_kind = None;
-    for group in groups.iter().filter(|group| painted(group)) {
+    for group in groups {
         if let Some(layers) = layers {
             let layer = layers.iter().find(|layer| layer.kind == group.kind).ok_or_else(|| IoError::Invalid("missing paper PDF layer".into()))?;
             if active_kind != Some(group.kind) {
