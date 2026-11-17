@@ -63,8 +63,8 @@
 //!   grazing cut by a neighbour's offset as a crossing where the end has no tangent
 //!   neighbour and the curve meets the offset at more than the tangency tolerance (the
 //!   angle that classed no neighbour tangent there), and `extend_trim_edges` gives an edge whose two uses are on one surface (a
-//!   seam) the extended UV curve moved onto the other use's side instead of a drop
-//!   (`same_surface_twin`). Solidcore-native, no fork commit.
+//!   seam), with UV curves a period apart, the extended UV curve moved onto the other use's
+//!   side instead of a drop (`same_surface_twin`). Solidcore-native, no fork commit.
 //! - **Object handles.** Every `SmObject*` (topology, curves, surfaces) is a caller
 //!   handle `O` ([`ClassObject`] + [`SolutionObject`]), as in
 //!   [`proto_topology`](crate::topology::proto_topology) and the topology intersector.
@@ -1240,31 +1240,48 @@ fn b_spline_overload_copy(c: &Curve) -> Result<Curve> {
     }))
 }
 
-/// Not upstream (#17514): `extended`, an extended UV curve of an edge use on a surface,
+/// Not upstream (#17514): `extended`, an extended UV curve of an edge use on `surface`,
 /// moved onto the side of the edge's other use on the same surface, `this` and `other`
 /// being the two uses' own UV trim curves: by the step from the middle of `this` to the
-/// middle of `other`. The two run over one edge, so their middles are one point of it;
+/// middle of `other`. Where the two run over one edge, their middles are one point of it:
 /// across a seam the step is the surface's period, and along the edge it is nought. The
 /// control points move as points, a 2D curve staying 2D (`CPoint::translate`), so the
 /// result keeps `extended`'s parameters.
 ///
+/// `None` where the step does not carry `this` onto the same points of `surface` (at its
+/// two ends and its middle, within `tol`): the two curves then do not run over one edge
+/// (a pole's row and a meridian of a sphere), the moved curve would lie elsewhere, and
+/// the caller drops the lifted curve as upstream does.
+///
 /// # Errors
 ///
-/// Those of the two evaluations; `SM_ERR` without a NURB.
+/// Those of the evaluations; `SM_ERR` without a NURB.
 fn same_surface_twin(
     extended: &BSplineCurve,
     this: &Curve,
     other: &Curve,
+    surface: &Surface,
+    tol: f64,
     k: &Kernel,
-) -> Result<Curve> {
-    let this_mid = this.evaluate_point(k, this.natural_interval().evaluate(0.5))?;
+) -> Result<Option<Curve>> {
+    let this_ivl = this.natural_interval();
+    let this_mid = this.evaluate_point(k, this_ivl.evaluate(0.5))?;
     let other_mid = other.evaluate_point(k, other.natural_interval().evaluate(0.5))?;
     let step = other_mid - this_mid;
+    for t in [this_ivl.min(), this_ivl.evaluate(0.5), this_ivl.max()] {
+        let p = this.evaluate_point(k, t)?;
+        let here = surface.evaluate_point(k, Point2::new(p.x, p.y))?;
+        let moved = p + step;
+        let there = surface.evaluate_point(k, Point2::new(moved.x, moved.y))?;
+        if (there - here).length() > tol {
+            return Ok(None);
+        }
+    }
     let mut twin = extended.copy();
     for pw in twin.get_or_create_gw_nurb()?.cpts_mut() {
         *pw = pw.translate(step);
     }
-    Ok(Curve::from(twin))
+    Ok(Some(Curve::from(twin)))
 }
 
 /// `new SmBSplineCurve(*pCurve)`, or the `SmBSplineCurve` data a static B-spline
@@ -4556,8 +4573,8 @@ impl OffsetGeometryCreation {
     /// non-lamina edge that curve is dropped onto the other extended surface for the
     /// second UV curve (the piece closest to the other UV curve's midpoint, or a copy
     /// of the original UV curve when the drop fails; not upstream, #17514: with both edge
-    /// uses on one surface, the extended UV curve moved onto the other use's side,
-    /// `same_surface_twin`). `TrimExtendedEdge` finds the trim
+    /// uses on one surface and their UV curves a period apart, the extended UV curve moved
+    /// onto the other use's side, `same_surface_twin`). `TrimExtendedEdge` finds the trim
     /// interval; the three curves are trimmed to it and become the offset edge uses'
     /// geometry (`ReplaceEdgeCurves`).
     ///
@@ -4757,20 +4774,29 @@ impl OffsetGeometryCreation {
         let mut other_uv_h: Option<O> = other_uv_curve;
         if let Some((other_ext_h, other_ext_domain)) = other_ext_surf {
             // Not upstream (#17514): both edge uses on one surface (a seam, the other side
-            // of a closed face's period) take the lifted curve back on that surface. The
-            // second UV curve is then the extended UV curve itself moved by the step between
-            // the two edge uses' own UV curves (a whole period across a seam): the same
-            // parameters, exactly. Dropping the lifted curve instead gives a piece on each
-            // side of the seam, and a piece cut short (a tube's extension turning past a
-            // whole turn) left the trim interval outside it.
-            let candidate_h = if other_ext_h == ext_surf_h {
+            // of a closed face's period) take the lifted curve back on that surface. Where
+            // the step between the two edge uses' own UV curves (a whole period across a
+            // seam) carries the first onto the same points of the surface, within the
+            // edge's tolerance (`same_surface_twin`), the second UV curve is the extended
+            // UV curve itself moved by that step: the same parameters, exactly. Dropping
+            // the lifted curve instead gives a piece on each side of the seam, and a piece
+            // cut short (a tube's extension turning past a whole turn) left the trim
+            // interval outside it. Two UV curves that do not run over one edge (a step
+            // that is not a period) are dropped as upstream does.
+            let twin = if other_ext_h == ext_surf_h {
                 let other = other_uv_curve.ok_or(dangling("null other UV curve"))?;
-                let twin = same_surface_twin(
+                same_surface_twin(
                     &uv_curve_extended,
                     curve_of(brep, uv_curve)?,
                     curve_of(brep, other)?,
+                    &ext_surface,
+                    edge_tol,
                     k,
-                )?;
+                )?
+            } else {
+                None
+            };
+            let candidate_h = if let Some(twin) = twin {
                 store_curve(brep, twin)?
             } else {
                 // (pOffsetEdgeuse->GetEdge()->GetTolerance(): null is undefined)
