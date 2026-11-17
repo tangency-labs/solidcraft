@@ -2197,11 +2197,10 @@ fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bo
             many.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
         ),
     };
-    let message = format!("body `{name}`{before}: {e}");
     match e {
         // A panic the check caught stays one, so it is not cached as an ordinary refusal.
-        kernel::KernelError::Internal(_) => kernel::KernelError::Internal(message),
-        _ => kernel::KernelError::Failed(message),
+        kernel::KernelError::Internal(m) => kernel::KernelError::Internal(format!("body `{name}`{before}: {m}")),
+        _ => kernel::KernelError::Failed(format!("body `{name}`{before}: {e}")),
     }
 }
 
@@ -13296,7 +13295,7 @@ mod kept_refused_tests {
         let good = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
         let inputs = [("Box1".to_string(), good, false)];
         let internal = kept_refused("Box1", &kernel::KernelError::Internal("SMLib copy: boom".into()), &inputs);
-        assert!(matches!(&internal, kernel::KernelError::Internal(m) if m.contains("body `Box1`")), "{internal:?}");
+        assert!(matches!(&internal, kernel::KernelError::Internal(m) if m == "body `Box1`: SMLib copy: boom"), "{internal:?}");
         let refused = kept_refused("Box1", &kernel::KernelError::Failed("refused".into()), &inputs);
         assert!(matches!(refused, kernel::KernelError::Failed(_)), "{refused:?}");
     }
