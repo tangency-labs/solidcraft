@@ -88,7 +88,7 @@ fn revolution_mold_edges_cover_their_gaps() {
 }
 
 /// The UV trim of the sphere's use of `Fillet/sphere_plane.smb`'s circle edge (edge 3),
-/// built after the read: the file's trim fails `sm_CheckUVTrimCurve` and is dropped, so
+/// built after the read once the caller has dropped the file's trim, so
 /// `GetOrCreateUVTrimCurve` makes it. Returns the curve's interval ends and 65 points
 /// along it, and the edge's tolerance.
 fn sphere_plane_circle_trim(k: &Kernel, b: &mut Brep) -> (Vec<[u64; 2]>, f64) {
@@ -131,6 +131,13 @@ fn sphere_plane_trim_fit_does_not_grow_with_the_gap_cover() {
     let e = EdgeId::from_index(3);
     let raised = b.edge(e).unwrap().tolerance;
     assert!(raised > 1.0e-5, "the circle edge is raised: {raised:e}");
+    // the sphere's trim made again after the read (the read keeps the file's own trim,
+    // WR-493)
+    for eu in b.edge(e).unwrap().edgeuses.clone() {
+        if eu1::face(&b, eu).unwrap() == Some(FaceId::from_index(0)) {
+            eu1::set_uv_trim_curve(&mut b, eu, eu1::UvTrimCurveArg::Null, 0.0, true, None).unwrap();
+        }
+    }
     let (healed, tol) = sphere_plane_circle_trim(&k, &mut b);
 
     // the same read with the circle edge at the tolerance before the gap cover, and the
