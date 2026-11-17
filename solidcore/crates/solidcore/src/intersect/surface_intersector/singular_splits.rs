@@ -466,8 +466,8 @@ mod tests {
     /// `z = (2u - 1)^2` have parallel normals at u = 1/2, which the second UV curve
     /// reaches at t = 1.25, so the crossing is split there. Its 3D curve is rational
     /// (unit weights) and its first span [0, 1] collapses to a pole at the start, so the
-    /// split's `Trim` cleans that span off the lead piece and drops the parent's knot at
-    /// 1. A rational piece cannot be bounded (`piece_deviation` is `None`) and the curve
+    /// split's `Trim` cleans that span off the lead piece and drops the parent's knot
+    /// at 1. A rational piece cannot be bounded (`piece_deviation` is `None`) and the curve
     /// is left unsplit: the three parents must come back with their knots, control
     /// points, owner and recorded edge tolerance. A `Clone` (the copy constructor) drops
     /// the owner and the tolerance and merges the first UV curve's knots 1e-14 apart,
