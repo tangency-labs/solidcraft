@@ -989,7 +989,7 @@ fn drawn_plan(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, opaque: boo
             None => b.gpu_plan_at(solidcraft_engine::doc::display_quality::current()),
         })
         .flatten()
-        .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH)
+        .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH && solidcraft_viewport_gpu::validate_plan(plan).is_ok())
 }
 
 /// Whether `b` is a copy of a body the shown world places more than once (a component placed
@@ -5140,7 +5140,7 @@ fn wireframe_highlight_plan(app: &SolveApp, b: &solidcraft_engine::doc::ModelBod
         .is_some_and(|g| g.tess)
         .then(|| refined(app, b).map(|(plan, _)| plan).or_else(|| b.gpu_plan_at(solidcraft_engine::doc::display_quality::current())))
         .flatten()
-        .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH)
+        .filter(|plan| plan.vertex_count() <= solidcraft_viewport_gpu::MAX_BATCH && solidcraft_viewport_gpu::validate_plan(plan).is_ok())
 }
 
 /// Whether the model draws a whole body opaque on the GPU, rather than building it on the CPU:
@@ -9892,6 +9892,115 @@ mod tests {
                 let rung = (x - left[0]) / step;
                 assert!((rung - rung.round()).abs() < 1e-6, "{axis} = {x} is off the ladder {left:?} (step {step}); right piece {right:?}");
             }
+        }
+    }
+
+    fn pole_revolve_app() -> SolveApp {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"name": "Profile", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}})).unwrap();
+        s.execute("sketch.arc.center_point", &json!({"center": [1, 1], "start": [0, 1], "end": [1, 0]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[1, 0], [2, 0], [2, 4], [0, 4], [0, 1]]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.revolve", &json!({"sketch": "Profile", "axis": "Z", "angle": "360 deg", "operation": "new", "body_name": "Rounded"}))
+            .unwrap();
+        s.execute("solid.box", &json!({"length": 2, "width": 2, "height": 2, "corner": [6, 0, 0], "body_name": "Box"})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        app.ui.show_grid = false;
+        app
+    }
+
+    /// A revolved round that ends tangent to its axis needs pole normals the GPU cannot
+    /// evaluate. Its complete CPU mesh stays visible beside an ordinary GPU-planned body,
+    /// including after refinement and while the whole body is highlighted (#16977).
+    #[test]
+    fn a_revolve_with_pole_nodes_keeps_its_faces_and_highlights_on_the_cpu() {
+        let mut app = pole_revolve_app();
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+        let st = app.session.world_state().unwrap();
+        let rounded = st.body("Rounded").unwrap().clone();
+        let bx = st.body("Box").unwrap().clone();
+        let q = solidcraft_engine::doc::display_quality::current();
+        let box_plan = bx.gpu_plan_at(q).unwrap();
+        assert!(rounded.gpu_plan_at(q).unwrap().faces.iter().any(|f| !f.poles.is_empty()), "the round reaches a higher-order pole");
+        for refined in [false, true] {
+            if refined {
+                assert!(app.viewport.lod.lock().unwrap().force(&rounded, q, 1));
+            }
+            for style in [0, 3] {
+                app.ui.visual_style = style;
+                app.viewport.hover_bodies.clear();
+                app.session.selection.clear();
+                let scene = build_scene(&app).merged();
+                assert_eq!(scene.planned.len(), 1, "style {style}, refined {refined}: only the ordinary box is evaluated on the GPU");
+                assert!(std::sync::Arc::ptr_eq(&scene.planned[0].plan, &box_plan));
+                let mesh = drawn_mesh(&app, &rounded);
+                let faces: std::collections::HashSet<_> = mesh.tri_face.iter().copied().collect();
+                assert_eq!(faces.len(), rounded.body.face_count(), "every face has triangles");
+                assert_eq!(scene.tris.len(), mesh.triangles.len() * 3 * crate::gpu::TRI_SIZE, "the pole body's complete mesh is drawn on the CPU");
+                for selected in [false, true] {
+                    app.viewport.hover_bodies = if selected { Vec::new() } else { vec![rounded.name.clone()] };
+                    app.session.selection = if selected { vec![Sel::Body { name: rounded.name.clone() }] } else { Vec::new() };
+                    let lit = build_highlight(&app);
+                    assert!(lit.hover_planned.is_empty() && lit.selected_planned.is_empty());
+                    assert_eq!(lit.hover_blocks.len() + lit.selected_blocks.len(), 1, "whole-body feedback reuses the CPU mesh");
+                }
+            }
+            app.ui.visual_style = 2;
+            app.session.selection.clear();
+            app.viewport.hover_bodies = vec![rounded.name.clone()];
+            build_scene(&app);
+            let lit = build_highlight(&app);
+            assert!(lit.planned.is_empty(), "Wireframe feedback cannot evaluate the pole plan either");
+            assert!(!lit.merged().tris.is_empty(), "Wireframe feedback draws the CPU triangles");
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_revolve_with_pole_nodes_renders_beside_a_gpu_body() {
+        const SIZE: u32 = 512;
+        let mut app = pole_revolve_app();
+        app.fit_view();
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
+        for style in [0, 3] {
+            app.ui.visual_style = style;
+            let mut render = |tess: bool| {
+                app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess, oit: false });
+                let proj = projection(&app, rect);
+                let e = proj.cam.eye().to_f32();
+                let eye = [e[0], e[1], e[2], 0.0];
+                let pixels = crate::gpu::render_offscreen(
+                    build_scene(&app).merged(),
+                    None,
+                    proj.vp.to_f32(),
+                    proj.cam.back().to_f32(),
+                    eye,
+                    SIZE,
+                    tess.then_some(solidcraft_viewport_gpu::SHADER),
+                    [0.0; 8],
+                    crate::gpu::analysis_colors(&Tokens::get().analysis),
+                )?;
+                if let Some(dir) = std::env::var_os("SOLIDCRAFT_POLE_EVIDENCE") {
+                    let image = image::RgbaImage::from_raw(SIZE, SIZE, pixels.clone()).unwrap();
+                    image.save(std::path::PathBuf::from(dir).join(format!("style-{style}-tess-{tess}.png"))).unwrap();
+                }
+                Some(pixels)
+            };
+            let (Some(gpu), Some(cpu)) = (render(true), render(false)) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            let drawn = cpu.as_chunks::<4>().0.iter().filter(|p| p[..3] != [255, 255, 255]).count();
+            assert!(drawn > (SIZE * SIZE) as usize / 20, "the bodies cover the view");
+            let different = gpu
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(cpu.as_chunks::<4>().0)
+                .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(a, b)| a.abs_diff(*b) > 24))
+                .count();
+            assert!(different * 100 < drawn, "style {style}: {different} of {drawn} body pixels differ");
         }
     }
 
