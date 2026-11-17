@@ -1100,19 +1100,30 @@ impl<O: ClassObject> VertexDefinition<O> {
         }
 
         let position = find_position_from_pcs(k, geometry, &mut pc1, &mut pc2)?;
-        // A point farther from this placement than the definition's tolerance is not this
+        // A point farther from this placement than the old crossing can reach is not this
         // point placed again: both points lie on both objects, but they are two points (an
         // edge that meets a face along a stretch within tolerance, where a later crossing of
-        // the same edge and face lands 1.2e-4 from the first at a tolerance of 1e-5). Moving
-        // there would move the proto vertex out of its own tolerance of the first point.
-        // (NaN keeps the placement.)
-        if !matches!(
-            position
-                .position
-                .distance(self.position)
-                .partial_cmp(&self.tolerance(k)),
-            Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
-        ) {
+        // the same edge and face at the same angle lands 1.2e-4 from the first at a
+        // tolerance of 1e-5). Moving there would move the proto vertex out of its own
+        // tolerance of the first point. Two objects that cross at angle `asin(s)` with their
+        // points `gap` apart stay within a tolerance `tol` of each other for about
+        // `(tol + gap) / s` along the edge either side of the crossing (to first order), so
+        // a grazing first crossing reaches far and a steep one only its tolerance.
+        // A classification on a vertex pins the crossing to that vertex's point: no stretch,
+        // so every crossing there is this point placed again. (NaN keeps the placement.)
+        let tol = self.tolerance(k);
+        let reach = max2(tol, crossing_error(self.gap + tol, self.crossing_sine));
+        let along_a_stretch = pc1.point_class() != PointClassType::Vertex
+            && pc2.point_class() != PointClassType::Vertex;
+        if along_a_stretch
+            && !matches!(
+                position
+                    .position
+                    .distance(self.position)
+                    .partial_cmp(&reach),
+                Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+            )
+        {
             return Ok(false);
         }
         self.pc1 = pc1;
