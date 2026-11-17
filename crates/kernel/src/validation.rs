@@ -182,7 +182,7 @@ pub fn check_kept(body: &Body) -> Result<()> {
     if body.is_mesh() {
         return Ok(());
     }
-    let step = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r)));
+    let step = body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r)));
     let (what, check) = match step {
         Some((u, r)) => (u.what.as_str(), check_result_owned(r, u.how)),
         None => ("SMLib", body.smlib()?.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
@@ -237,7 +237,7 @@ pub fn detach_kept(body: &Body) -> KeptCheck {
     if body.is_mesh() {
         return KeptCheck(Kept::Nothing, stop);
     }
-    if let Some((u, result)) = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r))) {
+    if let Some((u, result)) = body.unchecked.as_deref().and_then(|u| u.take(body.record.arc()).map(|r| (u, r))) {
         return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result }, stop);
     }
     KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))), stop)
