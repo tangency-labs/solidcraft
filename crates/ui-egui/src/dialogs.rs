@@ -408,6 +408,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Pick what the agent chat's next message is about (#2286): elements, features and bodies.
             /// OK hands the picks to the chat (`agent_chat::pick_done`); nothing is run.
             ChatContext,
+            /// The selection fields of a plugin command's dialog (`plugin_menu`, by its dialog id):
+            /// the viewport picks into them as into any dialog's inputs, while the plugin's own
+            /// window draws them. No panel is drawn for it and nothing runs from it.
+            PluginPick {
+                dialog: u64,
+            },
             /// Joints and components (`dialogs_assembly`).
             Assembly(crate::dialogs_assembly::Asm),
             /// Sheet metal (`dialogs_sheet`).
@@ -819,7 +825,7 @@ impl Refused {
 }
 
 /// Can a selection go into an input that accepts `a`? (Planar-ness is checked when picking.)
-fn fits(a: Accept, s: &Sel) -> bool {
+pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
     match s {
         Sel::Profile { .. } => a & PROFILES != 0,
         Sel::Edge { .. } => a & EDGES != 0,
@@ -2917,6 +2923,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::BoundaryFill { .. } => "BOUNDARY FILL",
         Kind::Remove => "REMOVE",
         Kind::ChatContext => "PICK CONTEXT",
+        Kind::PluginPick { .. } => "PLUGIN",
         Kind::PathPattern { .. } => "PATTERN ON PATH",
         Kind::Split => "SPLIT BODY",
         Kind::Thread { .. } => "THREAD",
@@ -4173,7 +4180,8 @@ pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
 /// Whether OK and Cancel in the view's corner act on the dialog (#6709): every docked dialog;
 /// a deletion asks in a modal card of its own, which the corner must not answer.
 pub(crate) fn corner_confirms(d: &Dialog) -> bool {
-    !matches!(d.kind, Kind::ConfirmDelete { .. })
+    // A plugin's picks are confirmed by Run in its own window.
+    !matches!(d.kind, Kind::ConfirmDelete { .. } | Kind::PluginPick { .. })
 }
 
 /// Show the active dialog (if any), docked flush to an edge of the viewport just below the axis
@@ -4194,6 +4202,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.op_check.abandon();
         return;
     };
+    // A plugin dialog's picks: its own window draws the fields, Run and Cancel (`plugin_menu`).
+    if matches!(d.kind, Kind::PluginPick { .. }) {
+        // Escape stops picking at once; the plugin's window closes on it too, as a tool's does.
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !app.esc_handled && escape_routed_here {
+            app.esc_handled = true;
+            crate::plugin_menu::stop_picking(app, d);
+        } else {
+            app.dialog = Some(d);
+        }
+        return;
+    }
     // Edit Text lasts as long as its text: other design changes leave it open.
     if let Kind::Text(k) = &mut d.kind
         && !crate::sketch_text::refresh(app, k)
@@ -5807,6 +5826,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     }
     let (cmd, params): (&str, Value) = match &d.kind {
         Kind::ChatContext => return Err("the chat takes these picks; nothing runs".into()),
+        Kind::PluginPick { .. } => return Err("the plugin's dialog takes these picks; nothing runs here".into()),
         Kind::Extrude {
             distance,
             direction,

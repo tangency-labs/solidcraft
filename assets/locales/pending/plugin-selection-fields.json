@@ -1,0 +1,6 @@
+{
+  "en": {
+    "ui.plugin_dialog_finish_tool": "Finish or cancel the open tool to pick into this field.",
+    "ui.plugin_dialog_picks_cleared": "The design changed, so the picks were cleared. Pick them again."
+  }
+}
