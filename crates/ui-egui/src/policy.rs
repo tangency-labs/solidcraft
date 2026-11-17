@@ -295,6 +295,7 @@ mod tests {
 
     #[test]
     fn any_mandatory_value_makes_the_computer_managed_and_a_recommended_one_does_not() {
+        crate::i18n::install();
         let _language = solidcraft_ui_text::scope("en");
         assert!(!Policy::default().managed());
         assert_eq!(Policy::default().managed_by(), None);
