@@ -254,6 +254,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:names_from_file", response.rect);
         });
         ui_kit::settings_section(ui, "assemblies", app.tr("prefs.assemblies"), |ui| {
+            let response = setting::joint_moving_first(app, ui);
+            crate::scenario::publish_target("prefs:joint_moving_first", response.rect);
+            let response = setting::joint_auto_alignment(app, ui);
+            crate::scenario::publish_target("prefs:joint_auto_alignment", response.rect);
+
             ui.horizontal_wrapped(|ui| {
                 let response = setting::joint_drag_trackball(app, ui).backing_on_hover_text(app.tr("prefs.joint_drag_trackball_help"));
                 crate::scenario::publish_target("prefs:joint_drag_trackball", response.rect);
