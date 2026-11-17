@@ -2,8 +2,8 @@
 //! real crates and packages in docs/book/plugin-examples, and this keeps the two the same and
 //! builds each crate for wasm32-unknown-unknown as the guide does, against this checkout's WIT.
 //!
-//! The crates are outside the workspace (a plugin author's crate is not part of SolidCraft), with
-//! their own lockfiles. `--run` also wraps each module as a component and runs
+//! The crates are workspaces of their own (a plugin author's crate is not part of SolidCraft),
+//! with their own lockfiles. `--run` also wraps each module as a component and runs
 //! `solidcraft-cli plugin test --require-cases` on its package, as the guide's last steps do.
 
 use std::path::{Path, PathBuf};
