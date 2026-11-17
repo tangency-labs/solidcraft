@@ -415,8 +415,11 @@ fn json_import_resolves_forward_references() {
 
     let (values, errors) = session.doc.param_values();
     assert!(errors.is_empty(), "{errors:?}");
-    assert_eq!(session.doc.param_display_value(&values, "panel_width"), Some(22.5));
-    assert_eq!(session.doc.param_display_value(&values, "panel_angle"), Some(45.0));
+    // Inch and angle conversions can round at the last bit on different platforms.
+    for (name, expected) in [("panel_width", 22.5), ("panel_angle", 45.0)] {
+        let actual = session.doc.param_display_value(&values, name).expect("imported parameter has a value");
+        assert!(rel(actual, expected) < 1e-12, "{name}: expected {expected}, got {actual}");
+    }
 }
 
 /// A value a spreadsheet would run as a formula is exported as text, with a `'` first, and
@@ -1425,4 +1428,4 @@ fn exports_round_reported_numbers() {
     let rows: Vec<Value> = serde_json::from_str(&json_text).unwrap_or_default();
     let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
     assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
-}
+        }
