@@ -554,24 +554,80 @@ pub(super) fn paper_border(ui: &mut egui::Ui, paper: Option<Paper>, border: Opti
     ui.add_enabled_ui(false, |ui| choice(ui, tr("ui.drawing_panel.border"), 0, &[&label]));
 }
 
+pub(super) struct SheetNotice {
+    owner: (u64, u64, u64),
+    revision: u64,
+    views: Vec<u64>,
+}
+
 fn change_sheet(app: &mut SolveApp, sheet: u64, key: &str, value: Value) {
     let mut params = json!({"sheet": ids::encode(sheet)});
     params[key] = value;
-    if let Err(error) = app.run("drawing.sheet.set", params) {
-        app.set_status(error, true);
+    match app.run("drawing.sheet.set", params) {
+        Ok(reply) => {
+            let views = reply["outside"].as_array().into_iter().flatten().filter_map(|view| ids::decode(view["view"].as_str()?)).collect::<Vec<_>>();
+            app.drawing_workspace.sheet_notice = app.session.open_drawing.filter(|_| !views.is_empty()).map(|drawing| SheetNotice {
+                owner: (app.session.uid, drawing, sheet),
+                revision: app.session.revision,
+                views,
+            });
+        }
+        Err(error) => app.set_status(error, true),
+    }
+}
+
+fn sheet_notice(app: &mut SolveApp, ui: &mut egui::Ui, drawing: &Drawing, sheet: &Sheet) {
+    let Some(notice) = app.drawing_workspace.sheet_notice.as_ref() else { return };
+    if notice.owner != (app.session.uid, drawing.id, sheet.id) || notice.revision != app.session.revision {
+        return;
+    }
+    let t = Tokens::get();
+    let message = solidcraft_ui_text::format("ui.drawing_settings.outside", &[("count", &notice.views.len().to_string())]);
+    let container = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel);
+    let frame =
+        container.edge_frame(t.pref_note_fill).stroke(t.control_border_stroke(t.pref_note)).corner_radius(t.radius_md).inner_margin(t.space_12);
+    let area = ui.available_rect_before_wrap();
+    let picked = container
+        .show_frame(ui, frame, area, |ui| {
+            ui.set_width((area.width() - 2.0 * t.space_12).max(0.0));
+            ui.label(egui::RichText::new(message).strong().color(t.pref_note));
+            ui.label(tr("ui.drawing_settings.unmoved"));
+            ui.horizontal_wrapped(|ui| {
+                let mut picked = None;
+                for (index, view) in drawing.views.iter().filter(|view| view.sheet == sheet.id).enumerate() {
+                    if notice.views.contains(&view.id) {
+                        let label = solidcraft_ui_text::format("ui.drawing_settings.view", &[("number", &(index + 1).to_string())]);
+                        if ui_kit::button(ui, label, Button::Small).clicked() {
+                            picked = Some(view.id);
+                        }
+                    }
+                }
+                picked
+            })
+            .inner
+        })
+        .inner;
+    if let Some(view) = picked {
+        super::edit_object(app, "view", view);
     }
 }
 
 pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let sheet = active_sheet(app).and_then(|id| app.session.drawing("drawing.inspect").ok()?.sheets.iter().find(|sheet| sheet.id == id).cloned());
-    if let Some(sheet) = sheet {
-        sheet_fields(app, ui, &sheet);
-    } else {
+    let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return };
+    let Some(sheet) = active_sheet(app).and_then(|id| drawing.sheets.iter().find(|sheet| sheet.id == id)) else {
         caption(ui, "ui.drawing_panel.no_sheet");
-    }
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.screen"));
-    ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
-    ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
+        return;
+    };
+    ui_kit::settings_page(ui, |ui| {
+        sheet_notice(app, ui, &drawing, sheet);
+        sheet_fields(app, ui, sheet);
+
+        ui_kit::section_heading(ui, tr("ui.drawing_panel.screen"));
+        ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
+        ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
+        ui.separator();
+        ui_kit::settings_inline_note(ui, tr("ui.drawing_settings.immediate"));
+    });
 }
 
 fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
@@ -595,22 +651,31 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
         SheetSize::Custom { sides_mm: [a, b] } => format!("{a} × {b} mm"),
     };
     let mut new_size = None;
-    ui_kit::row(ui, tr("ui.drawing_panel.size"), |ui| {
+    let picker = ui_kit::row(ui, tr("ui.drawing_panel.size"), |ui| {
         ui_kit::dropdown_menu(ui, "drawing_sheet_size", &selected, |ui| {
             for size in PaperSize::ALL {
                 let caption = size_caption(size);
-                if ui_kit::list_picker(ui, &caption, &caption, sheet.sheet.size == SheetSize::Standard(size)).clicked() {
+                let option = ui_kit::list_picker(ui, &caption, &caption, sheet.sheet.size == SheetSize::Standard(size));
+                crate::scenario::publish_target(&format!("drawing:settings:paper:{size:?}"), option.rect);
+                if option.clicked() {
                     new_size = Some(size);
+                    ui.close();
                 }
             }
-        });
+        })
     });
+    crate::scenario::publish_target("drawing:settings:paper", picker.rect);
     if let Some(size) = new_size {
         change_sheet(app, sheet.id, "size", json!(SheetSize::Standard(size)));
     }
     let mut orientation = usize::from(sheet.sheet.orientation == Orientation::Portrait);
     let changed = ui_kit::row(ui, tr("ui.drawing_panel.orientation"), |ui| {
-        ui_kit::segmented(ui, &mut orientation, &[tr("ui.drawing_panel.landscape"), tr("ui.drawing_panel.portrait")], ui_kit::Segments::default())
+        ui_kit::segmented(
+            ui,
+            &mut orientation,
+            &[tr("ui.drawing_panel.landscape"), tr("ui.drawing_panel.portrait")],
+            ui_kit::Segments { workspace_accent: true, ..Default::default() },
+        )
     });
     if changed {
         let value = if orientation == 0 { Orientation::Landscape } else { Orientation::Portrait };
@@ -618,7 +683,22 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     }
     let dpi_id = ui.make_persistent_id(("sheet_settings_dpi", app.session.uid, sheet.id));
     let mut dpi = context.data(|data| data.get_temp::<String>(dpi_id)).unwrap_or_else(|| sheet.dpi.to_string());
-    let (enter, response) = ui_kit::row(ui, tr("ui.drawing_panel.picture_dpi"), |ui| ui_kit::text_field_reserving(ui, &mut dpi, "", 0.0));
+    let picture = tr("ui.drawing_settings.picture");
+    let (enter, response) = ui_kit::row(ui, picture, |ui| {
+        let t = Tokens::get();
+        let (enter, response) = ui_kit::text_field_reserving(ui, &mut dpi, "", t.space_24);
+        ui.painter().text(
+            response.rect.right_center() - egui::vec2(t.space_8, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            "dpi",
+            egui::FontId::monospace(t.font_small),
+            t.form_dim,
+        );
+        (enter, response)
+    });
+    ui_kit::below_row_control(ui, picture, ui.available_width(), |ui| {
+        ui_kit::settings_inline_note(ui, tr("ui.drawing_settings.picture_help"));
+    });
     if enter || response.lost_focus() {
         if let Ok(value) = dpi.parse::<f64>()
             && (MIN_DPI..=MAX_DPI).contains(&value)
@@ -631,20 +711,34 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
         context.data_mut(|data| data.insert_temp(dpi_id, dpi));
     }
     ui_kit::section_heading(ui, tr("ui.drawing_panel.border_title"));
-    ui.add_enabled_ui(false, |ui| {
-        choice(
-            ui,
-            tr("ui.drawing_panel.border"),
-            0,
-            &[if sheet.border.is_some() { tr("ui.drawing_panel.existing") } else { tr("ui.drawing_panel.none") }],
-        );
-        choice(
-            ui,
-            tr("ui.drawing_panel.title_block"),
-            0,
-            &[if sheet.title_block.is_some() { tr("ui.drawing_panel.existing") } else { tr("ui.drawing_panel.none") }],
-        );
-        choice(ui, tr("ui.drawing_panel.template"), 0, &[tr("ui.drawing_panel.none")]);
+    paper_border(ui, Some(sheet.sheet), sheet.border.as_ref());
+    let built_in = tr("ui.drawing_panel.built_in");
+    let none = tr("ui.drawing_panel.none");
+    let current = match sheet.title_block.as_ref() {
+        Some(block) if *block == *STANDARD_TITLE_BLOCK => built_in,
+        Some(_) => tr("ui.graphics_custom"),
+        None => none,
+    };
+    let mut replacement = None;
+    ui_kit::row(ui, tr("ui.drawing_panel.title_block"), |ui| {
+        ui_kit::dropdown_menu(ui, "drawing_sheet_title_block", current, |ui| {
+            for (label, value) in [(built_in, json!("built-in")), (none, Value::Null)] {
+                if ui_kit::list_picker(ui, label, label, current == label).clicked() {
+                    if current != label {
+                        replacement = Some(value);
+                    }
+                    ui.close();
+                }
+            }
+        });
+    });
+    if let Some(value) = replacement {
+        change_sheet(app, sheet.id, "title_block", value);
+    }
+    let template = tr("ui.drawing_panel.template");
+    ui.add_enabled_ui(false, |ui| choice(ui, template, 0, &[none]));
+    ui_kit::below_row_control(ui, template, ui.available_width(), |ui| {
+        ui_kit::settings_inline_note(ui, tr("ui.drawing_settings.template_help"));
     });
     ui_kit::section_heading(ui, tr("ui.drawing_panel.counting"));
     let mut count = !sheet.excluded.count;
