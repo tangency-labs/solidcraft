@@ -42,7 +42,8 @@
 //!   the status it returns there is non-zero, which its caller reads as `TRUE` (an
 //!   analytic surface was made, though none was added, and skips the Coons patch). The
 //!   port returns `Ok(false)` for those exits, so the caller builds the Coons patch
-//!   (`plan/upstream-issues/WR-254--smfilletcorner-makeanalyticcornersurface-reports-its-ser-ner--dup2.md`). Its fits that fail softly upstream
+//!   (`plan/upstream-issues/WR-254--smfilletcorner-makeanalyticcornersurface-reports-its-ser-ner--dup2.md`);
+//!   an exit that carries no upstream status propagates. Its fits that fail softly upstream
 //!   (`if (SM_SUCCESS != fit(..)) return FALSE;`) are `false`; only
 //!   [`SolidError::Unported`] and [`SolidError::InvalidInput`] propagate from them.
 //!   The fillet solvers are the base [`FilletSolver`]s of [`CornerEnv::solvers`]; a
@@ -900,14 +901,17 @@ impl FilletCorner {
     /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (a primary edge
     /// use, fillet solver, surface generator, start vertex or intersection curve);
     /// [`SolidError::Unported`] (`MakeConstantRadiusFillet`, unit
-    /// `blend.fillet_corner_p1`).
+    /// `blend.fillet_corner_p1`); any other exit that carries no upstream status (such
+    /// as [`SolidError::NotFound`] for an entity the corner names but the B-reps lack),
+    /// which no upstream status stands for and so is never read as a made surface.
     pub fn make_analytic_corner_surface(&mut self, env: &mut CornerEnv<'_>) -> Result<bool> {
         env.with_patch_env(|env| self.make_analytic_corner_surface_with(env))
     }
 
     /// [`FilletCorner::make_analytic_corner_surface`] against any [`CornerPatchEnv`].
     ///
-    /// A failing upstream status is `Ok(false)` (WR-254).
+    /// A failing upstream status is `Ok(false)` (WR-254); every other error is passed
+    /// on.
     ///
     /// # Errors
     /// As [`FilletCorner::make_analytic_corner_surface`].
@@ -917,21 +921,15 @@ impl FilletCorner {
     ) -> Result<bool> {
         match self.analytic_corner_surface(env) {
             Ok(made) => Ok(made),
-            Err(e)
-                if matches!(
-                    e,
-                    SolidError::Unported { .. }
-                        | SolidError::Cancelled { .. }
-                        | SolidError::InvalidInput { .. }
-                        | SolidError::PortInvariant { .. }
-                ) || e.is_not_certified() =>
-            {
-                Err(e)
-            }
             // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: no surface
-            // was added, so they read as FALSE (upstream reads TRUE; WR-254).
-            Err(e) if e.upstream_status().is_some() => Ok(false),
-            Err(_) => Ok(true),
+            // was added, so they read as FALSE (upstream reads TRUE; WR-254). A
+            // certificate past its work budget carries a status but is work given up.
+            Err(e) if e.upstream_status().is_some() && !e.is_not_certified() => Ok(false),
+            // `Unported`, `Cancelled`, `InvalidInput`, `PortInvariant`, and every exit
+            // no upstream status stands for (`NotFound`, `Degenerate`, a typed reason
+            // without one): no surface was added either, and none of them is an
+            // upstream FALSE to patch over, so they are passed on.
+            Err(e) => Err(e),
         }
     }
 
