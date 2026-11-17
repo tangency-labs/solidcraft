@@ -334,8 +334,15 @@ pub(super) fn size_caption(size: PaperSize) -> String {
 
 impl AddSheet {
     pub(super) fn open(app: &SolveApp) -> Option<Self> {
+        Self::open_after(app, None)
+    }
+
+    pub(super) fn open_after(app: &SolveApp, sheet: Option<u64>) -> Option<Self> {
         let drawing = app.session.drawing("drawing.inspect").ok()?;
-        let after = drawing.sheets.len().checked_sub(1)?;
+        let after = match sheet {
+            Some(id) => drawing.sheets.iter().position(|sheet| sheet.id == id)?,
+            None => drawing.sheets.len().checked_sub(1)?,
+        };
         let paper = PaperChoice::new(drawing.sheets.get(after)?.sheet);
         Some(Self { name: String::new(), after, paper, title_block: 0 })
     }
@@ -652,6 +659,9 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     let mut name = context.data(|data| data.get_temp::<String>(name_id)).unwrap_or_else(|| sheet.name.clone());
     ui_kit::section_heading(ui, tr("ui.drawing_panel.sheet"));
     let (enter, response) = ui_kit::row(ui, tr("ui.drawing_panel.name"), |ui| ui_kit::text_field_reserving(ui, &mut name, "", 0.0));
+    if app.drawing_workspace.rename_sheet.take() == Some(sheet.id) {
+        response.request_focus();
+    }
     if enter || response.lost_focus() {
         if !name.trim().is_empty() && name.len() <= MAX_NAME_BYTES && name != sheet.name {
             change_sheet(app, sheet.id, "name", json!(name));
