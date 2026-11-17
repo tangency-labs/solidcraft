@@ -4073,7 +4073,6 @@
   "ui.agent_chat_attach_selection_tip": "Отправить с сообщением выделенное в модели (грани, рёбра, операции, тела), чтобы агент понимал, что вы имеете в виду",
   "ui.agent_chat_attach_view": "Прикрепить вид",
   "ui.agent_chat_attach_view_tip": "Отправить с сообщением изображение текущего вида",
-  "ui.agent_chat_attachable": "Изображения, PDF, текст и файлы CAD",
   "ui.agent_chat_auth_agent": "Войти через {name}",
   "ui.agent_chat_auth_env": "Задайте {vars} в окружении и перезапустите SolidCraft.",
   "ui.agent_chat_auth_needed": "Агент просит войти в систему. Вход выполняется через самого агента; SolidCraft никогда не видит ваш пароль или ключи.",

@@ -511,9 +511,16 @@ pub struct Services {
     /// only the types it names, so the agent chat's files need a dialog of their own. `None`: the
     /// Open dialog.
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
-    /// The same dialog, allowing several files at once (the agent chat's files). `None`: one
-    /// file, with `pick_file`.
-    pub pick_files: Option<Box<dyn Fn(&str, &[&str]) -> FilesPickerFuture>>,
+    /// Open a dialog for several files of any type at once (the agent chat's files: whatever it
+    /// can't read goes to the agent by path, so nothing is filtered out). `None`: one file, with
+    /// `pick_file`.
+    pub pick_files: Option<Box<dyn Fn() -> FilesPickerFuture>>,
+    /// Open a dialog for several folders at once (the agent chat's files). `None`: one, with
+    /// `pick_folder`.
+    pub pick_folders: Option<Box<dyn Fn() -> FilesPickerFuture>>,
+    /// Open one dialog for files and folders together, several at once, where the system's dialog
+    /// can (macOS). `None` elsewhere: the chat offers files and folders apart.
+    pub pick_files_or_folders: Option<Box<dyn Fn() -> FilesPickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
     /// Open a dialog for a folder: the local document library root, or a folder the agent chat

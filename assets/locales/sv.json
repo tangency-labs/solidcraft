@@ -4118,7 +4118,6 @@
   "ui.agent_chat_attach_selection_tip": "Skicka det som är markerat i modellen (ytor, kanter, funktioner, kroppar) med meddelandet, så att agenten vet vad du menar",
   "ui.agent_chat_attach_view": "Bifoga vy",
   "ui.agent_chat_attach_view_tip": "Skicka en bild av den aktuella vyn med meddelandet",
-  "ui.agent_chat_attachable": "Bilder, PDF-filer, text och CAD-filer",
   "ui.agent_chat_auth_agent": "Logga in med {name}",
   "ui.agent_chat_auth_env": "Ange {vars} i din miljö och starta om SolidCraft.",
   "ui.agent_chat_auth_needed": "Agenten ber dig logga in. Du loggar in hos agenten själv; SolidCraft ser aldrig ditt lösenord eller dina nycklar.",

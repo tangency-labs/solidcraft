@@ -1,82 +1,90 @@
 {
   "en": {
-    "ui.agent_chat_add_folder": "Choose a folder…",
-    "ui.agent_chat_add_folder_tip": "The agent is told where the folder is, and reads the files it needs with its own tools",
+    "ui.agent_chat_add_folder": "Choose folders…",
+    "ui.agent_chat_add_folder_tip": "A folder goes to the agent as its path: the agent reads the files it needs with its own tools",
     "ui.agent_chat_file_by_place_tip": "Not in the message: the agent is told where it is and reads it with its own tools",
     "ui.agent_chat_files_by_place": "Past {max} files, the rest go by their path: the agent reads them with its own tools",
     "ui.agent_chat_folder_tip": "A folder: the agent is told where it is, and reads the files it needs with its own tools",
     "ui.agent_chat_paste_past_max": "At most {max} files go in one message; save the picture as a file and attach that instead",
     "ui.ai_auto_attached": "it reads something you attached",
-    "ui.agent_chat_reads_warning": "Sending a file or folder by path turns on Claude Code's read tools for this chat: it reads what you send without asking, and asks before reading anything else."
+    "ui.agent_chat_reads_warning": "Sending a file or folder by path turns on Claude Code's read tools for this chat: it reads what you send without asking, and asks before reading anything else.",
+    "ui.agent_chat_add_any": "Choose files or folders…"
   },
   "ar": {
-    "ui.agent_chat_add_folder": "اختر مجلدًا…",
-    "ui.agent_chat_add_folder_tip": "يُخبَر الوكيل بمكان المجلد، ويقرأ الملفات التي يحتاجها بأدواته الخاصة",
+    "ui.agent_chat_add_folder": "اختر مجلدات…",
+    "ui.agent_chat_add_folder_tip": "يُرسل المجلد إلى الوكيل بمساره: يقرأ الوكيل الملفات التي يحتاجها بأدواته الخاصة",
     "ui.agent_chat_file_by_place_tip": "ليس ضمن الرسالة: يُخبَر الوكيل بمكانه ويقرؤه بأدواته الخاصة",
     "ui.agent_chat_files_by_place": "بعد {max} ملفات، تُرسل البقية بمساراتها: يقرؤها الوكيل بأدواته الخاصة",
     "ui.agent_chat_folder_tip": "مجلد: يُخبَر الوكيل بمكانه، ويقرأ الملفات التي يحتاجها بأدواته الخاصة",
     "ui.agent_chat_paste_past_max": "يُرسل {max} ملفات كحد أقصى في رسالة واحدة؛ احفظ الصورة في ملف وأرفقه بدلًا منها",
     "ui.ai_auto_attached": "يقرأ شيئًا أرفقته",
-    "ui.agent_chat_reads_warning": "إرسال ملف أو مجلد بمساره يشغّل أدوات القراءة في Claude Code لهذه المحادثة: يقرأ ما ترسله دون سؤال، ويسأل قبل قراءة أي شيء آخر."
+    "ui.agent_chat_reads_warning": "إرسال ملف أو مجلد بمساره يشغّل أدوات القراءة في Claude Code لهذه المحادثة: يقرأ ما ترسله دون سؤال، ويسأل قبل قراءة أي شيء آخر.",
+    "ui.agent_chat_add_any": "اختر ملفات أو مجلدات…"
   },
   "de": {
     "ui.agent_chat_add_folder": "Ordner auswählen…",
-    "ui.agent_chat_add_folder_tip": "Der Agent erfährt, wo der Ordner liegt, und liest die benötigten Dateien mit seinen eigenen Werkzeugen",
+    "ui.agent_chat_add_folder_tip": "Ein Ordner geht als Pfad an den Agenten: Der Agent liest die benötigten Dateien mit seinen eigenen Werkzeugen",
     "ui.agent_chat_file_by_place_tip": "Nicht in der Nachricht: Der Agent erfährt, wo die Datei liegt, und liest sie mit seinen eigenen Werkzeugen",
     "ui.agent_chat_files_by_place": "Ab {max} Dateien gehen die übrigen über ihren Pfad: Der Agent liest sie mit seinen eigenen Werkzeugen",
     "ui.agent_chat_folder_tip": "Ein Ordner: Der Agent erfährt, wo er liegt, und liest die benötigten Dateien mit seinen eigenen Werkzeugen",
     "ui.agent_chat_paste_past_max": "Höchstens {max} Dateien pro Nachricht; speichern Sie das Bild als Datei und hängen Sie diese an",
     "ui.ai_auto_attached": "es liest etwas, das Sie angehängt haben",
-    "ui.agent_chat_reads_warning": "Wenn Sie eine Datei oder einen Ordner über den Pfad senden, schaltet das die Lesewerkzeuge von Claude Code für diesen Chat ein: Es liest, was Sie senden, ohne Rückfrage, und fragt, bevor es etwas anderes liest."
+    "ui.agent_chat_reads_warning": "Wenn Sie eine Datei oder einen Ordner über den Pfad senden, schaltet das die Lesewerkzeuge von Claude Code für diesen Chat ein: Es liest, was Sie senden, ohne Rückfrage, und fragt, bevor es etwas anderes liest.",
+    "ui.agent_chat_add_any": "Dateien oder Ordner auswählen…"
   },
   "he": {
-    "ui.agent_chat_add_folder": "בחירת תיקייה…",
-    "ui.agent_chat_add_folder_tip": "הסוכן מקבל את מיקום התיקייה, וקורא את הקבצים שהוא צריך בכלים שלו",
+    "ui.agent_chat_add_folder": "בחירת תיקיות…",
+    "ui.agent_chat_add_folder_tip": "תיקייה נשלחת לסוכן לפי הנתיב שלה: הסוכן קורא את הקבצים שהוא צריך בכלים שלו",
     "ui.agent_chat_file_by_place_tip": "לא בתוך ההודעה: הסוכן מקבל את מיקום הקובץ וקורא אותו בכלים שלו",
     "ui.agent_chat_files_by_place": "מעבר ל־{max} קבצים, השאר נשלחים לפי הנתיב שלהם: הסוכן קורא אותם בכלים שלו",
     "ui.agent_chat_folder_tip": "תיקייה: הסוכן מקבל את מיקומה, וקורא את הקבצים שהוא צריך בכלים שלו",
     "ui.agent_chat_paste_past_max": "לכל היותר {max} קבצים בהודעה אחת; יש לשמור את התמונה כקובץ ולצרף אותו במקומה",
     "ui.ai_auto_attached": "הוא קורא משהו שצירפת",
-    "ui.agent_chat_reads_warning": "שליחת קובץ או תיקייה לפי נתיב מפעילה את כלי הקריאה של Claude Code בצ׳אט הזה: הוא קורא את מה ששלחת בלי לשאול, ושואל לפני שהוא קורא כל דבר אחר."
+    "ui.agent_chat_reads_warning": "שליחת קובץ או תיקייה לפי נתיב מפעילה את כלי הקריאה של Claude Code בצ׳אט הזה: הוא קורא את מה ששלחת בלי לשאול, ושואל לפני שהוא קורא כל דבר אחר.",
+    "ui.agent_chat_add_any": "בחירת קבצים או תיקיות…"
   },
   "ja": {
     "ui.agent_chat_add_folder": "フォルダーを選択…",
-    "ui.agent_chat_add_folder_tip": "フォルダーの場所がエージェントに伝えられ、必要なファイルはエージェントが自分のツールで読み込みます",
+    "ui.agent_chat_add_folder_tip": "フォルダーはパスとしてエージェントに渡されます。必要なファイルはエージェントが自分のツールで読み込みます",
     "ui.agent_chat_file_by_place_tip": "メッセージには含まれません。場所がエージェントに伝えられ、エージェントが自分のツールで読み込みます",
     "ui.agent_chat_files_by_place": "{max} 個を超えたファイルはパスで渡されます。エージェントが自分のツールで読み込みます",
     "ui.agent_chat_folder_tip": "フォルダー: 場所がエージェントに伝えられ、必要なファイルはエージェントが自分のツールで読み込みます",
     "ui.agent_chat_paste_past_max": "1 つのメッセージで送れるファイルは {max} 個までです。画像をファイルとして保存し、そのファイルを添付してください",
     "ui.ai_auto_attached": "添付したものを読み込むため",
-    "ui.agent_chat_reads_warning": "パスでファイルやフォルダーを送ると、このチャットで Claude Code の読み取りツールがオンになります。送ったものは確認なしで読み込み、それ以外を読む前には確認します。"
+    "ui.agent_chat_reads_warning": "パスでファイルやフォルダーを送ると、このチャットで Claude Code の読み取りツールがオンになります。送ったものは確認なしで読み込み、それ以外を読む前には確認します。",
+    "ui.agent_chat_add_any": "ファイルまたはフォルダーを選択…"
   },
   "ko": {
     "ui.agent_chat_add_folder": "폴더 선택…",
-    "ui.agent_chat_add_folder_tip": "폴더의 위치가 에이전트에게 전달되고, 에이전트가 필요한 파일을 자체 도구로 읽습니다",
+    "ui.agent_chat_add_folder_tip": "폴더는 경로로 에이전트에게 전달됩니다. 에이전트가 필요한 파일을 자체 도구로 읽습니다",
     "ui.agent_chat_file_by_place_tip": "메시지에 포함되지 않음: 에이전트에게 위치가 전달되고 에이전트가 자체 도구로 읽습니다",
     "ui.agent_chat_files_by_place": "{max}개를 넘는 파일은 경로로 전달됩니다. 에이전트가 자체 도구로 읽습니다",
     "ui.agent_chat_folder_tip": "폴더: 위치가 에이전트에게 전달되고, 에이전트가 필요한 파일을 자체 도구로 읽습니다",
     "ui.agent_chat_paste_past_max": "메시지 하나에는 파일을 최대 {max}개까지 보낼 수 있습니다. 그림을 파일로 저장한 뒤 그 파일을 첨부하세요",
     "ui.ai_auto_attached": "첨부한 항목을 읽음",
-    "ui.agent_chat_reads_warning": "경로로 파일이나 폴더를 보내면 이 채팅에서 Claude Code의 읽기 도구가 켜집니다. 보낸 항목은 묻지 않고 읽고, 그 밖의 항목을 읽기 전에는 묻습니다."
+    "ui.agent_chat_reads_warning": "경로로 파일이나 폴더를 보내면 이 채팅에서 Claude Code의 읽기 도구가 켜집니다. 보낸 항목은 묻지 않고 읽고, 그 밖의 항목을 읽기 전에는 묻습니다.",
+    "ui.agent_chat_add_any": "파일 또는 폴더 선택…"
   },
   "vi": {
-    "ui.agent_chat_add_folder": "Chọn một thư mục…",
-    "ui.agent_chat_add_folder_tip": "AI Agent được cho biết thư mục nằm ở đâu, rồi đọc các tệp cần thiết bằng công cụ của mình",
+    "ui.agent_chat_add_folder": "Chọn thư mục…",
+    "ui.agent_chat_add_folder_tip": "Thư mục được gửi tới AI Agent theo đường dẫn: AI Agent đọc các tệp cần thiết bằng công cụ của mình",
     "ui.agent_chat_file_by_place_tip": "Không nằm trong tin nhắn: AI Agent được cho biết vị trí của tệp và đọc nó bằng công cụ của mình",
     "ui.agent_chat_files_by_place": "Quá {max} tệp, các tệp còn lại được gửi theo đường dẫn: AI Agent đọc chúng bằng công cụ của mình",
     "ui.agent_chat_folder_tip": "Một thư mục: AI Agent được cho biết nó nằm ở đâu, rồi đọc các tệp cần thiết bằng công cụ của mình",
     "ui.agent_chat_paste_past_max": "Tối đa {max} tệp trong một tin nhắn; hãy lưu hình ảnh thành tệp rồi đính kèm tệp đó",
     "ui.ai_auto_attached": "nó đọc thứ bạn đã đính kèm",
-    "ui.agent_chat_reads_warning": "Gửi một tệp hoặc thư mục theo đường dẫn sẽ bật các công cụ đọc của Claude Code cho cuộc trò chuyện này: nó đọc những gì bạn gửi mà không hỏi, và hỏi trước khi đọc bất cứ thứ gì khác."
+    "ui.agent_chat_reads_warning": "Gửi một tệp hoặc thư mục theo đường dẫn sẽ bật các công cụ đọc của Claude Code cho cuộc trò chuyện này: nó đọc những gì bạn gửi mà không hỏi, và hỏi trước khi đọc bất cứ thứ gì khác.",
+    "ui.agent_chat_add_any": "Chọn tệp hoặc thư mục…"
   },
   "zh": {
     "ui.agent_chat_add_folder": "选择文件夹…",
-    "ui.agent_chat_add_folder_tip": "智能体会得知文件夹的位置，并用自己的工具读取所需的文件",
+    "ui.agent_chat_add_folder_tip": "文件夹以路径形式交给智能体：智能体用自己的工具读取所需的文件",
     "ui.agent_chat_file_by_place_tip": "不在消息中：智能体会得知它的位置，并用自己的工具读取",
     "ui.agent_chat_files_by_place": "超过 {max} 个文件后，其余文件按路径提供：智能体用自己的工具读取",
     "ui.agent_chat_folder_tip": "文件夹：智能体会得知它的位置，并用自己的工具读取所需的文件",
     "ui.agent_chat_paste_past_max": "一条消息最多发送 {max} 个文件；请把图片另存为文件，再附加该文件",
     "ui.ai_auto_attached": "它读取的是你附加的内容",
-    "ui.agent_chat_reads_warning": "按路径发送文件或文件夹会为本次聊天开启 Claude Code 的读取工具：它会直接读取你发送的内容，读取其他任何内容前都会先询问。"
+    "ui.agent_chat_reads_warning": "按路径发送文件或文件夹会为本次聊天开启 Claude Code 的读取工具：它会直接读取你发送的内容，读取其他任何内容前都会先询问。",
+    "ui.agent_chat_add_any": "选择文件或文件夹…"
   }
 }

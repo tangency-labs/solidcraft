@@ -129,8 +129,11 @@ A message carries the contents of up to eight files, to show the agent what you 
 picture, a sketch, a brief, a part to fit around. More files, and folders, go by their path
 (below), up to 200 on one message.
 
-- **+** next to **Send** has **Choose files…** (a file dialog for the types below; pick several at
-  once), **Choose a folder…** and **Paste a picture** (the picture on the clipboard).
+- **+** next to **Send** has **Paste a picture** (the picture on the clipboard) and a way to choose
+  files and folders, several at once and of any type. On macOS it is one item, **Choose files or
+  folders…**. Windows' and Linux's file dialogs choose files or folders but not both, so there it
+  is **Choose files…** and **Choose folders…**. What happens to each file depends on its type
+  (below).
 - **Drop files or folders on the chat.** What is dropped on the panel (or its folded strip)
   attaches to the next message, and the app doesn't open it too. While files are dragged over the chat, it says
   so. The window gives no position while something is dragged, so the drop is the chat's when the

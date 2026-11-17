@@ -71,10 +71,12 @@ pub enum PanelAction {
         at: Option<usize>,
     },
     AttachDropped(Vec<std::path::PathBuf>),
-    /// Choose files to attach, one or several.
+    /// Choose files of any type to attach, one or several.
     ChooseAttachment,
-    /// Choose a folder to attach: the agent is told where it is and what it holds.
+    /// Choose folders to attach, one or several: the agent is told where each is.
     ChooseFolder,
+    /// Choose files and folders in one dialog, where the host's dialog can (macOS).
+    ChooseAny,
     /// Attach the clipboard's picture (desktop only, as the clipboard reader is).
     #[cfg(not(target_arch = "wasm32"))]
     PastePicture,
@@ -130,10 +132,9 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
         PanelAction::SetConfigOption { id, value } => set_config_option(app, &id, &value),
         PanelAction::StartPick { at } => start_pick(app, at),
         PanelAction::AttachDropped(paths) => attach_paths(app, paths.into_iter()),
-        PanelAction::ChooseAttachment => app.pick_files(tr("ui.agent_chat_attachable"), &attach::extensions(), |app, paths| {
-            attach_paths(app, paths.into_iter().map(std::path::PathBuf::from));
-        }),
-        PanelAction::ChooseFolder => app.pick_folder(|app, path| attach_paths(app, path.into_iter().map(std::path::PathBuf::from))),
+        PanelAction::ChooseAttachment => app.pick_files(|app, paths| attach_paths(app, paths.into_iter().map(std::path::PathBuf::from))),
+        PanelAction::ChooseFolder => app.pick_folders(|app, paths| attach_paths(app, paths.into_iter().map(std::path::PathBuf::from))),
+        PanelAction::ChooseAny => app.pick_files_or_folders(|app, paths| attach_paths(app, paths.into_iter().map(std::path::PathBuf::from))),
         #[cfg(not(target_arch = "wasm32"))]
         PanelAction::PastePicture => {
             if let Err(e) = paste_picture(app) {
@@ -223,6 +224,9 @@ pub struct PanelView {
     pub shared: bool,
     /// The composer's height the shared host measured last time, if it has.
     pub composer_height: Option<f32>,
+    /// The host's file dialog chooses files and folders together (macOS): the + menu offers one
+    /// Choose files or folders… instead of Choose files… and Choose folders….
+    pub mixed_picker: bool,
 }
 
 impl PanelView {
@@ -252,6 +256,7 @@ impl PanelView {
             rtl: crate::i18n::panel_direction(&app.preferences.language) == solidcraft_engine::panels::Direction::Rtl,
             shared: crate::panel_runtime::shared_content_measurement(ctx),
             composer_height: crate::panel_runtime::shared_content_composer_height(ctx),
+            mixed_picker: app.services.pick_files_or_folders.is_some(),
         }
     }
 }
@@ -1189,7 +1194,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                     Layout::left_to_right(Align::Center),
                     |ui| {
                         ui.set_min_height(Tokens::get().control_height + Tokens::get().space_2);
-                        add_menu(chat, ui);
+                        add_menu(chat, view.mixed_picker, ui);
                         let mode = view.permission;
                         let permissions = ui
                             .allocate_ui(vec2(Tokens::get().space_24 * 4.0, Tokens::get().control_height), |ui| {
@@ -2751,42 +2756,37 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
     clicked
 }
 
-/// The + button: choose files with the app's picker (pictures, text and CAD files, several at
-/// once), choose a folder, or paste the clipboard's picture.
+/// The + button: choose files of any type and folders, several at once (in one dialog where the
+/// host's dialog mixes them, `mixed`; else one item for each), or paste the clipboard's picture.
 #[cfg(not(target_arch = "wasm32"))]
-fn add_menu(chat: &mut AgentChat, ui: &mut egui::Ui) {
-    let (mut choose, mut folder, mut paste) = (false, false, false);
+fn add_menu(chat: &mut AgentChat, mixed: bool, ui: &mut egui::Ui) {
+    let mut picked = None;
     let r = ui_kit::action_menu(ui, "+", |ui| {
-        let a = ui_kit::button(ui, tr("ui.agent_chat_add_file"), ui_kit::Button::Normal);
-        solidcraft_ui_registry::publish_handle("agent_chat:add_file", a.rect.center());
-        let f = ui_kit::button(ui, tr("ui.agent_chat_add_folder"), ui_kit::Button::Normal);
-        solidcraft_ui_registry::publish_handle("agent_chat:add_folder", f.rect.center());
-        let f = f.backing_on_hover_text(tr("ui.agent_chat_add_folder_tip"));
-        let b = ui_kit::button(ui, tr("ui.agent_chat_paste_picture"), ui_kit::Button::Normal);
-        solidcraft_ui_registry::publish_handle("agent_chat:paste_picture", b.rect.center());
-        if a.clicked() {
-            choose = true;
-            ui.close();
-        }
-        if f.clicked() {
-            folder = true;
-            ui.close();
-        }
-        if b.clicked() {
-            paste = true;
-            ui.close();
+        let mut items = if mixed {
+            vec![("ui.agent_chat_add_any", "agent_chat:add_any", Some("ui.agent_chat_add_folder_tip"), PanelAction::ChooseAny)]
+        } else {
+            vec![
+                ("ui.agent_chat_add_file", "agent_chat:add_file", None, PanelAction::ChooseAttachment),
+                ("ui.agent_chat_add_folder", "agent_chat:add_folder", Some("ui.agent_chat_add_folder_tip"), PanelAction::ChooseFolder),
+            ]
+        };
+        items.push(("ui.agent_chat_paste_picture", "agent_chat:paste_picture", None, PanelAction::PastePicture));
+        for (label, handle, tip, action) in items {
+            let mut b = ui_kit::button(ui, tr(label), ui_kit::Button::Normal);
+            solidcraft_ui_registry::publish_handle(handle, b.rect.center());
+            if let Some(tip) = tip {
+                b = b.backing_on_hover_text(tr(tip));
+            }
+            if b.clicked() {
+                picked = Some(action);
+                ui.close();
+            }
         }
     });
     solidcraft_ui_registry::publish_handle("agent_chat:add", r.response.rect.center());
     r.response.backing_on_hover_text(tr("ui.agent_chat_add"));
-    if choose {
-        chat.actions.push(PanelAction::ChooseAttachment);
-    }
-    if folder {
-        chat.actions.push(PanelAction::ChooseFolder);
-    }
-    if paste {
-        chat.actions.push(PanelAction::PastePicture);
+    if let Some(action) = picked {
+        chat.actions.push(action);
     }
 }
 
@@ -3118,6 +3118,7 @@ mod tests {
             rtl: false,
             shared,
             composer_height: None,
+            mixed_picker: false,
         }
     }
 

@@ -764,9 +764,14 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     let files_parent = parent.clone();
+    let folders_parent = parent.clone();
     let folder_parent = parent.clone();
+    #[cfg(target_os = "macos")]
+    let any_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
-    let files_folder = folder.clone();
+    let (files_folder, folders_folder) = (folder.clone(), folder.clone());
+    #[cfg(target_os = "macos")]
+    let any_folder = folder.clone();
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
@@ -810,14 +815,30 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
         })),
-        // The same, several files at once (the agent chat's attachments: a batch of photos).
-        pick_files: Some(Box::new(move |label: &str, exts: &[&str]| {
-            let all = any_case(exts);
-            let all: Vec<&str> = all.iter().map(String::as_str).collect();
-            let future = files_folder.start(files_parent.clone()).add_filter(label, &all).add_filter("All files", &["*"]).pick_files();
+        // Several files of any type at once (the agent chat's attachments: a batch of photos). No
+        // filter: what the chat can't read goes to the agent by path. (On macOS a filter lists the
+        // only types that can be chosen, and its "All files" `*` is no wildcard.)
+        pick_files: Some(Box::new(move || {
+            let future = files_folder.start(files_parent.clone()).pick_files();
             let folder = files_folder.clone();
             Box::pin(async move { folder.answer_all(future.await) })
         })),
+        // Several folders at once (the agent chat attaches them by path).
+        pick_folders: Some(Box::new(move || {
+            let future = folders_folder.start(folders_parent.clone()).pick_folders();
+            let folder = folders_folder.clone();
+            Box::pin(async move { folder.answer_all(future.await) })
+        })),
+        // macOS's open panel chooses files and folders together; Windows' and Linux's dialogs
+        // choose one or the other, so there the chat offers both.
+        #[cfg(target_os = "macos")]
+        pick_files_or_folders: Some(Box::new(move || {
+            let future = any_folder.start(any_parent.clone()).pick_files_or_folders();
+            let folder = any_folder.clone();
+            Box::pin(async move { folder.answer_all(future.await) })
+        })),
+        #[cfg(not(target_os = "macos"))]
+        pick_files_or_folders: None,
         // A folder: the document library's, or one the agent chat attaches.
         pick_folder: Some(Box::new(move || {
             let future = folder_parent.clone().set_title("Choose a folder").pick_folder();

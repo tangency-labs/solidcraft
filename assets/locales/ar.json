@@ -5513,7 +5513,6 @@
   "ui.agent_chat_attach_selection_tip": "إرسال ما هو محدد في النموذج (أوجه وحواف وميزات وأجسام) مع الرسالة، ليعرف الوكيل ما تقصده",
   "ui.agent_chat_attach_view": "إرفاق العرض",
   "ui.agent_chat_attach_view_tip": "إرسال صورة للعرض الحالي مع الرسالة",
-  "ui.agent_chat_attachable": "صور وملفات PDF ونصوص وملفات CAD",
   "ui.agent_chat_auth_agent": "تسجيل الدخول باستخدام {name}",
   "ui.agent_chat_auth_env": "اضبط {vars} في بيئة النظام وأعد تشغيل SolidCraft.",
   "ui.agent_chat_auth_needed": "يطلب الوكيل منك تسجيل الدخول. تسجّل الدخول عبر الوكيل نفسه؛ ولا يرى SolidCraft كلمة مرورك أو مفاتيحك أبدًا.",

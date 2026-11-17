@@ -5513,7 +5513,6 @@
   "ui.agent_chat_attach_selection_tip": "随消息发送模型中当前选中的内容(面、边、特征、实体),让智能体知道你指的是什么",
   "ui.agent_chat_attach_view": "附加视图",
   "ui.agent_chat_attach_view_tip": "随消息发送当前视图的图片",
-  "ui.agent_chat_attachable": "图片、PDF、文本和 CAD 文件",
   "ui.agent_chat_auth_agent": "使用 {name} 登录",
   "ui.agent_chat_auth_env": "请在环境中设置 {vars}，然后重启 SolidCraft。",
   "ui.agent_chat_auth_needed": "智能体要求你登录。登录在智能体本身完成；SolidCraft 从不接触你的密码或密钥。",

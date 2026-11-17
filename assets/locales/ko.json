@@ -4590,7 +4590,6 @@
   "ui.agent_chat_attach_selection_tip": "모델에서 선택한 항목(면, 모서리, 피처, 바디)을 메시지와 함께 보내 에이전트가 무엇을 말하는지 알 수 있게 합니다",
   "ui.agent_chat_attach_view": "뷰 첨부",
   "ui.agent_chat_attach_view_tip": "현재 뷰의 이미지를 메시지와 함께 보냅니다",
-  "ui.agent_chat_attachable": "이미지, PDF, 텍스트 및 CAD 파일",
   "ui.agent_chat_auth_agent": "{name}(으)로 로그인",
   "ui.agent_chat_auth_env": "환경 변수 {vars}을(를) 설정하고 SolidCraft를 다시 시작하세요.",
   "ui.agent_chat_auth_needed": "에이전트가 로그인을 요청합니다. 로그인은 에이전트에서 직접 하며, SolidCraft는 비밀번호나 키를 보지 않습니다.",

@@ -5308,7 +5308,6 @@
   "ui.agent_chat_attach_selection_tip": "Envía con el mensaje lo que esté seleccionado en el modelo (caras, aristas, operaciones, cuerpos) para que el agente sepa a qué te refieres",
   "ui.agent_chat_attach_view": "Adjuntar vista",
   "ui.agent_chat_attach_view_tip": "Enviar una imagen de la vista actual con el mensaje",
-  "ui.agent_chat_attachable": "Imágenes, PDF, texto y archivos CAD",
   "ui.agent_chat_auth_agent": "Iniciar sesión con {name}",
   "ui.agent_chat_auth_env": "Configura {vars} en las variables de entorno y reinicia SolidCraft.",
   "ui.agent_chat_auth_needed": "El agente te pide que inicies sesión. El inicio de sesión se realiza con el propio agente; SolidCraft nunca ve tu contraseña ni tus claves.",

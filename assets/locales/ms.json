@@ -4117,7 +4117,6 @@
   "ui.agent_chat_attach_selection_tip": "Hantar apa yang dipilih dalam model (muka, tepi, ciri, jasad) bersama mesej, supaya ejen tahu apa yang anda maksudkan",
   "ui.agent_chat_attach_view": "Lampirkan paparan",
   "ui.agent_chat_attach_view_tip": "Hantar imej pandangan semasa bersama mesej",
-  "ui.agent_chat_attachable": "Gambar, PDF, teks dan fail CAD",
   "ui.agent_chat_auth_agent": "Log masuk dengan {name}",
   "ui.agent_chat_auth_env": "Tetapkan {vars} dalam persekitaran, kemudian mula semula SolidCraft.",
   "ui.agent_chat_auth_needed": "Ejen memerlukan anda log masuk melalui ejen itu sendiri. SolidCraft tidak dapat melihat kata laluan atau kunci anda.",

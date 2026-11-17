@@ -5513,7 +5513,6 @@
   "ui.agent_chat_attach_selection_tip": "Gửi các đối tượng đang chọn trong mô hình (mặt, cạnh, tính năng, khối) kèm tin nhắn để trợ lý hiểu rõ đối tượng bạn muốn xử lý",
   "ui.agent_chat_attach_view": "Đính kèm góc nhìn",
   "ui.agent_chat_attach_view_tip": "Gửi kèm hình ảnh góc nhìn hiện tại trong tin nhắn",
-  "ui.agent_chat_attachable": "Hình ảnh, PDF, văn bản và tệp CAD",
   "ui.agent_chat_auth_agent": "Đăng nhập với {name}",
   "ui.agent_chat_auth_env": "Thiết lập {vars} trong biến môi trường của bạn rồi khởi động lại SolidCraft.",
   "ui.agent_chat_auth_needed": "AI Agent yêu cầu bạn đăng nhập. Bạn đăng nhập trực tiếp với dịch vụ của AI; SolidCraft không bao giờ thấy mật khẩu hay khóa API của bạn.",

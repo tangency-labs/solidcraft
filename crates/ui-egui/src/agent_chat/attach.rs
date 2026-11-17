@@ -56,15 +56,6 @@ const THUMB: u32 = 64;
 const PICTURE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"];
 /// Text sent in full; SVG goes as its source, which the agents read well.
 const TEXT_EXTS: &[&str] = &["svg", "txt", "md", "markdown", "json", "csv", "tsv", "yaml", "yml", "toml", "xml", "log", "ini", "cfg"];
-/// CAD files and meshes, imported into the design (the file picker's list; [`kind`] asks the
-/// importers themselves).
-const CAD_EXTS: &[&str] = &["step", "stp", "igs", "iges", "FCStd", "3dm", "stl", "3mf", "obj", "glb", "gltf"];
-
-/// Every extension the file picker lists first, pictures first (any other file can be chosen too).
-pub fn extensions() -> Vec<&'static str> {
-    PICTURE_EXTS.iter().chain(TEXT_EXTS).chain(CAD_EXTS).chain(&["pdf"]).copied().collect()
-}
-
 /// What a file is, by its extension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -799,9 +790,6 @@ mod tests {
         let heic = d.join("photo.HEIC");
         std::fs::write(&heic, b"....ftypheic").unwrap();
         assert!(read(&heic).unwrap_err().contains("HEIC"));
-        for ext in ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "svg", "md", "txt", "step", "FCStd", "3dm", "stl", "3mf", "obj", "glb"] {
-            assert!(extensions().contains(&ext), "{ext} can be chosen");
-        }
         let _ = std::fs::remove_dir_all(&d);
     }
 

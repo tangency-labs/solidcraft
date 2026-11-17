@@ -4117,7 +4117,6 @@
   "ui.agent_chat_attach_selection_tip": "Modelde seçili olanı (yüzler, kenarlar, özellikler, gövdeler) mesajla birlikte gönderin; ajan ne kastettiğinizi bilsin",
   "ui.agent_chat_attach_view": "Görünümü ekle",
   "ui.agent_chat_attach_view_tip": "Geçerli görünümün bir resmini mesajla birlikte gönder",
-  "ui.agent_chat_attachable": "Görseller, PDF'ler, metin ve CAD dosyaları",
   "ui.agent_chat_auth_agent": "{name} ile oturum aç",
   "ui.agent_chat_auth_env": "{vars} ortam değişkenlerini ayarlayın ve SolidCraft'ı yeniden başlatın.",
   "ui.agent_chat_auth_needed": "Ajan oturum açmanızı istiyor. Oturumu ajanın kendisinde açarsınız; SolidCraft parolanızı veya anahtarlarınızı asla görmez.",

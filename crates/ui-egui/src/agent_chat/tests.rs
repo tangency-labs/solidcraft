@@ -3305,49 +3305,61 @@ fn past_eight_files_the_rest_go_by_their_place() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// Choose files… takes several at once from the host's dialog; Choose a folder… attaches the
-/// folder by its place, as dropping one does.
+/// Where the host's dialogs choose files or folders but not both (Windows, Linux), the + menu has
+/// Choose files… and Choose folders…, each taking several at once; where one dialog mixes them
+/// (macOS), one Choose files or folders… takes both. Folders go by their path, as dropped ones do.
 #[test]
-fn choose_files_takes_several_and_choose_a_folder_one_folder() {
+fn the_plus_menu_chooses_several_files_and_folders() {
     use solidcraft_ui_registry::handle_at;
     let d = attachable("choose-many");
+    let (one, two) = (d.join("one"), d.join("two"));
+    std::fs::create_dir_all(&one).unwrap();
+    std::fs::create_dir_all(&two).unwrap();
     let mut h = narrow_chat();
     let chosen = vec![at(&d, "brief.md"), at(&d, "target.png")];
-    h.app.services.pick_files = Some(Box::new(move |_label: &str, _exts: &[&str]| {
+    h.app.services.pick_files = Some(Box::new(move || {
         let all = chosen.clone();
         Box::pin(async move { all })
     }));
-    let folder = d.to_string_lossy().to_string();
-    h.app.services.pick_folder = Some(Box::new(move || {
-        let f = folder.clone();
-        Box::pin(async move { Some(f) })
+    let folders = vec![one.to_string_lossy().to_string(), two.to_string_lossy().to_string()];
+    h.app.services.pick_folders = Some(Box::new(move || {
+        let all = folders.clone();
+        Box::pin(async move { all })
     }));
     h.frames(2);
     let plus = handle_at("agent_chat:add").expect("a + button");
-    h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
-    h.frames(2);
-    let choose = handle_at("agent_chat:add_file").expect("Choose files… in its menu");
-    h.call("ui.click", json!({"x": choose.x, "y": choose.y}));
-    h.frames(2);
-    settle_chat(&mut h);
+    let choose = |h: &mut crate::scenario::Harness, item: &str| {
+        h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
+        h.frames(2);
+        let at = handle_at(item).unwrap_or_else(|| panic!("{item} in the + menu"));
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        settle_chat(h);
+    };
+    choose(&mut h, "agent_chat:add_file");
     assert_eq!(status(&h.app)["attachments"], json!(["brief.md", "target.png"]), "both chosen files");
-    h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
-    h.frames(2);
-    let choose = handle_at("agent_chat:add_folder").expect("Choose a folder… in its menu");
-    h.call("ui.click", json!({"x": choose.x, "y": choose.y}));
-    h.frames(2);
-    settle_chat(&mut h);
-    let name = format!("{}/", d.file_name().unwrap().to_string_lossy());
-    assert_eq!(status(&h.app)["attachments"], json!(["brief.md", "target.png", name]));
-    assert!(h.app.agent_chat.attachments[2].by_place(), "the folder goes by its place");
+    assert!(handle_at("agent_chat:add_any").is_none(), "no mixed item where the dialogs don't mix");
+    choose(&mut h, "agent_chat:add_folder");
+    assert_eq!(status(&h.app)["attachments"], json!(["brief.md", "target.png", "one/", "two/"]), "both chosen folders");
+    assert!(h.app.agent_chat.attachments[2..].iter().all(attach::Attachment::by_place), "folders go by their path");
     // Cancelled: nothing more.
-    h.app.services.pick_files = Some(Box::new(|_: &str, _: &[&str]| Box::pin(async { Vec::new() })));
+    h.app.services.pick_files = Some(Box::new(|| Box::pin(async { Vec::new() })));
+    choose(&mut h, "agent_chat:add_file");
+    assert_eq!(h.app.agent_chat.attachments.len(), 4);
+    // One dialog for both.
+    h.app.agent_chat.attachments.clear();
+    let mixed = vec![at(&d, "brief.md"), one.to_string_lossy().to_string()];
+    h.app.services.pick_files_or_folders = Some(Box::new(move || {
+        let all = mixed.clone();
+        Box::pin(async move { all })
+    }));
+    h.frames(2);
+    choose(&mut h, "agent_chat:add_any");
+    assert_eq!(status(&h.app)["attachments"], json!(["brief.md", "one/"]), "a file and a folder from one dialog");
     h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
     h.frames(2);
-    let choose = handle_at("agent_chat:add_file").expect("Choose files…");
-    h.call("ui.click", json!({"x": choose.x, "y": choose.y}));
-    settle_chat(&mut h);
-    assert_eq!(h.app.agent_chat.attachments.len(), 3);
+    assert!(handle_at("agent_chat:add_file").is_none() && handle_at("agent_chat:add_folder").is_none(), "one item instead of two");
+    assert!(handle_at("agent_chat:paste_picture").is_some());
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -3739,36 +3751,29 @@ fn each_file_has_its_own_id_and_thumbnail() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// The + button: "Choose a file…" asks the app's file picker for the types that can be attached
-/// (not the design types Open shows) and attaches what it answers; "Paste a picture" attaches
-/// the clipboard's picture (here given as RGBA, as the system does).
+/// The + button: "Choose files…" asks the app's dialog for files of any type (no filter: what
+/// the chat can't read goes by path) and attaches what it answers; "Paste a picture" attaches the
+/// clipboard's picture (here given as RGBA, as the system does).
 #[test]
 fn the_plus_button_attaches_a_chosen_file_or_a_pasted_picture() {
     use solidcraft_ui_registry::handle_at;
     let d = attachable("plus");
     let mut h = narrow_chat();
     let chosen = at(&d, "brief.md");
-    let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
-    let seen = asked.clone();
-    h.app.services.pick_file = Some(Box::new(move |_label: &str, exts: &[&str]| {
-        *seen.borrow_mut() = exts.iter().map(|e| e.to_string()).collect();
+    h.app.services.pick_files = Some(Box::new(move || {
         let p = chosen.clone();
-        Box::pin(async move { Some(p) })
+        Box::pin(async move { vec![p] })
     }));
+    h.app.services.pick_file = Some(Box::new(|_: &str, _: &[&str]| panic!("the filtered one-file dialog is not the chat's")));
     h.frames(2);
     let plus = handle_at("agent_chat:add").expect("a + button");
     h.call("ui.click", json!({"x": plus.x, "y": plus.y}));
     h.frames(2);
-    let choose = handle_at("agent_chat:add_file").expect("Choose a file… in its menu");
+    let choose = handle_at("agent_chat:add_file").expect("Choose files… in its menu");
     assert!(handle_at("agent_chat:paste_picture").is_some(), "Paste a picture in its menu");
     h.call("ui.click", json!({"x": choose.x, "y": choose.y}));
     h.frames(4);
     assert_eq!(status(&h.app)["attachments"], json!(["brief.md"]));
-    let exts = asked.borrow().clone();
-    for ext in ["png", "jpg", "gif", "webp", "svg", "md", "step", "stl"] {
-        assert!(exts.iter().any(|e| e == ext), "{ext} in {exts:?}");
-    }
-    assert!(!exts.iter().any(|e| e == "solidcraft"));
     attach_rgba(&mut h.app, 4, 3, &[200; 48]).unwrap();
     attach_rgba(&mut h.app, 4, 3, &[200; 47]).unwrap();
     settle_chat(&mut h);

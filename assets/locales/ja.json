@@ -5513,7 +5513,6 @@
   "ui.agent_chat_attach_selection_tip": "モデルで選択中のもの(面、エッジ、フィーチャ、ボディ)をメッセージと一緒に送り、何を指しているかをエージェントに伝えます",
   "ui.agent_chat_attach_view": "ビューを添付",
   "ui.agent_chat_attach_view_tip": "現在のビューの画像をメッセージと一緒に送ります",
-  "ui.agent_chat_attachable": "画像・PDF・テキスト・CAD ファイル",
   "ui.agent_chat_auth_agent": "{name} でサインイン",
   "ui.agent_chat_auth_env": "環境変数 {vars} を設定して SolidCraft を再起動してください。",
   "ui.agent_chat_auth_needed": "エージェントがサインインを求めています。サインインはエージェント自身で行います。SolidCraft がパスワードやキーを見ることはありません。",

@@ -84,19 +84,51 @@ impl SolveApp {
         self.begin_picker(future, Box::new(complete));
     }
 
-    /// Ask for files of a kind, several at once (the agent chat's files): the host's dialog for
+    /// Ask for files of any type, several at once (the agent chat's files): the host's dialog for
     /// several, else one file as [`Self::pick_file`] asks.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(crate) fn pick_files(&mut self, label: &str, extensions: &[&str], complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+    pub(crate) fn pick_files(&mut self, complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
         if self.file_picker_busy() {
             return;
         }
         match self.services.pick_files.as_ref() {
             Some(pick) => {
-                let future = pick(label, extensions);
+                let future = pick();
                 self.begin_file_task(future, complete);
             }
-            None => self.pick_file(label, extensions, move |app, path| complete(app, path.into_iter().collect())),
+            None => self.pick_file("", &[], move |app, path| complete(app, path.into_iter().collect())),
+        }
+    }
+
+    /// Ask for folders, several at once (the agent chat's files): the host's dialog for several,
+    /// else one as [`Self::pick_folder`] asks.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_folders(&mut self, complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        match self.services.pick_folders.as_ref() {
+            Some(pick) => {
+                let future = pick();
+                self.begin_file_task(future, complete);
+            }
+            None => self.pick_folder(move |app, path| complete(app, path.into_iter().collect())),
+        }
+    }
+
+    /// Ask for files and folders in one dialog, several at once, where the host's dialog can
+    /// (macOS). Without one, the answer is a cancel (the chat then offers files and folders apart).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn pick_files_or_folders(&mut self, complete: impl FnOnce(&mut SolveApp, Vec<String>) + 'static) {
+        if self.file_picker_busy() {
+            return;
+        }
+        match self.services.pick_files_or_folders.as_ref() {
+            Some(pick) => {
+                let future = pick();
+                self.begin_file_task(future, complete);
+            }
+            None => complete(self, Vec::new()),
         }
     }
 

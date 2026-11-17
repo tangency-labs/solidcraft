@@ -4924,7 +4924,6 @@
   "ui.agent_chat_attach_selection_tip": "Nosūtīt kopā ar ziņu to, kas modelī atlasīts (skaldnes, šķautnes, operācijas, ķermeņus), lai aģents zinātu, ko jūs domājat",
   "ui.agent_chat_attach_view": "Pievienot skatu",
   "ui.agent_chat_attach_view_tip": "Nosūtīt kopā ar ziņu pašreizējā skata attēlu",
-  "ui.agent_chat_attachable": "Attēli, PDF, teksts un CAD faili",
   "ui.agent_chat_auth_agent": "Pierakstīties ar {name}",
   "ui.agent_chat_auth_env": "Iestatiet {vars} savā vidē un restartējiet SolidCraft.",
   "ui.agent_chat_auth_needed": "Aģents lūdz jums pierakstīties. Jūs pierakstāties pašā aģentā; SolidCraft nekad neredz jūsu paroli vai atslēgas.",
