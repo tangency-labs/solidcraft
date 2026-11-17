@@ -288,6 +288,9 @@ fn switches_design(step: &Value) -> Option<&'static str> {
 /// Why `engine.batch` refuses these steps before running any: a step loads a file or switches
 /// to another design (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
+    if steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"))) {
+        return Some(solidcraft_ui_text::tr("ui.plugin_standalone").into());
+    }
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
     }
@@ -410,6 +413,10 @@ fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
 /// and the steps before it stay. Its words are the engine script's, or the panel error when a step
 /// is a panel command.
 fn script(app: &mut SolveApp, p: &Value) -> Outcome {
+    let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
+    if steps.is_some_and(|steps| steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run")))) {
+        return err(solidcraft_ui_text::tr("ui.plugin_standalone"));
+    }
     let steps = match solidcraft_engine::script_steps(p) {
         Ok(steps) => steps,
         Err(e) => return err(e),
@@ -668,7 +675,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.operations" => wrap(crate::operations::control(app, p)),
         "ui.home" => with(p, |q| ui_home(app, q)),
         "ui.set" => ui_set(app, p),
-        "ui.view" => with(p, |q| ui_view(app, q)),
+        "ui.view" => with(p, |q| ui_view(app, ctx, q)),
         "ui.camera" => wrap(camera(app, p)),
         "ui.palette" => ui_palette(app, p),
         "ui.start" => with(p, |q| ui_start(app, q)),
@@ -997,6 +1004,7 @@ fn ui_agent_cursor(app: &mut SolveApp, p: &Value) -> Outcome {
 fn ui_inspect(app: &SolveApp) -> Outcome {
     ok(json!({
         "render": crate::render_workspace::inspect_state(app),
+        "sheet_page": crate::drawing_sheet_page::inspect(app),
         "ui": ui_state(app),
         "visibility": app.session.visibility,
         "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
@@ -1138,14 +1146,19 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
 }
 
 /// `ui.view {view, animate?}`: a standard view, snapped or animated.
-fn ui_view(app: &mut SolveApp, q: params::View) -> Outcome {
+fn ui_view(app: &mut SolveApp, ctx: &egui::Context, q: params::View) -> Outcome {
     let v = q.view.as_str();
     if crate::drawing_workspace::active(app) {
         if crate::dialogs_sheet::flat_active(app) && matches!(v, "fit" | "home") {
             app.flat_view.fitted = false;
             return ok(json!({"flat_pattern":true,"fitted":false}));
         }
-        return err("Drawing has no sheet renderer or camera yet");
+        match v {
+            "fit" | "home" => crate::drawing_sheet_page::fit(app),
+            "actual_size" => crate::drawing_sheet_page::actual_size(app, ctx),
+            _ => return err(format!("unknown drawing view `{v}`")),
+        };
+        return ok(json!({"sheet_page": true}));
     }
     // A name it doesn't know is refused before the view changes at all.
     if v != "fit" && v != "home" && StandardView::parse(v).is_none() {
@@ -1959,8 +1972,8 @@ mod tests {
             assert!(takeover.is_err());
             assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), second);
             h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-            assert!(h.app.panel_runtime().is_none());
-            assert!(!h.app.universal_panel_host_enabled());
+            assert!(h.app.panel_runtime().is_some());
+            assert!(h.app.universal_panel_host_enabled());
         }
     }
 
@@ -2162,7 +2175,9 @@ mod tests {
         assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), before);
         click_visible_guard(&mut h, &guard);
         h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
-        assert!(h.app.panel_runtime().is_none());
+        let layout = h.app.panel_runtime().unwrap().layout().layout();
+        let browser = solidcraft_engine::panels::InstanceId::new("browser").unwrap();
+        assert!(layout.instance(&browser).is_ok(), "the workspace restores production panels after teardown");
     }
 
     #[test]

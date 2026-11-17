@@ -8,8 +8,9 @@
 //! off its plane, so it was not planar and its search domain reached past the fold of its
 //! continuation; upstream's `CoverCoincidentSurface` merged wall B's top onto that folded
 //! continuation and the join lost 5573 mm3. WR-407's frame on the path plane's normal is
-//! the default now, and without `cover_refuses_folded_continuation` the join still loses
-//! more than 1000 mm3. With `cover_refuses_folded_continuation` the cover across the
+//! the default now, and without `cover_refuses_folded_continuation` the join is still
+//! wrong: with the drop pieces of the walls' trims joined (WR-543) it is 7744 mm3 too
+//! large. With `cover_refuses_folded_continuation` the cover across the
 //! fold is refused and the join has the closed-form volume
 //! `V_A + V_B - overlap = 60 (pi/2)(56^2 - 44^2) + 60 (pi/2)(64^2 - 52^2) - 60 (pi/4)(56^2 - 52^2)`.
 //! The walls' radial faces are the sweep's approximation of the arcs, so the volume is
@@ -75,6 +76,7 @@ fn wall(k: &mut Kernel, turn: (Vec3, f64), radius: f64, start: f64, end: f64) ->
         orient_profile_perpendicular_to_path: false,
         move_to_profile: false,
         profile_at_path_start: false,
+        up: None,
     };
     create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
         .unwrap()
@@ -120,11 +122,12 @@ fn wr_407_walls_join_to_the_closed_form_with_the_fix() {
     );
 }
 
-/// Without the fold rule the cover merges onto the folded continuation: the join is short
-/// by more than 1000 mm3 (5573 mm3 with upstream's sweep frame).
+/// Without the fold rule the cover merges onto the folded continuation: the join is too
+/// large by more than 1000 mm3 (7744 mm3; it was short by 5573 mm3 with upstream's sweep
+/// frame, and by 14596 mm3 with a drop piece stretched onto each trim's edge).
 #[test]
 fn wr_407_default_join_loses_the_folded_cover() {
     let (k, mut b) = joined(false);
     let v = volume(&k, &mut b);
-    assert!(closed_form() - v > 1000.0, "{v} against {}", closed_form());
+    assert!(v - closed_form() > 1000.0, "{v} against {}", closed_form());
 }

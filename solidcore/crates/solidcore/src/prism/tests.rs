@@ -14,7 +14,9 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 use super::extrude::extrude_region;
 use super::measure::{equivalent, section};
 use super::profile::rational_curve;
-use super::profile::{check_regions, curve_on_frame, Loop2, ProfileRefusal, Region2, Seg2};
+use super::profile::{
+    check_regions, curve_on_frame, tapered_flange_ends, Loop2, ProfileRefusal, Region2, Seg2,
+};
 use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
 use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
@@ -722,4 +724,46 @@ fn discontinuous_splines_are_not_read() {
         assert!(read(&k, &c, c.natural_interval(), true, &xy(), 1e-5).is_none());
     }
     assert_eq!(refused, 2, "both jumps refused where they are made");
+}
+
+#[test]
+fn a_tapered_flange_changes_by_half_its_length_times_the_slope_tangent() {
+    // No slope: the given thickness at both ends.
+    assert_eq!(tapered_flange_ends(80.0, 14.0, 0.0), (14.0, 14.0));
+    // 45 degrees over an 80 mm inside length: 40 mm thinner at the toe, 40 mm thicker at the root.
+    let (toe, root) = tapered_flange_ends(80.0, 50.0, 45.0);
+    assert!(
+        (toe - 10.0).abs() < 1e-12 && (root - 90.0).abs() < 1e-12,
+        "{toe} {root}"
+    );
+    // A 5 degree taper flange channel (203 x 89, web 8.9, flange 14.2): the ends are the mean
+    // thickness less and plus 40.05 tan 5°, and they average back to it.
+    let (toe, root) = tapered_flange_ends(89.0 - 8.9, 14.2, 5.0);
+    let change = 40.05 * 5.0_f64.to_radians().tan();
+    assert!((toe - (14.2 - change)).abs() < 1e-12 && (root - (14.2 + change)).abs() < 1e-12);
+    assert!(((toe + root) / 2.0 - 14.2).abs() < 1e-12);
+    // A non-finite input gives a non-finite answer, never a panic.
+    assert!(tapered_flange_ends(f64::NAN, 1.0, 5.0).0.is_nan());
+}
+
+#[test]
+fn directed_planar_sweep_keeps_quadrants_and_tiny_seam_angles() {
+    let sweep = super::profile::counterclockwise_sweep;
+    let center = Point2::new(0.0, 0.0);
+    let x = Point2::new(1.0, 0.0);
+    let y = Point2::new(0.0, 1.0);
+    assert_eq!(sweep(center, x, y), Some(FRAC_PI_2));
+    assert_eq!(sweep(center, y, x), Some(3.0 * FRAC_PI_2));
+    assert_eq!(sweep(center, x, x), Some(0.0));
+    for delta in [0.5e-12_f64, 1e-12, 2e-12] {
+        let end = Point2::new(delta.cos(), delta.sin());
+        assert_eq!(sweep(center, x, end), Some(delta));
+        let start = Point2::new(-1.0, delta / 2.0);
+        let end = Point2::new(-1.0, -delta / 2.0);
+        let expected = (end.y.atan2(end.x) - start.y.atan2(start.x)).rem_euclid(TAU);
+        assert_eq!(sweep(center, start, end), Some(expected));
+        assert!(expected > 0.0 && expected < 3e-12);
+    }
+    assert_eq!(sweep(center, center, x), None);
+    assert_eq!(sweep(center, x, Point2::new(f64::NAN, 0.0)), None);
 }

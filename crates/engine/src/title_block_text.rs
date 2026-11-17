@@ -25,6 +25,8 @@ use solidcraft_geom::title_block::{CellKind, TextCell, TitleBlock, TitleBlockLay
 use solidcraft_geom::{Aabb2, EPS};
 use solidcraft_sketch::{Outcome, PaperFonts, PaperLines, SketchError, TextAlign, TextStyle};
 
+use crate::Session;
+
 /// A text cell as its sheet shows it: its name, its text, and the value typed text hides.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CellText {
@@ -71,15 +73,15 @@ impl Set {
 /// The text cells of sheet `at`'s title block as the sheet shows them, in the block's order: each
 /// the text typed over it, or its content as [`read`] reads it. A cell that shows a logo shows no
 /// text (`TextCell::image`).
-pub fn shown(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec<CellText> {
+pub fn shown(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec<CellText> {
     let mut out = Vec::new();
-    shown_with(doc, tree, d, at, |cell, _, _| out.push(cell));
+    shown_with(s, tree, d, at, |cell, _, _| out.push(cell));
     out
 }
 
 /// [`shown`], each cell given to `each` with its own content and the values its fields read, for a
 /// caller that reads more of them than the sheet shows (`drawing.check`'s empty fields).
-pub fn shown_with(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize, mut each: impl FnMut(CellText, &Content, &Values)) {
+pub fn shown_with(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize, mut each: impl FnMut(CellText, &Content, &Values)) {
     let Some(sheet) = d.sheets.get(at) else { return };
     let Some(block) = &sheet.title_block else { return };
     let texts: Vec<(&String, &Content)> = block
@@ -90,7 +92,7 @@ pub fn shown_with(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize, m
             _ => None,
         })
         .collect();
-    with_values(doc, tree, d, at, texts.iter().map(|(_, content)| *content), |values| {
+    with_values(s, tree, d, at, texts.iter().map(|(_, content)| *content), |values| {
         for &(name, content) in &texts {
             let value = values.text(content);
             let cell = match sheet.title_block_overrides.get(name) {
@@ -105,15 +107,16 @@ pub fn shown_with(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize, m
 /// `contents` as sheet `at` of `d` shows them, in their order: text as written, each field read
 /// ([`Values::text`]). The component the sheet documents is weighed in `tree` only when a field reads
 /// its material or mass. A title block's cells and a note's text read their fields by this one rule.
-pub fn read<'c>(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize, contents: impl Iterator<Item = &'c Content> + Clone) -> Vec<String> {
-    with_values(doc, tree, d, at, contents.clone(), |values| contents.map(|content| values.text(content)).collect())
+pub fn read<'c>(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize, contents: impl Iterator<Item = &'c Content> + Clone) -> Vec<String> {
+    with_values(s, tree, d, at, contents.clone(), |values| contents.map(|content| values.text(content)).collect())
 }
 
 /// `answer` given what sheet `at` of `d` reads its fields from ([`Values`]), for `contents`: the
-/// component the sheet documents is weighed in `tree` only when one of them reads its material or
-/// mass. [`read`] and a note's inspect read through this one rule.
+/// component the sheet documents, in the design its source names ([`Session::drawn`]; one that
+/// can't be read has nothing to show), weighed in `tree`, the tree of `s`'s design, only when one of
+/// them reads its material or mass. [`read`] and a note's inspect read through this one rule.
 pub fn with_values<'c, R>(
-    doc: &Document,
+    s: &Session,
     tree: &mut Tree<'_>,
     d: &Drawing,
     at: usize,
@@ -123,14 +126,21 @@ pub fn with_values<'c, R>(
     let weighs = contents.any(|content| {
         content.0.iter().any(|part| matches!(part, Part::Field { source: Source::Component, key, .. } if key == "material" || key == "mass"))
     });
-    // What the model says of the component it documents: a component since deleted has nothing.
-    let id = d.sheets.get(at).and_then(|sheet| sheet.documents).map(|documents| documents.component);
-    let (mass, materials) = id.filter(|_| weighs).and_then(|id| tree.component(id).ok()).unzip();
+    // What the model says of the component it documents: a component since deleted, or of a design
+    // that can't be read, has nothing.
+    let documents = d.sheets.get(at).and_then(|sheet| sheet.documents);
+    let design = documents.map(|documents| s.drawn(d, documents.source).ok());
+    let id = documents.map(|documents| documents.component);
+    let weighed = id.filter(|_| weighs && matches!(design, Some(Some(design)) if std::ptr::eq(design, s)));
+    let (mass, materials) = weighed.and_then(|id| tree.component(id).ok()).unzip();
     let mass = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(format_mass(grams)) } else { None });
     let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
-    let component = match id {
-        None => Documented::Nothing,
-        Some(id) => documented(doc, id, material.as_deref(), mass.as_deref()).map_or(Documented::Gone, Documented::Present),
+    let component = match (design, id) {
+        (Some(Some(design)), Some(id)) => {
+            documented(&design.doc, id, material.as_deref(), mass.as_deref()).map_or(Documented::Gone, Documented::Present)
+        }
+        (Some(None), _) => Documented::Gone,
+        _ => Documented::Nothing,
     };
     answer(&Values { drawing: d, sheet: at, component })
 }

@@ -215,7 +215,7 @@ pub fn loft_blend(
 }
 
 /// The kernel's refusal of a railed loft as ops' error.
-fn refused(e: solidcore::SolidError) -> Error {
+pub(super) fn refused(e: solidcore::SolidError) -> Error {
     use solidcore::error::sweep::SweepFailure;
     use solidcore::error::Reason;
     if let solidcore::SolidError::Failed(f) = &e {

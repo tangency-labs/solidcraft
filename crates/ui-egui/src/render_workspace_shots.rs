@@ -15,15 +15,7 @@ pub(super) fn camera_modified(app: &SolveApp, name: &str) -> bool {
     app.session.doc.render.setups.get(name).is_some_and(|setup| setup.camera != app.cam)
 }
 
-pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
-    draw_contents(app, ui, None, true);
-}
-
 pub(crate) fn shared_shots(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, inline: bool) {
-    draw_contents(app, ui, Some(flow), inline);
-}
-
-fn draw_contents(app: &mut SolveApp, ui: &mut egui::Ui, flow: Option<Flow>, inline: bool) {
     super::thumbnails::refresh(app, ui.ctx());
     let status = app.render_workspace.view.job.and_then(|job| app.session.render_job_handle(job).ok()).and_then(|handle| handle.status().ok());
     let progress = status
@@ -90,11 +82,6 @@ fn draw_contents(app: &mut SolveApp, ui: &mut egui::Ui, flow: Option<Flow>, inli
         crate::scenario::publish_rect("render:shots:status", response.rect);
     };
     let choices = |ui: &mut egui::Ui| {
-        if flow.is_none() {
-            let heading = ui_kit::StripHeading::new(ui.painter(), solidcraft_ui_text::tr_label("Shots"));
-            let response = heading.show(ui);
-            crate::scenario::publish_rect("render:shots:heading", response.rect);
-        }
         let response = ui.add_enabled_ui(super::setups::snapshot(app).is_ok(), |ui| ui_kit::add_choice(ui, app.tr("render.shots_save"))).inner;
         crate::panel_runtime::register_content_focus(ui.ctx(), &response);
         crate::scenario::publish_target("render:shots:save", response.rect);
@@ -122,7 +109,7 @@ fn draw_contents(app: &mut SolveApp, ui: &mut egui::Ui, flow: Option<Flow>, inli
             }
         }
     };
-    if let Some(flow) = flow.filter(|_| !inline) {
+    if !inline {
         let top = ui.cursor().top();
         let rtl = crate::i18n::panel_direction(&app.preferences.language) == Direction::Rtl;
         let horizontal = if rtl { egui::Layout::right_to_left(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };

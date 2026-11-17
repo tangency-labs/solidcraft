@@ -281,7 +281,7 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
     match crate::blend_smlib::fillet_removing(body, edges, radius, turn) {
         Ok((b, gone)) => Ok((closed(body, b)?, gone)),
         Err(KernelError::TooLarge(why)) => match edges {
-            [pick] => match concave_overflow_round(body, *pick, radius, turn) {
+            [pick] => match concave_overflow_round(body, *pick, radius, |carried| crate::blend_smlib::fillet(carried, &[*pick], radius, turn)) {
                 Some(b) => Ok((b, Vec::new())),
                 None => Err(KernelError::TooLarge(why)),
             },
@@ -291,84 +291,76 @@ pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTur
     }
 }
 
-/// A concave round on one straight edge whose contact line runs off the flat face it rolls on
-/// (the face's outline turns away there, into a rounded corner or an opening), which SMLib
-/// refuses (solidcore#3252): the round of the edge on the body with that face carried on as a
-/// slab behind its plane, over the edge's length, the material that round adds kept within the
-/// face's outline (its sheet thickened along its normal) and joined to the body. So the round
-/// ends where the face's outline ends, on the surface of whatever the face turns into there,
-/// carried on square to the face.
+/// A concave blend (a round or a chamfer) on one straight edge whose contact line runs off the
+/// flat face it rolls on (the face's outline turns away there, into a rounded corner or an
+/// opening), which SMLib refuses (solidcore#3252): `blend` of the edge on the body with that face
+/// carried on as a slab behind its plane, over the edge's length, and of the material that blend
+/// adds, what stands over the face's outline (its sheet thickened along its normal) and what
+/// stands past the edge's line, on the other face's side of it (a box on that side of the line,
+/// over the edge's length), joined to the body. So the blend ends where the face's outline ends,
+/// on the surface of whatever the face turns into there, carried on square to the face, and is
+/// whole where it stands over the other face (leaning back, or curving away behind the edge's
+/// line). The sheet's prism and the box reach as far either way from the plane, and the box as
+/// far from the edge's line, as the added material's own exact box is across, and a margin more:
+/// that material touches the edge, so none of it stands further off. `reach`: how far the blend
+/// reaches from the edge (a round's radius, a chamfer's larger distance), which sizes the slab.
 ///
-/// Only where it gives the round SMLib would build on an unbounded face: the edge is straight,
-/// one of its faces is planar and it is concave (material in front of that face on the other
-/// face's side), and at each end of the edge a planar face square to it ends the round, so the
-/// slab's square ends add no material the round could run into. `None` where it does not apply
-/// or a step fails: the caller keeps SMLib's refusal. Decided on exact geometry.
-fn concave_overflow_round(body: &Body, pick: Vec3, radius: f64, turn: FilletTurn) -> Option<Body> {
+/// The kernel says where that gives the blend it would build on an unbounded face, and
+/// measures the slab ([`solidcore_ops::carried_faces_ordered`]: a straight concave edge, a flat
+/// face of it, and a flat face square to the edge at each end, so the slab's square ends add no
+/// material the blend could run into). This only sequences the operations, each recording its
+/// history. `None` where it does not apply or a step fails: the caller keeps SMLib's refusal.
+/// Its steps are checked as they are built whatever the evaluation checks, also under
+/// `Validation::Off`.
+fn concave_overflow_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Option<Body> {
+    // Each step checked as it is built: one whose result the check refuses gives `None`, so the
+    // caller keeps the kernel's refusal rather than a body the feature's check refuses later.
+    crate::validation::validating(crate::Validation::EachStep, || carried_on_round(body, pick, reach, blend)).0
+}
+
+/// [`concave_overflow_round`]'s steps.
+fn carried_on_round(body: &Body, pick: Vec3, reach: f64, blend: impl Fn(&Body) -> Result<Body>) -> Option<Body> {
     use solidcore_record::{Loop2, Plane, Region2, Vec2};
-    if !(radius.is_finite() && radius > 0.0) {
-        return None;
-    }
-    let rec = Faces::of(body).ok()?;
     let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).ok()?;
     let [e] = picked.as_slice() else { return None };
     let e = *e;
-    if !rec.straight(e) {
-        return None;
-    }
-    let (a, b) = rec.ends(e)?;
-    let length = a.dist(b);
-    let d = (b - a).normalized()?;
+    let (ops, order) = body.ops_body()?;
+    let found = solidcore_ops::carried_faces_ordered(ops, order, e, reach).ok()?;
+    let rec = Faces::of(body).ok()?;
     let size = body.size();
-    if !(length > 0.0 && size.is_finite() && size > 0.0) {
-        return None;
-    }
-    let eps = (size * 1e-4).max(1e-4).min(radius * 0.1);
-    let middle = (a + b) * 0.5;
-    let [vs, ve] = rec.rec.edges.get(e)?.vertices;
-    // A planar face square to the edge, other than its own, at vertex v.
-    let squared_at = |v: u32| {
-        rec.rec.edges.iter().enumerate().filter(|(_, x)| x.vertices.contains(&v)).any(|(i, _)| {
-            rec.faces_of(i)
-                .into_iter()
-                .any(|f| !rec.faces_of(e).contains(&f) && rec.plane_normal(f as usize).is_some_and(|n| n.dot(d).abs() > 1.0 - 1e-9))
-        })
-    };
-    if !(squared_at(vs) && squared_at(ve)) {
-        return None;
-    }
-    for f in rec.faces_of(e) {
-        let f = f as usize;
-        let Some(n) = rec.plane_normal(f) else { continue };
-        if n.dot(d).abs() > 1e-9 {
-            continue;
-        }
-        let u = n.cross(d);
-        // concave: material in front of the plane beside the edge, on the other face's side
-        let inside = |p: Vec3| matches!(body.classify_point(p), Ok(crate::PointClass::Inside));
-        if !(inside(middle + n * eps + u * eps) || inside(middle + n * eps - u * eps)) {
-            continue;
-        }
-        let far = 4.0 * (size + radius);
-        let plane = Plane { origin: a, x: d, y: u };
-        let rect = Loop2::polygon(&[Vec2::new(0.0, -far), Vec2::new(length, -far), Vec2::new(length, far), Vec2::new(0.0, far)]);
-        let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], -far, 0.0).ok()?.into_iter().next()?;
+    let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+    let volume = |x: &Body| crate::measure(x).ok().map(|m| m.volume);
+    // A face whose carried-on blend fails at a step gives way to the edge's other face.
+    let carry = |c: &solidcore_ops::CarriedFace| -> Option<Body> {
+        let plane = Plane { origin: v(c.origin), x: v(c.along), y: v(c.across) };
+        let length = c.outline[1][0];
+        let rect = Loop2::polygon(&c.outline.map(|p| Vec2::new(p[0], p[1])));
+        let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], c.depth[0], c.depth[1]).ok()?.into_iter().next()?;
         let carried = crate::boolean(body, &slab, crate::BoolOp::Union).ok()??;
-        let rounded = crate::blend_smlib::fillet(&carried, &[pick], radius, turn);
-        let rounded = rounded.ok()?;
+        let rounded = blend(&carried).ok()?;
         let fill = crate::boolean(&rounded, &carried, crate::BoolOp::Cut).ok()??;
         // the face itself, by its index, for its sheet
-        let sheet = crate::surfaces::taken(body, &rec.rec, &[(f, false)]).ok()?;
-        let prism = crate::thicken(&sheet, 4.0 * (radius + size * 1e-3 + 1.0), true).ok()?;
-        let kept = crate::boolean(&fill, &prism, crate::BoolOp::Intersect).ok()??;
+        let sheet = crate::surfaces::taken(body, &rec.rec, &[(c.face, false)]).ok()?;
+        // The fill touches the edge, so it stands no further off the face's plane or the edge's
+        // line than its own box is across.
+        let bounds = fill.exact_bounds().ok()?;
+        let room = bounds.min.dist(bounds.max) + size * 1e-3 + 1.0;
+        let prism = crate::thicken(&sheet, 2.0 * room, true).ok()?;
+        // Past the edge's line the fill stands over the other face, not over the flat face's
+        // outline, and is kept whole.
+        let (from, to) = if c.other_side > 0.0 { (0.0, room) } else { (-room, 0.0) };
+        let beyond = Loop2::polygon(&[Vec2::new(0.0, from), Vec2::new(length, from), Vec2::new(length, to), Vec2::new(0.0, to)]);
+        let beyond = crate::build::extrude(&plane, &[Region2 { outer: beyond, holes: vec![] }], -room, room).ok()?.into_iter().next()?;
+        let keep = crate::boolean(&prism, &beyond, crate::BoolOp::Union).ok()??;
+        let kept = crate::boolean(&fill, &keep, crate::BoolOp::Intersect).ok()??;
         let joined = crate::boolean(body, &kept, crate::BoolOp::Union).ok()??;
         let joined = closed(body, joined).ok()?;
-        let grew = |x: &Body| crate::measure(x).ok().map(|m| m.volume);
-        if grew(&joined)? > grew(body)? {
+        if volume(&joined)? > volume(body)? {
             return Some(over_body_alone(joined, body, e));
         }
-    }
-    None
+        None
+    };
+    found.iter().find_map(carry)
 }
 
 /// What a refusal of a setback too short for its corner says before the least that builds (in
@@ -959,6 +951,95 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
     crate::blend_smlib::chamfer_sides(body, edges, d1, side, flip)
 }
 
+/// [`chamfer`], and where SMLib refuses the equal chamfer of a single edge as too large or fails
+/// it as an operation, the concave chamfer whose contact line runs off the flat face it rolls on,
+/// built by carrying that face on ([`concave_overflow_round`]) as [`fillet_removing`] builds such
+/// a round; where that does not apply, SMLib's error. The search for the largest chamfer that
+/// fits ([`chamfer_max_why`]) uses [`chamfer`], without it. The two-distance and
+/// distance-and-angle forms are carried on by [`chamfer_sides_carrying_face`].
+pub fn chamfer_carrying_face(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+    match (chamfer(body, edges, distance), edges) {
+        // Just past the largest that fits, SMLib fails the chamfer as an operation (its status
+        // 1001) rather than sizing it as too large; the error kinds say no more than that.
+        (Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))), [pick]) => {
+            concave_overflow_round(body, *pick, distance, |carried| chamfer(carried, &[*pick], distance)).ok_or(e)
+        }
+        (plain, _) => plain,
+    }
+}
+
+/// [`chamfer_sides`], and where SMLib refuses the chamfer of a single edge (by two distances, or
+/// by a distance and an angle) as too large or fails it as an operation, the concave chamfer
+/// whose contact line runs off the flat face it rolls on, built by carrying that face on
+/// ([`concave_overflow_round`]) as [`chamfer_carrying_face`] builds the equal one; where that
+/// does not apply, SMLib's error.
+///
+/// The first distance stays along the face SMLib gives it on the body itself
+/// ([`first_face_normal`]), and the angle is from that face: the body with the face carried on
+/// is another body, whose edge may list its two faces the other way round, so there the chamfer
+/// is asked along that face's normal, which only that face leans along.
+pub fn chamfer_sides_carrying_face(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
+    match (chamfer_sides(body, edges, d1, side, flip), edges) {
+        // As the equal chamfer: past its face SMLib refuses it as too large, and just past the
+        // largest that fits it fails it as an operation (its status 1001).
+        (Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))), [pick]) => {
+            // Deliberate: where the first face cannot be told, SMLib's refusal stands.
+            let Some(first) = first_face_normal(body, *pick, flip) else { return Err(e) };
+            // The reach sizes only the slab the flat face is carried on as (four times the
+            // body's size and the reach, each way from the edge). By an angle the second side's
+            // contact may lie further than any multiple of the first distance: where it lies past
+            // the slab, the chamfer runs off the slab's square end as it ran off the face, SMLib
+            // refuses it on the carried body too, and its refusal stands.
+            let reach = match side {
+                ChamferSide::Distance(d2) => d1.max(d2),
+                ChamferSide::Angle(_) => d1,
+            };
+            concave_overflow_round(body, *pick, reach, |carried| crate::blend_smlib::chamfer_sides_along(carried, &[*pick], d1, side, first)).ok_or(e)
+        }
+        (plain, _) => plain,
+    }
+}
+
+/// How far apart two leans (each a unit normal's component along a unit direction) must be for
+/// the face that leans more to be taken as told: far above the rounding of a normal, so that the
+/// same face leans more on every copy of the body.
+const LEANS_APART: f64 = 1e-9;
+
+/// Whether the second of an edge's two faces takes a two-sided chamfer's first distance, from
+/// how far each leans along the chooser's direction, as SMLib decides it
+/// (`solidcraft_smlib::Brep::chamfer_sides`): the second only where it leans more, so the first
+/// where they lean alike. `None` where the leans differ by less than [`LEANS_APART`]: rounding
+/// decides there, and SMLib's own copy of the body need not round as the copy asked here.
+fn second_face_first(l0: f64, l1: f64) -> Option<bool> {
+    (l0 == l1 || (l1 - l0).abs() > LEANS_APART).then_some(l1 > l0)
+}
+
+/// The outward unit normal, at the middle of the edge `pick` takes, of the face [`chamfer_sides`]
+/// gives its first distance on `body`: the edge's two faces and how far each leans along up (down
+/// with `flip`) are the kernel's ([`solidcore_ops::edge_faces_along_ordered`]), for the choice
+/// ([`second_face_first`]), and so is the chosen face's normal there
+/// ([`solidcore_ops::Body::face_normal_at_edge`]).
+///
+/// `None` where the edge, its faces or the choice cannot be told (a mesh body, an edge not
+/// between two faces, leans that rounding decides), and where the two faces do not lean clearly
+/// apart along that normal ([`LEANS_APART`]), so that it would not single the face out.
+fn first_face_normal(body: &Body, pick: Vec3, flip: bool) -> Option<Vec3> {
+    let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).ok()?;
+    let [e] = picked.as_slice() else { return None };
+    let (ops, order) = body.ops_body()?;
+    let leans = |dir: [f64; 3]| solidcore_ops::edge_faces_along_ordered(ops, order, *e, dir).ok();
+    let [(f0, l0), (f1, l1)] = leans([0.0, 0.0, if flip { -1.0 } else { 1.0 }])?;
+    if f0 == f1 {
+        return None;
+    }
+    let second = second_face_first(l0, l1)?;
+    let first = if second { f1 } else { f0 };
+    let [x, y, z] = ops.face_normal_at_edge(order, *e, first).ok()?.value;
+    let n = Vec3::new(x, y, z);
+    let [(_, a), (_, b)] = leans([n.x, n.y, n.z])?;
+    (a != b && second_face_first(a, b)? == second).then_some(n)
+}
+
 /// The edge each pick takes, as a blend takes it (an index in the body's edge order, the order
 /// of its mesh's edges): the nearest, and at a vertex where a seam or a smooth join meets a sharp
 /// edge (a cylinder's seam at its rim), the sharp edge. Picks that find no edge are refused.
@@ -968,7 +1049,7 @@ pub fn blend_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
 
 /// The picked edges' tangent chains, for a blend that is to run along them: `picks` (each the
 /// nearest edge of `body` to it), then a point on every other edge that continues one of them
-/// tangentially (within 0.5° at a shared vertex), until no more do. Each pick takes its edge as a
+/// tangentially (within 2°, [`solidcraft_geom::TANGENT_CHAIN`], at a shared vertex), until no more do. Each pick takes its edge as a
 /// blend does (a pick at a vertex where a seam meets a rim takes the rim). An edge only one face
 /// uses ends a chain, and so do a seam and a smooth edge (its two faces meet tangentially, within
 /// 0.5°, all along it): they have no corner to round. A chain does not run on into an edge of the
@@ -1010,10 +1091,10 @@ fn picked_chain(body: &Body, picks: &[Vec3]) -> Result<(Faces, Vec<usize>, usize
     Ok((rec, chain, picked.len()))
 }
 
-/// Edges meeting at an angle (radians) below this continue one another; faces meeting at an
-/// angle below it meet tangentially, a smooth edge with nothing to round. One value for smooth
-/// everywhere: the shaded view's ([`crate::smooth_edges::ANGLE`], half a degree), so an edge
-/// the view draws can be rounded and one it hides is smooth.
+/// Faces meeting at an angle (radians) below this meet tangentially, a smooth edge with nothing
+/// to round: the shaded view's ([`crate::smooth_edges::ANGLE`], half a degree), so an edge the
+/// view draws can be rounded and one it hides is smooth. Which edges a chain continues through
+/// is wider ([`solidcraft_geom::TANGENT_CHAIN`], 2°).
 const TANGENT: f64 = crate::smooth_edges::ANGLE;
 
 /// The point halfway along edge `e`.
@@ -1063,7 +1144,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
         }
         if a == v { rec.tangent(e, false) } else { rec.tangent(e, true).map(|t| t * -1.0) }
     };
-    let cos = TANGENT.cos();
+    let cos = solidcraft_geom::TANGENT_CHAIN.cos();
     let accept = normal_reach(rec);
     // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the
     // body): the direction into its second face, square to it, points against its first face's
@@ -1504,6 +1585,633 @@ mod tests {
         }
     }
 
+    /// The pick on the boss's concave base edge of [`boss_on_rounded_plate`].
+    const BOSS_EDGE: Vec3 = Vec3::new(26.796894836538296, -10.5, -12.0);
+
+    /// The chamfer `d` of the boss's base edge on the rounded plate, as solidcore defines it from
+    /// the wedge at the edge (angle `a`): offset `r = d (1 - cos a) / sin a` from the plate's front
+    /// face (the plane y = -10.5) and from the boss's cylinder. Its contact on the plane `p` and
+    /// on the boss's circle `q` (in xy: the feet of the point that far from both), and the area
+    /// of its section between the plane, the chamfer's line from `p` to `q` and the circle.
+    fn boss_chamfer_section(d: f64) -> ((f64, f64), (f64, f64), f64) {
+        boss_chamfer_sides_section(d, d)
+    }
+
+    /// [`boss_chamfer_section`] of the two-distance chamfer `plate` along the plate's front face
+    /// and `boss` along the boss's cylinder: solidcore keeps the offsets these are at the edge's
+    /// wedge, `(boss - plate cos a) / sin a` from the plate's face and `(plate - boss cos a) /
+    /// sin a` from the boss's cylinder, and the contacts are the feet of the point that far from
+    /// each.
+    fn boss_chamfer_sides_section(plate: f64, boss: f64) -> ((f64, f64), (f64, f64), f64) {
+        let (cx, cy, big, yp): (f64, f64, f64, f64) = (14.388009991673611, -14.038301415494109, 12.90348790056394, -10.5);
+        let ex = cx + (big * big - (yp - cy).powi(2)).sqrt();
+        let (cos, sin) = ((yp - cy) / big, (ex - cx) / big);
+        let (rp, rb) = ((boss - plate * cos) / sin, (plate - boss * cos) / sin);
+        let (ox, oy) = (((big + rb).powi(2) - (yp - rp - cy).powi(2)).sqrt(), yp - rp - cy);
+        let p = (cx + ox, yp);
+        let q = (cx + ox * big / (big + rb), cy + oy * big / (big + rb));
+        let triangle = 0.5 * ((p.0 - ex) * (q.1 - yp) - (q.0 - ex) * (p.1 - yp)).abs();
+        let turn = (yp - cy).atan2(ex - cx) - (q.1 - cy).atan2(q.0 - cx);
+        (p, q, triangle - 0.5 * big * big * (turn - turn.sin()))
+    }
+
+    /// z of the r16 corner's arc on the plate's front face at x (x >= 32.5): it lies on
+    /// (x - 32.5)^2 + (z + 16)^2 = 256.
+    fn on_corner_arc(x: f64) -> f64 {
+        -16.0 + (256.0 - (x - 32.5).powi(2)).sqrt()
+    }
+
+    /// The boss's base edge chamfered 8: its contact line on the plate's front face runs past
+    /// x 32.5, where the face's top edge turns into the r16 corner's arc, and SMLib refuses it.
+    /// Carried on, the chamfer's contact line on the plate ends on the arc, its top edge meets
+    /// the corner at x 32.5, and its material is its section over the boss's 24 mm less the
+    /// sliver past the arc (under 0.01 mm³ here). One shell.
+    #[test]
+    fn a_concave_chamfer_runs_on_past_where_its_face_turns_into_a_round() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap().volume;
+        assert!(matches!(chamfer(&body, &[BOSS_EDGE], 8.0), Err(KernelError::TooLarge(_))));
+        let out = chamfer_carrying_face(&body, &[BOSS_EDGE], 8.0).unwrap();
+        let m = crate::measure(&out).unwrap();
+        let (p, q, area) = boss_chamfer_section(8.0);
+        let short = 24.0 * area - (m.volume - before);
+        assert!(m.shells == 1 && (0.0..0.01).contains(&short), "short of the full section by {short}");
+        let top = p.1 + (32.5 - p.0) * (q.1 - p.1) / (q.0 - p.0);
+        for v in [Vec3::new(p.0, -10.5, on_corner_arc(p.0)), Vec3::new(32.5, top, 0.0), Vec3::new(q.0, q.1, 0.0)] {
+            assert!(has_vertex(&out, v, 1e-6), "no vertex at {v:?}");
+        }
+    }
+
+    /// Chamfered 7 the contact line stays on the plate's face (x 32.4906 < 32.5) and SMLib builds
+    /// it: carrying the face on does not run and the body is SMLib's, its material the section.
+    #[test]
+    fn a_concave_chamfer_that_fits_its_face_is_smlibs() {
+        let body = boss_on_rounded_plate();
+        let plain = chamfer(&body, &[BOSS_EDGE], 7.0).unwrap();
+        let out = chamfer_carrying_face(&body, &[BOSS_EDGE], 7.0).unwrap();
+        assert_eq!(crate::encode_native_body(&out).unwrap(), crate::encode_native_body(&plain).unwrap());
+        let (_, _, area) = boss_chamfer_section(7.0);
+        let added = crate::measure(&out).unwrap().volume - crate::measure(&body).unwrap().volume;
+        assert!((24.0 * area - added).abs() < 1e-3, "{added}");
+    }
+
+    /// The carried-on sequence checks each step as it is built, whatever the evaluation around it
+    /// checks: a step the check refuses gives the kernel's refusal, not a body the feature's check
+    /// refuses later.
+    #[test]
+    fn a_carried_on_blend_checks_each_step_whatever_the_evaluation_checks() {
+        let body = boss_on_rounded_plate();
+        for mode in crate::Validation::ALL {
+            let seen = std::cell::Cell::new(None);
+            let (out, deferred) = crate::validation::validating(mode, || {
+                concave_overflow_round(&body, BOSS_EDGE, 8.0, |carried| {
+                    seen.set(Some(crate::validation::step()));
+                    chamfer(carried, &[BOSS_EDGE], 8.0)
+                })
+            });
+            assert!(out.is_some(), "{mode:?}");
+            assert_eq!(seen.get(), Some(crate::validation::Step::Check), "{mode:?}");
+            assert!(!deferred, "{mode:?}: no step's check is left for the feature");
+        }
+    }
+
+    /// Just past the largest chamfer that fits (7.00), SMLib fails it as an operation instead of
+    /// sizing it; carried on it builds, and the chamfer grows with its distance through there.
+    #[test]
+    fn a_concave_chamfer_just_past_its_face_builds() {
+        let body = boss_on_rounded_plate();
+        assert!(matches!(chamfer(&body, &[BOSS_EDGE], 7.02), Err(KernelError::Failed(_))));
+        let before = crate::measure(&body).unwrap().volume;
+        let mut last = before;
+        for d in [7.0, 7.01, 7.02, 7.05, 7.1, 8.0] {
+            let out = chamfer_carrying_face(&body, &[BOSS_EDGE], d).unwrap_or_else(|e| panic!("{d}: {e}"));
+            let v = crate::measure(&out).unwrap().volume;
+            let (_, _, area) = boss_chamfer_section(d);
+            assert!(v > last && (24.0 * area - (v - before)).abs() < 0.01, "{d}: {v}");
+            last = v;
+        }
+    }
+
+    /// What carrying the face on leaves out of a chamfer with contacts `p` on the plate and `q`
+    /// on the boss: the part of its section past the r16 corner's arc, none where `p` is short of
+    /// x 32.5. At x = 32.5 + u the section is as thick as the chamfer's line stands off the plate
+    /// there, `(a - u)` times the line's slope with `a = p.x - 32.5`, and the arc is
+    /// `16 - sqrt(256 - u^2)` below the plate's top: their product integrated over u from 0 to a.
+    fn past_corner_arc(p: (f64, f64), q: (f64, f64)) -> f64 {
+        assert!(q.0 < 32.5, "the chamfer's line runs from the boss past x 32.5");
+        let a = (p.0 - 32.5).max(0.0);
+        let root = (256.0 - a * a).sqrt();
+        let slope = (p.1 - q.1) / (p.0 - q.0);
+        slope * (8.0 * a * a - a * (0.5 * a * root + 128.0 * (a / 16.0).asin()) + (4096.0 - root.powi(3)) / 3.0)
+    }
+
+    /// The round `r` of the boss's base edge on the rounded plate: its centre is `r` off the
+    /// plate's front face and off the boss's cylinder. Its contact on the plane `p` and on the
+    /// boss's circle `t` (in xy), and the area of its section: the triangle of the edge, `p` and
+    /// `t`, less the round's segment on `p t` and the boss's segment on the edge and `t`.
+    fn boss_round_section(r: f64) -> ((f64, f64), (f64, f64), f64) {
+        let (cx, cy, big, yp): (f64, f64, f64, f64) = (14.388009991673611, -14.038301415494109, 12.90348790056394, -10.5);
+        let ex = cx + (big * big - (yp - cy).powi(2)).sqrt();
+        let (bx, by) = (cx + ((big + r).powi(2) - (yp - r - cy).powi(2)).sqrt(), yp - r);
+        let (p, t) = ((bx, yp), (cx + (bx - cx) * big / (big + r), cy + (by - cy) * big / (big + r)));
+        let triangle = 0.5 * ((p.0 - ex) * (t.1 - yp) - (t.0 - ex) * (p.1 - yp)).abs();
+        // the round's arc turns from straight up at `p` to the direction of the boss's axis
+        let round = ((cy - by) / (big + r)).acos();
+        let boss = (yp - cy).atan2(ex - cx) - (t.1 - cy).atan2(t.0 - cx);
+        (p, t, triangle - 0.5 * r * r * (round - round.sin()) - 0.5 * big * big * (boss - boss.sin()))
+    }
+
+    /// How many faces of `out` were made in place of the edge `pick` takes on `body`.
+    fn faces_from_edge(out: &Body, body: &Body, pick: Vec3) -> usize {
+        let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).unwrap();
+        let from = [crate::history::FaceOrigin::Edge { operand: 0, edge: picked[0] }];
+        out.history().expect("a history").faces.iter().filter(|f| f.origins == from).count()
+    }
+
+    /// The boss curves away behind the line of its base edge: its circle is back at the edge's x
+    /// (26.797) 7.08 in front of the plate. A chamfer whose contact on the boss lies past there
+    /// (equal distances from 12.92 on) stands over the boss there, not over the plate's face,
+    /// and is whole there all the same: chamfered 13, 14 and 16 its material is its section over
+    /// the boss's 24 mm less the part past the corner's arc, its contact line on the boss runs
+    /// the boss's height, and it is one face.
+    #[test]
+    fn a_concave_chamfer_is_whole_where_it_stands_over_the_boss() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap().volume;
+        for d in [13.0, 14.0, 16.0] {
+            assert!(matches!(chamfer(&body, &[BOSS_EDGE], d), Err(KernelError::TooLarge(_))), "SMLib refuses {d}");
+            let out = chamfer_carrying_face(&body, &[BOSS_EDGE], d).unwrap_or_else(|e| panic!("{d}: {e}"));
+            let (p, q, area) = boss_chamfer_section(d);
+            assert!(q.0 < BOSS_EDGE.x, "{d}: the contact on the boss is behind the edge's line");
+            let m = crate::measure(&out).unwrap();
+            let (added, full) = (m.volume - before, 24.0 * area - past_corner_arc(p, q));
+            assert!(m.shells == 1 && (full - added).abs() < 5e-4, "{d}: added {added} of {full}");
+            for z in [0.0, -24.0] {
+                assert!(has_vertex(&out, Vec3::new(q.0, q.1, z), 1e-6), "{d}: no vertex on the boss at z {z}");
+            }
+            assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "{d}");
+        }
+    }
+
+    /// A round likewise, from a radius of 9.75 on: rounded 10.5, 12 and 14 its contact line on
+    /// the boss, behind the edge's line, runs the boss's height, it is one face, and its material
+    /// is its section less the part past the corner's arc. That part has no closed form (over x
+    /// it is the round's height over the plate times the arc's drop below the plate's top, two
+    /// circles' heights), so it is bracketed. With `a` the contact's reach past x 32.5, the round
+    /// stands `w^2 / (r + sqrt(r^2 - w^2))` off the plate `w` short of its contact: at least
+    /// `w^2 / 2r`, at most `w^2 / a^2` of its height at x 32.5. The arc drops likewise, between
+    /// `v^2 / 32` and `v^2 / a^2` of its drop at the contact, and `w^2 (a - w)^2` integrates to
+    /// `a^5 / 30`. The bracket is narrower than what stands over the boss (0.004 against 0.019
+    /// mm³ at 10.5, 0.06 against 1.5 at 14). The section's closed form is SMLib's at radius 5.
+    #[test]
+    fn a_concave_round_is_whole_where_it_stands_over_the_boss() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap().volume;
+        let fits = crate::measure(&fillet(&body, &[BOSS_EDGE], 5.0).unwrap()).unwrap().volume - before;
+        assert!((fits - 24.0 * boss_round_section(5.0).2).abs() < 1e-3, "{fits}");
+        for r in [10.5, 12.0, 14.0] {
+            assert!(matches!(fillet(&body, &[BOSS_EDGE], r), Err(KernelError::TooLarge(_))), "SMLib refuses r {r}");
+            let (out, gone) = fillet_removing(&body, &[BOSS_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("r {r}: {e}"));
+            assert!(gone.is_empty());
+            let (p, t, area) = boss_round_section(r);
+            assert!(t.0 < BOSS_EDGE.x, "r {r}: the contact on the boss is behind the edge's line");
+            let a = p.0 - 32.5;
+            let (height, drop) = (r - (r * r - a * a).sqrt(), 16.0 - (256.0 - a * a).sqrt());
+            let (least, most) = (a.powi(5) / (30.0 * 2.0 * r * 32.0), height * drop * a / 30.0);
+            let m = crate::measure(&out).unwrap();
+            let short = 24.0 * area - (m.volume - before);
+            assert!(m.shells == 1 && (least - 1e-3..=most + 1e-3).contains(&short), "r {r}: short by {short}, past the arc {least} to {most}");
+            for z in [0.0, -24.0] {
+                assert!(has_vertex(&out, Vec3::new(t.0, t.1, z), 1e-6), "r {r}: no vertex on the boss at z {z}");
+            }
+            assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "r {r}");
+        }
+    }
+
+    /// A plate 30 long and 10 thick, 20 deep, with a wall on its left: the wall's side rises
+    /// from the plate's top (the plane y = 10, from x 20 to its end at x 30) at (20, 10), `wedge`
+    /// degrees from the top and 20 long, and meets the top there in an inside edge along z.
+    fn walled_plate(wedge: f64) -> Body {
+        let (sin, cos) = wedge.to_radians().sin_cos();
+        let far = Vec2::new(20.0 + 20.0 * cos, 10.0 + 20.0 * sin);
+        let outline = [Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0), Vec2::new(30.0, 10.0), Vec2::new(20.0, 10.0), far, Vec2::new(0.0, far.y)];
+        crate::build::extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&outline), holes: vec![] }], 0.0, 20.0).unwrap().pop().unwrap()
+    }
+
+    /// The pick on the inside edge of [`walled_plate`].
+    const WALL_EDGE: Vec3 = Vec3::new(20.0, 10.0, 10.0);
+
+    /// Blends of [`walled_plate`]'s inside edge through where they run past the top's end at
+    /// x 30. A chamfer `d` is the triangle of its two sides, `d^2 sin(wedge) / 2`, and past the
+    /// end it loses its tip there, `d - 10` long and as high as its line stands off the top at
+    /// x 30. Up to 10 it is SMLib's; past it SMLib refuses it and carrying the top on builds it.
+    /// A round whose contacts are 12 from the edge (radius `12 tan(wedge / 2)`) is the kite of
+    /// the edge, its contacts and its centre less its sector, and loses what stands past x 30:
+    /// `r - sqrt(r^2 - w^2)` off the top, `w` from 0 to 2 short of its contact. Each blend is one
+    /// face, in one shell.
+    fn wall_blends_run_on_past_the_tops_end(wedge: f64) {
+        let body = walled_plate(wedge);
+        let before = crate::measure(&body).unwrap().volume;
+        let (sin, cos) = wedge.to_radians().sin_cos();
+        let mut last = before;
+        for d in [9.0, 9.9, 10.1, 12.0] {
+            let plain = chamfer(&body, &[WALL_EDGE], d);
+            let out = chamfer_carrying_face(&body, &[WALL_EDGE], d).unwrap_or_else(|e| panic!("{wedge}°, {d}: {e}"));
+            match plain {
+                Ok(plain) if d < 10.0 => {
+                    assert_eq!(crate::encode_native_body(&out).unwrap(), crate::encode_native_body(&plain).unwrap(), "{wedge}°, {d}")
+                }
+                Err(KernelError::TooLarge(_)) if d > 10.0 => {}
+                other => panic!("{wedge}°, {d}: SMLib gave {:?}", other.map(|_| ())),
+            }
+            let tip = (d - 10.0).max(0.0);
+            let full = 20.0 * 0.5 * (d * d * sin - tip * tip * sin / (1.0 - cos));
+            let m = crate::measure(&out).unwrap();
+            assert!(
+                m.shells == 1 && m.volume > last && (full - (m.volume - before)).abs() < 1e-6,
+                "{wedge}°, {d}: added {} of {full}",
+                m.volume - before
+            );
+            assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{wedge}°, {d}");
+            last = m.volume;
+        }
+        let half = wedge.to_radians() / 2.0;
+        let r = 12.0 * half.tan();
+        assert!(matches!(fillet(&body, &[WALL_EDGE], r), Err(KernelError::TooLarge(_))), "{wedge}°: SMLib refuses r {r}");
+        let (out, gone) = fillet_removing(&body, &[WALL_EDGE], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("{wedge}°, r {r}: {e}"));
+        assert!(gone.is_empty());
+        let section = 12.0 * r - r * r * (std::f64::consts::FRAC_PI_2 - half);
+        let past = 2.0 * r - (r * r - 4.0).sqrt() - 0.5 * r * r * (2.0 / r).asin();
+        let m = crate::measure(&out).unwrap();
+        let full = 20.0 * (section - past);
+        assert!(m.shells == 1 && (full - (m.volume - before)).abs() < 1e-6, "{wedge}°, r {r}: added {} of {full}", m.volume - before);
+        assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{wedge}°, r {r}");
+    }
+
+    /// With the wall's side leaning back 30° (a wedge of 120°) a blend stands over the wall's
+    /// foot, behind the line of the edge, and is whole there: where it runs past the top's end
+    /// it continues the blend SMLib builds below it.
+    #[test]
+    fn a_blend_in_a_wedge_wider_than_square_is_whole_over_the_other_face() {
+        wall_blends_run_on_past_the_tops_end(120.0);
+    }
+
+    /// With the wall's side upright, or leaning 30° over the top (wedges of 90° and 60°), no
+    /// blend stands behind the line of the edge, and the blends run on past the top's end as
+    /// they did.
+    #[test]
+    fn a_blend_in_a_wedge_up_to_square_runs_on_past_its_face() {
+        for wedge in [90.0, 60.0] {
+            wall_blends_run_on_past_the_tops_end(wedge);
+        }
+    }
+
+    /// The boss's base edge is vertical, so its two faces lean alike along up and along down:
+    /// SMLib gives the first distance to the first of the edge's two faces, here the plate's,
+    /// whatever `flip` says. Where the chamfer fits the plate's face, carrying the face on does
+    /// not run and the body is SMLib's, its material the section with the first distance along
+    /// the plate. The face found to be first is the one SMLib takes: the chamfer asked along its
+    /// normal is that same body (with the other face's normal it would be the other chamfer).
+    #[test]
+    fn a_two_sided_chamfer_that_fits_its_face_is_smlibs() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap().volume;
+        let bytes = |b: &Body| crate::encode_native_body(b).unwrap();
+        for (d1, side) in [(3.0, ChamferSide::Distance(5.0)), (5.0, ChamferSide::Distance(3.0)), (5.0, ChamferSide::Angle(60f64.to_radians()))] {
+            let unflipped = bytes(&chamfer_sides(&body, &[BOSS_EDGE], d1, side, false).unwrap());
+            for flip in [false, true] {
+                let plain = chamfer_sides(&body, &[BOSS_EDGE], d1, side, flip).unwrap();
+                assert_eq!(bytes(&plain), unflipped, "{d1} {side:?}: flipped");
+                let out = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], d1, side, flip).unwrap();
+                assert_eq!(bytes(&out), bytes(&plain), "{d1} {side:?} flip {flip}");
+                let first = first_face_normal(&body, BOSS_EDGE, flip).expect("the first face");
+                assert_eq!(first, Vec3::new(0.0, -1.0, 0.0), "the plate's front face");
+                let along = crate::blend_smlib::chamfer_sides_along(&body, &[BOSS_EDGE], d1, side, first).unwrap();
+                assert_eq!(bytes(&along), bytes(&plain), "{d1} {side:?} flip {flip}: along the first face's normal");
+                if let ChamferSide::Distance(d2) = side {
+                    let (p, q, area) = boss_chamfer_sides_section(d1, d2);
+                    let added = crate::measure(&plain).unwrap().volume - before;
+                    assert!((24.0 * area - added).abs() < 1e-4, "{d1} and {d2}: {added}");
+                    for v in [Vec3::new(p.0, -10.5, 0.0), Vec3::new(q.0, q.1, 0.0)] {
+                        assert!(has_vertex(&plain, v, 1e-6), "{d1} and {d2}: no vertex at {v:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Past the plate's face the first distance stays along the plate. 9 and 10, 10 and 9, and 8
+    /// and 4 each run the contact line on the plate past x 32.5, where the face's top edge turns
+    /// into the r16 corner's arc (to x 33.32, 34.91 and 34.40), and SMLib refuses each as too
+    /// large. Carried on, each is its own chamfer and not the one with the distances the other
+    /// way round: its contact line on the plate ends on the arc, its top edge meets the corner
+    /// at x 32.5, its contact on the boss is where the second distance puts it, and its material
+    /// is its section over the boss's 24 mm less the part past the arc. One shell, within the
+    /// body's box.
+    #[test]
+    fn a_two_distance_chamfer_runs_on_past_where_its_face_turns_into_a_round() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap();
+        // The plate's top edge is z = 0 up to x 32.5 and the corner's arc from there.
+        let on_plate = |p: (f64, f64)| Vec3::new(p.0, -10.5, if p.0 > 32.5 { on_corner_arc(p.0) } else { 0.0 });
+        for (d1, d2) in [(9.0, 10.0), (10.0, 9.0), (8.0, 4.0)] {
+            for flip in [false, true] {
+                let side = ChamferSide::Distance(d2);
+                assert!(matches!(chamfer_sides(&body, &[BOSS_EDGE], d1, side, flip), Err(KernelError::TooLarge(_))), "SMLib refuses {d1} and {d2}");
+                let out = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], d1, side, flip).unwrap_or_else(|e| panic!("{d1} and {d2}: {e}"));
+                let m = crate::measure(&out).unwrap();
+                let (p, q, area) = boss_chamfer_sides_section(d1, d2);
+                assert!(p.0 > 32.5, "{d1} and {d2}: the contact on the plate is past its face");
+                let (added, full) = (m.volume - before.volume, 24.0 * area - past_corner_arc(p, q));
+                assert!(m.shells == 1 && (full - added).abs() < 1e-4, "{d1} and {d2} flip {flip}: added {added} of {full}");
+                assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "{d1} and {d2}: {:?}", m.bbox);
+                let top = p.1 + (32.5 - p.0) * (q.1 - p.1) / (q.0 - p.0);
+                for v in [on_plate(p), Vec3::new(32.5, top, 0.0), Vec3::new(q.0, q.1, 0.0)] {
+                    assert!(has_vertex(&out, v, 1e-6), "{d1} and {d2} flip {flip}: no vertex at {v:?}");
+                }
+                let (p, q, _) = boss_chamfer_sides_section(d2, d1);
+                for v in [on_plate(p), Vec3::new(q.0, q.1, 0.0)] {
+                    assert!(!has_vertex(&out, v, 1e-3), "{d1} and {d2} flip {flip}: a vertex of the other order's chamfer at {v:?}");
+                }
+            }
+        }
+    }
+
+    /// On the body with the plate's face carried on, the normal the chamfer is asked along
+    /// decides which face takes the first distance: 9 and 10 along the plate's normal is 9 along
+    /// the plate, and along the boss's normal at the edge (from the boss's axis to the edge) it
+    /// is 9 along the boss, the chamfer of 10 and 9.
+    #[test]
+    fn a_carried_on_two_distance_chamfer_has_its_first_distance_along_the_normal_asked() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap().volume;
+        let (cy, big, yp): (f64, f64, f64) = (-14.038301415494109, 12.90348790056394, -10.5);
+        let boss = Vec3::new((big * big - (yp - cy).powi(2)).sqrt() / big, (yp - cy) / big, 0.0);
+        for (first, plate, along_boss) in [(Vec3::new(0.0, -1.0, 0.0), 9.0, 10.0), (boss, 10.0, 9.0)] {
+            let out = concave_overflow_round(&body, BOSS_EDGE, 10.0, |carried| {
+                crate::blend_smlib::chamfer_sides_along(carried, &[BOSS_EDGE], 9.0, ChamferSide::Distance(10.0), first)
+            })
+            .expect("carried on");
+            let (p, q, area) = boss_chamfer_sides_section(plate, along_boss);
+            let (added, full) = (crate::measure(&out).unwrap().volume - before, 24.0 * area - past_corner_arc(p, q));
+            assert!((full - added).abs() < 1e-4, "along {first:?}: added {added} of {full}");
+        }
+    }
+
+    /// A box's four upright edges, each between two upright faces that lean alike along up and
+    /// down: on each, for either `flip`, the face found to be first is the one SMLib gives the
+    /// first distance (the chamfer asked along its normal is SMLib's body), and round the box it
+    /// is a face across x on some edges and a face across y on others.
+    #[test]
+    fn the_first_face_of_an_upright_edge_is_the_one_smlib_takes() {
+        let body = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+        let bytes = |b: &Body| crate::encode_native_body(b).unwrap();
+        let mut across_x = 0;
+        for edge in [Vec3::new(0.0, 0.0, 15.0), Vec3::new(10.0, 0.0, 15.0), Vec3::new(10.0, 20.0, 15.0), Vec3::new(0.0, 20.0, 15.0)] {
+            for flip in [false, true] {
+                let plain = chamfer_sides(&body, &[edge], 2.0, ChamferSide::Distance(3.0), flip).unwrap();
+                let first = first_face_normal(&body, edge, flip).expect("the first face");
+                let along = crate::blend_smlib::chamfer_sides_along(&body, &[edge], 2.0, ChamferSide::Distance(3.0), first).unwrap();
+                assert_eq!(bytes(&along), bytes(&plain), "{edge:?} flip {flip}");
+                across_x += usize::from(first.x != 0.0);
+            }
+        }
+        assert_eq!(across_x, 4, "two of the four edges, for either flip");
+    }
+
+    /// With 5 along the boss, 6.38 along the plate is the largest that fits the plate's face (its
+    /// contact at x 32.4994) and is SMLib's body; 6.4 SMLib fails as an operation and 6.45 it
+    /// refuses as too large. Carried on they build, and the chamfer grows with its first distance
+    /// through there, its material the section less the part past the arc.
+    #[test]
+    fn a_two_distance_chamfer_just_past_its_face_builds() {
+        let body = boss_on_rounded_plate();
+        let side = ChamferSide::Distance(5.0);
+        let plain = |d: f64| chamfer_sides(&body, &[BOSS_EDGE], d, side, false);
+        assert!(matches!(plain(6.4), Err(KernelError::Failed(_))));
+        assert!(matches!(plain(6.45), Err(KernelError::TooLarge(_))));
+        let fits = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], 6.38, side, false).unwrap();
+        assert_eq!(crate::encode_native_body(&fits).unwrap(), crate::encode_native_body(&plain(6.38).unwrap()).unwrap());
+        let before = crate::measure(&body).unwrap().volume;
+        let mut last = before;
+        for d in [6.38, 6.39, 6.4, 6.42, 6.45, 6.6, 8.0] {
+            let out = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], d, side, false).unwrap_or_else(|e| panic!("{d}: {e}"));
+            let m = crate::measure(&out).unwrap();
+            let (p, q, area) = boss_chamfer_sides_section(d, 5.0);
+            let full = 24.0 * area - past_corner_arc(p, q);
+            assert!(m.shells == 1 && m.volume > last && (full - (m.volume - before)).abs() < 1e-4, "{d}: {}", m.volume);
+            last = m.volume;
+        }
+    }
+
+    /// A two-distance chamfer whose contact on the boss lies behind the line of the edge stands
+    /// over the boss there and is whole: 10 and 12, 11 and 13, 12 and 15 (plate and boss) run
+    /// past the plate's face, and carried on each is its section over the boss's 24 mm less the
+    /// part past the corner's arc, its contact line on the boss runs the boss's height, and it
+    /// is one face. 9 and 12 fits the plate's face and stands over the boss too: SMLib builds
+    /// it, as whole, and 10 and 12 is more.
+    #[test]
+    fn a_two_distance_chamfer_is_whole_where_it_stands_over_the_boss() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap().volume;
+        let added = |d1: f64, d2: f64| {
+            let out = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], d1, ChamferSide::Distance(d2), false)
+                .unwrap_or_else(|e| panic!("{d1} and {d2}: {e}"));
+            let (p, q, area) = boss_chamfer_sides_section(d1, d2);
+            assert!(q.0 < BOSS_EDGE.x, "{d1} and {d2}: the contact on the boss is behind the edge's line");
+            let m = crate::measure(&out).unwrap();
+            let (added, full) = (m.volume - before, 24.0 * area - past_corner_arc(p, q));
+            assert!(m.shells == 1 && (full - added).abs() < 1e-4, "{d1} and {d2}: added {added} of {full}");
+            for z in [0.0, -24.0] {
+                assert!(has_vertex(&out, Vec3::new(q.0, q.1, z), 1e-6), "{d1} and {d2}: no vertex on the boss at z {z}");
+            }
+            assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "{d1} and {d2}");
+            added
+        };
+        assert!(chamfer_sides(&body, &[BOSS_EDGE], 9.0, ChamferSide::Distance(12.0), false).is_ok(), "SMLib builds 9 and 12");
+        let fits = added(9.0, 12.0);
+        for (d1, d2) in [(10.0, 12.0), (11.0, 13.0), (12.0, 15.0)] {
+            assert!(
+                matches!(chamfer_sides(&body, &[BOSS_EDGE], d1, ChamferSide::Distance(d2), false), Err(KernelError::TooLarge(_))),
+                "{d1} and {d2}"
+            );
+            assert!(added(d1, d2) > fits, "{d1} and {d2}");
+        }
+    }
+
+    /// By a wall the first distance is along the wall's side, for either `flip`. 5 along it and
+    /// 15 along the plate's top runs 5 past the top's end at x 30, which SMLib refuses; carried
+    /// on it is the triangle of its two sides less its tip past x 30, 5 long and as high as its
+    /// line stands off the top there, also where the wall leans back and the chamfer stands over
+    /// its foot (a wedge of 120°). One face, one shell.
+    #[test]
+    fn a_two_distance_chamfer_by_a_wall_runs_on_past_the_tops_end() {
+        for wedge in [90.0_f64, 120.0] {
+            let body = walled_plate(wedge);
+            let before = crate::measure(&body).unwrap().volume;
+            let (sin, cos) = wedge.to_radians().sin_cos();
+            let side = ChamferSide::Distance(15.0);
+            // The chamfer's line falls from the wall to the top, 15 - 5 cos(wedge) along the top.
+            let tip = 5.0 * 5.0 * sin / (15.0 - 5.0 * cos);
+            let full = 20.0 * 0.5 * (5.0 * 15.0 * sin - 5.0 * tip);
+            for flip in [false, true] {
+                let first = first_face_normal(&body, WALL_EDGE, flip).expect("the first face");
+                assert!(first.dist(Vec3::new(sin, -cos, 0.0)) < 1e-12, "{wedge}° flip {flip}: {first:?}");
+                assert!(matches!(chamfer_sides(&body, &[WALL_EDGE], 5.0, side, flip), Err(KernelError::TooLarge(_))), "{wedge}°");
+                let out = chamfer_sides_carrying_face(&body, &[WALL_EDGE], 5.0, side, flip).unwrap_or_else(|e| panic!("{wedge}° flip {flip}: {e}"));
+                let m = crate::measure(&out).unwrap();
+                assert!(m.shells == 1 && (full - (m.volume - before)).abs() < 1e-6, "{wedge}° flip {flip}: added {} of {full}", m.volume - before);
+                assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{wedge}° flip {flip}");
+            }
+        }
+    }
+
+    /// By a wall the distance is along the wall's side and the angle is from it, for either
+    /// `flip`: the chamfer's contact on the plate's top is `d sin(angle) / sin(wedge + angle)`
+    /// from the edge. 8 at 60° and 5 at 80° by an upright wall (13.86 and 28.36 along the top),
+    /// and 8 at 45° by a wall leaning back 30° (21.86, the chamfer standing over the wall's
+    /// foot), run past the top's end at x 30, which SMLib refuses. Carried on, each is the
+    /// triangle of its two sides less its tip past x 30, its contact line on the wall is the
+    /// distance up it, and its line meets the plane of the top's end as high as the tip is. With
+    /// the angle taken from the top instead, 8 at 60° would reach 4.62 along the top and fit.
+    /// One face, one shell.
+    #[test]
+    fn a_distance_and_angle_chamfer_by_a_wall_runs_on_past_the_tops_end() {
+        for (wedge, d, degrees) in [(90.0_f64, 8.0, 60.0_f64), (90.0, 5.0, 80.0), (120.0, 8.0, 45.0)] {
+            let body = walled_plate(wedge);
+            let before = crate::measure(&body).unwrap().volume;
+            let (sin, cos) = wedge.to_radians().sin_cos();
+            let angle = degrees.to_radians();
+            let along_top = d * angle.sin() / (wedge.to_radians() + angle).sin();
+            // The chamfer's line stands this high over the top at its end.
+            let tip = (along_top - 10.0) * d * sin / (along_top - d * cos);
+            let full = 20.0 * 0.5 * (d * along_top * sin - (along_top - 10.0) * tip);
+            for flip in [false, true] {
+                let what = format!("{wedge}°, {d} at {degrees}°, flip {flip}");
+                let side = ChamferSide::Angle(angle);
+                assert!(matches!(chamfer_sides(&body, &[WALL_EDGE], d, side, flip), Err(KernelError::TooLarge(_))), "{what}");
+                let out = chamfer_sides_carrying_face(&body, &[WALL_EDGE], d, side, flip).unwrap_or_else(|e| panic!("{what}: {e}"));
+                let m = crate::measure(&out).unwrap();
+                assert!(m.shells == 1 && (full - (m.volume - before)).abs() < 1e-6, "{what}: added {} of {full}", m.volume - before);
+                for z in [0.0, 20.0] {
+                    for v in [Vec3::new(20.0 + d * cos, 10.0 + d * sin, z), Vec3::new(30.0, 10.0 + tip, z)] {
+                        assert!(has_vertex(&out, v, 1e-6), "{what}: no vertex at {v:?}");
+                    }
+                }
+                assert_eq!(faces_from_edge(&out, &body, WALL_EDGE), 1, "{what}");
+            }
+        }
+    }
+
+    /// The top is carried on as a slab that reaches four times the body's size and the distance
+    /// from the edge. By an upright wall, 5 at 88.6° reaches 204.59 along the top, short of the
+    /// slab's end (207.62), and builds: the triangle of its two sides less its tip past x 30.
+    /// At 88.7° it would reach 220.33, past the slab: it runs off the slab's end as it ran off
+    /// the top's, and SMLib's refusal stands.
+    #[test]
+    fn a_distance_and_angle_chamfer_reaching_past_the_carried_on_slab_keeps_smlibs_refusal() {
+        let body = walled_plate(90.0);
+        let before = crate::measure(&body).unwrap().volume;
+        let slab = 4.0 * (body.size() + 5.0);
+        let (short, past) = (88.6_f64.to_radians(), 88.7_f64.to_radians());
+        assert!(5.0 * short.tan() < slab && slab < 5.0 * past.tan(), "the slab reaches {slab}");
+        let out = chamfer_sides_carrying_face(&body, &[WALL_EDGE], 5.0, ChamferSide::Angle(short), false).unwrap();
+        let along_top = 5.0 * short.tan();
+        let full = 20.0 * 0.5 * (5.0 * along_top - (along_top - 10.0).powi(2) * 5.0 / along_top);
+        let m = crate::measure(&out).unwrap();
+        assert!(m.shells == 1 && (full - (m.volume - before)).abs() < 1e-6, "added {} of {full}", m.volume - before);
+        let plain = chamfer_sides(&body, &[WALL_EDGE], 5.0, ChamferSide::Angle(past), false).unwrap_err();
+        assert!(matches!(plain, KernelError::TooLarge(_)), "{plain}");
+        let kept = chamfer_sides_carrying_face(&body, &[WALL_EDGE], 5.0, ChamferSide::Angle(past), false).unwrap_err();
+        assert_eq!(kept.to_string(), plain.to_string());
+    }
+
+    /// On the boss's base edge the distance is along the plate and the angle is from it:
+    /// solidcore turns the angle into the distance along the boss at the edge's wedge,
+    /// `d sin(angle) / sin(wedge + angle)`, and the chamfer is the two-distance one
+    /// ([`boss_chamfer_sides_section`]); 5 at 60°, which fits, is SMLib's body and that section.
+    /// At 45°, 6.43 is the largest that fits the plate's face (its contact at x 32.4942) and is
+    /// SMLib's; 6.45 SMLib fails as an operation, and from 6.5 it refuses as too large, naming
+    /// the part of the sizes that fits. Carried on they build, the chamfer growing with its
+    /// distance through there, each its section over the boss's 24 mm less the part past the
+    /// corner's arc; 8 at 45° has its contact line on the plate ending on the arc, its top edge
+    /// meeting the corner at x 32.5, and its contact on the boss. 10 at 60° (12.06 along the
+    /// boss) has its contact on the boss behind the edge's line and is whole there. One face,
+    /// one shell.
+    #[test]
+    fn a_distance_and_angle_chamfer_runs_on_past_where_its_face_turns_into_a_round() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap().volume;
+        let wedge = ((-10.5_f64 + 14.038301415494109) / 12.90348790056394).acos();
+        let section = |d: f64, angle: f64| boss_chamfer_sides_section(d, d * angle.sin() / (wedge + angle).sin());
+        let plain = |d: f64, angle: f64| chamfer_sides(&body, &[BOSS_EDGE], d, ChamferSide::Angle(angle), false);
+        let carried = |d: f64, angle: f64| {
+            let out = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], d, ChamferSide::Angle(angle), false).unwrap_or_else(|e| panic!("{d}: {e}"));
+            let (p, q, area) = section(d, angle);
+            let m = crate::measure(&out).unwrap();
+            let (added, full) = (m.volume - before, 24.0 * area - past_corner_arc(p, q));
+            assert!(m.shells == 1 && (full - added).abs() < 1e-4, "{d}: added {added} of {full}");
+            assert_eq!(faces_from_edge(&out, &body, BOSS_EDGE), 1, "{d}");
+            (out, added)
+        };
+        let steep = 60f64.to_radians();
+        let fits = crate::measure(&plain(5.0, steep).unwrap()).unwrap().volume - before;
+        assert!((24.0 * section(5.0, steep).2 - fits).abs() < 1e-4, "{fits}");
+
+        let angle = 45f64.to_radians();
+        assert!(matches!(plain(6.45, angle), Err(KernelError::Failed(_))));
+        assert!(matches!(plain(8.0, angle), Err(KernelError::TooLarge(why)) if why.contains("times the distances given")));
+        let (largest, mut last) = carried(6.43, angle);
+        assert_eq!(crate::encode_native_body(&largest).unwrap(), crate::encode_native_body(&plain(6.43, angle).unwrap()).unwrap());
+        for d in [6.44, 6.45, 6.5, 7.0, 8.0] {
+            let (out, added) = carried(d, angle);
+            assert!(added > last, "{d}: {added}");
+            last = added;
+            if d == 8.0 {
+                let (p, q, _) = section(d, angle);
+                let top = p.1 + (32.5 - p.0) * (q.1 - p.1) / (q.0 - p.0);
+                for v in [Vec3::new(p.0, -10.5, on_corner_arc(p.0)), Vec3::new(32.5, top, 0.0), Vec3::new(q.0, q.1, 0.0)] {
+                    assert!(has_vertex(&out, v, 1e-6), "no vertex at {v:?}");
+                }
+            }
+        }
+
+        assert!(matches!(plain(10.0, steep), Err(KernelError::TooLarge(_))));
+        let (out, _) = carried(10.0, steep);
+        let (_, q, _) = section(10.0, steep);
+        assert!(q.0 < BOSS_EDGE.x, "the contact on the boss is behind the edge's line");
+        for z in [0.0, -24.0] {
+            assert!(has_vertex(&out, Vec3::new(q.0, q.1, z), 1e-6), "no vertex on the boss at z {z}");
+        }
+    }
+
+    /// What carrying the face on does not build keeps SMLib's own error: 6 along the plate with
+    /// 12 along the boss, whose contact on the plate fits its face (x 28.35). SMLib fails it for
+    /// the boss's side, which carrying the plate's face on does not change.
+    #[test]
+    fn a_two_sided_chamfer_that_is_not_carried_on_keeps_smlibs_error() {
+        let body = boss_on_rounded_plate();
+        let side = ChamferSide::Distance(12.0);
+        let plain = chamfer_sides(&body, &[BOSS_EDGE], 6.0, side, false).unwrap_err();
+        assert!(matches!(&plain, KernelError::Failed(why) if why.contains("reach past the rails")), "{plain}");
+        let kept = chamfer_sides_carrying_face(&body, &[BOSS_EDGE], 6.0, side, false).unwrap_err();
+        assert_eq!(kept.to_string(), plain.to_string());
+        assert_eq!(std::mem::discriminant(&kept), std::mem::discriminant(&plain));
+    }
+
+    /// The first face is the second of the pair only where it leans more, the first where they
+    /// lean alike, and neither where rounding would decide.
+    #[test]
+    fn the_first_face_is_chosen_as_smlib_chooses_it_or_not_at_all() {
+        assert_eq!(second_face_first(0.0, 0.0), Some(false));
+        assert_eq!(second_face_first(-0.0, 0.0), Some(false));
+        assert_eq!(second_face_first(0.0, 0.5), Some(true));
+        assert_eq!(second_face_first(0.5, 0.0), Some(false));
+        assert_eq!(second_face_first(0.0, 1e-12), None);
+        assert_eq!(second_face_first(1e-12, 0.0), None);
+        assert_eq!(second_face_first(f64::NAN, 0.0), None);
+    }
+
     /// A search where every candidate is refused as too large keeps the smallest size it tried
     /// and that candidate's own refusal, and builds nothing: the caller can say why nothing
     /// smaller builds instead of repeating the first refusal's estimate.
@@ -1667,6 +2375,33 @@ mod tests {
         // the boss's tangentially but has no corner to blend.
         let side = (top + Vec3::new(top.x, top.y, 21.0)) * 0.5;
         assert_eq!(tangent_chain(&rounded, &[side]).unwrap(), vec![side], "the chain ran into the round's seam");
+    }
+
+    /// A prism of the regular `n`-gon of circumradius 20, 5 high: its outline turns 360 / n degrees
+    /// at every vertex. The point halfway along its first top edge, and the number of top edges.
+    fn polygon_prism(n: usize) -> (Body, Vec3) {
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+        let at = |k: usize| {
+            let a = std::f64::consts::TAU * k as f64 / n as f64;
+            Vec2::new(20.0 * a.cos(), 20.0 * a.sin())
+        };
+        let outer = Loop2::polygon(&(0..n).map(at).collect::<Vec<_>>());
+        let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0.0, 5.0).unwrap().pop().unwrap();
+        let (a, b) = (at(0), at(1));
+        (body, Vec3::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0, 5.0))
+    }
+
+    /// A tangent chain continues through an outline turning 2° or less at a vertex (the one angle
+    /// for a chain, [`solidcraft_geom::TANGENT_CHAIN`]): a 240-gon, 1.5° at every vertex, chains
+    /// whole from one pick, and so does one that blends; a 120-gon, 3° at every vertex, stops at
+    /// the pick's own edge.
+    #[test]
+    fn a_chain_runs_through_a_one_and_a_half_degree_kink_and_stops_at_three() {
+        let (near, pick) = polygon_prism(240);
+        assert_eq!(tangent_chain_edges(&near, &[pick]).unwrap().len(), 240, "the whole top outline");
+        assert_eq!(tangent_chain(&near, &[pick]).unwrap().len(), 240);
+        let (corner, pick) = polygon_prism(120);
+        assert_eq!(tangent_chain_edges(&corner, &[pick]).unwrap().len(), 1, "3° is a corner");
     }
 
     /// Smoothness is decided all along an edge. A bar 40 × 16 × 10 whose front face runs tangent

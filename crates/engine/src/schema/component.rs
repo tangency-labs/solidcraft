@@ -1170,7 +1170,7 @@ pub struct UnlockResult {
 // ---------------------------------------------------------------------------------------------
 
 /// The message of a handler's refusal, to give whole.
-fn refusal(e: crate::EngineError) -> String {
+pub(crate) fn refusal(e: crate::EngineError) -> String {
     match e {
         crate::EngineError::BadParams { msg, .. } => msg,
         e => e.to_string(),
@@ -1211,11 +1211,13 @@ fn without(mut value: Value, keys: &[&str]) -> Value {
 /// in size, with its message `key must contain three finite numbers` for anything else, `null`
 /// included.
 fn move_point_key<'de, D: Deserializer<'de>>(d: D, key: &str, coordinate: bool) -> Result<Option<Point3>, D::Error> {
+    move_point_value::<D::Error>(Value::deserialize(d)?, key, coordinate)
+}
+
+fn move_point_value<E: serde::de::Error>(value: Value, key: &str, coordinate: bool) -> Result<Option<Point3>, E> {
     let mut one = serde_json::Map::new();
-    one.insert(key.to_string(), Value::deserialize(d)?);
-    crate::cmd::move_vector(&Value::Object(one), key, Vec3::ZERO, coordinate, "")
-        .map(|v| Some(Point3(v)))
-        .map_err(|e| D::Error::custom(whole(refusal(e))))
+    one.insert(key.to_string(), value);
+    crate::cmd::move_vector(&Value::Object(one), key, Vec3::ZERO, coordinate, "").map(|v| Some(Point3(v))).map_err(|e| E::custom(whole(refusal(e))))
 }
 
 macro_rules! move_point {
@@ -1227,6 +1229,24 @@ macro_rules! move_point {
 }
 
 move_point!(translate_key, "translate", true);
+
+/// `occurrence.move`'s `translate`: three numbers, or three entries of which some are length
+/// expressions (#8192). Whether the expressions work out is the handler's to say.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MoveTranslate {
+    Point(Point3),
+    Exprs(PointExpr3),
+}
+
+fn move_translate_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MoveTranslate>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if matches!(&v, Value::Array(a) if a.len() == 3 && a.iter().any(Value::is_string)) {
+        return PointExpr3::deserialize(&v)
+            .map(|p| Some(MoveTranslate::Exprs(p)))
+            .map_err(|_| D::Error::custom(whole("translate entries must be numbers or length expressions")));
+    }
+    move_point_value::<D::Error>(v, "translate", true).map(|p| p.map(MoveTranslate::Point))
+}
 move_point!(axis_key, "axis", false);
 move_point!(origin_key, "origin", true);
 move_point!(at_key, "at", true);
@@ -1750,9 +1770,9 @@ pub struct MoveKeys {
     #[schemars(with = "MoveSpace")]
     pub space: Option<MoveSpace>,
     /// Move by this much, in mm. Default: no move. Not with `matrix`.
-    #[serde(default, deserialize_with = "translate_key", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Point3")]
-    pub translate: Option<Point3>,
+    #[serde(default, deserialize_with = "move_translate_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PointExpr3")]
+    pub translate: Option<MoveTranslate>,
     /// The axis to turn about, not zero when `angle` is. Default: Z. Not with `matrix`.
     #[serde(default, deserialize_with = "axis_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point3")]

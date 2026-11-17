@@ -24,7 +24,7 @@ use solidcore_convert as convert;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
 pub use solidcore::prism::measure::Interval;
-pub use solidcore::prism::profile::ProfileRefusal;
+pub use solidcore::prism::profile::{tapered_flange_ends, ProfileRefusal};
 
 use crate::body::{finish, Body, Expect};
 use crate::boolean::{union_all, BooleanOp};
@@ -392,4 +392,15 @@ pub fn region_area(region: &Region2) -> Result<kp::Area> {
 #[must_use]
 pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
+}
+
+/// Counter-clockwise angle between two planar rays, in radians modulo one turn.
+/// Equal rays give zero. Nonfinite and zero rays have no angle.
+#[must_use]
+pub fn counterclockwise_sweep(center: Vec2, start: Vec2, end: Vec2) -> Option<f64> {
+    kp::counterclockwise_sweep(
+        convert::vec2(center),
+        convert::vec2(start),
+        convert::vec2(end),
+    )
 }

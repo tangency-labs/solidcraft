@@ -78,7 +78,7 @@ use crate::blend::blend_corner::swept::fmt_g;
 use crate::blend::blend_corner::{BlendCorner, BlendCornerEvent};
 use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy, SetbackTooShortWhy};
 use crate::blend::blend_setback::{
-    bisect_thousandths, certified_scale, containment, distances, fill_hole_counted,
+    bisect_thousandths, certified_scale, containment_kept, distances, fill_hole_counted,
     fill_hole_probe, spring_curve, Edge, Face, FaceKind, Fill, FillStats, Probe, Round,
     SpringCurve,
 };
@@ -109,6 +109,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::knots::Side;
 use crate::surface::procedural_blend::corner::{CornerDefinition, SetbackFill};
 use crate::surface::side::Bracket;
 use crate::surface::surface::Surface;
@@ -481,9 +482,50 @@ struct CornerPlanes {
     edges: Vec<Edge>,
 }
 
-/// `sm_SbCornerPlanes`: of a corner whose edges all have one convexity, the planes of its
-/// faces with their normals out of the material, and its edges for [`distances`]; `None`
-/// (`rbPlanes` FALSE) where a face is not a plane (or its side is undecided).
+/// Not the fork's: the sense of the planar `face`'s surface normal out of the material, from
+/// the body's topology: the face use of `face` that edge `e`'s loop edge use on the
+/// material's side (its shell's region not void, as [`is_concave_edge`] takes it) lies in,
+/// whose normal (the surface's, reversed where the face use is `Opposite`) points out of
+/// the material (`IsConvexRadialSector`'s reading). `None` where no such edge use lies in
+/// `face`.
+fn material_sense(b: &Brep, face: FaceId, e: EdgeId) -> Result<Option<f64>> {
+    for use_ in edge::edgeuses(b, e, None, None)? {
+        if !eu1::is_loop_edgeuse(b, use_)? {
+            continue;
+        }
+        let Some(fu) = eu1::faceuse(b, use_)? else {
+            continue;
+        };
+        if eu1::faceuse_face(b, fu)? != Some(face) {
+            continue;
+        }
+        let Some(shell) = eu1::shell(b, use_)? else {
+            continue;
+        };
+        let Some(region) = eu1::shell_region(b, shell)? else {
+            continue;
+        };
+        if b.region(region)?.is_void() != 0 {
+            continue;
+        }
+        return Ok(Some(
+            if eu1::faceuse_orientation(b, fu)? == OrientType::Opposite {
+                -1.0
+            } else {
+                1.0
+            },
+        ));
+    }
+    Ok(None)
+}
+
+/// `sm_SbCornerPlanes`: the planes of a corner's faces with their normals out of the
+/// material, and its edges for [`distances`]; `None` (`rbPlanes` FALSE) where a face is not
+/// a plane (or its side is undecided). Not the fork's: each normal's sense is the face's own
+/// out of the material ([`material_sense`]), so that a corner of mixed convexity (a step's
+/// corner, whose face between its two convex edges has a reflex angle at the vertex) has its
+/// planes as its faces are; the fork took it from the other edges' side of the face, which
+/// holds only where every edge has one convexity.
 fn corner_planes(
     k: &Kernel,
     b: &Brep,
@@ -491,7 +533,6 @@ fn corner_planes(
     all_eus: &[EdgeuseId],
     solvers: &dyn BallSolvers,
     tol: f64,
-    convex: bool,
 ) -> Result<Option<CornerPlanes>> {
     let nul =
         || SolidError::blend_missing(OP_CLASSIFY, "topology the corner's planes are found from");
@@ -517,26 +558,26 @@ fn corner_planes(
         if !planar.is_planar {
             return Ok(None);
         }
+        // the surface's own normal (is_planar's is unsigned), turned out of the material
+        let mid = face2::uv_domain(b, face)?.mid();
+        let Ok(along) = surface
+            .evaluate_normal(k, mid, Side::Right, Side::Right)?
+            .unitize()
+        else {
+            return Ok(None);
+        };
         let Ok(mut normal) = planar.normal.unitize() else {
             return Ok(None);
         };
-        // the other edges lie on the material's side of a convex corner's face, off it at
-        // a concave one's
-        let mut others = Vec3::new(0.0, 0.0, 0.0);
-        for (j, &aj) in away.iter().enumerate() {
-            if j != i && j != (i + n - 1) % n {
-                others += aj;
-            }
-        }
-        let side = normal.dot(others);
-        if side.abs() <= EFF_ZERO {
-            return Ok(None);
-        }
-        if (side > 0.0) == convex {
+        if normal.dot(along) < 0.0 {
             normal = -normal;
         }
+        let e = eu1::edge(b, this.ok_or_else(nul)?)?.ok_or_else(nul)?;
+        let Some(sense) = material_sense(b, face, e)? else {
+            return Ok(None);
+        };
         faces.push(face);
-        planes.push(Face::plane(vpoint, normal));
+        planes.push(Face::plane(vpoint, normal * sense));
     }
     let mut edges = Vec::with_capacity(n);
     for (i, &eu) in all_eus.iter().enumerate() {
@@ -722,7 +763,7 @@ fn corner_faces(
     tol: f64,
     convex: bool,
 ) -> Result<Option<(CornerPlanes, bool)>> {
-    if let Some(planes) = corner_planes(k, b, vtx, all_eus, solvers, tol, convex)? {
+    if let Some(planes) = corner_planes(k, b, vtx, all_eus, solvers, tol)? {
         return Ok(Some((planes, false)));
     }
     // beside a curved face only with its own flag: without it such a corner is the corner it
@@ -1165,9 +1206,10 @@ pub fn classify_setback(
         max_r = smax(max_r, r0);
     }
 
-    // the edges: of one convexity, no two tangent at the vertex; straight between planes
-    // (beside a curved face, any edge)
+    // the edges: no two tangent at the vertex; straight between planes (beside a curved
+    // face, any edge); of one convexity, or mixed (convex and concave edges at one vertex)
     let mut concave0 = false;
+    let mut mixed = false;
     let mut straight = true;
     for (i, &eu) in all_eus.iter().enumerate() {
         let e = eu1::edge(b, eu)?.ok_or_else(nul)?;
@@ -1181,7 +1223,7 @@ pub fn classify_setback(
         if i == 0 {
             concave0 = concave;
         } else if concave != concave0 {
-            return none;
+            mixed = true;
         }
         for &other in all_eus.iter().skip(i + 1) {
             let oe = eu1::edge(b, other)?;
@@ -1237,6 +1279,13 @@ pub fn classify_setback(
             event: BlendCornerEvent::None,
             order,
         });
+    }
+    // a corner of mixed convexity is the order-2 fill's between planes: its saddle is
+    // certified by its normal (fill_hole) and kept off the faces by their kept regions
+    // (containment_kept). The G1 fill is certified convex (or no more concave than its
+    // faces) and so takes no saddle; beside a curved face the kept regions have no test yet.
+    if mixed && (order != 2 || curved) {
+        return none;
     }
     Ok(SetbackClass {
         event: BlendCornerEvent::Setback,
@@ -2549,10 +2598,10 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     let worst = if open {
         None
     } else {
-        let worst = containment(k, &fill, &planes.planes, convex, tol)?;
+        let worst = containment_kept(k, &fill, &planes.planes, tol)?;
         if worst == f64::INFINITY {
             return Ok(Err(SetbackRefusal::not_built(
-                "Fillet Error: the setback corner's fill is not certified to stay on the material's side of its curved faces",
+                "Fillet Error: the setback corner's fill is not certified to stay on the material's side of its curved faces, or off the kept part of a face where a convex and a concave round meet",
             )));
         }
         if worst > tol {

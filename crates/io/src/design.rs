@@ -10,10 +10,17 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::sync::Arc;
 
 mod drawing;
+mod import_cache;
 mod native_cache;
+mod provenance;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
+pub use import_cache::ImportCache;
 pub use native_cache::read_design_geometry;
+pub use provenance::{
+    OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
+    ProvenanceSummary, SignatureSource, Signer,
+};
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
 use serde_json::{Map, Value, json};
@@ -197,11 +204,26 @@ pub fn write_design_container_with_thumbnail(
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design())
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None)
 }
 
-/// [`write_design_container_with_thumbnail`] within `budget` bytes for the optional caches (the
-/// container's budget; tests pass less).
+/// Write a container with one signed provenance record appended to `save.chain` (see
+/// [`ProvenanceSave`]). The signature covers the document, the container header and every
+/// authoritative part beside them; the optional caches are not signed.
+pub fn write_design_container_with_provenance(
+    doc: &Document,
+    compression: DesignCompression,
+    preview: Option<&DesignPreview>,
+    geometry: Option<&solidcraft_doc::SavedModel>,
+    thumbnail: Option<&[u8]>,
+    save: &ProvenanceSave<'_>,
+) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_with_provenance");
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save))
+}
+
+/// The common container writer. `provenance` records a signed record when present; the budget
+/// bounds the optional caches (tests pass less).
 fn write_container(
     doc: &Document,
     compression: DesignCompression,
@@ -209,9 +231,13 @@ fn write_container(
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
     budget: usize,
+    provenance: Option<&ProvenanceSave<'_>>,
 ) -> Result<Vec<u8>> {
     doc.render.validate().map_err(invalid)?;
     let mut writer = PackageWriter::new();
+    if provenance.is_some() {
+        writer.track_parts(provenance::is_authoritative);
+    }
     let mut features = Vec::with_capacity(doc.features.len());
     for feature in &doc.features {
         let replacements = match &feature.kind {
@@ -294,20 +320,37 @@ fn write_container(
         replacements.insert("render".into(), render);
     }
     let mut metadata = replace(doc, replacements).map_err(invalid)?;
-    // The drawings have entries of their own: `document.json` is the same with them or without.
-    if let Some(o) = metadata.as_object_mut() {
-        o.remove("drawings");
+    // The drawings have entries of their own, and plugin data goes beside the design, a part each,
+    // as it came: `document.json` is the same with them or without.
+    if let Some(object) = metadata.as_object_mut() {
+        object.remove("drawings");
+        object.remove("plugin_data");
     }
     solidcraft_doc::newer_file::restore(doc, &mut metadata);
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     // What a newer build's file holds beside the design goes back as it came.
     let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| json!({"format": VERSION}));
-    writer.part("container.json", &serde_json::to_vec(&container).map_err(invalid)?, false)?;
+    let container_bytes = serde_json::to_vec(&container).map_err(invalid)?;
+    writer.part("container.json", &container_bytes, false)?;
     for (name, bytes) in doc.newer_file.iter().flat_map(|file| &file.parts) {
+        // A signed save writes the chain the caller carries; older raw records cannot be checked
+        // here, so they are replaced rather than kept beside the new entry.
+        if provenance.is_some() && name.starts_with("provenance/") {
+            continue;
+        }
         writer.part(name, bytes, true)?;
     }
     drawing::write(&mut writer, doc)?;
+    for (key, data) in &doc.plugin_data {
+        let bytes = solidcraft_doc::canvas::base64_decode(data).ok_or_else(|| invalid(format!("plugin data `{key}` is not base64")))?;
+        writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), &bytes, true)?;
+    }
+    // The signature binds every authoritative part written above (never the optional caches), and
+    // is written before them so their budget sees its bytes.
+    if let Some(save) = provenance {
+        provenance::write(save, &mut writer, &metadata, &container_bytes, &doc.format, &doc.format_pending)?;
+    }
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
     // left out, never a failed save. Encoding it is a save's longest step: not begun once cancelled.
     if crate::safe_write::cancelled() {
@@ -563,6 +606,70 @@ pub fn read_design_preview(bytes: &[u8]) -> Option<DesignPreview> {
     DesignContainerReader::new(Cursor::new(bytes)).ok()?.preview()
 }
 
+/// Verify a container's provenance entry in memory. `None` when the file has no entry or is not a
+/// container; a bad entry is reported, never an error.
+pub fn read_design_provenance(bytes: &[u8]) -> Option<ProvenanceReport> {
+    if bytes.len() > max_design() || !is_design_container(bytes) {
+        return None;
+    }
+    DesignContainerReader::new(Cursor::new(bytes)).ok()?.provenance()
+}
+
+/// The provenance records a container carries, without verifying them. That is what a save
+/// appends to; verification is [`read_design_provenance`].
+pub fn read_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
+    if bytes.len() > max_design() || !is_design_container(bytes) {
+        return None;
+    }
+    DesignContainerReader::new(Cursor::new(bytes)).ok()?.provenance_chain()
+}
+
+/// [`read_design_provenance`] for a file on disk (or the browser's storage).
+pub fn read_design_provenance_file(path: &str) -> Option<ProvenanceReport> {
+    read_design_provenance_file_checked(path).ok().flatten()
+}
+
+/// [`read_design_provenance_file`], but a file that cannot be read is an error: a caller that
+/// asks for a check must not report a missing or unreadable file as an unsigned one.
+pub fn read_design_provenance_file_checked(path: &str) -> Result<Option<ProvenanceReport>> {
+    let mut source = open_regular_file(path)?;
+    if !is_container_source(&mut source)? {
+        return Ok(None);
+    }
+    let mut reader = DesignContainerReader::new(source)?;
+    Ok(reader.provenance())
+}
+
+/// What a design file's provenance says without verifying it, for a list that shows a design
+/// before it is opened. Reads the entry only.
+pub fn read_design_provenance_summary_file(path: &str) -> Option<ProvenanceSummary> {
+    let mut source = open_regular_file(path).ok()?;
+    if !is_container_source(&mut source).ok()? {
+        return None;
+    }
+    let chain = DesignContainerReader::new(source).ok()?.provenance_chain()?;
+    provenance::summarize_chain(&chain)
+}
+
+/// Whether a design file carries a provenance entry, without verifying it. Cheap: it reads the
+/// container directory, not the payloads.
+pub fn has_design_provenance(path: &str) -> bool {
+    let Ok(mut source) = open_regular_file(path) else { return false };
+    if !is_container_source(&mut source).unwrap_or(false) {
+        return false;
+    }
+    DesignContainerReader::new(source).is_ok_and(|reader| reader.has_provenance())
+}
+
+/// [`read_design_provenance_chain`] for a file on disk (or the browser's storage).
+pub fn read_design_provenance_chain_file(path: &str) -> Option<ProvenanceChain> {
+    let mut source = open_regular_file(path).ok()?;
+    if !is_container_source(&mut source).ok()? {
+        return None;
+    }
+    DesignContainerReader::new(source).ok()?.provenance_chain()
+}
+
 fn read_preview<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<DesignPreview> {
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
     if !matches!(container.get("format").and_then(Value::as_str), Some(VERSION | LEGACY_VERSION)) {
@@ -651,6 +758,24 @@ impl<R: Read + Seek> DesignContainerReader<R> {
     /// Portable PNG picture only; no source blobs or geometry are evaluated.
     pub fn thumbnail(&mut self) -> Option<Vec<u8>> {
         thumbnail::read(&mut self.reader).ok()
+    }
+
+    /// Verify the provenance entry against this file's authoritative content. `None` when the
+    /// file has no entry; a malformed or unverifiable entry is a report, never an error, so the
+    /// design still opens. The verification reads and hashes every authoritative part.
+    pub fn provenance(&mut self) -> Option<ProvenanceReport> {
+        provenance::verify(&mut self.reader)
+    }
+
+    /// Whether the container carries a provenance entry, read or not: a file with one must not
+    /// adopt its excluded model cache, even when the entry is malformed.
+    pub fn has_provenance(&self) -> bool {
+        self.reader.has_part(provenance::ENTRY)
+    }
+
+    /// The provenance records, unverified: what a save appends to.
+    pub fn provenance_chain(&mut self) -> Option<ProvenanceChain> {
+        provenance::read_chain(&mut self.reader)
     }
 
     /// The saved model, when this build wrote it for exactly this document.
@@ -791,7 +916,10 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     }
     // A blob a typed record uses comes back from that record; others only for what is kept.
     for name in reader.part_names() {
-        let ours = matches!(name.as_str(), "document.json" | "container.json") || name.starts_with("cache/") || name.starts_with("drawings/");
+        let ours = matches!(name.as_str(), "document.json" | "container.json")
+            || name.starts_with("cache/")
+            || name.starts_with("drawings/")
+            || plugin_part(&name).is_some();
         let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
         if !ours && !unused_blob {
             file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
@@ -800,6 +928,25 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     // Looking counts against what a design may expand to only once: the reads below are the real ones.
     reader.hydrated = 0;
     Ok(())
+}
+
+/// The plugin data key of a container part under `plugins/`, when it is one this build keeps.
+fn plugin_part(name: &str) -> Option<&str> {
+    name.strip_prefix(solidcraft_doc::plugin_data::PREFIX).filter(|key| solidcraft_doc::plugin_data::valid_key(key))
+}
+
+/// Plugin data: each `plugins/<plugin-id>/` part, kept as it is whether or not the plugin is
+/// installed. One that does not read is left out; the design opens all the same.
+fn hydrate_plugin_data<R: Read + Seek>(doc: &mut Document, reader: &mut PackageReader<R>) {
+    for name in reader.part_names() {
+        let Some(key) = plugin_part(&name) else { continue };
+        if doc.plugin_data.len() >= solidcraft_doc::plugin_data::MAX_FILES && !doc.plugin_data.contains_key(key) {
+            break;
+        }
+        if let Ok(bytes) = reader.limited_part(&name, part_limit(&name)) {
+            doc.plugin_data.insert(key.to_string(), solidcraft_doc::canvas::base64_encode(&bytes));
+        }
+    }
 }
 
 /// A `container.json` that says only a format this build writes or wrote.
@@ -895,6 +1042,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     if doc.newer_file.is_some() {
         hydrate_newer(&mut doc, &metadata, container, reader)?;
     }
+    hydrate_plugin_data(&mut doc, reader);
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
@@ -1186,6 +1334,22 @@ fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut 
 mod tests {
     use super::*;
     use solidcore_record::Vec2;
+
+    #[test]
+    fn a_missing_design_file_is_a_check_error_not_an_unsigned_design() {
+        let path = std::env::temp_dir().join(format!("solidcraft-check-missing-{}.sc", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        assert!(read_design_provenance_file_checked(&path.to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn a_readable_unsigned_design_has_no_report_and_no_error() {
+        let doc = Document::new("Unsigned");
+        let path = std::env::temp_dir().join(format!("solidcraft-check-unsigned-{}.sc", std::process::id()));
+        std::fs::write(&path, write_design_container(&doc).unwrap()).unwrap();
+        assert!(read_design_provenance_file_checked(&path.to_string_lossy()).unwrap().is_none());
+        let _ = std::fs::remove_file(&path);
+    }
 
     /// Building a design file under a watch that asks to stop (a cancelled save) stops with
     /// "save cancelled", before the next part; unwatched, it is built as ever.
@@ -1520,12 +1684,12 @@ mod tests {
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
     }
 
@@ -1707,6 +1871,90 @@ mod tests {
         assert!(all > space);
         let (manifest, _) = native_cache::encode_model(&model, document, space).unwrap();
         assert_eq!(kept_states(&serde_json::from_slice::<Value>(&manifest).unwrap()["model"]), vec![false, false, false, true]);
+    }
+
+    #[test]
+    fn import_cache_uses_native_trust_checks_and_evicts_oldest_first() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut cache = ImportCache::new(dir.clone());
+        let body = native_geometry().bodies.remove(0);
+        let text = solidcraft_kernel::step_export_bodies(
+            &[solidcraft_kernel::ExportBody { body: &body, name: "Box".into(), color: None }],
+            &solidcraft_kernel::StepHeader::default(),
+        )
+        .unwrap();
+        let mut doc = Document::new("Box");
+        doc.add_feature(crate::step_import_feature(text.as_bytes(), "box.step").unwrap().kind, None).unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let saved = model.saved(&doc).unwrap();
+        let key = ImportCache::key(text.as_bytes(), "box.step", &json!({}));
+        let reply = json!({"content_sha256": digest(text.as_bytes())});
+        cache.write(&key, &doc, &saved, &reply).unwrap();
+        let path = dir.join(format!("{key}.sc"));
+        let original_bytes = std::fs::read(&path).unwrap();
+        let (back, saved, out) = cache.read(&key).unwrap();
+        assert_eq!(out, reply);
+        assert_eq!(back.to_json(), doc.to_json());
+        assert_eq!(solidcraft_doc::Model::adopt(&back, &saved).unwrap().last_recomputed, 0);
+        let original = parts(&original_bytes);
+        for field in ["format", "producer", "evaluation", "document", "payload"] {
+            let mut entries = original.clone();
+            let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
+            manifest[field] = json!("different");
+            entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            std::fs::write(&path, package(&entries)).unwrap();
+            assert!(cache.read(&key).is_none(), "{field} mismatch must miss");
+        }
+        for field in ["key", "reply"] {
+            let mut entries = original.clone();
+            let mut binding: Value = serde_json::from_slice(&entries["cache/import.json"]).unwrap();
+            binding[field] = Value::Null;
+            entries.insert("cache/import.json".into(), serde_json::to_vec(&binding).unwrap());
+            std::fs::write(&path, package(&entries)).unwrap();
+            assert!(cache.read(&key).is_none(), "damaged {field} must miss");
+        }
+        let mut entries = original;
+        entries.get_mut("cache/bodies.bin").unwrap()[0] ^= 1;
+        std::fs::write(&path, package(&entries)).unwrap();
+        assert!(cache.read(&key).is_none());
+        std::fs::write(&path, &original_bytes).unwrap();
+        assert!(cache.read(&key).is_some());
+        let unrelated = dir.join("my-design.sc");
+        std::fs::write(&unrelated, b"leave me").unwrap();
+
+        cache.budget = original_bytes.len() as u64 * 2 + 64;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH))
+            .unwrap();
+        let second = "b".repeat(64);
+        cache.write(&second, &doc, &saved, &reply).unwrap();
+        assert!(cache.read(&key).is_some());
+        let third = "c".repeat(64);
+        cache.write(&third, &doc, &saved, &reply).unwrap();
+        assert!(cache.read(&key).is_none(), "oldest entry evicted without touching recent ones");
+        assert!(cache.read(&second).is_some() && cache.read(&third).is_some());
+        let size: u64 = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum();
+        assert!(size <= cache.budget);
+        assert_eq!(cache.clear().unwrap(), 2);
+        assert_eq!(cache.clear().unwrap(), 0);
+        assert_eq!(std::fs::read(unrelated).unwrap(), b"leave me", "clear only removes managed cache entries");
+        #[cfg(unix)]
+        {
+            let outside = dir.join("outside");
+            std::fs::create_dir(&outside).unwrap();
+            let target = outside.join("valuable.sc");
+            std::fs::write(&target, b"keep this design").unwrap();
+            std::os::unix::fs::symlink(&target, &path).unwrap();
+            assert!(cache.read(&key).is_none());
+            assert!(cache.write(&key, &doc, &saved, &reply).is_err());
+            assert_eq!(std::fs::read(&target).unwrap(), b"keep this design");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -1995,6 +2243,47 @@ mod tests {
         let said = &opened.newer_file.as_ref().unwrap().not_understood;
         assert!(said.iter().any(|what| what.contains("unsupported mesh blob version")), "{said:?}");
         assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
+    }
+
+    /// Plugin data under `plugins/<plugin-id>/` opens and saves back byte for byte with no plugin
+    /// installed, in a container and in a plain JSON design; a design without any has no
+    /// `plugins/` part, and a part that is not a plugin data name is not kept.
+    #[test]
+    fn plugin_data_round_trips_untouched_without_the_plugin() {
+        let doc = document();
+        let without = parts(&write_design_container(&doc).unwrap());
+        assert!(without.keys().all(|name| !name.starts_with("plugins/")));
+        assert!(crate::read_design(&package(&without)).unwrap().plugin_data.is_empty());
+
+        let mut entries = without.clone();
+        let binary: Vec<u8> = (0..=255).collect();
+        entries.insert("plugins/gear-maker/state.json".into(), br#"{"teeth":24}"#.to_vec());
+        entries.insert("plugins/gear-maker/cache/table.bin".into(), binary.clone());
+        entries.insert("plugins/other-tool/notes.txt".into(), b"kept".to_vec());
+        entries.insert("plugins/Bad_ID/x".into(), b"no".to_vec());
+        entries.insert("plugins/gear-maker/.hidden".into(), b"no".to_vec());
+        // A name that climbs out (`plugins/../x`) is refused by the container reader itself.
+        let mut climbing = entries.clone();
+        climbing.insert("plugins/../escape".into(), b"no".to_vec());
+        assert!(crate::read_design(&package(&climbing)).is_err());
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert_eq!(opened.features, doc.features);
+        assert_eq!(opened.plugin_data.len(), 3, "{:?}", opened.plugin_data.keys().collect::<Vec<_>>());
+
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        assert_eq!(resaved["plugins/gear-maker/state.json"], br#"{"teeth":24}"#);
+        assert_eq!(resaved["plugins/gear-maker/cache/table.bin"], binary);
+        assert_eq!(resaved["plugins/other-tool/notes.txt"], b"kept");
+        assert_eq!(resaved.keys().filter(|name| name.starts_with("plugins/")).count(), 3);
+        let metadata: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+        assert!(metadata.get("plugin_data").is_none(), "the parts stand beside the design, not inside it");
+        assert_eq!(crate::read_design(&package(&resaved)).unwrap(), opened);
+
+        // A plain JSON design carries the same data, and a container made from it has the parts.
+        let json = opened.to_json();
+        let from_json = Document::from_json(&json).unwrap();
+        assert_eq!(from_json.plugin_data, opened.plugin_data);
+        assert_eq!(parts(&write_design_container(&from_json).unwrap())["plugins/gear-maker/cache/table.bin"], binary);
     }
 
     /// A newer build's point cloud with numbers, an edge and a face (#14572): a field this build

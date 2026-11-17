@@ -508,6 +508,31 @@ pub struct MemberResult {
     pub text: String,
 }
 
+/// An arrowhead of a dimension on its sheet.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ArrowResult {
+    /// Its tip: paper millimetres from the sheet's lower-left corner.
+    pub tip: [f64; 2],
+    /// The unit direction it points in.
+    pub points: [f64; 2],
+}
+
+/// Where a dimension's parts sit on its view's sheet, in paper millimetres from the sheet's lower-left
+/// corner (the frame of `drawing.scene`): its lines as laid out, before an arrowhead stops one at its
+/// base. The ink, a descender included, is in `drawing.scene`'s `objects[].bounds_mm`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DimensionLayoutResult {
+    /// Each from near what it measures to past the dimension line; a chain's shared one once.
+    pub extension_lines: Vec<Vec<[f64; 2]>>,
+    /// Lines and arcs from arrow tip to arrow tip, with any run-on to a text outside.
+    pub dimension_lines: Vec<Vec<[f64; 2]>>,
+    pub arrows: Vec<ArrowResult>,
+    /// Each set text's box, as the arrows fit by (its cap height and measured width): start and end on
+    /// the line's side, then end and start on the far side, so it reads from its first corner to its
+    /// second. A chain has one for each member, from its first point.
+    pub text_boxes: Vec<[[f64; 2]; 4]>,
+}
+
 /// A dimension as the model has it now.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DimensionResult {
@@ -541,6 +566,12 @@ pub struct DimensionResult {
     /// What its name finds when ambiguous, or the leads when lost: never taken but by a repair.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<CandidateResult>,
+    /// Where it sits on its view's sheet now, the model read as it is now; none when it isn't drawn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<DimensionLayoutResult>,
+    /// Why it has no layout, or no box for its text, when `status` doesn't already say it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout_why: Option<String>,
     /// What to know about it: a view edited since to leave out what it points at.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,

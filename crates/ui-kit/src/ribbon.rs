@@ -440,6 +440,8 @@ pub struct Button<'a> {
     pub icon: &'a str,
     pub size: ButtonSize,
     pub enabled: bool,
+    /// A planned tool may open an options panel while keeping its ribbon artwork faded.
+    pub planned: bool,
     pub pressed: bool,
     /// It leaves the mode: never shown pressed.
     pub exit: bool,
@@ -731,7 +733,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             let side = if exit { 30.0 } else { 26.0 };
             let icon_rect =
                 Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
-            crate::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled { 1.0 } else { 0.35 });
+            crate::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled && !b.planned { 1.0 } else { 0.35 });
             if !b.app_paints {
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && b.enabled, b.name));
             }
@@ -772,7 +774,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, s.name));
                 drawn_button.split = Some(arrow);
             } else if labels {
-                let color = if b.enabled { t.text } else { t.text_dim };
+                let color = if b.enabled && !b.planned { t.text } else { t.text_dim };
                 let galley = button_galley(&painter, b.label, whole.width() - BUTTON_LABEL_PADDING, color);
                 painter.galley(pos2(whole.center().x, label_top(whole, galley.size().y)), galley, t.text);
             }
@@ -1255,20 +1257,21 @@ pub fn section_footer(ui: &mut egui::Ui, message: &str) {
     ui.add_space(4.0);
 }
 
-/// How wide a menu's rows are for these (label, shortcut) pairs: the widest, at least 200.
-pub fn menu_width<'a>(ui: &egui::Ui, entries: impl IntoIterator<Item = (&'a str, &'a str)>) -> f32 {
+/// The widest menu row, at least 200, including space for a checkmark beside icon-bearing entries.
+pub fn menu_width<'a>(ui: &egui::Ui, entries: impl IntoIterator<Item = (&'a str, &'a str, &'a str, bool)>) -> f32 {
     let t = Tokens::get();
     let font = FontId::proportional(t.font_button);
     entries
         .into_iter()
-        .map(|(label, shortcut)| {
+        .map(|(label, shortcut, icon, checkable)| {
             let label = ui.painter().layout_no_wrap(label.to_string(), font.clone(), t.text).size().x;
             let key = if shortcut.is_empty() {
                 0.0
             } else {
                 ui.painter().layout_no_wrap(shortcut.to_string(), FontId::monospace(t.font_button), t.text).size().x + 24.0
             };
-            6.0 + 20.0 + 8.0 + label + key + 30.0
+            let check = crate::MenuItem::trailing_check_width(icon.into(), checkable);
+            6.0 + 20.0 + 8.0 + label + key + 30.0 + check
         })
         .fold(200.0, f32::max)
 }

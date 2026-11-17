@@ -86,6 +86,10 @@
 //!   its `Inversion`s not, tangency-labs/smlib 8ea6a20), the degenerate `ApproximateCurve`'s `EditParameterization`,
 //!   `ClassifyIntersectingRangeSolution`, `SmCPGlobalSolver::LocalSolve` and
 //!   `GlobalPointSolve`'s `SolveIt`.
+//! - **Projected extrema on a tangent field (#13675).** `GlobalPointSolve` refuses a
+//!   projected minimum or maximum on a tangent field curve, and on a projected, offset,
+//!   in-volume or on-surface curve built on one, with [`SolidError::Unsupported`]. The
+//!   search found no stationary point there and reported an empty success.
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{
@@ -1569,6 +1573,34 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                     } else if local_op == SolverOperation::Signed3dDirectedMinimize {
                         ang_from_perp_rad =
                             passed_on(self.opt(0)?.angle_between(sol_vec), pass_on)?.unwrap_or(0.0);
+                    } else if matches!(
+                        local_op,
+                        SolverOperation::ProjectedMinimize | SolverOperation::ProjectedMaximize
+                    ) {
+                        // (not upstream, #13677, WR-779) The projected searches accept a point as a
+                        // root when their equation is below `EFF_ZERO_SQRT`, so every span
+                        // that ends close to a root reported its own end as one more
+                        // answer. At an end the curve passes through smoothly, the answer
+                        // belongs to the span the projected distance improves into: the next
+                        // span finds the root itself.
+                        let normal = self.opt(0)?;
+                        let offset = normal.cross(sol_vec).cross(normal);
+                        let outward = normal.cross(bndry_vec).cross(normal);
+                        let scale = offset.length() * outward.length();
+                        if scale.is_finite() && scale > 0.0 {
+                            // the cosine between the outward tangent and the direction to
+                            // the point: positive when the distance falls past the end
+                            let cosine = offset.dot(outward) / scale;
+                            let improves_outside = if local_op == SolverOperation::ProjectedMaximize
+                            {
+                                cosine < -EFF_ZERO
+                            } else {
+                                cosine > EFF_ZERO
+                            };
+                            if improves_outside {
+                                continue;
+                            }
+                        }
                     }
 
                     // skip solutions with tolerant angles that will get better in the
@@ -1576,6 +1608,61 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                     if !is_zero_to_tol(ang_from_perp_rad, EFF_ZERO_RAD) && outside_dir {
                         continue;
                     }
+                }
+            }
+
+            // (not upstream, #13677, WR-779) A search reports the point it stopped at, and a nearest
+            // point search can stop at a farthest point (and the reverse). With a wide
+            // tolerance, All then kept a minimum among the maxima. A point where the
+            // distance bends the wrong way is no answer. The exception is an end of the
+            // span where the curve stops or turns a corner, with the distance still
+            // changing there: that is an extremum because the curve ends, whatever the
+            // bend.
+            if found_solution
+                && matches!(
+                    op,
+                    SolverOperation::Minimize
+                        | SolverOperation::Maximize
+                        | SolverOperation::ProjectedMinimize
+                        | SolverOperation::ProjectedMaximize
+                )
+            {
+                let t = solution.start.parameters[0];
+                let at_start = is_zero(t - bez_ivl.min());
+                let at_end = is_zero(t - bez_ivl.max());
+                let open = |side: usize| {
+                    conts
+                        .get(side)
+                        .is_some_and(|c| (*c as i32) < (ContinuityType::G1 as i32))
+                };
+                let at_open_end = (at_start && open(0)) || (at_end && open(1));
+                let projected = matches!(
+                    op,
+                    SolverOperation::ProjectedMinimize | SolverOperation::ProjectedMaximize
+                );
+                let normal = if projected { Some(self.opt(0)?) } else { None };
+                let maximize = matches!(
+                    op,
+                    SolverOperation::Maximize | SolverOperation::ProjectedMaximize
+                );
+                // (at a knot: the derivatives of the span this leaf is part of)
+                match distance_bend(k, curve, t, !at_end, test_pnt, normal) {
+                    Ok(Some(bend)) => {
+                        let wrong_way = bend.second.is_some_and(|second| {
+                            if maximize {
+                                second > EFF_ZERO_SQRT
+                            } else {
+                                second < -EFF_ZERO_SQRT
+                            }
+                        });
+                        let stationary = bend.slope.abs() <= EFF_ZERO_RAD;
+                        if wrong_way && (stationary || !at_open_end) {
+                            continue;
+                        }
+                    }
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    // nothing to measure, or a curve without second derivatives: no verdict
+                    Ok(None) | Err(_) => {}
                 }
             }
 
@@ -1818,6 +1905,28 @@ impl Curve {
             .without_objects())
     }
 
+    /// Whether the curve is a tangent field, or a projected, offset, in-volume or
+    /// on-surface curve whose defining curve is one (through any number of them).
+    fn rests_on_tangent_field(&self) -> bool {
+        // far above any nesting a caller builds; a deeper chain is not searched further
+        const MAX_WRAPPERS: usize = 64;
+        let mut curve = self;
+        for _ in 0..MAX_WRAPPERS {
+            curve = match curve.kind() {
+                CurveKind::TangentField(_) => return true,
+                CurveKind::Projected(c) => c.curve(),
+                CurveKind::CrvInVolume(c) => c.curve(),
+                CurveKind::CrvOnSurf(c) => c.uv_curve(),
+                CurveKind::Offset(c) => match c.base_curve() {
+                    Some(base) => base,
+                    None => return false,
+                },
+                _ => return false,
+            };
+        }
+        false
+    }
+
     /// [`Curve::global_point_solve`] keeping the curve's cache in `cache` across calls,
     /// as upstream keeps it on the curve (`GetOrCreateObjectCache`): the cache is built
     /// where the solve first needs it (with the same errors) and reused by later calls
@@ -1841,6 +1950,21 @@ impl Curve {
         cache: &mut Option<CurveCache<O>>,
     ) -> Result<SolutionArray<O>> {
         let target = opts.target_distance;
+
+        // (not upstream, #13675) A tangent field switches to its stored end vectors in
+        // strips at its two ends that its knots do not name, and it has no derivative
+        // past the first. The projected search below looks for stationary points between
+        // knots, so on such a curve it finds none and reported an empty success where a
+        // nearest (farthest) point exists. Nothing here builds the solution set of that
+        // definition, so the query is refused instead.
+        if (op == SolverOperation::ProjectedMinimize || op == SolverOperation::ProjectedMaximize)
+            && self.rests_on_tangent_field()
+        {
+            return Err(SolidError::Unsupported {
+                operation: OP_GLOBAL,
+                reason: "a projected minimum or maximum on a tangent field curve",
+            });
+        }
 
         // Try quick solves when MINIMIZING and INTERSECTING (without using curve cache)
         if op == SolverOperation::Minimize || op == SolverOperation::Intersect {
@@ -2021,6 +2145,58 @@ fn end_is_projected_extremum(
     } else {
         cosine < -EFF_ZERO_RAD
     }
+}
+
+/// How the distance from a point to a curve changes at a parameter ([`distance_bend`]).
+struct DistanceBend {
+    /// The cosine between the tangent and the offset from the point: zero where the
+    /// distance is stationary.
+    slope: f64,
+    /// The second derivative of half the squared distance, over its largest possible
+    /// size: positive where the distance bends up (a minimum when stationary), negative
+    /// where it bends down, between -1 and 1. `None` where the tangent is too short
+    /// beside the other term to say.
+    second: Option<f64>,
+}
+
+/// The slope and bend at `t` of the distance from `test_point` to `curve`, seen along
+/// `normal` when given. Half the squared distance `g` has `g' = D.T` and
+/// `g'' = T.T + D.A` for the offset `D` from the point, the tangent `T` and the second
+/// derivative `A`. `starts_here` picks, at a knot, the span that starts there. `None`
+/// where there is nothing to measure: the point is on the curve within
+/// `EFF_ZERO_SQRT` (the direction of the offset is then rounding), or the curve has no
+/// tangent there (in the projection).
+fn distance_bend(
+    k: &Kernel,
+    curve: &Curve,
+    t: f64,
+    starts_here: bool,
+    test_point: Point3,
+    normal: Option<Vec3>,
+) -> Result<Option<DistanceBend>> {
+    let derivatives = curve.evaluate(k, t, 2, starts_here, false)?;
+    let [point, tangent, second, ..] = derivatives.as_slice() else {
+        return Ok(None);
+    };
+    let seen = |v: Vec3| match normal {
+        Some(n) => n.cross(v).cross(n),
+        None => v,
+    };
+    let (offset, tangent, second) = (seen(*point - test_point), seen(*tangent), seen(*second));
+    let lengths = offset.length() * tangent.length();
+    if !lengths.is_finite() || offset.length() <= EFF_ZERO_SQRT || tangent.length() <= 0.0 {
+        return Ok(None);
+    }
+    let speed = tangent.length_squared();
+    let pull = offset.length() * second.length();
+    // a tangent this short beside the curvature term is a cusp: the sign of `g''` there
+    // is the sign of rounding
+    let bend = (pull.is_finite() && speed > EFF_ZERO_SQRT * pull)
+        .then(|| (speed + offset.dot(second)) / (speed + pull));
+    Ok(Some(DistanceBend {
+        slope: offset.dot(tangent) / lengths,
+        second: bend,
+    }))
 }
 
 // ---- TessellateByBisection / Tessellate ---------------------------------------------
@@ -2720,6 +2896,190 @@ mod tests {
             );
             if requested == SolutionRequested::All {
                 assert_eq!(got.len(), 2, "{tolerance}: {got:?}");
+            }
+        }
+    }
+
+    /// #13675: a tangent field with the same vector stored at both ends evaluates to
+    /// that vector in a strip at each end and to zero between them, and its knots name
+    /// neither strip. Seen from 2Z along Y the field is 1 away in the strips and 2 away
+    /// between them, so every interval has a nearest and a farthest point; the projected
+    /// queries returned an empty success for all of them.
+    #[test]
+    fn projected_extremum_on_a_tangent_field_is_refused() {
+        use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
+        use crate::curve::tangent_field::{TangentDirType, TangentFieldCurve};
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::Vec2;
+        use crate::nurbs::b_spline_curve::ProjectionType;
+        use crate::surface::plane::Plane;
+        use crate::surface::surface::p2::Surface;
+        let k = Kernel::default();
+        let field = || {
+            let uv =
+                Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
+            let domain = Extent2d::from_points(Vec2::new(-2.0, -2.0), Vec2::new(2.0, 2.0));
+            let plane = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Y, Vec2::new(1.0, 1.0), &domain);
+            let field = TangentFieldCurve::new(
+                &k,
+                uv,
+                Surface::from(plane),
+                TangentDirType::Interpolate,
+                Vec3::Z,
+                Vec3::Z,
+                None,
+            );
+            Curve::from(field.unwrap())
+        };
+        let wrapped = Curve::from(
+            ProjectedCurve::new(
+                field(),
+                Some(Vec3::ZERO),
+                Some(Vec3::Y),
+                None,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            )
+            .unwrap(),
+        );
+        let field = field();
+        let query = Vec3::new(0.0, 0.0, 2.0);
+        let solve = |curve: &Curve, interval: (f64, f64), op, requested| {
+            let options = GlobalPointSolveOptions {
+                opt_vectors: Some(&[Vec3::Y]),
+                ..Default::default()
+            };
+            let interval = Extent1d::from_min_max(interval.0, interval.1);
+            curve.global_point_solve::<Obj>(&k, &interval, op, query, 1e-12, requested, &options)
+        };
+        for curve in [&field, &wrapped] {
+            for interval in [(0.0, 1.0), (0.0, 1e-8), (0.2, 0.8)] {
+                for op in [
+                    SolverOperation::ProjectedMaximize,
+                    SolverOperation::ProjectedMinimize,
+                ] {
+                    for requested in [SolutionRequested::All, SolutionRequested::Single] {
+                        assert!(
+                            matches!(
+                                solve(curve, interval, op, requested),
+                                Err(SolidError::Unsupported { .. })
+                            ),
+                            "{interval:?} {op:?} {requested:?}"
+                        );
+                    }
+                }
+            }
+        }
+        // the other operations on the field are not refused
+        let nearest = solve(
+            &field,
+            (0.0, 1.0),
+            SolverOperation::Minimize,
+            SolutionRequested::Single,
+        )
+        .unwrap();
+        assert_eq!(nearest.len(), 1);
+    }
+
+    /// #13677: with a tolerance wide enough to hold every point of that curve, All
+    /// returns only the points where the distance is smallest (for nearest) or largest
+    /// (for farthest), plain and projected, on the spline and on its projected wrapper.
+    /// The one minimum is the knot at 0.5 (distance 1); the two maxima are the ends.
+    #[test]
+    fn all_with_a_wide_tolerance_keeps_only_minima_or_only_maxima() {
+        use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
+        use crate::nurbs::b_spline_curve::ProjectionType;
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        use SolverOperation::{Maximize, Minimize, ProjectedMaximize, ProjectedMinimize};
+        let a = 1.0 / 1024.0;
+        let controls = vec![
+            CPoint::new(-a, 1.0, 0.0, NOW),
+            CPoint::new(0.0, 1.0, 0.0, NOW),
+            CPoint::new(a, 1.0, 0.0, NOW),
+        ];
+        let net = Net::new(controls, 1, vec![0.0, 0.0, 0.5, 2.0, 2.0]).unwrap();
+        let base = Curve::from(BSplineCurve::from_nurb(net, 3, false));
+        let wrapped = Curve::from(
+            ProjectedCurve::new(
+                base.clone(),
+                Some(Vec3::ZERO),
+                Some(Vec3::Z),
+                None,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            )
+            .unwrap(),
+        );
+        let far = (1.0 + a * a).sqrt();
+        for (name, curve) in [("spline", &base), ("wrapper", &wrapped)] {
+            for op in [Minimize, ProjectedMinimize] {
+                let got = projected_answers(
+                    curve,
+                    (0.0, 2.0),
+                    op,
+                    Vec3::ZERO,
+                    1.0,
+                    SolutionRequested::All,
+                );
+                assert_eq!(got, vec![(0.5, 1.0)], "{name} {op:?}");
+            }
+            for op in [Maximize, ProjectedMaximize] {
+                let mut got = projected_answers(
+                    curve,
+                    (0.0, 2.0),
+                    op,
+                    Vec3::ZERO,
+                    1.0,
+                    SolutionRequested::All,
+                );
+                got.sort_by(|a, b| a.0.total_cmp(&b.0));
+                assert_eq!(got.len(), 2, "{name} {op:?}: {got:?}");
+                assert!(got[0].0 == 0.0 && got[1].0 == 2.0, "{name} {op:?}: {got:?}");
+                assert!(
+                    got.iter().all(|(_, v)| (v - far).abs() < 1e-12),
+                    "{name} {op:?}: {got:?}"
+                );
+            }
+        }
+    }
+
+    /// A corner that is the farthest point of a polyline stays an answer although the
+    /// distance bends up along both legs: (-1, 0) to (0, 1) to (1, 0), seen from (0, -1).
+    /// The corner at 0.5 is 2 away, the ends sqrt(2). Seen from (0, 3) the corner is the
+    /// nearest point, 2 away, and the ends are the farthest.
+    #[test]
+    fn a_corner_stays_the_farthest_or_nearest_point_of_a_polyline() {
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        use SolutionRequested::{All, Single};
+        use SolverOperation::{Maximize, Minimize, ProjectedMaximize, ProjectedMinimize};
+        let controls = vec![
+            CPoint::new(-1.0, 0.0, 0.0, NOW),
+            CPoint::new(0.0, 1.0, 0.0, NOW),
+            CPoint::new(1.0, 0.0, 0.0, NOW),
+        ];
+        let net = Net::new(controls, 1, vec![0.0, 0.0, 0.5, 1.0, 1.0]).unwrap();
+        let roof = Curve::from(BSplineCurve::from_nurb(net, 3, false));
+        let whole = (0.0, 1.0);
+        for (tolerance, requested) in [(1e-6, Single), (1e-6, All), (0.1, All)] {
+            for op in [Maximize, ProjectedMaximize] {
+                let below = Vec3::new(0.0, -1.0, 0.0);
+                let got = projected_answers(&roof, whole, op, below, tolerance, requested);
+                assert_eq!(got.len(), 1, "{op:?} {tolerance} {requested:?}: {got:?}");
+                assert!(
+                    (got[0].0 - 0.5).abs() < 1e-9 && (got[0].1 - 2.0).abs() < 1e-9,
+                    "{op:?} {tolerance} {requested:?}: {got:?}"
+                );
+            }
+            for op in [Minimize, ProjectedMinimize] {
+                let above = Vec3::new(0.0, 3.0, 0.0);
+                let got = projected_answers(&roof, whole, op, above, tolerance, requested);
+                assert_eq!(got.len(), 1, "{op:?} {tolerance} {requested:?}: {got:?}");
+                assert!(
+                    (got[0].0 - 0.5).abs() < 1e-9 && (got[0].1 - 2.0).abs() < 1e-9,
+                    "{op:?} {tolerance} {requested:?}: {got:?}"
+                );
             }
         }
     }

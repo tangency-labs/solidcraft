@@ -32,7 +32,7 @@ const PROGRESS_EVERY: Duration = Duration::from_secs(30);
 
 /// How an error starts when a request is still running in the app after the wait: the request
 /// was not cancelled and its reply waits on the connection; [`Connection::pending`] gets it.
-pub const STILL_RUNNING: &str = "still running:";
+pub use crate::STILL_RUNNING;
 
 /// How long to wait for a request the app says is still running.
 #[derive(Clone, Copy, Debug)]

@@ -19,6 +19,7 @@ mod product;
 #[cfg(feature = "raytrace-cpu")]
 pub mod raytrace;
 pub mod sheet_image;
+mod silhouette;
 pub mod stage;
 pub mod studio;
 pub mod surface_patterns;
@@ -38,4 +39,5 @@ pub use curve_display::{PixelCurveView, SampledPath, SamplingBudget, SamplingQua
 pub use gif::gif;
 pub use model_bounds::view_bounds;
 pub use product::{FaceAppearance, ProductMesh, ProductScene};
+pub use silhouette::{PreparedSilhouettes, SilhouetteBuilder, SilhouetteEdge, SilhouetteView};
 pub use visual_style::VisualStyle;

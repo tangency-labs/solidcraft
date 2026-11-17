@@ -35,6 +35,23 @@ use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData
 const OP_CURVE: &str = "prism::profile::curve_on_frame";
 const OP_AREA: &str = "prism::profile::Loop2::signed_area";
 
+/// Counter-clockwise angle from the ray `center`–`start` to `center`–`end`, in
+/// radians modulo one turn. Equal rays give zero; this does not infer a full circle.
+/// Returns `None` for a nonfinite or zero ray. The angle is measured by the
+/// difference of the two polar angles, retaining tiny sweeps across atan2's seam.
+#[must_use]
+pub fn counterclockwise_sweep(center: Point2, start: Point2, end: Point2) -> Option<f64> {
+    let (ax, ay) = (start.x - center.x, start.y - center.y);
+    let (bx, by) = (end.x - center.x, end.y - center.y);
+    if ![ax, ay, bx, by].iter().all(|v| v.is_finite())
+        || (ax == 0.0 && ay == 0.0)
+        || (bx == 0.0 && by == 0.0)
+    {
+        return None;
+    }
+    Some((by.atan2(bx) - ay.atan2(ax)).rem_euclid(TAU))
+}
+
 /// Highest degree of a [`Seg2::Bezier`].
 pub const MAX_BEZIER_DEGREE: usize = 9;
 
@@ -1050,4 +1067,15 @@ pub fn rational_curve(knots: &[f64], homogeneous: &[[f64; 4]]) -> Result<Curve> 
         trim: None,
     };
     Ok(Curve::from(BSplineCurve::create_canonical(&data)?))
+}
+
+/// A tapered flange's thickness at its two ends: `(at the toe, at the root)`. The flange is
+/// `thickness` thick at the middle of its inside length `inside` (a channel's width less its web)
+/// and its inside face slopes by `slope` degrees across that length, so each end differs from the
+/// middle by half the length times the slope's tangent. No slope: `thickness` at both ends.
+/// Inputs are not checked: a caller refuses a slope or a length out of its range first; a
+/// non-finite input gives a non-finite answer, never a panic.
+pub fn tapered_flange_ends(inside: f64, thickness: f64, slope: f64) -> (f64, f64) {
+    let change = inside / 2.0 * slope.to_radians().tan();
+    (thickness - change, thickness + change)
 }

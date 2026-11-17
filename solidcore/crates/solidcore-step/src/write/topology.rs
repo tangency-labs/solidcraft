@@ -1,4 +1,4 @@
-//! A schema 4 record ([`solidcraft_geom::brep`]) as ISO 10303-42 topology, the inverse of
+//! A schema 4 record ([`solidcore_record::brep`]) as ISO 10303-42 topology, the inverse of
 //! [`crate::topology`]. Each bounded material region becomes a MANIFOLD_SOLID_BREP, or a
 //! BREP_WITH_VOIDS when voids lie inside it (each void's CLOSED_SHELL through an
 //! ORIENTED_CLOSED_SHELL); the open shells become one SHELL_BASED_SURFACE_MODEL. Faces are ADVANCED_FACEs on their
@@ -23,7 +23,11 @@
 //! side's normal); a later use of the other side refers to it through an ORIENTED_FACE.
 
 use crate::vec::Vec3Geom as _;
+use std::borrow::Cow;
 use std::sync::Arc;
+
+use solidcore::surface::face_surface::analytic_label;
+use solidcore_record::brep::blend::BlendDefinition;
 
 use solidcore_record::brep::{Brep, Curve as BCurve, Curve2, Edge, Face, Frame, Loop, Shell, Surface as BSurface};
 
@@ -402,8 +406,46 @@ pub fn layout(b: &Brep) -> R<Layout> {
     Ok(out)
 }
 
+/// `b` with each face that is a rational NURBS, or a round of an exact class held as a blend by
+/// its definition, labelled as the cylinder, cone, sphere or torus its NURBS form proves, holding
+/// that form: a cylinder's rim rounded is a torus, and STEP has the surface where the record has
+/// its rational net, which a reader measures a little off (volume, bounding box). The proof is
+/// the kernel's ([`analytic_label`]: the form lies on the surface and the surface evaluates as
+/// the form); a form no kind is proved on keeps its NURBS. The record itself is not changed, `b`
+/// borrowed where no face is such a form.
+fn analytic_rounds(b: &Brep) -> R<Cow<'_, Brep>> {
+    let candidate = |f: &Face| match (&f.surface, &f.nurbs) {
+        (BSurface::RationalSpline { .. }, None) => true,
+        (BSurface::Blend { definition }, Some(_)) => matches!(**definition, BlendDefinition::ExactRound(_)),
+        _ => false,
+    };
+    if !b.faces.iter().any(candidate) {
+        return Ok(Cow::Borrowed(b));
+    }
+    // the kernel the application's solids were built with: its fixes decide what is proved on a form
+    let mut k = solidcore::kernel::Kernel::new(&solidcore::kernel::KernelOptions::default());
+    for name in solidcore_ops::session::fixes() {
+        if let Some(on) = k.fixes.flag_mut(name) {
+            *on = true;
+        }
+    }
+    let mut out = b.clone();
+    for face in out.faces.iter_mut().filter(|f| candidate(f)) {
+        let invalid = |e: solidcore_record::brep::Invalid| format!("a round's analytic surface: {}", e.0);
+        let form = face.nurbs.as_ref().unwrap_or(&face.surface);
+        let net = solidcore_convert::surface(form).map_err(invalid)?;
+        if let Some(label) = analytic_label(&k, &net, face.domain).map_err(|e| format!("a round's analytic surface: {e}"))? {
+            let form = face.nurbs.take().unwrap_or_else(|| face.surface.clone());
+            face.surface = solidcore_convert::record_surface(label).map_err(invalid)?;
+            face.nurbs = Some(form);
+        }
+    }
+    Ok(Cow::Owned(out))
+}
+
 /// Write `b`'s solids and sheets, each item named `name`.
 pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
+    let b = &*analytic_rounds(b)?;
     let layout = layout(b)?;
     let mut w = BrepWriter {
         g,
