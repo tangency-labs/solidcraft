@@ -26,6 +26,120 @@ fn near(a: Vec3, b: Vec3) -> bool {
     a.dist(b) < 1e-6
 }
 
+/// A knob built from a linked circle in a separate, grounded skeleton component.
+fn knob_from_linked_sketch(foreign_plane: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"radius", "expression":"2 mm"}));
+    run(&mut s, "component.create", json!({"name":"Base", "grounded":true}));
+    run(&mut s, "solid.box", json!({"length":2, "width":2, "height":2, "body_name":"BaseBody"}));
+    run(&mut s, "component.create", json!({"name":"Skeleton", "parent":"root", "grounded":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Source"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[10,0], "radius":2}));
+    run(&mut s, "sketch.dimension", json!({"entities":["c1"], "type":"radius", "value":"radius"}));
+    run(&mut s, "sketch.finish", json!({}));
+    if foreign_plane {
+        run(&mut s, "construct.plane.offset", json!({"base":"XY", "offset":0, "name":"SkeletonPlane"}));
+    }
+    run(&mut s, "component.create", json!({"name":"Knob", "parent":"root", "grounded":false}));
+    let plane = if foreign_plane { "SkeletonPlane" } else { "XY" };
+    run(&mut s, "sketch.create", json!({"plane":plane, "name":"Profile"}));
+    run(&mut s, "sketch.project", json!({"refs":[{"sketch":"Source", "curve":"c1"}], "projection_link":true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Profile", "distance":4, "operation":"new", "body_name":"KnobBody"}));
+    if foreign_plane {
+        run(&mut s, "sketch.create", json!({"plane":plane, "name":"Peg"}));
+        run(&mut s, "sketch.circle.center", json!({"center":[5,0], "radius":1}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch":"Peg", "distance":4, "operation":"new", "body_name":"PegBody"}));
+    }
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type":"revolute", "name":"Hinge", "a":"Base", "b":"Knob",
+        "at":{"occurrence":"Base", "point":[0,0,0], "z":[0,0,1]}}),
+    );
+    s
+}
+
+fn check_linked_knob(s: &mut Session, center: [f64; 3], radius: f64) {
+    let measured = run(s, "inspect.measure", json!({"bodies":["KnobBody"]}));
+    let body = &measured["bodies"][0];
+    for (i, expected) in center.into_iter().enumerate() {
+        let actual = body["center_of_mass"][i].as_f64().unwrap();
+        assert!((actual - expected).abs() < 1e-6, "center[{i}]: {actual} != {expected}");
+    }
+    let volume = body["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 4. * std::f64::consts::PI * radius * radius).abs() < 1e-6, "volume: {volume}");
+}
+
+#[test]
+fn linked_sketch_projection_moves_with_its_joint_and_keeps_source_edits() {
+    for foreign_plane in [false, true] {
+        let mut s = knob_from_linked_sketch(foreign_plane);
+        check_linked_knob(&mut s, [10., 0., 2.], 2.);
+        let result = run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+        assert_eq!(result["moved"], true);
+        check_linked_knob(&mut s, [0., 10., 2.], 2.);
+        run(&mut s, "parameters.change", json!({"name":"radius", "expression":"3 mm"}));
+        check_linked_knob(&mut s, [0., 10., 2.], 3.);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        check_linked_knob(&mut reopened, [0., 10., 2.], 3.);
+        if foreign_plane {
+            let peg = run(&mut reopened, "inspect.measure", json!({"bodies":["PegBody"]}));
+            let center = &peg["bodies"][0]["center_of_mass"];
+            assert!(center[0].as_f64().unwrap().abs() < 1e-6, "{center}");
+            assert!((center[1].as_f64().unwrap() - 5.).abs() < 1e-6, "{center}");
+        }
+        run(&mut reopened, "joint.drive", json!({"joint":"Hinge", "value":180}));
+        check_linked_knob(&mut reopened, [-10., 0., 2.], 3.);
+    }
+}
+
+#[test]
+fn older_sketch_references_capture_the_saved_assembly_pose() {
+    for foreign_plane in [false, true] {
+        let mut s = knob_from_linked_sketch(foreign_plane);
+        run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+        let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        as_last_release_saved(&mut file);
+        for feature in file["features"].as_array_mut().unwrap() {
+            if feature["type"] != "sketch" {
+                continue;
+            }
+            if let Some(plane) = feature.get_mut("plane").and_then(Value::as_object_mut) {
+                plane.remove("placement");
+            }
+            for link in feature.get_mut("sketch").and_then(|sketch| sketch.get_mut("links")).and_then(Value::as_array_mut).into_iter().flatten() {
+                link.as_object_mut().unwrap().remove("sketch_placements");
+            }
+        }
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&file.to_string()).unwrap());
+        // Older cold builds anchored the circle in world space. Preserve that saved shape,
+        // then move it rigidly relative to the pose at which the old file was saved.
+        check_linked_knob(&mut reopened, [10., 0., 2.], 2.);
+        run(&mut reopened, "joint.drive", json!({"joint":"Hinge", "value":180}));
+        check_linked_knob(&mut reopened, [0., 10., 2.], 2.);
+    }
+}
+
+#[test]
+fn pasting_a_captured_plane_and_its_sketch_applies_the_paste_transform_once() {
+    let mut s = knob_from_linked_sketch(true);
+    run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+    run(&mut s, "timeline.copy", json!({"features":["SkeletonPlane", "Peg"]}));
+    run(&mut s, "timeline.paste", json!({"component":"root", "translate":[2,3,0]}));
+    let id = s.doc.features.last().unwrap().id;
+    let check = |s: &Session| {
+        let state = s.model.state();
+        let ss = state.sketch(id).unwrap();
+        let solidcraft_sketch::CurveKind::Circle { c, .. } = ss.sketch.curves[0].kind else { panic!("expected circle") };
+        let center = ss.plane.to_world(ss.sketch.points[c].pos);
+        assert!(center.dist(Vec3::new(2., 8., 0.)) < 1e-6, "{center:?}");
+    };
+    check(&s);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+}
+
 #[test]
 fn joint_creation_rejects_reversed_limits_without_changing_the_design() {
     for command in ["joint.create", "joint.as_built"] {
@@ -274,6 +388,56 @@ fn two_cubes() -> Session {
 }
 
 #[test]
+fn unground_reports_a_joint_whose_origin_was_removed() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 3, "corner": [22, 2, -2], "operation": "join", "name": "Foot"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let joint = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Foot joint", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, -2]}}),
+    )["joint"]
+        .clone();
+    run(&mut s, "timeline.suppress", json!({"feature": "Foot"}));
+    let before = s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform;
+    let reply = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(reply["grounded"], false);
+    assert_eq!(reply["errors"][0]["joint"], joint, "{reply}");
+    assert_eq!(reply["errors"][0]["name"], "Foot joint", "{reply}");
+    assert!(reply["errors"][0]["why"].as_str().unwrap().contains("no longer exists"), "{reply}");
+    assert_eq!(reply["moved"], json!([]), "{reply}");
+    assert_eq!(reply["transform"], json!(before), "{reply}");
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform, before);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().grounded);
+}
+
+#[test]
+fn unground_reports_the_solved_placement_and_moves() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}}));
+    super::solve_counts::take();
+    let reply = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(reply["moved"], json!(["B:1"]), "{reply}");
+    assert_eq!(reply["errors"], json!([]), "{reply}");
+    assert_eq!(reply["conflicts"], json!([]), "{reply}");
+    assert_eq!(reply["transform"], json!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform));
+    assert!(near(place(&s, "B", Vec3::new(25., 5., 0.)), Vec3::new(5., 5., 10.)));
+    assert_eq!(super::solve_counts::take(), (1, 0), "unground and refresh share one placement solve");
+    // An already placed part does not need to move. That is not a failed placement.
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    let settled = run(&mut s, "occurrence.ground", json!({"occurrence": b}));
+    assert_eq!(settled["moved"], json!([]), "{settled}");
+    assert_eq!(settled["errors"], json!([]), "{settled}");
+    assert_eq!(settled["conflicts"], json!([]), "{settled}");
+    assert_eq!(settled["transform"], reply["transform"]);
+}
+
+#[test]
 fn slider_limits_clamp() {
     let mut s = two_cubes();
     // B's bottom face onto A's top face (faces meet), sliding along their common normal.
@@ -409,6 +573,53 @@ fn invalid_lateral_joint_offsets_leave_the_design_unchanged() {
             assert!(s.execute("joint.create", &create).is_err(), "{create}");
             assert_eq!(s.doc.to_json(), before, "failed creation changed the design");
         }
+    }
+}
+
+/// A part on a revolute joint, nested in the part a slider moves, moves as far as the slider
+/// does (#17305). The part is made before the slider's part and then moved into it, so its
+/// occurrence has the lower id. A solve stored the placements in id order: the part in the frame
+/// its parent was leaving, then the parent, which moved the part a second time. A slider whose
+/// offset follows a parameter shows it in one solve: changing the parameter by 10 mm moved the
+/// slider's part 10 mm and the part inside it 20 mm.
+#[test]
+fn a_part_nested_in_a_slider_part_moves_as_far_as_the_slider() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("C", 40), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    let (a, b, c) = (occ(&s, "A"), occ(&s, "B"), occ(&s, "C"));
+    assert!(c < b, "C's occurrence {c} is older than B's {b}");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "occurrence.reparent", json!({"occurrence": c, "parent": "B"}));
+    // B's bottom onto A's top, sliding up and down; C rides inside B and moves with it.
+    let r = run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
+    let (corner_b, corner_c) = (Vec3::new(20.0, 0.0, 0.0), Vec3::new(40.0, 0.0, 0.0));
+    assert!(near(place(&s, "C", corner_c), Vec3::new(20.0, 0.0, 10.0)), "C follows B onto A: {:?}", place(&s, "C", corner_c));
+    // C's bottom onto B's top, turning about their common normal.
+    let r = run(&mut s, "joint.create", json!({"type": "revolute", "a": {"face": [5, 5, 20]}, "b": {"face": [25, 5, 10]}, "name": "Turn"}));
+    assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
+    run(&mut s, "parameters.add", json!({"name": "lift", "expression": "5 mm"}));
+    run(&mut s, "joint.edit", json!({"joint": "Rail", "offset": "lift"}));
+    let moved = |s: &Session, b0: Vec3, c0: Vec3| (place(s, "B", corner_b) - b0, place(s, "C", corner_c) - c0);
+    for (lift, by) in [("15 mm", 10.0), ("1 mm", -14.0), ("31 mm", 30.0)] {
+        let (b0, c0) = (place(&s, "B", corner_b), place(&s, "C", corner_c));
+        run(&mut s, "parameters.change", json!({"name": "lift", "expression": lift}));
+        let (db, dc) = moved(&s, b0, c0);
+        assert!(near(db, Vec3::new(0.0, 0.0, by)), "lift {lift}: B moves with the slider by {by}: {db:?}");
+        assert!(near(dc, db), "lift {lift}: C moves as far as B ({db:?}), not {dc:?}");
+    }
+    // Driving the slider moves both by the same distance too.
+    for travel in [10.0, -4.0] {
+        let (b0, c0) = (place(&s, "B", corner_b), place(&s, "C", corner_c));
+        let now =
+            solidcraft_doc::joints::joint_values(&s.doc.assembly).get(&s.doc.assembly.joints[0].id).and_then(|q| q.first().copied()).unwrap_or(0.0);
+        run(&mut s, "joint.drive", json!({"joint": "Rail", "value": now + travel}));
+        let (db, dc) = moved(&s, b0, c0);
+        assert!(near(db, Vec3::new(0.0, 0.0, travel)) && near(dc, db), "drive by {travel}: B {db:?}, C {dc:?}");
     }
 }
 

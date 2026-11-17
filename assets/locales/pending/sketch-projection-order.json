@@ -1,6 +1,6 @@
 {
   "en": {"sketch.error.source_later_in_timeline": "sketch `{name}` comes after this sketch in the timeline, so its geometry cannot be used here. Move the source sketch earlier if its dependencies allow, or use a sketch after it."},
-  "ar": {"sketch.error.source_later_in_timeline": "يقع الرسم التخطيطي `{name}` بعد هذا الرسم التخطيطي في التسلسل الزمني، لذا لا يمكن استخدام هندسته هنا. انقل الرسم التخطيطي المصدر إلى موضع أسبق إذا سمحت اعتمادياته بذلك، أو استخدم رسمًا تخطيطيًا يأتي بعده."},
+  "ar": {"sketch.error.source_later_in_timeline": "يأتي الرسم `{name}` بعد هذا الرسم في الخط الزمني، لذا لا يمكن استخدام هندسته هنا. انقل الرسم المصدر إلى موضع أسبق إذا سمحت اعتمادياته بذلك، أو استخدم رسمًا يأتي بعده."},
   "de": {"sketch.error.source_later_in_timeline": "Die Skizze `{name}` liegt in der Zeitleiste nach dieser Skizze. Ihre Geometrie kann hier daher nicht verwendet werden. Verschiebe die Quellskizze nach vorne, wenn ihre Abhängigkeiten dies erlauben, oder verwende eine Skizze, die nach ihr liegt."},
   "he": {"sketch.error.source_later_in_timeline": "הסקיצה `{name}` נמצאת אחרי סקיצה זו בציר הזמן, ולכן אי אפשר להשתמש כאן בגאומטריה שלה. העבירו את סקיצת המקור למיקום מוקדם יותר אם התלויות שלה מאפשרות זאת, או השתמשו בסקיצה שנמצאת אחריה."},
   "ja": {"sketch.error.source_later_in_timeline": "スケッチ `{name}` はタイムラインでこのスケッチより後にあるため、そのジオメトリをここでは使用できません。依存関係が許す場合は元のスケッチを前に移動するか、元のスケッチより後のスケッチを使用してください。"},

@@ -6,7 +6,7 @@ use solidcraft_sketch::Sketch;
 
 use crate::construct::{AxisDef, GeoRef, PointDef};
 use crate::expr::{self, Expr, Kind};
-use crate::names::{BodyName, FeatureId, FeatureName, SketchId};
+use crate::names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
 use crate::points::{Dir, FacePick, Position};
 use crate::{DocError, Result};
 
@@ -85,7 +85,13 @@ pub enum PlaneRef {
         pivot: Option<Box<GeoRef>>,
     },
     /// A construction plane feature (by id).
-    Construction { feature: FeatureId },
+    Construction {
+        feature: FeatureId,
+        /// Source component to sketch component when a foreign plane was chosen. The plane's
+        /// geometry stays live, while later assembly motion leaves the sketch inside its part.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        placement: Option<crate::Mat>,
+    },
     /// `base` seen from its other side: the normal reversed by a half turn about the base's
     /// own x axis (y reversed), or about its y axis (x reversed) when `about_y`. A sketch
     /// started from behind a plane faces the viewer this way.
@@ -1231,6 +1237,10 @@ pub enum FeatureKind {
         #[walk(picks_faces)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
+        /// Use only the tool face's infinite plane, preserving the plane split's side order
+        /// and section names. Otherwise use the face's extended surface and its sheet.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        tool_plane: bool,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
         /// sketch's normal, which follows the sketch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1994,6 +2004,12 @@ pub enum FeatureKind {
         /// How the rails reshape the curves.
         #[serde(default, skip_serializing_if = "RailFit::is_scale")]
         rail_fit: RailFit,
+        /// A 3D sketch spline in the path is followed as the lines between its samples, a wall
+        /// along each, as designs saved before #17828 swept it, so their faces and what refers to
+        /// them stay as they were (`format/pending/surface-sweep-exact-spline-path.rs`). Off for a
+        /// new or redefined sweep, which follows the spline itself.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        spline_as_samples: bool,
     },
     /// A surface body lofted through sections in order, each one open or closed chain of
     /// sketch curves: walls only, no caps.
@@ -2189,6 +2205,12 @@ pub enum FeatureKind {
         translate: [Expr; 3],
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rotate_axis: Option<Dir>,
+        /// The edge or round face of the model the turn was picked on (#17974), found again on
+        /// each evaluation ([`crate::construct::model_axis`]), so the turn follows it when an
+        /// earlier step moves the body; `rotate_axis` and `origin` are where it was when picked,
+        /// and are used when it is not found. Older moves have none and turn about those.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotate_about: Option<GeoRef>,
         /// Rotation pivot in the body's authoring frame. Older moves turn about the origin.
         #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
         #[walk(placement)]
@@ -3373,10 +3395,13 @@ impl Feature {
 
     /// Keep `made`, the names the feature's bodies have now (in the order it builds them), as
     /// its stored names, so they stay as they are whatever comes and goes before it. An Import's
-    /// skipped file bodies keep the names stored for them.
+    /// skipped file bodies keep the names stored for them, and so do the solids its reader left
+    /// out, whose names it keeps after its bodies (#16857).
     pub fn pin_body_names(&mut self, made: &[String]) {
         let slots = self.body_name_slots(made.len());
-        self.body_names.resize(slots.last().map_or(0, |s| s + 1), String::new());
+        let len = slots.last().map_or(0, |s| s + 1);
+        let len = if matches!(self.kind, FeatureKind::Import { .. }) { len.max(self.body_names.len()) } else { len };
+        self.body_names.resize(len, String::new());
         for (slot, name) in slots.iter().zip(made) {
             if let Some(stored) = self.body_names.get_mut(*slot) {
                 stored.clone_from(name);
@@ -4393,7 +4418,29 @@ impl Document {
         {
             return Some(f);
         }
-        self.features.iter().find(|f| f.name.eq_ignore_ascii_case(r))
+        self.features.iter().find(|f| same_feature_name(&f.name, r))
+    }
+
+    /// Whether a new feature of `kind` called `name` would be ambiguous. Plane references share
+    /// the feature namespace, and sketches are also referenced by name (`extrude` by sketch name
+    /// takes the first match), so a duplicate would silently select the first feature. Other
+    /// shared names (a sketch and its extrude) remain supported. Two sketches clash the way
+    /// lookup matches them (ASCII case does not matter); a plane clashes on the exact name, as
+    /// it always has.
+    pub fn name_clash(&self, kind: &FeatureKind, name: &str) -> bool {
+        let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
+        let is_sketch = matches!(kind, FeatureKind::Sketch { .. });
+        self.features.iter().any(|f| {
+            let other_sketch = matches!(f.kind, FeatureKind::Sketch { .. });
+            let other_plane = matches!(f.kind, FeatureKind::ConstructionPlane { .. });
+            (is_sketch && other_sketch && same_feature_name(&f.name, name)) || ((is_plane || other_plane) && f.name == name)
+        })
+    }
+
+    /// `name` if no other sketch has it, else the first free `name (2)`, `name (3)` ...
+    pub fn free_sketch_name(&self, name: &str) -> String {
+        let taken = |n: &str| self.features.iter().any(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && same_feature_name(&f.name, n));
+        if taken(name) { copy_name(name, taken) } else { name.to_string() }
     }
 
     /// Resolve a textual timeline reference. An exact name wins even when it looks like an id.
@@ -4407,7 +4454,7 @@ impl Document {
         {
             return Ok(feature);
         }
-        let mut matches = self.features.iter().filter(|f| f.name.eq_ignore_ascii_case(name));
+        let mut matches = self.features.iter().filter(|f| same_feature_name(&f.name, name));
         let feature = matches.next().ok_or_else(|| DocError::Invalid(format!("no feature `{name}`")))?;
         if matches.next().is_some() {
             return Err(DocError::Invalid(format!("ambiguous feature `{name}`. Use its exact name or numeric id")));
@@ -4484,10 +4531,7 @@ impl Document {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
             _ => self.unique_name(kind.base_name()),
         };
-        // Plane references share the feature namespace. A duplicate would silently select
-        // the first feature. Other shared names (a sketch and its extrude) remain supported.
-        let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
-        if self.features.iter().any(|f| f.name == name && (is_plane || matches!(f.kind, FeatureKind::ConstructionPlane { .. }))) {
+        if self.name_clash(&kind, &name) {
             return Err(DocError::Invalid(format!("another feature is called `{name}`")));
         }
         let id = self.next_id.max(1);
@@ -4912,15 +4956,27 @@ impl Document {
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
             }
             PlaneRef::Flipped { base, about_y } => Ok(self.resolve_plane_in(vals, base, depth + 1, component, st)?.flipped(*about_y)),
-            PlaneRef::Construction { feature } => {
+            PlaneRef::Construction { feature, placement } => {
+                if placement.as_ref().is_some_and(|matrix| !crate::is_placement(matrix)) {
+                    return Err(DocError::Invalid("invalid captured construction plane placement".into()));
+                }
                 // Evaluated already: as it came out.
                 if let Some(c) = st.and_then(|st| st.construct.iter().find(|c| c.feature == feature.0))
                     && let crate::construct::ConstructGeom::Plane(pl) = &c.geom
                 {
-                    return Ok(*pl);
+                    return match placement {
+                        Some(matrix) => crate::eval::placed_plane(matrix, pl),
+                        None => Ok(*pl),
+                    };
                 }
-                match self.feature(feature.0).map(|f| &f.kind) {
-                    Some(FeatureKind::ConstructionPlane { plane }) => self.resolve_plane_in(vals, plane, depth + 1, component, st),
+                match self.feature(feature.0) {
+                    Some(Feature { kind: FeatureKind::ConstructionPlane { plane }, component: owner, .. }) => {
+                        let resolved = self.resolve_plane_in(vals, plane, depth + 1, if placement.is_some() { *owner } else { component }, st)?;
+                        match placement {
+                            Some(matrix) => crate::eval::placed_plane(matrix, &resolved),
+                            None => Ok(resolved),
+                        }
+                    }
                     // A name that could not be resolved when an older design opened keeps id 0,
                     // which no feature has (#1134): the reference dangles, as it always did.
                     _ => {
@@ -5271,4 +5327,9 @@ pub fn valid_density(d: f64) -> bool {
 /// Density of a built-in physical material (g/cm³).
 pub fn material_density(name: &str) -> Option<f64> {
     MATERIALS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())).map(|(_, d)| *d)
+}
+
+/// How a textual reference matches a feature name: ASCII case does not matter.
+pub fn same_feature_name(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
 }

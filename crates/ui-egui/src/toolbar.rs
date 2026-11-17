@@ -538,7 +538,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         rows.push(FileRow::Separator);
     }
     for item in entries {
-        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown));
+        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown || item.importer));
     }
     rows
 }
@@ -1953,7 +1953,9 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
     }
     if let Some((id, br)) = start {
         // The exact pinned command, without replacing its family's remembered ribbon choice.
-        app.start_pinned(id, Some(br));
+        if !end_running_tool(app, id) {
+            app.start_pinned(id, Some(br));
+        }
     }
     if let Some((at, id)) = menu {
         crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
@@ -2399,17 +2401,30 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::checkbox(ui, &label, &mut app.ui.lasso_select);
 }
 
-/// A click on the lit button of the sketch tool that is running ends the tool, as a toggle does,
-/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
-/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
-/// the tool was ended. A persistent analysis button already turns its analysis off its own way.
-fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
-    if !app.preferences.ribbon_click_ends_tool || persistent_available(app, id) || !app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+/// Ends the active sketch tool or dialog when `id` is its command, as `Esc` does.
+/// Returns whether anything was closed.
+pub(crate) fn end_running_command(app: &mut SolveApp, id: &str) -> bool {
+    if persistent_available(app, id) {
         return false;
     }
-    crate::dim_view::cancel();
-    app.tool = None;
-    true
+    if app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+        crate::dim_view::cancel();
+        app.tool = None;
+        return true;
+    }
+    if app.dialog.as_ref().and_then(|d| d.command()) == Some(id) {
+        crate::dialogs::cancel(app);
+        return true;
+    }
+    false
+}
+
+/// A click on the lit button of the tool or dialog that is running ends it, as a toggle does,
+/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
+/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
+/// it was ended. A persistent analysis button already turns its analysis off its own way.
+fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
+    app.preferences.ribbon_click_ends_tool && end_running_command(app, id)
 }
 
 /// Two Esc presses within this many seconds finish the open sketch.
@@ -4331,6 +4346,21 @@ mod dropdown_toggle_tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"));
+        // A second click on a dialog command's button (Extrude) also closes it when enabled.
+        h.app.preferences.ribbon_click_ends_tool = true;
+        h.app.finish_sketch();
+        h.settle();
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert!(h.app.dialog.is_none(), "second click closes the extrude dialog");
+        h.app.preferences.ribbon_click_ends_tool = false;
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
     }
 
     /// A tool pinned into the Finish Sketch group, the one at the ribbon's right edge, shows

@@ -47,7 +47,6 @@ pub struct DocSlot {
     pre_sketch_component: Option<crate::PreSketchComponent>,
     pre_edit_component: Option<crate::PreEditComponent>,
     view: DocView,
-    occurrence_move: Option<crate::browser::OccMove>,
     reveals: crate::browser::PendingReveals,
     agent_chat: crate::agent_chat::AgentChat,
     /// Its linked design files as the design last read them (`Documents::link_stamps`).
@@ -163,7 +162,6 @@ impl DocSlot {
             pre_sketch_component: None,
             pre_edit_component: None,
             view: DocView::default(),
-            occurrence_move: None,
             reveals: Default::default(),
             agent_chat: Default::default(),
             link_stamps: Vec::new(),
@@ -459,7 +457,6 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
         pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
-        occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
         reveals,
         agent_chat: slot.agent_chat,
         link_stamps: std::mem::replace(&mut app.docs.link_stamps, slot.link_stamps),
@@ -2623,6 +2620,18 @@ mod tests {
         h.step(&json!({"key": "Enter"})).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.doc.name, "x".repeat(MAX_DESIGN_NAME), "the command takes it, cut to 128 characters");
+    }
+
+    /// The field and the command both count characters: a hundred `ł` (200 bytes) is taken.
+    #[test]
+    fn a_long_name_with_accented_letters_is_taken() {
+        let mut h = design_open();
+        double_click_tab(&mut h, 0);
+        h.step(&json!({"text": "ł".repeat(100)})).unwrap();
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.doc.name, "ł".repeat(100));
+        assert!(!renaming_tab(&h.app), "the field closed");
     }
 
     #[test]
