@@ -30,7 +30,7 @@
 //! | [`SurfaceIntersector::test_span_accuracy`], [`SpanAccuracy`] | `TestSpanAccuracy`                    |
 //! | [`SurfaceIntersector::add_point_to_curve`]        | `AddPointToCurve`                                |
 //! | [`SurfaceIntersector::add_start_point`]           | `AddStartPoint`                                  |
-//! | [`SurfaceIntersector::is_same_tangent_cluster`], [`IntersectionPointType::is_tangent_type`], `tangent_start_rank` (private) | the SolidCraft fork's `IsSameTangentCluster`, `sm_IsTangentType`, `sm_TangentStartRank` (opt-in, WR-76) |
+//! | [`SurfaceIntersector::is_same_tangent_cluster`], [`IntersectionPointType::is_tangent_type`], `tangent_start_rank` (private) | the SolidCraft fork's `IsSameTangentCluster`, `sm_IsTangentType`, `sm_TangentStartRank` (WR-76) |
 //! | [`SurfaceIntersector::add_through_point`]         | `AddThroughPoint`                                |
 //! | [`SurfaceIntersector::reverse_curve_direction`]   | `ReverseCurveDirection`                          |
 //! | [`SurfaceIntersector::is_point_on_curve`]         | `IsPointOnCurve`                                 |
@@ -71,13 +71,11 @@
 //! - **`AddStartPoint`** keeps upstream's "replace a bounded start point by the exact
 //!   one" branch, which only reassigns a local pointer: the exact candidate is
 //!   dropped and the bounded point stays.
-//! - **Opt-in fix (WR-76, #392).** With
-//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
-//!   `AddStartPoint` keeps one start point per tangent cluster
+//! - **Fix (WR-76, #392).** `AddStartPoint` keeps one start point per tangent cluster
 //!   ([`SurfaceIntersector::is_same_tangent_cluster`]): a candidate in a cluster
 //!   replaces the start point it clusters with when it ranks better and is dropped
-//!   otherwise (the SolidCraft fork's tangency-labs/smlib@0ce09f2). Off by default
-//!   (upstream behaviour).
+//!   otherwise (the SolidCraft fork's tangency-labs/smlib@0ce09f2); upstream keeps
+//!   every start point of the cluster.
 //! - **WR-51.** `IsPointOnStartPoint` compares each distance with the tolerance;
 //!   upstream compares the squared distance with the tolerance itself.
 //! - **WR-52.** [`SurfaceIntersector::is_point_on_curve`] (`SmSurfaceIntersector.cpp:7376`,
@@ -190,7 +188,7 @@ pub enum IntersectionPointType {
 
 impl IntersectionPointType {
     /// A tangent point, tangent curve or coincidence point (the fork's
-    /// `sm_IsTangentType`, opt-in fix WR-76, #392).
+    /// `sm_IsTangentType`, fix WR-76, #392).
     #[must_use]
     pub const fn is_tangent_type(self) -> bool {
         matches!(
@@ -1505,9 +1503,9 @@ impl<'s> SurfaceIntersector<'s> {
         let scaled_zero = EFF_ZERO * 100.0 * (1.0 + start.srf_pos(SrfIndex::First).max_dimension());
         let bounded_start = start.is_bounded_start(scaled_zero);
 
-        // opt-in fix (WR-76, #392): keep one start point per tangent cluster, the
+        // fix (WR-76, #392): keep one start point per tangent cluster, the
         // tangent-curve point with the smallest deviation
-        if k.fixes.ssi_trace_tangent_curves_once && start.point_type.is_tangent_type() {
+        if start.point_type.is_tangent_type() {
             for i in 0..self.start_points.len() {
                 let Some(&tid) = self.start_points.get(i) else {
                     break;
@@ -1646,7 +1644,7 @@ impl<'s> SurfaceIntersector<'s> {
 
     /// True when two tangent-type boundary start points are two samples of one
     /// tangential contact crossing a boundary, not two intersection branches
-    /// (`IsSameTangentCluster`, opt-in fix WR-76, #392; the SolidCraft fork's
+    /// (`IsSameTangentCluster`, fix WR-76, #392; the SolidCraft fork's
     /// tangency-labs/smlib@0ce09f2): they lie on a common boundary side of both
     /// surfaces, within `10 sqrt(this_approx_tol_3d (1 + size))` of each other, and
     /// the surfaces stay within `this_approx_tol_3d` of each other at three points of
@@ -1721,7 +1719,7 @@ impl<'s> SurfaceIntersector<'s> {
     /// first or the last curve point, when those differ: the trace reaches the
     /// boundary within tolerance but not necessarily at the cluster's representative
     /// start point, which would otherwise be traced again from that end (the
-    /// SolidCraft fork's `DoIntersection` block before `FlushCurve`, opt-in fix
+    /// SolidCraft fork's `DoIntersection` block before `FlushCurve`, fix
     /// WR-76, #392; tangency-labs/smlib@0ce09f2).
     ///
     /// # Errors
@@ -2515,7 +2513,7 @@ fn surface_global_point_solve(
 
 /// The rank of a tangent start point as a cluster's representative, lower is better:
 /// a traceable tangent-curve point first, then the smallest deviation (the fork's
-/// `sm_TangentStartRank`, opt-in fix WR-76, #392).
+/// `sm_TangentStartRank`, fix WR-76, #392).
 fn tangent_start_rank(tsp: &TsectPnt) -> f64 {
     (if tsp.point_type == IntersectionPointType::TangentCurve {
         0.0
