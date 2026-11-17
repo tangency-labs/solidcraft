@@ -12,9 +12,11 @@
 //! is opposite CADIR's (`reversed`), which turns the face's sense against it. CADIR's plane,
 //! cylinder, circular cone, sphere and torus are the record's with the same frame (x the
 //! reference direction, z the axis) and the same formulas, so their natural normals agree, but
-//! for a sphere or torus with a negative (tube) radius, whose points CADIR places on the other
-//! side of the centre (`c + r n` for `r < 0`): the record holds the radius's magnitude and its
-//! normal is the opposite. A NURBS surface's oriented normal is opposite `Pu × Pv` when CADIR says
+//! for a sphere with a negative radius, whose points CADIR places on the other side of the centre
+//! (`c + r n` for `r < 0`) while its normal `∂u × ∂v` still points along `n`: the record holds the
+//! radius's magnitude, whose normal points out, so it is the opposite. A torus with a negative
+//! tube radius is the same surface with `v` moved by π, and its normal `∂u × ∂v` points away from
+//! the tube's centre for either sign, as the record's does: it keeps its side. A NURBS surface's oriented normal is opposite `Pu × Pv` when CADIR says
 //! `normal_reversed`. A procedural carrier is read by the solved form the producer cached.
 //!
 //! A cone, and a procedural linear sweep or revolution with no solved form cached, have a record
@@ -615,7 +617,9 @@ fn solved_surface(g: &SolvedSurfaceGeometry, depth: usize) -> R<(FaceSurface, bo
                 minor_radius: minor.abs(),
                 tube_start: 0.0,
             };
-            record(torus, minor < 0.0)
+            // A negative tube radius moves v by π: the normal still points away from the tube's
+            // centre, so the side is kept.
+            record(torus, false)
         }
         SolvedSurfaceGeometry::Nurbs(n) => {
             let points: Vec<Vec<[f64; 3]>> = n

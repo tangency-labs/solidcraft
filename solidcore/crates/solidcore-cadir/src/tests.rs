@@ -141,19 +141,50 @@ fn a_vertex_far_from_its_edges_refuses_its_region() {
     );
 }
 
-/// The side a record surface keeps against CADIR's: a sphere or torus whose (tube) radius is
-/// negative has CADIR's normal pointing inward, so the record (with the radius's magnitude,
-/// whose natural normal points out) is reversed against it; with a positive radius it is not.
-/// Both signs are checked, so a reversal applied to both could not pass.
+/// The side a record surface keeps against CADIR's, checked by the normals at one point: CADIR's
+/// sphere and torus (`c + r(cos v cos u x + cos v sin u y + sin v z)` and
+/// `c + (R + r cos v)(cos u x + sin u y) + r sin v z`, cadmpeg's evaluator), and the record's with
+/// the radius's magnitude, each normal `∂u × ∂v`. A sphere of negative radius has CADIR's normal
+/// pointing in where the record's points out, so it is reversed; a torus of negative tube radius
+/// is the same surface with v moved by π, its normal away from the tube's centre either way, so it
+/// keeps its side. Both signs are checked, so a reversal applied to both could not pass.
 #[test]
-fn a_negative_radius_turns_the_surface_side_and_a_positive_one_does_not() {
+fn a_negative_radius_turns_the_surface_side_as_the_normals_say() {
     use cadmpeg_ir::geometry::analytic::{SphereSurface, TorusSurface};
     use solidcore_record::brep::Surface as BSurface;
+    type F = dyn Fn(f64, f64) -> [f64; 3];
     let (c, z, x) = (
         Point3::new(1.0, 2.0, 3.0),
         Vector3::new(0.0, 0.0, 1.0),
         Vector3::new(1.0, 0.0, 0.0),
     );
+    let (cx, cy, cz) = (c.x, c.y, c.z);
+    let at = move |a: f64, b: f64, h: f64| [cx + a, cy + b, cz + h];
+    let sphere = |r: f64| {
+        move |u: f64, v: f64| at(r * v.cos() * u.cos(), r * v.cos() * u.sin(), r * v.sin())
+    };
+    let torus = |r: f64| {
+        move |u: f64, v: f64| {
+            let ring = 20.0 + r * v.cos();
+            at(ring * u.cos(), ring * u.sin(), r * v.sin())
+        }
+    };
+    // ∂u × ∂v by central differences.
+    let normal = |f: &F, u: f64, v: f64| {
+        let h = 1e-6;
+        let d = |p: [f64; 3], q: [f64; 3]| [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+        let du = d(f(u - h, v), f(u + h, v));
+        let dv = d(f(u, v - h), f(u, v + h));
+        [
+            du[1] * dv[2] - du[2] * dv[1],
+            du[2] * dv[0] - du[0] * dv[2],
+            du[0] * dv[1] - du[1] * dv[0],
+        ]
+    };
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let near = |a: [f64; 3], b: [f64; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-9);
+    let (u, v) = (0.3, 0.4);
+    let pi = std::f64::consts::PI;
     for r in [5.0, -5.0] {
         let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Sphere(
             SphereSurface::try_new(c, z, x, r).unwrap(),
@@ -163,7 +194,14 @@ fn a_negative_radius_turns_the_surface_side_and_a_positive_one_does_not() {
             matches!(s, BSurface::Sphere { radius, .. } if radius == 5.0),
             "{s:?}"
         );
+        // The record's point there: (u + π, −v) on the sphere of the radius's magnitude.
+        let (theirs, ours) = (sphere(r), sphere(5.0));
+        let (ou, ov) = if r < 0.0 { (u + pi, -v) } else { (u, v) };
+        assert!(near(theirs(u, v), ours(ou, ov)), "sphere radius {r}");
+        let agree = dot(normal(&theirs, u, v), normal(&ours, ou, ov)) > 0.0;
+        assert_eq!(reversed, !agree, "sphere radius {r}");
         assert_eq!(reversed, r < 0.0, "sphere radius {r}");
+
         let g = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Torus(
             TorusSurface::try_new(c, z, x, 20.0, r).unwrap(),
         ));
@@ -172,7 +210,13 @@ fn a_negative_radius_turns_the_surface_side_and_a_positive_one_does_not() {
             matches!(s, BSurface::Torus { minor_radius, major_radius, .. } if minor_radius == 5.0 && major_radius == 20.0),
             "{s:?}"
         );
-        assert_eq!(reversed, r < 0.0, "torus tube radius {r}");
+        // The record's point there: (u, v + π) on the tube of the radius's magnitude.
+        let (theirs, ours) = (torus(r), torus(5.0));
+        let ov = if r < 0.0 { v + pi } else { v };
+        assert!(near(theirs(u, v), ours(u, ov)), "torus tube radius {r}");
+        let agree = dot(normal(&theirs, u, v), normal(&ours, u, ov)) > 0.0;
+        assert_eq!(reversed, !agree, "torus tube radius {r}");
+        assert!(!reversed, "torus tube radius {r}");
     }
 }
 
@@ -319,6 +363,151 @@ fn a_cone_of_nearly_a_right_angle_is_read_as_its_plane() {
     );
     assert!(s.turned.is_empty(), "{:?}", s.turned);
     assert!((volume(&s) - 1000.0).abs() < 1e-6, "{}", volume(&s));
+}
+
+/// A face with no loops on a sphere is the whole sphere (CADIR's form for a face of a closed
+/// surface, which cadmpeg's STEP and FreeCAD readers write): the cube's shell given one such face
+/// is a ball of radius 5, its volume (4/3)π·125.
+#[test]
+fn a_sphere_face_with_no_boundary_is_the_whole_ball() {
+    use cadmpeg_ir::geometry::analytic::SphereSurface;
+    let mut ir = cube();
+    let shell = ir.model.shells.first().unwrap().clone();
+    let face = ir.model.faces.first().unwrap().clone();
+    *ir.model.shells.first_mut().unwrap() = cadmpeg_ir::topology::Shell::new(
+        shell.id.clone(),
+        shell.region.clone(),
+        vec![face.id.clone()],
+        Vec::new(),
+        Vec::new(),
+    )
+    .unwrap();
+    let ball = SphereSurface::try_new(
+        Point3::new(5.0, 5.0, 5.0),
+        Vector3::new(0.0, 0.0, 1.0),
+        Vector3::new(1.0, 0.0, 0.0),
+        5.0,
+    )
+    .unwrap();
+    let surface = ir
+        .model
+        .surfaces
+        .iter_mut()
+        .find(|s| s.id == face.surface)
+        .unwrap();
+    surface.geometry = SurfaceGeometry::Solved(SolvedSurfaceGeometry::Sphere(ball));
+    let f = ir.model.faces.first_mut().unwrap();
+    f.loops = FaceLoops::unspecified(Vec::new());
+    f.sense = Sense::Forward;
+    let s = one(&ir);
+    assert_eq!(s.brep.faces.len(), 1);
+    let ball = 4.0 / 3.0 * std::f64::consts::PI * 125.0;
+    assert!((volume(&s) - ball).abs() < 1e-6 * ball, "{}", volume(&s));
+}
+
+/// A curve-less edge between two vertices at one point collapses, and the loops through it run on
+/// from the one vertex the two are: the cube with one corner split into two vertices at its
+/// point, joined by such an edge in both loops that pass there, is still the cube.
+#[test]
+fn an_edge_collapsed_between_two_vertices_at_one_point_keeps_its_loops_closed() {
+    use cadmpeg_ir::ids::{CoedgeId, EdgeId, VertexId};
+    use cadmpeg_ir::topology::{EdgeCarrier, LoopRing, Vertex};
+    let mut ir = cube();
+    let first = ir.model.edges.first().unwrap().clone();
+    let a = first.start.clone();
+    let point = ir
+        .model
+        .vertices
+        .iter()
+        .find(|v| v.id == a)
+        .unwrap()
+        .point
+        .clone();
+    let split: VertexId = tid("vertex", 0);
+    ir.model.vertices.push(Vertex {
+        id: split.clone(),
+        point,
+        tolerance: None,
+    });
+    ir.model.edges.first_mut().unwrap().start = split.clone();
+    let collapsed: EdgeId = tid("edge", 0);
+    ir.model.edges.push(cadmpeg_ir::topology::Edge {
+        id: collapsed.clone(),
+        carrier: EdgeCarrier::new(None, None).unwrap(),
+        start: a,
+        end: split,
+        tolerance: None,
+    });
+    // In each loop through the first edge, a use of the collapsed edge where the loop passes
+    // the corner: before the edge's use when that runs from the corner, else after it.
+    let uses: Vec<Coedge> = ir
+        .model
+        .coedges
+        .iter()
+        .filter(|c| c.edge == first.id)
+        .cloned()
+        .collect();
+    assert_eq!(uses.len(), 2);
+    let ids: [CoedgeId; 2] = [tid("coedge", 0), tid("coedge", 1)];
+    for (k, c) in uses.iter().enumerate() {
+        ir.model.coedges.push(Coedge {
+            id: ids[k].clone(),
+            owner_loop: c.owner_loop.clone(),
+            edge: collapsed.clone(),
+            radial_next: ids[1 - k].clone(),
+            sense: c.sense,
+            pcurves: Vec::new(),
+            use_curve: None,
+        });
+        let lp = ir
+            .model
+            .loops
+            .iter_mut()
+            .find(|l| l.id == c.owner_loop)
+            .unwrap();
+        let LoopBoundary::Ring(ring) = &lp.boundary else {
+            panic!("{:?}", lp.boundary)
+        };
+        let mut ring: Vec<CoedgeId> = ring.coedges().to_vec();
+        let at = ring.iter().position(|x| *x == c.id).unwrap();
+        let at = if c.sense == Sense::Forward {
+            at
+        } else {
+            at + 1
+        };
+        ring.insert(at, ids[k].clone());
+        lp.boundary = LoopBoundary::Ring(LoopRing::new(ring, Vec::new()).unwrap());
+    }
+    let s = one(&ir);
+    assert_eq!(
+        (
+            s.brep.faces.len(),
+            s.brep.edges.len(),
+            s.brep.vertices.len()
+        ),
+        (6, 12, 8)
+    );
+    assert!((volume(&s) - 1000.0).abs() < 1e-6, "{}", volume(&s));
+}
+
+/// A coedge with a 3D curve of its own in place of its edge's refuses its region with the reason,
+/// rather than being built on the edge's curve.
+#[test]
+fn a_coedge_on_a_curve_of_its_own_refuses_its_region() {
+    let mut ir = cube();
+    let curve = ir.model.curves.first().unwrap().id.clone();
+    let c = ir.model.coedges.first_mut().unwrap();
+    c.use_curve = Some(cadmpeg_ir::topology::CoedgeUseCurve {
+        curve,
+        parameter_range: cadmpeg_ir::topology::ParameterInterval::new([0.0, 1.0]).unwrap(),
+    });
+    let bodies = read_bodies(&ir, None);
+    assert!(bodies.read.is_empty());
+    assert!(
+        bodies.failures[0].message.contains("a 3D curve of its own"),
+        "{:?}",
+        bodies.failures
+    );
 }
 
 /// An id of kind `kind` with key `key`, in a namespace of these tests.
