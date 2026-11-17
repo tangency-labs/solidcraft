@@ -24,21 +24,48 @@ const PLATE_FCSTD: &[u8] = include_bytes!("fixtures/plate.FCStd");
 /// STEP text, which these importers refuse.
 const STEP_TEXT: &str = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
-/// The file imports as one solid with the box's volume, through the same Import feature as STEP,
-/// which keeps the records the file was read into and no STEP text.
+/// Both readers of a FreeCAD or Rhino file: the STEP route (the default) and the records.
+const READERS: [crate::StepReader; 2] = [crate::StepReader::SolidCraft, crate::StepReader::Cadmpeg];
+
+/// `bytes` (a file called `file`) read into an Import feature by `reader`.
+fn read(bytes: &[u8], file: &str, reader: crate::StepReader) -> crate::StepFeature {
+    crate::step_import_feature_read(bytes, file, crate::StepNames::default(), reader).unwrap_or_else(|e| panic!("{file} ({reader:?}): {e}"))
+}
+
+/// The file imports as one solid with the box's volume, through the same Import feature as STEP.
+/// By default cadmpeg's STEP writer restates it and the feature keeps that STEP text, as on main;
+/// with the cadmpeg reader the feature keeps the records the file was read into and no STEP text.
 fn imports_the_block(bytes: &[u8], file: &str) {
-    let sf = crate::step_import_feature(bytes, &format!("dir/{file}")).unwrap();
-    assert_eq!(sf.import.bodies.len(), 1, "{file}");
-    let solidcraft_doc::FeatureKind::Import { file: held, step, records, .. } = &sf.kind else { panic!("not an Import feature") };
-    assert_eq!(held, file);
-    assert!(step.is_empty(), "{file}: no STEP text in between");
-    assert_eq!(records.as_ref().map(|r| r.bodies.len()), Some(1), "{file}: the feature keeps the records");
-    let v = solidcraft_kernel::measure(&sf.import.bodies[0].body).unwrap().volume;
-    assert!((v - 6000.0).abs() < 1e-6, "{file}: volume {v}");
-    // A Rhino object keeps its name; FreeCAD's object label does not come through cadmpeg, so the
-    // body is named after the file.
-    let stem = file.rsplit_once('.').unwrap().0;
-    assert!(["Block", stem].contains(&sf.body_names[0].as_str()), "{file}: {:?}", sf.body_names);
+    let step = native_cad_to_step(bytes, file).unwrap().0;
+    assert!(step.contains("MANIFOLD_SOLID_BREP"), "{file}: no solid in the restated STEP");
+    let default = crate::step_import_feature(bytes, &format!("dir/{file}")).unwrap();
+    assert!(
+        matches!(&default.kind, solidcraft_doc::FeatureKind::Import { step, records: None, .. } if step.contains("MANIFOLD_SOLID_BREP")),
+        "{file}: by default the feature keeps the restated STEP"
+    );
+    for reader in READERS {
+        let sf = read(bytes, &format!("dir/{file}"), reader);
+        assert_eq!(sf.import.bodies.len(), 1, "{file} ({reader:?})");
+        let solidcraft_doc::FeatureKind::Import { file: held, step, records, .. } = &sf.kind else { panic!("not an Import feature") };
+        assert_eq!(held, file);
+        match reader {
+            crate::StepReader::SolidCraft => {
+                assert!(step.contains("MANIFOLD_SOLID_BREP"), "{file}: the feature keeps the restated STEP");
+                assert!(!step.contains("cadmpeg_model"), "{file}");
+                assert!(records.is_none(), "{file}: no records on the STEP route");
+            }
+            crate::StepReader::Cadmpeg => {
+                assert!(step.is_empty(), "{file}: no STEP text in between");
+                assert_eq!(records.as_ref().map(|r| r.bodies.len()), Some(1), "{file}: the feature keeps the records");
+            }
+        }
+        let v = solidcraft_kernel::measure(&sf.import.bodies[0].body).unwrap().volume;
+        assert!((v - 6000.0).abs() < 1e-6, "{file} ({reader:?}): volume {v}");
+        // A Rhino object keeps its name; FreeCAD's object label does not come through cadmpeg, so
+        // the body is named after the file.
+        let stem = file.rsplit_once('.').unwrap().0;
+        assert!(["Block", stem].contains(&sf.body_names[0].as_str()), "{file} ({reader:?}): {:?}", sf.body_names);
+    }
 }
 
 #[test]
@@ -84,6 +111,8 @@ fn other_contents_are_refused() {
     for (bytes, name) in cases {
         let e = native_cad_records(bytes, name).expect_err(name);
         assert!(e.starts_with(name), "{name}: the message names the file: {e}");
+        let e = native_cad_to_step(bytes, name).expect_err(name);
+        assert!(e.starts_with(name), "{name}: the message names the file: {e}");
     }
     // A Rhino file named .FCStd is still read as what it is.
     imports_the_block(BLOCK_3DM, "renamed.FCStd");
@@ -108,8 +137,10 @@ fn hostile_native_cad_never_panics() {
         cases.push(tail);
         cases.push(good.iter().rev().copied().collect());
         for (i, bytes) in cases.iter().enumerate() {
-            let r = std::panic::catch_unwind(|| crate::step_import_feature(bytes, name));
-            assert!(r.is_ok(), "{name}: case {i} panicked");
+            for reader in READERS {
+                let r = std::panic::catch_unwind(|| crate::step_import_feature_read(bytes, name, crate::StepNames::default(), reader));
+                assert!(r.is_ok(), "{name} ({reader:?}): case {i} panicked");
+            }
         }
     }
 }
@@ -140,6 +171,7 @@ fn a_zip_bomb_is_refused() {
     let bytes = zip.finish().unwrap().into_inner();
     assert!(bytes.len() < 2 << 20, "{} bytes", bytes.len());
     assert!(native_cad_records(&bytes, "bomb.FCStd").is_err());
+    assert!(native_cad_to_step(&bytes, "bomb.FCStd").is_err());
 }
 
 fn types(d: &NativeDesign) -> Vec<&'static str> {
@@ -197,15 +229,17 @@ fn freecad_primitives_rebuild_and_rhino_has_no_history() {
 /// tool's shape hidden in the file, and those are not imported (they were before).
 #[test]
 fn freecad_hidden_intermediate_shapes_are_not_imported() {
-    let sf = crate::step_import_feature(BRACKET_FCSTD, "bracket.FCStd").unwrap();
-    let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
-    let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
-    assert_eq!(built.len(), 1, "{} bodies in the file, {} skipped", sf.import.bodies.len(), skip.len());
-    let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
-    assert!((v - (7840.0 - 50.0 * std::f64::consts::PI)).abs() < 0.05, "volume {v}");
-    // A Part workbench file has nothing hidden.
-    let sf = crate::step_import_feature(BLOCK_FCSTD, "block.FCStd").unwrap();
-    assert!(matches!(&sf.kind, solidcraft_doc::FeatureKind::Import { skip, .. } if skip.is_empty()));
+    for reader in READERS {
+        let sf = read(BRACKET_FCSTD, "bracket.FCStd", reader);
+        let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
+        let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
+        assert_eq!(built.len(), 1, "{reader:?}: {} bodies in the file, {} skipped", sf.import.bodies.len(), skip.len());
+        let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
+        assert!((v - (7840.0 - 50.0 * std::f64::consts::PI)).abs() < 0.05, "{reader:?}: volume {v}");
+        // A Part workbench file has nothing hidden.
+        let sf = read(BLOCK_FCSTD, "block.FCStd", reader);
+        assert!(matches!(&sf.kind, solidcraft_doc::FeatureKind::Import { skip, .. } if skip.is_empty()), "{reader:?}");
+    }
 }
 
 /// The hidden-shape skip follows the format detected in the file's contents, not its name: a
@@ -213,26 +247,37 @@ fn freecad_hidden_intermediate_shapes_are_not_imported() {
 /// out; a Rhino file called .FCStd is still a Rhino file, whose hidden objects would import.
 #[test]
 fn hidden_items_follow_the_detected_format_not_the_file_name() {
-    let skipped = |bytes: &[u8], file: &str| match crate::step_import_feature(bytes, file).unwrap().kind {
-        solidcraft_doc::FeatureKind::Import { skip, .. } => skip.len(),
-        _ => panic!("not an Import feature"),
-    };
-    assert_eq!(skipped(BRACKET_FCSTD, "bracket.FCStd"), 7, "a FreeCAD body's hidden shapes are left out");
-    assert_eq!(skipped(BRACKET_FCSTD, "renamed.3dm"), 7, "the contents say FreeCAD, not the name");
-    assert_eq!(skipped(BLOCK_3DM, "renamed.FCStd"), 0, "a Rhino file leaves nothing out");
+    // The STEP route, on the INVISIBILITY the STEP writer writes.
+    let step = "#1=MANIFOLD_SOLID_BREP('body',#2);\n#9=INVISIBILITY((#1));\n";
+    assert!(crate::native_cad::hidden_items("part.FCStd", BLOCK_FCSTD, step).contains(&1), "a FreeCAD body's hidden shape is left out");
+    assert!(crate::native_cad::hidden_items("renamed.3dm", BLOCK_FCSTD, step).contains(&1), "the contents say FreeCAD, not the name");
+    assert!(crate::native_cad::hidden_items("renamed.FCStd", BLOCK_3DM, step).is_empty(), "a Rhino file's hidden object still imports");
+    assert!(crate::native_cad::hidden_items("part.3dm", BLOCK_3DM, step).is_empty());
+    // Both routes, on the files.
+    for reader in READERS {
+        let skipped = |bytes: &[u8], file: &str| match read(bytes, file, reader).kind {
+            solidcraft_doc::FeatureKind::Import { skip, .. } => skip.len(),
+            _ => panic!("not an Import feature"),
+        };
+        assert_eq!(skipped(BRACKET_FCSTD, "bracket.FCStd"), 7, "{reader:?}: a FreeCAD body's hidden shapes are left out");
+        assert_eq!(skipped(BRACKET_FCSTD, "renamed.3dm"), 7, "{reader:?}: the contents say FreeCAD, not the name");
+        assert_eq!(skipped(BLOCK_3DM, "renamed.FCStd"), 0, "{reader:?}: a Rhino file leaves nothing out");
+    }
 }
 
 /// FreeCAD places a PartDesign body's shape by the body's placement: the knob, placed off the
 /// origin and turned, comes in where FreeCAD shows it (the file's own history, rebuilt, agrees).
 #[test]
 fn a_placed_freecad_body_imports_where_freecad_shows_it() {
-    let sf = crate::step_import_feature(KNOB_FCSTD, "knob.FCStd").unwrap();
-    let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
-    let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
-    assert_eq!(built.len(), 1);
-    let m = solidcraft_kernel::measure(&built[0].body).unwrap();
-    assert!((m.bbox.min.x - 38.0).abs() < 1e-6 && (m.bbox.min.y + 12.0).abs() < 1e-6, "{:?}", m.bbox);
-    assert!((m.volume - 2564.8775).abs() < 1e-3, "volume {}", m.volume);
+    for reader in READERS {
+        let sf = read(KNOB_FCSTD, "knob.FCStd", reader);
+        let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
+        let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
+        assert_eq!(built.len(), 1, "{reader:?}");
+        let m = solidcraft_kernel::measure(&built[0].body).unwrap();
+        assert!((m.bbox.min.x - 38.0).abs() < 1e-6 && (m.bbox.min.y + 12.0).abs() < 1e-6, "{reader:?}: {:?}", m.bbox);
+        assert!((m.volume - 2564.8775).abs() < 1e-3, "{reader:?}: volume {}", m.volume);
+    }
 }
 
 /// A FreeCAD design is detected from its contents, not from the file's name.
@@ -278,16 +323,18 @@ fn freecad_patterns_and_mirrors_rebuild() {
 /// neither is imported beside the body's own shape.
 #[test]
 fn freecad_shown_tip_and_binders_are_not_imported_twice() {
-    let sf = crate::step_import_feature(PLATE_FCSTD, "plate.FCStd").unwrap();
-    let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
-    let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
-    assert_eq!(built.len(), 1, "{} bodies in the file, {} skipped", sf.import.bodies.len(), skip.len());
-    let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
-    assert!((v - 7818.009).abs() < 0.05, "volume {v}");
+    for reader in READERS {
+        let sf = read(PLATE_FCSTD, "plate.FCStd", reader);
+        let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
+        let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
+        assert_eq!(built.len(), 1, "{reader:?}: {} bodies in the file, {} skipped", sf.import.bodies.len(), skip.len());
+        let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
+        assert!((v - 7818.009).abs() < 0.05, "{reader:?}: volume {v}");
+    }
 }
 
-/// The route a FreeCAD or Rhino file took before its solids were read into records, kept here to
-/// compare the two: cadmpeg's STEP writer (AP214), then SolidCraft's STEP reader. Returns the
+/// The route a FreeCAD or Rhino file takes by default (the STEP route), on the neutral model, to
+/// compare with the records: cadmpeg's STEP writer (AP214), then SolidCraft's STEP reader. Returns the
 /// import, or why there is none, and the writer's losses.
 fn by_step_text(ir: &cadmpeg_ir::document::CadIr) -> (Result<solidcraft_kernel::StepImport, String>, Vec<String>) {
     use cadmpeg_ir::codec::write::{EncodeInput, target::TargetRequest};
@@ -304,7 +351,7 @@ fn by_step_text(ir: &cadmpeg_ir::document::CadIr) -> (Result<solidcraft_kernel::
     (solidcraft_kernel::step_import(&String::from_utf8_lossy(&out)).map_err(|e| e.to_string()), losses)
 }
 
-/// The route they take now: the neutral model read into records, the records made into bodies.
+/// The route they take with the cadmpeg reader: the neutral model read into records, the records made into bodies.
 fn by_records(ir: &cadmpeg_ir::document::CadIr) -> (Result<solidcraft_kernel::StepImport, String>, Vec<String>) {
     let records = cadir_records(ir, "compared", "test");
     let warnings = records.warnings.clone();

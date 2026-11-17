@@ -1,14 +1,16 @@
 //! Other CAD formats read through [cadmpeg](https://github.com/cadmpeg/cadmpeg): FreeCAD
-//! `.FCStd` and Rhino `.3dm`. cadmpeg decodes the file into its neutral model (CADIR), which is
-//! read straight into B-rep records ([`cadir_records`]); the Import feature keeps
-//! those records, with no STEP text in between.
+//! `.FCStd` and Rhino `.3dm`. cadmpeg decodes the file into its neutral model (CADIR). By default
+//! cadmpeg's STEP writer restates that as STEP, which the Import feature then reads and keeps like
+//! any STEP file ([`native_cad_to_step`]); with [`crate::StepReader::Cadmpeg`] (the Preferences
+//! switch "Import with cadmpeg", off by default) the model is read straight into B-rep records
+//! ([`cadir_records`]) and the Import feature keeps those records, with no STEP text in between.
 //!
 //! Only codecs for open formats are compiled in (the workspace enables cadmpeg-registry's
 //! `fcstd`, `rhino` and `step` features alone). cadmpeg's codecs for commercial formats, and its
 //! `sat` codec (a ShapeManager stream decoder that reads ACIS as one dialect), are not built.
 //!
-//! This module is the importer seam: the one place cadmpeg is called, returning the records plus
-//! warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
+//! This module is the importer seam: the one place cadmpeg is called, returning the STEP text or
+//! the records plus warnings. A cadmpeg-based STEP reader could be added here later and chosen by a setting, to
 //! compare with our own STEP reader, without changing that reader.
 
 /// File extensions read through cadmpeg (lower case).
@@ -47,7 +49,8 @@ pub fn native_cad_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel
 /// A FreeCAD file's design history rebuilt as features (sketches, Pad and Pocket, Revolution and
 /// Groove, Fillet and Chamfer), checked against the file's own solids: each rebuilt body has the
 /// volume and extent of one of them. The error says why the history was not rebuilt; the file's
-/// solids then import as before ([`native_cad_records`]). Rhino files carry no such history.
+/// solids then import as before ([`native_cad_to_step`], or [`native_cad_records`] with the
+/// cadmpeg reader). Rhino files carry no such history.
 pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, String> {
     let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     let design = solidcraft_kernel::guard("cadmpeg design", || convert::design(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid))
@@ -113,6 +116,9 @@ pub(crate) fn cadir_records(ir: &cadmpeg_ir::document::CadIr, product: &str, sys
 mod design;
 pub use design::NativeDesign;
 
+pub(crate) use convert::step_route::hidden_items;
+pub use convert::step_route::native_cad_to_step;
+
 mod convert {
     use std::io::Cursor;
 
@@ -127,6 +133,8 @@ mod convert {
 
     /// The codecs we accept (cadmpeg codec ids), whatever else the registry recognises.
     const ACCEPTED: [&str; 2] = ["fcstd", "rhino"];
+
+    pub(super) mod step_route;
 
     /// Caps for hostile input: cadmpeg's tight `service` profile, with our STEP size limit on
     /// the input. The service profile already admits a detailed part's 8 million entities:
@@ -246,7 +254,8 @@ mod convert {
     /// Mark hidden what FreeCAD shows only through its body: the shapes of the features inside a
     /// PartDesign body that has a shape of its own (a file saved from FreeCAD's window keeps the
     /// tip feature's shape visible beside the body's identical one), and binders, which are
-    /// reference copies of other geometry. The import leaves them out.
+    /// reference copies of other geometry. The import leaves them out (on the STEP route the STEP
+    /// writer marks them invisible).
     fn hide_body_members(ir: &mut CadIr) {
         use serde_json::Value;
         let Ok(Value::Array(features)) = serde_json::to_value(&ir.model.features) else { return };
