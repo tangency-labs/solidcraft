@@ -1745,6 +1745,32 @@ fn a_woken_middle_lies_on_the_face_beside_its_edge() {
     assert!(got.param["edge"].is_array() && got.param["on"].is_array() && got.param.get("z").is_none(), "{}", got.param);
 }
 
+/// With only Faces in the selection filter, a joint origin clicked right on an edge is the face
+/// there, not the edge or a woken point on it, and no points wake (#18255). Unfiltered, the same
+/// click takes the edge's middle.
+#[test]
+fn a_faces_only_filter_keeps_joint_origins_on_faces() {
+    let mut h = joint_picking_component_1();
+    let middle = Vec3::new(10.0, 0.0, 10.0);
+    let at = h.call("ui.at", json!({ "world": [10, 0, 10] }))["result"].clone();
+    h.step(&json!({ "move": { "world": [10, 0, 10] } })).unwrap();
+    h.step(&json!({ "click": at })).unwrap();
+    let picked = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert!(matches!(picked.as_slice(), [Sel::Edge { .. } | Sel::Vertex { .. }]), "unfiltered, the edge: {picked:?}");
+
+    let mut h = joint_picking_component_1();
+    h.app.ui.pick_off = vec!["edges".into(), "vertices".into()];
+    h.step(&json!({ "move": { "world": [10, 0, 10] } })).unwrap();
+    assert!(h.app.viewport.woken.points.is_empty(), "no points wake: {:?}", h.app.viewport.woken.points);
+    h.step(&json!({ "click": at })).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let picked = d.inputs[0].items.clone();
+    assert!(matches!(picked.as_slice(), [Sel::Face { body, .. }] if body == "Body1"), "the face at the edge: {picked:?}");
+    let got = snap_in(&h.app, &d.inputs[0], &picked[0]).unwrap();
+    assert_eq!(got.kind, SnapKind::FaceCenter);
+    assert!(got.at.dist(middle) > 1.0, "not on the edge: {got:?}");
+}
+
 /// A woken point that is not its item's own snap (a straight edge's end) stays a point, and a
 /// face's centre is the face; with no woken item a vertex is a vertex, as before.
 #[test]
