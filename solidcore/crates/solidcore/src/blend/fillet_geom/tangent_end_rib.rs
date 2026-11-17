@@ -620,6 +620,10 @@ mod tests {
     use super::*;
     use crate::error::blend::BlendFailure;
     use crate::error::SM_ERR_NULL_POINTER;
+    use crate::nurbs::b_spline_curve::KnotType;
+    use crate::nurbs::b_spline_surface::{
+        BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+    };
 
     /// A solver without a surface generator has no contact order: a typed blend failure
     /// that keeps the bare `Upstream`'s status (#13790).
@@ -634,6 +638,102 @@ mod tests {
                 Some(&BlendFailure::Missing("the solver's surface generator")),
                 Some(SM_ERR_NULL_POINTER)
             )
+        );
+    }
+
+    /// The fillet surface `S(u, v) = (2v − 1, u, 0)` (its section along u, its rails at
+    /// u = 0 and 1) and an end surface `E(u, v) = (u − 1/2 + b(u), u, 2v − 1)` that holds the
+    /// rib `x = y − 1/2 + b(y)`: `b` is one cubic B-spline of height `bump` on
+    /// `[0.38, 0.42]`, between the station t = 3/8 and its span's midpoint 7/16, zero at
+    /// every station and midpoint of 8 spans.
+    fn bumped_rib_surfaces(bump: f64) -> (Surface, Surface) {
+        let p = Point3::new;
+        let fillet = BSplineSurface::create_bilinear_surface(
+            p(-1.0, 0.0, 0.0),
+            p(-1.0, 1.0, 0.0),
+            p(1.0, 0.0, 0.0),
+            p(1.0, 1.0, 0.0),
+        )
+        .unwrap();
+        let knots = [0.0, 0.25, 0.38, 0.39, 0.4, 0.41, 0.42, 0.5, 0.75, 1.0];
+        let mult = [4, 1, 1, 1, 1, 1, 1, 1, 1, 4];
+        let full: Vec<f64> = knots
+            .iter()
+            .zip(mult)
+            .flat_map(|(&x, m)| std::iter::repeat(x).take(m))
+            .collect();
+        let mut pts = Vec::new();
+        for i in 0..full.len() - 4 {
+            // the Greville abscissa: y = u exactly, and x = y − 1/2 off the bump
+            let y = (full[i + 1] + full[i + 2] + full[i + 3]) / 3.0;
+            let x = y - 0.5 + if i == 5 { bump } else { 0.0 };
+            pts.push(p(x, y, -1.0));
+            pts.push(p(x, y, 1.0));
+        }
+        let end = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &mult,
+            v_multiplicities: &[2, 2],
+            u_knots: &knots,
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        (Surface::from(fillet), Surface::from(end))
+    }
+
+    /// A rib that passes every span's midpoint but leaves the end surface between the
+    /// stations (#17744): the bump of 1e-3 on the end surface lies between a station and
+    /// the next midpoint of 8 spans. The rib is refined until it follows the bump, or
+    /// refused typed; it is never returned off the end surface.
+    #[test]
+    fn a_rib_off_the_end_surface_between_its_stations_is_refined_or_refused() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let (fillet, end) = bumped_rib_surfaces(1e-3);
+        let rib = tangent_end_rib(
+            &k,
+            &fillet,
+            &end,
+            2,
+            Point3::new(-0.5, 0.0, 0.0),
+            Point3::new(0.5, 1.0, 0.0),
+            None,
+            false,
+            tol,
+        );
+        let rib = match rib {
+            Err(e) => {
+                assert_eq!(e.operation(), OP_RIB);
+                assert!(e.blend_failure().is_some(), "{e:?}");
+                return;
+            }
+            Ok(rib) => rib,
+        };
+        let opts = DropPointOptions::default();
+        let fil_dom = fillet.natural_uv_domain_with_nurb(&k).unwrap();
+        let end_dom = end.natural_uv_domain_with_nurb(&k).unwrap();
+        let ivl = rib.curve_3d.natural_interval();
+        let mut worst: f64 = 0.0;
+        for i in 0..=1000 {
+            let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 1000.0;
+            let x = rib.curve_3d.evaluate_point(t).unwrap();
+            for (s, dom) in [(&fillet, &fil_dom), (&end, &end_dom)] {
+                let d = s
+                    .drop_point::<crate::surface::surface::p4::NoObject>(&k, x, dom, &opts)
+                    .unwrap();
+                assert!(d.success);
+                worst = worst.max(d.gap);
+            }
+        }
+        assert!(
+            worst <= tol,
+            "the rib is {worst:e} off a surface (tolerance {tol:e})"
         );
     }
 }
