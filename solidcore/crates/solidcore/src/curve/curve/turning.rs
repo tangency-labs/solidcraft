@@ -434,10 +434,13 @@ fn bezier_points(vals: &[f64], u: &[f64], a: f64, b: f64) -> Option<Vec<(f64, f6
 ///
 /// (#17987) `past`, for a curve that evaluates past its knots: where `[lo, hi]` runs
 /// below the domain's start or above its end, one more piece covers that part, the
-/// polynomial of the span the evaluation takes there (`KnotVector::find_span`) extended,
-/// extracted by [`bezier_points`] over the part. Its weights may then be zero or
-/// negative (a pole past the knots); its `w_min` is then not positive and `isolate`
-/// refuses it.
+/// polynomial of the span the evaluation takes there extended (`KnotVector::find_span`:
+/// the first or last span at least `1e-12` wide),
+/// extracted by [`bezier_points`] over the part. A rational extension's Bezier weights
+/// may then be zero or negative even where its weight polynomial is positive: such a
+/// part is halved until each half's weights are certified positive (`w_min > 0`), at
+/// most [`MAX_DEPTH`] times. A half that never gets there (the weight has a zero there,
+/// a pole of the curve) keeps `w_min <= 0`, and `isolate` refuses it.
 ///
 /// # Errors
 ///
@@ -490,8 +493,8 @@ fn bspline_pieces(
     let pf = p as f64;
     let short =
         || SolidError::invalid_input(OP, "a B-spline's knots do not cover its control points");
-    // (span j, t0, t1): the non-empty spans, then the parts of `past` beyond the domain,
-    // each on the span the curve's evaluation extends there.
+    // (span j, t0, t1, halvings left): the non-empty spans, then the parts of `past` beyond
+    // the domain, each on the span the curve's evaluation extends there.
     let mut spans = Vec::new();
     for j in p..hs_all.len() {
         let (&t0, &t1) = (
@@ -502,7 +505,7 @@ fn bspline_pieces(
             return Err(SolidError::invalid_input(OP, "a B-spline's knots decrease"));
         }
         if t1 > t0 {
-            spans.push((j, t0, t1));
+            spans.push((j, t0, t1, 0));
         }
     }
     if let Some((lo, hi)) = past {
@@ -512,14 +515,16 @@ fn bspline_pieces(
         );
         let kv = nl.knot_vector()?;
         if lo < d0 {
-            spans.push((kv.find_span(p, lo, Side::Left)?, lo, d0));
+            spans.push((kv.find_span(p, lo, Side::Left)?, lo, d0, MAX_DEPTH));
         }
         if hi > d1 {
-            spans.push((kv.find_span(p, hi, Side::Left)?, d1, hi));
+            spans.push((kv.find_span(p, hi, Side::Left)?, d1, hi, MAX_DEPTH));
         }
     }
+    // Taken from the end: reversed, so the pieces keep the spans' order.
+    spans.reverse();
     let mut pieces = Vec::new();
-    for (j, t0, t1) in spans {
+    while let Some((j, t0, t1, halvings)) = spans.pop() {
         let u = knots.get(j + 1 - p..=j + p).ok_or_else(short)?;
         let support = j - p..=j;
         let bez = |vals: &[f64]| {
@@ -545,6 +550,12 @@ fn bspline_pieces(
         let w_min = hs.iter().fold(f64::INFINITY, |m, &(_, w, _, ew)| {
             m.min((w - ew) * (1.0 - gamma(3)))
         });
+        let mid = 0.5 * t0 + 0.5 * t1;
+        if rational && halvings > 0 && w_min <= 0.0 && t0 < mid && mid < t1 {
+            spans.push((j, mid, t1, halvings - 1));
+            spans.push((j, t0, mid, halvings - 1));
+            continue;
+        }
         let num = if rational {
             let d = |i: usize, j: usize| -> (f64, f64, f64) {
                 match (hs.get(i), hs.get(j)) {
@@ -707,7 +718,9 @@ impl Curve {
     /// (procedural, offset, on-surface, composite, iso, projected) add nothing; their box
     /// is upstream's. A B-spline with out-of-bounds evaluation enabled is also searched
     /// over the part of `interval` past its knots, where its evaluation extends its first
-    /// or last span's polynomial (#17987); without it, evaluation clamps there.
+    /// or last span's polynomial (#17987); without it, evaluation clamps past `[U_0, U_m]`.
+    /// The ends of an unclamped curve's `[U_0, U_m]` outside its domain `[U_p, U_{n+1}]`
+    /// are not searched.
     ///
     /// # Errors
     ///
@@ -999,11 +1012,80 @@ mod tests {
             .unwrap();
         assert!(close(bx.max().z, 1.25), "{}", bx.max().z);
         assert!(close(bx.min().z, -3.25), "{}", bx.min().z);
+        // Over its knots only, the box is the one without out-of-bounds evaluation.
+        let pts = [[0.0, 0.0, 0.0], [1.0, 0.0, 1.0], [2.0, 0.0, 1.2]];
+        let c = out_of_bounds_quadratic(&pts, None, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        let bx = c
+            .calculate_tight_bounding_box(&k, &Extent1d::from_min_max(0.0, 1.0))
+            .unwrap();
+        let inside = quadratic_box(pts, None);
+        assert!(bx.min() == inside.min() && bx.max() == inside.max());
     }
 
-    /// (#17987) A rational extension whose weight is not positive is refused, as a stored
-    /// weight that is not positive is: the quadratic with weights 1, 3, 1 on [0, 1] has
-    /// `w = 1 + 4t - 4t^2`, zero at t = (1 + sqrt 2) / 2, so over [0, 2] it has a pole.
+    /// (#17987) A rational extension with positive weights: the 45 degree arc of the unit
+    /// circle from (1, 0) (weights 1, cos 22.5 degrees, 1) continues round the circle past
+    /// its last knot, to about 188 degrees at t = 20. Its box over [0, 20] reaches
+    /// y = 1 (90 degrees) and x = -1 (180 degrees), both past the knots.
+    #[test]
+    fn a_circle_arcs_extension_reaches_the_circles_extremes() {
+        let h = std::f64::consts::FRAC_PI_8;
+        let c = out_of_bounds_quadratic(
+            &[
+                [1.0, 0.0, 0.0],
+                [1.0, h.tan(), 0.0],
+                [
+                    std::f64::consts::FRAC_1_SQRT_2,
+                    std::f64::consts::FRAC_1_SQRT_2,
+                    0.0,
+                ],
+            ],
+            Some(&[1.0, h.cos(), 1.0]),
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        let bx = c
+            .calculate_tight_bounding_box(&Kernel::default(), &Extent1d::from_min_max(0.0, 20.0))
+            .unwrap();
+        assert!(
+            (bx.max().y - 1.0).abs() <= 16.0 * f64::EPSILON,
+            "{}",
+            bx.max().y
+        );
+        assert!(
+            (bx.min().x + 1.0).abs() <= 16.0 * f64::EPSILON,
+            "{}",
+            bx.min().x
+        );
+    }
+
+    /// (#17987) Bezier weights that are not all positive where the weight is: weights 1,
+    /// 0.5, 0.3 give `w = 1 - t + 0.3t^2 > 0`, but over [1, 4] the extension's Bezier
+    /// weights are 0.3, -0.3, 1.8. The part is halved until each half's are positive, and
+    /// the box over [0, 4] reaches z's least value past the knots: with points (0, 0, 0),
+    /// (1, 0, 1), (2, 0, 0), `z = (t - t^2) / w`, least where `1 - 2t + 0.7t^2 = 0`, at
+    /// t = (2 + sqrt 1.2) / 1.4 = 2.2110..., z = -10.477225575051661... (to 50 digits,
+    /// rounded to the nearest f64).
+    #[test]
+    fn a_rational_extension_with_a_negative_bezier_weight_is_halved() {
+        let c = out_of_bounds_quadratic(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 1.0], [2.0, 0.0, 0.0]],
+            Some(&[1.0, 0.5, 0.3]),
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        let bx = c
+            .calculate_tight_bounding_box(&Kernel::default(), &Extent1d::from_min_max(0.0, 4.0))
+            .unwrap();
+        let want = -10.47722557505166;
+        assert!(
+            (bx.min().z - want).abs() <= 16.0 * f64::EPSILON * want.abs(),
+            "{}",
+            bx.min().z
+        );
+    }
+
+    /// (#17987) A rational extension through a pole is refused, as a stored weight that is
+    /// not positive is: the quadratic with weights 1, 3, 1 on [0, 1] has
+    /// `w = 1 + 4t - 4t^2`, zero at t = (1 + sqrt 2) / 2 = 1.207..., so over [0, 2] it has a
+    /// pole. Over [0, 1] and [0, 1.2] there is none, and the search succeeds.
     #[test]
     fn a_rational_extension_through_a_pole_is_refused() {
         let c = out_of_bounds_quadratic(
@@ -1011,14 +1093,18 @@ mod tests {
             Some(&[1.0, 3.0, 1.0]),
             vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         );
-        let mut pt = crate::geom::vector3d::Vec3::UNDEF;
-        let r = c.add_turning_points(
-            &Kernel::default(),
-            &Extent1d::from_min_max(0.0, 2.0),
-            &mut pt,
-            &mut |_| {},
-        );
+        let search = |hi: f64| {
+            let mut pt = crate::geom::vector3d::Vec3::UNDEF;
+            c.add_turning_points(
+                &Kernel::default(),
+                &Extent1d::from_min_max(0.0, hi),
+                &mut pt,
+                &mut |_| {},
+            )
+        };
+        let r = search(2.0);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        assert!(search(1.0).is_ok() && search(1.2).is_ok());
     }
 
     /// A rational quadratic in two Bezier segments (knots 0, 0, 0, 1, 1, 2, 2, 2). Over
