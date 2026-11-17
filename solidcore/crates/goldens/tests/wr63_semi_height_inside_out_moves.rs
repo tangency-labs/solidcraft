@@ -192,33 +192,30 @@ fn moved_rows_are_the_inside_out_cones_asked_for() {
             );
             let before = line(&built);
             let agree = |a: &Value, b: &Value| golden::diff(a, b, unit.abs_floors()).is_none();
-            match listed.get(&case.name) {
-                Some((old, new)) => {
-                    assert_eq!(&now, new, "{} {}: not the new row", unit.id(), case.name);
-                    assert!(
-                        agree(old, &before),
-                        "{} {}: the old row is not upstream's outward cone: {old} vs {before}",
-                        unit.id(),
-                        case.name
-                    );
-                    assert!(
-                        !agree(old, new),
-                        "{} {}: listed, but old and new agree",
-                        unit.id(),
-                        case.name
-                    );
-                    moved += 1;
-                }
-                None => {
-                    assert!(
-                        agree(&before, &now),
-                        "{} {}: moved but not listed ({}): {before} vs {now}",
-                        unit.id(),
-                        case.name,
-                        case.inputs
-                    );
-                    unmoved += 1;
-                }
+            if let Some((old, new)) = listed.get(&case.name) {
+                assert_eq!(&now, new, "{} {}: not the new row", unit.id(), case.name);
+                assert!(
+                    agree(old, &before),
+                    "{} {}: the old row is not upstream's outward cone: {old} vs {before}",
+                    unit.id(),
+                    case.name
+                );
+                assert!(
+                    !agree(old, new),
+                    "{} {}: listed, but old and new agree",
+                    unit.id(),
+                    case.name
+                );
+                moved += 1;
+            } else {
+                assert!(
+                    agree(&before, &now),
+                    "{} {}: moved but not listed ({}): {before} vs {now}",
+                    unit.id(),
+                    case.name,
+                    case.inputs
+                );
+                unmoved += 1;
             }
         }
     }
