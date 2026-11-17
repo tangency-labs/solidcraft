@@ -26,12 +26,20 @@
 //! build row certifies its placement against the inputs' frame by closed form, and an
 //! unbounded cone's semi-angle as the input's modulo 180 degrees (the same `tan`, the same
 //! generator line). Two old rows fail the frame, with an input `Y` of `-1e-300 Y`, which
-//! upstream unitizes to zero and replaces by `Z`. Reading such a tiny axis as the
-//! direction it has (`(0, -1, 0)`), and so the frame the inputs define, is a convention
-//! (ARGUED, not PROVEN: the input is a nonzero vector, and upstream's `Z` is its own
-//! choice). So is reading a huge axis (`(0, -1e300, 1)`) as its direction, and an axis
-//! of `5e-13`, below upstream's unitize threshold. The 32 rows that rest on these
-//! readings, all ARGUED:
+//! upstream unitizes to zero and replaces by `Z`.
+//!
+//! **Axes upstream cannot unitize** ([`cert_rescaled`], [`AXIS_SCALED_ROWS`]). Upstream's
+//! definition unitizes both axis inputs, so the cone `(O, X, Y, r, s)` defines is the same
+//! for `X -> λ X` and `Y -> μ Y` with `λ, μ > 0`; only floating point (`|v|^2`
+//! underflowing or overflowing, or the unitize threshold) tells them apart. Such a row is
+//! re-run with each axis scaled by the power of two that brings its largest coordinate into
+//! `[1, 2)` (exact: `(0, -1e-300, 0)` by `2^996`, `(0, -1e300, 1)` by `2^-996`, `5e-13` by
+//! `2^41`), an ordinary input upstream's own unitize reads. That run is certified with the
+//! ordinary certificate, and the row's new value must equal it (bit for bit, else within the
+//! goldens' comparison); the old value is certified against the rescaled inputs too. So the
+//! frame these rows are held to follows from the definition's scale invariance, not from a
+//! convention of this proof (PROVEN). The `5e-13` axis is the one a reader may call a
+//! tolerance rather than an artefact; the same invariance decides it. The 32 rows:
 //! * `surface.cone_p1` (2): `height_without_polar_tiny_axis_swap0_inside1` and
 //!   `_swap1_inside1`;
 //! * `surface.cone_p2` (16), every `nopolar_*` row (input `Y` of `(0, -1e-300, 0)`):
@@ -92,35 +100,41 @@
 //!   loop curves fix both normals, so it is corner-saturated: EQUAL there means the
 //!   corners agree, not the side interiors. Some rows moved because the neighbour did
 //!   (a bounded cylinder on non-unit axes, whose NURB main built with radius `r |X|`);
-//!   the others moved because the refinement loop now treats per-side maxima within the
-//!   a-priori rounding bound of `coons_side_angle` as tied and takes the finer patch
-//!   (deterministic: the bound is a function of the patch alone). Those rows, by label
-//!   "(tie rule)", are checked twice before G1 decides the class. First the refinement
-//!   replays ([`replay_coons`]): every counted station's derivative and angle bounds
-//!   enclose the exact values (enclosed here from the candidate's net and knots), the side
-//!   maxima are the stations', and the rule (a certain gain, or a tie with no side
-//!   certainly worse, goes to the finer copy) picks the logged copy, which the output
-//!   holds bit for bit. Then main's patch is found among the candidates, and on every side
-//!   both certify, the new copy is not certainly worse than main's
+//!   the others moved because the refinement loop now compares copies side by side. Each
+//!   copy is measured at the same stations (the union of the bare and every refined copy's
+//!   knot stations), against side normals read once from the bare patch; a station counts
+//!   only where its angle bound is certified (error below a right angle). A copy is taken
+//!   only when, against every copy held so far, no side is worse, undecided or uncertified
+//!   where the held copy certifies: "no worse" means its upper bound is at most the held
+//!   lower bound plus the resolution `0.5` degrees. Those rows, by label "(tie rule)", are
+//!   checked twice before G1 decides the class. First the refinement replays
+//!   ([`replay_coons`]): every station's derivative and angle bounds enclose the exact
+//!   values (enclosed here from the candidate's net and knots), every candidate is measured
+//!   at the bare patch's stations, and an independent replay of the rule picks the logged
+//!   copy, which the output holds bit for bit. Then main's patch is found among the
+//!   candidates, and a side counts against a patch only with a station where it is
+//!   certainly worse and none where it is certainly better
 //!   ([`cert_coons_against_main`]). analytic064 (torus), whose refined copies are
 //!   certainly worse along two sides, keeps main's bare patch, and analytic111 the 32-span
-//!   copy main took (three ties, then a certain loss); neither moves.
-//!   [`coons_refinements_replay_with_honest_bounds`] replays them, analytic028 and
-//!   `topology.brep_p1`'s `vase_rev_corner_blend_3` and `Endcap_corner_blend_3`.
+//!   copy main took; neither moves. [`coons_refinements_replay_with_honest_bounds`]
+//!   replays them, analytic028 and `topology.brep_p1`'s `vase_rev_corner_blend_3` and
+//!   `Endcap_corner_blend_3`.
 //! * **Whole-solid corner blends** (`topology.brep_p1`, label "Coons replay, stations"):
 //!   the neighbours have no implicit form, so only the replay and the comparison with
 //!   main's candidate apply. `Endcap_corner_blend_3` moves: main took a refined copy whose
-//!   station maximum on one side (1.1353) is certainly above the bare patch's
-//!   (1.0752 ± 0.0034); the veto keeps the bare patch. CLOSER at the stations, which is a
-//!   sampled measure (ARGUED, not a sup-norm bound).
+//!   bottom side reaches 1.1353 ± 2.6e-5 at a station where the bare patch is certified at
+//!   1.0752 ± 3e-4, so every refined copy is certainly worse there and the bare patch is
+//!   kept. Main's copy is also certainly nearer to tangent at other stations, so neither
+//!   patch fails the pointwise comparison and the row is EQUAL, not CLOSER.
 //! * **Extrusion and cone curves** (`surface.surf_of_extrusion_p2`): every Bézier segment
 //!   lies within `tol` of the extrusion's planes (convex hull) and of the cone (a Bernstein
 //!   bound of the implicit equation, by de Casteljau halving).
 //!
 //! The bounds are `γ_n` multiples of the magnitudes each formula combines (`n` above the
-//! operation count of the paths measured, with room), stated at each use. The report lists
-//! the smallest ratio of an old value's error to its bound among the CLOSER rows: the
-//! certificates separate them by orders of magnitude, not by the bounds' constants.
+//! operation count of the paths measured, with room), stated at each use. Those constants
+//! are not derived to the last factor, so a row whose old value fails its bound by less
+//! than [`CLOSER_MARGIN`] (10 times) is classed EQUAL, not CLOSER. The report prints the
+//! distribution of the old values' error-to-bound ratios over the CLOSER rows.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -1481,6 +1495,8 @@ fn moved_cone_rows_are_proven() {
     let mut counts: BTreeMap<(String, String, Class), usize> = BTreeMap::new();
     let mut failures = Vec::new();
     let mut closest: BTreeMap<String, (f64, String)> = BTreeMap::new();
+    let mut ratios: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    let mut axis_rows: Vec<String> = Vec::new();
     let mut report = String::new();
     for unit in registry() {
         let Some(cases) = wanted.get(unit.id()) else {
@@ -1519,7 +1535,22 @@ fn moved_cone_rows_are_proven() {
                 case.name
             );
             let logs = coons_logs(unit.id(), &case, &new);
-            let (op, vn, vo) = certify(unit.id(), &case.inputs, &new, &old, &logs);
+            let (op, vn, vo) = if is_axis_scaled_row(unit.id(), &case.name) {
+                let (op, vn, vo, bits) = cert_rescaled(unit.as_ref(), &case, &new, &old);
+                axis_rows.push(format!(
+                    "{} {} ({})",
+                    unit.id(),
+                    case.name,
+                    if bits {
+                        "bit for bit"
+                    } else {
+                        "within the goldens' tolerance"
+                    }
+                ));
+                (op, vn, vo)
+            } else {
+                certify(unit.id(), &case.inputs, &new, &old, &logs)
+            };
             if std::env::var("WR713_SHOW").is_ok_and(|w| w.split(',').any(|w| w == case.name)) {
                 println!(
                     "SHOW {} {}\n  new {:?} {:?}\n  old {:?} {:?}",
@@ -1531,11 +1562,20 @@ fn moved_cone_rows_are_proven() {
                     old.values
                 );
             }
+            // an old value off by less than `CLOSER_MARGIN` times its bound fails only by
+            // the bound's constant (`γ_n` with an `n` stated, not derived for the old
+            // path): EQUAL, not CLOSER (review r3 M6)
             let class = match (&vn, &vo) {
                 (Err(_), _) => Class::Farther,
                 (Ok(()), Ok(())) => Class::Equal,
+                (Ok(()), Err(f)) if f.ratio.is_some_and(|r| r < CLOSER_MARGIN) => Class::Equal,
                 (Ok(()), Err(_)) => Class::Closer,
             };
+            if let (Ok(()), Err(f)) = (&vn, &vo) {
+                if let Some(r) = f.ratio {
+                    ratios.entry(op.clone()).or_default().push(r);
+                }
+            }
             if let Err(f) = &vn {
                 let o = match &vo {
                     Ok(()) => "old passes".to_owned(),
@@ -1548,7 +1588,7 @@ fn moved_cone_rows_are_proven() {
                     f.why
                 ));
             }
-            if let (Ok(()), Err(f)) = (&vn, &vo) {
+            if let (Ok(()), Err(f), Class::Closer) = (&vn, &vo, class) {
                 let r = f.ratio.unwrap_or(f64::INFINITY);
                 let e = closest
                     .entry(op.clone())
@@ -1575,11 +1615,218 @@ fn moved_cone_rows_are_proven() {
     for (op, (r, w)) in &closest {
         writeln!(report, "  {op:24} {r:.3e}  {w}").unwrap();
     }
+    writeln!(
+        report,
+        "old error / bound where the old value fails by a bound (EQUAL below {CLOSER_MARGIN}):"
+    )
+    .unwrap();
+    let edges = [1.0, 10.0, 1e2, 1e4, 1e8, f64::INFINITY];
+    for (op, rs) in &ratios {
+        let mut line = format!("  {op:24}");
+        let mut lo = 0.0;
+        for hi in edges {
+            let n = rs.iter().filter(|r| **r >= lo && **r < hi).count();
+            write!(line, " [{lo:.0e},{hi:.0e}):{n}").unwrap();
+            lo = hi;
+        }
+        let n = rs.iter().filter(|r| !r.is_finite()).count();
+        write!(line, " inf/nan:{n}").unwrap();
+        writeln!(report, "{line}").unwrap();
+    }
+    writeln!(
+        report,
+        "axis rows certified on inputs rescaled by powers of two ({}):",
+        axis_rows.len()
+    )
+    .unwrap();
+    for r in &axis_rows {
+        writeln!(report, "  {r}").unwrap();
+    }
+    assert_eq!(
+        axis_rows.len(),
+        AXIS_SCALED_ROWS.len(),
+        "an axis row is missing"
+    );
     println!("{report}");
     for f in &failures {
         println!("FARTHER {f}");
     }
     assert!(failures.is_empty(), "{} rows FARTHER", failures.len());
+}
+
+/// An old value off its certified answer by less than this many times the bound fails only
+/// by the bound's constant: the `γ_n` bounds state an `n` above the operation count of the
+/// path they were written for, with room, not derived for main's path. Such a row is
+/// EQUAL, not CLOSER.
+const CLOSER_MARGIN: f64 = 10.0;
+
+/// The rows whose inputs hold an axis that upstream's unitize cannot read (a coordinate of
+/// `1e-300` or `1e300`, or `5e-13`, below its threshold): certified on the same inputs with
+/// each axis rescaled by a power of two ([`cert_rescaled`]).
+const AXIS_SCALED_ROWS: [(&str, &str); 32] = [
+    (
+        "surface.cone_p1",
+        "height_without_polar_tiny_axis_swap0_inside1",
+    ),
+    (
+        "surface.cone_p1",
+        "height_without_polar_tiny_axis_swap1_inside1",
+    ),
+    ("surface.cone_p2", "nopolar_bounded_off_pos"),
+    ("surface.cone_p2", "nopolar_bounded_off_trunc"),
+    ("surface.cone_p2", "nopolar_bounded_rebuild"),
+    ("surface.cone_p2", "nopolar_bounded_recognize"),
+    ("surface.cone_p2", "nopolar_bounded_trim"),
+    ("surface.cone_p2", "nopolar_bounded_y_trim_o0_full"),
+    ("surface.cone_p2", "nopolar_bounded_apex_off_pos"),
+    ("surface.cone_p2", "nopolar_bounded_apex_off_trunc"),
+    ("surface.cone_p2", "nopolar_bounded_apex_rebuild"),
+    ("surface.cone_p2", "nopolar_bounded_apex_recognize"),
+    ("surface.cone_p2", "nopolar_bounded_apex_trim"),
+    ("surface.cone_p2", "nopolar_bounded_apex_y_trim_o0_full"),
+    ("surface.cone_p2", "nopolar_bounded_cone_rebuild"),
+    ("surface.cone_p2", "nopolar_bounded_cone_recognize"),
+    ("surface.cone_p2", "nopolar_bounded_cone_trim"),
+    ("surface.cone_p2", "nopolar_bounded_cone_x_trim_oneg_full"),
+    ("surface.cone_p3", "rejected_tiny_axis_0_cone"),
+    ("surface.cone_p3", "rejected_tiny_axis_0_other"),
+    ("surface.cone_p3", "rejected_tiny_axis_3_cone"),
+    ("surface.cone_p3", "rejected_tiny_axis_3_other"),
+    ("surface.cone_p3", "rejected_tiny_axis_cylinders_cone"),
+    ("surface.cone_p3", "rejected_tiny_axis_cylinders_other"),
+    ("surface.cone_p3", "rejected_below_unitize_threshold_axis"),
+    ("surface.cone_p3", "fuzz_axis_overflow_zero_y"),
+    ("surface.cone_p3", "fuzz_axis_overflow_zero_y_swapped"),
+    ("surface.cone_p3", "fuzz_axis_overflow_zero_y_trimmed"),
+    ("surface.cone_p3", "fuzz_height_06674"),
+    ("surface.cone_p3", "fuzz_height_06289"),
+    ("surface.cone_p3", "missing_polar_height_plane_1_y"),
+    ("surface.cone_p3", "missing_polar_height_plane_2_y"),
+];
+
+fn is_axis_scaled_row(unit: &str, case: &str) -> bool {
+    AXIS_SCALED_ROWS
+        .iter()
+        .any(|(u, c)| *u == unit && *c == case)
+}
+
+/// The power of two that brings the largest absolute coordinate of `v` into `[1, 2)`;
+/// `1` for a zero or non-finite vector. Each step is a multiplication by 2 or 1/2, exact
+/// in the ranges reached (the coordinates stay normal or are zero).
+fn pow2_scale(v: &[f64]) -> f64 {
+    let m = v.iter().fold(0.0_f64, |m, x| m.max(x.abs()));
+    if m == 0.0 || !m.is_finite() {
+        return 1.0;
+    }
+    let mut s = 1.0;
+    while m * s < 1.0 {
+        s *= 2.0;
+    }
+    while m * s >= 2.0 {
+        s *= 0.5;
+    }
+    s
+}
+
+/// `v` times `s`, each product checked exact (it divides back to `v`).
+fn scaled(v: &[f64], s: f64) -> Vec<f64> {
+    v.iter()
+        .map(|&x| {
+            let y = x * s;
+            assert!(y / s == x, "{x} * {s} is not exact");
+            y
+        })
+        .collect()
+}
+
+/// The row's inputs with each cone or cylinder axis (`X` and `Y`) scaled by
+/// [`pow2_scale`]: the JSON `x` and `y` of `cone_p1`/`cone_p2` and the entries 3..9 of each
+/// 17-entry cone array of `cone_p3` (a 13-entry plane is left as it is). `None` where no
+/// axis changes.
+fn rescaled_inputs(unit: &str, inputs: &Value) -> Option<Value> {
+    let mut out = inputs.clone();
+    let mut changed = false;
+    let fix = |arr: &mut Value| -> bool {
+        let v: Vec<f64> = arr
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+        let s = pow2_scale(&v);
+        if s != 1.0 {
+            *arr = serde_json::json!(scaled(&v, s));
+        }
+        s != 1.0
+    };
+    match unit {
+        "surface.cone_p1" | "surface.cone_p2" => {
+            changed |= fix(&mut out["cone"]["x"]);
+            changed |= fix(&mut out["cone"]["y"]);
+        }
+        "surface.cone_p3" => {
+            for key in ["cone", "other"] {
+                let a: Vec<f64> = out[key]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.as_f64().unwrap())
+                    .collect();
+                if a.len() != 17 {
+                    continue;
+                }
+                let mut b = a.clone();
+                for range in [3..6, 6..9] {
+                    let s = pow2_scale(&a[range.clone()]);
+                    if s != 1.0 {
+                        changed = true;
+                        b.splice(range.clone(), scaled(&a[range], s));
+                    }
+                }
+                out[key] = serde_json::json!(b);
+            }
+        }
+        _ => return None,
+    }
+    changed.then_some(out)
+}
+
+/// The certificate of an axis row (review r3 B1). The cone `(O, X, Y, r, s)` defines is
+/// the same for `X -> λ X` and `Y -> μ Y` (`λ, μ > 0`): upstream's definition unitizes both
+/// axes, and so does its scale-invariant reading, in exact arithmetic. Only the rounding
+/// of `|v|^2` (its underflow or overflow, or the unitize threshold) tells the two apart.
+/// Scaling by a power of two is exact, so the rescaled inputs ([`rescaled_inputs`]) are
+/// the same cone given with ordinary axes, which upstream's own unitize reads. The row's
+/// new value must equal the rescaled run's (bit for bit, else within the goldens'
+/// comparison), and that run is certified with the ordinary certificate ([`certify`])
+/// against the rescaled inputs; the old value is certified against them too. Returns the
+/// op, the new and old verdicts, and whether the two runs agree bit for bit.
+fn cert_rescaled(
+    unit: &dyn goldens::UnitDiff,
+    case: &goldens::case::Case,
+    new: &Output,
+    old: &Output,
+) -> (String, Verdict, Verdict, bool) {
+    let inputs = rescaled_inputs(unit.id(), &case.inputs)
+        .unwrap_or_else(|| panic!("{}: no axis to rescale", case.name));
+    let scaled_case = goldens::case::Case {
+        inputs: inputs.clone(),
+        ..case.clone()
+    };
+    let out = unit.run_rust(&scaled_case).unwrap();
+    let (op, vr, vo) = certify(unit.id(), &inputs, &out, old, &[]);
+    let enc = |o: &Output| golden::encode(&case.name, o);
+    let bits = enc(new) == enc(&out)
+        && new.values.iter().all(|(k, v)| {
+            out.values.get(k).is_some_and(|w| {
+                v.len() == w.len() && v.iter().zip(w).all(|(a, b)| a.to_bits() == b.to_bits())
+            })
+        })
+        && new.values.len() == out.values.len()
+        && new.error == out.error;
+    let same = bits || golden::diff(&enc(&out), &enc(new), unit.abs_floors()).is_none();
+    let vn = vr.and_then(|()| check(same, "the row's value is not the rescaled inputs' value"));
+    (format!("{op} (axes rescaled)"), vn, vo, bits)
 }
 
 /// The op label and the new and old verdicts of one row.
@@ -4040,54 +4287,156 @@ struct Replay {
     deriv_ratio: f64,
     /// the largest half-width of an angle enclosure over the station's claimed bound
     angle_ratio: f64,
-    /// candidates taken on a tie, kept on a certain loss, taken on a certain gain,
-    /// refused for a certainly worse side inside a tie, and compared on no common side
-    ties_taken: usize,
-    losses: usize,
-    gains: usize,
-    vetoed: usize,
-    no_common_side: usize,
+    /// candidates taken; refused for a side certainly worse than a held copy's, for a
+    /// station a held copy certifies and the candidate does not, or for a comparison the
+    /// bounds leave undecided
+    taken: usize,
+    worse: usize,
+    uncertified: usize,
+    undecided: usize,
 }
 
-/// The largest angle and bound over the sides in `voting`, as `SideAngle::sup_over`.
-fn sup_over(sides: &[Option<(f64, f64)>; 4], voting: impl Fn(usize) -> bool) -> Option<(f64, f64)> {
-    let mut sup: Option<(f64, f64)> = None;
-    for (ii, s) in sides.iter().enumerate() {
-        let Some((max, err)) = *s else { continue };
-        if !voting(ii) {
-            continue;
-        }
-        sup = Some(match sup {
-            None => (max, err),
-            Some((m, e)) => (if max > m { max } else { m }, e.max(err)),
+/// The next double above `x` (the library's `next_up`, written again here).
+fn up(x: f64) -> f64 {
+    if x.is_nan() || x == f64::INFINITY {
+        x
+    } else if x == 0.0 {
+        f64::from_bits(1)
+    } else if x > 0.0 {
+        f64::from_bits(x.to_bits() + 1)
+    } else {
+        f64::from_bits(x.to_bits() - 1)
+    }
+}
+
+/// The next double below `x`.
+fn down(x: f64) -> f64 {
+    -up(-x)
+}
+
+/// A candidate's station angles per side (left, bottom, right, top), `None` for a side
+/// with no station; a station is `Some((angle, err))` where it is certified (an angle,
+/// and a bound below `PI / 2`).
+type Sides = [Option<Vec<Option<(f64, f64)>>>; 4];
+
+/// The [`Sides`] of a logged candidate, read from its stations.
+fn candidate_sides(c: &CoonsCandidateLog) -> Sides {
+    let mut sides: Sides = [None, None, None, None];
+    for st in &c.stations {
+        let at = st.angle.filter(|_| st.err < 0.5 * PI).map(|a| (a, st.err));
+        sides[st.side].get_or_insert_with(Vec::new).push(at);
+    }
+    sides
+}
+
+/// The largest computed angle over every certified station (the loop's stop test).
+fn sides_sup(s: &Sides) -> Option<f64> {
+    s.iter()
+        .flatten()
+        .flatten()
+        .flatten()
+        .map(|&(a, _)| a)
+        .fold(None, |m: Option<f64>, a| {
+            Some(m.map_or(a, |m| if a > m { a } else { m }))
+        })
+}
+
+/// One side of a candidate `c` against a held copy `h`, at the same stations, over those
+/// `h` certifies: `"worse"` where the candidate's largest lower end is above the copy's
+/// largest upper end, `"no worse"` where its largest upper end is at most the copy's
+/// largest lower end plus `res` (one step down), `"uncertified"` where it lacks a station,
+/// else `"undecided"`. Each enclosure is `[angle - err, angle + err]` rounded outwards.
+fn side_verdict(c: &[Option<(f64, f64)>], h: &[Option<(f64, f64)>], res: f64) -> &'static str {
+    if c.len() != h.len() {
+        return "uncertified";
+    }
+    let (mut cl, mut ch, mut hl, mut hh) = (
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    );
+    let mut any = false;
+    for (sc, sh) in c.iter().zip(h) {
+        let Some((ha, he)) = *sh else { continue };
+        let Some((ca, ce)) = *sc else {
+            return "uncertified";
+        };
+        cl = cl.max(down(ca - ce));
+        ch = ch.max(up(ca + ce));
+        hl = hl.max(down(ha - he));
+        hh = hh.max(up(ha + he));
+        any = true;
+    }
+    if !any {
+        "no worse"
+    } else if cl > hh || cl.is_nan() || hh.is_nan() {
+        "worse"
+    } else if ch <= down(hl + res) {
+        "no worse"
+    } else {
+        "undecided"
+    }
+}
+
+/// The verdict of candidate `c` against held copy `h`: `"no worse"` when every side is;
+/// else the first of `"worse"`, `"uncertified"`, `"undecided"` some side has.
+fn candidate_verdict(c: &Sides, h: &Sides, res: f64) -> &'static str {
+    let mut found = Vec::new();
+    for (cs, hs) in c.iter().zip(h) {
+        found.push(match (cs, hs) {
+            (_, None) => "no worse",
+            (None, Some(hs)) if hs.iter().all(Option::is_none) => "no worse",
+            (None, Some(_)) => "uncertified",
+            (Some(cs), Some(hs)) => side_verdict(cs, hs, res),
         });
     }
-    sup
+    ["worse", "uncertified", "undecided"]
+        .into_iter()
+        .find(|v| found.contains(v))
+        .unwrap_or("no worse")
 }
 
 /// Replays one `make_coons_patch_tangent_to_sides` run from its log and checks it.
 ///
-/// * **Honest bounds.** At every station that counts (`err < PI`), the exact first
+/// * **Common stations.** Every candidate is measured at the same `(side, s)` stations as
+///   the bare patch, bit for bit, so each comparison is of angles at the same points.
+/// * **Honest bounds.** At every certified station (`err < PI / 2`), the exact first
 ///   derivatives of the candidate (enclosed here, [`exact_derivatives`]) are within the
 ///   claimed `(eu, ev)` of the computed ones, and the exact angle between the exact patch
 ///   normal `du x dv` and the logged side normal (its cosine enclosed in [`Rv`] arithmetic,
 ///   then `acos` of the ends, widened for the library's rounding) is inside
 ///   `[angle - err, angle + err]`. So each station's bound encloses the angle its own
 ///   arithmetic is meant to measure; nothing is taken from the kernel's bound arithmetic.
-/// * **Sides.** Each side's `(max, err)` is the largest angle and bound over its counted
-///   stations, bit for bit.
 /// * **The rule.** From the bare patch, each refined copy (spans 8, 16, 32, 64, while the
-///   held sup is above the target) is compared over the sides both certify: taken when
-///   its sup is certainly smaller, or tied within the sum of the bounds and no common side
-///   certainly worse; the replayed choice is the logged one, and the loop stops where it
-///   did.
+///   last copy held reads above the target) is taken only where it is shown no worse
+///   ([`candidate_verdict`]) than the bare patch and every copy taken before it, at the
+///   log's resolution, which is `SM_CONTINUITY_ANGLE`; the replayed choice is the logged
+///   one, and the loop stops where it did.
 fn replay_coons(log: &CoonsTangencyLog) -> Result<Replay, Fail> {
     let mut r = Replay::default();
+    check(
+        log.resolution.to_bits() == (0.5 * (PI / 180.0)).to_bits(),
+        format!("the resolution is {}", log.resolution),
+    )?;
+    let Some(bare) = log.candidates.first() else {
+        return fail("no candidate");
+    };
+    let at = |c: &CoonsCandidateLog| -> Vec<(usize, u64)> {
+        c.stations
+            .iter()
+            .map(|st| (st.side, st.s.to_bits()))
+            .collect()
+    };
+    let bare_at = at(bare);
     for (ci, c) in log.candidates.iter().enumerate() {
-        let mut sides: [Option<(f64, f64)>; 4] = [None; 4];
+        check(
+            at(c) == bare_at,
+            format!("candidate {ci} is not measured at the bare patch's stations"),
+        )?;
         for st in &c.stations {
             check(st.side < 4, "a station on no side")?;
-            if st.err >= PI {
+            if st.angle.is_none() || st.err >= 0.5 * PI {
                 continue;
             }
             let (Some(angle), Some((_, m)), Some((eu, ev))) =
@@ -4133,59 +4482,37 @@ fn replay_coons(log: &CoonsTangencyLog) -> Result<Replay, Fail> {
             )?;
             r.angle_ratio = r.angle_ratio.max((angle - lo).max(hi - angle) / st.err);
             r.stations += 1;
-            let s = &mut sides[st.side];
-            *s = Some(match *s {
-                None => (angle, st.err),
-                Some((mx, e)) => (if angle > mx { angle } else { mx }, e.max(st.err)),
-            });
         }
-        let bits =
-            |s: &[Option<(f64, f64)>; 4]| s.map(|x| x.map(|(a, b)| (a.to_bits(), b.to_bits())));
-        check(
-            bits(&sides) == bits(&c.sides),
-            format!("candidate {ci}: the logged sides are not its stations'"),
-        )?;
         let want = if ci == 0 { 0 } else { 8 << (ci - 1) };
         check(
             c.spans == want,
             format!("candidate {ci} has {} spans", c.spans),
         )?;
     }
-    let Some(bare) = log.candidates.first() else {
-        return fail("no candidate");
-    };
-    let mut held = bare.sides;
+    let mut held: Vec<Sides> = vec![candidate_sides(bare)];
     let mut chosen = None;
     let mut next = 1;
-    while next <= 4 && sup_over(&held, |_| true).is_some_and(|(m, _)| m > log.target) {
+    while next <= 4 && sides_sup(held.last().unwrap()).is_some_and(|m| m > log.target) {
         let Some(c) = log.candidates.get(next) else {
             return fail(format!(
                 "the loop measured candidate {next}, the log has none"
             ));
         };
-        let joint = sup_over(&c.sides, |ii| held[ii].is_some())
-            .zip(sup_over(&held, |ii| c.sides[ii].is_some()));
-        if let Some(((a, ea), (b, eb))) = joint {
-            let tied = (a - b).abs() <= ea + eb;
-            let worse = c.sides.iter().zip(&held).any(|pair| match pair {
-                (Some((x, ex)), Some((y, ey))) => x - y > ex + ey,
-                _ => false,
-            });
-            if !tied && a < b {
-                r.gains += 1;
-            } else if tied && !worse {
-                r.ties_taken += 1;
-            } else if tied {
-                r.vetoed += 1;
-            } else {
-                r.losses += 1;
-            }
-            if (!tied && a < b) || (tied && !worse) {
-                held = c.sides;
+        let cs = candidate_sides(c);
+        let verdict = held
+            .iter()
+            .map(|h| candidate_verdict(&cs, h, log.resolution))
+            .find(|v| *v != "no worse")
+            .unwrap_or("no worse");
+        match verdict {
+            "no worse" => {
+                r.taken += 1;
+                held.push(cs);
                 chosen = Some(next);
             }
-        } else {
-            r.no_common_side += 1;
+            "worse" => r.worse += 1,
+            "uncertified" => r.uncertified += 1,
+            _ => r.undecided += 1,
         }
         next += 1;
     }
@@ -4296,11 +4623,10 @@ fn cert_coons_replay(logs: &[CoonsTangencyLog], o: &Output) -> Result<Replay, Fa
         total.stations += r.stations;
         total.deriv_ratio = total.deriv_ratio.max(r.deriv_ratio);
         total.angle_ratio = total.angle_ratio.max(r.angle_ratio);
-        total.ties_taken += r.ties_taken;
-        total.losses += r.losses;
-        total.gains += r.gains;
-        total.vetoed += r.vetoed;
-        total.no_common_side += r.no_common_side;
+        total.taken += r.taken;
+        total.worse += r.worse;
+        total.uncertified += r.uncertified;
+        total.undecided += r.undecided;
     }
     Ok(total)
 }
@@ -4311,7 +4637,7 @@ fn cert_coons_replay(logs: &[CoonsTangencyLog], o: &Output) -> Result<Replay, Fa
 /// one main took), `vase_rev_corner_blend_3` (its sups tie within
 /// the radian its left and right sides leave, but its bottom side, read to `3e-5`, is
 /// certainly ten degrees worse on every copy: the bare patch) and `Endcap_corner_blend_3`
-/// (likewise on its bottom side, 1.1353 against 1.0752 ± 0.0034: the bare patch, where
+/// (likewise on its bottom side, 1.1353 against 1.0752 ± 3e-4: the bare patch, where
 /// main took a refined copy).
 #[test]
 fn coons_refinements_replay_with_honest_bounds() {
@@ -4342,7 +4668,24 @@ fn coons_refinements_replay_with_honest_bounds() {
                 .unwrap_or_else(|f| panic!("{}: {}", case.name, f.why));
             println!("{} chosen {:?} {r:?}", case.name, logs[0].chosen);
             for c in &logs[0].candidates {
-                println!("  spans {} sides {:?}", c.spans, c.sides);
+                let s = candidate_sides(c);
+                let side_max = s.clone().map(|side| {
+                    side.map(|v| {
+                        v.iter()
+                            .flatten()
+                            .fold(
+                                (f64::NEG_INFINITY, 0.0),
+                                |m, &(a, e)| {
+                                    if a > m.0 {
+                                        (a, e)
+                                    } else {
+                                        m
+                                    }
+                                },
+                            )
+                    })
+                });
+                println!("  spans {} side maxima (angle, err) {side_max:?}", c.spans);
             }
             assert_eq!(logs[0].chosen, chosen, "{}", case.name);
             assert!(r.stations > 0);
@@ -4352,14 +4695,38 @@ fn coons_refinements_replay_with_honest_bounds() {
     assert_eq!(seen, want.len());
 }
 
-/// A B-rep row whose corner patch moved: the new side replays ([`cert_coons_replay`]); the
-/// old (main's) output must hold one of this run's candidates (main refined the same patch
-/// the same way, and chose by a strict `<` of uncertified maxima), and the two choices are
-/// compared on the certified side data of the replay, which [`replay_coons`] showed to
-/// enclose the stations' exact angles. A side fails where the other's sup is certainly
-/// smaller, or where the sups tie and some side of it is certainly worse; with neither,
-/// both pass (EQUAL at the stations, which sample each side four times a knot span and
-/// densely towards its corners: ARGUED, not a sup-norm bound between them).
+/// The points where candidate `a` is certainly farther from tangent than candidate `b`:
+/// the common stations `(side, s)` both certify where `a`'s enclosure of its exact angle
+/// lies wholly above `b`'s. Each is a fact about the exact patches at that point (the
+/// enclosures were shown honest by [`replay_coons`]), with nothing sampled in it.
+fn witnesses(log: &CoonsTangencyLog, a: usize, b: usize) -> Vec<String> {
+    let (ca, cb) = (&log.candidates[a], &log.candidates[b]);
+    let mut out = Vec::new();
+    for (x, y) in ca.stations.iter().zip(&cb.stations) {
+        let (Some(ax), Some(ay)) = (x.angle, y.angle) else {
+            continue;
+        };
+        if x.err >= 0.5 * PI || y.err >= 0.5 * PI {
+            continue;
+        }
+        if down(ax - x.err) > up(ay + y.err) {
+            out.push(format!(
+                "side {} at s = {}: {ax} +- {:e} against {ay} +- {:e}",
+                x.side, x.s, x.err, y.err
+            ));
+        }
+    }
+    out
+}
+
+/// A row whose corner patch moved because the refinement chose another copy: the new side
+/// replays ([`cert_coons_replay`]); the old (main's) output must hold one of this run's
+/// candidates (main refined the same patch the same way, and chose by a strict `<` of
+/// uncertified maxima). The two choices are then compared point by point
+/// ([`witnesses`]): a side fails where it is certainly farther from tangent than the
+/// other at some common station and certainly nearer at none. Failing rests on a witness
+/// point, a proof about the exact patches there. Passing is not a sup-norm bound: where
+/// neither side has a witness, or each has one, both pass.
 fn cert_coons_against_main(
     logs: &[CoonsTangencyLog],
     new: &Output,
@@ -4379,26 +4746,24 @@ fn cert_coons_against_main(
                 Ok(()),
             );
         };
-        let (si, sj) = (log.candidates[i].sides, log.candidates[j].sides);
-        let joint = sup_over(&si, |ii| sj[ii].is_some()).zip(sup_over(&sj, |ii| si[ii].is_some()));
-        let worse = |x: &[Option<(f64, f64)>; 4], y: &[Option<(f64, f64)>; 4]| {
-            x.iter().zip(y).any(|pair| match pair {
-                (Some((a, ea)), Some((b, eb))) => a - b > ea + eb,
-                _ => false,
-            })
-        };
-        let Some(((a, ea), (b, eb))) = joint else {
+        if i == j {
             continue;
-        };
-        let tied = (a - b).abs() <= ea + eb;
+        }
+        let (wn, wo) = (witnesses(log, i, j), witnesses(log, j, i));
         let what = format!("refinement {li}: candidate {i} (new) against {j} (main)");
-        if (!tied && a > b) || (tied && worse(&si, &sj)) {
+        if !wn.is_empty() && wo.is_empty() {
             vn = fail(format!(
-                "{what}: the new patch is certainly worse ({a} +- {ea} against {b} +- {eb})"
+                "{what}: the new patch is certainly farther from tangent at {} point(s), \
+                 nearer at none; first {}",
+                wn.len(),
+                wn[0]
             ));
-        } else if (!tied && b > a) || (tied && worse(&sj, &si)) {
+        } else if !wo.is_empty() && wn.is_empty() {
             vo = fail(format!(
-                "{what}: main's patch is certainly worse ({b} +- {eb} against {a} +- {ea})"
+                "{what}: main's patch is certainly farther from tangent at {} point(s), \
+                 nearer at none; first {}",
+                wo.len(),
+                wo[0]
             ));
         }
     }
