@@ -70,6 +70,18 @@ pub enum StretchSkip {
     },
 }
 
+impl StretchSkip {
+    /// The skip's reason id of design v2 11.3: `too_short` (stretch) or `spacing_too_small`
+    /// (pair).
+    #[must_use]
+    pub const fn reason_id(&self) -> &'static str {
+        match self {
+            Self::TooShort { .. } => "too_short",
+            Self::SpacingTooSmall { .. } => "spacing_too_small",
+        }
+    }
+}
+
 /// The least space between two laser-cut tabs (design 6.3, laser row): the web of the slot plate
 /// between two slots, `2c + min_land`.
 ///
@@ -212,6 +224,16 @@ pub enum TabSkip {
     },
 }
 
+impl TabSkip {
+    /// The skip's reason id of design v2 11.3: `tab_too_short`.
+    #[must_use]
+    pub const fn reason_id(&self) -> &'static str {
+        match self {
+            Self::TooShort { .. } => "tab_too_short",
+        }
+    }
+}
+
 /// Tab `k`'s outline in the tab plate's frame `(u, z)` (design 7.1): `u ∈ [u_k, u_k + W]`,
 /// `z ∈ [−h, δ]`, with `h = t_S + protrusion` the tab's length and `δ` the level of T's end face
 /// above P. Counter-clockwise.
@@ -338,6 +360,17 @@ pub enum SlotSkip {
         /// The least distance from the slot to the hole.
         web: f64,
     },
+}
+
+impl SlotSkip {
+    /// The skip's reason id of design v2 11.3 (tab level): `at_edge` or `over_hole`.
+    #[must_use]
+    pub const fn reason_id(&self) -> &'static str {
+        match self {
+            Self::AtEdge => "at_edge",
+            Self::OverHole { .. } => "over_hole",
+        }
+    }
 }
 
 /// Design 7.4 for one slot (its outline with the clearance, and in PR B its dogbones) against

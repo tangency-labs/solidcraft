@@ -337,3 +337,25 @@ fn apart_names_the_first_pair_that_meets() {
     );
     assert!(apart(&[a, far], TOL, TOL).is_err());
 }
+
+/// Design v2 11.3's ids for the stretch, tab and slot skips.
+#[test]
+fn skips_name_their_reason_ids() {
+    let too_short = StretchSkip::TooShort {
+        length: 10.0,
+        need: 24.0,
+        most: 0,
+    };
+    let spacing = StretchSkip::SpacingTooSmall {
+        space: 0.5,
+        least: 0.7,
+    };
+    assert_eq!(too_short.reason_id(), "too_short");
+    assert_eq!(spacing.reason_id(), "spacing_too_small");
+    assert_eq!(
+        TabSkip::TooShort { length: -1.0 }.reason_id(),
+        "tab_too_short"
+    );
+    assert_eq!(SlotSkip::AtEdge.reason_id(), "at_edge");
+    assert_eq!(SlotSkip::OverHole { web: 0.0 }.reason_id(), "over_hole");
+}

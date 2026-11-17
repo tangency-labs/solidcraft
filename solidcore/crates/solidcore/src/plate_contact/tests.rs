@@ -803,3 +803,36 @@ fn the_defects_of_a_notched_strip() {
     );
     assert!(strip_defects(&plain, Vec2::new(2.0, 0.0), TOL).is_err());
 }
+
+/// Design v2 11.3's pair ids for every [`PairSkip`].
+#[test]
+fn pair_skips_name_their_reason_ids() {
+    let ids: Vec<&str> = [
+        PairSkip::Contact(Contact::NoContact { distance: 0.5 }),
+        PairSkip::Contact(Contact::EndNotFlat),
+        PairSkip::NoPlateFaces(NoPlateFaces::NoPair),
+        PairSkip::NoPlateFaces(NoPlateFaces::NotAPlate),
+        PairSkip::NotSquare(Some(80.0)),
+        PairSkip::NotSquare(None),
+        PairSkip::Swapped,
+        PairSkip::PassesThrough,
+        PairSkip::SeveralContacts,
+    ]
+    .iter()
+    .map(PairSkip::reason_id)
+    .collect();
+    assert_eq!(
+        ids,
+        [
+            "no_contact",
+            "end_not_flat",
+            "not_a_plate",
+            "not_a_plate",
+            "not_square",
+            "not_square",
+            "swapped",
+            "passes_through",
+            "several_contacts"
+        ]
+    );
+}

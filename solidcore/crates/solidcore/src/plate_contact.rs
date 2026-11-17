@@ -777,6 +777,26 @@ pub enum PairSkip {
     SeveralContacts,
 }
 
+impl PairSkip {
+    /// The skip's reason id of design v2 11.3 (pair level): `no_contact`, `end_not_flat`,
+    /// `not_a_plate`, `not_square`, `swapped`, `passes_through` or `several_contacts`. A touch or
+    /// an overlap, which [`pair`] never gives as a skip, reads `not_a_plate`.
+    #[must_use]
+    pub const fn reason_id(&self) -> &'static str {
+        match self {
+            Self::Contact(Contact::NoContact { .. }) => "no_contact",
+            Self::Contact(Contact::EndNotFlat) => "end_not_flat",
+            Self::Contact(Contact::Touch { .. } | Contact::Overlap) | Self::NoPlateFaces(_) => {
+                "not_a_plate"
+            }
+            Self::NotSquare(_) => "not_square",
+            Self::Swapped => "swapped",
+            Self::PassesThrough => "passes_through",
+            Self::SeveralContacts => "several_contacts",
+        }
+    }
+}
+
 /// A plate joint of T on P: how T meets P and T's plate faces there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PairJoint {

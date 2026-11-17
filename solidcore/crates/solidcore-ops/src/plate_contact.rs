@@ -463,6 +463,19 @@ pub enum JointSkip {
     OtherDirection(usize),
 }
 
+impl JointSkip {
+    /// The skip's reason id of design v2 11.3: the pair's ([`PairSkip::reason_id`]),
+    /// `meets_other_plate_joint` or `other_direction`.
+    #[must_use]
+    pub const fn reason_id(&self) -> &'static str {
+        match self {
+            Self::Pair(p) => p.reason_id(),
+            Self::MeetsOtherJoint(_) => "meets_other_plate_joint",
+            Self::OtherDirection(_) => "other_direction",
+        }
+    }
+}
+
 /// One feature's joints in pick order (design 5.7): each `(t, s, p)` names the tab plate and
 /// the slot plate by index into `plates` and the plane P of S. Each joint is planned
 /// ([`Body::tab_slot_plan`]); a later joint whose slot outlines meet (by
@@ -1052,5 +1065,20 @@ mod tests {
             vec![None, Some(JointSkip::MeetsOtherJoint(0))]
         );
         assert_eq!(run(&[(1, 0, p), (3, 0, under)]), vec![None, None]);
+    }
+
+    /// Design v2 11.3's ids for every [`JointSkip`]; a pair skip keeps the pair's id.
+    #[test]
+    fn joint_skips_name_their_reason_ids() {
+        assert_eq!(JointSkip::Pair(PairSkip::Swapped).reason_id(), "swapped");
+        assert_eq!(
+            JointSkip::Pair(PairSkip::PassesThrough).reason_id(),
+            "passes_through"
+        );
+        assert_eq!(
+            JointSkip::MeetsOtherJoint(0).reason_id(),
+            "meets_other_plate_joint"
+        );
+        assert_eq!(JointSkip::OtherDirection(1).reason_id(), "other_direction");
     }
 }
