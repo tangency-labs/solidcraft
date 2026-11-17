@@ -670,3 +670,38 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
     assert!(solidcraft_ui_registry::rect_of("t:ns:pressed:a.on").is_some(), "the pressed button is published");
     assert_eq!(solidcraft_ui_registry::count_of("t:ns:pressed"), Some(1.0));
 }
+
+#[test]
+fn split_button_parts_are_separated_without_overlap() {
+    let ctx = crate::test_support::context();
+    let t = Tokens::get();
+    for labels in [true, false] {
+        let mut split_btn = button("sketch.line", true);
+        split_btn.split = Some(Split { key: "Line", title: "Line", name: "Line variants" });
+        let row = Row {
+            groups: vec![group("Create", vec![split_btn])],
+            labels,
+            accent: solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
+            exit: false,
+            reveal: None,
+            more_tip: "More",
+            handles: HANDLES,
+        };
+        solidcraft_ui_registry::clear_handles();
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 200.0))), ..Default::default() };
+        crate::test_support::raw_frame(&ctx, input, |ui| {
+            let out = show(ui, &row, Rect::from_min_size(pos2(0.0, 30.0), vec2(300.0, GROUP_HEIGHT + 1.0)), &mut |_, _| false);
+            assert_eq!(out.buttons.len(), 1);
+            let drawn = &out.buttons[0];
+            let split = drawn.split.as_ref().expect("split response");
+            assert!(!drawn.rect.intersects(split.rect), "labels={labels}: main and dropdown rects must not overlap");
+            if labels {
+                assert!(drawn.rect.bottom() < split.rect.top(), "main button sits above dropdown button");
+            } else {
+                assert!(drawn.rect.right() < split.rect.left(), "main button sits left of dropdown button");
+            }
+            assert!(drawn.whole.contains_rect(drawn.rect));
+            assert!(drawn.whole.contains_rect(split.rect));
+        });
+    }
+}
