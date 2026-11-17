@@ -848,7 +848,9 @@ mod native {
         assert!(template.contains(code) && template.contains(data));
         let source = template.replacen(code, "      i32.const 2560 i32.const 11 i32.const 3072 i32.const 25 i32.const 0 call $run\n", 1).replacen(
             data,
-            &format!("{data}    (data (i32.const 2560) \"storage.set\")\n    (data (i32.const 3072) \"{{\\22document\\22:{{\\22teeth\\22:24}}}}\")\n"),
+            &format!(
+                "{data}    (data (i32.const 2560) \"storage.set\")\n    (data (i32.const 3072) \"{{\\22document\\22:{{\\22teeth\\22:24}}}}\")\n"
+            ),
             1,
         );
         wat::parse_str(source).unwrap()

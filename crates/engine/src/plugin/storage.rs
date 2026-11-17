@@ -206,12 +206,8 @@ pub(crate) fn blob(doc: &Document, id: &str, path: &str) -> Option<Vec<u8>> {
 /// The installed plugin with this id, when there is one: its manifest. Reading it runs no code.
 #[cfg(not(target_arch = "wasm32"))]
 fn installed(s: &Session, id: &str) -> Option<craft_plugin::Manifest> {
-    let path = s
-        .plugin_state
-        .packages
-        .get(id)
-        .cloned()
-        .or_else(|| s.plugin_state.plugins_dir().map(|dir| dir.join(id).to_string_lossy().into_owned()))?;
+    let path =
+        s.plugin_state.packages.get(id).cloned().or_else(|| s.plugin_state.plugins_dir().map(|dir| dir.join(id).to_string_lossy().into_owned()))?;
     super::read_package(&path).ok().map(|package| package.manifest)
 }
 #[cfg(target_arch = "wasm32")]

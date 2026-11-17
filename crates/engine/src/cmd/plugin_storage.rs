@@ -95,7 +95,10 @@ fn get_blob(s: &mut Session, p: &Value) -> Result<Value> {
     let bytes = storage::blob(&s.doc, &id, &path).ok_or_else(|| bad(CMD, format!("{} is not readable", p.name)))?;
     let start = usize::try_from(p.offset).unwrap_or(usize::MAX).min(bytes.len());
     let end = start.saturating_add(len as usize).min(bytes.len());
-    reply(CMD, BlobRead { name: p.name, cache, data: base64_encode(bytes.get(start..end).unwrap_or_default()), offset: p.offset, bytes: bytes.len() as u64 })
+    reply(
+        CMD,
+        BlobRead { name: p.name, cache, data: base64_encode(bytes.get(start..end).unwrap_or_default()), offset: p.offset, bytes: bytes.len() as u64 },
+    )
 }
 
 fn delete_blob(s: &mut Session, p: &Value) -> Result<Value> {

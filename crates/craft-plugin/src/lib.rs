@@ -618,12 +618,18 @@ fn check_storage(manifest: &Manifest) -> Result<()> {
     let format = runtime.and_then(|runtime| runtime.data_format);
     if !storage {
         if format.is_some() {
-            return Err(invalid("runtime.data_format", "only a plugin that keeps data in designs has a data format: add \"storage@0.1\" to capabilities"));
+            return Err(invalid(
+                "runtime.data_format",
+                "only a plugin that keeps data in designs has a data format: add \"storage@0.1\" to capabilities",
+            ));
         }
         return Ok(());
     }
     if runtime.is_none_or(RuntimeManifest::is_importer) {
-        return Err(invalid("capabilities", "storage keeps a command plugin's data in the open design; an importer or a plugin without a runtime has none"));
+        return Err(invalid(
+            "capabilities",
+            "storage keeps a command plugin's data in the open design; an importer or a plugin without a runtime has none",
+        ));
     }
     if !format.is_some_and(|format| (1..=MAX_DATA_FORMAT).contains(&format)) {
         return Err(invalid("runtime.data_format", "a plugin with storage says its data's format number, 1 to 1000000, e.g. \"data_format\": 1"));

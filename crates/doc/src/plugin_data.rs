@@ -65,7 +65,12 @@ impl Meta {
         let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
         let object = value.as_object()?;
         let text = |key: &str, max: usize| -> String {
-            object.get(key).and_then(serde_json::Value::as_str).filter(|t| !t.chars().any(char::is_control)).map(|t| t.chars().take(max).collect()).unwrap_or_default()
+            object
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .filter(|t| !t.chars().any(char::is_control))
+                .map(|t| t.chars().take(max).collect())
+                .unwrap_or_default()
         };
         let format = object.get("format").and_then(serde_json::Value::as_u64).and_then(|f| u32::try_from(f).ok()).unwrap_or(0);
         Some(Self { plugin: text("plugin", 64), name: text("name", 80), plugin_version: text("plugin_version", 32), format })

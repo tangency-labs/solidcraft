@@ -229,14 +229,15 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
         let groups: BTreeSet<String> = rt.permissions.command_groups.intersection(&grants.command_groups).cloned().collect();
         let mut scratch = session.scratch();
         scratch.plugin_state.file_grants = grants.folders;
-        scratch.plugin_state.storage_caller = rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(
-            |data_format| storage::StorageCaller {
-                id: package.manifest.id.clone(),
-                name: package.manifest.name.clone(),
-                version: package.manifest.version.clone(),
-                data_format,
-            },
-        );
+        scratch.plugin_state.storage_caller =
+            rt.data_format.filter(|_| package.manifest.capabilities.iter().any(|c| c.starts_with("storage@"))).map(|data_format| {
+                storage::StorageCaller {
+                    id: package.manifest.id.clone(),
+                    name: package.manifest.name.clone(),
+                    version: package.manifest.version.clone(),
+                    data_format,
+                }
+            });
         let host =
             SolidCraftHost { session: scratch, transaction: None, sketch_exits: Vec::new(), groups, file_folders: Vec::new(), evaluation: None };
         let file_folders = host
