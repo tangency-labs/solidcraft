@@ -1106,8 +1106,8 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
 /// the corner commands resolve them in from a `point` parameter. An ellipse's axis is never a
 /// side (the engine refuses it), and construction curves are ignored when more than two meet.
-/// Each side must be a line, or for a fillet (`curves_ok`) an arc, a conic or an open spline
-/// (#9178).
+/// Each side must be a line, or for a fillet (`curves_ok`) an arc, a conic or an open control
+/// point spline (#9178).
 pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, curves_ok: bool) -> Option<(usize, usize)> {
     use solidcraft_engine::sketch::CurveKind;
     let candidates = sk
@@ -1124,7 +1124,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, c
     }
     let takes = |c: &solidcraft_engine::sketch::Curve| match c.kind {
         CurveKind::Line { .. } => true,
-        CurveKind::Arc { .. } | CurveKind::Conic { .. } | CurveKind::Spline { periodic: false, .. } => curves_ok,
+        CurveKind::Arc { .. } | CurveKind::Conic { .. } | CurveKind::Spline { periodic: false, control: true, .. } => curves_ok,
         _ => false,
     };
     if curves.iter().any(|(_, c)| !takes(c)) {

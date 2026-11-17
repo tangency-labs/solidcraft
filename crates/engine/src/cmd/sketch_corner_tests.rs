@@ -433,7 +433,7 @@ fn a_fillet_or_chamfer_brings_two_separate_lines_to_where_they_meet() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Corners with a conic or an open spline as a side (#9178)
+// Corners with a conic or a control point spline as a side (#9178)
 
 /// Distance from `q` to the nearest of the exact pieces `segs`.
 fn dist_to(segs: &[solidcore_record::Seg2], q: Vec2) -> f64 {
@@ -449,8 +449,13 @@ fn end_tangent(k: &solidcraft_sketch::Sketch, ci: usize, p: usize) -> Vec2 {
     d.normalized().unwrap()
 }
 
+/// The sketch's degrees of freedom.
+fn dof(s: &Session) -> usize {
+    s.model.state().sketch(s.active_sketch.unwrap()).unwrap().report.dof
+}
+
 /// The checks every round of such a corner passes: the arc has radius `r`, each side keeps its id
-/// and ends where the arc does, tangent to it, and that tangent point lies on the side's original
+/// and ends where the arc does, tangent to it, and the whole kept side lies on the side's original
 /// curve (`before`), so the side was cut back and not reshaped. The sketch solves.
 fn check_round(s: &Session, before: &solidcraft_sketch::Sketch, arc_id: &str, sides: [&str; 2], r: f64) {
     assert!(solved(s), "the sketch solves after the round");
@@ -469,8 +474,13 @@ fn check_round(s: &Session, before: &solidcraft_sketch::Sketch, arc_id: &str, si
         let (u, v) = (end_tangent(&k, ci, shared), end_tangent(&k, arc, shared));
         assert!(u.cross(v).abs() < 1e-7, "`{id}` is tangent to the arc: {u:?} vs {v:?}");
         let orig = before.exact_pieces(before.curve_index(id).unwrap());
-        let d = dist_to(&orig, k.point(shared).unwrap());
-        assert!(d < 1e-9, "the tangent point on `{id}` lies on its original curve: {d}");
+        for piece in k.exact_pieces(ci) {
+            for i in 0..=16 {
+                let q = piece.point_at(i as f64 / 16.0);
+                let d = dist_to(&orig, q);
+                assert!(d < 1e-9, "{q:?} on `{id}` is off its original curve by {d}");
+            }
+        }
     }
 }
 
@@ -479,7 +489,8 @@ fn check_round(s: &Session, before: &solidcraft_sketch::Sketch, arc_id: &str, si
 /// meet, weight cos(45°), `rho` = w / (1 + w)). The round of radius 2 lies outside the circle,
 /// 12 from (0, 10) and 2 from the line: centre (2, 10 − √140), the tangent point on the line
 /// straight left of it, and the one on the circle 10 from (0, 10) towards the centre. Both
-/// rounds give that arc.
+/// rounds give that arc. The conic's kept part is still that circle, so its `rho` is
+/// w / (1 + w) again, with w the cosine of half its sweep.
 #[test]
 fn a_conic_that_is_a_circular_arc_fillets_like_the_arc() {
     let w = std::f64::consts::FRAC_PI_4.cos();
@@ -510,7 +521,13 @@ fn a_conic_that_is_a_circular_arc_fillets_like_the_arc() {
         assert!(on_round.dist(want_round) < 1e-9, "conic {conic}: {on_round:?}");
         got.push((centre, on_line, on_round));
         if conic {
-            assert!(matches!(k.curves[k.curve_index(&c).unwrap()].kind, solidcraft_sketch::CurveKind::Conic { .. }), "`{c}` stays a conic");
+            let solidcraft_sketch::CurveKind::Conic { rho: kept, .. } = k.curves[k.curve_index(&c).unwrap()].kind else {
+                panic!("`{c}` stays a conic")
+            };
+            let (to_end, to_cut) = (Vec2::new(10.0, 0.0), on_round - Vec2::new(0.0, 10.0));
+            let half = 0.5 * to_end.cross(to_cut).atan2(to_end.dot(to_cut)).abs();
+            let w = half.cos();
+            assert!((kept - w / (1.0 + w)).abs() < 1e-12, "rho {kept} for a sweep of {}°", 2.0 * half.to_degrees());
         }
     }
     let (arc, conic) = (got[0], got[1]);
@@ -521,12 +538,15 @@ fn a_conic_that_is_a_circular_arc_fillets_like_the_arc() {
 const CURVED_TIP_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 30" width="20mm" height="30mm"><path d="M0,0 L20,0 L20,10 Q20,20 10,30 Q0,20 0,10 Z"/></svg>"#;
 
 /// The tip of an imported drawing, where two conics meet, is rounded: an arc tangent to both,
-/// each conic cut back exactly to the tangent point, keeping its id, and one closed profile.
+/// each conic cut back exactly, keeping its id, one closed profile, and the sketch's degrees of
+/// freedom as they were (the corner point gives way to the arc's two ends and centre, which the
+/// tangencies and the radius hold).
 #[test]
 fn a_fillet_rounds_a_corner_of_two_conics() {
     let mut s = new_sketch();
     run(&mut s, "sketch.insert_svg", json!({"text": CURVED_TIP_SVG}));
     let before = sk(&s);
+    let dof_before = dof(&s);
     assert!(matches!(before.curves[before.curve_index("n1").unwrap()].kind, solidcraft_sketch::CurveKind::Conic { .. }));
     let n = before.curves.len();
     let f = run(&mut s, "sketch.fillet", json!({"point": "n1.end", "radius": 1}));
@@ -536,47 +556,100 @@ fn a_fillet_rounds_a_corner_of_two_conics() {
     assert_eq!(k.curves.len(), n + 1, "the two conics and the arc, nothing else");
     assert_eq!(s.model.state().sketch(s.active_sketch.unwrap()).unwrap().profiles.len(), 1, "one closed profile");
     assert_eq!(f["virtual_corners"], json!([]), "{f}");
+    assert_eq!(dof(&s), dof_before, "the fillet leaves the degrees of freedom as they were");
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(sk(&s), before, "undo brings the sharp tip back");
 }
 
-/// A line meeting a conic at a real corner (the conic's apex off the line), and a line meeting a
-/// fit point spline: both corners round, the side cut back exactly. The spline keeps its id as
-/// the control spline of its kept spans, still on its original curve, with its far end in place.
+/// A line meeting a conic at a real corner (the conic's apex off the line), a line meeting a
+/// control point spline at its start, and a control point spline ending where a line starts: each
+/// corner rounds and the side is cut back exactly. The conic leaves the degrees of freedom as they
+/// were. The spline keeps its id, its degree and its far end. The control points away from the cut
+/// keep their ids and places, and the degrees of freedom change by two for each control point the
+/// spline gains or loses.
 #[test]
-fn a_fillet_rounds_a_corner_of_a_line_with_a_conic_or_a_spline() {
+fn a_fillet_rounds_a_corner_of_a_line_with_a_conic_or_a_control_spline() {
     let mut s = new_sketch();
     let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
     let c = curves(&run(&mut s, "sketch.conic", json!({"start": format!("{l}.end"), "apex": [20, 5], "end": [20, 10], "rho": 0.5})))[0].clone();
-    let before = sk(&s);
+    let (before, dof_before) = (sk(&s), dof(&s));
     let f = run(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}));
     check_round(&s, &before, &curves(&f)[0], [&l, &c], 1.0);
     let k = sk(&s);
     let end = k.point(k.resolve_point(&format!("{l}.end")).unwrap()).unwrap();
     assert!(end.x < 10.0 - 1e-6 && end.y.abs() < 1e-12, "the line is cut back along itself: {end:?}");
+    assert_eq!(dof(&s), dof_before, "a conic side leaves the degrees of freedom as they were");
+
+    for at_start in [true, false] {
+        let mut s = new_sketch();
+        let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
+        let (corner, points) = if at_start {
+            (format!("{l}.end"), json!([format!("{l}.end"), [15, 5], [20, 4], [25, 10], [30, 6]]))
+        } else {
+            (format!("{l}.start"), json!([[-30, 6], [-25, 10], [-20, 4], [-15, 5], format!("{l}.start")]))
+        };
+        let sp = curves(&run(&mut s, "sketch.spline.control_point", json!({"points": points})))[0].clone();
+        let (before, dof_before) = (sk(&s), dof(&s));
+        let bi = before.curve_index(&sp).unwrap();
+        let solidcraft_sketch::CurveKind::Spline { pts: old, .. } = before.curves[bi].kind.clone() else { panic!("a spline") };
+        // The two control points at the far end, by id.
+        let far_ids: Vec<String> = if at_start { old[3..].iter() } else { old[..2].iter() }.map(|p| before.points[*p].id.clone()).collect();
+        let f = run(&mut s, "sketch.fillet", json!({"point": corner, "radius": 1}));
+        check_round(&s, &before, &curves(&f)[0], [&l, &sp], 1.0);
+        let k = sk(&s);
+        let si = k.curve_index(&sp).unwrap();
+        let solidcraft_sketch::CurveKind::Spline { pts, control, periodic, degree, .. } = &k.curves[si].kind else { panic!("`{sp}` stays a spline") };
+        assert!(*control && !*periodic && *degree == 3, "{:?}", k.curves[si].kind);
+        for id in &far_ids {
+            let p = k.point_index(id).unwrap_or_else(|| panic!("`{id}` stays"));
+            assert!(pts.contains(&p), "`{id}` is still a control point of `{sp}`");
+            assert_eq!(k.points[p].pos, before.points[before.point_index(id).unwrap()].pos, "`{id}` stays where it was");
+        }
+        let gained = pts.len() as isize - old.len() as isize;
+        assert_eq!(dof(&s) as isize - dof_before as isize, 2 * gained, "at_start {at_start}: {} control points from {}", pts.len(), old.len());
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(sk(&s), before);
+    }
+}
+
+/// A drawing whose side runs into a cubic Bézier at a right angle: the import makes the cubic a
+/// control point spline, and the corner rounds.
+#[test]
+fn a_fillet_rounds_the_corner_of_an_imported_cubic() {
+    let svg =
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="20mm" height="20mm"><path d="M0,0 L20,0 C20,10 10,20 0,20 Z"/></svg>"#;
+    let mut s = new_sketch();
+    run(&mut s, "sketch.insert_svg", json!({"text": svg}));
+    let before = sk(&s);
+    let cubic = before.curves.iter().find(|c| matches!(c.kind, solidcraft_sketch::CurveKind::Spline { .. })).expect("a spline").clone();
+    assert!(matches!(cubic.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. }), "{:?}", cubic.kind);
+    let (a, _) = cubic.kind.ends().unwrap();
+    let line = before.curves.iter().find(|c| matches!(c.kind, solidcraft_sketch::CurveKind::Line { .. }) && c.kind.uses(a)).unwrap().id.clone();
+    let f = run(&mut s, "sketch.fillet", json!({"point": before.points[a].id, "radius": 1}));
+    check_round(&s, &before, &curves(&f)[0], [&line, &cubic.id], 1.0);
+}
+
+/// An arc meeting a conic, given as `a` and `b`, and a conic between two lines whose two corners
+/// are rounded together (`points`), each with its own arc tangent to the conic.
+#[test]
+fn a_fillet_rounds_an_arc_and_conic_corner_and_both_corners_of_one_conic() {
+    let mut s = new_sketch();
+    let arc = curves(&run(&mut s, "sketch.arc.three_point", json!({"start": [-10, 5], "end": [0, 5], "through": [-5, 1]})))[0].clone();
+    let c = curves(&run(&mut s, "sketch.conic", json!({"start": format!("{arc}.end"), "apex": [10, 10], "end": [10, 15], "rho": 0.4})))[0].clone();
+    let before = sk(&s);
+    let f = run(&mut s, "sketch.fillet", json!({"a": arc, "b": c, "radius": 1}));
+    check_round(&s, &before, &curves(&f)[0], [&arc, &c], 1.0);
 
     let mut s = new_sketch();
-    let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
-    let sp = curves(&run(&mut s, "sketch.spline.fit_point", json!({"points": [format!("{l}.end"), [15, 5], [20, 4], [25, 10]]})))[0].clone();
+    let a = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
+    let c = curves(&run(&mut s, "sketch.conic", json!({"start": format!("{a}.end"), "apex": [20, 5], "end": [20, 10], "rho": 0.5})))[0].clone();
+    let b = curves(&run(&mut s, "sketch.line", json!({"points": [format!("{c}.end"), [30, 15]], "connect": false})))[0].clone();
     let before = sk(&s);
-    let orig = before.exact_pieces(before.curve_index(&sp).unwrap());
-    let f = run(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}));
-    check_round(&s, &before, &curves(&f)[0], [&l, &sp], 1.0);
-    let k = sk(&s);
-    let si = k.curve_index(&sp).unwrap();
-    let solidcraft_sketch::CurveKind::Spline { control, periodic, handles, .. } = &k.curves[si].kind else { panic!("`{sp}` stays a spline") };
-    assert!(*control && !*periodic && handles.is_empty(), "{:?}", k.curves[si].kind);
-    let (_, far) = k.curves[si].kind.ends().unwrap();
-    assert!(k.point(far).unwrap().dist(Vec2::new(25.0, 10.0)) < 1e-12, "the far end stays");
-    // The kept spans run along the original spline.
-    for piece in k.exact_pieces(si) {
-        for i in 0..=8 {
-            let q = piece.point_at(i as f64 / 8.0);
-            assert!(dist_to(&orig, q) < 1e-9, "{q:?} is off the original spline by {}", dist_to(&orig, q));
-        }
-    }
-    run(&mut s, "edit.undo", json!({}));
-    assert_eq!(sk(&s), before);
+    let f = run(&mut s, "sketch.fillet", json!({"points": [format!("{a}.end"), format!("{c}.end")], "radius": 1}));
+    let arcs = curves(&f);
+    assert_eq!(arcs.len(), 2, "{f}");
+    check_round(&s, &before, &arcs[0], [&a, &c], 1.0);
+    check_round(&s, &before, &arcs[1], [&c, &b], 1.0);
 }
 
 /// Where a line runs on along a conic's end tangent there is no corner: the drawing's side meets
@@ -599,10 +672,12 @@ fn a_fillet_where_a_line_runs_on_smoothly_into_a_conic_is_refused() {
 }
 
 /// What a round with a conic or spline side refuses, each with a message naming the cause, and
-/// changing nothing: a radius too large, an ellipse as a side, a chamfer there, a corner that
-/// would have to stay as a virtual sharp corner (a dimension measures to it, or a construction
-/// curve ends there too), a conic whose apex point is held, and a spline with tangent handles.
-/// A side of a kind fillets do not take is named, also a closed spline through the corner.
+/// changing nothing: a radius too large, a chamfer there, a side of a kind fillets do not take
+/// (an ellipse, a closed spline through the corner, a fit point spline, also one with tangent
+/// handles), a corner that would have to stay as a virtual sharp corner (a dimension measures to
+/// it, or a construction line or curve ends there too, which is never taken as a side), a point
+/// held on the cut conic, a conic whose apex point is held, a spline control point that the cut
+/// moves and that another curve holds, and a spline that starts and ends at the corner.
 #[test]
 fn rounds_with_a_conic_or_spline_side_refuse_with_the_cause_named() {
     let line_conic = || {
@@ -634,7 +709,7 @@ fn rounds_with_a_conic_or_spline_side_refuse_with_the_cause_named() {
         &mut s,
         "sketch.fillet",
         json!({"a": l, "b": e, "radius": 1}),
-        &format!("fillets work on lines, arcs, conics and open splines: `{e}` is an ellipse"),
+        &format!("fillets work on lines, arcs, conics and control point splines: `{e}` is an ellipse"),
     );
     let arc = curves(&run(&mut s, "sketch.arc.three_point", json!({"start": [40, 0], "end": [50, 10], "through": [47, 3]})))[0].clone();
     refused(&mut s, "sketch.fillet", json!({"a": arc, "b": e, "radius": 1}), &format!("`{e}` is an ellipse"));
@@ -644,23 +719,72 @@ fn rounds_with_a_conic_or_spline_side_refuse_with_the_cause_named() {
     let closed =
         curves(&run(&mut s, "sketch.spline.fit_point", json!({"points": [format!("{l}.end"), [5, -5], [0, -8]], "periodic": true})))[0].clone();
     refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}), &format!("`{closed}` is a closed spline"));
+    // A fit point spline, also one with tangent handles (their lines end at the corner too).
+    for handles in [false, true] {
+        let mut s = new_sketch();
+        let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
+        let sp = curves(&run(&mut s, "sketch.spline.fit_point", json!({"points": [format!("{l}.end"), [15, 5], [20, 4], [25, 10]]})))[0].clone();
+        if handles {
+            run(&mut s, "sketch.spline.handles", json!({"curve": sp}));
+        }
+        refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}), &format!("`{sp}`, a fit point spline"));
+    }
     // A dimension to the corner.
     let (mut s, l, _) = line_conic();
     run(&mut s, "sketch.dimension", json!({"entities": ["origin", format!("{l}.end")], "type": "horizontal", "value": 10}));
     refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}), "virtual sharp corner");
-    // A construction curve ending at the corner too.
-    let (mut s, l, _) = line_conic();
-    let guide = curves(&run(&mut s, "sketch.conic", json!({"start": format!("{l}.end"), "apex": [10, -5], "end": [5, -8], "rho": 0.5})))[0].clone();
-    run(&mut s, "sketch.construction", json!({"curves": [guide], "value": true}));
-    refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}), "virtual sharp corner");
+    // A construction line or curve ending at the corner too: the line and the conic are the
+    // sides, and the corner has to stay for the construction curve.
+    for guide in ["sketch.line", "sketch.conic"] {
+        let (mut s, l, _) = line_conic();
+        let p = if guide == "sketch.line" {
+            json!({"points": [format!("{l}.end"), [10, -5]], "connect": false})
+        } else {
+            json!({"start": format!("{l}.end"), "apex": [10, -5], "end": [5, -8], "rho": 0.5})
+        };
+        let g = curves(&run(&mut s, guide, p))[0].clone();
+        run(&mut s, "sketch.construction", json!({"curves": [g], "value": true}));
+        refused(
+            &mut s,
+            "sketch.fillet",
+            json!({"point": format!("{l}.end"), "radius": 1}),
+            &format!("virtual sharp corner, and this one would have to: `{g}` uses it too"),
+        );
+    }
+    // A point held on the conic, which the cut shortens.
+    let (mut s, l, c) = line_conic();
+    let pin = curves(&run(&mut s, "sketch.line", json!({"points": [[19, 4], [25, 0]], "connect": false})))[0].clone();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{pin}.start"), "b": c}));
+    let k = {
+        let k = sk(&s);
+        let ci = k.curve_index(&c).unwrap();
+        k.constraints
+            .iter()
+            .find(|x| matches!(x.kind, solidcraft_sketch::ConstraintKind::PointOnCurve { c, .. } if c == ci))
+            .expect("a point on the conic")
+            .id
+            .clone()
+    };
+    refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}), &format!("`{k}` holds something on `{c}`"));
     // The conic's apex point held by another curve.
     let (mut s, l, c) = line_conic();
     run(&mut s, "sketch.line", json!({"points": [format!("{c}.apex"), [30, 30]], "connect": false}));
     refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}), "apex");
-    // A spline with tangent handles.
+    // A control point that the cut moves, held by another curve.
     let mut s = new_sketch();
     let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
-    let sp = curves(&run(&mut s, "sketch.spline.fit_point", json!({"points": [format!("{l}.end"), [15, 5], [20, 4], [25, 10]]})))[0].clone();
-    run(&mut s, "sketch.spline.handles", json!({"curve": sp}));
-    refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}), "handles");
+    let h = curves(&run(&mut s, "sketch.line", json!({"points": [[15, 5], [15, 20]], "connect": false})))[0].clone();
+    let sp = curves(&run(
+        &mut s,
+        "sketch.spline.control_point",
+        json!({"points": [format!("{l}.end"), format!("{h}.start"), [20, 4], [25, 10], [30, 6]]}),
+    ))[0]
+        .clone();
+    refused(&mut s, "sketch.fillet", json!({"point": format!("{l}.end"), "radius": 1}), &format!("`{sp}`'s control point"));
+    // A spline that starts and ends at the corner.
+    let mut s = new_sketch();
+    let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "connect": false})))[0].clone();
+    let sp = curves(&run(&mut s, "sketch.spline.control_point", json!({"points": [format!("{l}.end"), [15, 5], [20, -5], format!("{l}.end")]})))[0]
+        .clone();
+    refused(&mut s, "sketch.fillet", json!({"a": l, "b": sp, "radius": 1}), &format!("`{sp}` starts and ends at the corner"));
 }

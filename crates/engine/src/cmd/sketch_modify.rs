@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two curves meeting at a corner: lines, arcs, conics and open splines (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). A conic or spline side is cut back exactly to the tangent point and keeps its id (a fit point spline becomes the control point spline of its kept spans, and a conic's apex point moves with it); such a corner cannot stay as a virtual sharp corner, so one that is measured to, or that a third curve ends at, is refused. An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids)", created_doc!())),
+        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two curves meeting at a corner: lines, arcs, conics and open control point splines (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). A conic or control point spline side is cut back exactly to the tangent point and keeps its id (a conic's apex point moves with it; a spline keeps its degree and its knots past the cut, which becomes a knot). Refused: such a corner where it would have to stay as a virtual sharp corner (measured to, or a third curve ends there), a constraint on the cut curve other than a tangency at its far end, a held conic apex or a held spline control point that the cut moves, and a fit point spline (not supported yet). An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids)", created_doc!())),
     CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", crate::checked!("sketch.chamfer.equal_distance", chamfer_equal))
         .contract(&CHAMFER_EQUAL_CONTRACT)
         .output(output_schema_for::<ChamferResult>)
@@ -2163,17 +2163,18 @@ fn kind_name(c: &Curve) -> &'static str {
         CurveKind::Ellipse { .. } => "an ellipse",
         CurveKind::Conic { .. } => "a conic",
         CurveKind::Spline { periodic: true, .. } => "a closed spline",
-        CurveKind::Spline { .. } => "a spline",
+        CurveKind::Spline { control: true, .. } => "a control point spline",
+        CurveKind::Spline { .. } => "a fit point spline",
     }
 }
 
 /// Whether curve `c` can be a side of a corner the command rounds or cuts: fillets take lines,
-/// arcs, conics and open splines (`round_corner` and `round_freeform_corner` take the curved
-/// ones), chamfers lines only.
+/// arcs, conics and open control point splines (`round_corner` and `round_freeform_corner` take
+/// the curved ones), chamfers lines only.
 fn takes_side(sk: &Sketch, c: usize, cmd: &str) -> bool {
     sk.curves.get(c).is_some_and(|c| match c.kind {
         CurveKind::Line { .. } => true,
-        CurveKind::Arc { .. } | CurveKind::Conic { .. } | CurveKind::Spline { periodic: false, .. } => cmd == "sketch.fillet",
+        CurveKind::Arc { .. } | CurveKind::Conic { .. } | CurveKind::Spline { periodic: false, control: true, .. } => cmd == "sketch.fillet",
         _ => false,
     })
 }
@@ -2185,7 +2186,7 @@ fn wrong_side(sk: &Sketch, c: usize, cmd: &str) -> crate::EngineError {
     let what = curve.map(kind_name).unwrap_or("no curve");
     let id = curve.map(|c| c.id.as_str()).unwrap_or("?");
     if cmd == "sketch.fillet" {
-        bad(cmd, format!("fillets work on lines, arcs, conics and open splines: `{id}` is {what}"))
+        bad(cmd, format!("fillets work on lines, arcs, conics and control point splines: `{id}` is {what}"))
     } else {
         bad(cmd, format!("chamfers work on lines: `{id}` is {what}"))
     }
@@ -2219,8 +2220,8 @@ fn not_two_lines(sk: &Sketch, q: usize, cmd: &str) -> crate::EngineError {
 }
 
 /// A corner of two lines: (line a, line b, corner point, far end of a, far end of b). A fillet
-/// with an arc, a conic or an open spline as a side goes on to `round_corner` and
-/// `round_freeform_corner` after this error.
+/// with an arc, a conic or a control point spline as a side goes on to `round_freeform_corner`
+/// and `round_corner` after this error.
 fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usize, usize)> {
     let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => Some((*a, *b)),
@@ -2229,14 +2230,21 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
     let (la, lb) = if let Some(r) = str_(p, "point") {
         let q = sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown point `{r}`")))?;
         // An ellipse's construction axis is never a side: it would round a line into the axis.
-        let lines: Vec<usize> = (0..sk.curves.len())
-            .filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i) && !sk.is_ellipse_axis(*i))
+        let at: Vec<usize> = (0..sk.curves.len())
+            .filter(|i| {
+                sk.curves.get(*i).is_some_and(|c| c.kind.ends().is_some_and(|(a, b)| a == q || b == q))
+                    && !sk.is_linked_curve(*i)
+                    && !sk.is_ellipse_axis(*i)
+            })
             .collect();
-        // A construction line ending there too (a diagonal that centres something) is not one of
-        // the corner's sides: it keeps its end on the virtual sharp corner (#1026).
+        // A construction curve ending there too (a diagonal that centres something) is not one of
+        // the corner's sides: it keeps its end on the virtual sharp corner (#1026). Curves of
+        // every kind count here, so a line, a conic and a construction line make a corner of the
+        // line and the conic (#9178).
         let sides: Vec<usize> =
-            if lines.len() == 2 { lines } else { lines.into_iter().filter(|i| sk.curves.get(*i).is_some_and(|c| !c.construction)).collect() };
-        match sides[..] {
+            if at.len() == 2 { at } else { at.into_iter().filter(|i| sk.curves.get(*i).is_some_and(|c| !c.construction)).collect() };
+        let lines: Vec<usize> = sides.into_iter().filter(|i| ends(*i).is_some()).collect();
+        match lines[..] {
             [a, b] => (a, b),
             _ => return Err(not_two_lines(sk, q, cmd)),
         }
@@ -2251,7 +2259,7 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
         }
         (a, b)
     };
-    // Past here a side that is not a line is one a fillet takes: an arc, a conic or an open spline
+    // Past here a side that is not a line is one a fillet takes: an arc, a conic or a spline
     // that shares no end with the other side, when `round_corner` and `round_freeform_corner`
     // find no corner either.
     let (a0, a1) = ends(la).ok_or_else(|| bad(cmd, "the curves must share a corner point"))?;
@@ -2486,15 +2494,13 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     meet_lines(sk, p, cmd)?;
     let (la, lb, c, fa, fb) = match corner(sk, p, cmd) {
         Ok(x) => x,
-        // Not two lines: a corner with an arc, or with a conic or an open spline (#9178).
+        // Not two lines: a corner with a conic or a control point spline (#9178), or with an arc.
+        // The free-form corner goes first: it leaves out construction curves that end there too.
         Err(e) => {
-            if let Some(round) = round_corner(sk, p, r, cmd)? {
-                return Ok(round);
+            if let Some((arc, cons)) = super::sketch_corner_freeform::round_freeform_corner(sk, p, r, cmd)? {
+                return Ok((arc, cons, CornerKept::default()));
             }
-            return match super::sketch_corner_freeform::round_freeform_corner(sk, p, r, cmd)? {
-                Some((arc, cons)) => Ok((arc, cons, CornerKept::default())),
-                None => Err(e),
-            };
+            return round_corner(sk, p, r, cmd)?.ok_or(e);
         }
     };
     // A spline's tangent handle is a construction line from a fit point, never a side. Where one

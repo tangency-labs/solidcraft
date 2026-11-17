@@ -131,10 +131,11 @@ into reference geometry that doesn't form profiles. Modify tools include trim (T
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
 and all go when you let go, in one undo step (`sketch.trim.path`). Fillet also rounds a corner
-where a conic or an open spline meets another curve: the curve is cut back exactly to the
-tangent point and keeps its id (a fit-point spline becomes the control-point spline of its kept
-spans). Such a corner cannot stay as a virtual sharp corner, so a corner that a dimension measures
-to is refused there. Chamfer stays on lines. Fillet and chamfer take
+where a conic or a control-point spline meets another curve: the curve is cut back exactly to the
+tangent point and keeps its id. A spline keeps its degree and its knots past the cut. Such a
+corner cannot stay as a virtual sharp corner, so a corner that a dimension measures to is refused
+there, and so is a constraint that holds something on the cut curve. Fit-point splines are not
+supported yet. Chamfer stays on lines. Fillet and chamfer take
 several corners at once: pick the corners, set the size once, and every corner is rounded or
 cut alike in one undo step.
 
