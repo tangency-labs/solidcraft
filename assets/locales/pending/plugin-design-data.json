@@ -24,5 +24,70 @@
     "plugin_data.missing": "Enthält Daten von {name} (Plugin {version}). Installieren Sie es, um sie zu bearbeiten.",
     "plugin_data.missing_unversioned": "Enthält Daten von {name}. Installieren Sie das Plugin, um sie zu bearbeiten.",
     "plugin_data.older": "Enthält Daten von {name} aus einer neueren Version des Plugins ({version}). Sie bleiben unverändert; aktualisieren Sie das Plugin, um sie zu bearbeiten."
+  },
+  "ar": {
+    "cmd.storage_delete_blob": "حذف ملف الإضافة",
+    "cmd.storage_get": "قراءة بيانات الإضافة",
+    "cmd.storage_get_blob": "قراءة ملف الإضافة",
+    "cmd.storage_list": "سرد بيانات الإضافات",
+    "cmd.storage_patch": "تعديل بيانات الإضافة",
+    "cmd.storage_put_blob": "كتابة ملف الإضافة",
+    "cmd.storage_set": "تعيين بيانات الإضافة",
+    "plugin_data.disabled": "يحتوي على بيانات {name}. شغّل الإضافة من التفضيلات › الإضافات لتحريرها.",
+    "plugin_data.missing": "يحتوي على بيانات {name} (الإضافة {version}). ثبّتها للتحرير.",
+    "plugin_data.missing_unversioned": "يحتوي على بيانات {name}. ثبّت الإضافة لتحريرها.",
+    "plugin_data.older": "يحتوي على بيانات {name} من إصدار أحدث من الإضافة ({version}). تُحفظ كما هي؛ حدّث الإضافة لتحريرها."
+  },
+  "he": {
+    "cmd.storage_delete_blob": "מחק קובץ של תוסף",
+    "cmd.storage_get": "קרא נתוני תוסף",
+    "cmd.storage_get_blob": "קרא קובץ של תוסף",
+    "cmd.storage_list": "הצג רשימת נתוני תוספים",
+    "cmd.storage_patch": "עדכן נתוני תוסף",
+    "cmd.storage_put_blob": "כתוב קובץ של תוסף",
+    "cmd.storage_set": "קבע נתוני תוסף",
+    "plugin_data.disabled": "מכיל נתונים של {name}. הפעל את התוסף בהעדפות › תוספים כדי לערוך אותם.",
+    "plugin_data.missing": "מכיל נתונים של {name} (תוסף {version}). התקן אותו כדי לערוך.",
+    "plugin_data.missing_unversioned": "מכיל נתונים של {name}. התקן את התוסף כדי לערוך אותם.",
+    "plugin_data.older": "מכיל נתונים של {name} מגרסה חדשה יותר של התוסף ({version}). הם נשמרים כמו שהם; עדכן את התוסף כדי לערוך אותם."
+  },
+  "ja": {
+    "cmd.storage_delete_blob": "プラグインのファイルを削除",
+    "cmd.storage_get": "プラグインのデータを読む",
+    "cmd.storage_get_blob": "プラグインのファイルを読む",
+    "cmd.storage_list": "プラグインのデータ一覧",
+    "cmd.storage_patch": "プラグインのデータを部分変更",
+    "cmd.storage_put_blob": "プラグインのファイルを書く",
+    "cmd.storage_set": "プラグインのデータを設定",
+    "plugin_data.disabled": "{name} のデータを含みます。編集するには 環境設定 › プラグイン でプラグインをオンにしてください。",
+    "plugin_data.missing": "{name} のデータ (プラグイン {version}) を含みます。編集するにはインストールしてください。",
+    "plugin_data.missing_unversioned": "{name} のデータを含みます。編集するにはプラグインをインストールしてください。",
+    "plugin_data.older": "新しいバージョンのプラグイン ({version}) による {name} のデータを含みます。そのまま保持されます。編集するにはプラグインを更新してください。"
+  },
+  "vi": {
+    "cmd.storage_delete_blob": "Xóa tệp của plugin",
+    "cmd.storage_get": "Đọc dữ liệu plugin",
+    "cmd.storage_get_blob": "Đọc tệp của plugin",
+    "cmd.storage_list": "Liệt kê dữ liệu plugin",
+    "cmd.storage_patch": "Sửa một phần dữ liệu plugin",
+    "cmd.storage_put_blob": "Ghi tệp của plugin",
+    "cmd.storage_set": "Đặt dữ liệu plugin",
+    "plugin_data.disabled": "Chứa dữ liệu của {name}. Bật plugin trong Tùy chọn › Plugin để chỉnh sửa.",
+    "plugin_data.missing": "Chứa dữ liệu của {name} (plugin {version}). Cài đặt nó để chỉnh sửa.",
+    "plugin_data.missing_unversioned": "Chứa dữ liệu của {name}. Cài đặt plugin để chỉnh sửa.",
+    "plugin_data.older": "Chứa dữ liệu của {name} từ phiên bản plugin mới hơn ({version}). Dữ liệu được giữ nguyên; cập nhật plugin để chỉnh sửa."
+  },
+  "zh": {
+    "cmd.storage_delete_blob": "删除插件文件",
+    "cmd.storage_get": "读取插件数据",
+    "cmd.storage_get_blob": "读取插件文件",
+    "cmd.storage_list": "列出插件数据",
+    "cmd.storage_patch": "修补插件数据",
+    "cmd.storage_put_blob": "写入插件文件",
+    "cmd.storage_set": "设置插件数据",
+    "plugin_data.disabled": "包含 {name} 的数据。请在 偏好设置 › 插件 中启用该插件以进行编辑。",
+    "plugin_data.missing": "包含 {name} 的数据（插件 {version}）。安装后即可编辑。",
+    "plugin_data.missing_unversioned": "包含 {name} 的数据。安装该插件后即可编辑。",
+    "plugin_data.older": "包含由更新版本插件（{version}）保存的 {name} 数据。数据会原样保留；更新插件后即可编辑。"
   }
 }
