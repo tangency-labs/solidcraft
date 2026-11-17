@@ -73,14 +73,18 @@
 //!   (`1e150`, below `sqrt(f64::MAX)`) fails with `InvalidInput` before any split: its polar boxes overflow, so every check would
 //!   run to the call cap (a swung primitive scaled by `f64::MAX` merged with itself
 //!   ran past 600 s, upstream past 120 s; issue from the #2490 fuzz).
-//! - **A point contact is no range (#18212).** `GlobalCoincidenceChecker` returns no
-//!   range when the drops bound a stretch that is one point at the tolerance on either
-//!   curve: its tight box's diagonal is shorter than `tol` (upstream only drops a
-//!   stretch shorter than `SM_EFF_ZERO` in parameter). Two curves leaving a shared end
-//!   at an angle stay within `tol` of each other for a short way; when one of them is
-//!   split there (a hook at its start makes every piece holding it half closed), a
-//!   piece inside that way has its own drops, and upstream returned it as a range or
-//!   not depending on where the splits fell, so a smaller tolerance could report one.
+//! - **A point contact is no range (#18212, WR-18212).** On a split piece,
+//!   `GlobalCoincidenceChecker` returns no range when the drops bound a stretch that is
+//!   one point at the tolerance on either curve: its tight box's diagonal is shorter
+//!   than `tol` (upstream only drops a stretch shorter than `SM_EFF_ZERO` in parameter).
+//!   Two curves leaving a shared end at an angle stay within `tol` of each other for a
+//!   short way; when one of them is split there (a hook at its start makes every piece
+//!   holding it half closed), a piece inside that way has its own drops, and upstream
+//!   returned it as a range or not depending on where the splits fell, so a smaller
+//!   tolerance could report one. A piece that misses the end is at most about 0.4 of
+//!   that way (`split_in_three` cuts at 0.375 and 0.625), and the way is about
+//!   `tol / sin(angle)`, so this covers curves meeting at about 24 degrees or more; at
+//!   shallower angles a piece can be longer than `tol` and is still returned.
 //! - **Seam test.** `sm_IsPointSolutionAcrossClosedSeamBoundary` (unit
 //!   `curve.curve_p5`) is told whether the solution's first object is its `this`
 //!   curve: the split solutions name `[this, other]`, so it is when the coincidence
@@ -1657,7 +1661,8 @@ impl Curve {
     /// dropped onto the other curve (`SM_SO_INTERSECT` within `tol`, snapping to the
     /// ends with `snap_to_ends`) and, when at least two distinct drops bound a range
     /// along which the curves stay within `tol`, it is returned as one range solution,
-    /// unless it is one point at `tol` on either curve (not upstream, #18212).
+    /// unless a split piece's range is one point at `tol` on either curve (not
+    /// upstream, #18212).
     /// Opposite end to end contacts are added as point solutions.
     /// [`Coincidence::additional_work_needed`] says whether the range may miss
     /// intersections. `objects` name this curve and `other` in the solutions.
@@ -2085,14 +2090,16 @@ impl Curve {
             return Ok(());
         }
 
-        // Not upstream (#18212): a stretch whose points all lie within tol of each
-        // other is one point at this tolerance, as a stretch of no length is above.
-        // Curves within tol of each other only along such a stretch of one of them
-        // touch there; they do not run together, so it is no range either. A split
-        // piece of a curve next to an end it shares with the other lies in that
-        // contact without reaching the end, so its drops alone bound no stretch.
-        if self.is_one_point_at(k, first.0, last.0, tol)?
-            || other.is_one_point_at(k, first.1, last.1, tol)?
+        // Not upstream (#18212): on a split piece, a stretch whose points all lie
+        // within tol of each other is one point at this tolerance, as a stretch of no
+        // length is above. Curves within tol of each other only along such a stretch
+        // of one of them touch there; they do not run together, so it is no range
+        // either. A split piece of a curve next to an end it shares with the other
+        // lies in that contact without reaching the end, so its drops alone bound no
+        // stretch. Unsplit curves keep upstream's answer.
+        if depth > 0
+            && (self.is_one_point_at(k, first.0, last.0, tol)?
+                || other.is_one_point_at(k, first.1, last.1, tol)?)
         {
             out.additional_work_needed = true;
             return Ok(());
@@ -2158,8 +2165,13 @@ impl Curve {
     /// Whether the curve between the parameters `a` and `b` (either order) is one point
     /// at `tol`: its tight box ([`Curve::calculate_tight_bounding_box`]: the ends, the
     /// tangent discontinuous knots and the turning points) has a diagonal shorter than
-    /// `tol`, so every two of its points are closer than `tol`.
+    /// `tol`, so every two of its points are closer than `tol`. Ends `tol` or more
+    /// apart answer no without the box.
     fn is_one_point_at(&self, k: &Kernel, a: f64, b: f64, tol: f64) -> Result<bool> {
+        let end = self.evaluate_point(k, b)?;
+        if self.evaluate_point(k, a)?.distance(end) >= tol {
+            return Ok(false);
+        }
         let stretch = Extent1d::from_min_max(min2(a, b), max2(a, b));
         let tight = self.calculate_tight_bounding_box(k, &stretch)?;
         Ok(!tight.has_negative_volume() && tight.size().length() < tol)
@@ -3233,7 +3245,8 @@ mod tests {
         let (_, e24) = issue_18212_edges();
         let end = e24.1.max();
         let sweep = (0..40).map(|i| 1e-5 * 2000.0_f64.powf(f64::from(i) / 39.0));
-        for tol in [1.4e-3, 1.4897e-3, 2.889e-3, 4e-3, 1e-2].into_iter().chain(sweep) {
+        let issue = [1.4e-3, 1.4897e-3, 2.889e-3, 4e-3, 1e-2];
+        for tol in issue.into_iter().chain(sweep) {
             let ranges = issue_18212_ranges(&k, &e24, &e24, tol);
             assert_eq!(ranges.len(), 1, "tol {tol:e}: {ranges:?}");
             let [s0, e0, s1, e1] = ranges[0];
