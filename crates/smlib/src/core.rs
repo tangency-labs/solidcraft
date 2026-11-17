@@ -59,14 +59,11 @@ pub(crate) use measure::{
     mass_properties, solid_count,
 };
 
-/// A solidcore body. Its own lock: solidcore's operations take `&mut Brep`, even to measure.
-pub(crate) struct Body(pub(crate) Mutex<solidcore::topology::Brep>);
-
-impl Body {
-    pub(crate) fn new(b: solidcore::topology::Brep) -> Body {
-        Body(Mutex::new(b))
-    }
-}
+/// A solidcore body: solidcore-ops' own, with its own lock (solidcore's operations take
+/// `&mut Brep`, even to measure). The operation families that still call the kernel crate here
+/// make one with `Body::from_kernel` and lock it with `Body::kernel`, a bridge solidcore-ops
+/// keeps until the last family calls it instead (tangency-labs/solidcore#3304).
+pub(crate) use solidcore_ops::Body;
 
 /// The fixes this backend runs with: every one of solidcore's opt-in fixes of upstream SMLib
 /// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it,
@@ -369,11 +366,11 @@ pub(crate) fn with_body<T: dump::Answer>(
     f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
     // A body a panic interrupted may be half-edited: it is never used again.
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     // No token stops it: stopped part way, solidcore may leave the body it borrows half-changed.
-    call_on(call, &[("brep", body)], None, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+    call_on(call, &[("brep", body)], None, |k| f(k, &mut body.kernel()))
 }
 
 /// [`with_body`] on a body only this call reads (one the caller consumes): the token over this
@@ -383,14 +380,14 @@ pub(crate) fn with_own_body<T: dump::Answer>(
     body: &Body,
     f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     let stop = crate::stop::token();
     if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
         return Err(Error::Cancelled(call));
     }
-    call_on(call, &[("brep", body)], stop, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+    call_on(call, &[("brep", body)], stop, |k| f(k, &mut body.kernel()))
 }
 
 /// An axis-aligned box from its lower corner (`SmApiCreateBox`, as `smlib_make_box` checks it:
@@ -400,7 +397,7 @@ pub(crate) fn make_box(origin: [f64; 3], size: [f64; 3]) -> Result<Body> {
         return Err(Error::Argument);
     }
     let [x, y, z] = size;
-    run("create_box", |k| primitives::create_box(k, Vec3::new(origin[0], origin[1], origin[2]), x, y, z)).map(Body::new)
+    run("create_box", |k| primitives::create_box(k, Vec3::new(origin[0], origin[1], origin[2]), x, y, z)).map(Body::from_kernel)
 }
 
 fn point(p: [f64; 3]) -> Result<Vec3> {
@@ -417,7 +414,7 @@ pub(crate) fn make_cylinder(origin: [f64; 3], radius: f64, height: f64) -> Resul
     if !(radius > 0.0 && height > 0.0 && radius.is_finite() && height.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_cylinder", |k| primitives::create_cylinder(k, o, radius, height)).map(Body::new)
+    run("create_cylinder", |k| primitives::create_cylinder(k, o, radius, height)).map(Body::from_kernel)
 }
 
 /// A sphere (`SmApiCreateSphere`; radius positive).
@@ -426,7 +423,7 @@ pub(crate) fn make_sphere(center: [f64; 3], radius: f64) -> Result<Body> {
     if !(radius > 0.0 && radius.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_sphere", |k| primitives::create_sphere(k, o, radius)).map(Body::new)
+    run("create_sphere", |k| primitives::create_sphere(k, o, radius)).map(Body::from_kernel)
 }
 
 /// A cone or frustum about +Z (`SmApiCreateCone`; `smlib_make_cone`'s checks: base radius and
@@ -437,7 +434,7 @@ pub(crate) fn make_cone(origin: [f64; 3], base_radius: f64, top_radius: f64, hei
     if !(ok && base_radius.is_finite() && top_radius.is_finite() && height.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_cone", |k| primitives::create_cone(k, o, base_radius, top_radius, height)).map(Body::new)
+    run("create_cone", |k| primitives::create_cone(k, o, base_radius, top_radius, height)).map(Body::from_kernel)
 }
 
 /// A ring torus about +Z (`SmApiCreateTorus`; major radius > minor radius > 0).
@@ -446,7 +443,7 @@ pub(crate) fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64)
     if !(minor_radius > 0.0 && minor_radius < major_radius && major_radius.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_torus", |k| primitives::create_torus(k, o, major_radius, minor_radius)).map(Body::new)
+    run("create_torus", |k| primitives::create_torus(k, o, major_radius, minor_radius)).map(Body::from_kernel)
 }
 
 /// The enclosed volume (`SmApiBrepComputeVolume`), its accuracy clamped as [`mass_properties`]
