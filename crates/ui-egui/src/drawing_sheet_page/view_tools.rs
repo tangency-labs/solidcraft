@@ -105,10 +105,11 @@ impl Canvas<'_> {
             } else if !ui.input(|input| input.pointer.primary_down()) {
                 state.drag = None;
             }
-        } else if !placing && let Some(selected) = state.selected {
-            if let Some(object) = self.objects.iter().find(|object| object.object == selected && object.kind == ObjectKind::View) {
-                self.card(app, &mut state, *object);
-            }
+        } else if !placing
+            && let Some(selected) = state.selected
+            && let Some(object) = self.objects.iter().find(|object| object.object == selected && object.kind == ObjectKind::View)
+        {
+            self.card(app, &mut state, *object);
         }
 
         self.confirm_delete(app, ui, &mut state);

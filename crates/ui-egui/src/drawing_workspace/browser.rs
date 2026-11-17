@@ -209,19 +209,18 @@ fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> S
     }
     if matches!(view.kind, ViewKind::Base { .. } | ViewKind::Projected { .. })
         && let Ok(resolved) = drawing.resolve_view(view.id)
+        && let Some(named) = NamedView::ALL.into_iter().find(|named| named.basis().normal() == resolved.basis.normal())
     {
-        if let Some(named) = NamedView::ALL.into_iter().find(|named| named.basis().normal() == resolved.basis.normal()) {
-            let key = match named {
-                NamedView::Front => "cmd.view_front",
-                NamedView::Back => "cmd.view_back",
-                NamedView::Top => "cmd.view_top",
-                NamedView::Bottom => "cmd.view_bottom",
-                NamedView::Left => "cmd.view_left",
-                NamedView::Right => "cmd.view_right",
-                _ => "cmd.view_isometric",
-            };
-            return app.tr(key).to_string();
-        }
+        let key = match named {
+            NamedView::Front => "cmd.view_front",
+            NamedView::Back => "cmd.view_back",
+            NamedView::Top => "cmd.view_top",
+            NamedView::Bottom => "cmd.view_bottom",
+            NamedView::Left => "cmd.view_left",
+            NamedView::Right => "cmd.view_right",
+            _ => "cmd.view_isometric",
+        };
+        return app.tr(key).to_string();
     }
     solidcraft_ui_text::format("ui.drawing_browser_view", &[("number", &number.to_string())])
 }
