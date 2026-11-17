@@ -2706,7 +2706,9 @@ impl Entry {
         match &self.sel {
             Some(Sel::Body { name }) => !app.session.visibility.hidden_bodies.contains(name),
             Some(Sel::Feature { id }) => sketch_visible(app, *id),
-            Some(Sel::Plane { name }) => !app.session.visibility.hidden_origin.contains(name),
+            // Construction planes, axes and points alike: the rows are cached per evaluation, and a
+            // visibility change (an eye, Show/Hide Reference Geometry) evaluates nothing.
+            Some(Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name }) => !app.session.visibility.hidden_origin.contains(name),
             _ => self.visible,
         }
     }
@@ -2765,7 +2767,7 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
     }
 }
 
-fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
+pub(crate) fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
     let name = f.name.clone();
     match f.kind {
         FeatureKind::ConstructionPoint { .. } => Sel::ConstructionPoint { name },

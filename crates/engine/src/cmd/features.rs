@@ -2742,12 +2742,12 @@ fn finish_pattern(
     p: &Value,
     features: Vec<solidcraft_doc::FeatureId>,
     pattern: solidcraft_doc::PatternKind,
-    bodies: Vec<String>,
+    (bodies, placements): (Vec<String>, Vec<Vec<u64>>),
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
     if comps.is_empty() {
         let copied = bodies.clone();
-        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() })?;
+        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect(), placements })?;
         // The pattern is added either way: when it made no copies (the feature failed to
         // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
         // and they keep no look, as before.
@@ -2774,21 +2774,27 @@ fn finish_pattern(
     Ok(json!({"occurrences": made}))
 }
 
+/// The bodies a pattern copies and the placement each was picked at.
+type PatternBodies = (Vec<String>, Vec<Vec<u64>>);
+
 /// What a pattern copies: features (replayed), bodies (`bodies: [names]`), or components
-/// (`components: [names]`, placed again as occurrences).
-fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, Vec<String>)> {
+/// (`components: [names]`, placed again as occurrences). A body may be named as a placement of
+/// its part shows it (its world name, as the view and the Browser name it): it is copied where
+/// that placement shows it, as a mirror copies it.
+fn pattern_sources(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<solidcraft_doc::FeatureId>, PatternBodies)> {
     if !string_list(cmd, p, "components")?.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
+        return Ok((Vec::new(), (Vec::new(), Vec::new())));
     }
     let bodies = string_list(cmd, p, "bodies")?;
     if bodies.is_empty() {
-        return Ok((source_features(s, p, cmd)?, Vec::new()));
+        return Ok((source_features(s, p, cmd)?, (Vec::new(), Vec::new())));
     }
+    let (bodies, placements) = placed_bodies(s, bodies, cmd)?;
     let st = s.model.state();
     if let Some(b) = bodies.iter().find(|b| st.body(b).is_none()) {
         return Err(bad(cmd, format!("no body `{b}`")));
     }
-    Ok((Vec::new(), bodies))
+    Ok((Vec::new(), (bodies, placements)))
 }
 
 fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {

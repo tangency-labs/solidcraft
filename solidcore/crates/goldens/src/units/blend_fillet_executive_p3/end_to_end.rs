@@ -706,13 +706,17 @@ impl From<SolidError> for RealSolidRunError {
     }
 }
 
-fn run_rust(
-    k: &mut Kernel,
-    body: SolidResult<Brep>,
+/// One generated fillet surface's type code, and its net's bound and the distance proved
+/// between the net and the definition when it is a blend by its definition.
+pub(super) type Certificate = (f64, Option<(f64, f64)>);
+
+/// The edges `input` selects on `body`, with the record of each before the fillet.
+fn select_edges(
+    k: &Kernel,
+    body: &Brep,
     input: &RealSolid,
-) -> Result<Vec<f64>, RealSolidRunError> {
-    let mut body = body?;
-    let edges = p1::edges(&body, None)?;
+) -> Result<(Vec<EdgeId>, Vec<f64>), RealSolidRunError> {
+    let edges = p1::edges(body, None)?;
     let mut selected = Vec::<EdgeId>::new();
     let mut before = Vec::new();
     let all: Vec<usize> = (0..edges.len()).collect();
@@ -740,35 +744,68 @@ fn run_rust(
             }
         }
     }
-    if input.checkpoint != Checkpoint::Full {
-        return prefix::run(k, &mut body, &selected, input, &before).map_err(Into::into);
-    }
-    let result = if let Some(setback) = input.corner_setback {
-        match setback_fillet_edges(k, &mut body, &selected, input, setback) {
+    Ok((selected, before))
+}
+
+/// The whole fillet of `selected` on `body` that `input` asks for: the kernel's result,
+/// or a fixture error.
+fn fillet_selected(
+    k: &mut Kernel,
+    body: &mut Brep,
+    selected: &[EdgeId],
+    input: &RealSolid,
+) -> Result<SolidResult<()>, RealSolidRunError> {
+    Ok(if let Some(setback) = input.corner_setback {
+        match setback_fillet_edges(k, body, selected, input, setback) {
             Ok(()) => Ok(()),
             Err(RealSolidRunError::Kernel(error)) => Err(error),
             Err(error @ RealSolidRunError::Fixture(_)) => return Err(error),
         }
     } else {
-        apply(k, &mut body, &selected, input)
-    };
+        apply(k, body, selected, input)
+    })
+}
+
+fn run_rust(
+    k: &mut Kernel,
+    body: SolidResult<Brep>,
+    input: &RealSolid,
+) -> Result<Vec<f64>, RealSolidRunError> {
+    let mut body = body?;
+    let (selected, before) = select_edges(k, &body, input)?;
+    if input.checkpoint != Checkpoint::Full {
+        return prefix::run(k, &mut body, &selected, input, &before, None).map_err(Into::into);
+    }
+    let result = fillet_selected(k, &mut body, &selected, input)?;
     let result_status = match result {
         Ok(()) => 0.0,
         Err(error) => status(error)?,
     };
+    Ok(record(k, &mut body, &before, result_status)?)
+}
+
+/// The full checkpoint's record of `body` after a fillet that ended with `result_status`:
+/// the selected edges `before` it, the status and counts, the topology, the geometry and
+/// the mass properties.
+fn record(
+    k: &Kernel,
+    body: &mut Brep,
+    before: &[f64],
+    result_status: f64,
+) -> SolidResult<Vec<f64>> {
     let mut values = Vec::new();
-    section(&mut values, &before);
+    section(&mut values, before);
     values.extend([
         result_status,
-        p1::vertices(&body, None)?.len() as f64,
-        p1::edges(&body, None)?.len() as f64,
-        p1::faces(&body, None)?.len() as f64,
+        p1::vertices(body, None)?.len() as f64,
+        p1::edges(body, None)?.len() as f64,
+        p1::faces(body, None)?.len() as f64,
     ]);
     let mut topology_record = Vec::new();
-    topology(&body, &mut topology_record)?;
+    topology(body, &mut topology_record)?;
     section(&mut values, &topology_record);
     let mut geometry = Vec::new();
-    crate::util::primitive::append(k, &body, &mut geometry)?;
+    crate::util::primitive::append(k, body, &mut geometry)?;
     section(&mut values, &geometry);
     // The public API leaves no attribute on the body: the executive's fillet-edge
     // attribute and the temporary merge tags are destroyed with its session, as
@@ -778,10 +815,10 @@ fn run_rust(
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
-    crate::dump::body(k, "mass", &body);
+    crate::dump::body(k, "mass", body);
     match solidcore::mass::integrator::properties::brep_mass_properties(
         k,
-        &mut body,
+        body,
         1e-4,
         1.0,
         Vec3::ZERO,
@@ -801,7 +838,7 @@ fn run_rust(
         Err(error) => values.push(status(error)?),
     }
     // (a soundness probe's measure of the result: nothing unless capture is on)
-    crate::soundness::measure(&mut body);
+    crate::soundness::measure(body);
     Ok(values)
 }
 /// Configure one actual retained corner between native corner creation and filleting.
@@ -1787,6 +1824,509 @@ mod tests {
         let mut invalid = record;
         invalid[6] = 14010.5;
         assert!(output(&invalid).is_err());
+    }
+}
+
+
+/// The proof of the golden rows that moved when a blend face became its definition
+/// (`fillet_round_as_definition` retired, #16580), replayed on the rows' own inputs.
+///
+/// Each moved row's integers move because its blend faces' type codes are now the
+/// definition's, and its values because its geometry is evaluated on the definition `S`
+/// (and its net, certified within its bound of `S`, where a [`NetScope`] asks). Checked per
+/// row: every blend face by its definition re-certifies its net (`recertify` proves a
+/// distance `d` between the net and `S` over the whole face, at most the bound); and on a
+/// closed result, the volume. [`solidcore::mass::enclosure::enclose_volume`] encloses the
+/// volume of the body as stored (the nets) with a certified `[lo, hi]`; the body bounded by
+/// the definitions differs from it by at most `sum A_f d_f` (each face within `d_f` of its
+/// net, `A_f` its area), bounded above by summing each blend face's certified area
+/// enclosure's upper end times its `d_f`. The
+/// volume the integrator converges to (its finest accuracy) lies in that band. The area,
+/// centroid, inertias and products are enclosed likewise
+/// ([`solidcore::mass::enclosure::enclose_mass_properties`], the body as stored), and the
+/// golden's estimates (`brep_mass_properties` at the requested relative accuracy `1e-4`)
+/// lie within that accuracy of their bands; every operation's logged blend faces are
+/// definitions (`blend::definition_check`).
+///
+/// [`NetScope`]: solidcore::surface::procedural_blend::NetScope
+#[cfg(test)]
+pub(super) mod round_definition_proof {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::enclosure::{enclose_face_area, enclose_volume};
+    use solidcore::mass::integrator::properties::{
+        brep_mass_properties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
+    };
+    use solidcore::math::Vec3;
+    use solidcore::surface::surface::Surface;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::{Brep, FaceId};
+
+    /// The golden's requested relative accuracy of the mass properties.
+    pub(in super::super) const MASS_ACCURACY: f64 = 1e-4;
+
+    /// The faces of `b` whose surface is a blend by its definition, each with the proved
+    /// distance `d_f` between its net and its definition (`recertify`, at most its bound);
+    /// asserts there is at least one.
+    pub(in super::super) fn certified_blends(
+        k: &Kernel,
+        b: &mut Brep,
+        name: &str,
+    ) -> Vec<(FaceId, f64)> {
+        let mut blends = Vec::new();
+        for f in p1::faces(b, None).unwrap() {
+            let surface = b.face(f).unwrap().surface.clone();
+            let Some(blend) = surface.as_ref().and_then(Surface::procedural_blend) else {
+                continue;
+            };
+            let d = blend
+                .recertify(k)
+                .unwrap_or_else(|e| panic!("{name}: {f:?} does not re-certify: {e}"));
+            let bound = blend.bound();
+            assert!(
+                d <= bound,
+                "{name}: {f:?} proved {d:e} past its bound {bound:e}"
+            );
+            blends.push((f, d));
+        }
+        assert!(!blends.is_empty(), "{name}: no blend face is a definition");
+        blends
+    }
+
+    /// `sum A_f d_f` bounded above: each face's area certified ([`enclose_face_area`],
+    /// refined until it is within 1% of its upper end or its budget is spent; the band holds
+    /// either way), each product and the sum rounded up.
+    fn spread(k: &Kernel, b: &mut Brep, blends: &[(FaceId, f64)]) -> f64 {
+        let mut sum = 0.0_f64;
+        for &(f, d) in blends {
+            let mut a = enclose_face_area(k, b, &[f], f64::MAX).unwrap();
+            for _ in 0..3 {
+                if a.width() <= 1e-2 * a.hi {
+                    break;
+                }
+                a = enclose_face_area(k, b, &[f], 1e-2 * a.hi).unwrap();
+            }
+            sum = (sum + (a.hi * d).next_up()).next_up();
+        }
+        sum
+    }
+
+    /// The certified volume band of the closed body `b`: its enclosure (asked 1e-6 wide
+    /// relative; refinement stops earlier where the gaps between faces, which no cut
+    /// narrows, are wider) widened by an upper bound of `sum A_f d_f` over the blend faces
+    /// ([`spread`]: each face's certified area times its proved net distance `d_f` from
+    /// [`certified_blends`]). Asserts that the volume the integrator
+    /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
+    /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
+    /// printed beside the band for the record only: an estimate is not a bound.
+    pub(in super::super) fn volume_band(
+        k: &Kernel,
+        b: &mut Brep,
+        blends: &[(FaceId, f64)],
+        old: f64,
+        name: &str,
+    ) {
+        let spread = spread(k, b, blends);
+        let store = solidcore::geom::attribute::AttributeStore::default();
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+        };
+        let mut volume = |accuracy: f64| {
+            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes)
+                .unwrap()
+                .properties
+                .volume
+        };
+        let new = volume(MASS_ACCURACY);
+        let converged = volume(ESTIMATE_ACCURACY_FINEST);
+        let enclosure = enclose_volume(k, b, 1e-6 * new.abs()).unwrap();
+        let (lo, hi) = (enclosure.lo - spread, enclosure.hi + spread);
+        assert!(
+            (lo..=hi).contains(&converged),
+            "{name}: the converged volume {converged} is off the certified [{lo}, {hi}]"
+        );
+        eprintln!(
+            "{name}: converged {converged}, the golden's estimate {new} (before {old}), \
+             certified [{lo}, {hi}], band width {:e}",
+            hi - lo
+        );
+    }
+
+    /// The certified bands of the closed body `b`'s other mass values, as the golden
+    /// records them (density 1, about the origin): its area, centroid, axial inertias and
+    /// products (`enclose_mass_properties`, each asked 1e-5 of its scale wide: the area's,
+    /// the volume's times the box's half diagonal `R` to the moment's degree; one that
+    /// spends its cell budget first stays a valid, wider band). The golden's requested
+    /// accuracy is `1e-4` of the value's
+    /// scale (the area, `R` for a centroid, `V R^2` for an inertia or product, or the value
+    /// where it is larger). Asserts, for each value, that the value the integrator
+    /// converges to (1e-8) lies in its band and that the golden's own estimate (1e-4) lies
+    /// within that accuracy of it; prints `PROVEN` where the band is at most that accuracy
+    /// wide (the golden's value is then within twice its accuracy of the true one) and
+    /// `WIDE` where it is not. The bands are of the body as stored (its nets), which is the
+    /// body the golden measures.
+    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, name: &str) {
+        use solidcore::mass::enclosure::{enclose_mass_properties, Bounds};
+        let store = solidcore::geom::attribute::AttributeStore::default();
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+        };
+        let mut at = |accuracy: f64| {
+            let m = brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap();
+            let v = |p: Vec3| [p.x, p.y, p.z];
+            (m.properties.area, v(m.centroid), v(m.inertia), v(m.products))
+        };
+        let golden = at(MASS_ACCURACY);
+        let converged = at(ESTIMATE_ACCURACY_FINEST);
+        let e = enclose_mass_properties(k, b, 1e-5).unwrap();
+        if let Some((q, stop)) = e.short {
+            eprintln!("{name}: the {q:?} enclosure stopped at {stop:?}, its band wider");
+        }
+        let r = {
+            let bbox = solidcore::query::brep::calculate_bounding_box(
+                k,
+                &mut *b,
+                solidcore::query::brep::BoundingBoxOptions::default(),
+            )
+            .unwrap();
+            0.5 * bbox.size().length()
+        };
+        let vr2 = e.volume.hi * r * r;
+        let check = |what: &str, band: &Bounds, conv: f64, gold: f64, scale: f64| {
+            let scale = scale.max(conv.abs());
+            let accuracy = MASS_ACCURACY * scale;
+            assert!(
+                band.contains(conv),
+                "{name}: the converged {what} {conv} is off the certified {band:?}"
+            );
+            let off = (band.lo - gold).max(gold - band.hi).max(0.0);
+            assert!(
+                off <= accuracy,
+                "{name}: the golden's {what} {gold} is {off:e} off the certified {band:?}, \
+                 past its accuracy {accuracy:e}"
+            );
+            // PROVEN: the band is at most the accuracy wide, so the golden's value is within
+            // twice its accuracy of the true one; WIDE: the band holds the converged and
+            // golden values but is wider than the accuracy
+            let label = if band.width() <= accuracy {
+                "PROVEN"
+            } else {
+                "WIDE"
+            };
+            eprintln!(
+                "MASSBAND {label} {name}: {what} converged {conv}, golden {gold}, certified \
+                 [{}, {}], width {:e} (accuracy {accuracy:e})",
+                band.lo,
+                band.hi,
+                band.width()
+            );
+        };
+        check("area", &e.area, converged.0, golden.0, converged.0);
+        let axes = ["x", "y", "z"];
+        for i in 0..3 {
+            check(
+                &format!("centroid {}", axes[i]),
+                &e.centroid[i],
+                converged.1[i],
+                golden.1[i],
+                r,
+            );
+            check(
+                &format!("inertia {}", axes[i]),
+                &e.inertia[i],
+                converged.2[i],
+                golden.2[i],
+                vr2,
+            );
+            check(
+                &format!("product {}", ["yz", "zx", "xy"][i]),
+                &e.products[i],
+                converged.3[i],
+                golden.3[i],
+                vr2,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+pub(super) mod round_definition_rows {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_proof::{certified_blends, mass_bands, volume_band};
+    use super::*;
+    use solidcore::blend::definition_check::{
+        bare_blend_faces, BlendFaceKind, BlendFaceLog, CornerKind,
+    };
+
+    /// The moved rows of the full real-solid form: name, the volume and the counts the
+    /// golden held before, and the counts after (`None`: an open result, no volume).
+    /// A moved row: name, the volume before (`None`: an open result), counts before and after.
+    type Row = (&'static str, Option<f64>, [i64; 4], [i64; 4]);
+
+    const ROWS: &[Row] = &[
+        ("law-box10x20x30-e0-deg1-edge-map-degenerate", Some(5993.756280511141), [0, 12, 19, 9], [0, 12, 19, 9]),
+        ("law-cube20-e0-deg1-4-2-4-c0-corner", Some(7960.456479043605), [0, 12, 19, 9], [0, 12, 19, 9]),
+        ("law-cube20-e0-deg1-linear-2-4", Some(7960.071936129126), [0, 10, 15, 7], [0, 10, 15, 7]),
+        ("law-cube20-e0-deg1-two-corners", Some(7967.522641489464), [0, 16, 26, 12], [0, 16, 26, 12]),
+        ("law-cube20-e0-deg2-c0-knot", Some(7960.45647903661), [0, 12, 19, 9], [0, 12, 19, 9]),
+        ("law-cube20-e3-deg1-4-2-4-c0-corner", Some(7960.4591713535165), [0, 12, 19, 9], [0, 12, 19, 9]),
+        ("source-file-corner_box-all-edges", Some(455.9756600237953), [0, 30, 60, 32], [0, 30, 60, 32]),
+        ("source-file-corner_box-edge13", Some(456.170359361229), [0, 12, 18, 8], [0, 12, 18, 8]),
+        ("source-file-nurb_box-all-edges", Some(899.6446069287648), [0, 24, 48, 26], [0, 24, 48, 26]),
+        ("source-file-nurb_box-edge0", Some(899.9779184480373), [0, 10, 15, 7], [0, 10, 15, 7]),
+        ("source-file-nurb_box-edge5", Some(899.8473310857921), [0, 10, 15, 7], [0, 10, 15, 7]),
+        ("stubs4-Heart-all-edges-r0.1", Some(326.05803686396416), [0, 14, 26, 14], [0, 14, 26, 14]),
+        ("stubs4-coons_01_03_29-e0-r0.5", None, [0, 8, 12, 5], [0, 8, 12, 5]),
+        ("stubs4-coons_01_03_29-e3-r0.5", None, [0, 8, 12, 5], [0, 8, 12, 5]),
+        ("stubs4-coons_01_03_29-e6-r0.5", None, [0, 8, 12, 5], [0, 8, 12, 5]),
+        ("stubs4-delete-edge-bottle-e8-r0.1", Some(11.065538784092405), [0, 30, 46, 18], [0, 31, 47, 18]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", Some(169498.77345473654), [0, 27, 42, 10], [0, 27, 42, 10]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", Some(169488.15759245612), [0, 27, 42, 10], [0, 27, 42, 10]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", Some(169498.7688211253), [0, 27, 42, 10], [0, 27, 42, 10]),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", Some(169488.16356054693), [0, 27, 42, 10], [0, 27, 42, 10]),
+        ("stubs4-sphere_plane-e3-r0.5", None, [0, 4, 6, 3], [0, 4, 6, 3]),
+        ("stubs4-test8-e3-r0.5", None, [0, 6, 9, 3], [0, 6, 9, 3]),
+        ("stubs4-torii_unioned-e2-r0.5", Some(8906.398139766763), [0, 4, 7, 3], [0, 4, 7, 3]),
+        ("sweep5-ext_w_hole-e15-r1.0", Some(234.29248501042775), [0, 16, 24, 10], [0, 16, 24, 10]),
+        ("sweep5-letter_g-e1-r1.0", Some(573.7971132096428), [0, 22, 33, 13], [0, 22, 33, 13]),
+        ("sweep5-letter_g-e10-r1.0", Some(572.1858458923035), [0, 23, 35, 14], [0, 23, 35, 14]),
+        ("sweep5-nurb_box1-all-r0.5", Some(3793.253064279953), [0, 18, 36, 20], [0, 18, 36, 20]),
+    ];
+
+    /// No face the operation logged as a blend face (`blend::definition_check`) is a bare
+    /// net that a definition should hold: a face without a definition is either an exact
+    /// analytic surface (a plane, sphere, cone or torus: the ball's own surface, nothing
+    /// approximated) or a face of a pinned corner (a corner hierarchy that is not built as a
+    /// definition; its faces are definitions only with the blend corner's fixes).
+    pub(in super::super) fn no_bare_blend_face(k: &Kernel, b: &Brep, name: &str) {
+        let made = k.blend_face_log.as_ref().unwrap().last().to_vec();
+        assert!(!made.is_empty(), "{name}: no blend face logged");
+        for bare in bare_blend_faces(b, &made).unwrap() {
+            let exact = matches!(bare.surface, "plane" | "sphere" | "cone" | "torus");
+            let pinned = bare.kind == BlendFaceKind::Corner(CornerKind::Pinned);
+            assert!(exact || pinned, "{name}: a bare blend face {bare:?}");
+        }
+    }
+
+    /// The fixture inputs of `name`.
+    pub(super) fn inputs(name: &str) -> super::super::Inputs {
+        crate::fixtures::load_fixture_dir(&crate::case::repo_root(), "blend.fillet_executive_p3")
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("no case {name}"))
+            .parse()
+            .unwrap()
+    }
+
+    /// The status and the vertex, edge and face counts of `b`, as the golden records them.
+    pub(super) fn counts(b: &Brep, status: i64) -> [i64; 4] {
+        [
+            status,
+            p1::vertices(b, None).unwrap().len() as i64,
+            p1::edges(b, None).unwrap().len() as i64,
+            p1::faces(b, None).unwrap().len() as i64,
+        ]
+    }
+
+    /// One test per moved row of the full real-solid form, so the test runner spreads the
+    /// rows over its threads (each row's certificates take minutes; the rows in sequence
+    /// outran the CI job's time limit). Each checks its row as [`check`] says.
+    macro_rules! row_tests {
+        ($($test:ident => $name:literal,)*) => {
+            $(
+                #[test]
+                fn $test() {
+                    check($name);
+                }
+            )*
+
+            /// The rows the generated tests take, in [`ROWS`]'s order.
+            const ROW_TESTS: &[&str] = &[$($name),*];
+        };
+    }
+
+    row_tests! {
+        law_box10x20x30_e0_deg1_edge_map_degenerate => "law-box10x20x30-e0-deg1-edge-map-degenerate",
+        law_cube20_e0_deg1_4_2_4_c0_corner => "law-cube20-e0-deg1-4-2-4-c0-corner",
+        law_cube20_e0_deg1_linear_2_4 => "law-cube20-e0-deg1-linear-2-4",
+        law_cube20_e0_deg1_two_corners => "law-cube20-e0-deg1-two-corners",
+        law_cube20_e0_deg2_c0_knot => "law-cube20-e0-deg2-c0-knot",
+        law_cube20_e3_deg1_4_2_4_c0_corner => "law-cube20-e3-deg1-4-2-4-c0-corner",
+        source_file_corner_box_all_edges => "source-file-corner_box-all-edges",
+        source_file_corner_box_edge13 => "source-file-corner_box-edge13",
+        source_file_nurb_box_all_edges => "source-file-nurb_box-all-edges",
+        source_file_nurb_box_edge0 => "source-file-nurb_box-edge0",
+        source_file_nurb_box_edge5 => "source-file-nurb_box-edge5",
+        stubs4_heart_all_edges_r0_1 => "stubs4-Heart-all-edges-r0.1",
+        stubs4_coons_01_03_29_e0_r0_5 => "stubs4-coons_01_03_29-e0-r0.5",
+        stubs4_coons_01_03_29_e3_r0_5 => "stubs4-coons_01_03_29-e3-r0.5",
+        stubs4_coons_01_03_29_e6_r0_5 => "stubs4-coons_01_03_29-e6-r0.5",
+        stubs4_delete_edge_bottle_e8_r0_1 => "stubs4-delete-edge-bottle-e8-r0.1",
+        stubs4_delete_edge_sphere_diff_3cylinders_e1_r0_1 => "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+        stubs4_delete_edge_sphere_diff_3cylinders_e1_r0_5 => "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+        stubs4_delete_edge_sphere_diff_3cylinders_e4_r0_1 => "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+        stubs4_delete_edge_sphere_diff_3cylinders_e4_r0_5 => "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+        stubs4_sphere_plane_e3_r0_5 => "stubs4-sphere_plane-e3-r0.5",
+        stubs4_test8_e3_r0_5 => "stubs4-test8-e3-r0.5",
+        stubs4_torii_unioned_e2_r0_5 => "stubs4-torii_unioned-e2-r0.5",
+        sweep5_ext_w_hole_e15_r1_0 => "sweep5-ext_w_hole-e15-r1.0",
+        sweep5_letter_g_e1_r1_0 => "sweep5-letter_g-e1-r1.0",
+        sweep5_letter_g_e10_r1_0 => "sweep5-letter_g-e10-r1.0",
+        sweep5_nurb_box1_all_r0_5 => "sweep5-nurb_box1-all-r0.5",
+    }
+
+    /// Every row of [`ROWS`] has exactly one test.
+    #[test]
+    fn every_moved_row_has_its_own_test() {
+        let rows: Vec<&str> = ROWS.iter().map(|row| row.0).collect();
+        assert_eq!(rows, ROW_TESTS);
+    }
+
+    /// The [`ROWS`] row named `row`: its blend faces are definitions whose nets
+    /// re-certify, its counts are the golden's (unchanged but for the bottle's rail, split
+    /// at the shoulder face's C1 knot), and a closed result's converged volume and mass
+    /// values lie in their certified bands.
+    fn check(row: &str) {
+        let picked: Vec<&Row> = ROWS.iter().filter(|r| r.0 == row).collect();
+        assert_eq!(picked.len(), 1, "{row}: one row of that name");
+        for &&(name, old_volume, before, after) in &picked {
+            let input = inputs(name).real_solid.expect("a real solid");
+            assert_eq!(input.checkpoint, Checkpoint::Full, "{name}");
+            let mut k = Kernel::default();
+            let mut body = build(&mut k, &input).unwrap().unwrap();
+            let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+            k.blend_face_log = Some(BlendFaceLog::default());
+            let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+            assert!(result.is_ok(), "{name}: {result:?}");
+            no_bare_blend_face(&k, &body, name);
+            assert_eq!(counts(&body, 0), after, "{name}");
+            if name != "stubs4-delete-edge-bottle-e8-r0.1" {
+                assert_eq!(before, after, "{name}");
+            }
+            if name == "stubs4-delete-edge-bottle-e8-r0.1" {
+                rail_splits_at_a_c1_knot(&k, &body);
+            }
+            let blends = certified_blends(&k, &mut body, name);
+            if let Some(old) = old_volume {
+                volume_band(&k, &mut body, &blends, old, name);
+                mass_bands(&k, &mut body, name);
+            }
+        }
+    }
+
+    /// The bottle's extra vertex: two edges between the same B-spline face and blend face
+    /// meet at a vertex that lies, within its tolerance, on that face's iso-line at a u
+    /// knot of multiplicity at least the degree less one (where the face is only C1, so the
+    /// rail, the feet of the ball's centres, turns), the knot nearest the edges' trim end.
+    fn rail_splits_at_a_c1_knot(k: &Kernel, b: &Brep) {
+        use solidcore::math::Point2;
+        use solidcore::nurbs::b_spline_surface::SurfParamType;
+        use solidcore::surface::surface::SurfaceKind;
+        let edges = p1::edges(b, None).unwrap();
+        let faces_of = |e: EdgeId| {
+            let mut f = edge::faces(b, e, None).unwrap();
+            f.sort();
+            f
+        };
+        let mut found = 0;
+        for (i, &e1) in edges.iter().enumerate() {
+            for &e2 in edges.iter().skip(i + 1) {
+                let faces = faces_of(e1);
+                if faces.len() != 2 || faces != faces_of(e2) {
+                    continue;
+                }
+                let ends = |e: EdgeId| edge::vertices(b, e, None).unwrap();
+                let Some(v) = ends(e1).into_iter().flatten().find(|v| ends(e2).contains(&Some(*v)))
+                else {
+                    continue;
+                };
+                let surface = |f| b.face(f).unwrap().surface.clone().unwrap();
+                let (Some(&shoulder), Some(_)) = (
+                    faces.iter().find(|&&f| matches!(surface(f).kind(), SurfaceKind::BSpline(_))),
+                    faces.iter().find(|&&f| surface(f).procedural_blend().is_some()),
+                ) else {
+                    continue;
+                };
+                let s = surface(shoulder);
+                let SurfaceKind::BSpline(net) = s.kind() else {
+                    unreachable!()
+                };
+                let p = solidcore::topology::vertex::point(b, v).unwrap();
+                let tol = solidcore::topology::vertex::tolerance(b, v).unwrap();
+                // the end of e1's trim on the shoulder at the vertex
+                let eu = edge::edgeuses(b, e1, None, None)
+                    .unwrap()
+                    .into_iter()
+                    .find(|&u| eu::face(b, u).unwrap() == Some(shoulder))
+                    .unwrap();
+                let trim = eu::uv_trim_curve(b, eu).unwrap().0.unwrap();
+                let ivl = trim.natural_interval();
+                let uv = [ivl.min(), ivl.max()]
+                    .into_iter()
+                    .map(|t| {
+                        let q = trim.evaluate_point(k, t).unwrap();
+                        Point2::new(q.x, q.y)
+                    })
+                    .min_by(|a, c| {
+                        let d = |w: &Point2| s.evaluate_point(k, *w).unwrap().distance(p);
+                        d(a).total_cmp(&d(c))
+                    })
+                    .unwrap();
+                let degree = net.degree(SurfParamType::U);
+                let (knots, mults) = net.knots(SurfParamType::U, None).unwrap();
+                // interior knots only: the clamped end knots bound the domain, where the
+                // face is not C1-limited
+                let last = knots.len() - 1;
+                let (_, (&knot, _)) = knots
+                    .iter()
+                    .zip(&mults)
+                    .enumerate()
+                    .filter(|&(i, (_, &m))| i > 0 && i < last && m + 1 >= degree)
+                    .min_by(|a, c| (a.1 .0 - uv.x).abs().total_cmp(&(c.1 .0 - uv.x).abs()))
+                    .expect("an interior knot of multiplicity at least the degree less one");
+                let on_iso = s.evaluate_point(k, Point2::new(knot, uv.y)).unwrap().distance(p);
+                assert!(
+                    on_iso <= tol,
+                    "the split vertex is {on_iso:e} off the u = {knot} iso-line (tolerance {tol:e})"
+                );
+                found += 1;
+            }
+        }
+        assert_eq!(found, 1, "one rail split at a C1 knot");
+    }
+
+    /// issue #2349's teardrop at its solver-geometry and corner-edge checkpoints: every
+    /// generated fillet surface is a blend by its definition whose net re-certifies.
+    #[test]
+    fn teardrop_generated_rounds_are_certified_definitions() {
+        for name in [
+            "issue-2349-teardrop-solver_geometry-r0.5",
+            "issue-2349-teardrop-corner_edges-r0.5",
+        ] {
+            let input = inputs(name).real_solid.expect("a real solid");
+            let mut k = Kernel::default();
+            let mut body = build(&mut k, &input).unwrap().unwrap();
+            let (selected, before) = select_edges(&k, &body, &input).ok().unwrap();
+            let mut certificates = Vec::new();
+            prefix::run(
+                &mut k,
+                &mut body,
+                &selected,
+                &input,
+                &before,
+                Some(&mut certificates),
+            )
+            .unwrap();
+            assert!(!certificates.is_empty(), "{name}: no generated surface");
+            for (type_code, certified) in certificates {
+                let (bound, d) =
+                    certified.unwrap_or_else(|| panic!("{name}: a bare surface ({type_code})"));
+                assert!(d <= bound, "{name}: proved {d:e} past its bound {bound:e}");
+            }
+        }
     }
 }
 
