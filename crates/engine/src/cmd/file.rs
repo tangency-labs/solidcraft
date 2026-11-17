@@ -2428,7 +2428,7 @@ fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: so
             ));
         }
     }
-    let glass = super::render::glass_bodies(s, cmd)?;
+    let glass = super::render::glass_bodies(s, cmd, bodies)?;
     // The occurrences as the world state placed them: a part moved but not yet committed is where
     // the move left it, so its node and its mesh's frame agree with the world.
     let moved;
@@ -3100,6 +3100,10 @@ mod tests {
         let e = s.execute("file.export", &json!({"path": path})).unwrap_err().to_string();
         assert!(e.contains("Pane") && e.contains("`Hero`") && e.contains("`Studio`"), "{e}");
         assert_eq!(std::fs::read(&path).unwrap(), written);
+        // Left out with `bodies`, its Glass is not read: the rest exports.
+        s.execute("file.export", &json!({"path": path, "bodies": ["Block"]})).unwrap();
+        assert!(glb_json(&std::fs::read(&path).unwrap())["materials"].as_array().unwrap().iter().all(|m| m["name"] != "Pane"));
+        std::fs::write(&path, &written).unwrap();
         // Glass that scatters light inside it: refused, as glTF has no place for it.
         let scattering = json!({"ior": 1.52, "absorption_per_mm": [0.2, 0.1, 0.0], "boundary": "closed_mesh", "subsurface": {"scattering_per_mm": 0.4, "anisotropy": 0.0}});
         rebind(&mut s, "Hero", &scattering);

@@ -493,9 +493,10 @@ pub(super) fn textured_bodies(s: &Session, cmd: &str) -> Result<std::collections
 }
 
 /// The Glass saved render setups give placed bodies, by world name (GLB export, #5296). A body
-/// two setups give different Glass is refused, naming both: the file holds one. A binding whose
-/// body is gone binds nothing.
-pub(super) fn glass_bodies(s: &Session, cmd: &str) -> Result<std::collections::BTreeMap<String, solidcraft_doc::render_optics::OpticalMaterial>> {
+/// two setups give different Glass is refused, naming both: the file holds one. Only the bodies
+/// in `bodies` are read (all when it is empty), so leaving one out clears its refusal. A binding
+/// whose body is gone binds nothing.
+pub(super) fn glass_bodies(s: &Session, cmd: &str, bodies: &[String]) -> Result<std::collections::BTreeMap<String, solidcraft_doc::render_optics::OpticalMaterial>> {
     let mut out: std::collections::BTreeMap<String, (String, solidcraft_doc::render_optics::OpticalMaterial)> = std::collections::BTreeMap::new();
     let setups = &s.doc.render.setups;
     if setups.values().all(|x| x.optics.is_empty()) {
@@ -505,6 +506,9 @@ pub(super) fn glass_bodies(s: &Session, cmd: &str) -> Result<std::collections::B
     for (setup, x) in setups {
         for b in x.optics.iter() {
             let Some(name) = names.get(&b.target) else { continue };
+            if !bodies.is_empty() && !bodies.contains(name) {
+                continue;
+            }
             match out.get(name) {
                 Some((first, optics)) if *optics != b.optics => {
                     return Err(bad(
