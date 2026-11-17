@@ -1,0 +1,168 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  27.6,
+                  0.0,
+                  35.2
+                ],
+                [
+                  27.6,
+                  0.0,
+                  35.2
+                ]
+              ],
+              "index": 10
+            }
+          ],
+          "points": [
+            [
+              -27.60000000000001,
+              0.0,
+              35.2
+            ]
+          ],
+          "tolerance": 5.655874003901414
+        },
+        "kind": "chamfer",
+        "sizes": [
+          7.4
+        ]
+      }
+    }
+  ],
+  "case": "every-chamfer-two-depth-counterbore-rim-7-4-fits",
+  "expected": {
+    "bbox": {
+      "max": [
+        38.0,
+        38.0,
+        35.2
+      ],
+      "min": [
+        -38.0,
+        -38.0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "V0 = pi (R^2 - r1^2) h1 + pi (R^2 - r0^2)(H - h1) - (pi/2)(r1^2 - r0^2)(h2 - h1) (the deeper half of the ledge) with R = 38, r1 = 27.6, r0 = 20.2, H = 35.2, h1 = 7.7, h2 = 27.8: 94836.080531190. Section in (rho, z): the chamfer triangle (r1, H), (r1 + d, H), (r1, H - d) with d = 7.4, area d^2/2, centroid rho = r1 + d/3, wholly at rho >= r1 and in the ring's material (below a floor it takes ring material only, a groove, built as if the wall went on, the owner's ruling of 2026-10-30, d7; the ledges at rho < r1 are untouched). Removed by Pappus, 2 pi Int rho dA = 5172.477318898. V = 89663.603212292",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-06
+    },
+    "volume_mm3": 89663.6032122923,
+    "what": "a ring (outer r38, bore r20.2, 35.2 high) with a counterbore r27.6 whose floor is a ledge at two depths, 7.7 on the half x > 0 and 27.8 on the half x < 0 (split on x = 0); its top rim chamfered 7.4: both legs stay on their faces all the way round; control for every-chamfer-two-depth-counterbore-rim-9-7-past-the-shallow-floor"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 23,
+      "faces": 10,
+      "vertices": 15
+    }
+  },
+  "records": "every-chamfer-two-depth-counterbore-rim-7-4-fits.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ring",
+      "made": "b26"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 19823.42173292687,
+      "body_count": 1,
+      "edges": 23,
+      "faces": 10,
+      "vertices": 15,
+      "volume_mm3": 89663.60321178663
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "a ring (outer r38, bore r20.2, 35.2 high) with a counterbore r27.6 whose floor is a ledge at two depths, 7.7 on the half x > 0 and 27.8 on the half x < 0 (split on x = 0); its top rim chamfered 7.4: both legs stay on their faces all the way round; control for every-chamfer-two-depth-counterbore-rim-9-7-past-the-shallow-floor",
+  "why_not": []
+}
