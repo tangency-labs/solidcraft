@@ -5,7 +5,7 @@ use solidcraft_engine::doc::drawing::{
     view::{View, ViewKind},
 };
 use solidcraft_engine::doc::ids::encode;
-use solidcraft_engine::geom::drawing_view::NamedView;
+use solidcraft_engine::geom::{PlaneGeom, drawing_view::NamedView};
 use solidcraft_theme::Tokens;
 use std::collections::HashMap;
 
@@ -210,11 +210,7 @@ fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> S
     if matches!(view.kind, ViewKind::Base { .. } | ViewKind::Projected { .. })
         && let Ok(resolved) = drawing.resolve_view(view.id)
     {
-        let normal = resolved.basis.x.cross(resolved.basis.y);
-        if let Some(named) = NamedView::ALL.into_iter().find(|named| {
-            let basis = named.basis();
-            basis.x.cross(basis.y) == normal
-        }) {
+        if let Some(named) = NamedView::ALL.into_iter().find(|named| named.basis().normal() == resolved.basis.normal()) {
             let key = match named {
                 NamedView::Front => "cmd.view_front",
                 NamedView::Back => "cmd.view_back",
