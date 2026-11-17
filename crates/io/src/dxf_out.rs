@@ -2559,9 +2559,13 @@ mod tests {
             1,
         )
         .unwrap();
-        assert!(dxf.contains("LWPOLYLINE"));
-        assert!(dxf.contains("\n  8\nCUT\n") || dxf.contains("\n8\nCUT\n"));
-        assert!(dxf.contains("\n 70\n1\n") || dxf.contains("\n70\n1\n")); // $INSUNITS 1
+        // Wire checks through the shared lexer: the layered reader doesn't take an inch file with
+        // patterned linetypes yet, and $INSUNITS is a header value it converts away.
+        let [(kind, groups)] = &entities(&dxf)[..] else { panic!("{dxf}") };
+        assert_eq!((kind.as_str(), field(groups, 8)), ("LWPOLYLINE", "CUT"));
+        let p = pairs(&dxf);
+        let after = |var: &str| &p[p.iter().position(|(c, v)| (*c, v.as_str()) == (9, var)).unwrap() + 1..];
+        assert_eq!(after("$INSUNITS")[0], (70, "1".to_string()));
 
         // Read back via read_dxf: should scale from inches back to mm
         let geom = read_dxf(&dxf).unwrap();

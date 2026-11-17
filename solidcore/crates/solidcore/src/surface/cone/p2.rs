@@ -19,9 +19,9 @@
 //! | [`Cone::base_mut`]                           | `GetGwNurbPointer` (non-`const`, inherited)      |
 //!
 //! Deviations:
-//! - **Opt-in fix** ([`UpstreamFixes::analytic_inversion_answers_apart`](crate::kernel::UpstreamFixes::analytic_inversion_answers_apart),
-//!   WR-662, the SolidCraft fork's tangency-labs/smlib dfc7cb6): the ellipse-trim
-//!   classification passes a failed cone inversion on instead of reading it as exterior.
+//! - **Inversion answers apart** (WR-662, the SolidCraft fork's tangency-labs/smlib
+//!   dfc7cb6): the ellipse-trim classification passes a failed cone inversion on
+//!   instead of reading it as exterior.
 //! - **Out-params** become return values: the offset is `None` where upstream succeeds
 //!   without a surface (both new radii below the tolerance); the recogniser's cone is
 //!   `Some` when upstream returns `TRUE`; the trim intervals are returned.
@@ -1773,10 +1773,10 @@ impl Cone {
 /// The location and STEP parameters the cone's `STEPInversion` writes for `point` (its
 /// status is ignored upstream). The parameters are only read for a location other
 /// than `SM_LT_EXTERIOR`; they are `SM_UNDEF_DOUBLE` where a failure sets that location.
-/// With [`UpstreamFixes::analytic_inversion_answers_apart`](crate::kernel::UpstreamFixes::analytic_inversion_answers_apart)
-/// only the answer "off the generator" reads as exterior; a failed start-plane
-/// transform is returned (the SolidCraft fork, tangency-labs/smlib dfc7cb6, in
-/// `sm_GetEllipseTrimIntervals` and `sm_IsConePointInTrimDomain`).
+/// Only the answer "off the generator" reads as exterior; any other failure (a failed
+/// start-plane transform) is returned, where upstream read some as exterior (WR-662;
+/// the SolidCraft fork, tangency-labs/smlib dfc7cb6, in `sm_GetEllipseTrimIntervals`
+/// and `sm_IsConePointInTrimDomain`).
 fn cone_inversion(
     k: &Kernel,
     cone: &Cone,
@@ -1785,28 +1785,17 @@ fn cone_inversion(
 ) -> Result<(LocationType, Point2)> {
     match cone.step_inversion(k, point, tol, None) {
         Ok(inv) => Ok((inv.location, inv.uv)),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
         // rotated point not on the generator: upstream sets SM_LT_EXTERIOR
         // (by its status, so also a typed failure that replaced the `Upstream`, #13790)
-        Err(e) if crate::surface::surf_of_revolution::p2::is_off_generator(&e) => {
+        Err(e)
+            if !e.is_unported_or_cancelled()
+                && crate::surface::surf_of_revolution::p2::is_off_generator(&e) =>
+        {
             Ok((LocationType::Exterior, Point2::UNDEF))
         }
         // the fork (tangency-labs/smlib dfc7cb6, `SER` unless `STEPInversionAnswered`):
-        // a failure is passed on instead of read as SM_LT_EXTERIOR
-        Err(e) if k.fixes.analytic_inversion_answers_apart => Err(e),
-        Err(e) => {
-            // a failed TransformPointToStartPlane returns after SM_LT_EXTERIOR is set
-            let pos = cone.positive_point(k, point)?;
-            if cone
-                .rev
-                .transform_point_to_start_plane(pos.point, tol, false)
-                .is_err()
-            {
-                Ok((LocationType::Exterior, Point2::UNDEF))
-            } else {
-                Err(e)
-            }
-        }
+        // any other failure is passed on instead of read as SM_LT_EXTERIOR
+        Err(e) => Err(e),
     }
 }
 
@@ -2311,27 +2300,24 @@ mod tests {
 
     /// fork dfc7cb6 (`sm_GetEllipseTrimIntervals` / `sm_IsConePointInTrimDomain`,
     /// `if(!SmSurface::STEPInversionAnswered(eInv)) { SER(eInv) ; }`): a point off the
-    /// generator is an answer, read as exterior for either setting, and a point on the
-    /// cone inverts. Coverage only: the failure the fix passes on (a failed
-    /// start-plane transform, `CCWAngleBetween` on a zero projection) is screened out
-    /// by the transform's own axis and projection checks for every finite input.
+    /// generator is an answer, read as exterior, and a point on the cone inverts.
+    /// Coverage only: the failure passed on (a failed start-plane transform,
+    /// `CCWAngleBetween` on a zero projection) is screened out by the transform's own
+    /// axis and projection checks for every finite input.
     #[test]
-    fn cone_inversion_answers_read_for_either_setting() {
-        for apart in [false, true] {
-            let mut k = kernel();
-            k.fixes.analytic_inversion_answers_apart = apart;
-            let cone = canonical(&k, 2.0, 2.0, 3.0, false, false);
-            let off = Point3::new(3.0, 0.0, 1.0);
-            assert_eq!(
-                cone_inversion(&k, &cone, off, 1e-9).unwrap().0,
-                LocationType::Exterior
-            );
-            let on = Point3::new(0.0, 2.0, 1.0);
-            assert_ne!(
-                cone_inversion(&k, &cone, on, 1e-9).unwrap().0,
-                LocationType::Exterior
-            );
-        }
+    fn cone_inversion_answers_read_as_locations() {
+        let k = kernel();
+        let cone = canonical(&k, 2.0, 2.0, 3.0, false, false);
+        let off = Point3::new(3.0, 0.0, 1.0);
+        assert_eq!(
+            cone_inversion(&k, &cone, off, 1e-9).unwrap().0,
+            LocationType::Exterior
+        );
+        let on = Point3::new(0.0, 2.0, 1.0);
+        assert_ne!(
+            cone_inversion(&k, &cone, on, 1e-9).unwrap().0,
+            LocationType::Exterior
+        );
     }
 
     #[test]
