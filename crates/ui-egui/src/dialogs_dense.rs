@@ -965,11 +965,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Mirror => {
             // Feature replay retains the source operation; Join is for body copies.
             if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
+                let mut picked = false;
                 form_row(ui, "Operation", |ui| {
                     let mut op = usize::from(d.extra.get("combine").and_then(Value::as_bool).unwrap_or(false));
-                    ui_kit::segmented(ui, &mut op, &["New Body", "Join"], Default::default());
+                    picked = ui_kit::segmented(ui, &mut op, &["New Body", "Join"], Default::default());
                     d.extra.insert("combine".into(), json!(op == 1));
                 });
+                // Picked by hand: the preview's own choice, when it comes in, does not replace it.
+                if picked {
+                    crate::preview::mirror_operation_picked(app, d);
+                }
             }
         }
         Kind::OffsetPlane { offset } => {
@@ -998,7 +1003,13 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Construct { t: Some(t), .. } => {
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
-        Kind::Split | Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::Construct { t: None, .. } => {}
+        Kind::Split
+        | Kind::ReplaceFace
+        | Kind::Remove
+        | Kind::Midplane
+        | Kind::ChatContext
+        | Kind::PluginPick { .. }
+        | Kind::Construct { t: None, .. } => {}
         Kind::Rib { thickness, depth, flip, normal, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);

@@ -403,7 +403,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
                 *from = to_root(*from);
                 *to = to_root(*to);
             }
-            FeatureKind::Mirror { placements, .. } => {
+            FeatureKind::Mirror { placements, .. } | FeatureKind::Pattern { placements, .. } => {
                 for path in placements {
                     local_path(path, &sc.own);
                 }

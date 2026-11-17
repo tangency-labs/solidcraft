@@ -1874,11 +1874,13 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
         let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
         startup::configure_adapter(setup, cpu, environment, adapter);
-        // A float depth buffer with a stencil, wherever the adapter has it (see `FLOAT_DEPTH_BITS`).
+        // A float depth buffer with a stencil (see `FLOAT_DEPTH_BITS`), and indirect draws that
+        // start at an instance (instanced meshes drawn a call per pipeline), wherever the adapter
+        // has them.
         let base = setup.device_descriptor.clone();
         setup.device_descriptor = std::sync::Arc::new(move |adapter| {
             let mut d = base(adapter);
-            d.required_features |= adapter.features() & startup::FLOAT_DEPTH_STENCIL;
+            d.required_features |= adapter.features() & (startup::FLOAT_DEPTH_STENCIL | solidcraft_viewport_gpu::INDIRECT_DRAWS);
             d
         });
     }
