@@ -82,19 +82,35 @@ fn palette_entry(i: u32) -> vec2<u32> {
     return textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).xy;
 }
 
-// The palette's PBR materials (`Material` in view.rs): for palette row r, texel row 2r holds each
-// entry's linear base colour and a PBR flag, row 2r + 1 its metallic fraction, roughness and IOR.
+// The palette's PBR materials (`Material` in view.rs): for palette row r, texel row 4r holds each
+// entry's linear base colour and a PBR flag, row 4r + 1 its metallic fraction, roughness and IOR,
+// rows 4r + 2 and 4r + 3 its wood frame's origin and fibre axis (`wood_coordinates`).
 @group(0) @binding(2) var pbr_materials: texture_2d<f32>;
 
 /// Palette entry `i`'s hatch word (`hatch`, under 256) with the entry's PBR finish packed above
 /// it: metallic in bits 8-15, roughness in 16-23, bit 24 set when the entry has one. An entry
 /// past the material texture has none (a load out of range is not defined).
 fn finish_h(i: u32, hatch: u32) -> u32 {
-    let at = vec2<u32>(i & 2047u, (i >> 11u) * 2u);
+    let at = vec2<u32>(i & 2047u, (i >> 11u) * 4u);
     if (at.y + 1u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
     let p = clamp(textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).xy, vec2<f32>(0.0), vec2<f32>(1.0));
     let q = vec2<u32>(round(p * 255.0));
     return hatch | (q.x << 8u) | (q.y << 16u) | (1u << 24u);
+}
+
+/// Palette entry `slot`'s wood grain coordinates at `p`: the offset across the fibre axis (xyz,
+/// whose length is the distance from the growth axis) and the distance along it (w). An original
+/// cylindrical growth field: continuous on every face, with rings on the end faces. Zero where the
+/// entry has no wood frame, which keeps its uniform colour exactly.
+fn wood_coordinates(p: vec3<f32>, slot: u32) -> vec4<f32> {
+    let at = vec2<u32>(slot & 2047u, (slot >> 11u) * 4u);
+    // An entry past the material texture has none (a load out of range is not defined).
+    if (at.y + 3u >= textureDimensions(pbr_materials).y) { return vec4<f32>(0.0); }
+    let origin = textureLoad(pbr_materials, at + vec2<u32>(0u, 2u), 0).xyz;
+    let axis = textureLoad(pbr_materials, at + vec2<u32>(0u, 3u), 0);
+    let delta = (p - origin) * axis.w;
+    let along = dot(delta, axis.xyz);
+    return vec4<f32>(delta - along * axis.xyz, along);
 }
 
 /// A palette entry's colour bytes as byte/255 (the old Unorm8x4 conversion, bit for bit).
@@ -130,6 +146,8 @@ struct TOut {
     // every vertex shader that gives none: a struct's fields start at zero).
     @location(4) v: f32,
     @location(5) @interpolate(flat) hv: u32,
+    // The wood grain coordinates (`wood_coordinates`): zero where the entry has no wood frame.
+    @location(6) wood: vec4<f32>,
 };
 
 /// A built triangle's vertex: its value word is an f32's bits, or all ones for none
@@ -159,6 +177,7 @@ fn tri_vertex(local: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
     o.c = unpack_color(e.x);
     o.h = finish_h(c, e.y);
     o.wp = p;
+    o.wood = wood_coordinates(local, c);
     return o;
 }
 
@@ -185,6 +204,7 @@ fn vs_tri_inst(
     o.c = unpack_color(e.x);
     o.h = finish_h(c, e.y);
     o.wp = wp;
+    o.wood = wood_coordinates(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)), c);
     return o;
 }
 
@@ -199,6 +219,7 @@ struct FOut {
     @location(0) rp: vec3<f32>,
     @location(1) c: vec4<f32>,
     @location(2) @interpolate(flat) h: u32,
+    @location(3) wood: vec4<f32>,
 };
 
 @vertex
@@ -217,6 +238,7 @@ fn vs_tri_inst_flat(
     let e = palette_entry(c);
     o.c = unpack_color(e.x);
     o.h = finish_h(c, e.y);
+    o.wood = wood_coordinates(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)), c);
     return o;
 }
 
@@ -234,6 +256,7 @@ fn flat_fragment(i: FOut, front: bool) -> TOut {
     o.c = i.c;
     o.h = i.h;
     o.wp = i.rp + u.eye.xyz;
+    o.wood = i.wood;
     return o;
 }
 
@@ -802,9 +825,14 @@ fn product_light_sample(k: u32, p: vec3<f32>) -> mat2x3<f32> {
     return mat2x3<f32>(direction,colour.xyz*weight);
 }
 
-/// An opaque face, with its material finish where the viewport shows them.
+/// An opaque face, with its material finish where the viewport shows them, and the wood figure
+/// where its entry has a wood frame (`wood_coordinates`).
 fn lit(i: TOut, visibility: f32) -> vec4<f32> {
-    return lit_color(i, visibility, i.c, true);
+    if (all(i.wood == vec4<f32>(0.0))) { return lit_color(i, visibility, i.c, true); }
+    let radius = length(i.wood.xyz);
+    let phase = 6.2831853 * (radius / 4.0 + 0.12 * sin(i.wood.w / 60.0));
+    let figure = 1.0 + 0.13 * sin(phase) + 0.035 * sin(phase * 5.0);
+    return lit_color(i, visibility, vec4<f32>(i.c.rgb * figure, i.c.a), true);
 }
 
 /// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).

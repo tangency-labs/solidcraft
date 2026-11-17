@@ -78,7 +78,7 @@ fn vs_pbr_inst(
 ) -> PbrOut {
     let q = vec4<f32>(p, 1.0);
     let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
-    let at = vec2<u32>(c & 2047u, (c >> 11u) * 2u);
+    let at = vec2<u32>(c & 2047u, (c >> 11u) * 4u);
     var o: PbrOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
@@ -93,7 +93,7 @@ fn vs_pbr_inst(
 // A built triangle vertex whose palette entry names its material (the product preview's blocks).
 @vertex
 fn vs_pbr_palette(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> PbrOut {
-    let at = vec2<u32>(c & 2047u, (c >> 11u) * 2u);
+    let at = vec2<u32>(c & 2047u, (c >> 11u) * 4u);
     var o: PbrOut;
     o.pos = u.vp * vec4<f32>(p, 1.0);
     o.n = n;

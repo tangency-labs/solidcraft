@@ -862,3 +862,203 @@ fn a_failed_sketch_is_not_drawn_while_the_model_cannot_be_placed() {
     h.app.session.pending_moves.remove(&part);
     assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "placed again");
 }
+
+#[test]
+fn wood_finish_frame_follows_box_rotation_translation_and_reopen() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length":100,"width":30,"height":10,"body_name":"Board"})).unwrap();
+    app.run("appearance.assign", json!({"bodies":["Board"],"appearance":"Wood - Oak"})).unwrap();
+    app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+    let frame = |app: &SolveApp| {
+        let state = app.session.world_state().unwrap();
+        super::wood_finish_frame(app, state.body("Board").unwrap()).unwrap()
+    };
+    assert_eq!(frame(&app), [[0.; 3], [1., 0., 0.]]);
+    app.run("solid.move", json!({"bodies":["Board"],"translate":[20,30,40],"axis":[0,0,1],"angle":"90 deg"})).unwrap();
+    let [origin, axis] = frame(&app);
+    assert_eq!(origin, [20., 30., 40.]);
+    for (actual, expected) in axis.into_iter().zip([0., 1., 0.]) {
+        assert!((actual - expected).abs() < 1e-6);
+    }
+    let document = serde_json::from_value(serde_json::to_value(&*app.session.doc).unwrap()).unwrap();
+    let reopened = SolveApp::new(Session::new(document), Services::default());
+    assert_eq!(frame(&reopened), frame(&app));
+    let state = app.session.world_state().unwrap();
+    let body = state.body("Board").unwrap();
+    assert!((kernel::measure(&body.body).unwrap().volume - 30000.).abs() < 1e-6);
+}
+
+#[test]
+fn wood_finish_without_grain_keeps_the_original_palette_and_vertex_bytes() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.run("solid.box", json!({"length":100,"width":30,"height":10,"body_name":"Board"})).unwrap();
+    app.run("appearance.assign", json!({"bodies":["Board"],"appearance":"Wood - Oak"})).unwrap();
+    let before = build_scene(&app);
+    assert!(before.palette.materials().iter().all(|m| m.wood.is_none()));
+    let vertices = before.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).unwrap().bytes.vertices.clone();
+    app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+    let with_grain = build_scene(&app);
+    assert!(with_grain.palette.materials().iter().any(|m| m.wood == Some([[0.; 3], [1., 0., 0.]])));
+    assert_eq!(with_grain.palette.entries(), before.palette.entries());
+    assert!(std::sync::Arc::ptr_eq(&vertices, &with_grain.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).unwrap().bytes.vertices));
+    app.run("wood.grain", json!({"body":"Board","direction":"none"})).unwrap();
+    let cleared = build_scene(&app);
+    assert!(cleared.palette.materials().iter().all(|m| m.wood.is_none()));
+    assert_eq!(cleared.palette.entries(), before.palette.entries());
+    assert_eq!(cleared.merged().tris, before.merged().tris);
+}
+
+#[test]
+fn wood_finish_respects_face_and_nonwood_overrides() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.run("solid.box", json!({"length":100,"width":30,"height":10,"body_name":"Board"})).unwrap();
+    app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+    app.run("appearance.assign", json!({"bodies":["Board"],"appearance":"Wood - Oak"})).unwrap();
+    app.run("appearance.assign", json!({"faces":[{"body":"Board","point":[50,15,10]}],"color":[12,34,56]})).unwrap();
+    let scene = build_scene(&app);
+    let mut overrides = 0;
+    for (index, rgba) in scene.palette.entries().iter().enumerate() {
+        if rgba[..3] == [12, 34, 56] {
+            overrides += 1;
+            assert!(scene.palette.materials().get(index).is_none_or(|m| m.wood.is_none()));
+        }
+    }
+    assert_eq!(overrides, 1, "the explicit face override is present");
+    app.run("appearance.assign", json!({"bodies":["Board"],"appearance":"Steel - Satin"})).unwrap();
+    assert!(build_scene(&app).palette.materials().iter().all(|m| m.wood.is_none()));
+}
+
+#[test]
+fn wood_finish_follows_the_recipe_not_the_look_name() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.run("solid.box", json!({"length":100,"width":30,"height":10,"body_name":"Board"})).unwrap();
+    app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+    // A red custom colour that borrows a wood name is not wood.
+    app.run("appearance.assign", json!({"bodies":["Board"],"name":"Wood - Oak","color":"#c81e1e"})).unwrap();
+    assert!(build_scene(&app).palette.materials().iter().all(|m| m.wood.is_none()));
+    // The oak recipe under another name is still wood.
+    app.run("appearance.assign", json!({"bodies":["Board"],"name":"Bench top","color":[190,146,92]})).unwrap();
+    assert!(build_scene(&app).palette.materials().iter().any(|m| m.wood == Some([[0.; 3], [1., 0., 0.]])));
+    // The library's PBR oak is a wood appearance too.
+    app.run("appearance.assign", json!({"bodies":["Board"],"appearance":"Wood - Oak Uniform PBR Preview"})).unwrap();
+    assert!(build_scene(&app).palette.materials().iter().any(|m| m.wood == Some([[0.; 3], [1., 0., 0.]])));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn wood_finish_images_follow_grain_in_light_and_dark_themes() {
+    const SIZE: u32 = 256;
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.ui.visual_style = 1;
+    app.set_origin_shown(false);
+    app.run("solid.box", json!({"length":100,"width":30,"height":10,"body_name":"Board"})).unwrap();
+    app.fit_view();
+    app.cam.set_view(solidcraft_viewport::StandardView::Top);
+    app.cam.fov = 0.;
+    let original_dark = solidcraft_theme::is_dark();
+    for dark in [false, true] {
+        solidcraft_theme::set_dark(dark);
+        for name in ["Wood - Oak", "starter.wood.walnut-dark", "starter.wood.ash-pale"] {
+            app.run("appearance.assign", json!({"bodies":["Board"],"appearance":name})).unwrap();
+            let picture = |app: &SolveApp| {
+                let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(SIZE as f32, SIZE as f32));
+                let proj = super::projection(app, rect);
+                let eye = proj.cam.eye().to_f32();
+                crate::gpu::render_offscreen(
+                    build_scene(app).merged(),
+                    None,
+                    proj.vp.to_f32(),
+                    proj.cam.back().to_f32(),
+                    [eye[0], eye[1], eye[2], 0.],
+                    SIZE,
+                    None,
+                    [0.; 8],
+                    crate::gpu::analysis_colors(&solidcraft_theme::Tokens::get().analysis),
+                )
+            };
+            app.run("wood.grain", json!({"body":"Board","direction":"none"})).unwrap();
+            let Some(plain) = picture(&app) else {
+                eprintln!("skipping wood finish image check: no GPU adapter");
+                solidcraft_theme::set_dark(original_dark);
+                return;
+            };
+            app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+            let along_x = picture(&app).unwrap();
+            app.run("wood.grain", json!({"body":"Board","direction":[0,1,0]})).unwrap();
+            let along_y = picture(&app).unwrap();
+            let changed = |a: &[u8], b: &[u8]| a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0).filter(|(a, b)| a != b).count();
+            assert!(changed(&plain, &along_x) > 500, "{name}, dark={dark}: visible fibres");
+            assert!(changed(&along_x, &along_y) > 500, "{name}, dark={dark}: changing grain turns the figure");
+            let variation = |picture: &[u8], dx: usize, dy: usize| {
+                (115..140)
+                    .flat_map(|y| (100..155).map(move |x| (x, y)))
+                    .map(|(x, y)| {
+                        let a = picture[(y * SIZE as usize + x) * 4] as i32;
+                        let b = picture[((y + dy) * SIZE as usize + x + dx) * 4] as i32;
+                        (a - b).abs()
+                    })
+                    .sum::<i32>()
+            };
+            assert!(variation(&along_x, 0, 1) > variation(&along_x, 1, 0) * 2, "fibres follow X");
+            assert!(variation(&along_y, 1, 0) > variation(&along_y, 0, 1) * 2, "fibres follow Y");
+            app.run("wood.grain", json!({"body":"Board","direction":"none"})).unwrap();
+            assert_eq!(picture(&app).unwrap(), plain, "no grain restores every original pixel");
+            if let Some(directory) = std::env::var_os("SOLIDCRAFT_WOOD_FINISH_EVIDENCE") {
+                let directory = std::path::PathBuf::from(directory);
+                std::fs::create_dir_all(&directory).unwrap();
+                let stem = name.replace([' ', ':', '.'], "-");
+                let image = image::RgbaImage::from_raw(SIZE, SIZE, along_x).unwrap();
+                image.save(directory.join(format!("wood-finish-{stem}-{}.png", if dark { "dark" } else { "light" }))).unwrap();
+                app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+                app.cam.set_view(solidcraft_viewport::StandardView::Iso);
+                image::RgbaImage::from_raw(SIZE, SIZE, picture(&app).unwrap())
+                    .unwrap()
+                    .save(directory.join(format!("wood-finish-{stem}-{}-iso.png", if dark { "dark" } else { "light" })))
+                    .unwrap();
+                app.cam.set_view(solidcraft_viewport::StandardView::Top);
+            }
+        }
+    }
+    solidcraft_theme::set_dark(original_dark);
+}
+
+#[test]
+fn wood_finish_repeated_parts_keep_each_placements_axis_and_origin() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    app.run("component.create", json!({"name":"Part"})).unwrap();
+    app.run("solid.box", json!({"length":100,"width":30,"height":10,"body_name":"Board"})).unwrap();
+    app.run("appearance.assign", json!({"bodies":["Board"],"appearance":"Wood - Oak"})).unwrap();
+    app.run("wood.grain", json!({"body":"Board","direction":[1,0,0]})).unwrap();
+    app.run("occurrence.copy", json!({"component":"Part","translate":[200,0,0]})).unwrap();
+    let turned = app.run("occurrence.copy", json!({"component":"Part","translate":[0,60,0]})).unwrap()["occurrence"].clone();
+    app.run("occurrence.move", json!({"occurrence":turned,"to":{"position":[0,60,0],"axis":[0,0,1],"angle":"90 deg"}})).unwrap();
+    app.run("component.activate", json!({"component":"root"})).unwrap();
+    let scene = build_scene(&app);
+    assert_eq!(scene.instanced.len(), 1);
+    let records = scene.instanced[0].instances.as_chunks::<{ crate::gpu::INSTANCE_SIZE }>().0;
+    assert_eq!(records.len(), 3);
+    let frames: Vec<_> = records
+        .iter()
+        .map(|record| {
+            let slot = u32::from_le_bytes(record[48..52].try_into().unwrap()) as usize;
+            scene.palette.materials()[slot].wood.unwrap()
+        })
+        .collect();
+    for expected in [[[0., 0., 0.], [1., 0., 0.]], [[200., 0., 0.], [1., 0., 0.]], [[0., 60., 0.], [0., 1., 0.]]] {
+        assert!(
+            frames.iter().any(|frame| frame.iter().flatten().zip(expected.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-5)),
+            "{frames:?}: {expected:?}"
+        );
+    }
+}

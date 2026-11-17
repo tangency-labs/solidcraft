@@ -667,7 +667,9 @@ its display name. Replies and scripts use the design-file key (`timeline.inspect
 
 **Wood grain**: The direction in which a piece of timber’s fibres run.
 
-Manufacturing grain belongs to the body and follows its movements and copies; it is separate from texture mapping. A frame member defaults to its member axis. Other bodies have no manufacturing grain until it is set.
+Manufacturing grain belongs to the body and follows its movements and copies. Wood appearances use that direction for their display-only finish in the shaded viewport: fibres run along the grain on side faces, and growth rings appear on end faces. A frame member defaults to its member axis. Other bodies have no manufacturing grain until it is set and retain their uniform appearance.
+
+**Growth rings**: Bands visible across the end of timber from successive periods of growth. The shaded wood finish shows an illustrative ring pattern, not measured growth data.
 
 **Stock length along grain**: The distance between the two parallel planes perpendicular to the wood grain that enclose the body.
 
