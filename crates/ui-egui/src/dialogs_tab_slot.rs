@@ -215,22 +215,25 @@ mod edit_tests {
         assert_eq!(args["slot_plates"][1], json!("Side"), "{args}");
     }
 
-    /// The summary lines read the command's reply: one plate joint cut with its tabs, and a
-    /// pair that does not meet skipped and named.
+    /// The summary lines read the command's reply: one plate joint cut with its tabs; a skipped
+    /// pair is named with its reason.
     #[test]
     fn tab_slot_summary_from_the_reply() {
         let mut s = Session::default();
-        for (corner, size, name) in [([0, 0, 0], [160, 100, 6], "Bottom"), ([20, 30, 6], [120, 6, 60], "Wall"), ([0, 200, 0], [40, 6, 40], "Far")] {
+        for (corner, size, name) in [([0, 0, 0], [160, 100, 6], "Bottom"), ([20, 30, 6], [120, 6, 60], "Wall")] {
             let p = json!({"corner": corner, "length": size[0], "width": size[1], "height": size[2], "body_name": name, "operation": "new"});
             s.execute("solid.box", &p).unwrap();
         }
-        let p = json!({"tab_plates": ["Wall", "Far"], "slot_plates": ["Bottom"], "count": "2", "tab_width": "12 mm"});
+        let p = json!({"tab_plates": ["Wall"], "slot_plates": ["Bottom"], "count": "2", "tab_width": "12 mm"});
         let reply = s.execute("solid.tab_slot", &p).unwrap();
         let lines = summary_args(&reply);
-        assert_eq!(lines[0], ("ui.tab_slot.summary", vec![("plate_joints", "1".to_string()), ("tabs", "2".to_string())]), "{reply}");
-        assert_eq!(lines.len(), 2, "{reply}");
-        assert_eq!((lines[1].0, lines[1].1[0].1.as_str()), ("ui.tab_slot.summary_skipped", "1"));
-        assert!(lines[1].1[1].1.starts_with("Far → Bottom "), "{:?}", lines[1]);
+        assert_eq!(lines, [("ui.tab_slot.summary", vec![("plate_joints", "1".to_string()), ("tabs", "2".to_string())])], "{reply}");
+        let reply = json!({"plate_joints": [], "tabs": 0, "skipped": [
+            {"tab_plate": "Back", "slot_plate": "Bottom", "reason": "swapped", "detail": "is the other way round"},
+            {"tab_plate": "Side", "slot_plate": "Bottom", "reason": "sheet_metal", "detail": ""}]});
+        let lines = summary_args(&reply);
+        assert_eq!(lines[1].0, "ui.tab_slot.summary_skipped");
+        assert_eq!(lines[1].1, [("count", "2".to_string()), ("list", "Back → Bottom is the other way round, Side → Bottom".to_string())]);
         assert_eq!(summary_args(&json!({})).len(), 1, "an empty reply still has the counts line");
     }
 }
