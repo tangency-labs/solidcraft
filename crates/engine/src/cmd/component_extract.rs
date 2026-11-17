@@ -316,6 +316,12 @@ fn scope(s: &Session, comp: u64, cmd: &str) -> Result<Scope> {
     if let Some(o) = source.occurrences.iter().find(|o| children.contains(&o.component) && !subtree.contains(&o.parent)) {
         return Err(bad(cmd, format!("{} is placed outside {name} too", o.name)));
     }
+    // A component placed inside and outside keeps its parent outside, so it would be left out of
+    // the new design and the placement inside lost
+    if let Some(o) = source.occurrences.iter().find(|o| subtree.contains(&o.parent) && !subtree.contains(&o.component)) {
+        let shared = source.components.iter().find(|c| c.id == o.component).map_or(o.name.clone(), |c| c.name.clone());
+        return Err(bad(cmd, format!("{shared} is placed inside {name} and elsewhere in the design, so it can't go with {name}")));
+    }
     let mut inside: BTreeSet<u64> = source.features.iter().filter(|f| subtree.contains(&f.component)).map(|f| f.id).collect();
     let state = s.model.state();
     let owners: BTreeMap<String, u64> = state.bodies.iter().map(|b| (b.name.clone(), source.model_body_component(b))).collect();
@@ -1020,6 +1026,22 @@ mod tests {
         run(&mut s, "component.activate", json!({"component": 0}));
         run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": 3, "operation": "new"}));
         refuse(&mut s, json!({"component": "Plate", "path": file}), "uses a sketch of Plate");
+
+        // A component placed twice, with one placement moved into an empty component
+        let mut t = Session::default();
+        run(&mut t, "component.create", json!({"name": "Block"}));
+        run(&mut t, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "BlockBody"}));
+        run(&mut t, "component.activate", json!({"component": 0}));
+        let copy = run(&mut t, "occurrence.copy", json!({"component": "Block", "translate": [30, 0, 0]}));
+        let copy = copy["occurrence"].as_u64().unwrap();
+        let holder = run(&mut t, "component.create", json!({"name": "Holder"}))["component"].as_u64().unwrap();
+        run(&mut t, "component.activate", json!({"component": 0}));
+        run(&mut t, "occurrence.reparent", json!({"occurrence": copy, "parent": holder}));
+        let before = serde_json::to_value(&*t.doc).unwrap();
+        let err = t.execute("component.extract", &json!({"component": "Holder", "path": file})).unwrap_err().to_string();
+        assert!(err.contains("Block is placed inside Holder and elsewhere"), "{err}");
+        assert_eq!(serde_json::to_value(&*t.doc).unwrap(), before);
+        assert!(!file.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
