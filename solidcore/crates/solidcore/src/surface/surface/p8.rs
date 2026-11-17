@@ -3181,6 +3181,29 @@ impl Surface {
         uv_guess: Point2,
         tol: f64,
     ) -> Result<SingularityInversion> {
+        self.invert_point_near_singularity_for(k, test_pt, uv_domain, uv_guess, tol, false)
+    }
+
+    /// [`Surface::invert_point_near_singularity`] for a closest point (`farthest`
+    /// false) or for a maximize (`farthest` true, not upstream): of the drops the
+    /// farthest from `test_pt` is kept, and where it is proven nearer than the guess
+    /// the guess is the answer (the point-solve stepper's `Maximize` ends its
+    /// iteration at an inversion's answer; the nearest drop ended goldens
+    /// `surface_point_solve_p3` `matrix_0105` at 18192 against the guess's 21900).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::invert_point_near_singularity`]; with `farthest`, no
+    /// refusal for the distance.
+    pub(crate) fn invert_point_near_singularity_for(
+        &self,
+        k: &Kernel,
+        test_pt: Point3,
+        uv_domain: &Extent2d,
+        uv_guess: Point2,
+        tol: f64,
+        farthest: bool,
+    ) -> Result<SingularityInversion> {
         let reason = TerminationReason::FoundAnswerConverged;
 
         // (the statuses SMLib drops here are passed on, as the fork does, WR-663,
@@ -3315,6 +3338,9 @@ impl Surface {
             let replaces = match nearest {
                 None => true,
                 Some((nd, _, _)) if !nd.value.is_finite() => d.value.is_finite(),
+                Some((nd, _, _)) if farthest => {
+                    d.above(certified::next_up(nd.value + nd.bound)).is_yes()
+                }
                 Some((nd, _, _)) => d
                     .at_most(certified::next_down(nd.value - nd.bound))
                     .is_yes(),
@@ -3347,9 +3373,24 @@ impl Surface {
                     .max(test_pt.max_dimension())
                     .max(found_pt.max_dimension()));
         let guess_hi = certified::next_up(d_guess.value + d_guess.bound);
-        if certified::distance(found_pt, test_pt)
-            .above(guess_hi)
-            .is_yes()
+        // (not upstream) For a maximize the guess is the answer where the drop kept is
+        // proven nearer the test point than it: the stepper ends its iteration at the
+        // answer, and stepping on from the guess ends nearer still (goldens
+        // `surface_point_solve_p3` matrix_0105: the one drop 18192 away, the guess
+        // 21900; matrix_0822 and matrix_0957 end at 0.591 and 0.619 when stepping on).
+        let d_found = certified::distance(found_pt, test_pt);
+        if farthest
+            && d_found
+                .at_most(certified::next_down(d_guess.value - d_guess.bound))
+                .is_yes()
+        {
+            return Ok(SingularityInversion {
+                uv: uv_guess,
+                reason,
+            });
+        }
+        if !farthest
+            && d_found.above(guess_hi).is_yes()
             && certified::distance(found_pt, srf_pt)
                 .above(allowance)
                 .is_yes()

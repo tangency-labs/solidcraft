@@ -492,6 +492,7 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod review_geometry_tests {
     use super::*;
+    use solidcore::geom::global_solver::SolverOperation;
 
     /// Maximum-distance results are evaluated independently and challenged by in-domain points.
     #[test]
@@ -541,5 +542,33 @@ mod review_geometry_tests {
             unexplained.is_empty(),
             "wrong maxima still blessed: {unexplained:?}"
         );
+    }
+
+    /// WR-57: a maximize stepping into a singular point keeps the farthest iso curve
+    /// drop, and the guess where every drop is proven nearer; the nearest drop ended
+    /// these local maximize solves nearer the test point than the main branch's.
+    #[test]
+    fn wr57_maximize_keeps_the_farthest_singular_answer() {
+        let k = Kernel::default();
+        for (name, main) in [
+            ("matrix_0105", 21_900.553_430_444_63),
+            ("matrix_0822", 0.592_092_503_846_087),
+            ("matrix_0957", 1.163_218_054_077_855_2),
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let input: Inputs = case.parse().unwrap();
+            assert_eq!(solver_op(input.solver).unwrap(), SolverOperation::Maximize);
+            assert!(matches!(input.op, Operation::Local { .. }), "{name}");
+            let surface = geometry(&k, &input).unwrap();
+            let output = rust(&input).unwrap();
+            let values = &output.values["out"];
+            let reported = values[6];
+            let actual = surface
+                .evaluate_point(&k, p2([values[4], values[5]]))
+                .unwrap()
+                .distance(v3(input.test));
+            assert!((actual - reported).abs() <= 1e-12 * actual, "{name}: {actual} {reported}");
+            assert!(reported >= main, "{name}: {reported} < {main}");
+        }
     }
 }

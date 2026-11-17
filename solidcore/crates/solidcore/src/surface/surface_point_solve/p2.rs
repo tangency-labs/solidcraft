@@ -1671,12 +1671,14 @@ impl SurfPtSolveStepper<'_> {
             let surface = self.base.surface();
             let srf_domain = surface.natural_uv_domain_with_nurb(k)?;
 
-            match surface.invert_point_near_singularity(
+            // (not upstream: a maximize keeps the farthest drop, WR-57)
+            match surface.invert_point_near_singularity_for(
                 k,
                 self.base.test_point(),
                 &srf_domain,
                 prev.uv(),
                 self.base.tight_tol(),
+                op == SolverOperation::Maximize,
             ) {
                 Ok(inverted) => {
                     self.set_uv(inverted.uv);
