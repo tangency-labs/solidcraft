@@ -1,0 +1,14 @@
+{
+  "en": {
+    "prefs.save_display_meshes": "Save display meshes for file previews",
+    "prefs.save_display_meshes_tip": "On: each save keeps the bodies' display meshes in the design, so file browsers can show the model in 3D (Quick Look on macOS). Designs grow by up to 8 MB. Off: designs are saved without them."
+  },
+  "en-GB": {
+    "prefs.save_display_meshes": "Save display meshes for file previews",
+    "prefs.save_display_meshes_tip": "On: each save keeps the bodies' display meshes in the design, so file browsers can show the model in 3D (Quick Look on macOS). Designs grow by up to 8 MB. Off: designs are saved without them."
+  },
+  "de": {
+    "prefs.save_display_meshes": "Anzeige-Meshes für Dateivorschauen speichern",
+    "prefs.save_display_meshes_tip": "An: Jedes Speichern legt die Anzeige-Meshes der Körper im Design ab, damit Dateibrowser das Modell in 3D zeigen können (Quick Look unter macOS). Designs werden bis zu 8 MB größer. Aus: Designs werden ohne sie gespeichert."
+  }
+}

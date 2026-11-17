@@ -27,7 +27,7 @@ impl Saving {
 /// Run `file.save` or `file.save_as` with `params`. On the desktop it runs on a worker and is
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).
-pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
+pub fn start(app: &mut SolveApp, command: &'static str, mut params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
@@ -36,6 +36,12 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     }
     // A save keeps print faces only when the user keeps them (#11512).
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
+    // Display meshes for file browsers, when the user keeps them (an explicit `preview` wins).
+    if app.preferences.save_display_meshes
+        && let Some(given) = params.as_object_mut()
+    {
+        given.entry("preview").or_insert(Value::Bool(true));
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if app.saving.is_none() && app.file_picker.is_none() && !app.file_load_holds() {
         let mut copy = app.session.scratch();
@@ -148,6 +154,27 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
         assert_eq!(h.app.session.undo.len(), history);
         assert!(h.app.dialog.as_ref().unwrap().error.as_ref().unwrap().contains("file operation"));
+    }
+
+    /// Preferences › General › Save display meshes: the window's saves keep the bodies'
+    /// display meshes for file browsers (Quick Look's 3D view); off, they don't, as before.
+    #[test]
+    fn saves_keep_display_meshes_only_when_the_user_does() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.frames(2);
+        let saved = |h: &mut crate::scenario::Harness, name: &str| {
+            let path = h.dir.join(name);
+            super::start(&mut h.app, "file.save_as", json!({"path": path.to_string_lossy()}));
+            super::tick(&mut h.app, true);
+            let bytes = std::fs::read(&path).unwrap();
+            bytes.windows(b"cache/preview.bin".len()).any(|entry| entry == b"cache/preview.bin")
+        };
+        assert!(!h.app.preferences.save_display_meshes, "off by default");
+        assert!(!saved(&mut h, "Plain.sc"));
+        crate::prefs::set(&mut h.app, &json!({"save_display_meshes": true})).unwrap();
+        assert!(saved(&mut h, "With meshes.sc"));
     }
 
     /// #6003: an agent's `engine.script` that arrives while the window's Save is being written

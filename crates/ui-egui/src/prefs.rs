@@ -1785,6 +1785,10 @@ preference_settings! {
     /// Off (the default): they show only while the Send to Slicer window is open, a save leaves
     /// them out, and a design that has them opens without them.
     keep_print_faces: bool = false, PAGE_GENERAL;
+    /// Saves keep each body's display mesh in the design (`cache/preview.bin`, `file.save`'s
+    /// `preview` option), so a file browser can show the model in 3D (Quick Look on macOS,
+    /// apps/solidcraft-quicklook). Off (the default): designs are saved without them, as before.
+    save_display_meshes: bool = false, PAGE_GENERAL;
     /// The line about sending again replacing the slicer's file has been shown.
     slicer_resend_hint_seen: bool = false;
     /// The user has agreed to Open with EasyPrint uploading a model to Printables' servers.
