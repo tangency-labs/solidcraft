@@ -733,6 +733,32 @@ fn square_rectangles_preference_off_keeps_shift_for_midpoints() {
 }
 
 #[test]
+fn typed_sizes_win_over_shift_and_leave_no_failed_equal() {
+    let mut h = fixture();
+    h.app.preferences.sketch_square_rectangles = true;
+    step(&mut h, json!({"start": "sketch.rectangle.two_point"}));
+    step(&mut h, json!({"click":{"sketch":[20.0, -30.0]}}));
+    step(&mut h, json!({"move":{"sketch":[50.0, -15.0]},"shift":true}));
+    for (text, next) in [("10", Some("Tab")), ("25", None)] {
+        step(&mut h, json!({"key": "A", "cmd": true}));
+        step(&mut h, json!({"text": text}));
+        if let Some(key) = next {
+            step(&mut h, json!({"key": key}));
+        }
+    }
+    step(&mut h, json!({"key": "Enter","shift":true}));
+    h.settle();
+    assert!(!matches!(&h.app.status, Some((_, _, true))), "no error: {:?}", h.app.status);
+    let world = crate::open_meshing::session_world(&h.app.session);
+    let sketch = &world.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert!(sketch.curves.len() >= 7, "the 10 x 25 rectangle was drawn");
+    assert!(
+        !sketch.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Equal { .. })),
+        "the typed sizes define it, no Equal beside them"
+    );
+}
+
+#[test]
 fn shift_makes_a_centre_rectangle_a_square() {
     let ((w, h), equal) = drawn_rectangle("sketch.rectangle.center", [30.0, -30.0], [40.0, -25.0], true, true);
     assert!((w - 20.0).abs() < 1e-6 && (h - 20.0).abs() < 1e-6, "{w} x {h}");

@@ -603,7 +603,9 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
             }
         }
     } else if n > 0 && tool.pts.len() >= n {
-        let square = squared_rectangle(&tool);
+        // Typed sizes win over the square: with both a width and a height typed they define the
+        // rectangle, and an Equal on its sides would fight them.
+        let square = squared_rectangle(&tool) && !(crate::sketch_dims::has_locked(&tool, "Width") && crate::sketch_dims::has_locked(&tool, "Height"));
         match run_shape(app, &tool) {
             Ok(curves) => {
                 // One side equal to the next: a single dimension then defines the square.
