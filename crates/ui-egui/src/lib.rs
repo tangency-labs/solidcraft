@@ -1513,6 +1513,9 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, mut params: Value) -> Result<Value, String> {
+        // The rules below name registered ids; a command spelled in another case is the same
+        // command (the engine runs it), so it meets the same rules.
+        let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
         crate::plugins::sync_policy(self);
         if plugins::busy(self) && matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove") {
             return Err(self.tr("prefs.plugin_busy").into());
