@@ -1509,6 +1509,90 @@ mod recognition {
         }
     }
 
+    /// The four quarters a sketch ellipse with centre `c`, major end `m` and minor radius
+    /// `r` exports, in the sketch's own arithmetic: `v = perp(u) / hypot(u) * r` and each
+    /// apex `a + b - c`.
+    fn sketch_ellipse_quarters(c: Vec2, m: Vec2, r: f64) -> Loop2 {
+        let u = m - c;
+        let v = Vec2::new(-u.y, u.x) / u.x.hypot(u.y) * r;
+        let corners = [c + u, c + v, c - u, c - v];
+        Loop2 {
+            segs: (0..4)
+                .map(|i| {
+                    let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                    Seg2::Conic {
+                        a,
+                        apex: a + b - c,
+                        b,
+                        w: FRAC_1_SQRT_2,
+                    }
+                })
+                .collect(),
+        }
+    }
+
+    // #18399: a turned ellipse's quarters carry rounded cos/sin products, so the
+    // quarter rules' exact equalities fail; the loop is still one ellipse.
+    #[test]
+    fn profile_ellipse_recognition_accepts_turned_sketch_quarters() {
+        let center = Vec2::new(40.0, 20.0);
+        let mut ends = vec![Vec2::new(15.0, 0.0), Vec2::new(50.0, 30.0)];
+        ends.extend((0..48).map(|i| {
+            let angle = f64::from(i) * TAU / 48.0 + 0.1;
+            center + Vec2::new(angle.cos(), angle.sin()) * 32.0
+        }));
+        for end in ends {
+            let u = end - center;
+            let ellipse = sketch_ellipse_quarters(center, end, 8.0);
+            for mut path in [ellipse.clone(), ellipse.reversed()] {
+                for _ in 0..4 {
+                    let (c, major, ratio) = path
+                        .as_ellipse()
+                        .unwrap_or_else(|| panic!("major end {end:?}: {path:?}"));
+                    assert!(c.dist(center) < 1e-12, "{c:?}");
+                    assert!(
+                        (major.length_hypot() - u.length_hypot()).abs() < 1e-12,
+                        "{major:?}"
+                    );
+                    assert!(major.cross(u).abs() < 1e-9, "{major:?} {u:?}");
+                    assert!(
+                        (ratio - 8.0 / u.length_hypot()).abs() < 1e-12,
+                        "{ratio}"
+                    );
+                    for seg in &path.segs {
+                        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                            let d = seg.point_at(t) - c;
+                            let x = d.dot(major) / major.length_squared();
+                            let y = d.dot(major.perp()) / (major.length_squared() * ratio);
+                            assert!((x * x + y * y - 1.0).abs() < 1e-12);
+                        }
+                    }
+                    path.segs.rotate_left(1);
+                }
+            }
+            // A quarter whose apex leaves the ellipse, or a gap at a join, is not one
+            // ellipse at any orientation.
+            for (index, delta) in [(1, Vec2::new(1e-9, 0.0)), (2, Vec2::new(0.0, -1e-9))] {
+                let mut moved_apex = ellipse.clone();
+                if let Seg2::Conic { apex, .. } = &mut moved_apex.segs[index] {
+                    *apex += delta;
+                }
+                assert_eq!(moved_apex.as_ellipse(), None, "{end:?}");
+                let mut gap = ellipse.clone();
+                if let Seg2::Conic { a, .. } = &mut gap.segs[index] {
+                    *a += delta;
+                }
+                assert_eq!(gap.as_ellipse(), None, "{end:?}");
+            }
+        }
+        // An axis-aligned sketch ellipse keeps the quarter rules' exact answer.
+        let aligned = sketch_ellipse_quarters(center, Vec2::new(55.0, 20.0), 8.0);
+        assert_eq!(
+            aligned.as_ellipse(),
+            Some((center, Vec2::new(15.0, 0.0), 8.0 / 15.0))
+        );
+    }
+
     #[test]
     fn profile_ellipse_recognition_does_not_replace_other_paths() {
         let ellipse = ellipse_quarters(
