@@ -8,7 +8,7 @@
     "policy.updates_off": "Your organisation turned off update checks on this computer."
   },
   "ar": {
-    "policy.set_by_organization": "تم ضبطه من قِبل مؤسستك",
+    "policy.set_by_organization": "ضبطته مؤسستك",
     "policy.updates_off": "أوقفت مؤسستك التحقق من التحديثات على هذا الحاسوب."
   },
   "de": {

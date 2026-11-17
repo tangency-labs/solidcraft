@@ -59,14 +59,11 @@ pub(crate) use measure::{
     mass_properties, solid_count,
 };
 
-/// A solidcore body. Its own lock: solidcore's operations take `&mut Brep`, even to measure.
-pub(crate) struct Body(pub(crate) Mutex<solidcore::topology::Brep>);
-
-impl Body {
-    pub(crate) fn new(b: solidcore::topology::Brep) -> Body {
-        Body(Mutex::new(b))
-    }
-}
+/// A solidcore body: solidcore-ops' own, with its own lock (solidcore's operations take
+/// `&mut Brep`, even to measure). The operation families that still call the kernel crate here
+/// make one with `Body::from_kernel` and lock it with `Body::kernel`, a bridge solidcore-ops
+/// keeps until the last family calls it instead (tangency-labs/solidcore#3304).
+pub(crate) use solidcore_ops::Body;
 
 /// The fixes this backend runs with: every one of solidcore's opt-in fixes of upstream SMLib
 /// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it,
@@ -85,14 +82,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.bspline_trim_preserves_uv_spans = true;
     f.boolean_vertex_by_best_crossing = true;
     f.classify_edge_interval = true;
-    f.degenerate_proto_edge_in_one_vertex = true;
     f.new_edge_vertex_tolerance_covers_gap = true;
-    f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
-    f.curve_contacts_at_curve_ends = true;
     f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;
     f.shell_edges_on_analytics_exact = true;
@@ -110,35 +104,27 @@ pub(crate) fn fixes() -> UpstreamFixes {
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
     f.fillet_mitre_concave_face_corners = true;
-    f.face_tight_box_searches_trim = true;
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;
     f.fillet_trim_status = true;
     f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;
-    f.analytic_inversion_answers_apart = true;
     f.fillet_statuses_pass_on = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.corner_patch_face_side_twist = true;
     f.boolean_union_refuses_solid_leak = true;
     f.fillet_exact_round_classes = true;
-    f.offset_edges_keep_source_tolerance = true;
     f.surface_continuity_checks_last_v_knot = true;
-    f.ssi_split_curves_at_singular_points = true;
     f.geometric_g2_continuity = true;
     f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.cone_iso_circle_at_axial_height = true;
-    f.fillet_overflow_trim_at_creases = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
-    f.fillet_round_as_definition = true;
-    f.fillet_overflow_crease_along_edge = true;
     f.keep_exact_pcurves = true;
     f.face_swap_uv_transposes_trims = true;
     f.closed_smooth_pole_tangent_limit = true;
@@ -238,7 +224,9 @@ fn put_kernel(k: Option<Kernel>) {
 /// What a call must not find from the calls before it: the same operation on the same bodies
 /// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
 /// the stations it remembers; marks, identities and what is only kept to reuse memory change no
-/// answer. Tolerances and fixes are the same on every kernel.)
+/// answer. The certificates it finished, kept by the exact content of their inputs
+/// (`recertify_memo`, the curve analyses), are the answers running them again gives, so they
+/// stay. Tolerances and fixes are the same on every kernel.)
 fn start_clean(k: &mut Kernel) {
     k.rng = Rng::new(KernelOptions::default().seed);
     *k.blend_station_memo.borrow_mut() = Default::default();
@@ -376,11 +364,11 @@ pub(crate) fn with_body<T: dump::Answer>(
     f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
     // A body a panic interrupted may be half-edited: it is never used again.
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     // No token stops it: stopped part way, solidcore may leave the body it borrows half-changed.
-    call_on(call, &[("brep", body)], None, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+    call_on(call, &[("brep", body)], None, |k| f(k, &mut body.kernel()))
 }
 
 /// [`with_body`] on a body only this call reads (one the caller consumes): the token over this
@@ -390,14 +378,14 @@ pub(crate) fn with_own_body<T: dump::Answer>(
     body: &Body,
     f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     let stop = crate::stop::token();
     if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
         return Err(Error::Cancelled(call));
     }
-    call_on(call, &[("brep", body)], stop, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+    call_on(call, &[("brep", body)], stop, |k| f(k, &mut body.kernel()))
 }
 
 /// An axis-aligned box from its lower corner (`SmApiCreateBox`, as `smlib_make_box` checks it:
@@ -407,7 +395,7 @@ pub(crate) fn make_box(origin: [f64; 3], size: [f64; 3]) -> Result<Body> {
         return Err(Error::Argument);
     }
     let [x, y, z] = size;
-    run("create_box", |k| primitives::create_box(k, Vec3::new(origin[0], origin[1], origin[2]), x, y, z)).map(Body::new)
+    run("create_box", |k| primitives::create_box(k, Vec3::new(origin[0], origin[1], origin[2]), x, y, z)).map(Body::from_kernel)
 }
 
 fn point(p: [f64; 3]) -> Result<Vec3> {
@@ -424,7 +412,7 @@ pub(crate) fn make_cylinder(origin: [f64; 3], radius: f64, height: f64) -> Resul
     if !(radius > 0.0 && height > 0.0 && radius.is_finite() && height.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_cylinder", |k| primitives::create_cylinder(k, o, radius, height)).map(Body::new)
+    run("create_cylinder", |k| primitives::create_cylinder(k, o, radius, height)).map(Body::from_kernel)
 }
 
 /// A sphere (`SmApiCreateSphere`; radius positive).
@@ -433,7 +421,7 @@ pub(crate) fn make_sphere(center: [f64; 3], radius: f64) -> Result<Body> {
     if !(radius > 0.0 && radius.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_sphere", |k| primitives::create_sphere(k, o, radius)).map(Body::new)
+    run("create_sphere", |k| primitives::create_sphere(k, o, radius)).map(Body::from_kernel)
 }
 
 /// A cone or frustum about +Z (`SmApiCreateCone`; `smlib_make_cone`'s checks: base radius and
@@ -444,7 +432,7 @@ pub(crate) fn make_cone(origin: [f64; 3], base_radius: f64, top_radius: f64, hei
     if !(ok && base_radius.is_finite() && top_radius.is_finite() && height.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_cone", |k| primitives::create_cone(k, o, base_radius, top_radius, height)).map(Body::new)
+    run("create_cone", |k| primitives::create_cone(k, o, base_radius, top_radius, height)).map(Body::from_kernel)
 }
 
 /// A ring torus about +Z (`SmApiCreateTorus`; major radius > minor radius > 0).
@@ -453,7 +441,7 @@ pub(crate) fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64)
     if !(minor_radius > 0.0 && minor_radius < major_radius && major_radius.is_finite()) {
         return Err(Error::Argument);
     }
-    run("create_torus", |k| primitives::create_torus(k, o, major_radius, minor_radius)).map(Body::new)
+    run("create_torus", |k| primitives::create_torus(k, o, major_radius, minor_radius)).map(Body::from_kernel)
 }
 
 /// The enclosed volume (`SmApiBrepComputeVolume`), its accuracy clamped as [`mass_properties`]
