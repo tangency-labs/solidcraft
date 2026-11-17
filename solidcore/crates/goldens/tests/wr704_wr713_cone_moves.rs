@@ -23,10 +23,17 @@
 //! # The certificates (one per op, applied to the new and to the old values alike)
 //!
 //! The cone `T` is the new cone's analytic data (placement, base radius, semi-angle). A
-//! build row certifies its placement against the inputs' frame by closed form; two old
-//! rows fail it, with an input `Y` of `-1e-300 Y`, which upstream unitizes to zero and
-//! replaces by `Z`. Every other state row checks the data bit-equal old and new, so both
-//! sides answer for the same cone. `T` has the STEP domain `D`, itself certified by the
+//! build row certifies its placement against the inputs' frame by closed form, and an
+//! unbounded cone's semi-angle as the input's modulo 180 degrees (the same `tan`, the same
+//! generator line). Two old rows fail the frame, with an input `Y` of `-1e-300 Y`, which
+//! upstream unitizes to zero and replaces by `Z`. Reading such a tiny axis as the
+//! direction it has (`(0, -1, 0)`), and so the frame the inputs define, is a convention
+//! (ARGUED, not PROVEN: the input is a nonzero vector, and upstream's `Z` is its own
+//! choice); the rows that rest on it are those two, `surface.cone_p2`'s
+//! `nopolar_bounded_y_trim_o0_full` and `nopolar_bounded_apex_y_trim_o0_full`, and
+//! `surface.cone_p3`'s `rejected_tiny_axis_*` and `rejected_below_unitize_threshold_axis`.
+//! Every other state row checks the data bit-equal old and new (the semi-angle modulo
+//! 180), so both sides answer for the same cone. `T` has the STEP domain `D`, itself certified by the
 //! state certificate: `u` over
 //! `[0, 360]`, the height interval on one nappe (it does not cross the apex height
 //! `-r0 / tan(semi)`), an unbounded cone's from the apex to `SM_INFINITE_PARAMETER` on the
@@ -54,15 +61,20 @@
 //!   inside answer's STEP point within `tol` of the point.
 //! * **Positive point**: the apex's closed form and the side of its plane.
 //! * **Refusals**: a refused construction is correct exactly when the inputs define no
-//!   cone (an axis that cannot be made canonical, a cylinder of radius 0); a refused op is
-//!   wrong where the op's certified answer exists.
+//!   cone, decided in closed form from the input numbers ([`degenerate`]): an unbounded
+//!   semi-angle of 90 degrees modulo 180 (no tangent: a plane) or not finite, a zero or
+//!   non-finite axis (no direction, no axis `Z`), a cylinder of radius 0 (a line); a
+//!   refused op is wrong where the op's certified answer exists.
 //! * **Cone intersections** (`surface.cone_p3`): the closed-form answer for each pair
 //!   (coaxial, parallel cylinders, cone and plane), with a witness section where two
 //!   circles must cross.
 //! * **Corner blends** (`nurbs.b_spline_surface_n_lib_p2`, regenerated with the kernel):
 //!   G0. Each patch side equals its loop curve (or its half for an n-sided patch), by
-//!   Bézier blossoms after degree elevation. The tangency target is best effort for both
-//!   runs, since the input curves leave the cylinder.
+//!   Bézier blossoms after degree elevation. The rows moved because the neighbour did:
+//!   a bounded cylinder on non-unit axes, whose NURB main built with radius `r |X|`
+//!   (the curves, STEP points, are certified on the data's cylinder). Tangency (G1) is
+//!   best effort for both runs, since the input curves leave the cylinder: ARGUED, not
+//!   compared.
 //! * **Extrusion and cone curves** (`surface.surf_of_extrusion_p2`): every Bézier segment
 //!   lies within `tol` of the extrusion's planes (convex hull) and of the cone (a Bernstein
 //!   bound of the implicit equation, by de Casteljau halving).
@@ -271,12 +283,17 @@ fn read_state(r: &mut Rd) -> State {
     }
     let _kinds = r.n(6);
     let r0 = r.f();
+    let semi_at = r.i - start;
     let semi = r.f();
     let flags = r.n(5);
     let origin = r.v3();
     let x = r.v3();
     let y = r.v3();
-    let identity = r.v[start..r.i].to_vec();
+    let mut identity = r.v[start..r.i].to_vec();
+    // the angle modulo 180 degrees: `s` and `s -+ 180` are one cone (same `tan`, same
+    // generator line); main keeps an unbounded cone's angle as given, the new code its
+    // representative in (-90, 90)
+    identity[semi_at] = semi_rep(semi);
     let d = r.n(4);
     let dom = [d[0], d[1], d[2], d[3]];
     let radh = r.n(5);
@@ -470,8 +487,44 @@ impl Analytic {
     }
 }
 
-/// The inputs' reason the construction must refuse: a zero axis, an axis pair that cannot
-/// be made canonical as directions (parallel axes), or a cylinder of radius 0.
+/// The representative in `[-90, 90]` of a semi-angle modulo 180 degrees: `s` and `s -+
+/// 180` have the same tangent, so the same `Rad(V) = r0 + tan(s) V` and the same generator
+/// line (directions that are each other's negatives). `%` is IEEE `fmod` (exact) and the
+/// `-+ 180` of a remainder past 90 is exact (Sterbenz).
+fn semi_rep(s: f64) -> f64 {
+    let r = s % 180.0;
+    if r > 90.0 {
+        r - 180.0
+    } else if r < -90.0 {
+        r + 180.0
+    } else {
+        r
+    }
+}
+
+/// The semi-angle an unbounded cone's inputs give, if they make an unbounded cone.
+fn unbounded_semi(cone: &Value) -> Option<f64> {
+    let mode = &cone["mode"];
+    let num = |k: &str| mode[k].as_f64();
+    match mode["kind"].as_str()? {
+        "cone_unbounded" => num("semi"),
+        "canonical_semi" if mode["height"].is_null() => num("semi"),
+        // `CreateCanonical` with no height makes the unbounded cone with `top` as its
+        // semi-angle in degrees
+        "canonical" if num("height").is_some_and(|h| h <= 0.0) => num("top"),
+        _ => None,
+    }
+}
+
+/// The inputs' reason, in closed form, that they define no cone, so that a construction
+/// must refuse them (exact arithmetic on the input numbers, no rule of the code under
+/// test):
+/// - an axis that is not finite, or zero: it has no direction, so no axis `Z`;
+/// - an unbounded cone's semi-angle of 90 degrees modulo 180: `tan` has no value there,
+///   so `Rad(V) = r0 + tan(semi) V` is undefined; the generator perpendicular to the axis
+///   sweeps a plane, every point at height 0, which the cone's height parameter `v` cannot
+///   parameterise. NaN and infinite angles have no remainder modulo 180;
+/// - a cylinder of radius 0: the sweep is the axis line, `dS/du = 0` everywhere.
 fn degenerate(cone: &Value) -> Option<String> {
     let v3 = |k: &str| {
         let a = &cone[k];
@@ -481,46 +534,38 @@ fn degenerate(cone: &Value) -> Option<String> {
             a[2].as_f64().unwrap(),
         )
     };
-    // an axis is a direction: scaled by its largest coordinate (a zero axis has none)
-    let dir = |k: &str| {
-        let a = v3(k);
-        let m = mc(a);
-        (m > 0.0).then(|| a * (1.0 / m))
-    };
     let mode = &cone["mode"];
     let num = |k: &str| mode[k].as_f64();
     let kind = mode["kind"].as_str().unwrap();
     // the canonical modes take a placement: the axes the constructor sees are the held
     // ones (`Axis2Placement::new` of the inputs, as the unit makes it)
     let held = matches!(kind, "canonical_semi" | "canonical" | "cyl_canonical");
-    let dir = |k: &str| {
+    let axis = |k: &str| {
         if held {
             let p = Axis2Placement::new(v3("origin"), v3("x"), v3("y"));
-            let a = if k == "x" { p.x_axis() } else { p.y_axis() };
-            let m = mc(a);
-            (m > 0.0 && m.is_finite()).then(|| a * (1.0 / m))
+            if k == "x" {
+                p.x_axis()
+            } else {
+                p.y_axis()
+            }
         } else {
-            dir(k)
+            v3(k)
         }
     };
-    // an unbounded cone's semi-angle must be inside (-90, 90) degrees
-    let unbounded_semi = match kind {
-        "cone_unbounded" => num("semi"),
-        "canonical_semi" if mode["height"].is_null() => num("semi"),
-        // `CreateCanonical` with no height makes the unbounded cone with `top` as its
-        // semi-angle in degrees
-        "canonical" if num("height").is_some_and(|h| h <= 0.0) => num("top"),
-        _ => None,
-    };
-    if unbounded_semi.is_some_and(|s| !(s.abs() < 90.0)) {
-        return Some("a semi-angle not inside (-90, 90) degrees".into());
+    // an unbounded cone's semi-angle must not be 90 modulo 180
+    if unbounded_semi(cone).is_some_and(|s| !(semi_rep(s).abs() < 90.0)) {
+        return Some(
+            "a semi-angle of 90 degrees modulo 180 (or not finite): no tangent, a plane".into(),
+        );
     }
-    let mut a2p = Axis2Placement::IDENTITY;
-    let (Some(x), Some(y)) = (dir("x"), dir("y")) else {
-        return Some("a zero axis".into());
-    };
-    if a2p.set_canonical(v3("origin"), x, y).is_err() {
-        return Some("axes cannot be made canonical".into());
+    let (x, y) = (axis("x"), axis("y"));
+    let finite = |a: Vec3| a.x.is_finite() && a.y.is_finite() && a.z.is_finite();
+    if !finite(x) || !finite(y) {
+        return Some("an axis that is not finite".into());
+    }
+    let zero = |a: Vec3| a.x == 0.0 && a.y == 0.0 && a.z == 0.0;
+    if zero(x) || zero(y) {
+        return Some("a zero axis: no direction, no Z = X x Y".into());
     }
     let zero_cylinder = match kind {
         "cyl_canonical" | "cyl_bounded" | "cyl_unbounded" => num("radius") == Some(0.0),
@@ -529,7 +574,7 @@ fn degenerate(cone: &Value) -> Option<String> {
         "canonical" | "cone_bounded" => num("bot") == Some(0.0) && num("top") == Some(0.0),
         _ => false,
     };
-    zero_cylinder.then(|| "a cylinder of radius 0".into())
+    zero_cylinder.then(|| "a cylinder of radius 0: the axis line, dS/du = 0".into())
 }
 
 // ---- certificates ---------------------------------------------------------------------------
@@ -1160,6 +1205,13 @@ fn cert_cone_row(
             let s = read_state(&mut r);
             check(r.rest() == 0, "trailing values")?;
             cert_input_frame(cone_in, &s)?;
+            if let Some(semi) = unbounded_semi(cone_in) {
+                // the angle is the input's modulo 180, in (-90, 90)
+                check(
+                    s.semi == semi_rep(semi),
+                    format!("semi-angle {} is not {semi} modulo 180", s.semi),
+                )?;
+            }
             cert_state(&s)
         }
         "copy" | "adjust" | "transform" => {
@@ -1643,7 +1695,10 @@ fn certify(unit: &str, inputs: &Value, new: &Output, old: &Output) -> (String, V
                 Some(e) => fail(format!("error {e}")),
                 None => cert_corner_sides(inputs, o),
             };
-            ("corner blend sides".into(), side(new), side(old))
+            // the new side is also judged on its inputs: they are points of the true
+            // cylinder, where main's were not ([`cert_corner_inputs`])
+            let new_side = cert_corner_inputs(inputs).and_then(|()| side(new));
+            ("corner blend sides".into(), new_side, side(old))
         }
         "surface.surf_of_extrusion_p2" => {
             let side = |o: &Output, other: &Output| match &o.error {
@@ -1686,6 +1741,52 @@ fn bezier_piece(b: &[Vec3], s0: f64, s1: f64) -> Vec<Vec3> {
             blossom(b, &ts)
         })
         .collect()
+}
+
+/// Why a moved corner-blend row moved: its neighbour is a bounded cylinder
+/// (`new_cylinder_bounded`) on perpendicular axes that are not unit. Main built its
+/// generator, and so its NURB, at `origin + r X` with the axis as given, `r |X|` from the
+/// axis, while the cylinder's data and STEP form have radius `r`: main blended against a
+/// neighbour whose NURB was another cylinder. The loop curves are the same on both sides
+/// (they are STEP points; the old patches' sides meet them too, [`cert_corner_sides`]).
+/// This certifies both halves: `|X|` is not 1 (beyond its rounding, so main's NURB was
+/// off by `r ||X| - 1|`), and every curve end (a point the neighbour evaluated) is at
+/// distance `r` from the axis through `origin` along `X x Y`, within the rounding of the
+/// evaluation and of this check (`γ_256` of the magnitudes, as in [`cert_corner_sides`]).
+/// Tangency to the neighbour is best effort on both sides (unchanged code) and is not
+/// compared: ARGUED.
+fn cert_corner_inputs(inputs: &Value) -> Verdict {
+    let srfs = inputs["srfs"].as_array().unwrap();
+    let Some(a) = srfs.iter().find_map(|s| s.get("analytic")) else {
+        return fail("no closed form: no analytic neighbour");
+    };
+    check(
+        a["kind"].as_u64() == Some(1),
+        "no closed form: not a bounded cylinder",
+    )?;
+    let (o, x, y) = (v3(&a["origin"]), v3(&a["x"]), v3(&a["y"]));
+    let r = a["p"][0].as_f64().unwrap();
+    let xl = x.length();
+    check(
+        (xl - 1.0).abs() > gamma(8),
+        "a unit X: main's cylinder NURB had the data's radius",
+    )?;
+    let z = x.cross(y);
+    let z = z * (1.0 / z.length());
+    for c in inputs["curves"].as_array().unwrap() {
+        let cp = c["cpts"].as_array().unwrap();
+        for p in [cp.first().unwrap(), cp.last().unwrap()] {
+            let d = v3(p) - o;
+            let radial = (d - d.dot(z) * z).length();
+            let bound = gamma(256) * (mc(o) + mc(v3(p)) + r);
+            within(
+                "a curve end off the cylinder of the data",
+                (radial - r).abs(),
+                bound,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// A generated corner blend on an analytic neighbour (`analytic<i>`): the loop's curves

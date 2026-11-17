@@ -97,6 +97,10 @@
 //!   infinite parameter (upstream runs out to it, up to 1e14 radii away). The parameter conversions map an inside-out unbounded cone's height
 //!   linearly onto its NURB's reversed interval, as for a bounded cone, where upstream
 //!   negates it. Upstream's unbounded cones are then parameterised unlike their NURB.
+//!   A semi-angle outside `(-90, 90)` is taken modulo 180 into it (the same tangent and
+//!   generator line; upstream kept it, and ran the domain on the nappe without the base
+//!   circle); 90 modulo 180 (a plane), non-finite numbers and axes with no frame are
+//!   refused.
 //! - **`STEPInversion` out of bounds.** Upstream's `const` `STEPInversion` calls
 //!   `m_pGenCurve->SetOutOfBoundsEnabled(TRUE)`, changing the generator for good; here
 //!   the inversion turns it on in a clone of the generator. Results are the same:
@@ -539,8 +543,8 @@ impl Cone {
     /// when `SetCanonical` makes a frame of them, else theirs scaled by their largest
     /// coordinate (a tiny axis such as `(0, -1e-300, 0)` is a direction its unit length
     /// underflows, a huge one such as `(0, -1e300, 1)` one its length overflows);
-    /// `None` when a direction is zero, not finite or parallel to the other (the inputs
-    /// define no frame).
+    /// `None` when a direction is zero or not finite (the inputs define no frame; a `Y`
+    /// parallel to `X` takes `SetCanonical`'s perpendicular).
     ///
     /// (WR-713: upstream's `SetCanonical` status is ignored, so axes it refuses left a
     /// placement that is no frame (a zero axis becomes `Z`, a tiny one stays tiny) and a
@@ -607,8 +611,11 @@ impl Cone {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for inputs that define no cone: axes with no
-    /// canonical frame (a zero, non-finite or parallel axis; tiny axes are directions), a
-    /// semi-angle not inside `(-90, 90)` degrees, a non-finite origin or radius. Those of
+    /// canonical frame (a zero or non-finite axis; tiny axes are directions, and a `Y`
+    /// parallel to `X` takes a perpendicular, as `SetCanonical` does), a
+    /// semi-angle of 90 degrees modulo 180 (a plane) or not finite, a non-finite origin or
+    /// radius. A semi-angle outside `(-90, 90)` is taken modulo 180 into it (the same
+    /// cone). Those of
     /// the apex (the generator's inversion), and [`SolidError::Unported`] from the NURB
     /// made for the line's owner.
     pub fn new_unbounded(
@@ -622,10 +629,9 @@ impl Cone {
         inside_out: bool,
     ) -> Result<Self> {
         // (WR-713: inputs that define no cone are refused: axes with no canonical frame
-        // (a zero or parallel axis), a semi-angle not inside (-90, 90) degrees (at 90 the
-        // generator is perpendicular to the axis; beyond, the base circle lies on the
-        // other nappe than upstream's domain), and non-finite numbers. Upstream built
-        // them, with a placement, generator and NURB that disagree.)
+        // (a zero axis has no direction, so there is no axis `Z`), a semi-angle of
+        // 90 degrees modulo 180 (below), and non-finite numbers. Upstream built them, with
+        // a placement, generator and NURB that disagree.)
         let finite = origin.x.is_finite()
             && origin.y.is_finite()
             && origin.z.is_finite()
@@ -636,17 +642,37 @@ impl Cone {
                 "the origin or the base radius is not finite",
             ));
         }
-        // (NaN is refused: it is not inside the interval)
+        // (WR-713: `Rad(V) = BaseRadius + tan(SemiAngle) V` and the generator line depend
+        // on the semi-angle only through its value modulo 180 degrees: `s` and `s - 180`
+        // give the same tangent, and generator directions that are each other's negatives,
+        // so the same line. A semi-angle outside (-90, 90) is taken to its representative
+        // inside, which the class holds (`m_dSemiAngleDeg` is documented between -90 and
+        // 90, its sign the side of the apex). Upstream kept it, so a semi-angle of 120 ran
+        // its domain from the apex up, on the nappe that does not hold the base circle.
+        // `%` is IEEE `fmod`, exact; the `-+ 180` of a remainder past 90 is exact
+        // (Sterbenz). A semi-angle of 90 modulo 180 has no tangent: the generator is
+        // perpendicular to the axis and sweeps a plane, every point at height 0, which no
+        // height parameterises; NaN and infinities have no remainder. Both are refused.)
+        let semi_angle_deg = {
+            let r = semi_angle_deg % 180.0;
+            if r > 90.0 {
+                r - 180.0
+            } else if r < -90.0 {
+                r + 180.0
+            } else {
+                r
+            }
+        };
         if semi_angle_deg.is_nan() || semi_angle_deg.abs() >= 90.0 {
             return Err(SolidError::invalid_input(
                 OP_NEW_UNBOUNDED,
-                "the semi-angle is not inside (-90, 90) degrees",
+                "the semi-angle is 90 degrees modulo 180 (the plane) or not a number",
             ));
         }
         let Some(frame) = Self::canonical_frame(origin, x_axis, y_axis) else {
             return Err(SolidError::invalid_input(
                 OP_NEW_UNBOUNDED,
-                "the axes define no frame (a zero, non-finite or parallel axis)",
+                "the axes define no frame (a zero or non-finite axis)",
             ));
         };
         let mut cone = Self {

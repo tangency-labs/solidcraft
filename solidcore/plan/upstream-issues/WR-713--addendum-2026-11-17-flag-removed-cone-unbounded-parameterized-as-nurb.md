@@ -7,17 +7,18 @@ The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, #18
 Running with the fix always on exposed further defects in the same constructors. They are fixed at the root (`surface/cone/p1.rs`, `surface/cone/p2.rs`):
 
 - **The canonical frame.** `Cone::canonical_frame` takes tiny and huge axes as directions. `SetCanonical` unitizes an axis with a coordinate of 1e300 to zero and still reports success, so a frame built that way is checked and refused.
-- **`Cone::new_unbounded`** refuses inputs that define no cone:
+- **`Cone::new_unbounded`** refuses inputs that define no cone, each decided in closed form from the input numbers:
   - a non-finite origin or radius;
-  - a semi-angle outside (−90, 90) degrees, or NaN;
-  - axes that give no frame.
+  - a semi-angle of 90 degrees modulo 180, or one that is not finite: `tan` has no value there, and the generator perpendicular to the axis sweeps a plane, every point at height 0;
+  - a zero or non-finite axis: it has no direction, so there is no axis `Z`.
+
+  A semi-angle outside (−90, 90) is taken modulo 180 into it. `s` and `s ∓ 180` have the same tangent and the same generator line, so they are the same cone; the class documents its angle between −90 and 90. Upstream kept such an angle, and a semi-angle of 120 ran its domain from the apex away from the base circle.
 - **The unbounded generator.**
   - It is built in the canonical frame.
   - It is rotated as a vector for every cone that is not a cylinder. Upstream rotates the point `origin + Z` and then subtracts `origin`, and at an origin around 1e5 that rotation is lost in rounding.
   - The apex end of the domain is clamped to `SM_INFINITE_PARAMETER`.
   - `transform` resets the generator's speed and domain when it scales.
 - **`Cone::new_bounded`** takes its generator axes from the canonical frame. With axes that are not orthonormal, upstream put the generator at `origin + radius X`, which gives a cylinder of radius `radius |X|`.
-- **`RebuildPolarConverter`** falls back to the domain-end iso circle only when the start lies on the axis, that is, at a cone's apex.
 - **`Cone::create_offset_surface`.**
   - The kept cone of a truncated offset runs from the cone's own STEP heights. Upstream placed it as if the bottom were at the origin, which for an unbounded cone gives another cone.
   - A copied offset rebuilds its polar circle on the offset cone. Upstream kept the original's circle, which is off the offset by the offset distance.
@@ -47,4 +48,4 @@ Running with the fix always on exposed further defects in the same constructors.
   - The extrusion and cone curves are checked by convex-hull plane distances and by Bernstein bounds of the implicit cone.
 - **Tests:**
   - `crates/solidcore/tests/issue_2313_unbounded_cone_iso_circle.rs` asserts the fixed behaviour only.
-  - `crates/solidcore/tests/wr713_cone_root_fixes.rs` covers each root fix above against its closed form.
+  - `crates/solidcore/tests/wr713_cone_root_fixes.rs` has a test for each root fix above against its closed form. Each was checked to fail with its fix reverted, except the refusals, which `unbounded_cone_refuses_inputs_that_define_no_cone` asserts directly.

@@ -752,15 +752,13 @@ impl SurfOfRevolution {
 
     /// Rebuilds the polar converter from the sweep iso curve at the NURB domain's
     /// generator-direction start (or, when that circle is degenerate, at 45% of the
-    /// domain, then, not upstream, at its end when the start is on the axis)
-    /// (`RebuildPolarConverter`), the iso
-    /// curves made by `iso` (upstream's
+    /// domain) (`RebuildPolarConverter`), the iso curves made by `iso` (upstream's
     /// virtual `CreateIsoParametricCurve`: this class's
     /// [`Self::create_iso_parametric_curve`] or a derived class's override).
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when all three iso curves are degenerate; those of the iso curves (upstream
+    /// `SM_ERR` when both iso curves are degenerate; those of the iso curves (upstream
     /// then dereferences a null curve) and of the table set-up; `InvalidInput` when the
     /// iso curve is not a circle (upstream casts it).
     pub(crate) fn rebuild_polar_converter(
@@ -813,45 +811,6 @@ impl SurfOfRevolution {
             };
             sweep_iso = iso(self, k, param, sweep_param)?;
             iso_degenerate = sweep_iso.is_degenerate(k, EFF_ZERO, None)?;
-        }
-
-        // the start lies on the axis (within the rounding of its distance along it): the
-        // case the end below is for
-        let start_on_axis = || -> Result<bool> {
-            let p = self.base.evaluate_point(nurb_min_uv)?;
-            let w = p - self.position.origin();
-            let z = self.position.z_axis();
-            let off = (w - w.dot(z) * z).length();
-            Ok(off <= EFF_ZERO.max(EFF_ZERO * w.length()))
-        };
-        if iso_degenerate && start_on_axis()? {
-            // Not upstream (WR-713): the end of the domain. A cone's NURB domain can span
-            // tens of billions (a semi-angle of 1e-9 degrees puts its apex 5.7e10 from
-            // its origin); at 0.45 of it, rounding at that distance moves the iso
-            // curve's seam off its angle by more than SM_EFF_ZERO_DEG, so the circle's
-            // domain closes to a point and reads as degenerate. Upstream then leaves the
-            // surface without a polar converter. Only when the start is on the axis (a
-            // cone's apex): the end is then the cone's other end, no farther than
-            // SM_INFINITE_PARAMETER for an unbounded cone. (A start off the axis with a
-            // degenerate circle is a surface whose placement and generator disagree, e.g.
-            // a cone of a zero axis: it keeps upstream's outcome.) An end iso curve that cannot be made, or is degenerate too,
-            // leaves the outcome upstream gives (the degenerate iso curve's error below).
-            let nurb_max_uv = nurb_domain.max();
-            let sweep_param = if self.swap_uv {
-                nurb_max_uv.x
-            } else {
-                nurb_max_uv.y
-            };
-            match iso(self, k, param, sweep_param) {
-                Ok(end_iso) => {
-                    if !end_iso.is_degenerate(k, EFF_ZERO, None)? {
-                        sweep_iso = end_iso;
-                        iso_degenerate = false;
-                    }
-                }
-                Err(e) if e.is_unported() => return Err(e),
-                Err(_) => {}
-            }
         }
 
         // update PolarConverter
