@@ -2299,6 +2299,42 @@ mod tests {
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
     }
 
+    /// An exit no upstream status stands for is passed on, never read as a made
+    /// surface: here the chamfer's arc names an original face the target does not have
+    /// (`NotFound`), after its curve was deleted to be recomputed. Read as `TRUE`, the
+    /// corner skipped the Coons patch and reported success with no surface and no face.
+    #[test]
+    fn analytic_corner_surface_passes_on_an_exit_without_upstream_status() {
+        let k = Kernel::default();
+        let missing_face = FaceId::from_index(u32::MAX);
+        let arc_chamfer = || {
+            let (mut pseudo, c) = line_chamfer_corner(3);
+            let e = c.edges[0];
+            let circle = Curve::from(create_analytic_circle(&k, Point3::ZERO, 1.0).unwrap());
+            pseudo.brep_mut().edge_mut(e).unwrap().curve = Some(circle);
+            let fe = pseudo.fillet_edge_mut(e).unwrap();
+            fe.set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
+            fe.set_original_face(Some(missing_face));
+            (pseudo, c)
+        };
+
+        let (mut pseudo, mut c) = arc_chamfer();
+        let r = with_env(&mut pseudo, |env| c.make_analytic_corner_surface(env));
+        let e = r.unwrap_err();
+        assert!(matches!(e, SolidError::NotFound { .. }), "{e:?}");
+        assert_eq!(e.upstream_status(), None, "{e:?}");
+        assert!(c.surfaces.is_empty());
+
+        // the corner patch passes it on too, with no surface and no face
+        let (mut pseudo, mut c) = arc_chamfer();
+        c.extended_surface_patch = false;
+        let r = with_env(&mut pseudo, |env| c.create_corner_patch_default(env));
+        let e = r.unwrap_err();
+        assert!(matches!(e, SolidError::NotFound { .. }), "{e:?}");
+        assert!(c.surfaces.is_empty());
+        assert!(c.surface_faces.is_empty());
+    }
+
     /// A chamfer of three real lines makes one surface, reported `TRUE`, that lies in
     /// the plane through the corner's three vertices (closed form: the signed distance
     /// of each evaluated point from that plane), with the corner's state unchanged.
