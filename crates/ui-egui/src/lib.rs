@@ -1580,7 +1580,7 @@ impl SolveApp {
             .unwrap_or_default();
         panel_runtime::load_preferences(self, &v);
         // Loaded values are the person's own; the organization's policy still sets its settings.
-        policy::enforce(self);
+        policy::enforce_loaded(self);
     }
 
     /// Keep approved plugin grants in the plugins folder's grant store, which the command line and
