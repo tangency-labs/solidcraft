@@ -4,6 +4,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
+use solidcore_record::brep::{Loop, OrientedEdge};
 use solidcraft_doc::{Feature, FeatureKind};
 
 use super::CommandSpec;
@@ -18,8 +19,8 @@ use crate::schema::edit::{
     TimelineUngroupParams, TimelineUngrouped,
 };
 use crate::schema::select::{
-    PartialPick, SameLookParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult, SelectItem, SelectMode,
-    SelectSetParams, SelectSetResult, read_item,
+    EdgeLoopParams, EdgeLoopResult, PartialPick, SameLookParams, SelectClearParams, SelectClearResult, SelectFilterParams, SelectFilterResult,
+    SelectItem, SelectMode, SelectSetParams, SelectSetResult, read_item,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
@@ -229,12 +230,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SAME_LOOK_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
+    CommandSpec::new("select.edge_loop", "Select Edge Loop", crate::checked!("select.edge_loop", select_edge_loop))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&EDGE_LOOP_CONTRACT)
+        .output(output_schema_for::<EdgeLoopResult>)
+        .params("body?: world body name and edge?: edge index, together (default: the last selected edge), face?: which of the edge's faces, add?: bool → selects the closed loop of edges of that face that holds the edge (exact topology); without face: a flat face, then one with more than one loop, then the lowest index → selected, face, edges"),
 ];
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const SAME_LOOK_CONTRACT: TypedContract<SameLookParams> = TypedContract::new();
+const EDGE_LOOP_CONTRACT: TypedContract<EdgeLoopParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
@@ -1674,6 +1683,70 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("select.same_look", "too many objects"));
     }
     select_set(s, &json!({"items":items}))
+}
+
+/// `select.edge_loop`: the loop of edges around one of an edge's faces, from the body's exact
+/// topology (#18094). See [`EdgeLoopParams`] for which face gives the loop.
+fn select_edge_loop(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "select.edge_loop";
+    let request: EdgeLoopParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
+    let (name, edge) = match (request.body, request.edge) {
+        (Some(body), Some(edge)) => (body, edge),
+        (None, None) => s
+            .selection
+            .iter()
+            .rev()
+            .find_map(|x| match x {
+                Sel::Edge { body, index, .. } => Some((body.clone(), *index)),
+                _ => None,
+            })
+            .ok_or_else(|| bad(CMD, "select an edge, or give body and edge"))?,
+        _ => return Err(bad(CMD, "give body and edge together")),
+    };
+    let state = s.world_state()?;
+    let body = state.body(&name).ok_or_else(|| bad(CMD, format!("no body `{name}`")))?;
+    let record = body.body.record();
+    if record.faces.is_empty() {
+        return Err(bad(CMD, format!("`{name}` is a mesh body: it has no edge loops")));
+    }
+    let wanted = u32::try_from(edge).ok().filter(|_| edge < record.edges.len()).ok_or_else(|| bad(CMD, format!("no edge {edge} of `{name}`")))?;
+    // Each face's loop that runs along the edge (a face holds an edge in one loop; a seam twice in it).
+    let loops: Vec<(usize, &[OrientedEdge])> = record
+        .faces
+        .iter()
+        .enumerate()
+        .filter_map(|(f, face)| {
+            face.loops.iter().find_map(|l| match l {
+                Loop::Edges { edges } if edges.iter().any(|u| u.edge == wanted) => Some((f, edges.as_slice())),
+                _ => None,
+            })
+        })
+        .collect();
+    let chosen = match request.face {
+        Some(face) => {
+            loops.iter().find(|(f, _)| *f == face).ok_or_else(|| bad(CMD, format!("face {face} of `{name}` is not one of edge {edge}'s faces")))?
+        }
+        None => loops
+            .iter()
+            .max_by_key(|(f, _)| {
+                let several_loops = record.faces.get(*f).is_some_and(|face| face.loops.len() > 1);
+                (body.body.planar_face(*f).is_some(), several_loops, std::cmp::Reverse(*f))
+            })
+            .ok_or_else(|| bad(CMD, format!("edge {edge} of `{name}` bounds no face")))?,
+    };
+    let (face, used) = *chosen;
+    let mut edges: Vec<usize> = Vec::new();
+    for u in used {
+        let e = u.edge as usize;
+        if !edges.contains(&e) {
+            edges.push(e);
+        }
+    }
+    let items: Vec<Value> = edges.iter().map(|e| json!({"type": "edge", "body": name, "index": e})).collect();
+    drop(state);
+    let set = select_set(s, &json!({"items": items, "add": request.add.unwrap_or(false)}))?;
+    let selected = set.get("selected").and_then(Value::as_u64).unwrap_or_default() as usize;
+    reply(CMD, EdgeLoopResult { selected, face, edges, param_warnings: Vec::new() })
 }
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
