@@ -452,12 +452,13 @@ fn slotted_stepped_bar(k: &mut Kernel) -> Brep {
     boolean_difference(k, bar, slot).unwrap()
 }
 
-/// #18646: the slotted stepped bar's two outer step edges chamfered 4 together. Each
+/// #18646: the slotted stepped bar's outer step edges chamfered 4, one and both. Each
 /// chamfer's leg runs past the step's foot under the wall, and each lies on the plane of
 /// both step tops; the other top, apart, is not the face it runs past, so it is not
-/// carried on to it (it was, and the pair was refused while each chamfer alone built).
-/// The bar is 85 x 30 = 2550 less the slot's 33 x 10, and each chamfer takes 4 x 4 / 2
-/// over its 10: 2060, and each its own new faces.
+/// carried on to it (it was, and even one chamfer was refused: "ends off the lines of the
+/// face's side edges"). The bar is 85 x 30 = 2550 less the slot's 33 x 10, and each
+/// chamfer takes 4 x 4 / 2 over its 10: 2140 for one, 2060 for both, each its own new
+/// faces.
 #[test]
 fn two_chamfers_past_the_feet_of_two_step_tops_of_one_plane_build() {
     let low = (p(10.0, 5.0, 0.0), p(10.0, 5.0, 10.0));
