@@ -21,7 +21,6 @@ use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::{HashMap, HashSet};
 
 use serde_json::json;
-use solidcraft_engine::Sel;
 use solidcraft_engine::doc::Component;
 
 use crate::SolveApp;

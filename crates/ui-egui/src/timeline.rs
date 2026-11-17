@@ -416,7 +416,7 @@ pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Op
     use solidcraft_engine::Sel;
     match sel {
         Sel::Feature { id } => Some(*id),
-        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => {
+        Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } => {
             doc.features.iter().find(|f| f.kind.is_construction() && crate::browser::construction_sel(f) == *sel).map(|f| f.id)
         }
         _ => None,
