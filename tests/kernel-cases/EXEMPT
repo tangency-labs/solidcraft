@@ -373,6 +373,7 @@ tab.view.open                     opens a view of the design: no geometry, teste
 tab.view.rename                   renames a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.reopen                   brings back the view closed last: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 timeline.dependents               a listing of dependents
+timeline.effects                  read-only historical body effects; crates/engine/src/cmd/edit_tests.rs feature_effects_* and crates/engine/src/schema/inspect_tests.rs feature_effects_publish_schemas_and_check_their_contract
 timeline.export_script            writes the history as a script
 timeline.inspect                  a listing of the timeline
 timeline.play                     plays the history back in the view: no new geometry
