@@ -120,6 +120,12 @@ struct Edge {
     curve: usize,
 }
 
+/// A loop bounded in part by a chorded curve's chords, under this area (mm2) and thinner on
+/// average (2 x area / perimeter, mm) than the chords' tolerance, is a sliver of the
+/// chord fit, not a region of the drawing (see the loop tracing in `island_loops`).
+const SLIVER_AREA: f64 = 1e-3;
+const SLIVER_WIDTH: f64 = 1.5e-3;
+
 /// Do two circles lie within `tol` of each other all the way round?
 fn same_circle(c: Vec2, r: f64, c2: Vec2, r2: f64, tol: f64) -> bool {
     c.dist(c2) + (r - r2).abs() <= tol
@@ -1391,6 +1397,24 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             }
         })
     };
+    // The curves' own ends: a piece end no other piece of the same curve shares (a free-form
+    // curve's chord joints are shared; a closed curve has none).
+    let mut by_curve: std::collections::HashMap<usize, Vec<Vec2>> = std::collections::HashMap::new();
+    for (ci, sh) in &shapes {
+        match *sh {
+            Shape::Line { a, b } => by_curve.entry(*ci).or_default().extend([a, b]),
+            Shape::Round { sweep, .. } if sweep < TAU - 1e-12 => by_curve.entry(*ci).or_default().extend([sh.point(0.0), sh.point(sweep)]),
+            Shape::Round { .. } => {}
+        }
+    }
+    let mut curve_ends: Vec<Vec2> = Vec::new();
+    for pts in by_curve.values() {
+        for (i, p) in pts.iter().enumerate() {
+            if !pts.iter().enumerate().any(|(j, q)| j != i && q.dist(*p) <= tol) {
+                curve_ends.push(*p);
+            }
+        }
+    }
     // Bounding boxes, and a uniform grid over them: only shapes sharing a cell can meet.
     let boxes: Vec<solidcraft_geom::Aabb2> = shapes
         .iter()
@@ -1795,109 +1819,149 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         let e = edges.get(h / 2)?;
         Some(if h.is_multiple_of(2) { (e.seg, e.u, e.v) } else { (e.seg.reversed(), e.v, e.u) })
     };
-    let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for (ei, a) in alive.iter().enumerate() {
-        if !*a {
-            continue;
+    let mut pass = 0;
+    let kept = loops.len();
+    loop {
+        loops.truncate(kept);
+        let mut slivers: Vec<usize> = Vec::new();
+        let mut outgoing: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (ei, a) in alive.iter().enumerate() {
+            if !*a {
+                continue;
+            }
+            for h in [2 * ei, 2 * ei + 1] {
+                if let Some((_, from, _)) = half(h)
+                    && let Some(o) = outgoing.get_mut(from)
+                {
+                    o.push(h);
+                }
+            }
         }
-        for h in [2 * ei, 2 * ei + 1] {
-            if let Some((_, from, _)) = half(h)
-                && let Some(o) = outgoing.get_mut(from)
+        let mut visited = vec![false; edges.len() * 2];
+        for start in 0..edges.len() * 2 {
+            if !alive.get(start / 2).copied().unwrap_or(false) || visited.get(start).copied().unwrap_or(true) {
+                continue;
+            }
+            let mut segs = Vec::new();
+            let mut hs: Vec<usize> = Vec::new();
+            let mut edge_nodes = Vec::new();
+            let mut edge_analytic = Vec::new();
+            let mut ids = Vec::new();
+            let mut ptags: Vec<Option<(Piece, bool)>> = Vec::new();
+            let mut coverage_tags = Vec::new();
+            let mut h = start;
+            let mut ok = true;
+            for _ in 0..=edges.len() * 2 {
+                if let Some(v) = visited.get_mut(h) {
+                    *v = true;
+                }
+                let Some((seg, from, to)) = half(h) else {
+                    ok = false;
+                    break;
+                };
+                segs.push(seg);
+                hs.push(h);
+                edge_nodes.push((from, to));
+                if let Some(e) = edges.get(h / 2) {
+                    ids.push(e.id.clone());
+                    ptags.push(e.tag.map(|t| (t, h.is_multiple_of(2))));
+                    coverage_tags.push(e.coverage.map(|t| (t, h.is_multiple_of(2))));
+                    edge_analytic.push(e.analytic);
+                } else {
+                    ptags.push(None);
+                    coverage_tags.push(None);
+                    edge_analytic.push(false);
+                }
+                let back = (-seg.end_tangent()).angle();
+                let twin = h ^ 1;
+                // First clockwise turn from the way back. Directions are compared a short way
+                // along each segment (curvature decides between equal tangents, e.g. a line tangent
+                // to an arc, or an arc leaving back along the incoming line).
+                // Tangents that [`leave_same_way`] are equal: a solved tangency leaves them that far
+                // apart either way, and the turn the round-off picked lost every region at a corner
+                // where two arcs leave along one line.
+                let kt = half(twin).map(|(ts, _, _)| curvature(&ts)).unwrap_or(0.0);
+                // (clockwise turn from the way back, curvature, chord, half-edge)
+                let mut turns: Vec<(f64, f64, f64, usize)> = Vec::new();
+                for &o in outgoing.get(to).map(Vec::as_slice).unwrap_or(&[]) {
+                    if o == twin {
+                        continue;
+                    }
+                    let Some((os, _, _)) = half(o) else { continue };
+                    let k = curvature(&os);
+                    let mut raw = (back - os.start_tangent().angle()).rem_euclid(TAU);
+                    // Leaving along the way back: just clockwise of it when it bends away to the
+                    // right of it, a whole turn round otherwise.
+                    if leave_same_way(raw.min(TAU - raw), kt - k, chord(&seg).min(chord(&os))) {
+                        raw = if kt - k > 1e-12 { 0.0 } else { TAU };
+                    }
+                    turns.push((raw, k, chord(&os), o));
+                }
+                // Of the first turns, the one bending most to the left comes first; between equal
+                // bends (two lines) the tangents decide.
+                let first = turns.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0));
+                let best = turns
+                    .into_iter()
+                    .filter(|t| first.is_some_and(|f| leave_same_way(t.0 - f.0, t.1 - f.1, t.2.min(f.2))))
+                    .min_by(|a, b| b.1.total_cmp(&a.1).then(a.0.total_cmp(&b.0)))
+                    .map(|(d, _, _, o)| (d, o));
+                let Some((_, next)) = best else {
+                    ok = false;
+                    break;
+                };
+                h = next;
+                if h == start {
+                    break;
+                }
+                if visited.get(h).copied().unwrap_or(true) {
+                    ok = false;
+                    break;
+                }
+            }
+            if !ok || h != start {
+                continue;
+            }
+            let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, TANGENT_JOIN_TOL);
+            let lp = Loop2 { segs: close_line_joints(restore_exact(segs, &ptags, &exact), ENDPOINT_JOIN_TOL) };
+            let area = lp.signed_area();
+            let perimeter: f64 = lp.segs.iter().map(Seg2::length).sum();
+            // A sliver a chorded curve's chords leave against an analytic curve where the two
+            // only touch: the tangent contact is found as two crossings a few hundredths apart. The
+            // drawing has no region there, so its longest chord goes and the sliver joins the region
+            // across it (one more pass) -- but only where its corners are crossings, not a curve's own
+            // ends: a thin region a curve closes against its chord, at its ends, is a region.
+            let at_end = |q: Vec2| curve_ends.iter().any(|e| e.dist(q) <= tol);
+            if pass == 0
+                && area > 1e-9
+                && area < SLIVER_AREA
+                && 2.0 * area / perimeter.max(1e-12) < SLIVER_WIDTH
+                && !lp.segs.iter().any(|s| at_end(s.start()))
             {
-                o.push(h);
+                let chord = hs
+                    .iter()
+                    .filter_map(|&h| edges.get(h / 2).filter(|e| !e.analytic).map(|e| (e.seg.length(), h / 2)))
+                    .max_by(|a, b| a.0.total_cmp(&b.0));
+                if let Some((_, ei)) = chord {
+                    slivers.push(ei);
+                }
+            }
+            if lp.signed_area() > 1e-9 {
+                let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
+                let curve = edges.get(start / 2).map(|e| e.curve).unwrap_or(usize::MAX);
+                let complete = whole_graph_complete.then(|| complete_loop(&coverage_tags, &expected, sk)).flatten();
+                loops.push(IslandLoop::new(lp, ids, c, complete, (1, curve, start)));
             }
         }
-    }
-    let mut visited = vec![false; edges.len() * 2];
-    for start in 0..edges.len() * 2 {
-        if !alive.get(start / 2).copied().unwrap_or(false) || visited.get(start).copied().unwrap_or(true) {
+        if pass == 0 && !slivers.is_empty() {
+            for ei in slivers {
+                if let Some(a) = alive.get_mut(ei) {
+                    *a = false;
+                }
+            }
+            pass = 1;
             continue;
         }
-        let mut segs = Vec::new();
-        let mut edge_nodes = Vec::new();
-        let mut edge_analytic = Vec::new();
-        let mut ids = Vec::new();
-        let mut ptags: Vec<Option<(Piece, bool)>> = Vec::new();
-        let mut coverage_tags = Vec::new();
-        let mut h = start;
-        let mut ok = true;
-        for _ in 0..=edges.len() * 2 {
-            if let Some(v) = visited.get_mut(h) {
-                *v = true;
-            }
-            let Some((seg, from, to)) = half(h) else {
-                ok = false;
-                break;
-            };
-            segs.push(seg);
-            edge_nodes.push((from, to));
-            if let Some(e) = edges.get(h / 2) {
-                ids.push(e.id.clone());
-                ptags.push(e.tag.map(|t| (t, h.is_multiple_of(2))));
-                coverage_tags.push(e.coverage.map(|t| (t, h.is_multiple_of(2))));
-                edge_analytic.push(e.analytic);
-            } else {
-                ptags.push(None);
-                coverage_tags.push(None);
-                edge_analytic.push(false);
-            }
-            let back = (-seg.end_tangent()).angle();
-            let twin = h ^ 1;
-            // First clockwise turn from the way back. Directions are compared a short way
-            // along each segment (curvature decides between equal tangents, e.g. a line tangent
-            // to an arc, or an arc leaving back along the incoming line).
-            // Tangents that [`leave_same_way`] are equal: a solved tangency leaves them that far
-            // apart either way, and the turn the round-off picked lost every region at a corner
-            // where two arcs leave along one line.
-            let kt = half(twin).map(|(ts, _, _)| curvature(&ts)).unwrap_or(0.0);
-            // (clockwise turn from the way back, curvature, chord, half-edge)
-            let mut turns: Vec<(f64, f64, f64, usize)> = Vec::new();
-            for &o in outgoing.get(to).map(Vec::as_slice).unwrap_or(&[]) {
-                if o == twin {
-                    continue;
-                }
-                let Some((os, _, _)) = half(o) else { continue };
-                let k = curvature(&os);
-                let mut raw = (back - os.start_tangent().angle()).rem_euclid(TAU);
-                // Leaving along the way back: just clockwise of it when it bends away to the
-                // right of it, a whole turn round otherwise.
-                if leave_same_way(raw.min(TAU - raw), kt - k, chord(&seg).min(chord(&os))) {
-                    raw = if kt - k > 1e-12 { 0.0 } else { TAU };
-                }
-                turns.push((raw, k, chord(&os), o));
-            }
-            // Of the first turns, the one bending most to the left comes first; between equal
-            // bends (two lines) the tangents decide.
-            let first = turns.iter().copied().min_by(|a, b| a.0.total_cmp(&b.0));
-            let best = turns
-                .into_iter()
-                .filter(|t| first.is_some_and(|f| leave_same_way(t.0 - f.0, t.1 - f.1, t.2.min(f.2))))
-                .min_by(|a, b| b.1.total_cmp(&a.1).then(a.0.total_cmp(&b.0)))
-                .map(|(d, _, _, o)| (d, o));
-            let Some((_, next)) = best else {
-                ok = false;
-                break;
-            };
-            h = next;
-            if h == start {
-                break;
-            }
-            if visited.get(h).copied().unwrap_or(true) {
-                ok = false;
-                break;
-            }
-        }
-        if !ok || h != start {
-            continue;
-        }
-        let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, TANGENT_JOIN_TOL);
-        let lp = Loop2 { segs: close_line_joints(restore_exact(segs, &ptags, &exact), ENDPOINT_JOIN_TOL) };
-        if lp.signed_area() > 1e-9 {
-            let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
-            let curve = edges.get(start / 2).map(|e| e.curve).unwrap_or(usize::MAX);
-            let complete = whole_graph_complete.then(|| complete_loop(&coverage_tags, &expected, sk)).flatten();
-            loops.push(IslandLoop::new(lp, ids, c, complete, (1, curve, start)));
-        }
+        break;
     }
     Island { loops, incomplete }
 }
