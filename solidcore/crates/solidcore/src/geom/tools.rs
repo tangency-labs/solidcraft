@@ -38,8 +38,11 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
 use crate::geom::vector3d::sqrt;
+use crate::intersect::curve_class::p1::SourceReach;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
+use crate::surface::normal_cone::intersection_reach;
+use crate::surface::surface::Surface;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::{Brep, BrepId, EdgeId, FaceId, VertexId};
 
@@ -319,8 +322,14 @@ pub fn find_coincident_edge(
 /// curve over its interval, and every point of the edge's curve as near the query's, or in
 /// the ball of one of the two vertices (its tolerance about its point), which holds both
 /// curves' ends ([`Curve::proved_together`]: an enclosure, where
-/// [`find_coincident_edge`] samples). The edge owning the curve is skipped. `None` where
-/// no edge is proved.
+/// [`find_coincident_edge`] samples). The edge owning the curve is skipped. A seam of
+/// `face` (the face on both sides of it, [`crate::topology::edge::face_on_both_sides`])
+/// bounds no material, and its tolerance adds nothing: the curve is the seam only within
+/// the query's own reach (docs/booleans.md, "Seams and poles"), which for the
+/// intersection curve of `face` with the surface `crossing` is its tolerance over the
+/// sine of the two surfaces' least angle along it
+/// ([`crate::surface::normal_cone::intersection_reach`]; without `crossing` the curve is
+/// known to the query's tolerance). `None` where no edge is proved.
 ///
 /// # Errors
 ///
@@ -328,10 +337,14 @@ pub fn find_coincident_edge(
 pub fn find_edge_proved_along(
     k: &Kernel,
     brep: &Brep,
+    face: FaceId,
     query: &CoincidentEdgeQuery<'_>,
     edges: &[EdgeId],
+    crossing: Option<&Surface>,
 ) -> Result<Option<usize>> {
     let (v1, v2) = (query.start_vertex, query.end_vertex);
+    // the curve's reach, read once and only for a seam
+    let mut reach: Option<SourceReach> = None;
     let mut ends = Vec::new();
     for v in [v1, v2] {
         ends.push((brep.vertex(v)?.point, vertex_tolerance(brep, v)?));
@@ -353,7 +366,32 @@ pub fn find_edge_proved_along(
         // edge where y = 0 kept two (`tests/one_edge_or_two_symmetric_walls.rs`). The B-rep's
         // tolerance is the same for every edge of the operation.
         let edge_tol = edge_tolerance(brep, e)?.min(brep.tolerance());
-        let tol = query.tolerance + edge_tol;
+        // A seam of `face` adds nothing (docs/booleans.md, "Seams and poles").
+        let summed = query.tolerance + edge_tol;
+        let tol = if crate::topology::edge::face_on_both_sides(brep, e, face)? {
+            let known = if let Some(known) = reach {
+                known
+            } else {
+                let own = crate::topology::face::p2::surface(brep, face)?;
+                let known = match (crossing, own) {
+                    (Some(other), Some(own)) => intersection_reach(
+                        k,
+                        query.curve,
+                        &query.interval,
+                        own,
+                        other,
+                        query.tolerance,
+                    )?
+                    .map_or(SourceReach::Unbounded, SourceReach::Across),
+                    _ => SourceReach::Own,
+                };
+                reach = Some(known);
+                known
+            };
+            known.contact_tolerance(query.tolerance, summed)
+        } else {
+            summed
+        };
         let edge_ivl = edge_interval(brep, e)?;
         if query.curve.proved_together(
             k,

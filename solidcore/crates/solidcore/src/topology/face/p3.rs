@@ -113,11 +113,11 @@ use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, MAX_TREES};
-use crate::geom::tol::xsect_tol_3d_from_zones;
+use crate::geom::tol::{xsect_tol3d, xsect_tol_3d_from_zones};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::sqrt as sm_sqrt;
 use crate::heal::face_props::{FaceProps, LoopObject, PropStage, Tri};
-use crate::intersect::curve_class::p1::CurveClassification;
+use crate::intersect::curve_class::p1::{CurveClassification, SourceReach};
 use crate::intersect::curve_class::p5::{ClassGeometryMut, ExtractOptions};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
@@ -132,6 +132,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::query::brep::{BrepFaceServices, FaceCaches, SideObject, SidedFaceServices};
 use crate::query::face::p2 as qf2;
+use crate::surface::normal_cone::intersection_reach;
 use crate::surface::surface::p1::map_to_2d;
 use crate::surface::surface::p2::{smos_max, TsectCurveType};
 use crate::surface::surface::p4::NoObject;
@@ -284,6 +285,40 @@ fn point_3d_classify(
 }
 
 // ---- small accessors ----------------------------------------------------------------------
+
+/// Not upstream: how far across itself the intersection curve `curve` of the two faces'
+/// surfaces is known over `interval` (docs/booleans.md, "Seams and poles"): the tolerance
+/// over the sine of the least angle between the surfaces along it, enclosed
+/// ([`intersection_reach`]), or unbounded where none is proved. Read only where it
+/// decides something, a face with a seam; a face without one meets the curve at its
+/// boundary edges, within both tolerances.
+fn intersection_curve_reach(
+    k: &Kernel,
+    faces: [(&Brep, FaceId); 2],
+    curve: &Curve,
+    interval: &Extent1d,
+    tolerance: f64,
+) -> Result<SourceReach> {
+    let mut seam = false;
+    for (b, f) in faces {
+        for e in face_edges(b, f)? {
+            seam = seam || edge::face_on_both_sides(b, e, f)?;
+        }
+    }
+    if !seam {
+        return Ok(SourceReach::Unbounded);
+    }
+    let [(b1, f1), (b2, f2)] = faces;
+    let reach = intersection_reach(
+        k,
+        curve,
+        interval,
+        surface_of(b1, f1)?,
+        surface_of(b2, f2)?,
+        tolerance,
+    )?;
+    Ok(reach.map_or(SourceReach::Unbounded, SourceReach::Across))
+}
 
 fn surface_of(b: &Brep, f: FaceId) -> Result<&Surface> {
     face2::surface(b, f)?.ok_or_else(|| null("face without surface"))
@@ -2645,6 +2680,9 @@ pub fn face_intersect_breps_cached(
         }
     }
 
+    // (not upstream) the curves are the faces' own edge curves, known to their tolerance;
+    // an intersection curve is known as far as the two surfaces' angle fixes it
+    let curves_are_edges = have_curves;
     if !have_curves {
         // the surfaces reach their faces' caches through the B-reps
         // (smsurf_GetSurfaceCache); exact evaluation copies, as the caches are made
@@ -2797,6 +2835,20 @@ pub fn face_intersect_breps_cached(
         let ivl = curve.natural_interval();
         let mut cc1 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv1, zone_tol)?;
         let mut cc2 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv2, zone_tol)?;
+        if !curves_are_edges {
+            let reach = intersection_curve_reach(
+                k,
+                [
+                    (&*this_brep, f),
+                    (other_brep.as_deref().unwrap_or(this_brep), other),
+                ],
+                curve,
+                &ivl,
+                xsect_tol3d(k, zone_tol),
+            )?;
+            cc1.set_source_reach(reach);
+            cc2.set_source_reach(reach);
+        }
 
         // the classifications' lazy face queries (UV trim curves, gap caches, tolerance
         // growth) edit the faces' own B-reps, as upstream's; they are queries, so the

@@ -833,6 +833,44 @@ fn pocket_chamfer_on_a_boolean_body() {
     assert!(rel(v, 21000.0 - (50.0 * d * d + 4.0 / 3.0 * d * d * d)) < 1e-8, "{v}");
 }
 
+/// A Ø20 x 20 cylinder with a Ø2 x 4 blind hole in its top face, and a Ø20 x 5 cap joined on top:
+/// the cap seals the hole into a void inside one solid (tangency-labs/solidcraft#18287). A 2 mm
+/// chamfer or round on the top or the bottom rim keeps the void: two shells, the void's three
+/// faces untouched (4 planes, 2 cylinders, and the chamfer's cone or the round's torus as a
+/// rational spline), and the record validates (the solid's region lists its outer shell first).
+/// Pappus for the rim: the chamfer takes the triangle d²/2, its centroid d/3 in from the rim; the
+/// round takes the spandrel, its centroid (10 - 3π)/(12 - 3π) r in.
+#[test]
+fn a_blend_on_a_cap_that_seals_a_hole_keeps_the_void() {
+    let (big, d) = (10.0, 2.0);
+    let sealed = move || {
+        let body = make_cylinder([0.0; 3], big, 20.0).unwrap();
+        let hole = make_cylinder([-4.0, 0.0, 16.0], 1.0, 4.0).unwrap();
+        let body = boolean(&body, &hole, BooleanOp::Subtract).unwrap().unwrap();
+        let cap = make_cylinder([0.0, 0.0, 20.0], big, 5.0).unwrap();
+        boolean(&body, &cap, BooleanOp::Union).unwrap().unwrap()
+    };
+    let whole = PI * big * big * 25.0 - PI * 4.0;
+    let chamfer_inset = d / 3.0;
+    let round_inset = (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI) * d;
+    for (kind, area, inset) in [(Blend::Chamfer, d * d / 2.0, chamfer_inset), (Blend::Round, spandrel(d), round_inset)] {
+        for z in [25.0, 0.0] {
+            let b = timed("sealed_cap_rim", move || blend(&sealed(), kind, &[[0.0, -big, z]], &[d], TOL, &[], &[], Corners::Filled).unwrap());
+            let v = volume(&b, 1e-10).unwrap();
+            let want = whole - 2.0 * PI * (big - inset) * area;
+            assert!(rel(v, want) < 1e-9, "{kind:?} at z {z}: volume {v}, want {want}");
+            let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{kind:?} at z {z}: record: {e:?}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{kind:?} at z {z}: record: {e}"));
+            assert_eq!(rec.shells.len(), 2, "{kind:?} at z {z}");
+            assert_eq!(rec.regions.iter().filter(|r| r.void).count(), 1, "{kind:?} at z {z}");
+            assert_eq!(counts(&b).unwrap(), [7, 8, 5], "{kind:?} at z {z}");
+            let face = if matches!(kind, Blend::Chamfer) { "cone" } else { "rational_spline" };
+            let surfaces = BTreeMap::from([("cylinder".to_owned(), 2), ("plane".to_owned(), 4), (face.to_owned(), 1)]);
+            assert_eq!(kinds(&rec), surfaces, "{kind:?} at z {z}");
+        }
+    }
+}
+
 /// The corner of r5 rounds at (60, 40, 20) on a 60 x 40 x 20 box, set back 8 and left open: the
 /// box's six faces and the three rounds (9 faces, 27 edges, 19 vertices), a sheet, and one hole
 /// of nine edges, chained end to start, each beside a face of the sheet. The marked corner is the

@@ -981,14 +981,35 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 
 /// Native dropdown with kit arrow and scenario option handles. Tokens: `text_dim; scope control/font tokens`.
 pub fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
+    dropdown_indexed(ui, id, selected, options, false)
+}
+
+/// Close after keyboard or accessibility selection, return focus to the trigger, and keep
+/// the Enter that picked the option from submitting the enclosing form.
+pub fn dropdown_with_keyboard_close(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
+    dropdown_indexed(ui, id, selected, options, true)
+}
+
+fn dropdown_indexed(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], close_on_keyboard: bool) -> Response {
     let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
-    dropdown_menu(ui, id, text, |ui| {
+    let mut restore_focus = false;
+    let trigger = dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
             solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            // Non-pointer activation does not trigger the popup's click-to-close.
+            if close_on_keyboard && response.clicked() && !response.clicked_by(egui::PointerButton::Primary) {
+                ui.close();
+                restore_focus = true;
+            }
         }
-    })
+    });
+    if restore_focus {
+        trigger.request_focus();
+        ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    }
+    trigger
 }
 
 /// The standard dropdown with a leading application icon on the current value and each option.

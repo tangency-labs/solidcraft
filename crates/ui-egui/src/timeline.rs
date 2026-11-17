@@ -413,17 +413,32 @@ pub(crate) fn delete_params(features: &[u64], groups: &[u64]) -> Value {
     if groups.is_empty() { json!({ "features": features }) } else { json!({ "features": features, "groups": groups }) }
 }
 
+/// The feature a selection item stands for in the Features list and the History: a picked
+/// feature itself, or the construction plane, axis or point the 3D view or the Construction
+/// folder picked by name. One mapping for both directions with [`viewport_sel_of_feature`], so
+/// the lists, the History and the 3D view agree on a construction feature (#17000).
+pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Option<u64> {
+    use solidcraft_engine::Sel;
+    match sel {
+        Sel::Feature { id } => Some(*id),
+        Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } => {
+            doc.features.iter().find(|f| f.kind.is_construction() && crate::browser::construction_sel(f) == *sel).map(|f| f.id)
+        }
+        _ => None,
+    }
+}
+
+/// What the 3D view lights for a selected construction feature: the plane, axis or point
+/// itself, picked by name. `None` for any other feature.
+pub(crate) fn viewport_sel_of_feature(doc: &Document, id: u64) -> Option<solidcraft_engine::Sel> {
+    doc.feature(id).filter(|f| f.kind.is_construction()).map(crate::browser::construction_sel)
+}
+
 /// The selected timeline features, in timeline order.
 pub(crate) fn selected_feature_ids(app: &SolveApp) -> Vec<u64> {
-    app.session
-        .doc
-        .features
-        .iter()
-        .filter(|feature| {
-            app.session.selection.iter().any(|selection| matches!(selection, solidcraft_engine::Sel::Feature { id } if *id == feature.id))
-        })
-        .map(|feature| feature.id)
-        .collect()
+    let doc = &app.session.doc;
+    let picked: std::collections::HashSet<u64> = app.session.selection.iter().filter_map(|selection| feature_of_sel(doc, selection)).collect();
+    doc.features.iter().filter(|feature| picked.contains(&feature.id)).map(|feature| feature.id).collect()
 }
 
 /// What Copy and Delete in a feature's menu act on: the selected features when the
@@ -1281,10 +1296,8 @@ impl history_bar::Contents for BarSteps<'_> {
         let results = BarResults::of(&self.rows.features, self.rows.unique_ids, &app.session.model.results);
         // The features picked in the design or in the open dialog, collected once for the
         // strip: the dialog built its item list again for every chip.
-        let feature_of = |selection: &solidcraft_engine::Sel| match selection {
-            solidcraft_engine::Sel::Feature { id } => Some(*id),
-            _ => None,
-        };
+        let doc = &app.session.doc;
+        let feature_of = |selection: &solidcraft_engine::Sel| feature_of_sel(doc, selection);
         let picked: std::collections::HashSet<u64> = app
             .session
             .selection
@@ -1749,6 +1762,7 @@ mod tests {
         let feature = FeatureKind::Pattern {
             features: Vec::new(),
             bodies: Vec::new(),
+            placements: Vec::new(),
             pattern: PatternKind::Path {
                 path_sketch: solidcraft_engine::doc::SketchId(0),
                 path: Vec::new(),

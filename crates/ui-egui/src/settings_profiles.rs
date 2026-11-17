@@ -110,6 +110,7 @@ const PROFILE_KEYS: &[&str] = &[
     "selection_shift_add_only",
     "shortcut_again_ends_tool",
     "shortcut_cycles_modes",
+    "show_design_view_switcher",
     "show_document_browser",
     "show_selected_hidden_edges",
     "sketch_align_points",
