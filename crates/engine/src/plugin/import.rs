@@ -141,9 +141,11 @@ pub fn importer_for(session: &Session, path: &str, format: Option<&str>) -> Resu
 pub fn open_filters(session: &Session) -> Vec<(String, Vec<String>)> {
     let mut filters: Vec<(String, Vec<String>)> = Vec::new();
     for importer in importers(session) {
-        match filters.iter_mut().find(|(name, _)| *name == importer.name) {
+        // A slot's own label names its group; without one, the plugin's name does.
+        let name = if importer.label.is_empty() { importer.name } else { importer.label };
+        match filters.iter_mut().find(|(group, _)| *group == name) {
             Some((_, extensions)) => extensions.extend(importer.extensions.into_iter().filter(|e| !extensions.contains(e)).collect::<Vec<_>>()),
-            None => filters.push((importer.name, importer.extensions)),
+            None => filters.push((name, importer.extensions)),
         }
     }
     filters

@@ -296,7 +296,8 @@ extensions it claims, lowercase without the dot:
   importer that claims its extension. `file.import` always uses an importer, and `format`
   (`plugin_id.entry`, listed in `plugin.list`'s `importers`) picks one for either command, for
   example for a `.fcstd` file SolidCraft also reads. `options` passes the entry's declared options.
-  Two importers claiming one extension need `format`. File › Open offers the claimed extensions,
+  Two importers claiming one extension need `format`. An entry's optional `label` names its group
+  in the Open dialog (default: the plugin's name), as for an export slot. File › Open offers the claimed extensions,
   and the Plugins menu has each importer's entry: its dialog shows the options, then chooses the file.
 - **The world.** The component implements `importer-plugin`: it exports
   `importer.import-file(entry, file, options)` and imports `source` (the file, read in chunks of at
