@@ -97,6 +97,19 @@ impl Default for WrappedTextureManager {
 // ----------------------------------------------------------------------------
 
 /// Repaint-logic
+/// The hit test of a pass whose pointer is at `pos`, against the widgets of the pass before it.
+// SolidCraft: shared by `begin_pass` and `Context::widget_hits_at`.
+fn prev_pass_hits(memory: &Memory, widgets: &crate::WidgetRects, pos: Pos2) -> WidgetHits {
+    // Areas that are not interactable are click-through: skip them in the hit-test.
+    let mut layers: Vec<LayerId> = widgets
+        .layer_ids()
+        .filter(|layer_id| memory.areas().is_interactable(*layer_id))
+        .collect();
+    layers.sort_by(|&a, &b| memory.areas().compare_order(a, b));
+    let interact_radius = memory.options.style().interaction.interact_radius;
+    crate::hit_test::hit_test(widgets, &layers, &memory.to_global, pos, interact_radius)
+}
+
 impl ContextImpl {
     /// This is where we update the repaint logic.
     fn begin_pass_repaint_logic(&mut self, viewport_id: ViewportId) {
@@ -514,25 +527,8 @@ impl ContextImpl {
         viewport.this_pass.begin_pass();
 
         {
-            // Areas that are not interactable are click-through: skip them in the hit-test.
-            let mut layers: Vec<LayerId> = viewport
-                .prev_pass
-                .widgets
-                .layer_ids()
-                .filter(|layer_id| self.memory.areas().is_interactable(*layer_id))
-                .collect();
-            layers.sort_by(|&a, &b| self.memory.areas().compare_order(a, b));
-
             viewport.hits = if let Some(pos) = viewport.input.pointer.interact_pos() {
-                let interact_radius = self.memory.options.style().interaction.interact_radius;
-
-                crate::hit_test::hit_test(
-                    &viewport.prev_pass.widgets,
-                    &layers,
-                    &self.memory.to_global,
-                    pos,
-                    interact_radius,
-                )
+                prev_pass_hits(&self.memory, &viewport.prev_pass.widgets, pos)
             } else {
                 WidgetHits::default()
             };
@@ -3618,6 +3614,24 @@ impl Context {
         }
     }
 
+    /// The widgets a pass would find under a pointer at `pos`, without running one.
+    ///
+    /// This is the hit test the next pass starts with (see [`WidgetHits`]), run against the
+    /// widgets of the last pass. An integration can use it between passes to tell whether moving
+    /// the pointer to `pos` reaches a different widget, for instance to skip a repaint for
+    /// pointer motion that only crosses a widget which draws the same wherever the pointer is
+    /// on it (see [`crate::RawInput::repaint_on_pointer_move`]).
+    // SolidCraft: added for SolidCraft's repaint on pointer motion (vendor/README.md).
+    pub fn widget_hits_at(&self, pos: Pos2) -> WidgetHits {
+        self.read(|ctx| {
+            ctx.viewports
+                .get(&ctx.viewport_id())
+                .map_or_else(WidgetHits::default, |viewport| {
+                    prev_pass_hits(&ctx.memory, &viewport.prev_pass.widgets, pos)
+                })
+        })
+    }
+
     /// Top-most layer at the given position.
     pub fn layer_id_at(&self, pos: Pos2) -> Option<LayerId> {
         self.memory(|mem| mem.layer_id_at(pos))
@@ -5258,6 +5272,96 @@ mod test {
             *observer_delays.lock(),
             [Duration::from_secs(1), Duration::from_secs(2)],
             "The observer sees every request"
+        );
+    }
+
+    /// Between passes, `widget_hits_at` finds the widgets the next pass's own hit test finds.
+    // SolidCraft
+    #[test]
+    fn widget_hits_at_matches_the_next_pass() {
+        use crate::{CentralPanel, Event, Id, RawInput, Sense, pos2, vec2};
+
+        let ctx = Context::default();
+        let ids = core::cell::Cell::new((Id::NULL, Id::NULL));
+        let run = |events: Vec<Event>| {
+            let input = RawInput {
+                events,
+                ..Default::default()
+            };
+            let out = ctx.run_ui(input, |ui| {
+                CentralPanel::default().show(ui, |ui| {
+                    let rect = crate::Rect::from_min_size(ui.max_rect().min, vec2(400.0, 300.0));
+                    let back = ui.interact(rect, ui.scope_id().with("back"), Sense::click_and_drag());
+                    let button = ui.put(
+                        crate::Rect::from_min_size(rect.min + vec2(20.0, 20.0), vec2(80.0, 30.0)),
+                        crate::Button::new("b"),
+                    );
+                    ids.set((back.id, button.id));
+                });
+            });
+            out.drop_without_applying_deltas();
+        };
+        for _ in 0..3 {
+            run(vec![]);
+        }
+        let (back, button) = ids.get();
+        for pos in [pos2(300.0, 250.0), pos2(40.0, 40.0)] {
+            let before = ctx.widget_hits_at(pos);
+            run(vec![Event::PointerMoved(pos)]);
+            let during = ctx.viewport(|v| v.hits.clone());
+            assert_eq!(
+                before.contains_pointer.iter().map(|w| w.id).collect::<Vec<_>>(),
+                during.contains_pointer.iter().map(|w| w.id).collect::<Vec<_>>(),
+                "the same widgets contain the pointer at {pos:?}"
+            );
+            assert_eq!(before.click.map(|w| w.id), during.click.map(|w| w.id), "{pos:?}");
+            assert_eq!(before.drag.map(|w| w.id), during.drag.map(|w| w.id), "{pos:?}");
+        }
+        let ids_at = |pos| -> Vec<Id> {
+            let hits = ctx.widget_hits_at(pos);
+            hits.contains_pointer.iter().map(|w| w.id).collect()
+        };
+        assert!(ids_at(pos2(300.0, 250.0)).contains(&back), "the background widget");
+        assert!(!ids_at(pos2(300.0, 250.0)).contains(&button), "not the button");
+        let hits = ctx.widget_hits_at(pos2(40.0, 40.0));
+        assert_eq!(hits.click.map(|w| w.id), Some(button), "the button over it");
+    }
+
+    /// Pointer motion alone may be asked not to schedule a frame; a click still does.
+    #[test]
+    fn pointer_motion_repaints_unless_asked_not_to() {
+        use crate::{Event, PointerButton, RawInput, pos2};
+
+        let run = |motion_repaints: bool, click: bool| {
+            let ctx = Context::default();
+            for _ in 0..3 {
+                let out = ctx.run_ui(RawInput::default(), |_| {});
+                out.drop_without_applying_deltas();
+            }
+            let mut input = RawInput {
+                repaint_on_pointer_move: motion_repaints,
+                ..Default::default()
+            };
+            input.events.push(Event::PointerMoved(pos2(10.0, 10.0)));
+            if click {
+                input.events.push(Event::PointerButton {
+                    pos: pos2(10.0, 10.0),
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                });
+            }
+            let out = ctx.run_ui(input, |_| {});
+            let requested = ctx.has_requested_repaint();
+            out.drop_without_applying_deltas();
+            requested
+        };
+
+        assert!(!run(false, false), "motion alone must not repaint");
+        assert!(run(true, false), "motion repaints by default");
+        assert!(
+            run(false, true),
+            "a click repaints even when motion does not"
         );
     }
 
