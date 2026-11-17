@@ -499,6 +499,7 @@ fn menu_style() -> MenuStyle<'static> {
         pin: "t:pin:",
         hot: "t:hot:",
         reveal: "t:reveal",
+        selected: None,
     }
 }
 
