@@ -153,6 +153,17 @@ fn halve_cubic([a, b, c, d]: [Point3; 4]) -> ([Point3; 4], [Point3; 4]) {
     ([a, ab, abc, mid], [mid, bcd, cd, d])
 }
 
+/// Whether the cubic Bezier curve through `points` runs forward along its chord all the way:
+/// the projections of its control points on the chord direction strictly increase from start to
+/// end. Its derivative along the chord is then a quadratic whose Bernstein coefficients (the
+/// steps between those projections) are all positive, so the curve never stops or turns back,
+/// and the next piece cannot fold back over it.
+fn runs_along_chord([a, b, c, d]: [Point3; 4]) -> bool {
+    let along = d - a;
+    let (pb, pc, pd) = ((b - a).dot(along), (c - a).dot(along), (d - a).dot(along));
+    0.0 < pb && pb < pc && pc < pd
+}
+
 /// The cubic Bezier curve through `points` on `[0, 1]` as pieces the model can keep, in order
 /// from its start: the whole curve when [`classify_cubic`] does not refuse it. A curve the
 /// B-spline curve check refuses (#16190: a bend whose radius is below the check's tolerance,
@@ -164,7 +175,9 @@ fn halve_cubic([a, b, c, d]: [Point3; 4]) -> ([Point3; 4], [Point3; 4]) {
 /// The whole curve is returned as [`CubicStanding::Refused`] when no such split exists: when a
 /// chord piece has its ends within the zone tolerance of each other (a point, which cannot be an
 /// edge: a curve refused at a zero-speed end keeps a refused piece there at every split down to
-/// that size), or when a piece would be split more often than a parameter on `[0, 1]` resolves
+/// that size), when a chord piece does not run forward along its chord ([`runs_along_chord`]: a
+/// curve that stops and turns back would become lines folded over each other), or when a piece
+/// would be split more often than a parameter on `[0, 1]` resolves
 /// (`f64::MANTISSA_DIGITS` halvings).
 ///
 /// # Errors
@@ -193,7 +206,9 @@ pub fn cubic_pieces(k: &Kernel, points: [Point3; 4]) -> Result<Vec<CubicPiece>> 
                 pending.push((second, depth + 1));
                 pending.push((first, depth + 1));
             }
-            CubicStanding::Chord if (end - start).length() <= zone => return Ok(whole),
+            CubicStanding::Chord if (end - start).length() <= zone || !runs_along_chord(piece) => {
+                return Ok(whole)
+            }
             CubicStanding::Chord | CubicStanding::Curve => pieces.push(CubicPiece {
                 points: piece,
                 standing,

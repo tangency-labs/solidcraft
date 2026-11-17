@@ -853,6 +853,12 @@ mod tests {
             "{}",
             d.warnings[1]
         );
+        // Collinear, stopping at its middle and turning back (x reaches 2, ends at 1): split
+        // there, each half would be within the zone tolerance of its chord, and the lines 0 to 2
+        // and 2 to 1 would fold over each other. It is kept as drawn, with a warning.
+        let d = read_svg_drawing(r#"<svg width="10mm" height="10mm" viewBox="0 0 10 10"><path d="M0 0 C3 0 2 0 1 0"/></svg>"#).unwrap();
+        assert!(matches!(d.geometry.as_slice(), [Geom2::Spline { .. }]), "{:?}", d.geometry);
+        assert_eq!(d.warnings.iter().map(|w| (w.number, w.unchecked.is_none())).collect::<Vec<_>>(), [(1, true)]);
     }
 
     /// Synthetic outlines (#16190). e and f each have a cubic whose inner control points almost
