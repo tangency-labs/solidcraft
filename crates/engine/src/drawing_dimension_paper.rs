@@ -148,7 +148,7 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
 
 /// The box of a text `half` in size centred on `centre` and running along `dir`, its corners as
 /// [`Layout::text_boxes`] has them. For one line, its first corner is where [`placed`] starts the run.
-fn text_box(centre: Vec2, dir: Vec2, half: Vec2) -> [Vec2; 4] {
+pub(crate) fn text_box(centre: Vec2, dir: Vec2, half: Vec2) -> [Vec2; 4] {
     let (along, up) = (dir * half.x, dir.perp() * half.y);
     [centre - along - up, centre + along - up, centre + along + up, centre - along + up]
 }

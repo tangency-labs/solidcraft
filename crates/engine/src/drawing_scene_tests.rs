@@ -2151,6 +2151,7 @@ fn a_replys_text_and_fonts_keep_to_its_schema() {
         notes: Vec::new(),
         balloons: Vec::new(),
         tables: Vec::new(),
+        tags: Vec::new(),
         out_of_date: Vec::new(),
         param_warnings: Vec::new(),
     };
@@ -2716,7 +2717,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
     let shown = crate::drawing_view::shown(&s);
     let lettering = Lettering::of(&s, &d);
     let (text, _) = block_text(record, &lettering, &[], true).unwrap();
-    let (notes, _) = sheet_notes(&s, &d, sheet, &lettering, true);
+    let (notes, _) = sheet_texts(&s, &d, sheet, &lettering, true);
     let mut prepared = PreparedBodies::default();
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(&s, &[], &shown, &mut prepared, *id, view)));
     let mut assembly = assemble(record, d.projection, &text, &[], &[], &[], drawn).unwrap();
@@ -2725,7 +2726,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
     let wanted = dimensions_on(&d, on.iter().map(|(id, ..)| *id));
     let dimensions = draw_dimensions(&s, None, &d, &wanted, |view| Some((*frames.get(&view)?, line_group(view)?)), true);
     // The other way round from `build`: the sheet's note joins first.
-    assembly.add_sheet_notes(&notes);
+    assembly.add_sheet_texts(&notes);
     assembly.add_dimensions(dimensions.iter());
     let (scene, _, objects, ..) = assembly.finish().unwrap();
     let mut view_annotations = [dimension, on_front];
