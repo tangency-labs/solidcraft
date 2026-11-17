@@ -428,7 +428,6 @@ fn show_sheet_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     .enumerate()
                     .fold(keyboard_pick, |chosen, (index, item)| ui_kit::menu::list_row_lit(ui, item, menu.keyboard_row == Some(index)).or(chosen))
             })
-            .inner
         });
     if let Some(action) = popup.inner {
         match action.id.as_str() {
