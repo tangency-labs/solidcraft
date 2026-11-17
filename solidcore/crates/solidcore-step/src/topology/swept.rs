@@ -15,7 +15,7 @@
 //! parameter); pcurves and domains come from the records, never from STEP's parameters.
 
 use crate::vec::Vec3Geom as _;
-use std::f64::consts::{FRAC_PI_2, TAU};
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Surface as BSurface};
@@ -710,12 +710,65 @@ fn step_profile(c: &BCurve) -> R<Option<Curve>> {
     }))
 }
 
+/// Samples a spline is checked at to be a circle.
+const CIRCLE_SAMPLES: usize = 64;
+
+/// A rational B-spline that is exactly a circle or an arc of one, as that circle, its angle
+/// running the way the spline runs and starting at the spline's start, and the angle the spline
+/// sweeps (a full turn or more for one that closes); `None` for any other spline. The circle is
+/// the one through the spline's points at the start and a third and two thirds of the way along
+/// its parameter; every sample of the spline lies on it to within rounding (1e-9 of its size).
+pub(super) fn spline_circle(b: &crate::geom::BSplineCurve) -> Option<(Curve, f64)> {
+    b.weights.as_ref()?;
+    let (t0, t1) = b.domain()?;
+    let at = |s: f64| b.point(t0 + (t1 - t0) * s).map(v3);
+    let (a, m, c) = (at(0.0)?, at(1.0 / 3.0)?, at(2.0 / 3.0)?);
+    let (ab, ac) = (m - a, c - a);
+    let n = ab.cross(ac);
+    let nn = n.dot(n);
+    if !(nn > 0.0) {
+        return None;
+    }
+    // The circumcentre of a, m and c.
+    let centre = a + (n.cross(ab) * ac.dot(ac) + ac.cross(n) * ab.dot(ab)) * (0.5 / nn);
+    let radius = (a - centre).len();
+    let axis = n.normalized()?;
+    let x = (a - centre).normalized()?;
+    let y = axis.cross(x);
+    let reach = 1e-9 * (radius + centre.len());
+    let (mut swept, mut last) = (0.0, 0.0);
+    for k in 0..=CIRCLE_SAMPLES {
+        let d = at(k as f64 / CIRCLE_SAMPLES as f64)? - centre;
+        if !((d.len() - radius).abs() <= reach && d.dot(axis).abs() <= reach) {
+            return None;
+        }
+        let angle = d.dot(y).atan2(d.dot(x));
+        let step = (angle - last + PI).rem_euclid(TAU) - PI;
+        // Samples a fraction of a turn apart: a step back is not this spline's way round.
+        if !(step >= -1e-9) {
+            return None;
+        }
+        swept += step;
+        last = angle;
+    }
+    Some((Curve::Circle { position: Placement { origin: p3(centre), axis: p3(axis), ref_direction: p3(x) }, radius }, swept))
+}
+
 /// An extruded circle along its axis is a cylinder; a circle in a plane through the axis,
 /// revolved, a ring torus. `None` for anything else.
 fn canonical(s: &Surface, reversed: &mut bool) -> Option<BSurface> {
     let c = match s {
         Surface::Extrusion { profile, .. } | Surface::Revolution { profile, .. } => basis(profile).ok()?,
         _ => return None,
+    };
+    // A rational spline that is exactly a circle (an exporter's NURBS circle) is that circle.
+    let fitted;
+    let c = match c {
+        Curve::BSpline(b) => {
+            fitted = spline_circle(b)?.0;
+            &fitted
+        }
+        c => c,
     };
     let Curve::Circle { position, radius } = c else { return None };
     let n = v3(position.axis);

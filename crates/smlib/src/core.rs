@@ -22,6 +22,7 @@ mod blend_tests;
 pub(crate) mod boolean;
 #[cfg(test)]
 mod boolean_tests;
+pub(crate) mod call;
 mod convert;
 #[cfg(test)]
 mod convert_tests;
@@ -110,7 +111,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_statuses_pass_on = true;
     f.fillet_rail_trim_at_near_knot = true;
     f.corner_patch_face_side_twist = true;
-    f.boolean_union_refuses_solid_leak = true;
     f.fillet_exact_round_classes = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.geometric_g2_continuity = true;
@@ -128,6 +128,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_round_ends_on_outline = false;
     f.fillet_chamfer_corner = true;
     f.brep_ray_classifies_current_trims = true;
+    f.seam_vertex_stays_on_seam = true;
     f
 }
 
@@ -209,7 +210,23 @@ const MOST_RUNNING: usize = 256;
 
 static POOL: Mutex<Pool<Kernel>> = Mutex::new(Pool { idle: Vec::new(), running: 0, most_idle: 8, most_running: MOST_RUNNING });
 
+/// Names this crate's fixes ([`fixes`]) to solidcore-ops' session, once: the kernels of its
+/// calls then run with the fixes this crate's own kernels run with ([`fresh`]). Without it
+/// solidcore-ops runs with every fix off, so a call the app makes through solidcore-ops (a
+/// measure, a planar boolean) ran on another kernel behaviour than the modelling beside it.
+pub(crate) fn start() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let fixes = fixes();
+        let on = fixes.flags().filter(|(_, on)| *on).map(|(name, _)| name);
+        if let Err(e) = solidcore_ops::session::set_fixes(on) {
+            log::warn!(target: "smlib", "solidcore-ops' session did not take the fixes: {e}");
+        }
+    });
+}
+
 fn take_kernel() -> Option<Kernel> {
+    start();
     POOL.lock().unwrap_or_else(PoisonError::into_inner).take(fresh)
 }
 
@@ -255,10 +272,10 @@ thread_local! {
     static IN_CALL: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-/// Is this thread inside a solidcore call, whose panic [`run_on`] catches? (Crash reports mark such
-/// a panic recovered.)
+/// Is this thread inside a solidcore call, whose panic [`run_on`] or solidcore-ops' session
+/// catches? (Crash reports mark such a panic recovered.)
 pub(crate) fn in_call() -> bool {
-    IN_CALL.with(std::cell::Cell::get) > 0
+    IN_CALL.with(std::cell::Cell::get) > 0 || solidcore_ops::session::in_call()
 }
 
 /// [`run`] for a call that reads the bodies `inputs`: should it fail while a dump folder is set,

@@ -1351,9 +1351,24 @@ fn reads_natively(path: &str) -> bool {
         || matches!(extension.as_str(), "sc" | "solidcraft" | "json")
 }
 
+/// Why a file read as a design could not be: with a design's own extension, what the reader said;
+/// with any other, that SolidCraft does not open that kind of file (#18465). A file of another
+/// CAD program reaches the design reader because nothing else claims it, and its words about a
+/// "design container" or an environment resource say nothing of that.
+fn unreadable_design(path: &str, reason: &str) -> EngineError {
+    let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default();
+    if matches!(extension.to_ascii_lowercase().as_str(), "sc" | "solidcraft" | "json") {
+        return EngineError::Other(format!("{path}: {reason}"));
+    }
+    let kind = if extension.is_empty() { "this file".to_string() } else { format!(".{extension} files") };
+    EngineError::Other(format!(
+        "{path}: SolidCraft can't open {kind}; export STEP (or another format it opens) from the program that made it ({reason})"
+    ))
+}
+
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
 fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
-    let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| unreadable_design(path, &e.to_string()))?;
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
