@@ -765,6 +765,58 @@ sends it a line whenever the active design changes (#6985):
   ask `document.revision` for the design now. A `control.subscribe` that timed out or failed did
   not subscribe the connection: send it again.
 
+### Example: driving a hinge and reading its angle (#17909)
+
+A local tool can set a joint's value and read it back, including after someone moves the joint
+in the window. This example uses the repository's hinge fixture,
+`apps/solidcraft-cli/tests/corpus/joints-hinge.solidcraft`. It has two leaves, `LeafA` (grounded)
+and `LeafB`, joined by a revolute joint named `Hinge`. Open the fixture by its full path (the first
+request carries the connection's [token](#token)), then give the hinge limits of 0 to 90°:
+
+```text
+{"id":1,"method":"engine.execute","params":{"command":"doc.open","params":{"path":"/path/to/solidcraft/apps/solidcraft-cli/tests/corpus/joints-hinge.solidcraft"}},"token":"…"}
+{"id":2,"method":"engine.execute","params":{"command":"joint.limits","params":{"joint":"Hinge","min":0,"max":90}}}
+```
+
+To be told when the angle changes, subscribe first. Every change to the design, such as a drive
+from this tool or OK in Drive Joints in the window, is then followed by a `design.changed` line:
+
+```text
+{"id":3,"method":"control.subscribe"}
+→ {"id":3,"ok":true,"result":{"document_id":"…","revision":7}}
+```
+
+Drive the hinge with `joint.drive`. `value` is in degrees, or it can be an expression such as
+`"45 deg"`. `quiet: true` leaves out the solver's degrees-of-freedom report. The reply gives the
+value the joint ended at:
+
+```text
+{"id":4,"method":"engine.execute","params":{"command":"joint.drive","params":{"joint":"Hinge","value":45,"quiet":true}}}
+→ {"id":4,"ok":true,"result":{"joint":1,"moved":true,"values":[{"name":"angle","value":45.0,"unit":"deg","limits":[0.0,90.0]}],"requested":[{"name":"angle","value":45.0,"unit":"deg","limits":[0.0,90.0]}],"stopped_by_contact":null,"stopped_by_loop":null,"conflicts":[],"errors":[]}}
+{"event":"design.changed","params":{"document_id":"…","revision":8}}
+```
+
+A value outside the limits is clamped to them. `held` then says which value ended up somewhere
+other than requested, and why:
+
+```text
+{"id":5,"method":"engine.execute","params":{"command":"joint.drive","params":{"joint":"Hinge","value":120,"quiet":true}}}
+→ {"id":5,"ok":true,"result":{"joint":1,"moved":true,"values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}],"requested":[{"name":"angle","value":120.0,"unit":"deg","limits":[0.0,90.0]}],"held":[{"name":"angle","requested":120.0,"value":90.0,"unit":"deg","why":"angle is held to its limits, 0 to 90 deg"}],"stopped_by_contact":null,"stopped_by_loop":null,"conflicts":[],"errors":[]}}
+```
+
+`joint.inspect` only reads the design, so it adds no undo step. Use it to read the angle at any
+time, for example after a `design.changed` line. The joint's `values` hold the angle (other fields
+left out here):
+
+```text
+{"id":6,"method":"engine.execute","params":{"command":"joint.inspect","params":{"joint":"Hinge"}}}
+→ {"id":6,"ok":true,"result":{"joints":[{"id":1,"name":"Hinge","type":"revolute","dofs":["angle"],"values":[{"name":"angle","value":90.0,"unit":"deg","limits":[0.0,90.0]}],…}]}}
+```
+
+While Drive Joints is open in the window, its preview does not change the design. `joint.inspect`
+still reads the last value set, and no event is sent until the dialog's OK stores the new angle.
+The joint id `1` comes from the fixture. The revisions are only examples.
+
 ### Slow commands and the window (#1989)
 
 With the preference **Preferences > AI > Keep the window responsive while agents run commands**
@@ -946,6 +998,8 @@ listed, or is `null`.
 
 ### `ui.prefs` settings
 
+- `show_document_browser` (default false): show the document browser beside open designs; also available in Preferences → Layout → Panels and through the app-bar Show/Hide Documents toggle. Explicit visibility choices from earlier document-browser builds are preserved.
+
 `render_previous_geometry_budget` (Graphics, default false) restores the previous fixed Render preview geometry budget: 512 MiB on 64-bit desktop, 128 MiB elsewhere. With it off, desktop uses the device-based budget.
 
 
@@ -955,10 +1009,12 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
 - `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre).
+- `browser_arrow_keys` (default true: while the Browser has the keyboard, which a click on one of its rows gives it and a click elsewhere takes back, Up/Down move the selection through its rows, Left/Right fold or unfold the row, Enter opens it and F2 renames it, and the plain arrows do not turn the view; false: the arrows always turn the view, as before #17931; the Browser also lets them go while its name editor is open)
 - `browser_bodies_folders` (`several` (default): a component with one body and no groups lists it straight under the component in the browser, without a Bodies folder; `always`; `never`: components list their bodies and groups straight under them, and the folder's menu items are on the component's menu; the design's own Bodies folder, and one hidden with its eye, always show; #4217)
 - `browser_components_open` (default false: each component placement in the browser starts closed until it is opened, by its fold arrow, Expand All or Find in Browser; true: every placement starts open, as before #9274)
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
-- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool}` with the value in force, `check_updates` itself stays the person's stored choice, and a request that changes it is refused
+- `browser_hover_shows_origin` (default true: an Origin plane, axis or point row under the pointer in the browser, the design's or a part's, shows that item in the view, and a hidden one only while the pointer is on its row, its eye and saved visibility unchanged and not pickable, #15658; false: only an origin plane already drawn lights up, as before; Preferences › Design › Origin)
+- `check_updates` (default true; [updates](book/src/guide/updates.md)). When the organization's policy sets it ([managed deployment](book/src/guide/managed-deployment.md)), the reply has `policy: {locked: ["check_updates"], check_updates: bool}` with the value in force (any policy adds that object, with `organization` when it names one; `locked` lists what it locks), `check_updates` itself stays the person's stored choice, and a request that changes it is refused
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`

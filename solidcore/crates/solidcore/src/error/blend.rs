@@ -1072,8 +1072,10 @@ mod tests {
             Failure::new("blend::op", BlendFailure::StageFailed).with_status(SM_ERR_NULL_POINTER);
         let after = line!();
         assert!((before..after).contains(&f.origin().line()));
+        // the path is written with the host's separator (`\` on Windows), so compare its
+        // components, not its text
         assert!(
-            f.origin().file().ends_with("error/blend.rs"),
+            std::path::Path::new(f.origin().file()).ends_with("error/blend.rs"),
             "{}",
             f.origin().file()
         );
@@ -1240,7 +1242,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1392;
+        const PHRASE_CAUSE_SITES: usize = 1336;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),

@@ -803,6 +803,34 @@ fn a_dimension_driven_to_zero_and_back_keeps_its_side() {
     }
 }
 
+/// Where the line's two ends are in the stored sketch `feature`: `(start, end)`.
+fn line_ends(s: &Session, feature: u64) -> (solidcore_record::Vec2, solidcore_record::Vec2) {
+    let sk = s.doc.sketch(feature).unwrap();
+    match sk.curves.iter().map(|c| &c.kind).find(|k| matches!(k, solidcraft_sketch::CurveKind::Line { .. })) {
+        Some(solidcraft_sketch::CurveKind::Line { a, b }) => (sk.points[*a].pos, sk.points[*b].pos),
+        _ => (solidcore_record::Vec2::new(f64::NAN, f64::NAN), solidcore_record::Vec2::new(f64::NAN, f64::NAN)),
+    }
+}
+
+#[test]
+fn a_dimension_between_two_free_points_driven_to_zero_and_back_keeps_its_sides() {
+    // #15766 with neither end fixed: a line from (20, 5) back to (10, 0), its horizontal length
+    // `w`. Both ends share the change; at 0 they are level, and a value after that puts the end
+    // back on the side it was drawn on instead of mirroring the line.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    let feature = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Free sketch"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.line", json!({"points": [[20, 5], [10, 0]], "ids": ["l"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l.start", "l.end"], "type": "horizontal", "value": "w"}));
+    run(&mut s, "sketch.finish", json!({}));
+    for (value, want) in [("6 mm", (18.0, 12.0)), ("0 mm", (15.0, 15.0)), ("10 mm", (20.0, 10.0)), ("0 mm", (15.0, 15.0)), ("4 mm", (17.0, 13.0))] {
+        run(&mut s, "parameters.change", json!({"name": "w", "expression": value}));
+        let (start, end) = line_ends(&s, feature);
+        assert!((start.x - want.0).abs() < 1e-6 && (end.x - want.1).abs() < 1e-6, "w = {value}: start {start:?}, end {end:?}, want x {want:?}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "w = {value}");
+    }
+}
+
 #[test]
 fn an_unsolvable_value_edit_is_refused_and_changes_nothing() {
     let (mut s, feature, params) = linkage_session();
