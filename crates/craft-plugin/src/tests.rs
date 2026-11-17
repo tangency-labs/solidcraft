@@ -206,7 +206,7 @@ fn capabilities_are_checked_at_load_with_plain_refusals() {
     let mut old = manifest();
     old["runtime"]["api"] = json!("solidcraft:plugin@1.0.0");
     let refusal = parse_manifest(old.to_string().as_bytes(), "sample").unwrap_err().to_string();
-    assert!(refusal.contains("was built for solidcraft:plugin@1.0.0") && refusal.contains("craft:plugin@0.1.0"), "{refusal}");
+    assert!(refusal.contains("was built for solidcraft:plugin@1.0.0") && refusal.contains("craft:plugin@0.2.0"), "{refusal}");
     // Sensitive command groups are named, bounded requests.
     let mut groups = manifest();
     groups["runtime"]["permissions"] = json!({"command_groups":["file","doc"]});
