@@ -1,7 +1,11 @@
 //! A projected length dimension picked from an edge on a drawing view.
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
-use solidcraft_engine::{doc::ids, drawing_scene, geom::hlr::Source};
+use solidcraft_engine::{
+    doc::ids,
+    drawing_scene,
+    geom::{Vec2Geom, hlr::Source},
+};
 use solidcraft_theme::Tokens;
 
 use super::close_panel;
