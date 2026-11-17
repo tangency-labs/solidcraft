@@ -534,4 +534,103 @@ mod tests {
             Err(PairSkip::Contact(Contact::NoContact { .. }))
         ));
     }
+
+    fn spec2() -> TabSlotSpec {
+        TabSlotSpec {
+            layout: Layout::Count(2),
+            width: 10.0,
+            end_distance: 5.0,
+            clearance: 0.1,
+            min_land: 0.5,
+            protrusion: 1.0,
+            overshoot: 0.5,
+        }
+    }
+
+    /// 16.2 overlap found and trimmed [M2]: Wall sunk 4 into Bottom (z 2..66) is an overlap joint,
+    /// and its plan (strip, plate faces, tabs, slots) is the plan of the same wall already trimmed
+    /// to P (z 6..66). Applied, S loses the same two slots.
+    #[test]
+    fn an_overlap_is_planned_as_the_trimmed_plate() {
+        let (s, p) = bottom();
+        let sunk = make_box([20.0, 30.0, 2.0], [120.0, 6.0, 64.0]).unwrap();
+        let trimmed = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let joint = sunk.plate_pair(&s, p, TOL).unwrap().expect("joint");
+        assert_eq!(joint.contact, Contact::Overlap);
+        let want = trimmed.plate_pair(&s, p, TOL).unwrap().expect("joint");
+        assert_eq!(joint.faces, want.faces);
+        assert!(sunk.strip(&s, p, TOL).unwrap().is_some());
+        // The section carries float noise (1e-13) the trimmed plate's face does not: the same
+        // plan within 1e-9.
+        let (d, plan) = sunk
+            .tab_slot_plan(&s, p, spec2(), TOL)
+            .unwrap()
+            .expect("joint");
+        let (want_d, want) = trimmed
+            .tab_slot_plan(&s, p, spec2(), TOL)
+            .unwrap()
+            .expect("joint");
+        assert_eq!(d, want_d);
+        assert_eq!(plan.len(), want.len(), "{plan:?}");
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        for (got, want) in plan.iter().zip(&want) {
+            assert!(near(got.stretch.0, want.stretch.0) && near(got.stretch.1, want.stretch.1));
+            let (got, want) = (got.tabs.as_ref().unwrap(), want.tabs.as_ref().unwrap());
+            assert_eq!(got.len(), want.len());
+            for (g, w) in got.iter().zip(want) {
+                assert!(near(g.start, w.start), "{g:?} {w:?}");
+                assert_eq!(g.skip, w.skip);
+                assert!(g.tab.is_ok() && w.tab.is_ok());
+                assert!(near(g.faces.0, w.faces.0) && near(g.faces.1, w.faces.1));
+            }
+        }
+        let cut = sunk
+            .tab_slot_cut(&s, p, spec2(), TOL)
+            .unwrap()
+            .expect("joint");
+        let v = cut.slot_plate.mass_properties(1e-9).unwrap().volume;
+        assert!((v - (96000.0 - 2.0 * 10.2 * 6.2 * 6.0)).abs() < 1e-6, "{v}");
+    }
+
+    /// 16.2 none: a wall beside S (x 200..320) meets P nowhere: `no_contact`, 40 apart; the recipe
+    /// makes nothing.
+    #[test]
+    fn a_wall_beside_s_is_no_joint() {
+        let (s, p) = bottom();
+        let beside = make_box([200.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        match beside.plate_pair(&s, p, TOL).unwrap() {
+            Err(PairSkip::Contact(Contact::NoContact { distance })) => {
+                assert!((distance - 40.0).abs() < 1e-2, "{distance}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            beside.tab_slot_cut(&s, p, spec2(), TOL).unwrap(),
+            Err(PairSkip::Contact(Contact::NoContact { .. }))
+        ));
+    }
+
+    /// 16.2 swapped [m10]: Bottom as the tab plate on the wall's foot (z = 6, n = -z) lies face to
+    /// face; the wall as tab plate on Bottom's top is a joint, so the pair is `swapped`.
+    #[test]
+    fn a_plate_under_a_wall_is_swapped() {
+        let (bottom, q) = bottom();
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let foot = Plane {
+            normal: -Vec3::Z,
+            offset: -6.0,
+        };
+        assert!(matches!(
+            bottom.plate_pair(&wall, foot, TOL).unwrap(),
+            Err(PairSkip::NotSquare(None))
+        ));
+        assert_eq!(
+            bottom.plate_pair_swapped(&wall, foot, q, TOL).unwrap(),
+            Err(PairSkip::Swapped)
+        );
+        assert!(wall
+            .plate_pair_swapped(&bottom, q, foot, TOL)
+            .unwrap()
+            .is_ok());
+    }
 }
