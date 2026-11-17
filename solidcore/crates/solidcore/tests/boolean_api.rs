@@ -1152,18 +1152,28 @@ fn assert_closed_with_volume(k: &mut Kernel, mut brep: Brep, want: f64, slack: f
 #[test]
 fn an_arc_grazing_a_coplanar_box_face_joins() {
     let mut k = Kernel::default();
-    let (py, centre) = (12.941, (5.003_150_514_408_299, 10.001_605_029_505_038));
+    let (py, centre, r) = (
+        12.941,
+        (5.003_150_514_408_299, 10.001_605_029_505_038),
+        4.996_849_743_366_094,
+    );
     let brep = arc_graze_union(
         &mut k,
         centre,
-        4.996_849_743_366_094,
+        r,
         -0.018_403_879_031_201_775,
         36.032_894_179_707_97,
         (9.044, py),
     )
     .unwrap();
-    // the added sliver is about 0.003 mm3
-    assert_closed_with_volume(&mut k, brep, 10.0 * (5.0 * py + 125.0), 0.01);
+    // The arc passes angle 0, so it reaches x = cx + r: past x = 10 by `bulge` (0.26 micron),
+    // over less than 0.01 in y (it is back on x = 10 at the vertex y = 10.00321). The sliver
+    // past the box is at most 10 bulge 0.01 in volume; the volume's own accuracy is the
+    // control's 1e-6 relative (#18401: the arc piece and the box edge piece between the two
+    // vertices are related as one edge, no zero-area faces are left).
+    let bulge = centre.0 + r - 10.0;
+    let want = 10.0 * (5.0 * py + 125.0);
+    assert_closed_with_volume(&mut k, brep, want, 10.0 * bulge * 0.01 + 1e-6 * want);
 }
 
 /// The control of #16640: the same profile with the arc exactly tangent to the face's plane
