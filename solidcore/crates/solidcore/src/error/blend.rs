@@ -230,9 +230,6 @@ pub enum WeldGap {
     /// Beads that meet at a vertex need a corner piece (#17916); the failure's site names the
     /// vertex.
     BeadsMeetAtVertex,
-    /// A tapered or rounded end of a bead on a joint that is not straight between two planes:
-    /// only the planar sweep cuts those ends so far; the foot blend ends square.
-    EndShapeOnCurvedJoint,
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
@@ -577,11 +574,6 @@ impl core::fmt::Display for BlendFailure {
             Self::WeldNotBuilt(WeldGap::BeadsMeetAtVertex) => write!(
                 f,
                 "{}: weld beads that meet at a vertex are not built yet (their corner, #17916)",
-                self.class()
-            ),
-            Self::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint) => write!(
-                f,
-                "{}: a tapered or rounded bead end is built only straight between two planes so far",
                 self.class()
             ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
@@ -949,10 +941,6 @@ mod tests {
             // a weld bead not built yet: neither a defect nor a refusal
             (
                 BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
-                ErrorKind::Unsupported,
-            ),
-            (
-                BlendFailure::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint),
                 ErrorKind::Unsupported,
             ),
             (

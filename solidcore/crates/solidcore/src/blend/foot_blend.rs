@@ -17,6 +17,14 @@
 //! foot or does not converge, it starts again from the previous station's foot before the
 //! station is refused.
 //!
+//! A span's end is square (a planar cap in the station's plane), tapered or rounded
+//! ([`BeadEnd`]). A shaped end is a **leg law** ([`FootRamp`]): over the end's zone the legs
+//! and the sagitta shrink together by one share, so each station's section is the full one
+//! scaled about the root, down to the root itself at the tip; nothing is cut. A taper's share
+//! falls in a straight line over a zone as long as the bead is high (the bead's middle comes
+//! down at 45 degrees); a rounded end's share is `sin(theta)` over a zone one bead reach long,
+//! its stations placed by the angle `theta`, so the toes' outline on flat plates is a round.
+//!
 //! A station refused is a typed failure ([`crate::error::blend::BlendFailure`]): no toe at
 //! the leg on the face's side, or an arc that would cut into a face, are refusals that name
 //! the size that builds (the largest leg, the sagitta's least bound, over the stations
@@ -894,7 +902,7 @@ impl FootBlend {
     ) -> Result<Surface> {
         let (lo, hi) = (self.interval.min(), self.interval.max());
         Ok(Surface::from(
-            self.segment(k, legs, sagitta, tol, lo, hi)?.face,
+            self.segment(k, legs, sagitta, tol, lo, hi, None)?.face,
         ))
     }
 
@@ -912,15 +920,18 @@ impl FootBlend {
         tol: f64,
     ) -> Result<FeetProof> {
         let (lo, hi) = (self.interval.min(), self.interval.max());
-        Ok(self.segment(k, legs, sagitta, tol, lo, hi)?.proof)
+        Ok(self.segment(k, legs, sagitta, tol, lo, hi, None)?.proof)
     }
 
     /// [`Self::section_face`] over the leader's parameters `a..b` inside its interval, with
-    /// its sides (the feet's curves) and the root's curve through the same stations.
+    /// its sides (the feet's curves) and the root's curve through the same stations; with
+    /// `ramp`, `a..b` is its zone and each station's legs and sagitta are the weld's times its
+    /// share there, the tip's section the root alone.
     ///
     /// # Errors
     ///
-    /// Those of [`Self::section_face`].
+    /// Those of [`Self::section_face`]; native invalid input for a ramp whose zone is not
+    /// `a..b`.
     #[allow(clippy::too_many_arguments)]
     fn segment(
         &self,
@@ -930,8 +941,21 @@ impl FootBlend {
         tol: f64,
         a: f64,
         b: f64,
+        ramp: Option<FootRamp>,
     ) -> Result<Segment> {
         check_legs(legs)?;
+        if let Some(r) = ramp {
+            let [lo, hi] = r.piece();
+            let gap = 1e-12 * (1.0 + a.abs().max(b.abs()));
+            if (lo - a).abs() > gap || (hi - b).abs() > gap || r.shape == BeadEnd::Square {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a shaped end's zone is its segment, tapered or rounded",
+                ));
+            }
+        }
+        let share = |t: f64| ramp.map_or(1.0, |r| r.share(t));
+        let scaled = |t: f64| (legs.map(|z| z * share(t)), sagitta * share(t));
         let mut breaks = vec![a];
         breaks.extend(
             self.breaks()?
@@ -945,22 +969,41 @@ impl FootBlend {
         let mut worst = f64::INFINITY;
         let mut made = 0;
         for _ in 0..REFINEMENTS {
-            // each span between the leader's knots split evenly: a station on every knot, where
-            // the leader may turn less smoothly
-            let mut stations = Vec::new();
-            for pair in breaks.windows(2) {
-                let &[lo, hi] = pair else { continue };
-                stations.extend((0..count).map(|i| lo + (hi - lo) * i as f64 / count as f64));
-            }
-            if let Some(&last) = breaks.last() {
-                stations.push(last);
-            }
+            // each station's net parameter and the leader's, the same but in a rounded end's
+            // zone (its net runs in the angle)
+            let pairs: Vec<(f64, f64)> = if let Some(r) = ramp {
+                r.stations((count * spans).max(4))
+            } else {
+                // each span between the leader's knots split evenly: a station on every knot,
+                // where the leader may turn less smoothly
+                let mut stations = Vec::new();
+                for pair in breaks.windows(2) {
+                    let &[lo, hi] = pair else { continue };
+                    stations.extend((0..count).map(|i| lo + (hi - lo) * i as f64 / count as f64));
+                }
+                if let Some(&last) = breaks.last() {
+                    stations.push(last);
+                }
+                stations.into_iter().map(|t| (t, t)).collect()
+            };
+            let params: Vec<f64> = pairs.iter().map(|p| p.0).collect();
+            let stations: Vec<f64> = pairs.iter().map(|p| p.1).collect();
+            let station_of = |u: f64| ramp.map_or(u, |r| r.station_of(u));
             made = stations.len();
             let mut rows = Vec::with_capacity(stations.len());
             let mut roots = Vec::with_capacity(stations.len());
             let mut solved: Vec<FootStation> = Vec::with_capacity(stations.len());
             for &t in &stations {
-                match self.section_rows(k, t, legs, sagitta, solved.last())? {
+                let (z, h) = scaled(t);
+                if share(t) == 0.0 {
+                    // the tip: the section the root alone, its weights the next row's
+                    let s = self.tip_station(k, t, solved.last())?;
+                    rows.push((vec![s.root; if sagitta == 0.0 { 2 } else { 5 }], Vec::new()));
+                    roots.push(s.root);
+                    solved.push(s);
+                    continue;
+                }
+                match self.section_rows(k, t, z, h, solved.last())? {
                     Ok((row, s)) => {
                         rows.push(row);
                         roots.push(s.root);
@@ -969,15 +1012,20 @@ impl FootBlend {
                     Err(miss) => return Err(self.refusal(k, miss, &stations, legs, sagitta)?),
                 }
             }
-            let (face, feet) = net_through_rows(&stations, &rows, sagitta)?;
+            weigh_tips(&mut rows)?;
+            let (face, feet) = net_through_rows(&params, &rows, sagitta)?;
+            // the root's curve in the leader's own parameter (in the angle it would stand still
+            // at a rounded end's tip)
             let root = through_at(&roots, &stations)?;
-            // sampled, not proved: at the midpoint between each two stations, the feet, the
-            // section's middle and the root
+            // sampled, not proved: at the midpoint between each two stations (in the net's
+            // parameter), the feet, the section's middle and the root
             worst = 0.0_f64;
-            for (j, pair) in stations.windows(2).enumerate() {
+            for (j, pair) in params.windows(2).enumerate() {
                 let &[lo, hi] = pair else { continue };
-                let t = 0.5 * (lo + hi);
-                let (row, s) = match self.section_rows(k, t, legs, sagitta, solved.get(j))? {
+                let u = 0.5 * (lo + hi);
+                let t = station_of(u);
+                let (z, h) = scaled(t);
+                let (row, s) = match self.section_rows(k, t, z, h, solved.get(j))? {
                     Ok(made) => made,
                     Err(miss) => {
                         return Err(self.refusal(k, miss, &stations, legs, sagitta)?);
@@ -986,15 +1034,15 @@ impl FootBlend {
                 let (Some(&first), Some(&last)) = (row.0.first(), row.0.last()) else {
                     continue;
                 };
-                let middle = section_middle(&row.0, sagitta);
+                let middle = section_middle(&row.0, h);
                 for (v, want) in [(0.0, first), (0.5, middle), (1.0, last)] {
-                    let got = face.evaluate_point(Point2::new(t, v))?;
+                    let got = face.evaluate_point(Point2::new(u, v))?;
                     worst = worst.max(got.distance(want));
                 }
                 worst = worst.max(root.evaluate_point(t)?.distance(s.root));
             }
             if worst <= tol {
-                let proof = self.prove_feet(k, legs, &solved)?;
+                let proof = self.prove_feet_by(k, &|t| scaled(t).0, &solved)?;
                 let start_uv = solved
                     .first()
                     .map_or([Point2::new(0.0, 0.0); 2], |s| s.root_uv);
@@ -1017,6 +1065,31 @@ impl FootBlend {
                 rounds: REFINEMENTS,
             },
         ))
+    }
+
+    /// The station at a tip, `t`: the root, both feet on it, its parameters on each support
+    /// (near `near`'s).
+    ///
+    /// # Errors
+    ///
+    /// A defect where the root does not drop onto a support; those of the evaluations.
+    fn tip_station(&self, k: &Kernel, t: f64, near: Option<&FootStation>) -> Result<FootStation> {
+        let (root, tangent) = self.root_at(k, t)?;
+        let mut root_uv = [Point2::new(0.0, 0.0); 2];
+        for (i, (side, uv)) in self.sides.iter().zip(root_uv.iter_mut()).enumerate() {
+            let domain = side.surface.natural_uv_domain_with_nurb(k)?;
+            let guess = near.and_then(|s| s.root_uv.get(i).copied());
+            *uv = dropped(k, &side.surface, &domain, root, guess)?
+                .ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?;
+        }
+        Ok(FootStation {
+            t,
+            root,
+            tangent,
+            feet: [root; 2],
+            uv: root_uv,
+            root_uv,
+        })
     }
 
     /// The refusal of `miss`, met among the stations at `ts` with the legs `legs` and the
@@ -1155,6 +1228,31 @@ fn section_middle(row: &[Point3], sagitta: f64) -> Point3 {
     }
 }
 
+/// Gives each tip's row (left with no weights: the root repeated) the weights of the row next
+/// to it, so the net's weights stay the arc's along the zone.
+///
+/// # Errors
+///
+/// A defect where every row is a tip's.
+fn weigh_tips(rows: &mut [SectionRow]) -> Result<()> {
+    let weights: Vec<Option<Vec<f64>>> = (0..rows.len())
+        .map(|i| {
+            let near = [i.checked_add(1), i.checked_sub(1)];
+            near.into_iter()
+                .flatten()
+                .filter_map(|j| rows.get(j))
+                .find(|r| !r.1.is_empty())
+                .map(|r| r.1.clone())
+        })
+        .collect();
+    for (row, w) in rows.iter_mut().zip(weights) {
+        if row.1.is_empty() {
+            row.1 = w.ok_or_else(|| SolidError::blend(OP, BlendFailure::StageFailed))?;
+        }
+    }
+    Ok(())
+}
+
 /// The rational net through the section rows at `stations`: each row's control points in
 /// homogeneous form interpolated cubic along `u` at the stations, the weights too, then
 /// divided back.
@@ -1241,6 +1339,8 @@ pub struct SectionFace {
     pub face: FaceId,
     /// The leader's parameters it runs over.
     pub interval: [f64; 2],
+    /// Its leg law, where it is a shaped end's zone.
+    pub ramp: Option<FootRamp>,
 }
 
 impl FootBlend {
@@ -1258,13 +1358,14 @@ impl FootBlend {
         let mut body = Brep::new_with_infinite_region()?;
         body.set_editing_enabled(true);
         let (lo, hi) = (self.interval.min(), self.interval.max());
-        let made = self.add_span(k, &mut body, legs, sagitta, tol, [lo, hi])?;
+        let ends = [BeadEnd::Square; 2];
+        let made = self.add_span(k, &mut body, legs, sagitta, tol, [lo, hi], ends)?;
         close_bead_body(k, &mut body, tol)?;
         let weld = BeadWeld {
             legs,
             sagitta,
             spans: vec![[lo, hi]],
-            ends: [BeadEnd::Square; 2],
+            ends,
             tol,
         };
         self.define_faces(&mut body, &made, &weld)?;
@@ -1273,15 +1374,19 @@ impl FootBlend {
 
     /// The faces of one span `span` of the leader (inside its interval) added to `body`
     /// unstitched (several beads and spans go into one body before it is closed with
-    /// [`close_bead_body`]): the section face and the two strips per segment, and square end
-    /// caps in the stations' planes at the span's ends, unless the span is the whole of a
-    /// closed joint (built in four (`CLOSED_SEGMENTS`) segments, no caps). The section faces added,
-    /// with their pieces of the leader.
+    /// [`close_bead_body`]): the section face and the two strips per segment, and at the
+    /// span's start and end the shape `ends`: a square end's planar cap in the station's
+    /// plane, or a shaped end's zone ([`FootRamp`]), its own segment, whose section shrinks to
+    /// the root at the tip (no cap: the faces close on the tip's point). A span that is the
+    /// whole of a closed joint has no ends (built in four (`CLOSED_SEGMENTS`) segments). The
+    /// section faces added, with their pieces of the leader and their leg laws.
     ///
     /// # Errors
     ///
-    /// Native invalid input for a span not inside the interval; those of
+    /// Native invalid input for a span not inside the interval, or too short for its shaped
+    /// ends (a taper's zone is the bead's height, a rounded end's its reach); those of
     /// [`Self::section_face`] and of the curves and faces.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_span(
         &self,
         k: &mut Kernel,
@@ -1290,6 +1395,7 @@ impl FootBlend {
         sagitta: f64,
         tol: f64,
         span: [f64; 2],
+        ends: [BeadEnd; 2],
     ) -> Result<Vec<SectionFace>> {
         use crate::blend::fillet_cliff_overflow::{face_of_loop, LoopCurve};
         use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -1306,10 +1412,21 @@ impl FootBlend {
         }
         let whole = (lo - a).abs() <= gap && (hi - b).abs() <= gap;
         let ring = self.closed && whole;
-        let pieces = if ring { CLOSED_SEGMENTS } else { 1 };
-        let cuts: Vec<f64> = (0..=pieces)
-            .map(|i| lo + (hi - lo) * i as f64 / pieces as f64)
-            .collect();
+        // the segments: (from, to, leg law), in order along the span
+        let segments: Vec<(f64, f64, Option<FootRamp>)> = if ring {
+            (0..CLOSED_SEGMENTS)
+                .map(|i| {
+                    let n = CLOSED_SEGMENTS as f64;
+                    (
+                        lo + (hi - lo) * i as f64 / n,
+                        lo + (hi - lo) * (i + 1) as f64 / n,
+                        None,
+                    )
+                })
+                .collect()
+        } else {
+            self.span_segments(k, legs, sagitta, [lo, hi], ends)?
+        };
         let same = |curve: &BSplineCurve| LoopCurve {
             curve: Curve::from(curve.clone()),
             orient: OrientType::Same,
@@ -1318,58 +1435,73 @@ impl FootBlend {
             curve: Curve::from(curve.clone()),
             orient: OrientType::Opposite,
         };
-        // the cuts' rungs (one per support) and sections, shared by the faces either side
-        let mut rungs: Vec<[BSplineCurve; 2]> = Vec::with_capacity(cuts.len());
-        let mut sections: Vec<BSplineCurve> = Vec::with_capacity(cuts.len());
-        for &t in &cuts {
-            let (r1, r2, section) = self.cut_curves(k, t, legs, sagitta)?;
-            rungs.push([r1, r2]);
-            sections.push(section);
+        // the cuts between and at the ends of the segments: their rungs (one per support) and
+        // sections, shared by the faces either side; none at a tip
+        let mut cuts: Vec<(f64, bool)> = Vec::with_capacity(segments.len() + 1);
+        for (j, &(from, to, ramp)) in segments.iter().enumerate() {
+            let tip = |t: f64| ramp.is_some_and(|r| r.tip == t);
+            if j == 0 {
+                cuts.push((from, tip(from)));
+            }
+            cuts.push((to, tip(to)));
         }
-        let mut made = Vec::with_capacity(pieces);
-        for (j, pair) in cuts.windows(2).enumerate() {
-            let &[a, b] = pair else { continue };
-            let seg = self.segment(k, legs, sagitta, tol, a, b)?;
+        let mut rungs: Vec<Option<[BSplineCurve; 2]>> = Vec::with_capacity(cuts.len());
+        let mut sections: Vec<Option<BSplineCurve>> = Vec::with_capacity(cuts.len());
+        for &(t, tip) in &cuts {
+            if tip {
+                rungs.push(None);
+                sections.push(None);
+                continue;
+            }
+            let (r1, r2, section) = self.cut_curves(k, t, legs, sagitta)?;
+            rungs.push(Some([r1, r2]));
+            sections.push(Some(section));
+        }
+        let stage = || SolidError::blend(OP, BlendFailure::StageFailed);
+        let mut made = Vec::with_capacity(segments.len());
+        for (j, &(a, b, ramp)) in segments.iter().enumerate() {
+            let seg = self.segment(k, legs, sagitta, tol, a, b, ramp)?;
             let (Some(ra), Some(rb), Some(sa), Some(sb)) = (
                 rungs.get(j),
                 rungs.get(j + 1),
                 sections.get(j),
                 sections.get(j + 1),
             ) else {
-                return Err(SolidError::blend(OP, BlendFailure::StageFailed));
+                return Err(stage());
             };
             let [f1, f2] = &seg.feet;
             // the section face: foot 1 along, the far section, foot 2 back, the near section
-            let face = face_of_loop(
-                k,
-                body,
-                Surface::from(seg.face.clone()),
-                vec![same(f1), same(sb), opposite(f2), opposite(sa)],
-            )?;
+            // (a tip's section is its point: left out)
+            let mut lp = vec![same(f1)];
+            lp.extend(sb.as_ref().map(same));
+            lp.push(opposite(f2));
+            lp.extend(sa.as_ref().map(opposite));
+            let face = face_of_loop(k, body, Surface::from(seg.face.clone()), lp)?;
             made.push(SectionFace {
                 face,
                 interval: [a, b],
+                ramp,
             });
             // the strips: the root along, the far rung out, the foot back, the near rung in
             for (i, (side, foot)) in self.sides.iter().zip([f1, f2]).enumerate() {
-                let (Some(near), Some(far), Some(&start)) =
-                    (ra.get(i), rb.get(i), seg.start_uv.get(i))
-                else {
+                let Some(&start) = seg.start_uv.get(i) else {
                     continue;
                 };
-                strip_face(
-                    k,
-                    body,
-                    side.surface.clone(),
-                    vec![same(&seg.root), same(far), opposite(foot), opposite(near)],
-                    start,
-                )?;
+                let near = ra.as_ref().and_then(|r| r.get(i));
+                let far = rb.as_ref().and_then(|r| r.get(i));
+                let mut lp = vec![same(&seg.root)];
+                lp.extend(far.map(same));
+                lp.push(opposite(foot));
+                lp.extend(near.map(opposite));
+                strip_face(k, body, side.surface.clone(), lp, start)?;
             }
         }
         // the square end caps of an open span, in the stations' planes
         if !ring {
             for (end, t) in [(0_usize, lo), (cuts.len() - 1, hi)] {
-                let (Some([r1, r2]), Some(section)) = (rungs.get(end), sections.get(end)) else {
+                let (Some(Some([r1, r2])), Some(Some(section))) =
+                    (rungs.get(end), sections.get(end))
+                else {
                     continue;
                 };
                 let (root, tangent) = self.root_at(k, t)?;
@@ -1378,6 +1510,115 @@ impl FootBlend {
             }
         }
         Ok(made)
+    }
+
+    /// An open span's segments `(from, to, leg law)` in order: a shaped end's zone at each end
+    /// that has one ([`FootRamp`], its length by arc length: the bead's height for a taper, its
+    /// reach for a rounded end, both read at that end's whole section), and the rest between.
+    ///
+    /// # Errors
+    ///
+    /// Native invalid input for a span shorter than its ends' zones; those of the lengths and
+    /// the end sections.
+    fn span_segments(
+        &self,
+        k: &Kernel,
+        legs: [f64; 2],
+        sagitta: f64,
+        span: [f64; 2],
+        ends: [BeadEnd; 2],
+    ) -> Result<Vec<(f64, f64, Option<FootRamp>)>> {
+        let [lo, hi] = span;
+        if ends == [BeadEnd::Square; 2] {
+            return Ok(vec![(lo, hi, None)]);
+        }
+        let length = self
+            .curve
+            .length(k, &Extent1d::from_min_max(lo, hi), 1e-12)?;
+        let [start, end] = ends;
+        let zone = |t: f64, shape: BeadEnd| -> Result<f64> {
+            if shape == BeadEnd::Square {
+                return Ok(0.0);
+            }
+            let (height, reach) = self.section_size(k, t, legs, sagitta)?;
+            Ok(if shape == BeadEnd::Taper {
+                height
+            } else {
+                reach
+            })
+        };
+        let (zs, ze) = (zone(lo, start)?, zone(hi, end)?);
+        if zs + ze > length * (1.0 + 1e-12) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "a span shorter than its two ends need (a bead height tapered, a bead reach rounded, at each)",
+            ));
+        }
+        let at = |d: f64| -> Result<f64> {
+            if d <= 0.0 {
+                return Ok(lo);
+            }
+            if d >= length {
+                return Ok(hi);
+            }
+            let found = self.curve.find_parameter_at_arc_length(k, lo, d)?;
+            if !found.converged || found.past_end {
+                return Err(SolidError::blend(OP, BlendFailure::StageFailed));
+            }
+            Ok(found.end_param.clamp(lo, hi))
+        };
+        let (m0, m1) = (at(zs)?, at(length - ze)?);
+        let mut out = Vec::with_capacity(3);
+        if start != BeadEnd::Square {
+            out.push((
+                lo,
+                m0,
+                Some(FootRamp {
+                    full: m0,
+                    tip: lo,
+                    shape: start,
+                }),
+            ));
+        }
+        if m1 - m0 > 1e-9 * (hi - lo) {
+            out.push((m0, m1, None));
+        }
+        if end != BeadEnd::Square {
+            out.push((
+                m1,
+                hi,
+                Some(FootRamp {
+                    full: m1,
+                    tip: hi,
+                    shape: end,
+                }),
+            ));
+        }
+        Ok(out)
+    }
+
+    /// How high the whole section at `t` stands from the root (along the direction to the
+    /// chord's middle) and how far it reaches from it: the most over 65 points of the section
+    /// (sampled; it sets a zone's length, not a bound).
+    ///
+    /// # Errors
+    ///
+    /// The refusals of the station; those of the section.
+    fn section_size(&self, k: &Kernel, t: f64, legs: [f64; 2], sagitta: f64) -> Result<(f64, f64)> {
+        let ((row, weights), s) = match self.section_rows(k, t, legs, sagitta, None)? {
+            Ok(made) => made,
+            Err(miss) => return Err(self.refusal(k, miss, &[t], legs, sagitta)?),
+        };
+        let section = section_curve(&row, &weights, sagitta)?;
+        let [a, b] = s.feet;
+        let up = ((a + (b - a) * 0.5) - s.root).unitize()?;
+        let (mut height, mut reach) = (0.0_f64, 0.0_f64);
+        for i in 0..=64 {
+            let p = section.evaluate_point(f64::from(i) / 64.0)?;
+            height = height.max((p - s.root).dot(up));
+            reach = reach.max(p.distance(s.root));
+        }
+        Ok((height, reach))
     }
 
     /// Gives each of the section faces `made` of `body` its definition: this blend with the
@@ -1403,6 +1644,7 @@ impl FootBlend {
                 sagitta: weld.sagitta,
                 spans: weld.spans.clone(),
                 ends: weld.ends,
+                ramp: m.ramp,
                 tol: weld.tol,
                 motions: Vec::new(),
             };
@@ -1432,7 +1674,6 @@ impl FootBlend {
         legs: [f64; 2],
         sagitta: f64,
     ) -> Result<(BSplineCurve, BSplineCurve, BSplineCurve)> {
-        use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
         let ((row, weights), full) = match self.section_rows(k, t, legs, sagitta, None)? {
             Ok(made) => made,
             Err(miss) => return Err(self.refusal(k, miss, &[t], legs, sagitta)?),
@@ -1459,24 +1700,36 @@ impl FootBlend {
         };
         let [p1, p2] = &rung_points;
         let (r1, r2) = (rung(p1)?, rung(p2)?);
-        let (degree, mults, knots): (usize, &[usize], &[f64]) = if sagitta == 0.0 {
-            (1, &[2, 2], &[0.0, 1.0])
-        } else {
-            (2, &[3, 2, 3], &[0.0, 0.5, 1.0])
-        };
-        let section = BSplineCurve::create_canonical(&CanonicalData {
-            dim: 3,
-            degree,
-            control_points: &row,
-            form: BSplineCurveForm::Unspecified,
-            knot_multiplicities: mults,
-            knots,
-            knot_type: KnotType::Unspecified,
-            weights: if sagitta == 0.0 { None } else { Some(&weights) },
-            trim: None,
-        })?;
-        Ok((r1, r2, section))
+        Ok((r1, r2, section_curve(&row, &weights, sagitta)?))
     }
+}
+
+/// A station's section as a curve from foot 1 to foot 2: the chord (`sagitta` 0), or the arc
+/// as a rational quadratic with [`BeadArc::rows`]' points and weights.
+///
+/// [`BeadArc::rows`]: crate::surface::procedural_blend::bead::BeadArc::rows
+///
+/// # Errors
+///
+/// Those of the curve.
+fn section_curve(row: &[Point3], weights: &[f64], sagitta: f64) -> Result<BSplineCurve> {
+    use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+    let (degree, mults, knots): (usize, &[usize], &[f64]) = if sagitta == 0.0 {
+        (1, &[2, 2], &[0.0, 1.0])
+    } else {
+        (2, &[3, 2, 3], &[0.0, 0.5, 1.0])
+    };
+    BSplineCurve::create_canonical(&CanonicalData {
+        dim: 3,
+        degree,
+        control_points: row,
+        form: BSplineCurveForm::Unspecified,
+        knot_multiplicities: mults,
+        knots,
+        knot_type: KnotType::Unspecified,
+        weights: if sagitta == 0.0 { None } else { Some(weights) },
+        trim: None,
+    })
 }
 
 /// A strip's face on its support `surface` (a face of the part's, continued): the loop `lp`
@@ -1663,12 +1916,97 @@ pub struct BeadWeld {
     pub tol: f64,
 }
 
+/// A shaped end's leg law (#15129): over the leader's parameters from `full` (the whole
+/// section) to `tip` (the root alone), the legs and the sagitta are the weld's times
+/// [`FootRamp::share`]. `x`, the fraction of the zone's parameters from the tip, runs from 0 at
+/// the tip to 1 at `full`; a taper's share is `x`, a rounded end's `sin(theta)` with
+/// `x = 1 - cos(theta)`. The zone is set by arc length where the bead is made (a taper's as
+/// long as the bead is high, a rounded end's one bead reach), and kept as these parameters.
+/// The zone's net runs over its piece, in the leader's parameter for a taper and evenly in the
+/// angle for a rounded end ([`FootRamp::station_of`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FootRamp {
+    /// Where the whole section stands: the zone's other end from the tip.
+    pub full: f64,
+    /// Where the bead ends in a point on the root.
+    pub tip: f64,
+    /// The shape: [`BeadEnd::Taper`] or [`BeadEnd::Round`].
+    pub shape: BeadEnd,
+}
+
+impl FootRamp {
+    /// The fraction of the zone's parameters from the tip to `t`, clamped to `0..=1`.
+    fn x(&self, t: f64) -> f64 {
+        let length = self.full - self.tip;
+        if length == 0.0 {
+            return 1.0;
+        }
+        ((t - self.tip) / length).clamp(0.0, 1.0)
+    }
+
+    /// The share of the weld's legs and sagitta at the leader's parameter `t`: 0 at the tip, 1
+    /// at `full` and past it.
+    #[must_use]
+    pub fn share(&self, t: f64) -> f64 {
+        let x = self.x(t);
+        match self.shape {
+            BeadEnd::Square => 1.0,
+            BeadEnd::Taper => x,
+            BeadEnd::Round => (x * (2.0 - x)).max(0.0).sqrt(),
+        }
+    }
+
+    /// The leader's parameter where the zone's net stands at its own parameter `u` (over the
+    /// zone's piece): `u` itself for a taper; for a rounded end the net runs evenly in the
+    /// angle, `u` from the tip at `theta = (pi / 2) (u - tip) / (full - tip)`, so its curves
+    /// follow `sin(theta)` and `1 - cos(theta)`, smooth to the tip (in the leader's parameter
+    /// the toe would move as the square root of the distance from it).
+    #[must_use]
+    pub fn station_of(&self, u: f64) -> f64 {
+        let length = self.full - self.tip;
+        if self.shape != BeadEnd::Round || length == 0.0 {
+            return u;
+        }
+        let s = ((u - self.tip) / length).clamp(0.0, 1.0);
+        if s >= 1.0 {
+            return self.full;
+        }
+        if s <= 0.0 {
+            return self.tip;
+        }
+        self.tip + length * (1.0 - (0.5 * core::f64::consts::PI * s).cos())
+    }
+
+    /// The zone's `n + 1` stations `(u, t)`, ascending: the net's parameter evenly over the
+    /// piece, the leader's where it stands ([`Self::station_of`]).
+    fn stations(&self, n: usize) -> Vec<(f64, f64)> {
+        let n = n.max(1);
+        let [lo, hi] = self.piece();
+        (0..=n)
+            .map(|i| {
+                let u = if i == n {
+                    hi
+                } else {
+                    lo + (hi - lo) * i as f64 / n as f64
+                };
+                (u, self.station_of(u))
+            })
+            .collect()
+    }
+
+    /// The zone's parameters, ascending.
+    fn piece(&self) -> [f64; 2] {
+        [self.full.min(self.tip), self.full.max(self.tip)]
+    }
+}
+
 /// A foot blend's section face's definition (#15129), kept on its net: the supports by value
 /// and their sides, the leader (the joint edge's curve as its B-spline form) and the face's
-/// piece of it, the legs, the sagitta, the weld's spans and end shapes, the fit tolerance,
-/// and the motions the net took since it was made, in order. The net is
-/// [`FootBlend::section_face`] of the piece made from these, then each motion. No part is
-/// read: the sides stand in for the faces' directions off the edge.
+/// piece of it, the legs, the sagitta, the weld's spans and end shapes, the face's leg law
+/// where it is a shaped end's zone ([`FootRamp`]), the fit tolerance, and the motions the net
+/// took since it was made, in order. The net is [`FootBlend::section_face`] of the piece made
+/// from these (under its leg law), then each motion. No part is read: the sides stand in for
+/// the faces' directions off the edge.
 #[derive(Debug, Clone)]
 pub struct FootBlendDefinition {
     supports: [Surface; 2],
@@ -1679,6 +2017,7 @@ pub struct FootBlendDefinition {
     sagitta: f64,
     spans: Vec<[f64; 2]>,
     ends: [BeadEnd; 2],
+    ramp: Option<FootRamp>,
     tol: f64,
     motions: Vec<Motion>,
 }
@@ -1702,6 +2041,8 @@ pub struct FootBlendParts {
     pub spans: Vec<[f64; 2]>,
     /// The end shape at each span's start and end.
     pub ends: [BeadEnd; 2],
+    /// The face's leg law, where it is a shaped end's zone (its piece is the zone).
+    pub ramp: Option<FootRamp>,
     /// The fit tolerance.
     pub tol: f64,
     /// The motions, in order.
@@ -1723,6 +2064,7 @@ impl FootBlendDefinition {
             sagitta: parts.sagitta,
             spans: parts.spans,
             ends: parts.ends,
+            ramp: parts.ramp,
             tol: parts.tol,
             motions: parts.motions,
         }
@@ -1740,6 +2082,7 @@ impl FootBlendDefinition {
             sagitta: self.sagitta,
             spans: self.spans.clone(),
             ends: self.ends,
+            ramp: self.ramp,
             tol: self.tol,
             motions: self.motions.clone(),
         }
@@ -1779,6 +2122,12 @@ impl FootBlendDefinition {
     #[must_use]
     pub const fn interval(&self) -> [f64; 2] {
         self.interval
+    }
+
+    /// The face's leg law, where it is a shaped end's zone.
+    #[must_use]
+    pub const fn ramp(&self) -> Option<FootRamp> {
+        self.ramp
     }
 
     /// The net's distance from the definition it states: the fit tolerance, checked at the
@@ -1825,7 +2174,7 @@ impl FootBlendDefinition {
         let [a, b] = self.interval;
         let mut net = self
             .blend()?
-            .segment(k, self.legs, self.sagitta, self.tol, a, b)?
+            .segment(k, self.legs, self.sagitta, self.tol, a, b, self.ramp)?
             .face;
         for m in &self.motions {
             net.transform(&m.rotate_n_move, m.scale)?;
@@ -1886,6 +2235,10 @@ const PROOF_HALVINGS: usize = 4;
 /// The longest piece [`FootBlend::prove_feet`] proves the feet over at first, as a share of
 /// the smaller leg (the root's travel over it).
 const PIECE_OF_LEG: f64 = 0.125;
+
+/// The least share of the largest leg a shaped end's stations are proved at
+/// ([`FootBlend::prove_feet`]): nearer the tip the feet close on the root.
+const PROOF_LEG_SHARE: f64 = 0.25;
 
 /// The most pieces [`FootBlend::prove_feet`] cuts one span between two stations into.
 const MAX_PIECES: f64 = 1024.0;
@@ -2080,7 +2433,34 @@ impl FootBlend {
         legs: [f64; 2],
         solved: &[FootStation],
     ) -> Result<FeetProof> {
+        self.prove_feet_by(k, &|_| legs, solved)
+    }
+
+    /// [`Self::prove_feet`] with the legs `legs_at(t)` at each station (a shaped end's leg
+    /// law, [`FootRamp`]): over a piece the leg is enclosed between its ends' (the law is
+    /// monotone along a zone), so the test holds for every leg between. Proved only where
+    /// both legs are at least [`PROOF_LEG_SHARE`] of the largest the stations reach: towards a
+    /// tip the feet close on the root, the pieces (a share of the leg) on nothing, and the
+    /// last part of the zone stays sampled, not proved.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::prove_feet`].
+    fn prove_feet_by(
+        &self,
+        k: &Kernel,
+        legs_at: &dyn Fn(f64) -> [f64; 2],
+        solved: &[FootStation],
+    ) -> Result<FeetProof> {
         use crate::blend::fillet_section::certificate::NurbsCurve;
+        let least = |t: f64| legs_at(t).iter().fold(f64::INFINITY, |m, z| m.min(*z));
+        let largest = solved.iter().fold(0.0_f64, |m, s| m.max(least(s.t)));
+        let solved: Vec<FootStation> = solved
+            .iter()
+            .filter(|s| least(s.t) >= PROOF_LEG_SHARE * largest)
+            .copied()
+            .collect();
+        let solved = solved.as_slice();
         let leader = NurbsCurve::of(&self.leader)?;
         let supports = [
             ProofSupport::of(k, &self.sides[0].surface)?,
@@ -2093,10 +2473,10 @@ impl FootBlend {
         // the toe moves along the joint as the root does, and the box encloses the two apart:
         // the Jacobian's spread grows with the piece's length over the leg), then each piece
         // and its halves from a work list (no recursion): (start, end, depth)
-        let reach = legs.iter().fold(f64::INFINITY, |m, z| m.min(*z)) * PIECE_OF_LEG;
         let mut work: Vec<(FootStation, FootStation, usize)> = Vec::new();
         for w in solved.windows(2) {
             let &[a, b] = w else { continue };
+            let reach = least(a.t).min(least(b.t)) * PIECE_OF_LEG;
             let count = (a.root.distance(b.root) / reach)
                 .ceil()
                 .clamp(1.0, MAX_PIECES) as usize;
@@ -2106,11 +2486,11 @@ impl FootBlend {
                     b
                 } else {
                     let t = a.t + (b.t - a.t) * j as f64 / count as f64;
-                    match self.try_station(k, t, legs, Some(&from))? {
+                    match self.try_station(k, t, legs_at(t), Some(&from))? {
                         Ok(s) => s,
                         Err(miss) => {
                             let ts: Vec<f64> = solved.iter().map(|s| s.t).collect();
-                            return Err(self.refusal(k, miss, &ts, legs, 0.0)?);
+                            return Err(self.refusal(k, miss, &ts, legs_at(t), 0.0)?);
                         }
                     }
                 };
@@ -2123,7 +2503,11 @@ impl FootBlend {
             let mut proved = true;
             for (i, (support, guess)) in supports.iter().zip(guesses.iter_mut()).enumerate() {
                 let Some(support) = support else { continue };
-                let z = legs.get(i).copied().unwrap_or(0.0);
+                let (za, zb) = (
+                    legs_at(a.t).get(i).copied().unwrap_or(0.0),
+                    legs_at(b.t).get(i).copied().unwrap_or(0.0),
+                );
+                let z = Ivl::new(za.min(zb), za.max(zb));
                 let (Some(&fa), Some(&fb)) = (a.feet.get(i), b.feet.get(i)) else {
                     return Err(SolidError::blend(OP, BlendFailure::StageFailed));
                 };
@@ -2141,14 +2525,14 @@ impl FootBlend {
                 continue;
             }
             if depth >= PROOF_HALVINGS {
-                return Err(self.unproved(k, legs, &a, &b, solved, proof)?);
+                return Err(self.unproved(k, legs_at(a.t), &a, &b, solved, proof)?);
             }
             let m = 0.5 * (a.t + b.t);
-            let mid = match self.try_station(k, m, legs, Some(&a))? {
+            let mid = match self.try_station(k, m, legs_at(m), Some(&a))? {
                 Ok(s) => s,
                 Err(miss) => {
                     let ts: Vec<f64> = solved.iter().map(|s| s.t).collect();
-                    return Err(self.refusal(k, miss, &ts, legs, 0.0)?);
+                    return Err(self.refusal(k, miss, &ts, legs_at(m), 0.0)?);
                 }
             };
             proof.halvings += 1;
@@ -2159,7 +2543,8 @@ impl FootBlend {
     }
 
     /// Krawczyk's test for one support's foot over a piece `[ta, tb]` of the leader, `fa` and
-    /// `fb` the feet at its ends and `z` the leg. The foot is taken as the straight path
+    /// `fb` the feet at its ends and `z` the leg (an interval where a leg law changes it over
+    /// the piece: the test then holds for every leg in it). The foot is taken as the straight path
     /// between the ends' feet on the support's form plus a correction `δ`, `x(t) = x̃ + s (t −
     /// t̃) + δ` about the middle `t̃`, and `w(t) = S(x(t)) − e(t)` is enclosed in its centred
     /// form `w(t̃) + w′(X, T) (t − t̃)`, `w′ = S_u s_u + S_v s_v − e′`: the root and the toe move
@@ -2173,7 +2558,7 @@ impl FootBlend {
         leader: &crate::blend::fillet_section::certificate::NurbsCurve,
         ta: f64,
         tb: f64,
-        z: f64,
+        z: Ivl,
         fa: Point3,
         fb: Point3,
         guess: &mut Option<Point2>,
@@ -2246,7 +2631,7 @@ impl FootBlend {
             let w = add(wm, scale(slope_w, dt));
             Ok(Some((w, slope_w, su, sv, wm)))
         };
-        let zz = Ivl::from(z) * Ivl::from(z);
+        let zz = z * z;
         let two = Ivl::from(2.0);
         // the equations centred along the path: G(t̃) + G′(T) (t − t̃), G′ their total rate
         // along it, (w′·e′ + w·e″, 2 w·w′), which nearly vanishes where the path follows the

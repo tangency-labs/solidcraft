@@ -503,9 +503,11 @@ pub fn beads_apart_in_spans(
 /// is. A convex bead overhanging its toe is built: nothing is trimmed. `spans` are where the
 /// bead runs along each edge, fractions of the edge's length from the start of its curve's
 /// interval ([`BeadSpan`]; none: the whole edge), and `ends` the shape at each span's start
-/// and end: square on any joint; tapered or rounded only straight between two planes with a
-/// sagitta so far, where the bead is the planar sweep ([`beads_apart_in_spans`]) cut at its
-/// ends, its bead face keeping the chord's exact definition with its sagitta.
+/// and end, on any joint: square (a planar cap), or tapered or rounded, a leg law over the
+/// end's zone inside the span (the section scaled down to the root at the tip:
+/// [`crate::blend::foot_blend::FootRamp`]; a taper's zone as long as the bead is high, a
+/// rounded end's one bead reach). Nothing is cut: the planar sweep's shaped ends
+/// ([`beads_apart_in_spans`]) are another shape, not this one's.
 ///
 /// A weld never changes the part it lies on: `target`'s geometry and topology are left as
 /// they were whether the bead is built or refused (it is mutable for the edges' binormals,
@@ -517,8 +519,7 @@ pub fn beads_apart_in_spans(
 /// Native invalid input for no edge, sizes not one per edge, a size that is not two legs, or
 /// spans out of order, overlapping or too short for their ends;
 /// [`crate::error::blend::BlendFailure::WeldNotBuilt`]
-/// naming the vertex for two of `edges` that meet at one, and for a shaped end the foot blend
-/// does not build; the foot blend's refusals, typed and with the size that builds (a toe off
+/// naming the vertex for two of `edges` that meet at one; the foot blend's refusals, typed and with the size that builds (a toe off
 /// its face, no toe at the leg, an arc that would cut into a face); those of the closing.
 #[allow(clippy::too_many_arguments)]
 pub fn bead_body(
@@ -533,7 +534,7 @@ pub fn bead_body(
 ) -> Result<Brep> {
     use crate::blend::foot_blend::{close_bead_body, BeadWeld, FootBlend, WELD_FIT_TOLERANCE};
     use crate::error::blend::{BlendFailure, WeldGap};
-    use crate::error::{Failure, Site, TargetEdge, TargetVertex};
+    use crate::error::{Failure, Site, TargetVertex};
     if edges.is_empty() || sizes.len() != edges.len() {
         return Err(SolidError::invalid_input(
             OP,
@@ -561,12 +562,10 @@ pub fn bead_body(
     } else {
         BeadSpan::along(&spans.iter().map(|s| (s.from, s.to)).collect::<Vec<_>>())?
     };
-    let shaped = ends.iter().any(|e| *e != BeadEnd::Square);
     let tol = WELD_FIT_TOLERANCE;
     let mut body = Brep::new_with_infinite_region()?;
     body.set_editing_enabled(true);
     let mut defined = Vec::new();
-    let mut apart: Vec<Brep> = Vec::new();
     for (&e, size) in edges.iter().zip(sizes) {
         let ChamferSize::Distances(legs) = *size else {
             return Err(SolidError::invalid_input(
@@ -579,26 +578,10 @@ pub fn bead_body(
             .find(|f| along.contains(f));
         let blend = FootBlend::of_edge(k, target, e, first)?;
         blend.toes_on_faces(k, target, legs)?;
-        if shaped {
-            // the shaped ends: the planar sweep's, cut at its ends
-            if sagitta == 0.0 || !between_planes(target, e)? {
-                return Err(Failure::new(
-                    OP,
-                    BlendFailure::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint),
-                )
-                .or_at(Site::edge(TargetEdge::of_target(e)))
-                .into_error());
-            }
-            let f = frame(k, target, e, *size, sagitta, along)?;
-            for s in &spans {
-                apart.push(f.span(k, s.from * f.length, s.to * f.length, ends)?);
-            }
-            continue;
-        }
         let params = span_parameters(k, &blend, &spans)?;
         let mut made = Vec::new();
         for &p in &params {
-            made.extend(blend.add_span(k, &mut body, legs, sagitta, tol, p)?);
+            made.extend(blend.add_span(k, &mut body, legs, sagitta, tol, p, ends)?);
         }
         let weld = BeadWeld {
             legs,
@@ -609,38 +592,11 @@ pub fn bead_body(
         };
         defined.push((blend, made, weld));
     }
-    if !defined.is_empty() {
-        close_bead_body(k, &mut body, tol)?;
-        for (blend, made, weld) in &defined {
-            blend.define_faces(&mut body, made, weld)?;
-        }
-    }
-    for piece in apart {
-        body = if body.face_list().is_empty() {
-            piece
-        } else {
-            crate::boolean::api_brep::boolean_union(k, body, piece)?
-        };
+    close_bead_body(k, &mut body, tol)?;
+    for (blend, made, weld) in &defined {
+        blend.define_faces(&mut body, made, weld)?;
     }
     Ok(body)
-}
-
-/// Whether `edge_id` of `target` is straight between two planes.
-fn between_planes(target: &Brep, edge_id: EdgeId) -> Result<bool> {
-    let straight = target
-        .edge(edge_id)?
-        .curve
-        .as_ref()
-        .is_some_and(|c| matches!(c.kind(), CurveKind::Line(_)));
-    let mut planes = true;
-    for f in edge_faces(target, edge_id)? {
-        planes &= target
-            .face(f)?
-            .surface
-            .as_ref()
-            .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
-    }
-    Ok(straight && planes)
 }
 
 /// `spans` (fractions of the joint's length from the start of its interval) as the foot

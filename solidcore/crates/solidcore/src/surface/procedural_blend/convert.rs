@@ -15,8 +15,8 @@ use super::chamfer::{ChamferDefinition, ChamferSize};
 use super::corner::{CornerDefinition, SetbackFill};
 use super::exact::{ExactClass, ExactRound};
 use super::record::{
-    BeadEndRecord, EndOrderRecord, FootBlendRecord, MotionRecord, SectionBlendRecord,
-    SectionFrameRecord,
+    BeadEndRecord, EndOrderRecord, FootBlendRecord, FootRampRecord, MotionRecord,
+    SectionBlendRecord, SectionFrameRecord,
 };
 use super::record::{
     BezierCurveRecord, BlendDefinitionRecord, ChamferRecord, ChamferSizeRecord, ClassInputsRecord,
@@ -1464,6 +1464,11 @@ pub fn foot_blend_to_record(k: &Kernel, surface: &Surface) -> Result<FootBlendRe
         sagitta: parts.sagitta,
         spans: parts.spans,
         ends: [end(e0), end(e1)],
+        ramp: parts.ramp.map(|r| FootRampRecord {
+            full: r.full,
+            tip: r.tip,
+            end: end(r.shape),
+        }),
         tol: parts.tol,
         motions: parts
             .motions
@@ -1508,7 +1513,7 @@ fn face_surface_of(k: &Kernel, s: &SupportRecord) -> Result<Surface> {
 /// a support form not of its label's kind; those of making the supports, the leader and the
 /// net.
 pub fn foot_blend_from_record(k: &Kernel, rec: &FootBlendRecord) -> Result<Surface> {
-    use crate::blend::foot_blend::{FootBlendDefinition, FootBlendParts};
+    use crate::blend::foot_blend::{FootBlendDefinition, FootBlendParts, FootRamp};
     use crate::blend::weld_bead::BeadEnd;
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::sweep::section_blend::Motion;
@@ -1531,6 +1536,11 @@ pub fn foot_blend_from_record(k: &Kernel, rec: &FootBlendRecord) -> Result<Surfa
         sagitta: rec.sagitta,
         spans: rec.spans.clone(),
         ends: [end(e0), end(e1)],
+        ramp: rec.ramp.map(|r| FootRamp {
+            full: r.full,
+            tip: r.tip,
+            shape: end(r.end),
+        }),
         tol: rec.tol,
         motions: rec
             .motions

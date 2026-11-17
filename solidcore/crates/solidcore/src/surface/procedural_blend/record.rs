@@ -1138,10 +1138,23 @@ pub enum BeadEndRecord {
     Round,
 }
 
+/// A shaped end's leg law (`blend::foot_blend::FootRamp`): the face's piece is the end's zone,
+/// from `full` (the whole section) to `tip` (the root alone), the legs and the sagitta the
+/// weld's times the shape's share between.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FootRampRecord {
+    /// Where the whole section stands, the leader's parameter.
+    pub full: f64,
+    /// Where the bead ends in a point on the root, the leader's parameter.
+    pub tip: f64,
+    /// The shape: `Taper` or `Round`.
+    pub end: BeadEndRecord,
+}
+
 /// A foot blend's section face (`blend::foot_blend`, a weld bead's, #15129): its definition
 /// (the supports and the face's side on each, the leader and the face's piece of it, the legs,
-/// the sagitta, the weld's spans and end shapes, the fit tolerance and the motions its net
-/// took) and its net. A kind of its own, not fields added to an older record, so no reader
+/// the sagitta, the weld's spans and end shapes, the face's leg law at a shaped end, the fit
+/// tolerance and the motions its net took) and its net. A kind of its own, not fields added to an older record, so no reader
 /// that predates it can read a bead as another kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FootBlendRecord {
@@ -1163,6 +1176,9 @@ pub struct FootBlendRecord {
     pub spans: Vec<[f64; 2]>,
     /// The end shape at each span's start and end.
     pub ends: [BeadEndRecord; 2],
+    /// The face's leg law, where its piece is a shaped end's zone; absent elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ramp: Option<FootRampRecord>,
     /// The fit tolerance the net was made to (checked at samples, not proved).
     pub tol: f64,
     /// The motions, in order.
@@ -1175,8 +1191,9 @@ impl FootBlendRecord {
     /// The structural check: the supports NURBS forms (a foot blend runs on faces), the leader
     /// and the net as their own checks, the sides `+1` or `-1`, the legs and the tolerance
     /// finite and positive, the sagitta finite, the piece and the spans finite, each `a < b`,
-    /// the spans ascending and apart and the piece inside one of them, and the motions' numbers
-    /// finite. The rebuild checks what the numbers mean (the piece on the leader, the feet, the
+    /// the spans ascending and apart and the piece inside one of them, a leg law's ends the
+    /// piece's (its tip one of them) and its shape tapered or rounded, and the motions'
+    /// numbers finite. The rebuild checks what the numbers mean (the piece on the leader, the feet, the
     /// net against its rebuild).
     ///
     /// # Errors
@@ -1223,6 +1240,15 @@ impl FootBlendRecord {
         let [a, b] = self.interval;
         if !self.spans.iter().any(|[s, t]| *s <= a && b <= *t) {
             return Err(refuse("interval", "the piece lies in one of the spans"));
+        }
+        if let Some(r) = self.ramp {
+            let ends = [r.full.min(r.tip), r.full.max(r.tip)];
+            if ends != [a, b] || r.end == BeadEndRecord::Square {
+                return Err(refuse(
+                    "ramp",
+                    "a leg law runs over its face's piece, tapered or rounded",
+                ));
+            }
         }
         let motions_finite = self.motions.iter().all(|m| {
             points_finite(&[m.origin, m.x_axis, m.y_axis]) && m.scale.is_none_or(|s| all_finite(&s))

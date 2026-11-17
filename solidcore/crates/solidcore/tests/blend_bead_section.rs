@@ -1918,48 +1918,239 @@ fn spans_round_a_tube_joint_are_one_body_of_lumps() {
     assert!(got < all && got > 0.4 * all, "{got} of {all}");
 }
 
-/// Tapered and rounded ends: between planes with a sagitta the bead is the planar sweep cut at
-/// its ends, one body of a lump per span (here a taper at each start and a round at each
-/// end); on the T-joint they are not built yet, a typed refusal naming the edge. Neither part
-/// changes.
+/// The weld's bead with `ends` over the span `(0.1, 0.6)` of the plates' 90-degree corner,
+/// legs `SETBACK`, sagitta `h`: the body, after the part is checked unchanged.
+fn plate_ends(k: &mut Kernel, h: f64, ends: [BeadEnd; 2]) -> Brep {
+    let (mut b, at) = corner(k, FRAC_PI_2);
+    let edge = pick(k, &b, at);
+    let before = smb(k, &b);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let spans = BeadSpan::along(&[(0.1, 0.6)]).unwrap();
+    let body = weld_bead_body(k, &mut b, &[edge], &[size], h, &[], &spans, ends).unwrap();
+    assert!(smb(k, &b) == before, "the corner changed");
+    body
+}
+
+/// The bead's height over the 90-degree corner's edge, along the direction to the chord's
+/// middle, and its reach from the edge, legs `SETBACK`, sagitta `h`: the chord's middle is
+/// `SETBACK / sqrt 2` up, the apex `h` more; a concave arc's highest points are its feet; the
+/// farthest points from the edge are the feet (here `|h|` stays under `SETBACK (1 - 1/sqrt
+/// 2)`).
+fn plate_height_reach(h: f64) -> (f64, f64) {
+    let middle = SETBACK * std::f64::consts::FRAC_1_SQRT_2;
+    (middle + h.max(0.0), SETBACK)
+}
+
+/// The length of a shaped end's zone along the leader, from its tip to where the whole section
+/// stands (the plates' edge is straight).
+fn zone_length(
+    def: &solidcore::blend::foot_blend::FootBlendDefinition,
+    r: solidcore::blend::foot_blend::FootRamp,
+) -> f64 {
+    let leader = def.blend().unwrap().leader;
+    let at = |t: f64| leader.evaluate_point(t).unwrap();
+    at(r.full).distance(at(r.tip))
+}
+
+/// A tapered end is a leg law: over a zone as long as the bead is high the legs and the
+/// sagitta fall in a straight line to nothing at the tip, so the section is the whole one
+/// scaled by `x` (its area by `x^2`) and the zone holds a third of its prism, `A L / 3`. Two
+/// tapers on a 50 mm span keep `A (50 - 4 L / 3)` (to 1e-11 measured: the feet run straight,
+/// which the net's cubics hold exactly): chord, convex and concave, on the plates.
+/// The body is sound, the corner unchanged, and every section face keeps its definition (the
+/// zones with their leg law).
 #[test]
-fn shaped_ends_are_built_between_planes_and_refused_round_a_tube() {
-    use solidcore::error::ErrorKind;
+fn a_tapered_end_shrinks_the_section_to_the_tip_over_the_bead_height() {
+    use solidcore::blend::foot_blend::FootRamp;
+    for h in [0.0, 1.0, -1.0] {
+        let mut k = kernel();
+        let mut body = plate_ends(&mut k, h, [BeadEnd::Taper; 2]);
+        assert_sound(&mut k, &mut body, &format!("tapered h {h}"));
+        let area = section_area(SETBACK, FRAC_PI_2, h);
+        let (height, _) = plate_height_reach(h);
+        let want = area * (0.5 * LENGTH - 4.0 * height / 3.0);
+        let got = volume_to(&k, &mut body, 1e-8);
+        assert!(
+            ((got - want) / want).abs() <= 1e-5,
+            "h {h}: {got} against {want}"
+        );
+        let found = foot_faces(&body);
+        assert_eq!(found.len(), 3, "h {h}: two zones and the middle");
+        let mut zones = 0;
+        for (_, s) in &found {
+            let def = s.procedural_blend().unwrap().foot_blend().unwrap();
+            let Some(r): Option<FootRamp> = def.ramp() else {
+                continue;
+            };
+            zones += 1;
+            assert_eq!(r.shape, BeadEnd::Taper, "h {h}");
+            let long = zone_length(def, r);
+            assert!(
+                (long - height).abs() <= 1e-6,
+                "h {h}: a zone of {long} not {height}"
+            );
+        }
+        assert_eq!(zones, 2, "h {h}");
+    }
+}
+
+/// A rounded end is a leg law over one bead reach `R`: the share `sin(theta)` with the zone's
+/// fraction from the tip `x = 1 - cos(theta)`, so on the plates each toe at its distance `d`
+/// from the edge, `(1 - x) R` back from where the zone starts, keeps `d^2 + ((1 - x) R)^2 =
+/// R^2` (legs `R`: the toes' outline is a round of the reach). Checked on the section face's
+/// sides at 11 points of each zone, to the fit tolerance (sampled, the net's fit). The zone
+/// holds `2 A R / 3`, so two rounds on a 50 mm span keep `A (50 - 2 R / 3)`, to the fit's
+/// share of the section (within 0.01 %; 0.005 % measured).
+#[test]
+fn a_rounded_end_shrinks_the_section_to_the_tip_in_a_round() {
+    use solidcore::blend::foot_blend::WELD_FIT_TOLERANCE;
+    for h in [0.0, 1.0] {
+        let mut k = kernel();
+        let mut body = plate_ends(&mut k, h, [BeadEnd::Round; 2]);
+        assert_sound(&mut k, &mut body, &format!("rounded h {h}"));
+        let (_, reach) = plate_height_reach(h);
+        let mut zones = 0;
+        for (_, s) in foot_faces(&body) {
+            let def = s.procedural_blend().unwrap().foot_blend().unwrap();
+            let Some(r) = def.ramp() else { continue };
+            zones += 1;
+            assert_eq!(r.shape, BeadEnd::Round, "h {h}");
+            assert!((zone_length(def, r) - reach).abs() <= 1e-6, "h {h}");
+            let full = def.blend().unwrap().leader.evaluate_point(r.full).unwrap();
+            let net = def.rebuild(&k).unwrap();
+            for i in 0..=10 {
+                let t = r.tip + (r.full - r.tip) * f64::from(i) / 10.0;
+                for v in [0.0, 1.0] {
+                    let toe = net.evaluate_point(solidcore::geom::vector2d::Point2::new(t, v));
+                    let toe = toe.unwrap();
+                    let d = toe.x.hypot(toe.y);
+                    let back = (full.z - toe.z).abs();
+                    assert!(
+                        ((d * d + back * back).sqrt() - reach).abs() <= 2.0 * WELD_FIT_TOLERANCE,
+                        "h {h} t {t} v {v}: toe {d} at {back} back, not on the round"
+                    );
+                }
+            }
+        }
+        assert_eq!(zones, 2, "h {h}");
+        let area = section_area(SETBACK, FRAC_PI_2, h);
+        let want = area * (0.5 * LENGTH - 2.0 * reach / 3.0);
+        let got = volume_to(&k, &mut body, 1e-8);
+        assert!(
+            ((got - want) / want).abs() <= 1e-4,
+            "h {h}: {got} against {want}"
+        );
+    }
+}
+
+/// A shaped end's face is written as its record with its leg law (absent from the other
+/// faces' records), read back and rebuilt; a changed leg law is refused: the shape swapped or
+/// dropped (the net is not that law's), the tip moved off the face's piece (the structural
+/// check).
+#[test]
+fn a_shaped_end_rebuilds_from_its_record_and_a_changed_leg_law_is_refused() {
+    use solidcore::surface::procedural_blend::convert::{foot_blend_rebuild, foot_blend_to_record};
+    use solidcore::surface::procedural_blend::record::{BeadEndRecord, FootBlendRecord};
+    let mut k = kernel();
+    let body = plate_ends(&mut k, 1.0, [BeadEnd::Taper, BeadEnd::Round]);
+    drop(k);
+    let k = kernel();
+    let mut shaped = 0;
+    for (_, s) in foot_faces(&body) {
+        let rec = foot_blend_to_record(&k, &s).unwrap();
+        let json = serde_json::to_string(&rec).unwrap();
+        assert_eq!(json.contains("\"ramp\""), rec.ramp.is_some());
+        let back: FootBlendRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, rec);
+        let rebuilt = foot_blend_rebuild(&k, &back).unwrap();
+        let def = rebuilt.procedural_blend().unwrap().foot_blend().unwrap();
+        let Some(ramp) = rec.ramp else { continue };
+        shaped += 1;
+        assert!(def.ramp().is_some());
+        let mut swapped = rec.clone();
+        swapped.ramp = Some(
+            solidcore::surface::procedural_blend::record::FootRampRecord {
+                end: if ramp.end == BeadEndRecord::Taper {
+                    BeadEndRecord::Round
+                } else {
+                    BeadEndRecord::Taper
+                },
+                ..ramp
+            },
+        );
+        assert!(
+            foot_blend_rebuild(&k, &swapped).is_err(),
+            "the shape swapped"
+        );
+        let mut dropped = rec.clone();
+        dropped.ramp = None;
+        assert!(foot_blend_rebuild(&k, &dropped).is_err(), "the law dropped");
+        let mut moved = rec.clone();
+        moved.ramp = Some(
+            solidcore::surface::procedural_blend::record::FootRampRecord {
+                tip: ramp.tip + 0.5 * (ramp.full - ramp.tip),
+                ..ramp
+            },
+        );
+        assert!(foot_blend_rebuild(&k, &moved).is_err(), "the tip moved");
+    }
+    assert_eq!(shaped, 2);
+}
+
+/// Shaped ends on any joint, one entry point: round the T-joint, two spans each with a taper
+/// at its start and a round at its end make one sound body (three section faces a span, the
+/// zones with their leg laws), less than the square-ended spans and more than half of them;
+/// chord and convex. A span too short for its ends is refused, on the tubes and the plates.
+/// Neither part changes.
+#[test]
+fn shaped_ends_are_built_round_a_tube_and_short_spans_are_refused() {
+    let ends = [BeadEnd::Taper, BeadEnd::Round];
+    let spans = BeadSpan::along(&[(0.1, 0.4), (0.6, 0.9)]).unwrap();
+    for h in [0.0, 1.0] {
+        let mut k = kernel();
+        let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
+        let before = smb(&k, &part);
+        let size = ChamferSize::Distances([4.0; 2]);
+        let mut body =
+            weld_bead_body(&mut k, &mut part, &joints, &[size], h, &[], &spans, ends).unwrap();
+        assert!(smb(&k, &part) == before, "h {h}: the tubes changed");
+        assert_sound(
+            &mut k,
+            &mut body,
+            &format!("shaped spans round the tube, h {h}"),
+        );
+        let found = foot_faces(&body);
+        assert_eq!(found.len(), 6, "h {h}");
+        let shaped = found
+            .iter()
+            .filter(|(_, s)| {
+                s.procedural_blend()
+                    .and_then(|b| b.foot_blend())
+                    .is_some_and(|d| d.ramp().is_some())
+            })
+            .count();
+        assert_eq!(shaped, 4, "h {h}");
+        let mut square =
+            weld_bead_body(&mut k, &mut part, &joints, &[size], h, &[], &spans, SQUARE).unwrap();
+        let (got, full) = (
+            volume_to(&k, &mut body, 1e-5),
+            volume_to(&k, &mut square, 1e-5),
+        );
+        assert!(got < full && got > 0.5 * full, "h {h}: {got} of {full}");
+        let short = BeadSpan::along(&[(0.5, 0.52)]).unwrap();
+        let r = weld_bead_body(&mut k, &mut part, &joints, &[size], h, &[], &short, ends);
+        assert!(r.is_err(), "h {h}: a short span round the tube was built");
+        assert!(smb(&k, &part) == before, "h {h}: the tubes changed");
+    }
     let mut k = kernel();
     let (mut b, at) = corner(&mut k, FRAC_PI_2);
     let edge = pick(&k, &b, at);
-    let before = smb(&k, &b);
     let size = ChamferSize::Distances([SETBACK; 2]);
-    let spans = BeadSpan::along(&[(0.1, 0.4), (0.6, 0.95)]).unwrap();
-    let ends = [BeadEnd::Taper, BeadEnd::Round];
-    let mut body =
-        weld_bead_body(&mut k, &mut b, &[edge], &[size], 1.0, &[], &spans, ends).unwrap();
-    assert!(smb(&k, &b) == before, "the corner changed");
-    assert_sound(&mut k, &mut body, "shaped spans between planes");
-    let pieces = beads_apart_in_spans(
-        &mut k,
-        &mut b,
-        edge,
-        size,
-        1.0,
-        &[],
-        &spans,
-        BeadEnd::Square,
-    )
-    .unwrap();
-    let square: f64 = pieces.into_iter().map(|mut p| volume(&k, &mut p)).sum();
-    let got = volume(&k, &mut body);
-    assert!(got < square && got > 0.8 * square, "{got} against {square}");
-
-    let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
-    let before = smb(&k, &part);
-    let size = ChamferSize::Distances([4.0; 2]);
-    let err = weld_bead_body(&mut k, &mut part, &joints, &[size], 1.0, &[], &spans, ends)
-        .err()
-        .unwrap();
-    assert_eq!(err.kind(), ErrorKind::Unsupported, "{err}");
-    assert!(err.site().is_some_and(|s| s.edge.is_some()), "{err:?}");
-    assert!(smb(&k, &part) == before, "the tubes changed");
+    let short = BeadSpan::along(&[(0.5, 0.52)]).unwrap();
+    for e in [BeadEnd::Taper, BeadEnd::Round] {
+        let r = weld_bead_body(&mut k, &mut b, &[edge], &[size], 1.0, &[], &short, [e; 2]);
+        assert!(r.is_err(), "{e:?}: a 2 mm span was built");
+    }
 }
 
 /// For the format decision (#16913, to bherbruck): an `ExactRoundRecord` of a convex bead

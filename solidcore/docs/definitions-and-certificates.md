@@ -359,7 +359,8 @@ Every face is in one of three classes:
 
 One kind is not in a class yet: a foot blend's section face (a weld bead's on curved faces,
 `blend::foot_blend`, #15129). Its feet are proved between its stations (Krawczyk on the foot
-equations over each piece, `generic-blend.md` §2.5), but its net's distance from the section is
+equations over each piece, `generic-blend.md` §2.5; at a tapered or rounded end only where the legs
+are at least a quarter of the full ones), but its net's distance from the section is
 checked at samples, 0.01 mm at the midpoints between its stations, and it states that tolerance
 as its bound; it moves into the certified class with the net's bound.
 
@@ -527,7 +528,8 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    `corner_rebuild` make the definition exactly and certify the net again before it is an operand
    (or take the proof the kernel already finished for the same record, §4.5).
    A weld bead's foot blend is a record of its own kind (`FootBlendRecord`: supports, sides,
-   leader and piece, legs, sagitta, spans, ends, tolerance, motions, net); `foot_blend_rebuild`
+   leader and piece, legs, sagitta, spans, ends, a shaped end's leg law, tolerance, motions,
+   net); `foot_blend_rebuild`
    makes it and compares the net with its rebuild, to rounding (invariant 9 does not hold for it
    yet: its feet are solved again, and its arcs' weights come from trigonometric functions).
 9. **A record rebuilds bit for bit.** Written, read back and rebuilt, a definition evaluates as the
