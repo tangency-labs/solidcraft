@@ -10,6 +10,9 @@
 //! A new test file in `tests/` is one `#[path]` line below, in order;
 //! `every_test_file_is_built` fails until it is there or in `Cargo.toml`.
 
+// Each file keeps the `mod common;` (two their `mod volume_leak;`) it had as a binary of its own.
+#![allow(clippy::duplicate_mod)]
+
 #[path = "../analytic_cv_edit.rs"]
 mod analytic_cv_edit;
 #[path = "../birail.rs"]
@@ -154,7 +157,7 @@ fn every_test_file_is_built() {
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
         .filter(|name| {
-            if name.ends_with(".rs") {
+            if is_rust(name) {
                 !main.contains(&format!("#[path = \"../{name}\"]"))
                     && !manifest.contains(&format!("path = \"tests/{name}\""))
             } else {
@@ -181,7 +184,7 @@ fn no_module_sets_the_process_fixes() {
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
         .filter(|name| {
-            name.ends_with(".rs")
+            is_rust(name)
                 && main.contains(&format!("#[path = \"../{name}\"]"))
                 && std::fs::read_to_string(dir.join(name))
                     .unwrap()
@@ -193,4 +196,11 @@ fn no_module_sets_the_process_fixes() {
         setting.is_empty(),
         "{setting:?} set the process's fixes: make each a [[test]] of its own in Cargo.toml"
     );
+}
+
+/// Whether a file name in `tests/` is a Rust source file.
+fn is_rust(name: &str) -> bool {
+    std::path::Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("rs"))
 }
