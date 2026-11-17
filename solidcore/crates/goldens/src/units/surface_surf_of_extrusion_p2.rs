@@ -1665,10 +1665,12 @@ mod tests {
     }
 
     /// #18342: `gen1053` intersects the extrusion of a 6.9e-4 long line segment with a
-    /// plane. Its one intersection curve now ends at two points on the extrusion: on
-    /// both planes (within 1e-9) and at most `SM_EFF_ZERO_SQRT` (1e-6, the bound of the
-    /// operation's tolerance) outside the swept segment; the first is 3.9e-7 past its
-    /// start, the second inside it. The old row's two curves ended at points on the
+    /// plane. Its one intersection curve is now the whole chord across the extrusion: it
+    /// ends on both planes (within 1e-9), one end on the edge swept by the segment's start
+    /// (`a` = 0) and the other on the edge swept by its far end (`a` = 1), each within
+    /// `SM_EFF_ZERO_SQRT` (1e-6, the bound of the operation's tolerance) in 3D. The first is
+    /// 3.9e-7 past the `a` = 0 edge, the second 6.7e-7 inside the `a` = 1 edge, so a curve
+    /// cut short inside the strip fails. The old row's two curves ended at points on the
     /// planes but up to 7.6e4 outside the swept segment; they fail the same check.
     #[test]
     fn gen1053_intersection_ends_lie_on_the_extrusion() {
@@ -1677,15 +1679,22 @@ mod tests {
         let i: Inputs = case.parse().unwrap();
         let out = rust(&i).unwrap();
         let o = out.values.get("out").unwrap().clone();
+        let glen = f[1].length();
         // the 3D distance past the swept segment's ends of a point at `a`
-        let outside = |a: f64| (-a).max(a - 1.0).max(0.0) * f[1].length();
+        let outside = |a: f64| (-a).max(a - 1.0).max(0.0) * glen;
         // status, status, one curve, ..., its two end points
         assert_eq!((o[0], o[1], o[2], o[9]), (0.0, 0.0, 1.0, 2.0), "{o:?}");
+        let mut ends = Vec::new();
         for at in [10usize, 14] {
             let (a, off, off_plane) = on_strip(&f, Vec3::new(o[at], o[at + 1], o[at + 2]));
             assert!(outside(a) <= EFF_ZERO_SQRT, "{at}: {a:e}");
             assert!(off < 1e-9 && off_plane < 1e-9, "{at}: {off:e} {off_plane:e}");
+            ends.push(a);
         }
+        // the whole chord: one end on each swept edge, within the tolerance in 3D
+        ends.sort_by(f64::total_cmp);
+        assert!(ends[0].abs() * glen <= EFF_ZERO_SQRT, "{ends:?}");
+        assert!((ends[1] - 1.0).abs() * glen <= EFF_ZERO_SQRT, "{ends:?}");
         // the old row's ends that the new one replaced (measured with the rules off)
         for q in [
             Vec3::new(1092.3570614157895, 5731.732333415699, -3560.217776102151),

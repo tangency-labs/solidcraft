@@ -1408,6 +1408,7 @@ mod tests {
         assert_eq!(out.error, None);
         assert_eq!(big.error, None);
         assert_eq!(out.ints, big.ints, "scale {:?}", i.brep);
+        assert_eq!(out.values, big.values, "scale {:?}", i.brep);
         out
     }
 
@@ -1535,33 +1536,65 @@ mod tests {
         }
     }
 
-    /// The largest distance from a sample of edge 0 of `i`'s B-rep to the nearest sample
-    /// of edge 1 (201 samples each), and the face's zone tolerance.
-    fn edge_gap(i: &Inputs) -> (f64, f64) {
+    /// Closed-form bounds on the distance between edges 0 and 1 of `i`'s B-rep, two full
+    /// circles: `(lower, upper, zone_tol_3d)`. Every point of edge 0 is at least `lower`
+    /// from edge 1, and each point of either lies within `upper` of the other.
+    ///
+    /// For circles `c_i + r_i u_i(θ)`, `u_i = cos θ x_i + sin θ y_i`, the points at the
+    /// same angle θ differ by `Δc + Δr u_0 + r1 (u_0 - u_1)` (`Δc = c0 - c1`,
+    /// `Δr = r0 - r1`). As `|u_0| = 1` and `Δc·u_0 = Δc_⊥0·u_0` (`Δc_⊥0` the part of `Δc`
+    /// in circle 0's plane), `|Δc + Δr u_0|² <= |Δc|² + Δr² + 2 |Δr| |Δc_⊥0|`, and
+    /// `|u_0 - u_1| <= |x0 - x1| + |y0 - y1|`: the root of the first plus `r1` times the
+    /// second bounds the distance. With `n` the unit axis of circle 1 and
+    /// `e = |x0·n| + |y0·n|` (circle 0's tilt to it), a point `p` of circle 0 lies
+    /// `|(p - c1)·n| >= |(c0 - c1)·n| - r0 e` off circle 1's plane and at a distance from
+    /// its axis within `|r0 - r1| - |(c0 - c1)_⊥| - r0 e` of `r1`; either is a lower
+    /// bound on its distance to circle 1. The rounding of these few products and sums is
+    /// a few ulps (1e-16 relative) of the largest term, far below the closest margin
+    /// asserted: at ×10 the upper bound is 9.945e-9 against 1e-8, 0.55% below it.
+    ///
+    /// Premises asserted: both edge curves are ellipses with equal radii (circles), and
+    /// each edge is the whole circle: a positive interval whose ends evaluate to the same
+    /// point, on a 360-degree domain.
+    fn circle_gap_bounds(i: &Inputs) -> (f64, f64, f64) {
+        use solidcore::curve::curve::p2::CurveKind;
         use solidcore::topology::edge as topo_edge;
         let k = Kernel::default();
         let (mut b, _) = own_brep(&i.brep, i.validate_only, i.init_gaps).unwrap().unwrap();
         let (_face, props, _loops) = setup(&k, &mut b, i).unwrap().unwrap();
         let edges = solidcore::topology::brep::p1::edges(&b, None).unwrap();
-        let samples: Vec<Vec<Point3>> = edges
+        let circles: Vec<(Point3, Point3, Point3, f64)> = edges
             .iter()
             .take(2)
             .map(|&e| {
                 let c = topo_edge::evaluation_curve(&b, e).unwrap().unwrap();
                 let iv = topo_edge::interval(&b, e).unwrap();
-                (0..=200)
-                    .map(|n| {
-                        let t = iv.min() + (iv.max() - iv.min()) * f64::from(n) / 200.0;
-                        c.evaluate_point(&k, t).unwrap()
-                    })
-                    .collect()
+                let CurveKind::Ellipse(el) = c.kind() else { panic!("edge {e:?} is no ellipse") };
+                let can = el.canonical();
+                assert_eq!(can.radius_x, can.radius_y, "edge {e:?} is no circle");
+                assert_eq!(can.domain.max() - can.domain.min(), 360.0, "edge {e:?}");
+                assert!(iv.max() > iv.min(), "edge {e:?}");
+                let (a, z) = (c.evaluate_point(&k, iv.min()).unwrap(), c.evaluate_point(&k, iv.max()).unwrap());
+                assert!(a.distance(z) <= 1e-12 * can.radius_x, "edge {e:?} is no whole circle");
+                let pos = can.position;
+                (pos.origin(), pos.x_axis(), pos.y_axis(), can.radius_x)
             })
             .collect();
-        let gap = samples[0]
-            .iter()
-            .map(|p| samples[1].iter().map(|q| p.distance(*q)).fold(f64::MAX, f64::min))
-            .fold(0.0, f64::max);
-        (gap, props.zone_tol_3d)
+        let [(c0, x0, y0, r0), (c1, x1, y1, r1)] = circles[..] else { panic!("two edges") };
+        let dc = c0 - c1;
+        let n0 = x0.cross(y0);
+        let n0 = n0 * (1.0 / n0.length());
+        let dr = (r0 - r1).abs();
+        let in_plane0 = (dc - n0 * dc.dot(n0)).length();
+        let upper = (dc.dot(dc) + dr * dr + 2.0 * dr * in_plane0).sqrt()
+            + r1 * ((x0 - x1).length() + (y0 - y1).length());
+        let n = x1.cross(y1);
+        let n = n * (1.0 / n.length());
+        let tilt = x0.dot(n).abs() + y0.dot(n).abs();
+        let axial = dc.dot(n).abs();
+        let radial = (dc - n * dc.dot(n)).length();
+        let lower = (axial - r0 * tilt).max((r0 - r1).abs() - radial - r0 * tilt);
+        (lower, upper, props.zone_tol_3d)
     }
 
     /// #18342: generated case 309, a cone at scale 1e-3 whose loops 0 and 1 are two
@@ -1585,7 +1618,7 @@ mod tests {
             Some(&vec![CrvDirOnFaceType::PoleNoVertex as i64, CrvDirOnFaceType::None as i64])
         );
         for f in [1.0, 3.0, 10.0] {
-            let (gap, tol) = edge_gap(&scaled(&i, f));
+            let (_, gap, tol) = circle_gap_bounds(&scaled(&i, f));
             assert!(gap < 0.1 * tol, "x{f}: {gap:e} {tol:e}");
             if f > 1.0 {
                 let o = rust(&scaled(&i, f)).unwrap();
@@ -1593,7 +1626,7 @@ mod tests {
                 assert_eq!(o.ints, out.ints, "x{f}");
             }
         }
-        let (gap, tol) = edge_gap(&scaled(&i, 1e3));
+        let (gap, _, tol) = circle_gap_bounds(&scaled(&i, 1e3));
         assert!(gap > 5.0 * tol, "x1e3: {gap:e} {tol:e}");
     }
 

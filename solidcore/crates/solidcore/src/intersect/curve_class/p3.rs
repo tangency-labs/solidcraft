@@ -52,10 +52,15 @@
 //! - **Coincident vertices keep the first (solidcore-native).** When `InsertPointClass`
 //!   merges a vertex into a boundary held by another vertex, both gaps are zero to the
 //!   scaled zero of the boundary's vertex and their pre-snap parameters agree to the
-//!   parameter's scaled zero, the boundary keeps the vertex it has. Upstream merges with
-//!   `Combine`, which keeps the vertex with the smaller gap, comparing rounding noise:
-//!   which loop owned a seam crossing then changed with the model's scale (#18342,
-//!   `query.face_p4` gen0381).
+//!   parameter's scaled zero, the boundary keeps the vertex it has. Both `Combine` calls
+//!   (the boundary and its neighbour) still run; only their gap comparison is changed:
+//!   the input is given the gap of the boundary it merges into, so the two zero gaps
+//!   compare as equal and `Combine` keeps the boundary (`This`), copying the input's
+//!   surf/surf/surf point and moving the vertex to it as upstream does on a tie. The
+//!   neighbour is tied only when it holds the same vertex; any other neighbour (one still
+//!   unknown, say) is merged as upstream. Upstream compares the two gaps as they are,
+//!   rounding noise: which loop owned a seam crossing then changed with the model's
+//!   scale (#18342, `query.face_p4` gen0381).
 //! - **Out-params.** `FindInterval` returns a [`FoundInterval`]; `InsertPointClass` returns
 //!   `rbInsertionMade`; `sm_ChangeEdgePointClassToNearVertex` returns
 //!   `rbChangedToVertexFlag`; `MergePointClass`'s optional output arrays are
@@ -271,6 +276,27 @@ pub(super) fn are_coincident_maybe<O: ClassObject>(
         CoincidentMaybe::Unsure => Coincident::Unsure,
     };
     Ok((coin, position))
+}
+
+/// (not upstream) `input`, with the gap of the boundary `kept` when `tie` is set. Two
+/// vertices whose gaps are both zero to the scaled zero then compare as equal in
+/// `Combine`: the boundary keeps its vertex (`This`), and `Combine` still copies the
+/// input's surf/surf/surf point (and moves the vertex there) as upstream does on a tie.
+fn tied_to<O: ClassObject>(
+    input: &PointClassification<O>,
+    kept: &PointClassification<O>,
+    tie: bool,
+) -> PointClassification<O> {
+    let mut tied = *input;
+    if tie {
+        tied.set_gap_3d(kept.deviation());
+    }
+    tied
+}
+
+/// Whether the boundary `pc` is classified to the vertex `object`.
+fn holds_vertex<O: ClassObject>(pc: &PointClassification<O>, object: Option<O>) -> bool {
+    pc.point_class() == PointClassType::Vertex && object.is_some() && pc.object() == object
 }
 
 /// `SmCurveClassification::InsertAt(index, interval)`.
@@ -1079,8 +1105,8 @@ impl<O: ClassObject> CurveClassification<O> {
         // PointClassifications on existing boundaries are merged not inserted.
         // This big if-statement will check those cases on existing boundaries.
 
-        // (not upstream) whether the boundary keeps its classification when the input
-        // merges into it: set below for two vertices that are indistinguishable
+        // (not upstream) whether the merge below compares the input as tied with the
+        // boundary: set for two vertices that are indistinguishable
         let mut keep_found = false;
 
         // when inserting point param is on a boundary and Insertion is to be computed
@@ -1220,7 +1246,8 @@ impl<O: ClassObject> CurveClassification<O> {
                         // gen0381: at scale 1e-3 the gaps 2.2e-19 and 0 kept the second
                         // vertex, at scale 1 the gaps 2.2e-16 and 8.9e-16 the first). The
                         // first vertex inserted is kept: the insertion order follows the
-                        // topology, which is the same at every scale.
+                        // topology, which is the same at every scale. The merge below still
+                        // runs `Combine`, with the input tied to the boundary's gap.
                         keep_found = true;
                     }
                 }
@@ -1421,14 +1448,12 @@ impl<O: ClassObject> CurveClassification<O> {
                 ivl2.mid.unset_parameters();
             }
         }
-        // (not upstream) two indistinguishable vertices: the boundary keeps the found one
-        else if keep_found {
-            insertion_made = true;
-        }
         // when merging a start boundary point classification
         else if position == IntervalPosition::Start {
             let found_ivl = self.at_mut(index)?;
-            if a.combine(&mut found_ivl.start, point_class)? == Precedence::Other {
+            let found_object = found_ivl.start.object();
+            let input = tied_to(point_class, &found_ivl.start, keep_found);
+            if a.combine(&mut found_ivl.start, &input)? == Precedence::Other {
                 found_ivl.start = *point_class;
             }
             insertion_made = true;
@@ -1436,7 +1461,9 @@ impl<O: ClassObject> CurveClassification<O> {
             // remember to merge the neighbor interval's boundary point
             if index > 0 {
                 let found2 = self.at_mut(index - 1)?;
-                if a.combine(&mut found2.end, point_class)? == Precedence::Other {
+                let tie = keep_found && holds_vertex(&found2.end, found_object);
+                let input = tied_to(point_class, &found2.end, tie);
+                if a.combine(&mut found2.end, &input)? == Precedence::Other {
                     found2.end = *point_class;
                 }
             }
@@ -1444,7 +1471,9 @@ impl<O: ClassObject> CurveClassification<O> {
         // when merging an end boundary point classification
         else if position == IntervalPosition::End {
             let found_ivl = self.at_mut(index)?;
-            if a.combine(&mut found_ivl.end, point_class)? == Precedence::Other {
+            let found_object = found_ivl.end.object();
+            let input = tied_to(point_class, &found_ivl.end, keep_found);
+            if a.combine(&mut found_ivl.end, &input)? == Precedence::Other {
                 found_ivl.end = *point_class;
             }
             insertion_made = true;
@@ -1452,7 +1481,9 @@ impl<O: ClassObject> CurveClassification<O> {
             // remember to merge the neighbor interval's boundary point
             if index + 1 < self.size() {
                 let found2 = self.at_mut(index + 1)?;
-                if a.combine(&mut found2.start, point_class)? == Precedence::Other {
+                let tie = keep_found && holds_vertex(&found2.start, found_object);
+                let input = tied_to(point_class, &found2.start, tie);
+                if a.combine(&mut found2.start, &input)? == Precedence::Other {
                     found2.start = *point_class;
                 }
             }

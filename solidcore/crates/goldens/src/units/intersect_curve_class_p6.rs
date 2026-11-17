@@ -843,7 +843,7 @@ mod tests {
     /// #18342: `scale_k3_5_0_0.000000000001` and `scale_k3_5_0.999999999999_1` insert a
     /// 1e-12 parameter range at an end of the quadratic B-spline of scale 1e9. That range
     /// is 2.83e-3 long in 3D: at least the classification's pair tolerance and more than
-    /// the curve's scaled zero (2.30e-3, a margin of only 1.23x, so it is asserted here).
+    /// the curve's scaled zero (2.27e-3, a margin of only 1.25x, so it is asserted here).
     /// The parameter snap used to merge it into the whole-curve interval; it now stays an
     /// interval of its own, next to the rest of the curve.
     #[test]

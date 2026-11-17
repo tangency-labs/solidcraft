@@ -2367,8 +2367,10 @@ mod tests {
             let (t, prm, tol) = match x {
                 OpIn::FindInterval { t, prm, tol, .. } => (*t, *prm, zone_tol3d(k, *tol)),
                 OpIn::Insert { t, pc, prm, .. } => {
-                    let Ok(pc) = build_pc(k, pool, pc) else { return };
-                    let Ok(tol) = pc.obj_zone_tol_3d(k, pool) else { return };
+                    // a failure here would leave no snap to find: the callers' empty
+                    // lists would then pass without testing anything
+                    let pc = build_pc(k, pool, pc).unwrap();
+                    let tol = pc.obj_zone_tol_3d(k, pool).unwrap();
                     (*t, *prm, tol)
                 }
                 _ => return,
@@ -2468,5 +2470,102 @@ mod tests {
         assert_eq!(a, b);
         // the op's code, its status (0) and whether the insert was made: it was not
         assert_eq!(&a[at + 1..at + 3], &[0.0, 0.0]);
+    }
+
+    /// The state after the ops of a hand-built script on a line `[0,1]` with two bare
+    /// vertices (objects 1 and 2), whose interval 0 ends at `split` at vertex 1 (gap 0,
+    /// pre-snap `split`), with a second interval `[split, 1]` when `split < 1`, after
+    /// inserting vertex 2 at `split` (gap 0, pre-snap `split`, `sss` its surf/surf/surf
+    /// point): classification 0 and the two vertices' points.
+    fn tied_vertex_merge(split: f64, sss: Option<[f64; 3]>) -> (CurveClassification<H>, [Vec3; 2]) {
+        let vertex = |obj: usize| PcIn {
+            class: 104,
+            obj: Some(obj),
+            t: split,
+            gap: 0.0,
+            presnap: split,
+            tol: USE_DEFAULT,
+            sss: None,
+        };
+        let mut ops = vec![
+            OpIn::SetCurve { t: 0, obj: Some(0), owned: false },
+            OpIn::SetSize { t: 0, n: if split < 1.0 { 2 } else { 1 } },
+            OpIn::IvlSet { t: 0, j: 0, a: 0.0, b: split },
+            OpIn::PcSetClass { t: 0, j: 0, w: 2, class: 104, obj: Some(1) },
+            OpIn::PcSetT { t: 0, j: 0, w: 2, v: split },
+            OpIn::PcSetGap { t: 0, j: 0, w: 2, g: 0.0 },
+            OpIn::PcSetPresnap { t: 0, j: 0, w: 2, v: split },
+        ];
+        if split < 1.0 {
+            ops.push(OpIn::IvlSet { t: 0, j: 1, a: split, b: 1.0 });
+        }
+        ops.push(OpIn::Insert {
+            t: 0,
+            pc: PcIn { sss, ..vertex(2) },
+            prm: split,
+            last: BIG,
+            force: false,
+        });
+        // the op whose inspection reads the state the insert left
+        ops.push(OpIn::FindPc { t: 0, prm: 0.0, tol: USE_DEFAULT });
+        let s = Script {
+            objects: vec![
+                ObjIn::Curve(CurveIn::Line(LineIn {
+                    p: [0.0; 3],
+                    v: [1.0, 0.0, 0.0],
+                    domain: [0.0, 1.0],
+                    scale: 1.0,
+                    inside_out: false,
+                })),
+                ObjIn::Vertex,
+                ObjIn::Vertex,
+            ],
+            face: None,
+            ops,
+        };
+        let n = s.ops.len();
+        let mut n_op = 0;
+        let mut after = None;
+        let out = rust_run_inspected(&s, &mut |_, pool, ccs, _| {
+            n_op += 1;
+            if n_op == n {
+                let p = |i| pool.bare.vertex_point(i).unwrap();
+                after = Some((ccs[0].clone(), [p(1), p(2)]));
+            }
+        });
+        assert!(out.is_ok(), "the script failed");
+        after.unwrap()
+    }
+
+    /// #18342 r4 B1 (a): an exact tie (both gaps 0) of vertex 2 merged into the end held
+    /// by vertex 1, the input carrying a surf/surf/surf point. As upstream, `Combine` keeps
+    /// vertex 1 (`This`), copies the point onto the boundary and moves vertex 1 there.
+    #[test]
+    fn a_tied_vertex_merge_keeps_the_surf_surf_surf_point() {
+        let (cc, [v1, v2]) = tied_vertex_merge(1.0, Some([5.0, 6.0, 7.0]));
+        assert_eq!(cc.size(), 1);
+        let end = cc.at(0).unwrap().end;
+        assert_eq!(end.point_class(), PointClassType::Vertex);
+        assert_eq!(end.object().map(|h| h.0), Some(1));
+        assert!(end.sss_point_flag());
+        assert_eq!(end.sss_point(), Vec3::new(5.0, 6.0, 7.0));
+        assert_eq!(v1, Vec3::new(5.0, 6.0, 7.0));
+        assert_eq!(v2, Vec3::new(0.0, 0.0, 0.0));
+    }
+
+    /// #18342 r4 B1 (b): the same tie at an interior boundary whose neighbour start is
+    /// still unknown. As upstream, the neighbour is merged and takes vertex 2 at 0.5; the
+    /// end of interval 0 keeps vertex 1.
+    #[test]
+    fn a_tied_vertex_merge_still_merges_an_unknown_neighbour() {
+        let (cc, _) = tied_vertex_merge(0.5, None);
+        assert_eq!(cc.size(), 2);
+        let end = cc.at(0).unwrap().end;
+        assert_eq!(end.point_class(), PointClassType::Vertex);
+        assert_eq!(end.object().map(|h| h.0), Some(1));
+        let start = cc.at(1).unwrap().start;
+        assert_eq!(start.point_class(), PointClassType::Vertex);
+        assert_eq!(start.object().map(|h| h.0), Some(2));
+        assert_eq!(start.t_param(), 0.5);
     }
 }
