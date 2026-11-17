@@ -58,6 +58,7 @@
 //! | [`Extent3d::from_pseudo_box`]          | `SmExtent3d(const SmPseudoBox&)`               |
 //! | [`Extent3d::circumscribe`]             | `Circumscribe`                                 |
 //! | [`Extent3d::max_distance_to_point`]    | (not upstream) the farthest of the corners from a point |
+//! | [`Extent3d::span_along`]               | (not upstream) the box's reach along a direction |
 //! | [`BoundaryType`]                       | `SmBoundaryType` (`SmTypes.h`)                 |
 //!
 //! Deviations:
@@ -749,6 +750,25 @@ impl Extent3d {
         .length()
     }
 
+    /// (not upstream) How far the box reaches from `origin` along `direction`, `[low, high]`:
+    /// the least and the greatest [`Vec3::distance_along`] of its points, as many lengths as
+    /// `direction` is long. Those are corners; on each axis the bound farther along `direction`
+    /// adds to `high` and the other to `low`.
+    #[must_use]
+    pub fn span_along(&self, origin: Point3, direction: Vec3) -> [f64; 2] {
+        let (mut low, mut high) = (0.0, 0.0);
+        for i in 0..3 {
+            let d = direction.component(i);
+            let ends = [
+                (self.min_at(i) - origin.component(i)) * d,
+                (self.max_at(i) - origin.component(i)) * d,
+            ];
+            low += ends[0].min(ends[1]);
+            high += ends[0].max(ends[1]);
+        }
+        [low, high]
+    }
+
     /// Square root of [`Extent3d::min_distance_squared`] (`MinimumDistance`).
     #[must_use]
     pub fn min_distance(&self, other: &Self) -> f64 {
@@ -1223,6 +1243,33 @@ mod tests {
             assert!((e.max_distance_to_point(at) - want).abs() < 1e-12, "{at:?}");
         }
         assert!((e.max_distance_to_point(p(-1.0, 0.0, 2.0)) - e.max_distance(&e)).abs() < 1e-12);
+    }
+
+    /// A box's reach along a direction runs from its lowest corner to its highest, each axis
+    /// taking the bound on its side, along an axis, a slanted direction, one pointing back, a
+    /// longer one and from an origin inside the box.
+    #[test]
+    fn the_span_along_a_direction_runs_from_the_lowest_corner_to_the_highest() {
+        let e = Extent3d::from_points(p(-1.0, 0.0, 2.0), p(3.0, 5.0, 4.0));
+        for (origin, direction, want) in [
+            (p(0.0, 0.0, 0.0), p(0.0, 0.0, 1.0), [2.0, 4.0]),
+            (p(0.0, 0.0, 0.0), p(0.6, 0.0, -0.8), [-3.8, 0.2]),
+            (p(1.0, 1.0, 1.0), p(-1.0, 0.0, 0.0), [-2.0, 2.0]),
+            (p(1.0, 1.0, 1.0), p(1.0, 2.0, 2.0), [-2.0, 16.0]),
+        ] {
+            let got = e.span_along(origin, direction);
+            let corners = e.corners().map(|c| c.distance_along(origin, direction));
+            let lowest = corners.iter().copied().fold(f64::INFINITY, f64::min);
+            let highest = corners.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            for (a, b) in [
+                (got[0], want[0]),
+                (got[1], want[1]),
+                (lowest, want[0]),
+                (highest, want[1]),
+            ] {
+                assert!((a - b).abs() < 1e-12, "{direction:?}: {got:?} vs {want:?}");
+            }
+        }
     }
 
     /// upstream `my_test_extent3d` (`tests/prog_test/src/smCurveTest.cpp`).

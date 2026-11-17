@@ -312,13 +312,34 @@ impl<'t> Assembly<'t> {
             }
             _ => bounds,
         };
-        let surface = match crate::topology::closed_within(&surface, self.tol) {
+        let mut surface = match crate::topology::closed_within(&surface, self.tol) {
             Some(closed) => {
                 self.splines_closed += 1;
                 closed
             }
             None => surface,
         };
+        if bounds.len() == 2
+            && let BSurface::Sphere { frame, .. } = &mut surface
+        {
+            let edges: Vec<&EdgeB> = bounds
+                .iter()
+                .filter_map(|b| match b {
+                    Bound::Edges(es) => Some(es),
+                    Bound::Vertex(_) => None,
+                })
+                .flatten()
+                .filter_map(|(e, _)| self.edges.get(*e as usize))
+                .collect();
+            if let Some(EdgeB { curve: BCurve::Circle { frame: rim, .. }, .. }) = edges.first() {
+                // Coaxial circular bounds are latitudes of the same sphere. Put its poles
+                // on their axis so an arbitrary placement cannot put a pole on a rim.
+                let aligned = Frame { origin: frame.origin, ..rim.clone() };
+                if edges.iter().all(|e| crate::kernel::form::on_frame(&e.curve, e.interval, &aligned, self.tol).is_some()) {
+                    *frame = aligned;
+                }
+            }
+        }
         let i = index(self.faces.len())?;
         self.faces.push(FaceB { origin, surface, loops: bounds, outer, forward, extent: None });
         Ok(i)
@@ -508,6 +529,14 @@ impl<'t> Assembly<'t> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
+        // A face on a torus that is the rest of it round a patch its loop bounds gets the
+        // torus's seams, its loop a hole in it.
+        let outsides = self.complete_outsides()?;
+        if outsides > 0 {
+            notes.push(format!("{outsides} faces on a torus that are the outside of their loops given the torus's seams"));
+        }
+        // A torus face's seams where its torus starts, so its (u, v) box is read whole.
+        self.seat_torus_seams()?;
         let slits = self.drop_inner_slits();
         if slits > 0 {
             notes.push(format!("{slits} slits of no area left out of the faces they lie in"));

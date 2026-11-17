@@ -245,6 +245,7 @@ fn wr_614_imported_tolerances_union_and_intersection_at_5e6() {
 /// When A continues well past the crossing ([-2, 10] instead of [-2, 2]) so B emerges
 /// out of A's y = 20 face up to y ~ 20.4, the crossing at x = 1.9999 is a real exit
 /// edge, not a two-sided coincident strip, and must not be dropped.
+/// The intersection, a wedge thinner than the tolerance, is empty.
 #[test]
 fn wr_614_wider_protruding_box_keeps_exit_crossing() {
     let mut k = Kernel::default();
@@ -263,9 +264,15 @@ fn wr_614_wider_protruding_box_keeps_exit_crossing() {
 
     let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
     let (_, b) = strip_cubes(&mut k, D);
+    // The overlap is that wedge: 1e-4 across and 4 long, 5e-6 thick at most. Its two
+    // edges in each end plane (A's along y = 20, B's rising 5e-6 over that 1e-4) run
+    // between the same two vertices within their tolerances (1e-5 each) of each other
+    // over their whole length: one edge (docs/booleans.md, "One edge or two"), so no
+    // solid is left between them. Kept as two edges, the wedge was a body of 3 faces
+    // whose check failed (a loop of zero area, bad orientation) and whose volume
+    // measured 8.9e-20.
     let mut inter = boolean_intersection(&mut k, a, b).unwrap();
-    assert_eq!(shape(&inter).0, 0, "empty intersection");
-    assert_eq!(shape(&inter).3, 0, "no intersection solid");
+    assert_eq!(shape(&inter), (0, 0, 0, 0, false), "empty intersection");
     assert_valid(&mut k, &mut inter, "wider box intersection");
 }
 

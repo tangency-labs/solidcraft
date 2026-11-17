@@ -102,6 +102,8 @@ pub struct Request {
     /// The Verify preference added `verify` to the options; unlike a caller's own option it must
     /// not stop an already-open design from being reused. Its check then runs separately.
     pub(crate) auto_verify: bool,
+    /// Open the file with an importer plugin (`file.import`) even when SolidCraft reads it too.
+    pub plugin_import: bool,
 }
 
 impl Request {
@@ -123,6 +125,7 @@ impl Request {
             tab: None,
             tries: 0,
             auto_verify: false,
+            plugin_import: false,
         }
     }
     /// It adds what it reads to the active design.
@@ -141,6 +144,7 @@ impl Request {
     }
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
+            Kind::Open if self.plugin_import => ("file.import", self.params()),
             Kind::Open => ("doc.open", self.params()),
             Kind::Insert if self.gerber => {
                 let mut params = self.options.clone();
@@ -494,7 +498,7 @@ pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde
 /// The preference's `reuse_import` default for an import-backed open only: a native design's
 /// request keeps empty options, so `reuse_open` can still switch to its open tab.
 fn default_reuse_import(app: &SolveApp, request: &mut Request) {
-    if request.kind == Kind::Open && solidcraft_engine::io::is_step_path(&request.path) {
+    if request.kind == Kind::Open && !request.plugin_import && solidcraft_engine::io::is_step_path(&request.path) {
         request.options.entry("reuse_import").or_insert(Value::Bool(app.preferences.reuse_imports));
     }
 }
@@ -513,6 +517,7 @@ pub(crate) fn preferred_options(app: &SolveApp, path: &str) -> serde_json::Map<S
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if request.kind == Kind::Open
+        && !request.plugin_import
         && app.preferences.verify_opened_designs
         && solidcraft_engine::io::is_design_path(&request.path)
         && !request.options.contains_key("verify")
@@ -525,10 +530,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
         return Ok(());
     }
     default_reuse_import(app, &mut request);
-    if app.file_load.idle() && reuse_open(app, &request) {
+    if !app.file_picker_busy() && app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
-    if matches!(request.kind, Kind::Open | Kind::Insert) {
+    if matches!(request.kind, Kind::Open | Kind::Insert) && !request.plugin_import {
         // After `reuse_open`: an already open tab is kept whatever the import preferences say,
         // as the folder option is.
         for (k, v) in preferred_options(app, &request.path) {
@@ -630,7 +635,7 @@ pub(crate) fn queue(app: &mut SolveApp, mut request: Request) -> Result<(), Stri
 /// Answer each ordinary open separately, including queued requests for the same file.
 /// Validate the caller's scope before looking at existing sessions or resolving paths.
 fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
-    if request.kind != Kind::Open {
+    if request.kind != Kind::Open || request.plugin_import {
         return false;
     }
     let reused = solidcraft_engine::io::vfs::scoped(request.scope.clone(), || {
@@ -678,7 +683,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         return Some(req);
     };
     let kind = match id {
-        "doc.open" => Kind::Open,
+        "doc.open" | "file.import" => Kind::Open,
         "file.insert_step" | "file.insert_mesh" | "pointcloud.insert" => Kind::Insert,
         "file.export_view_dxf" => Kind::ExportDxf,
         "pointcloud.reload" => Kind::ReloadCloud,
@@ -740,6 +745,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         tab: None,
         tries: 0,
         auto_verify: false,
+        plugin_import: id == "file.import",
     };
     let _ = begin_request(app, request);
     None
@@ -795,7 +801,7 @@ fn recovered_behind(app: &mut SolveApp, uid: u64, id: &str, dir: Option<&str>) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn start(app: &mut SolveApp) {
-    if app.file_load.running.is_some() {
+    if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
     // A request for a tab that was closed has nowhere to land: answer it so it does not wait for
@@ -848,6 +854,10 @@ fn start(app: &mut SolveApp) {
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
     scratch.set_validation(app.preferences.validation);
+    // A file an importer plugin reads opens with the plugins the user installed and left on.
+    scratch.plugin_state = app.session.plugin_state.clone();
+    scratch.disabled_plugins = app.session.disabled_plugins.clone();
+    scratch.plugin_limits = app.session.plugin_limits;
     crate::print_face_ui::sync(&mut scratch, &app.preferences);
     if insert {
         scratch.selection = app.session.selection.clone();
@@ -971,7 +981,7 @@ fn start(app: &mut SolveApp) {
 /// Start the next queued STEP file as a [`Staged`] import (see [`step_staged`]).
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn start_staged(app: &mut SolveApp) {
-    if app.file_load.running.is_some() {
+    if app.file_load.running.is_some() || app.file_picker_busy() {
         return;
     }
     // The first that can start: one for a design in a tab not shown waits for it.
@@ -1755,6 +1765,11 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                     }
                     if let Some(note) = &request.note {
                         app.set_status(note.clone(), false);
+                    }
+                    // A file an importer plugin opened: what it could not carry over. A program
+                    // that asked has it in the reply instead.
+                    if request.reply.is_none() {
+                        crate::import_report::offer(app, &made.result);
                     }
                 }
                 if request.kind == Kind::Open {

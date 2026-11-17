@@ -1323,7 +1323,7 @@ fn end_face_not_made() -> SolidError {
     SolidError::blend_failed(OP_END_PATCH, "the corner's end face could not be made")
 }
 
-/// Not upstream (#2488, with `fillet_round_as_definition`): an End's patch keeps its
+/// Not upstream (#2488): an End's patch keeps its
 /// definition ([`CornerDefinition::end`]): its support face's surface `support` (the face's
 /// or its extension) and the patch's boundary, the corner's edges' curves; re-certified at
 /// once ([`CornerDefinition::recertify`]: the net on its support).
@@ -1339,9 +1339,6 @@ fn keep_end_definition(
     support: &Surface,
     net: &mut Surface,
 ) -> Result<()> {
-    if !k.fixes.fillet_round_as_definition {
-        return Ok(());
-    }
     let mut boundary = Vec::with_capacity(edges.len());
     for &e in edges {
         let curve = pseudo
@@ -1366,9 +1363,6 @@ fn keep_end_definition_of(
     support: &Surface,
     net: &mut Surface,
 ) -> Result<()> {
-    if !k.fixes.fillet_round_as_definition {
-        return Ok(());
-    }
     let boundary = curves
         .iter()
         .map(|curve| nurbs_curve(curve).cloned())
