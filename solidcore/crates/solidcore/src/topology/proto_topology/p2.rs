@@ -557,26 +557,33 @@ fn within_tolerance_of_segment(x: Point3, a: Point3, b: Point3, tol: f64) -> boo
     bound.is_finite() && d <= bound
 }
 
-/// Not upstream (WR-306, #18312): whether a ball at `centre` growing from `old_tol` to
-/// `grown` reaches a vertex at `at` with tolerance `tol` that the ball before kept clear
-/// of: the two balls are certainly apart before (`old_tol + tol < D`, `D` the exact
-/// distance) and may touch after (`D <= grown + tol`). A ball that does not grow reaches
-/// nothing new.
+/// Not upstream (WR-306, #18312): whether a ball of radius `old_tol` at `before`, grown to
+/// radius `grown` at `centre`, reaches a vertex at `at` with tolerance `tol` that the ball
+/// before kept clear of: the two balls are certainly apart before (`old_tol + tol < D`,
+/// `D` the exact distance from `before`) and may touch after (`D' <= grown + tol`, `D'`
+/// from `centre`). A ball that does not grow reaches nothing new; nor does one that was
+/// within a rounding of the vertex before (that overlap is not the growth's, and is left
+/// as upstream leaves it).
 ///
-/// The computed distance `d` is within `γ_4·D` of `D` (the inputs are stored points). A
-/// computed sum `s` is at least `(1 - u)` times the exact one, and the rounded product
-/// `s·(1 + γ_8)` (the factor's own rounding included) is then at least `(1 + γ_4)` times
-/// the exact sum. So `old·(1 + γ_8) < d` gives `old_exact < D`, and `D <= reach_exact`
-/// gives `d <= reach·(1 + γ_8)`: the test may refuse a growth that misses by a rounding,
-/// and of balls it finds apart before it never passes one that reaches. A non-finite
-/// distance or bound reaches nothing (left as upstream leaves it).
-fn grown_into(centre: Point3, old_tol: f64, grown: f64, at: Point3, tol: f64) -> bool {
-    if !(grown > old_tol) {
-        return false;
-    }
-    let d = centre.distance(at);
+/// A computed distance `d` is within `γ_4·D` of the exact one (the inputs are stored
+/// points). A computed sum `s` is at least `(1 - u)` times the exact one, and the rounded
+/// product `s·(1 + γ_8)` (the factor's own rounding included) is then at least `(1 + γ_4)`
+/// times the exact sum. So `old·(1 + γ_8) < d` gives `old_exact < D`, and
+/// `D' <= reach_exact` gives `d' <= reach·(1 + γ_8)`: the test may refuse a growth that
+/// misses by a rounding, and of balls it finds apart before it never passes one that
+/// reaches. A non-finite distance or bound (NaN compares false) reaches nothing.
+fn grown_into(
+    before: Point3,
+    old_tol: f64,
+    centre: Point3,
+    grown: f64,
+    at: Point3,
+    tol: f64,
+) -> bool {
     let margin = 1.0 + gamma(8);
-    (old_tol + tol) * margin < d && d <= (grown + tol) * margin
+    grown.partial_cmp(&old_tol) == Some(core::cmp::Ordering::Greater)
+        && (old_tol + tol) * margin < before.distance(at)
+        && centre.distance(at) <= (grown + tol) * margin
 }
 
 /// `SM_CAST_PTR(SmTopology, obj)`.
@@ -1801,13 +1808,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let delete_which = match combined {
                     Ok(w) => w,
                     Err(e) => {
-                        // (statuses passed on) the definitions left are listed at `pv`
-                        let listed = if pass {
-                            vds.retain(Option::is_some);
-                            self.write_vertex_definitions(pv, &vds)
-                        } else {
-                            Ok(())
-                        };
+                        // the definitions left are listed at `pv`, whatever the statuses: a
+                        // hull hand-over's refusal (#18312) comes here with them ignored too
+                        vds.retain(Option::is_some);
+                        let listed = self.write_vertex_definitions(pv, &vds);
                         // Not upstream (#16637): on every error path, the points of those
                         // combined away so far stay covered where `pv` is
                         if absorbed_any {
@@ -2067,9 +2071,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     }
 
     /// Not upstream (#18312): writes `grown`, the proto vertex `pv` placed or covering what
-    /// it absorbed (#16637), unless its tolerance grew, from where `grown` is, into a vertex
-    /// definition of another proto vertex that the tolerance before kept clear of
-    /// ([`Self::growth_reaches_another`]; `pv`'s own definitions are what it stands for).
+    /// it absorbed (#16637), unless its grown tolerance reaches, from where `grown` is, a
+    /// vertex definition of another proto vertex that `pv`'s tolerance kept clear of from
+    /// where `pv` was ([`Self::growth_reaches_another`]; the placement is ours, not
+    /// upstream's, so "clear before" is judged before it; `pv`'s own definitions are what it
+    /// stands for).
     ///
     /// # Errors
     ///
@@ -2087,8 +2093,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .ok_or(dangling("proto vertex is deleted"))?;
         if self.growth_reaches_another(
             k,
-            grown.position(),
+            v.position(),
             v.tolerance(k),
+            grown.position(),
             grown.tolerance(k),
             None,
             v.vertex_definitions(),
@@ -2190,6 +2197,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             k,
             current.position(),
             current.tolerance(k),
+            grown.position(),
             grown.tolerance(k),
             current.proto_vertex(),
             &[to, from],
@@ -2718,27 +2726,26 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         refusal
     }
 
-    /// Not upstream (WR-306, #18312): whether a tolerance ball at `centre` that grows from
-    /// `old_tol` to `grown` reaches a vertex definition that the ball before the growth kept
-    /// clear of ([`grown_into`]): one of the proto vertex `own`, or of any other listed
-    /// one, other than `skip` (the definitions the ball stands for) and deleted ones. An
-    /// overlap the growth does not cause is left as upstream leaves it.
+    /// Not upstream (WR-306, #18312): whether a tolerance ball of radius `old_tol` at
+    /// `before`, grown to radius `grown` at `centre`, reaches a vertex definition that the
+    /// ball before kept clear of ([`grown_into`]): one of the proto vertex `own`, or of any
+    /// other listed one, other than `skip` (the definitions the ball stands for) and deleted
+    /// ones. An overlap the growth does not cause is left as upstream leaves it.
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] when `own` is deleted.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn growth_reaches_another(
         &self,
         k: &Kernel,
-        centre: Point3,
+        before: Point3,
         old_tol: f64,
+        centre: Point3,
         grown: f64,
         own: Option<ProtoVertexId>,
         skip: &[VertexDefId],
     ) -> Result<bool> {
-        if !(grown > old_tol) {
-            return Ok(false);
-        }
         let mut pvs = Vec::new();
         if let Some(own) = own {
             self.proto_vertex(own)
@@ -2756,7 +2763,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     continue;
                 }
                 if let Some(d) = self.vertex_def(x) {
-                    if grown_into(centre, old_tol, grown, d.position(), d.tolerance(k)) {
+                    if grown_into(before, old_tol, centre, grown, d.position(), d.tolerance(k)) {
                         return Ok(true);
                     }
                 }
@@ -2967,11 +2974,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         // leaves it.
                         let old_tol = self.vd_ref(vd0)?.tolerance(k);
                         let new_tol = self.vd_ref(new_vd)?.tolerance(k);
-                        if grown_into(pt0, old_tol, cover, pt1, new_tol)
+                        if grown_into(pt0, old_tol, pt0, cover, pt1, new_tol)
                             || self.growth_reaches_another(
                                 k,
                                 pt0,
                                 old_tol,
+                                pt0,
                                 cover,
                                 Some(start),
                                 &[vd0],
@@ -6017,8 +6025,13 @@ mod tests {
     /// goes ahead.
     #[test]
     fn a_resolve_whose_cover_would_reach_another_definition_is_refused() {
-        for (x, refused) in [(3.8e-4, true), (6e-4, false)] {
-            let k = Kernel::default();
+        for (x, refused, pass) in [
+            (3.8e-4, true, false),
+            (3.8e-4, true, true),
+            (6e-4, false, false),
+        ] {
+            let mut k = Kernel::default();
+            k.fixes.ssi_proto_topology_statuses_pass_on = pass;
             let mut geo = Geo::default();
             geo.curves.push(line([0.0, 0.0, 0.0], [5e-5, 0.0, 0.0]));
             geo.points.push(Point3::new(0.0, 0.0, 0.0));
@@ -6044,6 +6057,13 @@ mod tests {
             resolve_loop_at(&k, &mut m, &mut geo, pv, 0).unwrap();
             assert!(!m.vertex_def(vd).unwrap().absorbed_hull().is_empty());
             assert_eq!(m.vertex_def(vd).unwrap().tolerance(&k), 1e-4);
+            let moved = Point3::new(1.5e-4, 0.0, 0.0);
+            let cover = m
+                .vertex_def(vd)
+                .unwrap()
+                .covering_tolerance(&k, moved)
+                .unwrap();
+            assert!(cover > 1.5e-4 && cover < 1.5001e-4);
 
             let result = m.resolve_proto_vertex(&k, &geo, pv);
             let refusal = m.take_self_loop_refusal();
@@ -6052,8 +6072,10 @@ mod tests {
             if refused {
                 let err = refusal.expect("kept for the Boolean");
                 assert!(err.to_string().contains("another vertex"), "{err}");
-                if let Err(e) = result {
-                    assert_eq!(e, err);
+                if pass {
+                    assert_eq!(result.unwrap_err(), err);
+                } else {
+                    result.unwrap();
                 }
                 assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[vd]);
                 assert_eq!(def.position(), p, "not moved");
@@ -6061,8 +6083,8 @@ mod tests {
             } else {
                 result.unwrap();
                 assert!(refusal.is_none(), "{x:e}");
-                assert_eq!(def.position(), Point3::new(1.5e-4, 0.0, 0.0), "{x:e}");
-                assert!(def.tolerance(&k) > 1.5e-4, "{x:e}: grown to cover the line");
+                assert_eq!(def.position(), moved, "{x:e}");
+                assert_eq!(def.tolerance(&k), cover, "{x:e}: grown to cover the line");
             }
         }
     }
@@ -6104,12 +6126,17 @@ mod tests {
             let a = mk(&mut m, &geo, p, 2e-6);
             m.add_vertex_definition(pv, a).unwrap();
             resolve_loop_at(&k, &mut m, &mut geo, pv, 0).unwrap();
-            assert!(!m.vertex_def(a).unwrap().absorbed_hull().is_empty());
+            let hull = m.vertex_def(a).unwrap().absorbed_hull().to_vec();
+            assert!(!hull.is_empty());
 
             let at = Point3::new(1.5e-4, 0.0, 0.0);
             let b = mk(&mut m, &geo, at, 1e-6);
             m.add_vertex_definition(pv, b).unwrap();
             let (pv2, other) = another_vertex_at(&k, &mut m, &geo, Point3::new(x, 0.0, 0.0), 1e-4);
+            let mut covering = m.vertex_def(b).unwrap().clone();
+            covering.take_over_hull(&k, &hull).unwrap();
+            let cover = covering.tolerance(&k);
+            assert!(cover > 1.5e-4 && cover < 1.5001e-4);
 
             let result = m.resolve_proto_vertex(&k, &geo, pv);
             let refusal = m.take_self_loop_refusal();
@@ -6128,7 +6155,9 @@ mod tests {
                 result.unwrap();
                 assert!(refusal.is_none(), "{x:e}");
                 assert!(m.vertex_def(a).is_none(), "{x:e}: a is combined away");
-                assert!(def.tolerance(&k) > 1.5e-4, "{x:e}: grown to cover the line");
+                assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions(), &[b]);
+                assert_eq!(def.tolerance(&k), cover, "{x:e}: grown to cover the line");
+                assert_eq!(def.absorbed_hull(), &hull[..], "{x:e}: b holds a's hull");
             }
         }
     }
@@ -6184,6 +6213,7 @@ mod tests {
                 assert!(err.to_string().contains("another vertex"), "{err}");
                 assert!(refusal.is_some(), "kept for the Boolean");
                 assert_eq!(v.raw_tolerance(), 1e-5, "not grown");
+                assert!(v.absorbed_points().is_empty(), "nothing recorded");
             } else {
                 result.unwrap();
                 assert!(refusal.is_none(), "{dx:e}");

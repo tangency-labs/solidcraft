@@ -3195,13 +3195,15 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             // a self-loop grows to keep the curve's hull covered from the new position (a
             // definition with no hull is moved as upstream moves it). Not upstream
             // (#18312): a growth into another vertex definition its tolerance kept clear of
-            // is refused, with the definition unchanged.
+            // is refused, with the definition unchanged. The move is upstream's, so "clear
+            // before" is judged at the new position, as the self-loop split judges its own.
             if let Some(v) = self.vertex_def(vd) {
                 if let Some(cover) = v.covering_tolerance(k, position) {
                     if self.growth_reaches_another(
                         k,
                         position,
                         v.tolerance(k),
+                        position,
                         cover,
                         v.proto_vertex,
                         &[vd],
