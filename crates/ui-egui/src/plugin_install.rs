@@ -350,10 +350,9 @@ mod tests {
         let ctx = crate::fonts::test_context();
         for frame in 0..3 {
             let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(820.0, 680.0));
-            let mut output = ctx.run_ui(
-                egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), ..Default::default() },
-                |ui| crate::ui_kit::scope(ui, |ui| show(&mut app, ui.ctx())),
-            );
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.0), ..Default::default() }, |ui| {
+                crate::ui_kit::scope(ui, |ui| show(&mut app, ui.ctx()))
+            });
             if frame == 2 {
                 let labels = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect::<Vec<_>>().join(" ");
                 assert!(labels.contains("Update"), "the confirmation uses Update: {labels}");
