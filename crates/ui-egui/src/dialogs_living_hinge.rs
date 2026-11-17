@@ -64,7 +64,7 @@ fn tipped<R>(ui: &mut egui::Ui, tip: &str, row: impl FnOnce(&mut egui::Ui) -> R)
     row.inner
 }
 
-pub fn rows(_: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, _: &[SelInput]) -> bool {
+pub fn rows(app: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, _: &[SelInput]) -> bool {
     choice_row(
         ui,
         "ui.living_hinge.bend_axis",
@@ -90,7 +90,37 @@ pub fn rows(_: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, _: &[SelInput]
         )
     });
     enter |= tipped(ui, "ui.living_hinge.margin_tip", |ui| expr_row(ui, "ui.living_hinge.margin", &mut h.margin));
+    if let Some(reply) = &app.preview.report {
+        let lines = report_lines(&app.session.doc, reply);
+        for (i, line) in lines.iter().enumerate() {
+            let r = ui.label(line);
+            if i == 2 {
+                let outline = reply.get("outline_length_mm").and_then(Value::as_f64).unwrap_or(0.0);
+                let outline = crate::length_input::shown(&app.session.doc, outline);
+                r.backing_on_hover_text(solidcraft_ui_text::locale().format("ui.living_hinge.report_cut_tip", &[("outline", &outline)]));
+            }
+        }
+    }
     enter
+}
+
+/// The report lines under the fields (design 13.4), from a preview's reply: counts, the cut
+/// length and the band's width, lengths in the design's unit.
+fn report_lines(doc: &solidcraft_engine::doc::Document, reply: &Value) -> Vec<String> {
+    let l = solidcraft_ui_text::locale();
+    report_args(doc, reply).iter().map(|(id, args)| l.format(id, &args.iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>())).collect()
+}
+
+/// Each report line's message id and its arguments.
+fn report_args(doc: &solidcraft_engine::doc::Document, reply: &Value) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
+    let n = |k: &str| reply.get(k).and_then(Value::as_u64).unwrap_or(0).to_string();
+    let len = |k: &str| crate::length_input::shown(doc, reply.get(k).and_then(Value::as_f64).unwrap_or(0.0));
+    vec![
+        ("ui.living_hinge.report_slots", vec![("slots", n("slots")), ("rows", n("rows"))]),
+        ("ui.living_hinge.report_kinds", vec![("run_out", n("run_out")), ("shortened", n("shortened")), ("left_out", n("left_out"))]),
+        ("ui.living_hinge.report_cut", vec![("length", len("cut_length_mm"))]),
+        ("ui.living_hinge.report_band", vec![("width", len("band_width_mm"))]),
+    ]
 }
 
 pub fn commands(app: &SolveApp, h: &LivingHinge, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
@@ -223,5 +253,17 @@ mod tests {
         assert_eq!(args["targets"], json!(["Wall"]), "{args}");
         // Other features are not a living hinge.
         assert!(for_feature(&app, &app.session.doc.find_feature("HingeArea").unwrap().kind.clone()).is_none());
+    }
+
+    /// The report lines read the preview's reply, lengths in the design's unit.
+    #[test]
+    fn living_hinge_report_lines_from_the_reply() {
+        let s = Session::default();
+        let reply = json!({"slots": 95, "rows": 27, "run_out": 28, "shortened": 0, "left_out": 26,
+            "cut_length_mm": 1757.8, "outline_length_mm": 3566.5, "band_width_mm": 40.0});
+        let args = report_args(&s.doc, &reply);
+        let flat: Vec<String> = args.iter().flat_map(|(_, a)| a.iter().map(|(k, v)| format!("{k}={v}"))).collect();
+        assert_eq!(flat, ["slots=95", "rows=27", "run_out=28", "shortened=0", "left_out=26", "length=1757.8 mm", "width=40 mm"]);
+        assert_eq!(report_lines(&s.doc, &reply).len(), 4);
     }
 }
