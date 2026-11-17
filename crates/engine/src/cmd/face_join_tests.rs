@@ -324,6 +324,11 @@ fn join_to_object_can_keep_the_to_body_apart() {
             json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":["Base"],"to_body_apart":"true"}),
             json!({"sketch":sketch,"distance":30,"operation":"join","targets":["Base"],"to_body_apart":true}),
             json!({"sketch":sketch,"to":[20,20,40],"operation":"cut","targets":["Base"],"to_body_apart":true}),
+            // Automatic scope may still join the To body, so opt-in separation
+            // must name the bodies that may take part.
+            json!({"sketch":sketch,"to":[20,20,40],"operation":"join","to_body_apart":true}),
+            json!({"sketch":sketch,"to":[20,20,40],"operation":"join","targets":[],"to_body_apart":true}),
+            json!({"sketch":sketch,"to":[20,20,40],"operation":"join","participants":[],"to_body_apart":true}),
         ] {
             assert!(s.execute("solid.extrude", &bad_params).is_err(), "{bad_params}");
             assert_eq!(s.doc.to_json(), before, "invalid parameters leave no feature");
