@@ -396,16 +396,44 @@ fn adjacent_profiles_from_slanted_face_use_same_merged_centre_as_geometry() {
     let angle = 0.1f64.atan();
     let point = [2.0 * angle.sin(), 0.0, 10.0 + 2.0 * angle.cos()];
     h.app.run("solid.extrude", json!({"sketch":"Adjacent","distance":10,"from":point,"name":"Depth","body_name":"Main","operation":"new"})).unwrap();
-    let min_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z;
+    let mesh = h.app.session.world_state().unwrap().body("Main").unwrap().mesh();
+    let min_z = mesh.bounds().min.z;
+    // The extrude starts on the slanted face, so where it starts under the merged profiles'
+    // middle (x = 5, y = 5) is where a ray up through the solid first meets it.
+    let (t, _) = mesh.raycast(solidcore_record::Vec3::new(5.0, 5.0, 0.0), solidcore_record::Vec3::new(0.0, 0.0, 1.0)).unwrap();
+    let start_z = t;
+    assert!((start_z - (10.0 + 2.0 / angle.cos() - 5.0 * angle.tan())).abs() < 1e-6, "the start follows the face: {start_z}");
     open(&mut h);
     let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
-    assert!((base.z - min_z).abs() < 1e-7, "displayed start{} geometry start{min_z}", base.z);
+    assert!((base.z - start_z).abs() < 1e-6, "displayed start {} geometry start {start_z}", base.z);
     // Averaging the two unmerged rectangle loops gives x=3.5; their internal
     // seam must not bias the reference ray used by the extent handle.
     let unmerged_height = 10.0 + 2.0 / angle.cos() - 3.5 * angle.tan();
     assert!((base.z - unmerged_height).abs() > 0.01, "fixture must distinguish the raw-profile centre");
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!((h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z - min_z).abs() < 1e-7);
+}
+
+/// An extrude from a design saved before From followed a slanted face (`from_level`) still
+/// starts at the face's level, and the window's arrow starts there too, not on the slope.
+#[test]
+fn an_old_extrude_kept_on_its_flat_start_shows_the_arrow_at_that_level() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":2,"corner":[-10,-10,10],"body_name":"Reference"})).unwrap();
+    h.app.run("solid.move", json!({"bodies":["Reference"],"axis":[0,1,0],"angle":"atan(0.1)","origin":[0,0,10]})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Square"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let angle = 0.1f64.atan();
+    let point = [2.0 * angle.sin(), 0.0, 10.0 + 2.0 * angle.cos()];
+    h.app.run("solid.extrude", json!({"sketch":"Square","distance":10,"from":point,"name":"Depth","body_name":"Main","operation":"new"})).unwrap();
+    h.app.run("timeline.edit", json!({"feature":"Depth","set":{"extent":{"from_level":true}}})).unwrap();
+    let min_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z;
+    let max_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().max.z;
+    assert!((max_z - min_z - 10.0).abs() < 1e-6, "the old start is flat: z {min_z} to {max_z}");
+    open(&mut h);
+    let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
+    assert!((base.z - min_z).abs() < 1e-6, "displayed start {} geometry start {min_z}", base.z);
 }
 
 #[test]
@@ -1055,6 +1083,146 @@ fn target_bodies(h: &Harness) -> Option<Vec<String>> {
     d.inputs.iter().find(|i| i.label == "Target Bodies").map(|i| i.items.body_names())
 }
 
+fn overlapping_boxes_and_a_cut_profile() -> (Harness, u64) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, x) in [("Left", 0), ("Right", 30)] {
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":10,"corner":[x,0,0],"operation":"new","body_name":name})).unwrap();
+    }
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","offset":"10 mm","name":"CutProfile"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[32,5],"p1":[38,15]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.frames(4);
+    (h, sketch)
+}
+
+/// A To Object cut through overlapping bodies can leave the unpicked body intact (#17323).
+#[test]
+fn extrude_cut_only_cuts_the_target_bodies_picked_in_the_dialog() {
+    for (through_all, picked, hidden_left) in [(false, false, false), (false, true, false), (true, true, false), (false, false, true)] {
+        let (mut h, sketch) = overlapping_boxes_and_a_cut_profile();
+        if hidden_left {
+            h.app.session.visibility.hidden_bodies.push("Left".into());
+        }
+        h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+        h.app.start("solid.extrude");
+        h.frames(4);
+        {
+            let d = h.app.dialog.as_mut().unwrap();
+            let crate::dialogs::Kind::Extrude { operation, auto_op, direction, all, .. } = &mut d.kind else { panic!("extrude") };
+            *operation = 2;
+            *auto_op = false;
+            *direction = 1;
+            *all = through_all;
+            if !through_all {
+                d.pick(&h.app.session, solidcraft_engine::Sel::Vertex { body: "Right".into(), point: solidcore_record::Vec3::new(35.0, 10.0, 0.0) });
+            }
+        }
+        h.frames(2);
+        assert_eq!(target_bodies(&h), Some(vec![]), "Cut shows Target Bodies");
+        if picked {
+            let d = h.app.dialog.as_mut().unwrap();
+            d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
+            d.pick(&h.app.session, solidcraft_engine::Sel::Body { name: "Right".into() });
+        }
+        h.frames(2);
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+        let left_volume = if picked || hidden_left { 8000.0 } else { 7400.0 };
+        assert!((volume(&h, "Left") - left_volume).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+        let FeatureKind::Extrude { targets, extent, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("extrude") };
+        assert_eq!(targets.iter().map(|n| n.0.as_str()).collect::<Vec<_>>(), if picked || hidden_left { vec!["Right"] } else { vec![] });
+        assert_eq!(extent.to.as_ref().map(|p| p.0), (!through_all).then_some(solidcore_record::Vec3::new(35.0, 10.0, 0.0)));
+        assert_eq!(extent.through_all, through_all);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!((volume(&h, "Left") - 8000.0).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 8000.0).abs() < 1e-6);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert!((volume(&h, "Left") - left_volume).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn editing_extrude_cut_restores_targets_and_clearing_them_keeps_the_original_scope() {
+    for participants in [vec![], vec!["Left"]] {
+        let (mut h, _) = overlapping_boxes_and_a_cut_profile();
+        h.app
+            .run(
+                "solid.extrude",
+                json!({"sketch":"CutProfile","operation":"cut","direction":"negative","to":[35,10,0],
+            "targets":["Right"],"participants":participants,"name":"Depth"}),
+            )
+            .unwrap();
+        let undo = h.app.session.undo.len();
+        open(&mut h);
+        assert_eq!(target_bodies(&h), Some(vec!["Right".into()]));
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert!((volume(&h, "Left") - 8000.0).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+        open(&mut h);
+        h.app.dialog.as_mut().unwrap().inputs.iter_mut().find(|i| i.label == "Target Bodies").unwrap().items.clear();
+        h.frames(2);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        let feature = h.app.session.doc.find_feature("Depth").unwrap();
+        let FeatureKind::Extrude { targets, .. } = &feature.kind else { panic!("extrude") };
+        assert!(targets.is_empty(), "clearing the input must remove the stored targets");
+        assert_eq!(feature.participants, participants);
+        assert!((volume(&h, "Left") - 7400.0).abs() < 1e-6);
+        assert!((volume(&h, "Right") - if participants.is_empty() { 7400.0 } else { 8000.0 }).abs() < 1e-6);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!((volume(&h, "Left") - 8000.0).abs() < 1e-6);
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn extrude_target_picks_survive_join_cut_switches_but_not_new_body() {
+    for initial_operation in ["cut", "intersect"] {
+        let (mut h, _) = overlapping_boxes_and_a_cut_profile();
+        h.app
+            .run(
+                "solid.extrude",
+                json!({"sketch":"CutProfile","operation":initial_operation,"direction":"negative","distance":"10 mm",
+        "targets":["Right"],"name":"Depth"}),
+            )
+            .unwrap();
+        open(&mut h);
+        for (op, tip) in [(2, "ui.extrude_cut_targets_tip"), (1, "ui.extrude_join_targets_tip"), (2, "ui.extrude_cut_targets_tip")] {
+            let d = h.app.dialog.as_mut().unwrap();
+            let crate::dialogs::Kind::Extrude { operation, .. } = &mut d.kind else { panic!("extrude") };
+            *operation = op;
+            h.frames(2);
+            assert_eq!(target_bodies(&h), Some(vec!["Right".into()]));
+            let input = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "Target Bodies").unwrap();
+            assert_eq!(input.tip, Some(tip));
+        }
+        let d = h.app.dialog.as_mut().unwrap();
+        d.active = d.inputs.iter().position(|i| i.label == "Target Bodies").unwrap();
+        let crate::dialogs::Kind::Extrude { operation, .. } = &mut d.kind else { panic!("extrude") };
+        *operation = 0;
+        h.frames(2);
+        assert_eq!(target_bodies(&h), None);
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+        let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        assert!(commands[0].1["params"].get("targets").is_none(), "the discarded targets must not be applied while their input is hidden");
+        let crate::dialogs::Kind::Extrude { operation, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("extrude") };
+        *operation = 2;
+        h.frames(2);
+        assert_eq!(target_bodies(&h), Some(vec![]));
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert!((volume(&h, "Left") - 7400.0).abs() < 1e-6, "the discarded target must not return from the stored feature");
+        assert!((volume(&h, "Right") - 7400.0).abs() < 1e-6);
+    }
+}
+
 /// Extrude's Join shows Target Bodies, and joins the bodies picked there; with none picked it
 /// joins the body its sketch is on, as before. Editing the extrude shows the stored bodies, and
 /// another operation hides the input (#17657).
@@ -1099,16 +1267,16 @@ fn extrude_join_joins_the_target_bodies_picked_in_the_dialog() {
             assert_eq!(targets, picked, "the picked bodies");
             assert_eq!(bodies, 1, "the bridge joins both boxes");
         }
-        // The editor shows the stored bodies; Cut hides them.
+        // The editor shows the stored bodies; New Body hides them.
         let name = h.app.session.doc.features.last().unwrap().name.clone();
         h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
         h.frames(4);
         assert_eq!(target_bodies(&h), Some(targets.clone()));
         if let Some(crate::dialogs::Kind::Extrude { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
-            *operation = 2;
+            *operation = 0;
         }
         h.frames(2);
-        assert_eq!(target_bodies(&h), None, "Cut has no Target Bodies");
+        assert_eq!(target_bodies(&h), None, "New Body has no Target Bodies");
     }
 }
 

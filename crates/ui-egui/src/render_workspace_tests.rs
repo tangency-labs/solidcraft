@@ -3707,6 +3707,21 @@ fn numeric_editor_save_refreshes_only_unchanged_runtime_binding_sources() {
     }
 }
 
+/// The CPU render's body picker takes any body name a rename takes: a hundred CJK characters
+/// are 300 bytes, which the picker greyed out when it counted 128 bytes.
+#[test]
+fn a_body_with_a_long_multibyte_name_can_be_a_reflection_target() {
+    use solidcraft_engine::render::job::ReflectionMode;
+    let mut h = Harness::new();
+    let long = "中".repeat(100);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":3,"body_name":long})).unwrap();
+    enter(&mut h.app, true).unwrap();
+    select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+    cpu::set_reflection(&mut h.app, &long, Some(ReflectionMode::Mirror)).unwrap();
+    let bodies = h.app.render_workspace.view.raytrace.reflections.as_ref().map(|r| r.bodies.iter().map(|b| b.body.clone()).collect::<Vec<_>>());
+    assert_eq!(bodies, Some(vec![long]));
+}
+
 #[test]
 fn undo_numeric_editor_sync_preserves_runtime_inputs_and_camera_draft() {
     use solidcraft_engine::render::job::ReflectionMode;
