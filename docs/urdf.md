@@ -70,11 +70,13 @@ SolidCraft shows it.
 
 - The image covers the decal's rectangle as SolidCraft shows it, mirrored when the decal is.
   A decal anchored to sketch points (`canvas.frame_sketch`) is written where its sketch puts it.
-- The quad is written on both sides, 0.05 mm off the face each way, so the face never hides it
-  and one side faces out whichever way the face points.
-- A PNG's own transparency is kept, so a logo with a clear background shows only the logo. A
-  decal made partly transparent in SolidCraft (`opacity` below 1) is written opaque, with a
-  warning.
+- The quad is written on both sides, 0.2 mm off the face each way, so the face never hides it
+  (also for a 24-bit depth buffer seen from 10 m) and one side faces out whichever way the face
+  points.
+- The material is opaque: COLLADA readers disagree on what a `<transparency>` of 1 means, and one
+  that takes it for a clear surface hid the whole image. A clear pixel of a PNG shows the colour
+  it holds. A decal made partly transparent in SolidCraft (`opacity` below 1) is written opaque,
+  with a warning.
 - The image file is written as it is: a PNG stays a PNG, a JPEG becomes `.jpg`. An SVG decal is
   already a PNG in the design.
 - Only decals are written. A reference canvas (**Insert → Canvas**) is not; `canvas.edit

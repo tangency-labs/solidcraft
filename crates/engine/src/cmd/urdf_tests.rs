@@ -144,7 +144,7 @@ fn urdf_writes_decals_as_textured_visuals() {
     assert!(link_b.contains(r#"<mesh filename="t-B-Logo.dae"/>"#) && link_b.contains(r#"<mesh filename="t-B.stl"/>"#), "{xml}");
     let dae = std::fs::read_to_string(d.join("t-B-Logo.dae")).unwrap();
     assert!(dae.contains("<init_from>t-B-Logo.png</init_from>"), "{dae}");
-    // The front quad is the decal as SolidCraft shows it, in B's frame, in metres, 0.05 mm off the
+    // The front quad is the decal as SolidCraft shows it, in B's frame, in metres, 0.2 mm off the
     // face along its normal; the back quad as far the other way.
     let positions: Vec<f64> = dae
         .split(r#"<float_array id="decal-positions-array" count="24">"#)
@@ -161,7 +161,7 @@ fn urdf_writes_decals_as_textured_visuals() {
     assert!(((br - bl).len() - 8.0).abs() < 1e-9 && ((tl - bl).len() - 4.0).abs() < 1e-9, "8 x 4 mm: {shown:?}");
     let n = (br - bl).cross(tl - bl).normalized().unwrap();
     for (k, corner) in positions.chunks(3).enumerate() {
-        let side = if k < 4 { 0.05 } else { -0.05 };
+        let side = if k < 4 { 0.2 } else { -0.2 };
         let want = (shown[k % 4] + n * side) * 1e-3;
         assert!(
             (corner[0] - want.x).abs() < 1e-12 && (corner[1] - want.y).abs() < 1e-12 && (corner[2] - want.z).abs() < 1e-12,

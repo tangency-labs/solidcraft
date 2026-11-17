@@ -26,9 +26,10 @@ const TOKEN_INERTIA: f64 = 1e-12;
 const UNLIMITED_TRAVEL_MM: f64 = 1e6;
 const DEFAULT_EFFORT: f64 = 1000.0;
 const DEFAULT_VELOCITY: f64 = 10.0;
-/// How far a decal's quad stands off its face on each side (mm): enough for a renderer's depth
-/// test to keep it in front of the face, too little to see.
-const DECAL_LIFT_MM: f64 = 0.05;
+/// How far a decal's quad stands off its face on each side (mm): enough for a 24-bit depth
+/// buffer (Gazebo Classic, RViz) to keep it in front of the face from 10 m away, too little to
+/// see.
+const DECAL_LIFT_MM: f64 = 0.2;
 
 /// Choices for [`urdf`] (`file.export` parameters).
 #[derive(Clone, Debug, Default)]
@@ -258,15 +259,12 @@ struct Part {
 fn decal_files(decals: &[UrdfDecal], c: u64, prefix: &str, names: &mut Names, out: &mut UrdfPackage) -> Vec<String> {
     let mut files = Vec::new();
     for d in decals.iter().filter(|d| d.component == c) {
-        let (ext, alpha) = match image_kind(&d.image) {
-            Some(kind) => kind,
-            None => {
-                out.warnings.push(format!("decal `{}`: its image is neither PNG nor JPEG: left out", d.name));
-                continue;
-            }
+        let Some(ext) = image_kind(&d.image) else {
+            out.warnings.push(format!("decal `{}`: its image is neither PNG nor JPEG: left out", d.name));
+            continue;
         };
         let image = names.file_with(&format!("{prefix}-{}", d.name), ext);
-        let Some(dae) = decal_dae(d, &image, alpha) else {
+        let Some(dae) = decal_dae(d, &image) else {
             out.warnings.push(format!("decal `{}`: its corners lie on one line or are not finite: left out", d.name));
             continue;
         };
@@ -278,14 +276,12 @@ fn decal_files(decals: &[UrdfDecal], c: u64, prefix: &str, names: &mut Names, ou
     files
 }
 
-/// A decal image's file extension and whether it may be partly transparent, from its first bytes.
-fn image_kind(bytes: &[u8]) -> Option<(&'static str, bool)> {
+/// A decal image's file extension, from its first bytes.
+fn image_kind(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        // Colour type (IHDR byte 9): 4 grey and alpha, 6 RGBA; a tRNS chunk gives other types alpha.
-        let alpha = matches!(bytes.get(25), Some(4 | 6)) || bytes.windows(4).take(1 << 16).any(|w| w == b"tRNS");
-        Some(("png", alpha))
+        Some("png")
     } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        Some(("jpg", false))
+        Some("jpg")
     } else {
         None
     }
@@ -752,7 +748,11 @@ fn metres(m: &Mesh) -> Mesh {
 /// whichever way the face does), with texture coordinates that lay `image`, a file beside the
 /// document, on the corners: its bottom-left at (0, 0), its top-right at (1, 1). `None` when the
 /// corners are not finite or give no plane.
-fn decal_dae(d: &UrdfDecal, image: &str, alpha: bool) -> Option<String> {
+///
+/// The material is opaque: COLLADA readers disagree on what a `<transparency>` of 1 means, and
+/// one that takes it for a clear surface hides an RGBA image (every SVG is drawn into one)
+/// altogether.
+fn decal_dae(d: &UrdfDecal, image: &str) -> Option<String> {
     if !d.corners.iter().all(|p| p.is_finite()) {
         return None;
     }
@@ -768,12 +768,6 @@ fn decal_dae(d: &UrdfDecal, image: &str, alpha: bool) -> Option<String> {
     // the same corners the other way round.
     let indices = "0 0 0 1 0 1 2 0 2 0 0 0 2 0 2 3 0 3 4 1 0 6 1 2 5 1 1 4 1 0 7 1 3 6 1 2";
     let (name, image) = (attr(&d.name), attr(image));
-    // The image's own alpha cuts the decal's outline; an opaque image needs none of this.
-    let transparent = if alpha {
-        "\n            <transparent opaque=\"A_ONE\"><texture texture=\"decal-sampler\" texcoord=\"UVSET0\"/></transparent>\n            <transparency><float sid=\"transparency\">1</float></transparency>"
-    } else {
-        ""
-    };
     Some(format!(
         r##"<?xml version="1.0" encoding="utf-8"?>
 <COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
@@ -798,7 +792,7 @@ fn decal_dae(d: &UrdfDecal, image: &str, alpha: bool) -> Option<String> {
             <ambient><color sid="ambient">1 1 1 1</color></ambient>
             <diffuse><texture texture="decal-sampler" texcoord="UVSET0"/></diffuse>
             <specular><color sid="specular">0 0 0 1</color></specular>
-            <shininess><float sid="shininess">0</float></shininess>{transparent}
+            <shininess><float sid="shininess">0</float></shininess>
           </phong>
         </technique>
       </profile_COMMON>
@@ -1149,12 +1143,14 @@ mod tests {
                 _ => {}
             }
         }
-        for element in ["init_from", "sampler2D", "texture", "transparent", "triangles", "bind_vertex_input", "instance_visual_scene"] {
+        for element in ["init_from", "sampler2D", "texture", "triangles", "bind_vertex_input", "instance_visual_scene"] {
             assert!(elements.iter().any(|e| e == element), "no <{element}>");
         }
+        // Opaque even for an RGBA image: a reader that takes `transparency` 1 for clear drew none.
+        assert!(!elements.iter().any(|e| e.starts_with("transparen")), "{elements:?}");
         assert!(texts.iter().any(|t| t == "robot-base-Logo_1.png"), "the image is named beside the mesh");
         assert!(texts.iter().any(|t| t == "0 0 1 0 1 1 0 1"), "texture coordinates on the corners");
-        // Front at z = 10.05 mm, back at 9.95 mm, in metres.
+        // Front at z = 10.2 mm, back at 9.8 mm, in metres.
         let positions: Vec<f64> = texts
             .iter()
             .find(|t| t.split_whitespace().count() == 24)
@@ -1162,14 +1158,12 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(positions.len(), 24);
         let z: Vec<f64> = positions.chunks(3).map(|p| p[2]).collect();
-        assert!(z[..4].iter().all(|z| (z - 0.01005).abs() < 1e-12) && z[4..].iter().all(|z| (z - 0.00995).abs() < 1e-12), "{z:?}");
+        assert!(z[..4].iter().all(|z| (z - 0.0102).abs() < 1e-12) && z[4..].iter().all(|z| (z - 0.0098).abs() < 1e-12), "{z:?}");
         assert!((positions[3] - 0.04).abs() < 1e-12, "bottom-right at x = 40 mm");
 
-        // An opaque image needs no transparency; an image neither PNG nor JPEG, or corners on one
-        // line, are left out with a warning.
-        assert!(!decal_dae(&decal, "x.png", false).unwrap().contains("transparent"));
-        assert_eq!(image_kind(&png_header(2)), Some(("png", false)));
-        assert_eq!(image_kind(&[0xFF, 0xD8, 0xFF, 0xE0]), Some(("jpg", false)));
+        // An image neither PNG nor JPEG, or corners on one line, are left out with a warning.
+        assert_eq!(image_kind(&png_header(2)), Some("png"));
+        assert_eq!(image_kind(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("jpg"));
         let line = [corners[0], corners[1], corners[1] * 2.0, corners[0]];
         let bad = [UrdfDecal { image: b"GIF89a".to_vec(), ..decal.clone() }, UrdfDecal { corners: line, ..decal.clone() }];
         let pkg = urdf(&doc, &st, "robot", &UrdfOptions { decals: bad.to_vec(), ..UrdfOptions::default() }).unwrap();
