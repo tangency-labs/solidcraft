@@ -836,3 +836,51 @@ fn pair_skips_name_their_reason_ids() {
         ]
     );
 }
+
+/// Bottom and Wall as records whose edges and faces carry the 10⁻³ tolerance of a STEP import
+/// (set as `boolean_api.rs`'s `with_step_tolerances` does).
+fn with_tolerances(
+    k: &crate::kernel::Kernel,
+    mut b: crate::topology::Brep,
+) -> crate::topology::Brep {
+    use crate::topology::brep::{p1, p2};
+    p2::set_tolerance(k, &mut b, TOL, true, true).expect("brep tolerance");
+    for f in p1::faces(&b, None).expect("faces") {
+        crate::topology::face::p3::set_tolerance(&mut b, f, TOL, true, true)
+            .expect("face tolerance");
+    }
+    b
+}
+
+/// Design v3 16.2 "touch within tol" on the bodies, both carrying 10⁻³ tolerances, cases of v2
+/// 16.2: Wall's foot at z = 6 + 5·10⁻⁴ touches with δ = +5·10⁻⁴, at 6 − 5·10⁻⁴ with δ = −5·10⁻⁴;
+/// at 6 + 2·10⁻³ no contact, 2·10⁻³ apart; at 6 − 2·10⁻³ an overlap. Each a joint (or skip) on
+/// Wall's y pair, 6 thick.
+#[test]
+fn touch_within_tol_on_records_with_tolerances() {
+    let mut k = crate::kernel::Kernel::default();
+    let b = box_solid(&mut k, [0.0, 0.0, 0.0], [160.0, 100.0, 6.0]);
+    let bottom = with_tolerances(&k, b);
+    let mut at = |z: f64| {
+        let w = box_solid(&mut k, [20.0, 30.0, z], [140.0, 36.0, 66.0]);
+        let w = with_tolerances(&k, w);
+        pair_at(&mut k, &w, &bottom, p(), TOL).expect("pair")
+    };
+    for (z, want) in [(6.0005, 5.0e-4), (5.9995, -5.0e-4)] {
+        let got = at(z).expect("joint");
+        match got.contact {
+            Contact::Touch { delta } => assert!((delta - want).abs() < 1e-9, "{z}: {delta}"),
+            other => panic!("{z}: {other:?}"),
+        }
+        assert!((got.faces.thickness - 6.0).abs() < 1e-9, "{got:?}");
+    }
+    match at(6.002) {
+        Err(PairSkip::Contact(Contact::NoContact { distance })) => {
+            assert!((distance - 2.0e-3).abs() < 1e-3, "{distance}");
+        }
+        other => panic!("{other:?}"),
+    }
+    let got = at(5.998).expect("joint");
+    assert_eq!(got.contact, Contact::Overlap);
+    assert!((got.faces.thickness - 6.0).abs() < 1e-9, "{got:?}");
+}
