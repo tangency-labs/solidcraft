@@ -1966,4 +1966,32 @@ mod drafts {
             );
         }
     }
+
+    /// #18374: a cylinder r 1.5, z 0 to 4, with a 0.36 cube joined on its top 0.12 in from the
+    /// rim (x 1.02 to 1.38), its side drafted 3 degrees about its base. The side's cone is
+    /// r 1.5 - 4 tan 3 degrees (about 1.29) at the top, so the cube now overhangs it; the cube
+    /// stays as it was, its underside outside the cone uncovered. The frustum plus the cube,
+    /// in nine faces: the cone, the base, the top, the cube's underside past the cone, and
+    /// the cube's five.
+    #[test]
+    fn a_cylinder_with_a_boss_near_its_rim_drafts_under_the_boss() {
+        all_fixes();
+        let cylinder = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+        let cube = make_box([1.02, -0.18, 4.0], [0.36, 0.36, 0.36]).unwrap();
+        let b = crate::boolean::boolean(cylinder, cube, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let o = order(&b);
+        draft(&b, &o, &[curved(&b, &o)], [0.0; 3], Z, Z, THREE).unwrap();
+        let (big, h) = (1.5, 4.0);
+        let small = big - h * TAN_THREE;
+        let v = PI * h * (big * big + big * small + small * small) / 3.0 + 0.36 * 0.36 * 0.36;
+        let got = volume(&b);
+        assert!(rel(got, v) < 1e-9, "{got} {v}");
+        assert_eq!(b.counts().unwrap()[0], 9);
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
 }
