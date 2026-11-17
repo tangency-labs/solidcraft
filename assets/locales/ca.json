@@ -3665,7 +3665,7 @@
   "render.cpu_body_choose": "Triar un cos",
   "render.cpu_body_filter": "Filtrar els cossos pel nom",
   "render.cpu_body_filter_more": "Afineu el filtre per veure més cossos.",
-  "render.cpu_body_missing": "Falta un destí de reflexió, o està amagat, és ambigu o té un nom de més de 128 bytes. Trieu-lo de nou.",
+  "render.cpu_body_missing": "Falta un destí de reflexió, o està amagat, és ambigu o té un nom de més de 512 bytes. Trieu-lo de nou.",
   "render.cpu_budget": "Perfil de recursos de CPU",
   "render.cpu_budget_bodies": "Límit de cossos",
   "render.cpu_budget_compact": "Compacte (límits anteriors)",

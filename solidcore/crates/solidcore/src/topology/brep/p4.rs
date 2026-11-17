@@ -915,7 +915,7 @@ fn delete_manifold_edge(
     let split_loop = lu == lu_rad;
 
     // mark when face and radial face have same orientation
-    let same_orientation_faces =
+    let mut same_orientation_faces =
         eu1::faceuse_orientation(b, faceuse)? == eu1::faceuse_orientation(b, fu_rad)?;
 
     // Determine if either end of edge is a strut end
@@ -1016,6 +1016,10 @@ fn delete_manifold_edge(
                     swap_face_surfaces(k, b, env.key_of, sf, df)?;
                     if flip_face {
                         face1::flip_face_orientation(b, sf)?;
+                        // The surviving face is turned over: the deleted face's loops, moved
+                        // onto it below, go to the face use on their side of the new
+                        // orientation (#17596, #16133).
+                        same_orientation_faces = !same_orientation_faces;
                     }
                 }
                 // else: WARN (asked to keep a surface not used by the faces)

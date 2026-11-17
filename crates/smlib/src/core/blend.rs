@@ -20,7 +20,6 @@
 //! [`Error::Unsupported`] too.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::PoisonError;
 
 use solidcore::EntityRef;
 use solidcore::SolidError;
@@ -601,14 +600,14 @@ pub(super) fn finish(k: &mut Kernel, mut b: Brep, solid_in: bool) -> solidcore::
 
 /// Runs `f` on a copy of `body` (`brep_copy`).
 pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kernel, Brep) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
-    if body.0.is_poisoned() {
+    if body.kernel_left_unfinished() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
     super::run_on(call, &[("brep", body)], |k| {
-        let c = brep_copy(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        let c = brep_copy(k, &body.kernel())?;
         f(k, c)
     })?
-    .map(Body::new)
+    .map(Body::from_kernel)
 }
 
 /// What [`blend`] does with the picked corners' patches.
@@ -673,7 +672,7 @@ fn overflow_first(
         e.err().unwrap_or(Error::Unsupported)
     }
     let mut fresh = {
-        let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let g = body.kernel();
         brep_copy(k, &g)?
     };
     let again = match pick_edges(k, &fresh, points, tolerance)? {
@@ -1591,7 +1590,7 @@ mod tests {
     #[test]
     fn a_session_failure_says_what_the_session_noted() {
         let body = super::super::make_box([0.0; 3], [10.0; 3]).unwrap();
-        let mut b = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut b = body.kernel();
         let mut k = Kernel::default();
         let mut s = FilletSession::new(&mut k, &mut b).unwrap();
         let e = s.do_filleting(&mut k, None).unwrap_err();

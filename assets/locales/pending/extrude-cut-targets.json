@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.extrude_cut_targets_tip": "The bodies the extrusion cuts. With none picked, SolidCraft chooses the bodies automatically."
+  },
+  "ar": {
+    "ui.extrude_cut_targets_tip": "الأجسام التي يقطعها البثق. إذا لم يُختر أي جسم، يختار SolidCraft الأجسام تلقائيًا."
+  },
+  "de": {
+    "ui.extrude_cut_targets_tip": "Die Körper, die die Extrusion schneidet. Ohne Auswahl wählt SolidCraft die Körper automatisch aus."
+  },
+  "he": {
+    "ui.extrude_cut_targets_tip": "הגופים שהשחול חותך. אם לא נבחר גוף, SolidCraft בוחר את הגופים אוטומטית."
+  },
+  "ja": {
+    "ui.extrude_cut_targets_tip": "押し出しで切り取るボディです。何も選ばない場合は、SolidCraft がボディを自動的に選択します。"
+  },
+  "ko": {
+    "ui.extrude_cut_targets_tip": "돌출로 잘라낼 바디입니다. 아무것도 선택하지 않으면 SolidCraft가 바디를 자동으로 선택합니다."
+  },
+  "vi": {
+    "ui.extrude_cut_targets_tip": "Các khối mà phép đùn cắt. Nếu không chọn khối nào, SolidCraft sẽ tự động chọn các khối."
+  },
+  "zh": {
+    "ui.extrude_cut_targets_tip": "拉伸要切除的实体。未选择时，SolidCraft 会自动选择实体。"
+  }
+}
