@@ -3720,7 +3720,7 @@
   "render.cpu_body_choose": "Choose a body",
   "render.cpu_body_filter": "Filter bodies by name",
   "render.cpu_body_filter_more": "Refine the filter to see more bodies.",
-  "render.cpu_body_missing": "A reflection target is missing, hidden, ambiguous or has a name longer than 128 bytes. Choose it again.",
+  "render.cpu_body_missing": "A reflection target is missing, hidden, ambiguous or has a name longer than 512 bytes. Choose it again.",
   "render.cpu_budget": "CPU resource profile",
   "render.cpu_budget_bodies": "Body ceiling",
   "render.cpu_budget_compact": "Compact (legacy limits)",

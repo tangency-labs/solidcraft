@@ -3720,7 +3720,7 @@
   "render.cpu_body_choose": "בחירת גוף",
   "render.cpu_body_filter": "סינון גופים לפי שם",
   "render.cpu_body_filter_more": "יש לצמצם את הסינון כדי לראות גופים נוספים.",
-  "render.cpu_body_missing": "יעד החזרה חסר, מוסתר, דו־משמעי או ששמו ארוך מ־128 בתים. יש לבחור אותו שוב.",
+  "render.cpu_body_missing": "יעד החזרה חסר, מוסתר, דו־משמעי או ששמו ארוך מ־512 בתים. יש לבחור אותו שוב.",
   "render.cpu_budget": "פרופיל משאבי CPU",
   "render.cpu_budget_bodies": "תקרת גופים",
   "render.cpu_budget_compact": "קומפקטי (מגבלות ישנות)",
