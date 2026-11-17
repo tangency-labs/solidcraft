@@ -1975,8 +1975,12 @@ pub fn delete_fillet_face(
         None => crate::topology::face::p2::tolerance(b, fillet_face)?,
     };
     // Not upstream (WR-605; SolidCraft change, tangency-labs/smlib 52bfef0): a ring
-    // fillet (closed rails, no ends) has its own removal.
-    if ring::RingFilletRemoval::is_ring(k, b, Some(fillet_face), 2.0)? {
+    // fillet (closed rails, no ends) has its own removal. Not the fork's: the ring test
+    // reads the rails' tangency, which may make UV trim curves, on a copy standing for
+    // the B-rep, so a face that is no ring reaches the four-sided removal (or its
+    // refusal) exactly as it was.
+    let mut scratch = b.clone_standing_for_self()?;
+    if ring::RingFilletRemoval::is_ring(k, &mut scratch, Some(fillet_face), 2.0)? {
         let mut removal = ring::RingFilletRemoval::new(fillet_face, tol_3d);
         let r = removal.remove_face(k, b);
         // (not upstream: the port's cached topology fields, true again for the caller)
