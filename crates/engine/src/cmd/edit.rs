@@ -954,14 +954,15 @@ fn feature_ids(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
 /// renamed (#1109). The suppressed feature keeps its own too: the counter passes the names of
 /// suppressed features by, so a body made meanwhile does not take `Body1` and lose it again when
 /// the feature is back.
-fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
+fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>, Vec<usize>)> {
     let made = |f: &Feature| -> Vec<String> {
         s.model.result(f.id).map(|r| r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect()).unwrap_or_default()
     };
     let makes_counted = |f: &Feature| (0..made(f).len()).any(|i| super::browser::counted(f, i));
     let first = s.doc.features.iter().position(|f| ids.contains(&f.id) && !f.suppressed && makes_counted(f));
     let Some(at) = first else { return Vec::new() };
-    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f))).collect()
+    let left_out = |f: &Feature| s.model.result(f.id).map(|r| r.state.pattern_left_out(f.id).to_vec()).unwrap_or_default();
+    s.doc.features.iter().skip(at).filter(|f| makes_counted(f)).map(|f| (f.id, made(f), left_out(f))).collect()
 }
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
@@ -988,9 +989,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
-    for (id, made) in &keep {
+    for (id, made, left_out) in &keep {
         if let Some(f) = doc.feature_mut(*id) {
-            f.pin_body_names(made);
+            f.pin_body_names(made, left_out);
         }
     }
     for id in &ids {
