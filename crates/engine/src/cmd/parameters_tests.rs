@@ -1494,4 +1494,4 @@ fn exports_round_reported_numbers() {
     let rows: Vec<Value> = serde_json::from_str(&json_text).unwrap_or_default();
     let vals: Vec<f64> = rows.iter().filter_map(|r| r["value"].as_f64()).collect();
     assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
-        }
+}
