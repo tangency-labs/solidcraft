@@ -19,6 +19,9 @@ component. SolidCraft runs the component in a sandbox:
   nothing.
 - An **importer** reads a file of a format SolidCraft doesn't read and writes a SolidCraft design.
   The design opens as a new, unsaved design, with a report of what could not be carried over.
+- An **exporter** writes the open design as a file of a format SolidCraft doesn't write. It reads
+  the design through read-only commands and returns the file's bytes; SolidCraft writes them where
+  the user chose. See [Exporters](../../../plugins.md#exporters).
 
 A plugin has no network access, ever. It reads and writes files only in folders the user approved,
 and it runs within fuel, memory and time limits. It ships no UI code: SolidCraft draws its dialog
@@ -82,7 +85,7 @@ Create `plate-maker/plugin.json`:
 |---|---|
 | `id` | 1 to 64 lowercase letters, digits and dashes. The package folder has this name. |
 | `name`, `version`, `description` | What the user sees: at most 80, 32 and 240 characters. |
-| `capabilities` | The host interfaces the plugin uses: `commands@0.1` for a command plugin, `formats@0.1` for an importer, plus `evaluate@0.1` for an importer that checks its result. |
+| `capabilities` | The host interfaces the plugin uses: `commands@0.1` for a command plugin, `formats@0.1` for an importer or exporter, plus `evaluate@0.1` for an importer that checks its result. |
 | `runtime.module` | The component's file name, beside `plugin.json`. |
 | `runtime.commands` | Every SolidCraft command the plugin calls, by exact id. Anything else is refused. |
 | `runtime.entries` | What the plugin offers. Each entry has a `name`, an `effect` (`edit`, or `read` for one that only reads), an `input_schema` (a JSON schema of an object) and optional `slots`. |
@@ -99,13 +102,16 @@ File or Help menu; every entry is in the Plugins menu anyway.
 
 The WIT file is the contract between SolidCraft and the plugin: what the plugin may call, and what
 it must export. Copy it from SolidCraft's source, `crates/craft-plugin/wit/plugin.wit`, into
-`plate-maker-src/wit/plugin.wit`. Its package is `craft:plugin@0.1.0`, and it has two worlds:
+`plate-maker-src/wit/plugin.wit`. Its package is `craft:plugin@0.1.0`, and it has three worlds:
 
 - `command-plugin` imports `commands` (run a SolidCraft command), `log`, `control` (progress and
   cancel), `files` (granted folders) and `clock`, and exports `entry`, whose `execute(entry, params)`
   SolidCraft calls with the entry's name and its parameters as JSON.
 - `importer-plugin` imports `source` (the file being opened), `design` (where the new design
   goes), `evaluate`, `log`, `control` and `clock`, and exports `importer`.
+- `exporter-plugin` imports `commands` (only the read-only commands its manifest lists), `log`,
+  `control` and `clock`, and exports `formats-provider`, whose `export-file(slot, options)` returns
+  the file's bytes.
 
 Errors are a `plugin-error` variant: `permission-denied`, `command-failed`, `limit-exceeded`,
 `invalid-input` and the others name their cause, and the user sees them.
