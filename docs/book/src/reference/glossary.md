@@ -70,6 +70,18 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
 
+### bead
+
+A convex quarter-round edge molding separated from each adjoining face by a small flat step.
+
+- **In SolidCraft:** `wood.edge_profile`; sizes are expressions and the feature stays editable.
+
+### bevel
+
+A flat edge cut at a specified angle to a support face.
+
+- **In SolidCraft:** `wood.edge_profile`; sizes are expressions and the feature stays editable.
+
 ### bill of materials
 
 The list of the components placed in a design or in one component, with the quantity of each.
@@ -141,6 +153,12 @@ A concentration or structured redistribution of light caused by reflection or re
 
 - **In SolidCraft:** Render job `caustics` controls the photon estimate for point and hard directional sources; finite sources also have camera-path estimates.
 
+### chamfer
+
+A flat edge cut with equal setbacks on two perpendicular support faces.
+
+- **In SolidCraft:** `wood.edge_profile`; sizes are expressions and the feature stays editable.
+
 ### chromatic dispersion
 
 Variation of refractive index with wavelength that can separate colours along refracted paths.
@@ -201,6 +219,12 @@ They are listed together in the browser's *Construction* folder.
 - **Don't use:** "construction" on its own where it could mean a *construction entity*; work plane.
 - **Elsewhere:** construction plane, reference plane, datum plane (and axis, point).
 - **For translators:** not a sketch's construction entity.
+
+### cove
+
+A concave quarter-round edge cut.
+
+- **In SolidCraft:** `wood.edge_profile`; sizes are expressions and the feature stays editable.
 
 ### curve
 
@@ -285,6 +309,12 @@ construction plane.
 - **Elsewhere:** feature, operation.
 - **For translators:** French uses *fonction* for a timeline feature, so "AI features" had to
   become *fonctionnalités IA*. Translate "feature" only in the timeline sense.
+
+### fillet (woodworking)
+
+A small flat step beside a routed roundover, distinct from a CAD rounding fillet.
+
+- **In SolidCraft:** `wood.edge_profile`; sizes are expressions and the feature stays editable.
 
 ### folder
 
@@ -414,6 +444,12 @@ component changes every copy. The browser names occurrences with a number, such 
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
 
+### ogee
+
+An S-shaped edge molding with a concave curve over a convex curve.
+
+- **In SolidCraft:** `wood.edge_profile`; sizes are expressions and the feature stays editable.
+
 ### opaque path lighting
 
 Indirect diffuse and specular illumination computed by tracing finite light paths between opaque surfaces. Shown as **Indirect lighting (opaque surfaces)** in Sampling.
@@ -506,6 +542,12 @@ design's parameters.
 - **Elsewhere:** quantity, BOM quantity, base quantity.
 - **For translators:** not a count of placements (`count`).
 
+### rabbet
+
+A rectangular recess cut along an edge of a board.
+
+- **In SolidCraft:** `wood.edge_profile`; sizes are expressions and the feature stays editable.
+
 ### reference edge
 
 A straight edge of a flat face that a Single hole's centre or a cylinder's base centre keeps a
@@ -534,6 +576,18 @@ are kept, not deleted.
 - **Elsewhere:** rollback bar, rollback marker, end-of-part marker.
 - **For translators:** "history" is the undo history, not the timeline. French had three names
   for this marker while English did.
+
+### roundover
+
+A convex quarter-round cut that softens an outside edge.
+
+- **In SolidCraft:** `wood.edge_profile`; sizes are expressions and the feature stays editable.
+
+### router edge profile
+
+A constant section cut along a timber edge with a rotating shaped cutter.
+
+- **In SolidCraft:** `wood.edge_profile`; sizes are expressions and the feature stays editable.
 
 ### section plane
 
