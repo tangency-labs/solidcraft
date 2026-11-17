@@ -965,6 +965,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         let added = h.app.run("drawing.sheet.add", serde_json::json!({})).unwrap();
