@@ -2031,9 +2031,10 @@ fn knot_fixup_preserves(knots: &[f64]) -> bool {
     };
     let scale = merge_scale(first, last);
     knots.iter().all(|knot| knot.is_finite())
-        && knots
-            .windows(2)
-            .all(|pair| pair[0].to_bits() == pair[1].to_bits() || pair[1] - pair[0] >= scale)
+        && knots.windows(2).all(|pair| match pair {
+            [a, b] => a.to_bits() == b.to_bits() || b - a >= scale,
+            _ => false,
+        })
 }
 
 /// The row's `w_(n-1) / w_n`.
