@@ -57,10 +57,16 @@ impl Protocol for SolidCraft {
         "docs/control-protocol.md"
     }
 
-    /// `param_check`: the levels `engine.execute`, `engine.batch` and `engine.script` take as a
-    /// request's own parameter check (#9184).
+    fn stop_on_disconnect(&self, method: &str) -> bool {
+        method == "control.joint_drive"
+    }
+
+    /// Advertise the request's parameter checks and interactive desktop joint drive.
     fn capabilities(&self) -> Value {
-        json!({"param_check": solidcraft_engine::schema::ParamCheck::ALL.map(|l| l.name())})
+        json!({
+            "param_check": solidcraft_engine::schema::ParamCheck::ALL.map(|l| l.name()),
+            "joint_drive": true,
+        })
     }
 }
 

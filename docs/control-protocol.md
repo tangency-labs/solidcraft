@@ -574,11 +574,10 @@ turn behind another. `command` is the command id of `engine.execute` (a known on
 paths and expressions stay with the connection that sent them. `self` marks the asking
 connection's own request. `{"running": []}` when the app is idle.
 
-`control.capabilities` says what this app's control channel does beyond the methods every
-version has, so a client can find out before it relies on it: `{"param_check": ["off", "warn",
-"strict"]}`, the levels a request's own `param_check` takes (below). It is answered at once, like
-`control.running`, also on a `busy` connection. An app older than it answers ``unknown method
-`control.capabilities` ``; a feature added later is listed here too.
+`control.capabilities` says what this app's control channel supports. Its `param_check` list gives
+the available check levels. `joint_drive: true` advertises
+[interactive joint driving](#driving-a-joint-interactively). It answers at once, including on a
+busy connection. Older apps may refuse the method or omit a capability.
 
 Any request's `params` may carry `allow_paths: ["/abs/folder", …]`: every file that request
 reads, writes or deletes (command paths such as `file.export`'s `path` or `doc.recovery_*`'s
@@ -675,6 +674,32 @@ Commands never open dialogs when run this way. `solidcraft-cli commands` prints 
 `document.export`, `document.import` and `document.saved` are control methods, not commands: they
 act on the app's open design rather than on an engine session, and they are not among the methods
 the agent chat may use.
+
+### Driving a joint interactively
+
+Keep one authenticated desktop control connection open for all requests of a movement.
+Get the active `document_id` from `document.revision` and the numeric joint ID from
+`joint.inspect`. The optional `index` selects one coordinate and defaults to zero.
+
+| `control.joint_drive` params | Result |
+|---|---|
+| `{action: "begin", document_id, joint, index?}` | `{movement}`, the ID for this movement |
+| `{action: "update", movement, value}` | The `joint.drive` result, with the values the joint reached and any stop |
+| `{action: "finish", movement}` | `{changed}`, true when the final pose became an Undo step |
+| `{action: "cancel", movement}` | `{cancelled: true}` |
+
+Each update previews an absolute value in degrees or millimetres, solving from the pose at
+Begin. Joint limits, motion links, contact and loop stops use the ordinary `joint.drive` solver.
+A failed update leaves the last successful preview available. Wait for the reply before sending
+another request. The design and `design.changed` follow the committed pose. Read back an update
+in its reply.
+
+Finish keeps the last successful pose as one edit. Undo restores the starting pose, including
+joints moved by its couplings. If there was no change, Finish keeps the existing Undo and Redo
+history. Another edit keeps its own history and discards any pending movement. A selection
+change, a local editing tool or dialog, leaving the design tab, and Cancel also discard the
+preview. The movement ID expires. Closing the connection without sending Finish discards the
+preview. A Finish already running can still commit. Reconnect with a fresh Begin.
 
 ### Following the design
 
