@@ -1616,16 +1616,105 @@ pub fn get_or_create_uv_trim_curve(
         copy.assign(old);
         copy
     });
+    // Not upstream (#18162): the edge tolerance follows the trim's proved distance from the
+    // edge curve, not only the drop's reported error, whose fit part is the fit tolerance (the
+    // edge's own tolerance) and would raise the edge from its own tolerance on every refit.
+    let raise_by = trim_raise_distance(k, b, eu, &created.curve, created.max_dist_to_surf)?;
     set_uv_trim_curve(
         b,
         eu,
         UvTrimCurveArg::New(Box::new(created.curve)),
-        created.max_dist_to_surf,
+        raise_by,
         true, // TRUE = delete existing UVTrimCurve
         target_fail.as_mut(),
     )?;
     Ok(out)
 }
+
+/// Not upstream (#18162, #18009): the distance `SetUVTrimCurve` raises an edge's tolerance to
+/// cover (to twice it) for the new trim `trim` of `eu`, given upstream's distance `upstream`
+/// (the drop's reported error, or what the caller passes): the smaller of `upstream` and the
+/// trim's proved distance from the edge curve ([`trim_deviation_bound`], `B`). The drop's
+/// error counts its fit tolerance, which is the edge's own tolerance, so upstream raises the
+/// edge from its own tolerance on every refit, whatever the trim's real distance; `B` bounds
+/// that distance, so the edge is never raised past twice it. Where `B` is not enclosed, or
+/// `upstream` raises nothing (the tolerance already covers twice it), `upstream`, as
+/// upstream.
+///
+/// A raise never exceeds upstream's: where `B` is larger than `upstream` the trim lies
+/// farther from the edge than its drop reported, and covering it would hide that from the
+/// checks that rebuild such trims.
+///
+/// # Errors
+///
+/// Those of [`trim_deviation_bound`].
+pub(crate) fn trim_raise_distance(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    trim: &Curve,
+    upstream: f64,
+) -> Result<f64> {
+    // (`SetUVTrimCurve` raises only a tolerance below twice the distance)
+    let raises = match edge(b, eu)? {
+        Some(e) => b.edge(e)?.tolerance < 2.0 * upstream,
+        None => false,
+    };
+    if !raises {
+        return Ok(upstream);
+    }
+    Ok(match trim_deviation_bound(k, b, eu, trim)? {
+        Some(bound) => upstream.min(bound),
+        None => upstream,
+    })
+}
+
+/// Not upstream (#18162): a proved upper bound on how far the image of `trim` (a UV trim of
+/// `eu`, on the edge's parameter) on the surface of `eu`'s face lies from the edge's curve,
+/// over the edge's interval ([`trim_image_gap_bound`]): the distance `SetUVTrimCurve` raises
+/// the edge tolerance to cover. `None` when the bound is not enclosed (the caller then keeps
+/// upstream's distance) or the edge use has no face, surface, edge or curve.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the kernel's unported and cancelled statuses.
+///
+/// [`trim_image_gap_bound`]: crate::query::curve_surface_gap::trim_image_gap_bound
+pub(crate) fn trim_deviation_bound(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    trim: &Curve,
+) -> Result<Option<f64>> {
+    let (Some(e), Some(fu)) = (edge(b, eu)?, faceuse(b, eu)?) else {
+        return Ok(None);
+    };
+    let Some(f) = faceuse_face(b, fu)? else {
+        return Ok(None);
+    };
+    let edge_rec = b.edge(e)?;
+    let (Some(curve), Some(surface)) = (edge_rec.curve.as_ref(), b.face(f)?.surface.as_ref())
+    else {
+        return Ok(None);
+    };
+    // (a copy without owner, as the drops use: its evaluations do not trim to the face)
+    let mut surface = surface.clone_for_evaluation()?;
+    let _ = surface.set_owner(None::<ObjectRef>);
+    let ivl = edge_rec.interval;
+    // (below a thousandth of the edge's tolerance a tighter bound changes nothing)
+    let floor = TRIM_BOUND_FLOOR * edge_rec.tolerance;
+    crate::query::curve_surface_gap::trim_image_gap_bound(
+        k,
+        &surface,
+        curve,
+        trim,
+        [ivl.min(), ivl.max()],
+        floor,
+    )
+}
+
+/// The fraction of the edge tolerance below which [`trim_deviation_bound`] stops tightening.
+const TRIM_BOUND_FLOOR: f64 = 1.0e-3;
 
 /// [`get_or_create_uv_trim_curve`] of an edge use that has a UV trim curve (its own or
 /// its mate's), which reads the B-rep only; `None` without one.

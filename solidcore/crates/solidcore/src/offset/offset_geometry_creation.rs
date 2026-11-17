@@ -809,7 +809,10 @@ pub trait OffsetBrep<O>: ProtoGeometry<O> {
     /// of the UV trim curve, if any.
     fn edgeuse_uv_trim_curve(&self, eu: O) -> Result<Option<O>>;
     /// `SmEdgeuse::SetUVTrimCurve(curve, maxDist, TRUE)`
-    /// (`topology::edgeuse::p1::set_uv_trim_curve`, deleting the old curve).
+    /// (`topology::edgeuse::p1::set_uv_trim_curve`, deleting the old curve). Not upstream
+    /// (#18009): where the new trim's distance `B` from the edge curve is proved, the edge
+    /// tolerance is raised for `min(B, max_dist)` instead of `max_dist`
+    /// (`topology::edgeuse::p3::trim_raise_distance`).
     fn edgeuse_set_uv_trim_curve(
         &mut self,
         k: &Kernel,

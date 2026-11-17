@@ -1101,17 +1101,24 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
 
     fn edgeuse_set_uv_trim_curve(
         &mut self,
-        _k: &Kernel,
+        k: &Kernel,
         u: Handle,
         curve: Option<Handle>,
         max_dist: f64,
     ) -> Result<()> {
         let (arena, u) = u.edgeuse()?;
+        let mut raise_by = max_dist;
         let arg = match curve {
-            Some(h) => eu::UvTrimCurveArg::New(Box::new(self.cloned_curve(h)?)),
+            Some(h) => {
+                let c = self.cloned_curve(h)?;
+                // (not upstream, #18009: bounded by the trim's proved distance from the edge
+                // curve where it is enclosed, see the trait method)
+                raise_by = eu3::trim_raise_distance(k, self.brep(arena), u, &c, max_dist)?;
+                eu::UvTrimCurveArg::New(Box::new(c))
+            }
             None => eu::UvTrimCurveArg::Null,
         };
-        eu::set_uv_trim_curve(self.brep_mut(arena), u, arg, max_dist, true, None)?;
+        eu::set_uv_trim_curve(self.brep_mut(arena), u, arg, raise_by, true, None)?;
         Ok(())
     }
 
