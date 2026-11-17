@@ -248,7 +248,7 @@ pub const SECTIONS: &[Section] = &[
             "drawing.view.break",
             "drawing.view.auxiliary.planned",
             "drawing.view.pictorial",
-            "drawing.view.draft",
+            "drawing.view.draft.planned",
             "drawing.view.flat_pattern",
         ],
     },

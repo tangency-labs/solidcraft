@@ -366,6 +366,10 @@ fn view_label(d: &Drawing, view: &View) -> String {
                 label.push_str("Custom");
                 break;
             }
+            ViewKind::Draft => {
+                label.push_str("Draft");
+                break;
+            }
             ViewKind::Projected { parent, side } => {
                 label.push_str(match side {
                     ProjectedSide::Left => "Left of ",

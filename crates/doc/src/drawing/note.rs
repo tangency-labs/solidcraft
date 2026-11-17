@@ -206,6 +206,9 @@ impl Drawing {
         }
         if let Some(view) = n.anchor.view() {
             require(self.view(view).is_some(), || format!("it is on view {}, which the drawing doesn't have", ids::encode(view)))?;
+            if n.on_model() {
+                self.check_has_model(view)?;
+            }
         }
         if let Some(why) = leaders_refused(n.anchor.view().is_some(), n.branches.len(), n.paths().count()) {
             return Err(DocError::Invalid(why));

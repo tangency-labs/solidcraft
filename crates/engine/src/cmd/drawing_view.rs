@@ -79,9 +79,9 @@ use crate::drawing_view::{
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, AuxiliaryParams, BaseParams, BoxResult, ChoicesResult, ConfigurationParam, ConfigurationResult,
-    CopyParams, CreateResult, DPI_RANGE, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult, FlatParams,
-    FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams,
-    OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ProjectionForParams,
+    CopyParams, CreateResult, DPI_RANGE, DraftParams, DrawnJointResult, DrawnRowResult, EditParams, EditResult, ExplodedParam, ExtentsResult,
+    FlatParams, FromResult, InspectParams, InspectResult, LabelResult, LabelSet, LineResult, LinesStatusResult, MeasureParam, MeasurementResult,
+    MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, PoseParam, PoseResult, ProjectedParams, ProjectionForParams,
     ProjectionForResult, ScaleResult, SceneResult, SectionParams, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult,
     StandardParams, StandardResult, StudyPoseParam, StudyStepResult, ThreadPieceResult, ThreadResult, ToSheetResult, ViewLineParam, ViewMoveParams,
     ViewMoveResult, ViewResult, ViewSet,
@@ -111,6 +111,8 @@ const AUXILIARY: &str = "drawing.view.auxiliary";
 const AUXILIARY_CONTRACT: TypedContract<AuxiliaryParams> = TypedContract::new();
 const FLAT: &str = "drawing.view.flat";
 const FLAT_CONTRACT: TypedContract<FlatParams> = TypedContract::new();
+const DRAFT: &str = "drawing.view.draft";
+const DRAFT_CONTRACT: TypedContract<DraftParams> = TypedContract::new();
 
 /// How far from its parent's centre `drawing.view.projection_for` takes a point, either way, in
 /// paper millimetres: the most two points of one sheet are apart along an axis.
@@ -205,6 +207,13 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&FLAT_CONTRACT)
         .output(output_schema_for::<CreateResult>)
         .params("sheet: id or name; body?: a sheet-metal body's name (default the last one made); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); turn?: 0 (default), 90, 180 or 270 degrees counter-clockwise → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?}. The flat pattern as sheet.flat_pattern reports it: its outlines and cut-outs as visible lines, bends up as chain lines (long dash, dot) and bends down as double-chain lines (long dash, two dots), narrow. Refused as sheet.flat_pattern refuses the body. One undo step; no model is evaluated."),
+    CommandSpec::new(DRAFT, "Draft View", crate::checked!("drawing.view.draft", draft))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&DRAFT_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("sheet: id or name; scale: \"paper:model\", the scale its sketches are drawn at; position_mm?: [x, y] for its plane's origin (default the sheet's centre) → {view, sheet, scale: {text, factor, fitted: false}, boundary_mm, outside?}. A view with no model, for sketches drawn on it at its scale (drawing.sketch.create with the view as owner): looking straight at the sheet, its boundary round them, or a 20 x 20 mm placeholder round its origin with none. It sets no model settings, nothing is projected from it, and no dimension, balloon or note leader on it points at a model. One undo step; no model is evaluated."),
     CommandSpec::new(SECTION, "Section View", crate::checked!("drawing.view.section", section))
         .icon("new")
         .in_drawing()
@@ -307,7 +316,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         sheet: request.sheet,
         visual_style: snake_name(settings.visual_style),
         reference_style: snake_name(settings.reference_style),
-        extents: extents_result(&extents, None, false),
+        extents: extents_result(&extents, None, None),
         boundary_mm: BoxResult { min: boundary.min.into(), max: boundary.max.into() },
         lines: line_results(&set, &drawn),
         threads: thread_results(&set, &drawn),
@@ -553,11 +562,16 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let pose = pose_result(s, &mut sessions, &resolved, view.settings.pose.clone());
     let configuration = configuration_result(&mut sessions, &resolved, view.settings.configuration);
     let own = &view.settings;
+    let exact = match (&resolved.flat, resolved.source) {
+        (Some(_), _) => Some("flat_pattern"),
+        (None, None) => Some("view_sketches"),
+        _ => None,
+    };
     let reply = InspectResult {
         view: ids::encode(view.id),
         sheet: ids::encode(view.sheet),
         kind: view.kind.name(),
-        source: ids::encode(resolved.source),
+        source: resolved.source.map(ids::encode),
         parent: view.kind.parent().map(ids::encode),
         side: view.kind.beside().map(snake_name),
         toward: match &view.kind {
@@ -581,7 +595,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         },
         reference_shown_percent: view.reference_shown_percent,
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
-        extents: extents_result(&placed.extents, placed.unmeasured, resolved.flat.is_some()),
+        extents: extents_result(&placed.extents, placed.unmeasured, exact),
         linked: view.kind.parent().is_some().then(|| match display_set(own) {
             0 => Value::Bool(true),
             DISPLAY_GROUP => Value::Bool(false),
@@ -701,6 +715,7 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet, found: &Found) -> Result<Vec<
     let unparented = view.kind.unparented();
     let own_direction = match view.kind {
         ViewKind::Flat { .. } => "a flat pattern view looks straight at its flat: only a base view's direction changes",
+        ViewKind::Draft => "a draft view looks straight at its sheet: only a base view's direction changes",
         _ => "a projected view looks from its side of its parent: only a base view's direction changes",
     };
     let own = &mut view.settings;
@@ -827,9 +842,10 @@ pub(super) fn outside_results(outside: Vec<(u64, OnSheet)>) -> Vec<OutsideResult
     outside.into_iter().map(result).collect()
 }
 
-/// A flat pattern view's extents are its flat's exact box.
-fn extents_result(extents: &Extents, unmeasured: Option<Unmeasured>, flat: bool) -> ExtentsResult {
-    let (status, measured_on) = if flat { ("exact", "flat_pattern") } else { ("approximate", "display_mesh") };
+/// The extents as a reply gives them: `exact` names what an exact box was measured on, a flat pattern
+/// view's flat or a draft view's sketches (#5425); without it, the display mesh.
+fn extents_result(extents: &Extents, unmeasured: Option<Unmeasured>, exact: Option<&'static str>) -> ExtentsResult {
+    let (status, measured_on) = exact.map_or(("approximate", "display_mesh"), |on| ("exact", on));
     ExtentsResult {
         min: extents.model.min.into(),
         max: extents.model.max.into(),
@@ -1120,7 +1136,9 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                 // new sheet, as a base view copied does. A section view copied alone stays a section of
                 // its parent: its cut is what it shows.
                 ViewKind::Projected { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } if *old == id => {
-                    view.kind = ViewKind::Base { source: resolved.source, view: looking(&resolved.basis) };
+                    // Only a draft view has no source, and none is projected.
+                    let source = resolved.source.ok_or_else(|| bad(COPY, "a view made from another has the model's source"))?;
+                    view.kind = ViewKind::Base { source, view: looking(&resolved.basis) };
                     view.settings = ViewOverrides {
                         scale: Some(resolved.scale.value),
                         visual_style: Some(resolved.visual_style.value),
@@ -1145,7 +1163,7 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                 ViewKind::Auxiliary { parent, toward } => {
                     view.kind = ViewKind::Auxiliary { parent: copy_of(*parent).unwrap_or(*parent), toward: *toward }
                 }
-                ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
+                ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Draft => {}
             }
             // A copy never shares its original's letter: one that needs a letter is given its own below.
             if !view.needs_letter() {
@@ -1663,6 +1681,30 @@ fn flat(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     let placed = crate::drawing_view::flat_on_sheet(s.drawing(FLAT)?, id, &Ok(flat), FLAT)?;
     created_at(s, FLAT, id, request.scale.is_none(), placed)
+}
+
+/// A draft view (#5425): no model, so only its scale and its place, which the drawing's own rules check.
+fn draft(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: DraftParams = crate::schema::read(DRAFT, p)?;
+    let record = s.drawing(DRAFT)?.clone();
+    let (sheet, middle) = sheet_named(&record, &request.sheet, DRAFT)?;
+    let position = request.position_mm.map_or(middle, |p| p.0);
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(DRAFT, e.to_string()))?;
+    let settings = ViewOverrides { scale: Some(request.scale.0), ..ViewOverrides::default() };
+    let view = View {
+        id,
+        sheet,
+        kind: ViewKind::Draft,
+        place: ViewPlace::At([position.x, position.y]),
+        settings,
+        reference_shown_percent: 0.0,
+        label: None,
+    };
+    s.edit_drawing(DRAFT, |d| {
+        d.add_views([Arc::new(view)]);
+        Ok(())
+    })?;
+    created(s, DRAFT, id, false)
 }
 
 /// Where view `id`, staged in `staged`, goes `beside` its parent, for `cmd`: its centre, moved from

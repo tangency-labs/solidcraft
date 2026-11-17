@@ -4142,34 +4142,46 @@ fn nothing_on_a_flat_pattern_view_points_at_the_model() {
         assert!(e.contains(why), "{cmd}: {e}");
         assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{cmd}");
     }
-    // Made on the base view, then moved onto the flat view by hand.
+    // Made on the base view, then moved onto the flat view by hand: the drawing's own rule refuses each.
     let dimension = run(&mut s, "drawing.dimension.add", json!({"view": on_base, "kind": {"length": {"edge": edge}}}));
     let dimension = ids::decode(dimension["dimension"].as_str().unwrap()).unwrap();
     let noted = run(&mut s, "drawing.note.add", json!({"anchor": {"edge": {"view": on_base, "edge": edge}}, "at": [40, 40], "content": "Edge"}));
     let noted = ids::decode(noted["note"].as_str().unwrap()).unwrap();
-    s.edit_drawing(EDIT, |d| {
-        let at = d.dimensions.iter().position(|r| r.id == dimension).unwrap();
-        Arc::make_mut(&mut d.dimensions[at]).view = flat;
-        let at = d.notes.index_of(noted).unwrap();
-        if let Some(solidcraft_doc::drawing::note::Anchor::Edge { view, .. }) = d.notes.get_mut(at).map(|note| &mut Arc::make_mut(note).anchor) {
-            *view = flat;
-        }
+    let moves: [fn(&mut Drawing, u64, u64, u64); 3] = [
+        |d, flat, dimension, _| {
+            let at = d.dimensions.iter().position(|r| r.id == dimension).unwrap();
+            Arc::make_mut(&mut d.dimensions[at]).view = flat;
+        },
+        |d, flat, _, noted| {
+            let at = d.notes.index_of(noted).unwrap();
+            if let Some(solidcraft_doc::drawing::note::Anchor::Edge { view, .. }) = d.notes.get_mut(at).map(|note| &mut Arc::make_mut(note).anchor) {
+                *view = flat;
+            }
+        },
         // No command puts a balloon there, and this design has no placed part: one saved by hand.
-        let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13030)).unwrap();
-        let edge = solidcraft_doc::drawing::dimension::ModelEdge { body: "Plate".into(), origin_feature: 1, name: "F1:side".into(), path: vec![7] };
-        d.balloons.add([Arc::new(solidcraft_doc::drawing::balloon::Balloon { id, view: flat, edge, at: [40.0, 40.0], parts_list: None })]);
-        Ok(())
-    })
-    .unwrap();
+        |d, flat, _, _| {
+            let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13030)).unwrap();
+            let edge =
+                solidcraft_doc::drawing::dimension::ModelEdge { body: "Plate".into(), origin_feature: 1, name: "F1:side".into(), path: vec![7] };
+            d.balloons.add([Arc::new(solidcraft_doc::drawing::balloon::Balloon { id, view: flat, edge, at: [40.0, 40.0], parts_list: None })]);
+        },
+    ];
+    for one in moves {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = s
+            .edit_drawing(EDIT, |d| {
+                one(d, flat, dimension, noted);
+                Ok(())
+            })
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(&format!("view {on_flat}: {why}")), "{e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    }
     let d = s.drawing("test").unwrap();
     let built = crate::drawing_scene::build(&s, d, d.sheets[0].id).unwrap();
-    let dimension = built.dimensions.iter().find(|one| one.dimension == dimension).unwrap();
-    assert_eq!((dimension.view, dimension.drawn, dimension.why.as_deref()), (flat, false, Some(crate::drawing_scene::NO_PLACE)));
     let note = |id: u64| built.notes.iter().find(|one| one.note == id).unwrap();
-    assert_eq!((note(noted).view, note(noted).drawn, note(noted).why.as_deref()), (Some(flat), false, Some(crate::drawing_scene::NO_PLACE)));
     assert_eq!((note(plain).drawn, note(plain).why.as_deref()), (true, None));
-    let [balloon] = built.balloons.as_slice() else { panic!("one balloon: {:?}", built.balloons) };
-    assert_eq!((balloon.view, balloon.drawn, balloon.why.as_deref()), (flat, false, Some(crate::drawing_scene::NO_PLACE)));
 }
 
 /// A bend up is ISO 128's long dash and dot (type 04), a bend down its long dash and two dots (type
@@ -4825,4 +4837,86 @@ fn a_shafts_thread_is_seen_from_the_side() {
     let limits: Vec<(Vec2, Vec2)> = thread_segs(&v, "limit", "visible").iter().map(top_first).collect();
     assert_eq!(limits.len(), 1, "{v}");
     assert!((limits[0].0.y - 148.5).abs() < 1e-6 && (limits[0].0.dist(limits[0].1) - 8.0).abs() < 1e-6, "{v}");
+}
+
+const DRAFT: &str = "drawing.view.draft";
+
+/// A draft view (#5425) has no model, so it takes only the settings of its own: its scale, line
+/// group, place and label. Edit refuses each model setting by its name, following a parent and a
+/// direction, and changes nothing. Inspect gives its kind, no source, and its placeholder's reason
+/// while it has no sketch. No view is made from it, and nothing on it points at the model. It is
+/// copied and moved to another sheet as any view is.
+#[test]
+fn a_draft_view_takes_only_the_settings_of_its_own() {
+    let (mut s, [front, ..]) = three_views();
+    let (made, id) = create(&mut s, DRAFT, json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [300, 80]}));
+    assert_box(&made, [290.0, 70.0], [310.0, 90.0]);
+    assert_eq!((&made["scale"]["text"], &made["scale"]["fitted"]), (&json!("1:2"), &json!(false)), "{made}");
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let model = [
+        ("visual_style", json!("visible_hidden")),
+        ("reference_style", json!("visible")),
+        ("reference_hides_model", json!(true)),
+        ("tangent_edges", json!("show")),
+        ("exploded", json!("assembled")),
+        ("pose", json!("designed")),
+        ("configuration", json!("active")),
+        ("source", json!({"occurrences": [[]]})),
+    ];
+    for (name, value) in model {
+        let e = edit_refused(&mut s, id, json!({ name: value }));
+        assert!(e.contains(&format!("a draft view has no model: it sets no {name}")), "{name}: {e}");
+    }
+    let e = edit_refused(&mut s, id, json!({"reference_shown_percent": 10}));
+    assert!(e.contains("its reference_shown_percent is 0"), "{e}");
+    let e = edit_refused(&mut s, id, json!({"linked": true}));
+    assert!(e.contains("a draft view has no parent to follow"), "{e}");
+    let e = edit_refused(&mut s, id, json!({"view": "top"}));
+    assert!(e.contains("a draft view looks straight at its sheet"), "{e}");
+    let e = edit_refused(&mut s, id, json!({"scale": null}));
+    assert!(e.contains("a draft view has no parent to follow: it keeps a scale"), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "nothing changed");
+    assert_eq!(edit_view(&mut s, id, json!({"line_group": "0.5", "place": {"at": [310, 90]}}))["changed"], json!(["line_group", "place"]));
+
+    let inspected = inspect_view(&mut s, id);
+    assert_eq!((&inspected["kind"], inspected.get("source"), inspected.get("parent")), (&json!("draft"), None, None), "{inspected}");
+    assert_eq!((&inspected["extents"]["status"], &inspected["extents"]["provenance"]), (&json!("placeholder"), &json!("no_sketches")), "{inspected}");
+    assert_box(&inspected, [300.0, 80.0], [320.0, 100.0]);
+
+    let refusal = "a draft view has no model to project";
+    for (cmd, p) in [
+        (PROJECTED, json!({"parent": ids::encode(id), "side": "right"})),
+        (PROJECTED, json!({"parent": ids::encode(id), "side": "above_right"})),
+        ("drawing.view.section", json!({"parent": ids::encode(id), "line": {"kind": "full", "points": [[-30, 5], [30, 5]], "arrows": "right"}})),
+    ] {
+        let e = create_refused(&mut s, cmd, p);
+        assert!(e.contains(refusal), "{cmd}: {e}");
+    }
+    let d = s.drawing("test").unwrap();
+    let why = super::check_drawn(d, id, [&[3u64][..]], DRAFT).unwrap_err().to_string();
+    assert!(why.contains("a draft view draws no model: nothing on it points at the model"), "{why}");
+    assert!(super::check_drawn(d, front, std::iter::empty::<&[u64]>(), DRAFT).is_ok());
+
+    let other = second_sheet(&mut s);
+    let copied = to_sheet(&mut s, COPY, json!({"view": ids::encode(id), "sheet": ids::encode(other), "position_mm": [100, 100]}));
+    let copy = ids::decode(copied["view"].as_str().unwrap()).unwrap();
+    assert_eq!((saved(&s, copy).kind, saved(&s, copy).settings), (ViewKind::Draft, saved(&s, id).settings));
+    to_sheet(&mut s, MOVE, json!({"view": ids::encode(id), "sheet": ids::encode(other)}));
+    assert_eq!(saved(&s, id).sheet, other);
+}
+
+/// `drawing.view.draft` refuses a scale or a place it can't keep, and a missing scale (with no model,
+/// there is nothing to fit), and changes nothing.
+#[test]
+fn a_draft_view_refuses_a_scale_or_a_place_it_cant_keep() {
+    let mut s = block_drawing();
+    for scale in ["0:1", "1:0", "-1:2", "1e9:1", "NaN:1", ""] {
+        create_refused(&mut s, DRAFT, json!({"sheet": "Sheet 1", "scale": scale}));
+    }
+    create_refused(&mut s, DRAFT, json!({"sheet": "Sheet 1"}));
+    create_refused(&mut s, DRAFT, json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [1e300, 0]}));
+    for at in [json!([6000, 0]), json!([0, -5001])] {
+        let e = create_refused(&mut s, DRAFT, json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": at}));
+        assert!(e.contains("its place is at most 5000 mm"), "{at}: {e}");
+    }
 }

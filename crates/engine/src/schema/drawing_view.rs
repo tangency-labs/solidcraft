@@ -778,10 +778,11 @@ pub struct ChoicesResult {
 pub struct InspectResult {
     pub view: String,
     pub sheet: String,
-    /// `base`, `projected`, `section`, `pictorial`, `auxiliary` or `flat`.
+    /// `base`, `projected`, `section`, `pictorial`, `auxiliary`, `flat` or `draft`.
     pub kind: &'static str,
-    /// The design it draws: its own source, or its base view's.
-    pub source: String,
+    /// The design it draws: its own source, or its base view's. A draft view draws none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     /// The side of its parent a projected view sits on, or the diagonal a pictorial view sits on.
@@ -1078,6 +1079,23 @@ pub struct FlatParams {
     pub turn: Option<TurnParam>,
 }
 
+/// What `drawing.view.draft` takes: the sheet, its scale and where its centre goes (#5425).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct DraftParams {
+    /// The sheet, by id or name.
+    #[serde(deserialize_with = "super::drawing_sheet::sheet_ref")]
+    pub sheet: String,
+    /// The scale its sketches are drawn at: it has no model to fit one to.
+    pub scale: ScaleParam,
+    /// Where its plane's origin goes, in paper millimetres from the sheet's lower-left corner (the
+    /// sheet's centre when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub position_mm: Option<Point2>,
+}
+
 /// How far a flat pattern view is turned on its sheet, counter-clockwise.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(transparent)]
@@ -1274,11 +1292,11 @@ pub struct ExtentsResult {
     pub max: [f64; 2],
     /// How far the display mesh may lie inside a curved face: the largest display tolerance.
     pub error_mm: f64,
-    /// `approximate`: measured on the display mesh; `exact`: a flat pattern view's flat; `placeholder`:
-    /// nothing to measure, so the box is the placeholder's.
+    /// `approximate`: measured on the display mesh; `exact`: a flat pattern view's flat or a draft
+    /// view's sketches; `placeholder`: nothing to measure, so the box is the placeholder's.
     pub status: &'static str,
-    /// `display_mesh` or `flat_pattern`; with a placeholder, why: `past_walk_limit`, `no_bodies`,
-    /// `not_placed`, `nothing_chosen` or `no_flat`.
+    /// `display_mesh`, `flat_pattern` or `view_sketches`; with a placeholder, why: `past_walk_limit`,
+    /// `no_bodies`, `not_placed`, `nothing_chosen`, `no_flat` or `no_sketches`.
     pub provenance: &'static str,
 }
 

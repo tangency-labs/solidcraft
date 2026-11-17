@@ -47,7 +47,7 @@ pub const PENDING_ICONS: &[(&str, &str)] = &[
     ("drawing.view.break", "drawing_view_break"),
     ("drawing.view.copy_to_sheet.planned", "drawing_view_copy_to_sheet"),
     ("drawing.view.detail", "drawing_detail_view"),
-    ("drawing.view.draft", "drawing_view_draft"),
+    ("drawing.view.draft.planned", "drawing_view_draft"),
     ("drawing.view.flat_pattern", "drawing_view_flat_pattern"),
     ("drawing.view.move_to_sheet.planned", "drawing_view_move_to_sheet"),
     ("drawing.view.pictorial", "drawing_view_pictorial"),
@@ -89,7 +89,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.view.break", "Break View", "7578").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_break"),
     planned!("drawing.view.auxiliary.planned", "Auxiliary View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_auxiliary"),
     planned!("drawing.view.pictorial", "Pictorial View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_pictorial"),
-    planned!("drawing.view.draft", "Draft View", "4894").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_draft"),
+    planned!("drawing.view.draft.planned", "Draft View", "4894").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_draft"),
     planned!("drawing.view.flat_pattern", "Flat Pattern View", "13030").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_flat_pattern"),
     planned!("drawing.view.move_to_sheet.planned", "Move to sheet", "4894").at("DRAWING LAYOUT", "ARRANGE").icon("drawing_view_move_to_sheet"),
     planned!("drawing.view.copy_to_sheet.planned", "Copy to sheet", "4894").at("DRAWING LAYOUT", "ARRANGE").icon("drawing_view_copy_to_sheet"),
@@ -117,7 +117,9 @@ mod tests {
     fn drawing_entries_are_metadata_only() {
         let mut session = crate::Session::new(Default::default());
         let before = serde_json::to_value(&session.doc).unwrap();
-        for id in ["drawing.export", "drawing.view.base", "drawing.view.projected", "drawing.view.section", "drawing.view.auxiliary"] {
+        for id in
+            ["drawing.export", "drawing.view.base", "drawing.view.projected", "drawing.view.section", "drawing.view.auxiliary", "drawing.view.draft"]
+        {
             assert!(crate::find_command(id).unwrap().planned.is_none(), "the executable provider {id} stays registered");
         }
         assert!(crate::find_command("drawing.export.planned").unwrap().planned.is_some(), "the scaffold export stays disabled");

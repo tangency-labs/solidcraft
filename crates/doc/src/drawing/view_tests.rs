@@ -636,7 +636,7 @@ fn a_view_resolves_through_its_chain() {
     view.settings.tangent_edges = Some(TangentEdges::Show);
     view.reference_shown_percent = 2.0;
     let resolved = d.resolve_view(top).unwrap();
-    assert_eq!(resolved.source, d.sources[0].id);
+    assert_eq!(resolved.source, Some(d.sources[0].id));
     let right_basis = projected_basis(&NamedView::Front.basis(), ProjectedSide::Right, Projection::Third).unwrap();
     assert_eq!(resolved.basis, projected_basis(&right_basis, ProjectedSide::Above, Projection::Third).unwrap());
     assert_eq!(resolved.scale, Setting { value: "1:2".parse().unwrap(), set_by: SetBy::Parent(front) });
@@ -1330,4 +1330,123 @@ fn a_quarter_turn_is_saved_as_its_degrees() {
     for bad in [json!(45), json!(-90), json!(360), json!("90"), json!(90.5), json!(null)] {
         assert!(serde_json::from_value::<QuarterTurn>(bad.clone()).is_err(), "{bad}");
     }
+}
+
+/// A drawing with the front view and a draft view at 1:2 placed at (300, 120), and the draft view's id.
+fn drafted() -> (Drawing, IdSource, u64) {
+    let (mut d, mut id_source, _) = front();
+    let id = add(&mut d, &mut id_source, ViewKind::Draft, ViewPlace::At([300.0, 120.0]), scaled("1:2"));
+    d.validate().unwrap();
+    (d, id_source, id)
+}
+
+/// A draft view (#5425) saves its kind as `"draft"`, its place and its scale, and reads back as saved.
+/// It has no model: it resolves to the paper's own axes with no source, its centre is its place, and
+/// it needs no letter.
+#[test]
+fn a_draft_view_saves_its_kind_and_resolves_to_the_papers_axes_with_no_source() {
+    let (d, _, id) = drafted();
+    let v = file(&d);
+    let saved = v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    let sheet = ids::encode(d.sheets[0].id);
+    assert_eq!(
+        *saved,
+        json!({"id": ids::encode(id), "sheet": sheet, "kind": "draft", "place": {"at": [300.0, 120.0]}, "settings": {"scale": "1:2"}})
+    );
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), d);
+    let resolved = d.resolve_view(id).unwrap();
+    assert_eq!((resolved.source, resolved.flat, resolved.cut), (None, None, None));
+    assert_eq!(resolved.basis, Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y });
+    assert_eq!((resolved.scale.value, resolved.scale.set_by), ("1:2".parse().unwrap(), SetBy::This));
+    assert_eq!(d.view_centre(id).unwrap(), Vec2::new(300.0, 120.0));
+    let view = d.view(id).unwrap();
+    assert_eq!((view.kind.name(), view.kind.parent(), view.kind.unparented(), view.needs_letter()), ("draft", None, Some("a draft view"), false));
+}
+
+/// A draft view's rules, saved or made: it has a scale and is placed at a point; it sets none of the
+/// model settings, each refused by its name, and shows no more for reference parts; no view is made
+/// from it. Nothing on it measures or points at a model: a dimension, a balloon, a note on an edge and
+/// a note with a leader are refused. A note on the view itself is kept.
+#[test]
+fn a_draft_view_keeps_its_rules() {
+    use crate::drawing::balloon::Balloon;
+    use crate::drawing::dimension::{Dimension, DimensionKind, ModelEdge, TextPlace};
+    use crate::drawing::note::{Anchor, Branch, Note};
+    use solidcraft_geom::cell::{Content, Part};
+    use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
+
+    let (d, mut id_source, id) = drafted();
+    let at = file(&d)["views"].as_array().unwrap().iter().position(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    let no_model = |name: &str| format!("a draft view has no model: it sets no {name}");
+    let edits: [(fn(&mut Value), String); 13] = [
+        (|view| view["settings"] = json!({}), "a draft view has a scale".into()),
+        (|view| view["place"] = json!({"aligned": 10.0}), "a draft view is placed at a point".into()),
+        (|view| view["settings"]["visual_style"] = json!("visible"), no_model("visual_style")),
+        (|view| view["settings"]["reference_style"] = json!("visible"), no_model("reference_style")),
+        (|view| view["settings"]["reference_hides_model"] = json!(false), no_model("reference_hides_model")),
+        (|view| view["settings"]["tangent_edges"] = json!("show"), no_model("tangent_edges")),
+        (|view| view["settings"]["occurrences"] = json!([[]]), no_model("source")),
+        (|view| view["settings"]["hide"] = json!([[7]]), no_model("hide")),
+        (|view| view["settings"]["exploded"] = json!("assembled"), no_model("exploded")),
+        (|view| view["settings"]["pose"] = json!("designed"), no_model("pose")),
+        (|view| view["settings"]["configuration"] = json!("active"), no_model("configuration")),
+        (|view| view["reference_shown_percent"] = json!(10.0), "a draft view has no model: its reference_shown_percent is 0".into()),
+        (|view| view["settings"]["line_group"] = json!("0.5"), "read".into()),
+    ];
+    for (edit, why) in edits {
+        let error = refused(&d, |v| edit(&mut v["views"][at]));
+        assert!(error.contains(&why), "{why}: {error}");
+    }
+    let refusal = "a draft view has no model to project";
+    assert_eq!(d.can_project_from(id).unwrap_err().to_string(), refusal);
+    let place = ViewPlace::At([450.0, 150.0]);
+    let kinds = [
+        (projected(id, ProjectedSide::Right), ViewPlace::Aligned(450.0)),
+        (section(id), place),
+        (pictorial(id, Diagonal::AboveRight), place),
+        (auxiliary(id, [1.0, 0.0]), place),
+    ];
+    for (kind, place) in kinds {
+        let mut made_from = d.clone();
+        add(&mut made_from, &mut id_source, kind, place, ViewOverrides::default());
+        let error = made_from.validate().unwrap_err().to_string();
+        assert!(error.contains(refusal), "{error}");
+    }
+
+    let edge = || ModelEdge { body: "Box".into(), origin_feature: 7, name: "F1:front|F1:top".into(), path: vec![3] };
+    let text = || Content(vec![Part::Text("Break all edges".into())]);
+    let note = |id: u64, anchor: Anchor, branches: Vec<Branch>| Note { id, anchor, at: [40.0, 25.0], content: text(), cap_mm: None, branches };
+    let measures = format!("view {}: a draft view draws no model: nothing on it points at the model", ids::encode(id));
+    let mut measured = d.clone();
+    let dimension = measured.allocate_id(&mut id_source).unwrap();
+    let kind = DimensionKind::Length { edge: edge(), direction: LinearDirection::Aligned, reading: Reading::True };
+    let record = Dimension {
+        id: dimension,
+        view: id,
+        kind,
+        offset_mm: -10.0,
+        text: TextPlace::Centred,
+        decimals: 2,
+        override_text: None,
+        last_good: None,
+        from_model: None,
+    };
+    measured.add_dimensions([Arc::new(record)]);
+    let mut ballooned = d.clone();
+    let balloon = ballooned.allocate_id(&mut id_source).unwrap();
+    ballooned.balloons.add([Arc::new(Balloon { id: balloon, view: id, edge: edge(), at: [40.0, 25.0], parts_list: None })]);
+    let mut on_edge = d.clone();
+    let edge_note = on_edge.allocate_id(&mut id_source).unwrap();
+    on_edge.notes.add([Arc::new(note(edge_note, Anchor::Edge { view: id, edge: edge() }, Vec::new()))]);
+    let mut leader = d.clone();
+    let led = leader.allocate_id(&mut id_source).unwrap();
+    leader.notes.add([Arc::new(note(led, Anchor::View(id), vec![Branch::Edge(edge())]))]);
+    for (on, what) in [(measured, "dimension"), (ballooned, "balloon"), (on_edge, "note"), (leader, "note")] {
+        let error = on.validate().unwrap_err().to_string();
+        assert!(error.starts_with(what) && error.contains(&measures), "{what}: {error}");
+    }
+    let mut kept = d.clone();
+    let alone = kept.allocate_id(&mut id_source).unwrap();
+    kept.notes.add([Arc::new(note(alone, Anchor::View(id), Vec::new()))]);
+    kept.validate().unwrap();
 }

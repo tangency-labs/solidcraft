@@ -355,6 +355,7 @@ impl Drawing {
     fn check_dimension(&self, d: &Dimension) -> Result<()> {
         let on = || format!("it is on view {}, which the drawing doesn't have", ids::encode(d.view));
         require(self.view(d.view).is_some(), on)?;
+        self.check_has_model(d.view)?;
         match &d.kind {
             DimensionKind::Linear { a, b, direction, reading } => {
                 check_point(a)?;

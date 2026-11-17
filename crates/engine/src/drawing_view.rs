@@ -16,7 +16,7 @@ use std::sync::Arc;
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::config::RowKey;
 use solidcraft_doc::drawing::cutting_line::SectionKind;
-use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View, ViewKind};
+use solidcraft_doc::drawing::view::{Cut, ResolvedView, SetBy, View};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::{Exploded, Pose, StudyStep, ViewConfiguration};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
@@ -80,6 +80,8 @@ pub enum Unmeasured {
     NoFlat,
     /// It is a section view whose cutting line keeps none of its parts.
     CutAway,
+    /// It is a draft view with no sketches yet: it has no model, so only they give it a size.
+    NoSketches,
 }
 
 /// Why a choice of occurrences that draws nothing is refused.
@@ -99,6 +101,7 @@ impl Unmeasured {
             Unmeasured::NotConfigured => "not_configured",
             Unmeasured::NoFlat => "no_flat",
             Unmeasured::CutAway => "cut_away",
+            Unmeasured::NoSketches => "no_sketches",
         }
     }
 }
@@ -119,6 +122,7 @@ impl fmt::Display for Unmeasured {
             Unmeasured::NotConfigured => f.write_str("its configuration can't be applied to the design"),
             Unmeasured::NoFlat => f.write_str("the view's body has no flat pattern"),
             Unmeasured::CutAway => f.write_str("its cutting line keeps none of the parts"),
+            Unmeasured::NoSketches => f.write_str("the draft view has no sketches yet"),
         }
     }
 }
@@ -574,11 +578,11 @@ pub fn not_drawable_flat(view: &ResolvedView) -> Option<&'static str> {
 }
 
 /// Why nothing on saved view `view` can point at the model, if nothing can (#13030): a flat pattern
-/// view draws its body's flat, whose edges aren't the model's, so no dimension, balloon or note
-/// leader has a place on it. A note on it that points at nothing is drawn.
+/// view draws its body's flat, whose edges aren't the model's, and a draft view draws no model (#5425),
+/// so no dimension, balloon or note leader has a place on it ([`ViewKind::no_model_edges`], the
+/// record's rule). A note on it that points at nothing is drawn.
 pub fn no_model_edges(view: &View) -> Option<&'static str> {
-    let why = "a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model";
-    matches!(view.kind, ViewKind::Flat { .. }).then_some(why)
+    view.kind.no_model_edges()
 }
 
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
@@ -704,6 +708,10 @@ pub fn on_sheet_from(sessions: &mut ViewSessions, drawing: &Drawing, id: u64, cm
         return flat_on_sheet(drawing, id, &flat(sessions.placed, of, cmd), cmd);
     }
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
+    if view.source.is_none() {
+        let sketched = crate::drawing_scene::view_sketch_box(sessions.placed, drawing, id);
+        return draft_placed(&view, sketched, centre, cmd);
+    }
     let shown = shown_by(sessions, &view);
     let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
     placed(&view, measured, centre, cmd)
@@ -721,6 +729,18 @@ pub fn flat_on_sheet(drawing: &Drawing, id: u64, flat: &Result<Flat>, cmd: &str)
 pub fn flat_measured(flat: &Result<Flat>) -> std::result::Result<(Extents, Aabb2), Unmeasured> {
     let flat = flat.as_ref().map_err(|_| Unmeasured::NoFlat)?;
     Ok((Extents { model: flat.model, error_mm: 0.0, bodies: 1 }, flat.model))
+}
+
+/// Draft view `view` on its sheet (#5425), with its plane's origin on `centre`: round `sketched`, the
+/// box of what its sketches draw on its plane, so they stay where they were drawn whatever they hold.
+/// It has no model to measure, so with no sketches it is the placeholder ([`placed`]).
+pub fn draft_placed(view: &ResolvedView, sketched: Aabb2, centre: Vec2, cmd: &str) -> Result<OnSheet> {
+    if sketched.is_empty() {
+        return placed(view, Err(Unmeasured::NoSketches), centre, cmd);
+    }
+    let frame = ViewFrame::new(view.basis, view.scale.value, Vec2::ZERO, centre).map_err(|e| bad(cmd, e.to_string()))?;
+    let boundary = frame.boundary(&sketched).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(OnSheet { boundary, extents: Extents { model: sketched, error_mm: 0.0, bodies: 0 }, unmeasured: None })
 }
 
 /// A view drawing as `view` does on its sheet, from what [`measure`] and [`shows`] said of it, with the

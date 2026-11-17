@@ -17,6 +17,11 @@
 //! from the side away in first angle ([`auxiliary_basis`]); it is placed at a point, never lined up.
 //! Only the side is saved, never the edge or face it was made for: it is a direction on paper.
 //!
+//! A **draft view** (#5425) has no model: it holds view sketches, drawn at its scale on the paper's
+//! own axes with the plane's origin on its place. It has a scale and is placed at a point, sets none
+//! of the settings that read a model, and nothing is made from it; nothing on it measures or points
+//! at a model ([`Drawing::check_has_model`]): a note on it alone is kept.
+//!
 //! What a view sets itself is in [`ViewOverrides`]: each setting it leaves out follows its parent,
 //! then the default, and [`Drawing::resolve_view`] is that one rule for every reader. A projected
 //! view's source and basis come from its chain of parents, so neither is saved. Which occurrences it
@@ -234,10 +239,13 @@ pub enum ViewKind {
         body: String,
         turn: QuarterTurn,
     },
+    /// A view with no model (#5425): it holds only its view sketches, drawn at its scale on the
+    /// paper's own axes, the plane's origin on its place ([`Drawing::resolve_view`]).
+    Draft,
 }
 
 impl ViewKind {
-    /// Its name in replies: `base`, `projected`, `section`, `pictorial`, `auxiliary` or `flat`.
+    /// Its name in replies: `base`, `projected`, `section`, `pictorial`, `auxiliary`, `flat` or `draft`.
     pub fn name(&self) -> &'static str {
         match self {
             ViewKind::Base { .. } => "base",
@@ -246,15 +254,16 @@ impl ViewKind {
             ViewKind::Pictorial { .. } => "pictorial",
             ViewKind::Auxiliary { .. } => "auxiliary",
             ViewKind::Flat { .. } => "flat",
+            ViewKind::Draft => "draft",
         }
     }
 
-    /// The view it comes from: none for a base or flat pattern view. The one place a view's parent is
-    /// read, so every rule about parents (the chain, deleting, copying, listing) holds for each kind
-    /// with one.
+    /// The view it comes from: none for a base, flat pattern or draft view. The one place a view's
+    /// parent is read, so every rule about parents (the chain, deleting, copying, listing) holds for
+    /// each kind with one.
     pub fn parent(&self) -> Option<u64> {
         match self {
-            ViewKind::Base { .. } | ViewKind::Flat { .. } => None,
+            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Draft => None,
             ViewKind::Projected { parent, .. }
             | ViewKind::Section { parent, .. }
             | ViewKind::Pictorial { parent, .. }
@@ -262,12 +271,12 @@ impl ViewKind {
         }
     }
 
-    /// Where it sits by its parent, of the eight names `drawing.view.projected` takes: none for a base
-    /// or flat pattern view, and none for a section or an auxiliary view, which is placed wherever its
-    /// command puts it.
+    /// Where it sits by its parent, of the eight names `drawing.view.projected` takes: none for a base,
+    /// flat pattern or draft view, and none for a section or an auxiliary view, which is placed
+    /// wherever its command puts it.
     pub fn beside(&self) -> Option<Beside> {
         match self {
-            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Section { .. } | ViewKind::Auxiliary { .. } => None,
+            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Draft | ViewKind::Section { .. } | ViewKind::Auxiliary { .. } => None,
             ViewKind::Projected { side, .. } => Some(Beside::Side(*side)),
             ViewKind::Pictorial { diagonal, .. } => Some(Beside::Diagonal(*diagonal)),
         }
@@ -278,7 +287,23 @@ impl ViewKind {
         match self {
             ViewKind::Base { .. } => Some("a base view"),
             ViewKind::Flat { .. } => Some("a flat pattern view"),
+            ViewKind::Draft => Some("a draft view"),
             ViewKind::Projected { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } => None,
+        }
+    }
+
+    /// Why a view of this kind draws no model edges, so nothing on it can point at the model: no
+    /// dimension, balloon or note leader, and no sketch link. None when it draws them. Every kind
+    /// says, so a new kind chooses too.
+    pub fn no_model_edges(&self) -> Option<&'static str> {
+        match self {
+            ViewKind::Flat { .. } => Some("a flat pattern view draws its body's flat, not the model's edges: nothing on it points at the model"),
+            ViewKind::Draft => Some("a draft view draws no model: nothing on it points at the model"),
+            ViewKind::Base { .. }
+            | ViewKind::Projected { .. }
+            | ViewKind::Section { .. }
+            | ViewKind::Pictorial { .. }
+            | ViewKind::Auxiliary { .. } => None,
         }
     }
 }
@@ -461,7 +486,8 @@ pub struct Cut {
 /// A view as it draws: the source it draws, which way it looks, and each setting with who gave it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedView {
-    pub source: u64,
+    /// The source its model comes from: none for a draft view, which has no model.
+    pub source: Option<u64>,
     pub basis: Plane,
     /// A section view's cut: none for any other view.
     pub cut: Option<Cut>,
@@ -519,6 +545,36 @@ pub fn check_occurrence_paths(occurrences: &[Vec<u64>], hide: &[Vec<u64>]) -> Re
         format!("an occurrence path is 1..{MAX_PLACEMENT_DEPTH} ids")
     })?;
     require(hide.iter().all(|path| !path.is_empty()), || "hide [] would leave out the design's own bodies: give source instead".into())
+}
+
+/// The first setting of `settings` that reads a model, by its name in `drawing.view.edit`: what a
+/// draft view never sets. Every field is named, so a new setting must say which it is.
+fn model_setting(settings: &ViewOverrides) -> Option<&'static str> {
+    let ViewOverrides {
+        scale: _,
+        line_group: _,
+        visual_style,
+        reference_style,
+        reference_hides_model,
+        tangent_edges,
+        occurrences,
+        hide,
+        exploded,
+        pose,
+        configuration,
+    } = settings;
+    let set = [
+        ("visual_style", visual_style.is_some()),
+        ("reference_style", reference_style.is_some()),
+        ("reference_hides_model", reference_hides_model.is_some()),
+        ("tangent_edges", tangent_edges.is_some()),
+        ("source", occurrences.is_some()),
+        ("hide", hide.is_some()),
+        ("exploded", exploded.is_some()),
+        ("pose", pose.is_some()),
+        ("configuration", configuration.is_some()),
+    ];
+    set.into_iter().find(|(_, set)| *set).map(|(name, _)| name)
 }
 
 /// What a view's position may hold, saved or asked for: 1 to [`MAX_POSE_JOINTS`] joints, each once,
@@ -664,12 +720,19 @@ impl Drawing {
         }
         match &view.kind {
             ViewKind::Base { source, view: direction } => {
-                self.check_unparented(view, *source)?;
+                self.check_unparented(view, Some(*source))?;
                 direction.basis().map(|_| ()).map_err(|e| DocError::Invalid(e.to_string()))
             }
             ViewKind::Flat { source, body, .. } => {
-                self.check_unparented(view, *source)?;
+                self.check_unparented(view, Some(*source))?;
                 check_flat_body(body)
+            }
+            ViewKind::Draft => {
+                self.check_unparented(view, None)?;
+                if let Some(name) = model_setting(&view.settings) {
+                    return Err(DocError::Invalid(format!("a draft view has no model: it sets no {name}")));
+                }
+                require(view.reference_shown_percent == 0.0, || "a draft view has no model: its reference_shown_percent is 0".into())
             }
             ViewKind::Projected { parent, .. } => {
                 self.chain_of(view.id)?;
@@ -704,22 +767,38 @@ impl Drawing {
     /// Whether a view can be made from view `parent`, the one rule a new view, a saved one and a
     /// preview of one keep: `parent` is one of the drawing's views, its chain of parents has room for
     /// one more view ([`MAX_VIEW_DEPTH`]), and it isn't a pictorial view or made from a flat pattern
-    /// view (neither supported yet; a flat pattern's plane isn't a model view, #13030).
+    /// view (neither supported yet; a flat pattern's plane isn't a model view, #13030), nor a draft
+    /// view, which has no model.
     pub fn can_project_from(&self, parent: u64) -> Result<()> {
         let chain = self.chain_of(parent)?;
         require(chain.len() < MAX_VIEW_DEPTH, || format!("a chain of views is at most {MAX_VIEW_DEPTH} views"))?;
         let pictorial = matches!(chain.first().map(|view| &view.kind), Some(ViewKind::Pictorial { .. }));
         require(!pictorial, || "not supported yet: a view projected from a pictorial view".into())?;
-        let flat = matches!(chain.last().map(|end| &end.kind), Some(ViewKind::Flat { .. }));
-        require(!flat, || "not supported yet: a view made from a flat pattern view".into())
+        match chain.last().map(|end| &end.kind) {
+            Some(ViewKind::Flat { .. }) => Err(DocError::Invalid("not supported yet: a view made from a flat pattern view".into())),
+            Some(ViewKind::Draft) => Err(DocError::Invalid("a draft view has no model to project".into())),
+            _ => Ok(()),
+        }
     }
 
-    /// The rules of a view that ends a chain, a base or flat pattern view: it draws one of the
-    /// drawing's sources, has a scale and is placed at a point.
-    fn check_unparented(&self, view: &View, source: u64) -> Result<()> {
+    /// Refused when view `view` draws no model edges ([`ViewKind::no_model_edges`]): nothing on it
+    /// measures or points at the model. The one rule a dimension, a balloon and a note pointing at the
+    /// model keep.
+    pub(super) fn check_has_model(&self, view: u64) -> Result<()> {
+        match self.view(view).and_then(|v| v.kind.no_model_edges()) {
+            Some(why) => Err(DocError::Invalid(format!("view {}: {why}", ids::encode(view)))),
+            None => Ok(()),
+        }
+    }
+
+    /// The rules of a view that ends a chain, a base, flat pattern or draft view: it draws one of the
+    /// drawing's sources (none for a draft view), has a scale and is placed at a point.
+    fn check_unparented(&self, view: &View, source: Option<u64>) -> Result<()> {
         let what = view.kind.unparented().unwrap_or("a view");
-        let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
-        require(self.sources.iter().any(|s| s.id == source), drawn)?;
+        if let Some(source) = source {
+            let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
+            require(self.sources.iter().any(|s| s.id == source), drawn)?;
+        }
         require(view.settings.scale.is_some(), || format!("{what} has a scale"))?;
         require(matches!(view.place, ViewPlace::At(_)), || format!("{what} is placed at a point: it has no parent to line up with"))
     }
@@ -731,15 +810,19 @@ impl Drawing {
     pub fn resolve_view(&self, id: u64) -> Result<ResolvedView> {
         let chain = self.chain_of(id)?;
         let (source, mut basis, flat) = match chain.last().map(|end| &end.kind) {
-            Some(ViewKind::Base { source, view: direction }) => (*source, direction.basis().map_err(|e| DocError::Invalid(e.to_string()))?, None),
+            Some(ViewKind::Base { source, view: direction }) => {
+                (Some(*source), direction.basis().map_err(|e| DocError::Invalid(e.to_string()))?, None)
+            }
             // A flat lies on its own plane, so the turn alone says which way it looks.
-            Some(ViewKind::Flat { source, body, turn }) => (*source, turn.basis(), Some(FlatOf { body: body.clone(), turn: *turn })),
+            Some(ViewKind::Flat { source, body, turn }) => (Some(*source), turn.basis(), Some(FlatOf { body: body.clone(), turn: *turn })),
+            // No model: its sketches' plane is the paper's own, x right and y up.
+            Some(ViewKind::Draft) => (None, Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y }, None),
             _ => return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id)))),
         };
         let mut cut = None;
         for view in chain.iter().rev() {
             match &view.kind {
-                ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
+                ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Draft => {}
                 ViewKind::Projected { side, .. } => basis = Beside::Side(*side).basis(&basis, self.projection)?,
                 ViewKind::Pictorial { diagonal, .. } => basis = Beside::Diagonal(*diagonal).basis(&basis, self.projection)?,
                 ViewKind::Section { line, .. } => {
@@ -793,6 +876,7 @@ impl Drawing {
                     ViewPlace::Aligned(_),
                     ViewKind::Base { .. }
                     | ViewKind::Flat { .. }
+                    | ViewKind::Draft
                     | ViewKind::Section { .. }
                     | ViewKind::Pictorial { .. }
                     | ViewKind::Auxiliary { .. },

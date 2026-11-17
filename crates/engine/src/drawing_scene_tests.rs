@@ -4092,6 +4092,56 @@ fn a_views_sketch_is_drawn_through_its_view_and_goes_with_it_without_solving_aga
     assert_eq!(s.drawing_scenes.sketch_solves, solves, "a move or a new scale solves nothing again");
 }
 
+/// A draft view (#5425) has no model: its sketch is drawn at its scale with the plane's origin on the
+/// view's place, and the view is picked round its sketch, as `drawing.view.inspect` measures it.
+/// Nothing of the model is evaluated or projected for it, not even after the model changes. A new
+/// scale redraws its sketch with no new solve.
+#[test]
+fn a_draft_view_draws_its_sketch_at_its_scale_and_reads_no_model() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20}));
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let evaluations = s.evaluations;
+    let made = run(&mut s, "drawing.view.draft", json!({"sheet": ids::encode(sheet), "scale": "1:2", "position_mm": [100, 80]}));
+    assert_eq!((&made["boundary_mm"]["min"], &made["boundary_mm"]["max"]), (&json!([90.0, 70.0]), &json!([110.0, 90.0])), "{made}");
+    let view = ids::decode(made["view"].as_str().unwrap()).unwrap();
+    let sketch = run(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(view)}));
+    let sketch = ids::decode(sketch["sketch"].as_str().unwrap()).unwrap();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let corners = |b: Aabb2| [b.min.x, b.min.y, b.max.x, b.max.y];
+    let near = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-9);
+    // Its sketch's strokes and the view's pick box on the sheet, as the window and a command read them.
+    let drawn = |s: &mut Session| {
+        let shown = settled(s, sheet);
+        assert_eq!(bytes(&shown.scene), bytes(&built(s, sheet).scene));
+        let paths = cached_sketch_group(&shown.scene, sketch).items.iter().flat_map(|item| stroke_path(item).0.to_vec());
+        let strokes = paths.fold(Aabb2::EMPTY, |all, seg| all.union(&seg.bounds()));
+        let object = shown.objects.iter().find(|o| o.object == view && o.kind == ObjectKind::View).unwrap();
+        assert_eq!((object.bounds_mm, object.boundary_mm), (strokes, Some(strokes)), "picked round its sketch");
+        let inspected = run(s, "drawing.view.inspect", json!({"view": ids::encode(view)}));
+        let boundary = |at: &str| [0, 1].map(|i| inspected["boundary_mm"][at][i].as_f64().unwrap());
+        let [min, max] = [boundary("min"), boundary("max")];
+        assert!(near([min[0], min[1], max[0], max[1]], corners(strokes)), "{inspected}");
+        assert_eq!((&inspected["kind"], inspected.get("source")), (&json!("draft"), None), "{inspected}");
+        corners(strokes)
+    };
+    assert!(near(drawn(&mut s), [100.0, 80.0, 120.0, 90.0]), "40 x 20 at 1:2 from the view's place");
+    assert_eq!(s.evaluations, evaluations, "no model evaluated");
+    // A model edit, with the drawing closed as a model command needs, then opened again.
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "drawing.open", drawing);
+    assert!(near(drawn(&mut s), [100.0, 80.0, 120.0, 90.0]));
+    assert_eq!(s.drawing_scenes.projections, 0, "nothing projected for it after the model changed");
+    let solves = s.drawing_scenes.sketch_solves;
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"scale": "2:1"}}));
+    assert!(near(drawn(&mut s), [100.0, 80.0, 180.0, 120.0]), "at its new scale");
+    assert_eq!((s.drawing_scenes.sketch_solves, s.drawing_scenes.projections), (solves, 0), "a new scale solves nothing again");
+}
+
 /// A view's sketch whose view isn't drawn on the sheet says so; the sheet's own sketch still draws.
 #[test]
 fn a_views_sketch_whose_view_isnt_drawn_says_so_and_the_sheets_own_still_draws() {

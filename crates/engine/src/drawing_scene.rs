@@ -61,7 +61,7 @@
 //! [`groups`]: crate::drawing_pictures::groups
 //! [`TitleBlockLayout::paper`]: solidcraft_geom::title_block::TitleBlockLayout::paper
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -492,7 +492,14 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // What each view drew its lines from, kept as it is drawn (the lines themselves aren't): the
     // state of the assembly it draws, and its bodies.
     let mut owners = Vec::new();
+    // The sheet's sketches, drawn first: a draft view's place on the sheet is round its own.
+    let records = sketches_on(drawing, sheet);
+    let sketched: Vec<(u64, DrawnSketch)> = records.iter().map(|record| (record.id, draw_sketch(s, drawing, record))).collect();
+    let boxes = sketch_boxes(sketched.iter().map(|(_, drawn)| drawn));
     let drawn = on.iter().map(|(id, view, centre)| {
+        if view.source.is_none() {
+            return (*id, *centre, round_sketches(view, Cow::Owned(draw_draft(*id, view)), boxes.get(id)));
+        }
         let choice = sessions.choice(view);
         let drawn = match sessions.drawing(&choice) {
             Ok((from, failing)) => {
@@ -502,7 +509,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
             Err(why) => draw(s, &[], &Err(why), &mut PreparedBodies::default(), *id, view),
         };
         owners.extend(drawn.owners.clone().map(|of| (*id, choice, of)));
-        (*id, *centre, drawn)
+        (*id, *centre, Cow::Owned(drawn))
     });
     let lettering = Lettering::of(s, drawing);
     let (text, _) = block_text(record, &lettering, &cell_texts(s, drawing, sheet), true)?;
@@ -521,8 +528,6 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // Tables paint in their own band, under the sheet's own notes, so a note placed on one stays readable.
     let tables = assembly.add_tables(&tables);
     assembly.add_sheet_notes(&notes);
-    let records = sketches_on(drawing, sheet);
-    let sketched = records.iter().map(|record| (record.id, draw_sketch(s, drawing, record)));
     let fills = fills_on(drawing, sheet);
     let mut regions = BTreeMap::new();
     for record in &fills {
@@ -530,7 +535,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     }
     let filled = fills.iter().map(|record| (record.id, draw_fill(drawing, record, regions.get(&record.sketch))));
     assembly.add_fills(filled);
-    assembly.add_sketches(sketched);
+    assembly.add_sketches(sketched.iter().map(|(id, drawn)| (*id, drawn)));
     let fills = std::mem::take(&mut assembly.fills);
     let sketches = std::mem::take(&mut assembly.sketches);
     let (scene, views, objects, dimensions, notes, balloons) = assembly.finish()?;
@@ -892,6 +897,55 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
         return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
     }
     Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: None, boundary, frame: Some(frame), owners: None, why: None }
+}
+
+/// Draft view `id` (#5425), drawing as `view` does: it has no model, so it reads none and draws no
+/// lines, only an empty group and a frame through the paper's axes at its scale with its plane's
+/// origin on the view, for its sketches. With none yet it is the placeholder; [`round_sketches`] puts
+/// it round them.
+fn draw_draft(id: u64, view: &ResolvedView) -> Drawn {
+    let boundary = crate::drawing_view::draft_placed(view, Aabb2::EMPTY, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
+    let status = Status::Placeholder(Unmeasured::NoSketches);
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: None };
+    let frame = match ViewFrame::new(view.basis, view.scale.value, Vec2::ZERO, Vec2::ZERO) {
+        Ok(frame) => frame,
+        Err(e) => return none(Status::Failed(e.to_string())),
+    };
+    let group = Group { object: id, kind: ObjectKind::View, items: Vec::new() };
+    Drawn { group: Some(Arc::new(group)), frame: Some(frame), ..none(status) }
+}
+
+/// The box round what each view's sketches of `sketches` draw, on its plane, by view.
+fn sketch_boxes<K: Borrow<DrawnSketch>>(sketches: impl Iterator<Item = K>) -> BTreeMap<u64, Aabb2> {
+    let mut boxes = BTreeMap::new();
+    for drawn in sketches {
+        let drawn = drawn.borrow();
+        if let (Some(group), Some(view)) = (&drawn.group, drawn.view) {
+            let all: &mut Aabb2 = boxes.entry(view).or_insert(Aabb2::EMPTY);
+            *all = all.union(&group_bounds(group, &[]));
+        }
+    }
+    boxes
+}
+
+/// `drawn`, as `view` draws on the sheet: a draft view's round `sketched`, the box of what its
+/// sketches draw ([`sketch_boxes`]), as it has no model to measure ([`crate::drawing_view::draft_placed`]);
+/// any other view's, and a draft view with no sketches or no frame, as it is.
+fn round_sketches<'a>(view: &ResolvedView, drawn: Cow<'a, Drawn>, sketched: Option<&Aabb2>) -> Cow<'a, Drawn> {
+    let (Some(sketched), None, Some(_)) = (sketched, view.source, drawn.frame) else { return drawn };
+    match crate::drawing_view::draft_placed(view, *sketched, Vec2::ZERO, CMD) {
+        Ok(placed) if placed.unmeasured.is_none() => {
+            Cow::Owned(Drawn { boundary: Some(placed.boundary), status: Status::Drawn, ..drawn.into_owned() })
+        }
+        _ => drawn,
+    }
+}
+
+/// The box round what draft view `view` of `d`'s sketches draw on its plane, each solved now: what
+/// a command places it by, as the sheet does ([`round_sketches`]). Empty with none.
+pub(crate) fn view_sketch_box(s: &Session, d: &Drawing, view: u64) -> Aabb2 {
+    let own = d.sketches.iter().filter(|record| record.owner.view() == Some(view));
+    sketch_boxes(own.map(|record| draw_sketch(s, d, record))).remove(&view).unwrap_or(Aabb2::EMPTY)
 }
 
 /// Why a sheet leaves out a dimension or a note whose view it doesn't draw.
@@ -1915,9 +1969,10 @@ impl Cache {
         }
     }
 
-    /// Whether view `id`, drawing as `view` now, was last drawn so, from `state`.
+    /// Whether view `id`, drawing as `view` now, was last drawn so, from `state`: a draft view reads
+    /// no model, so from any state.
     fn fresh(&self, id: u64, state: &Arc<ModelState>, view: &ResolvedView) -> bool {
-        self.views.get(&id).is_some_and(|e| Arc::ptr_eq(&e.state, state) && e.view == *view)
+        self.views.get(&id).is_some_and(|e| (view.source.is_none() || Arc::ptr_eq(&e.state, state)) && e.view == *view)
     }
 
     /// What sheet `record` of `d`, holding the views `on` ([`views_on`]), is assembled from now.
@@ -2182,15 +2237,18 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             let kept: BTreeSet<u64> = d.views.iter().map(|v| v.id).collect();
             cache.views.retain(|id, _| kept.contains(id));
             cache.dimensions.retain(|id, _| d.dimension(*id).is_some() || d.notes.by_id(*id).is_some() || d.balloons.by_id(*id).is_some());
-            let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
+            let sketched = || sketches.iter().filter_map(|record| cache.sketches.get(&record.id).map(|e| (record.id, &e.drawn)));
+            let boxes = sketch_boxes(sketched().map(|(_, drawn)| drawn));
+            let drawn = on.iter().filter_map(|(id, view, centre)| {
+                cache.views.get(id).map(|e| (*id, *centre, round_sketches(view, Cow::Borrowed(&e.drawn), boxes.get(id))))
+            });
             let mut assembly = assemble(record, d.projection, &text, &inputs.images, &inputs.logos, &labels, drawn)?;
             assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
             let table_states = assembly.add_tables(&tables);
             assembly.add_sheet_notes(&notes);
-            let sketched = sketches.iter().filter_map(|record| cache.sketches.get(&record.id).map(|e| (record.id, &e.drawn)));
             let filled = fills.iter().filter_map(|record| cache.fills.get(&record.id).map(|entry| (record.id, &entry.drawn)));
             assembly.add_fills(filled);
-            assembly.add_sketches(sketched);
+            assembly.add_sketches(sketched());
             let fills = std::mem::take(&mut assembly.fills);
             let sketches = std::mem::take(&mut assembly.sketches);
             let (scene, views, objects, dimensions, notes, balloons) = assembly.finish()?;
@@ -2571,14 +2629,25 @@ fn by_their_jobs(s: &Session, on: &[(u64, ResolvedView, Vec2)]) -> BTreeSet<u64>
 /// Brings the cache to `d`, the drawing open, and `state`, before anything reads or draws from it:
 /// the lines kept when `d` closed come back, and each of the views `on` that shows the same takes
 /// `state` ([`keep_what_shows_the_same`]). [`extract`], [`step`], [`begin`] and [`standing`] all start
-/// here, so each says the same of a view.
+/// here, so each says the same of a view. A draft view out of date is drawn here: it reads no model,
+/// so it needs no job ([`draw_draft`]), and it keeps no world state.
 fn catch_up(s: &mut Session, d: &Drawing, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
     let cache = &mut s.drawing_scenes;
     if cache.drawing != Some(d.id) {
         cache.take_kept(d.id);
         cache.drawing = Some(d.id);
     }
-    keep_what_shows_the_same(s, on, state);
+    keep_what_shows_the_same(s, on.clone(), state);
+    let cache = &mut s.drawing_scenes;
+    for id in on {
+        let Ok(view) = d.resolve_view(id) else { continue };
+        if view.source.is_some() || cache.fresh(id, state, &view) {
+            continue;
+        }
+        let drawn = draw_draft(id, &view);
+        cache.serial = cache.serial.wrapping_add(1);
+        cache.views.insert(id, Entry { state: Arc::default(), shows: None, view, drawn, serial: cache.serial });
+    }
 }
 
 /// Sets the text of each dimension and note on `on` that waited for its font, once the search has

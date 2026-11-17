@@ -122,6 +122,7 @@ impl Drawing {
 
     fn check_balloon(&self, b: &Balloon) -> Result<()> {
         require(self.view(b.view).is_some(), || format!("it is on view {}, which the drawing doesn't have", ids::encode(b.view)))?;
+        self.check_has_model(b.view)?;
         if let Some(list) = b.parts_list {
             let named = || format!("it names table {}, which isn't one of the drawing's parts lists", ids::encode(list));
             require(self.tables.by_id(list).is_some_and(|t| matches!(t.kind, Kind::PartsList(_))), named)?;

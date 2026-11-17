@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_view_draft": "Draft View"
+  },
+  "ar": {
+    "cmd.drawing_view_draft": "مسقط حر"
+  },
+  "he": {
+    "cmd.drawing_view_draft": "מבט חופשי"
+  },
+  "ja": {
+    "cmd.drawing_view_draft": "製図ビュー"
+  },
+  "vi": {
+    "cmd.drawing_view_draft": "Hình chiếu phác"
+  },
+  "zh": {
+    "cmd.drawing_view_draft": "草图视图"
+  },
+  "de": {
+    "cmd.drawing_view_draft": "Freie Ansicht"
+  },
+  "ko": {
+    "cmd.drawing_view_draft": "제도 뷰"
+  }
+}
