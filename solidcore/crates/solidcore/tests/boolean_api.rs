@@ -1044,6 +1044,7 @@ fn a_circle_passing_near_a_spheres_poles_gets_a_trim_curve_on_the_circle() {
             };
             let ivl = trim.natural_interval();
             let mut worst = (0.0_f64, 0.0_f64);
+            let mut nonfinite = false;
             for i in 0..=20_000 {
                 let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 20_000.0;
                 let uv = trim.evaluate_point(&k, t).unwrap();
@@ -1052,10 +1053,17 @@ fn a_circle_passing_near_a_spheres_poles_gets_a_trim_curve_on_the_circle() {
                     .unwrap();
                 // how far the image is from the plane, and the trim from the domain [0, 1]^2
                 let outside = (-uv.x).max(uv.x - 1.0).max(-uv.y).max(uv.y - 1.0);
-                worst = (worst.0.max((p.y + delta).abs()), worst.1.max(outside));
+                let off = (p.y + delta).abs();
+                // f64::max drops a NaN, so a non-finite sample fails here, not in the maxima
+                if !(off.is_finite() && outside.is_finite()) {
+                    nonfinite = true;
+                    break;
+                }
+                worst = (worst.0.max(off), worst.1.max(outside));
             }
-            // Written to accept: a NaN fails.
-            if !(worst.0 <= tol && worst.1 <= 1e-9) {
+            if nonfinite {
+                failures.push(format!("{name}: a sphere trim sample is not finite"));
+            } else if !(worst.0 <= tol && worst.1 <= 1e-9) {
                 failures.push(format!(
                     "{name}: a sphere trim is {:e} off the plane, {:e} outside the domain",
                     worst.0, worst.1

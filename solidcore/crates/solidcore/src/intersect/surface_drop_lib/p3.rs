@@ -460,7 +460,7 @@ fn span_proved_off(
         };
         let p = surface.evaluate_point(k, uv)?;
         let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
-        Ok((Vec3::from(p), d.project_to_plane(n) * delta_t))
+        Ok((p, d.project_to_plane(n) * delta_t))
     };
     let (p0, d0) = at(start.t, start.uv_pd[0])?;
     let (p1, d1) = at(end.t, end.uv_pd[0])?;
