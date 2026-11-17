@@ -1,0 +1,29 @@
+{
+  "en": {
+    "cmd.solid_tab_slot": "Tab and Slot"
+  },
+  "ar": {
+    "cmd.solid_tab_slot": "لسان وشق"
+  },
+  "de": {
+    "cmd.solid_tab_slot": "Lasche und Schlitz"
+  },
+  "he": {
+    "cmd.solid_tab_slot": "לשונית וחריץ"
+  },
+  "ja": {
+    "cmd.solid_tab_slot": "タブとスロット"
+  },
+  "ko": {
+    "cmd.solid_tab_slot": "탭과 슬롯"
+  },
+  "nb": {
+    "cmd.solid_tab_slot": "Tapp og spor"
+  },
+  "vi": {
+    "cmd.solid_tab_slot": "Mộng và rãnh"
+  },
+  "zh": {
+    "cmd.solid_tab_slot": "凸舌与槽"
+  }
+}
