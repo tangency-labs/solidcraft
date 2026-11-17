@@ -45,7 +45,7 @@ pub(crate) fn normalize_request(session: &solidcraft_engine::Session, method: &s
 /// How many turned-off ids a preferences file may name.
 pub const MAX_DISABLED: usize = 256;
 /// `plugin.json` larger than this is refused.
-const MAX_MANIFEST_BYTES: u64 = 16 * 1024;
+const MAX_MANIFEST_BYTES: u64 = solidcraft_engine::plugin::MAX_MANIFEST_BYTES as u64;
 
 /// One installed plugin, as its manifest describes it.
 #[derive(Clone, Debug)]
@@ -133,7 +133,7 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
     let path = dir.join("plugin.json");
     let meta = std::fs::symlink_metadata(&path).map_err(|_| "no plugin.json".to_string())?;
     if !meta.is_file() || meta.len() > MAX_MANIFEST_BYTES {
-        return Err("plugin.json is missing or larger than 16 KiB".into());
+        return Err("plugin.json is missing or larger than 64 KiB".into());
     }
     let package = solidcraft_engine::plugin::read_package(&dir.to_string_lossy()).map_err(|e| e.to_string())?;
     let parsed = package.manifest;
