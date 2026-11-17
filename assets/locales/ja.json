@@ -3720,7 +3720,7 @@
   "render.cpu_body_choose": "ボディを選択",
   "render.cpu_body_filter": "名前でボディを絞り込み",
   "render.cpu_body_filter_more": "さらに表示するには絞り込んでください。",
-  "render.cpu_body_missing": "反射対象が存在しない、非表示、重複名、または名前が128バイトを超えています。選び直してください。",
+  "render.cpu_body_missing": "反射対象が存在しない、非表示、重複名、または名前が512バイトを超えています。選び直してください。",
   "render.cpu_budget": "CPUリソースプロファイル",
   "render.cpu_budget_bodies": "ボディ数の上限",
   "render.cpu_budget_compact": "コンパクト（従来の上限）",

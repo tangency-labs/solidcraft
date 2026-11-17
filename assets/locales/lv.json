@@ -3324,7 +3324,7 @@
   "render.cpu_body_choose": "Izvēlieties ķermeni",
   "render.cpu_body_filter": "Filtrēt ķermeņus pēc nosaukuma",
   "render.cpu_body_filter_more": "Precizējiet filtru, lai redzētu vairāk ķermeņu.",
-  "render.cpu_body_missing": "Atstarošanas mērķis trūkst, ir paslēpts, nav viennozīmīgs vai tā nosaukums ir garāks par 128 baitiem. Izvēlieties to vēlreiz.",
+  "render.cpu_body_missing": "Atstarošanas mērķis trūkst, ir paslēpts, nav viennozīmīgs vai tā nosaukums ir garāks par 512 baitiem. Izvēlieties to vēlreiz.",
   "render.cpu_budget": "CPU resursu profils",
   "render.cpu_budget_bodies": "Ķermeņu augšējā robeža",
   "render.cpu_budget_compact": "Kompakts (vecie ierobežojumi)",
