@@ -58,7 +58,8 @@ use solidcraft_doc::drawing::view::{
     Beside, ResolvedView, SetBy, Setting, Shows, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose,
 };
 use solidcraft_doc::drawing_view::{
-    Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
+    Exploded, JointPose, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides, looking,
+    named,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
@@ -1172,9 +1173,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
     let request: BaseParams = crate::schema::read(BASE, p)?;
     let record = s.drawing(BASE)?.clone();
     let (sheet, middle) = sheet_named(&record, &request.sheet, BASE)?;
-    // The design it is in, else the first it draws: read through the one accessor.
-    let source =
-        record.own_source().or_else(|| record.sources.first().map(|source| source.id)).ok_or_else(|| bad(BASE, "the drawing draws no design"))?;
+    let source = record.design_source().ok_or_else(|| bad(BASE, "the drawing draws no design"))?;
     s.drawn(&record, source).map_err(|why| bad(BASE, why.to_string()))?;
     let chosen = request.source.as_ref().map(|chosen| chosen.occurrences.as_slice());
     check_paths(s, chosen, request.hide.as_deref().unwrap_or_default(), BASE)?;
@@ -1720,20 +1719,6 @@ fn to_sheet_answer(view: u64, sheet: u64, views: &[u64], outside: Vec<(u64, OnSh
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
-}
-
-/// The named view that is exactly `basis`, if one is.
-fn named(basis: &Plane) -> Option<NamedView> {
-    NamedView::ALL.iter().copied().find(|v| v.basis() == *basis)
-}
-
-/// `basis` as a base view saves it: by name when it is exactly a named view's, so nothing rounds;
-/// else its line of sight and up, which give the same basis back to within rounding.
-fn looking(basis: &Plane) -> ViewDirection {
-    named(basis).map_or_else(
-        || ViewDirection::Looking(Looking { direction: basis.y.cross(basis.x).into(), up: basis.y.into(), origin: basis.origin.into() }),
-        ViewDirection::Named,
-    )
 }
 
 /// A basis as the replies give it: its name when it is exactly a named view's.

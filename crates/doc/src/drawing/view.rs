@@ -51,7 +51,7 @@ use super::fold::{auxiliary_basis, pictorial_basis};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
     Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewConfiguration,
-    ViewDirection, ViewOverrides, ViewSettings,
+    ViewDirection, ViewOverrides, ViewSettings, looking,
 };
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 
@@ -247,6 +247,17 @@ impl ViewKind {
             ViewKind::Pictorial { .. } => "pictorial",
             ViewKind::Auxiliary { .. } => "auxiliary",
             ViewKind::Flat { .. } => "flat",
+        }
+    }
+
+    /// This kind made from view `parent` instead: itself for a kind with none ([`ViewKind::parent`]).
+    pub fn with_parent(&self, parent: u64) -> ViewKind {
+        match self {
+            ViewKind::Base { .. } | ViewKind::Flat { .. } => self.clone(),
+            ViewKind::Projected { side, .. } => ViewKind::Projected { parent, side: *side },
+            ViewKind::Section { line, .. } => ViewKind::Section { parent, line: line.clone() },
+            ViewKind::Pictorial { diagonal, .. } => ViewKind::Pictorial { parent, diagonal: *diagonal },
+            ViewKind::Auxiliary { toward, .. } => ViewKind::Auxiliary { parent, toward: *toward },
         }
     }
 
@@ -645,6 +656,45 @@ impl ResolvedView {
     }
 }
 
+/// `view`'s place moved by `by`: a point moves, and a place lined up with a parent moves along
+/// its free axis, so the views lined up with a moved view stay where they were beside it.
+pub fn shifted(view: &View, by: Vec2) -> ViewPlace {
+    match (view.place, &view.kind) {
+        (ViewPlace::At([x, y]), _) => ViewPlace::At([x + by.x, y + by.y]),
+        (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => ViewPlace::Aligned(along + side.along(by)),
+        // Only a projected view is saved lined up ([`Drawing::view_centre`]): nothing to move.
+        (
+            ViewPlace::Aligned(_),
+            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. },
+        ) => view.place,
+    }
+}
+
+impl View {
+    /// This view made a base view of `source` that looks the way `resolved` says it did, with the
+    /// settings it had as its own, centred at `at`: a copy follows none of the views it came from.
+    /// Its line group is its own only when its chain gave it: else it follows its new sheet, as a
+    /// base view copied does. A state of the assembly it drew (exploded, posed, a row of the
+    /// configuration table) is its own when it isn't the default. Every setting is named, so a new
+    /// one must say whether a copy keeps it.
+    pub fn as_base(self, resolved: &ResolvedView, source: u64, at: Vec2) -> View {
+        let settings = ViewOverrides {
+            scale: Some(resolved.scale.value),
+            visual_style: Some(resolved.visual_style.value),
+            reference_style: Some(resolved.reference_style.value),
+            reference_hides_model: Some(resolved.reference_hides_model.value),
+            tangent_edges: Some(resolved.tangent_edges.value),
+            occurrences: resolved.occurrences.value.clone(),
+            hide: resolved.hide.value.clone(),
+            line_group: matches!(resolved.line_group.set_by, SetBy::This | SetBy::Parent(_)).then_some(resolved.line_group.value),
+            exploded: Some(resolved.exploded.value).filter(|exploded| *exploded != Exploded::Assembled),
+            pose: Some(resolved.pose.value.clone()).filter(|pose| *pose != Pose::Designed),
+            configuration: Some(resolved.configuration.value).filter(|row| *row != ViewConfiguration::Active),
+        };
+        View { kind: ViewKind::Base { source, view: looking(&resolved.basis) }, settings, place: ViewPlace::At([at.x, at.y]), ..self }
+    }
+}
+
 impl Drawing {
     /// Why view `view` doesn't draw the first of `paths` it leaves out ([`Shows::first_left_out`]):
     /// the one rule an annotation pointing through them is drawn by. Nothing when it draws them
@@ -957,10 +1007,7 @@ impl Drawing {
     /// places for a view and its line-up put on another sheet, or copied there.
     pub fn places_beside(&self, id: u64, to: Vec2) -> Result<Vec<(u64, ViewPlace)>> {
         let by = to - self.view_centre(id)?;
-        let lined = self.lined_up_with(id).into_iter().filter_map(|v| match self.view(v).map(|view| (view.place, &view.kind)) {
-            Some((ViewPlace::Aligned(along), ViewKind::Projected { side, .. })) => Some((v, ViewPlace::Aligned(along + side.along(by)))),
-            _ => None,
-        });
+        let lined = self.lined_up_with(id).into_iter().filter_map(|v| self.view(v).map(|view| (v, shifted(view, by))));
         Ok(std::iter::once((id, ViewPlace::At([to.x, to.y]))).chain(lined).collect())
     }
 
