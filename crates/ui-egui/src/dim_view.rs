@@ -793,7 +793,11 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
         });
     let decimals = if authored_four { decimals.max(4) } else { decimals };
     // A length says its unit, as the value inputs and the pointer's coordinates do (#1155).
-    let num = if k.is_angle() { format!("{:.*}°", usize::from(angle_decimals.min(6)), v.to_degrees()) } else { format!("{} {units}", crate::prefs::length_number(v, units, decimals)) };
+    let num = if k.is_angle() {
+        format!("{:.*}°", usize::from(angle_decimals.min(6)), v.to_degrees())
+    } else {
+        format!("{} {units}", crate::prefs::length_number(v, units, decimals))
+    };
     let num = match k {
         ConstraintKind::Radius { .. } if radius_mark => format!("R{num}"),
         ConstraintKind::Diameter { .. } | ConstraintKind::LinearDiameter { .. } => format!("Ø{num}"),
@@ -2129,6 +2133,9 @@ mod tests {
         assert_eq!(crate::prefs::length_number(25.4, "cm", 2), "2.54");
         let angle = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_4, flip: false };
         assert_eq!(label(&angle, Some("45 deg"), false, "in", 2, 1), "45.0°");
+        // #18231: the label follows the Angle decimals preference.
+        assert_eq!(label(&angle, Some("45 deg"), false, "in", 2, 3), "45.000°");
+        assert_eq!(label(&angle, Some("45 deg"), false, "in", 2, 0), "45°");
     }
 
     #[test]
