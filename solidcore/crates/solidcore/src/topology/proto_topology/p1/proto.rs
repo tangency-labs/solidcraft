@@ -1032,8 +1032,11 @@ impl<O: ClassObject> VertexDefinition<O> {
     /// crossing placed it. A later one replaces the point parameters on the source
     /// objects (an edge's t, a face's uv), the gap, the position and the crossing angle
     /// only when its points lie within both objects' tolerance of each other (a farther
-    /// one is another point the proto vertex took in) and its misplacement bound
-    /// (`crossing_error`) is smaller. Returns whether it was placed again.
+    /// one is another point the proto vertex took in), its misplacement bound
+    /// (`crossing_error`) is smaller, and its position is within this definition's
+    /// tolerance of the current one (#18401: a crossing elsewhere along a stretch where
+    /// the two objects stay within tolerance of each other is another point, not this one
+    /// fixed better). Returns whether it was placed again.
     ///
     /// # Errors
     ///
@@ -1097,6 +1100,21 @@ impl<O: ClassObject> VertexDefinition<O> {
         }
 
         let position = find_position_from_pcs(k, geometry, &mut pc1, &mut pc2)?;
+        // A point farther from this placement than the definition's tolerance is not this
+        // point placed again: both points lie on both objects, but they are two points (an
+        // edge that meets a face along a stretch within tolerance, where a later crossing of
+        // the same edge and face lands 1.2e-4 from the first at a tolerance of 1e-5). Moving
+        // there would move the proto vertex out of its own tolerance of the first point.
+        // (NaN keeps the placement.)
+        if !matches!(
+            position
+                .position
+                .distance(self.position)
+                .partial_cmp(&self.tolerance(k)),
+            Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+        ) {
+            return Ok(false);
+        }
         self.pc1 = pc1;
         self.pc2 = pc2;
         self.position = position.position;
