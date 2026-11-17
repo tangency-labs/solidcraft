@@ -41,7 +41,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     })
 }
 
-pub fn rows(_app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [SelInput]) -> bool {
+pub fn rows(app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [SelInput]) -> bool {
     choice_row(ui, "ui.tab_slot.layout", "tab_slot_layout", &mut t.layout, &["ui.tab_slot.by_count", "ui.tab_slot.by_spacing"]);
     let mut enter = false;
     if t.layout == 0 {
@@ -53,7 +53,34 @@ pub fn rows(_app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [
     enter |= tipped(ui, "ui.tab_slot.end_distance_tip", |ui| expr_row(ui, "ui.tab_slot.end_distance", &mut t.end_distance));
     enter |= tipped(ui, "ui.tab_slot.clearance_tip", |ui| expr_row(ui, "ui.tab_slot.clearance", &mut t.clearance));
     enter |= tipped(ui, "ui.tab_slot.protrusion_tip", |ui| expr_row(ui, "ui.tab_slot.protrusion", &mut t.protrusion));
+    if let Some(reply) = &app.preview.report {
+        let l = solidcraft_ui_text::locale();
+        for (id, args) in summary_args(reply) {
+            ui.label(l.format(id, &args.iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>()));
+        }
+    }
     enter
+}
+
+/// The summary under the fields (design v2 12.4), from a preview's reply, as (message id,
+/// arguments): the plate joints and tabs made, then the skipped pairs with the reason for each.
+fn summary_args(reply: &Value) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
+    let joints = reply["plate_joints"].as_array().map_or(0, Vec::len);
+    let tabs = reply["tabs"].as_u64().unwrap_or(0);
+    let mut lines = vec![("ui.tab_slot.summary", vec![("plate_joints", joints.to_string()), ("tabs", tabs.to_string())])];
+    let skipped: Vec<String> = reply["skipped"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| {
+            let text = |k: &str| s[k].as_str().unwrap_or("").to_string();
+            format!("{} → {} {}", text("tab_plate"), text("slot_plate"), text("detail")).trim_end().to_string()
+        })
+        .collect();
+    if !skipped.is_empty() {
+        lines.push(("ui.tab_slot.summary_skipped", vec![("count", skipped.len().to_string()), ("list", skipped.join(", "))]));
+    }
+    lines
 }
 
 /// One row with a tooltip over the whole of it (label and field).
@@ -186,5 +213,24 @@ mod edit_tests {
         inputs[1].items.push(Sel::Body { name: "Side".into() });
         let args = &commands(&app, &t, &inputs, &extra).unwrap()[0].1;
         assert_eq!(args["slot_plates"][1], json!("Side"), "{args}");
+    }
+
+    /// The summary lines read the command's reply: one plate joint cut with its tabs, and a
+    /// pair that does not meet skipped and named.
+    #[test]
+    fn tab_slot_summary_from_the_reply() {
+        let mut s = Session::default();
+        for (corner, size, name) in [([0, 0, 0], [160, 100, 6], "Bottom"), ([20, 30, 6], [120, 6, 60], "Wall"), ([0, 200, 0], [40, 6, 40], "Far")] {
+            let p = json!({"corner": corner, "length": size[0], "width": size[1], "height": size[2], "body_name": name, "operation": "new"});
+            s.execute("solid.box", &p).unwrap();
+        }
+        let p = json!({"tab_plates": ["Wall", "Far"], "slot_plates": ["Bottom"], "count": "2", "tab_width": "12 mm"});
+        let reply = s.execute("solid.tab_slot", &p).unwrap();
+        let lines = summary_args(&reply);
+        assert_eq!(lines[0], ("ui.tab_slot.summary", vec![("plate_joints", "1".to_string()), ("tabs", "2".to_string())]), "{reply}");
+        assert_eq!(lines.len(), 2, "{reply}");
+        assert_eq!((lines[1].0, lines[1].1[0].1.as_str()), ("ui.tab_slot.summary_skipped", "1"));
+        assert!(lines[1].1[1].1.starts_with("Far → Bottom "), "{:?}", lines[1]);
+        assert_eq!(summary_args(&json!({})).len(), 1, "an empty reply still has the counts line");
     }
 }
