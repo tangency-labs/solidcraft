@@ -191,15 +191,15 @@ pub(crate) fn merge_patch(target: &mut Value, patch: &Value) {
 }
 
 /// The full name of a file: `blobs/<name>` or `cache/<name>`, whichever holds it.
-pub(crate) fn blob_path(doc: &Document, id: &str, name: &str) -> Option<(String, bool)> {
+pub fn blob_path(doc: &Document, id: &str, name: &str) -> Option<(String, bool)> {
     [(BLOBS, false), (CACHE, true)]
         .into_iter()
         .map(|(folder, cache)| (format!("{folder}{name}"), cache))
         .find(|(path, _)| doc.plugin_data.contains_key(&format!("{id}/{path}")))
 }
 
-/// The bytes of one of a plugin's files.
-pub(crate) fn blob(doc: &Document, id: &str, path: &str) -> Option<Vec<u8>> {
+/// The bytes of one of a plugin's files, by its full name (`blobs/<name>` or `cache/<name>`).
+pub fn blob(doc: &Document, id: &str, path: &str) -> Option<Vec<u8>> {
     doc.plugin_data.get(&format!("{id}/{path}")).and_then(|text| base64_decode(text))
 }
 
