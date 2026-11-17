@@ -548,10 +548,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if crate::op_auto::op_row(ui, "ex_op", operation) {
                 *auto_op = false;
             }
-            // Join takes the bodies to join in Target Bodies (#17657). A body picked there is a
+            // Join and Cut take their bodies in Target Bodies. A body picked there is a
             // choice by hand, so Extrude's automatic operation stops changing it.
-            set_join_targets(&mut d.inputs, &mut d.active, *operation == 1);
-            if d.inputs.iter().any(|i| i.label == JOIN_TARGETS && !i.items.is_empty()) {
+            set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, *operation);
+            if d.inputs.iter().any(|i| i.label == EXTRUDE_TARGETS && !i.items.is_empty()) {
                 *auto_op = false;
             }
             ui_kit::section(ui, "extrude_options", "Options", true, |ui| {

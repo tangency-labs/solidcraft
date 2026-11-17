@@ -473,12 +473,16 @@ pub(crate) fn did_you_mean(id: &str) -> String {
     }
 }
 
+/// The longest name the "did you mean" search compares, in bytes: a body name of 128 characters
+/// (up to 512 bytes) still gets its suggestion, and a longer text costs no edit-distance work.
+const MAX_SUGGESTED_NAME_BYTES: usize = 512;
+
 /// "no body `name`", and the closest of `bodies` when it is near enough to be a typo or another
 /// case of the same name (`b` for `B`): `no body `Bdy`; did you mean `Body`?` (#9740).
 pub(crate) fn no_body<'a>(name: &str, bodies: impl IntoIterator<Item = &'a str>) -> String {
     let want = name.to_lowercase();
     let near = (want.chars().count() / 3).max(1);
-    let closest = (want.len() <= 256)
+    let closest = (want.len() <= MAX_SUGGESTED_NAME_BYTES)
         .then(|| bodies.into_iter().map(|b| (edit_distance(&want, &b.to_lowercase()), b)).filter(|(d, _)| *d <= near).min_by_key(|(d, _)| *d))
         .flatten();
     match closest {
