@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.plugin_dialog_finish_tool": "Finish or cancel the open tool to pick into this field.",
+    "ui.plugin_dialog_picks_cleared": "The design changed, so the picks were cleared. Pick them again."
+  },
+  "ar": {
+    "ui.plugin_dialog_finish_tool": "أنهِ الأداة المفتوحة أو ألغِها لتحديد عناصر في هذا الحقل.",
+    "ui.plugin_dialog_picks_cleared": "تغيّر التصميم، لذا مُسحت التحديدات. حدّدها مرة أخرى."
+  },
+  "he": {
+    "ui.plugin_dialog_finish_tool": "סיים או בטל את הכלי הפתוח כדי לבחור לתוך שדה זה.",
+    "ui.plugin_dialog_picks_cleared": "התכנון השתנה, ולכן הבחירות נוקו. בחר אותן שוב."
+  },
+  "ja": {
+    "ui.plugin_dialog_finish_tool": "このフィールドで選択するには、開いているツールを完了するかキャンセルしてください。",
+    "ui.plugin_dialog_picks_cleared": "設計が変更されたため、選択がクリアされました。もう一度選択してください。"
+  },
+  "vi": {
+    "ui.plugin_dialog_finish_tool": "Hãy hoàn tất hoặc hủy công cụ đang mở để chọn vào trường này.",
+    "ui.plugin_dialog_picks_cleared": "Thiết kế đã thay đổi nên các lựa chọn đã bị xóa. Hãy chọn lại."
+  },
+  "zh": {
+    "ui.plugin_dialog_finish_tool": "请先完成或取消已打开的工具，再在此字段中选择。",
+    "ui.plugin_dialog_picks_cleared": "设计已更改，已清除所选内容。请重新选择。"
+  }
+}

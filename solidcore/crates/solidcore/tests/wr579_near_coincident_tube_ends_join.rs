@@ -15,9 +15,19 @@
 //! about Y onto the axis, and moved to the base, as the `boolean.api_brep` fixture
 //! `issue_1517_tube_ends.json` does on both sides.
 //!
-//! Expected with either setting of `proto_edge_splits_at_captured_vertices`: one manifold
-//! solid, its volume between the larger tube's and both together, and its check is clean.
-//! The fork's still fails on a separate defect: an ellipse piece 8.6e-5 long (the top tube's wall cut by the
+//! Expected: one manifold solid, its volume between the larger tube's and both together,
+//! and its check is clean, in either order of the tubes and with or without
+//! `proto_edge_splits_at_captured_vertices`. On the side of the seat's seam its end circle
+//! meets the top tube's start circle (the corner), 8.6e-5 on its own seam vertex, and 2.9e-4
+//! further it crosses the top tube's wall: three points farther apart than their
+//! tolerances (1e-5 each), so three vertices, where the capture distance once made them one
+//! (docs/booleans.md, "One point or two"; the WR-579 split was for that one proto vertex).
+//! Between the seam vertex and the crossing the intersection curve (the top tube's wall
+//! cut by the seat's end plane, an ellipse of radii 71 and 16) runs 4e-9 inside the seat's
+//! end circle: it is that circle's piece, proved by enclosure, and no second edge is made
+//! beside it ("One edge or two"; upstream's second edge gave `SmFace` tests 33 and 34).
+//! The fork's still
+//! fails on a separate defect: an ellipse piece 8.6e-5 long (the top tube's wall cut by the
 //! seat's end plane) whose STEP inversion set points near the arc's start to the start, so
 //! its NURB read 2.1e-5 off its ellipse (`SmEllipse` test 2). That was
 //! `SmExtent1d::ContainsPeriodicValue`, fixed for #1518 (WR-509).
@@ -100,20 +110,22 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-6, &attrs).unwrap()
 }
 
-/// The union with the fix set to `fixed`: the result's volume when it is one manifold
-/// solid whose check is clean, else what went wrong.
-fn join(fixed: bool) -> Result<f64, String> {
+/// The union with the WR-579 split set to `fixed`, the seat tube first when `seat_first`:
+/// the result's volume when it is one manifold solid whose check is clean, else what went
+/// wrong.
+fn join(fixed: bool, seat_first: bool) -> Result<f64, String> {
     let mut k = Kernel::default();
     k.fixes.proto_edge_splits_at_captured_vertices = fixed;
     let (t, s) = (top(&mut k), seat(&mut k));
-    let mut r = boolean_union(&mut k, t, s).map_err(|e| format!("union: {e:?}"))?;
+    let (a, b) = if seat_first { (s, t) } else { (t, s) };
+    let mut r = boolean_union(&mut k, a, b).map_err(|e| format!("union: {e:?}"))?;
     if !is_manifold_solid(&r).unwrap() {
         return Err("not a manifold solid".into());
     }
     let lines = check_brep(&mut k, &mut r, CheckLevel::Level2)
         .unwrap()
         .lines();
-    println!("check (fix {fixed}): {lines:?}");
+    println!("check (fix {fixed}, seat first {seat_first}): {lines:?}");
     // any report fails: #1518's ellipse line, the one the fork still has, is gone with
     // WR-509's fix
     if !lines.is_empty() {
@@ -125,22 +137,30 @@ fn join(fixed: bool) -> Result<f64, String> {
 /// With `proto_edge_splits_at_captured_vertices` the stretch's edge is split at the
 /// crossing's vertex. Without it, `UpdateEdges` now splits the coincident definition that
 /// runs across that split point (WR-533, always on since its flag was removed), and the
-/// union joins as well. Either way `join` accepts only one manifold solid whose level-2
-/// check reports nothing, and its volume lies strictly between the larger tube's and both
-/// together.
+/// union joins as well. Either way, and in either order of the tubes, `join` accepts only
+/// one manifold solid whose level-2 check reports nothing, and its volume lies strictly
+/// between the larger tube's and both together; the four volumes agree to 1e-6.
 #[test]
 fn wr579_near_coincident_tube_ends_join() {
     let mut k = Kernel::default();
     let (mut t, mut s) = (top(&mut k), seat(&mut k));
     let (vt, vs) = (volume(&k, &mut t), volume(&k, &mut s));
-    for fixed in [false, true] {
-        let v = join(fixed).unwrap();
-        println!("fix {fixed}: {v:.17e}");
+    let mut volumes = Vec::new();
+    for (fixed, seat_first) in [(false, false), (true, false), (false, true), (true, true)] {
+        let v = join(fixed, seat_first).unwrap();
         assert!(
             v > vt.max(vs) && v < vt + vs,
-            "fix {fixed}: union volume {v}, tubes {vt} and {vs}"
+            "fix {fixed}, seat first {seat_first}: union volume {v}, tubes {vt} and {vs}"
         );
+        volumes.push(v);
     }
+    // one body whatever the order and the flag
+    let (lo, hi) = volumes
+        .iter()
+        .fold((f64::INFINITY, 0.0_f64), |(lo, hi), &v| {
+            (lo.min(v), hi.max(v))
+        });
+    assert!(hi - lo <= 1e-6 * hi, "volumes {volumes:?}");
 }
 
 /// Closed-form enclosures of the union's volume and of its six face areas, sorted, as
@@ -436,10 +456,14 @@ fn wr575_tube_ends_join_adds_no_check_failure_at_any_gap() {
     // Face test 36 is gone from every row since #13295: it named the joined tube's seam
     // edge ending at a vertex a few micrometres across the seam, inside the vertex's own
     // tolerance, with no edge beside the seam there: a corner, not a sliver.
-    // (gap, every fix on, upstream's report, the report now: only the two gap pairs of
-    // the default kernel at 1e-5 stay, which WR-575 does not address)
+    // (gap, every fix on, upstream's report, the report now: only one gap pair of the
+    // default kernel at 1e-5 stays, which WR-575 does not address: an edge use ending
+    // 8.15e-6 from the -y vertex, over half its tolerance 1.5e-5. The other pair, 7.77e-6
+    // at that vertex, went when WR-453's continuation became the only path: the
+    // intersection edge that stopped 2.77e-6 short of its proto vertex is continued onto
+    // it, and its end now lies 5e-6 from the vertex, as the circle edges there do.)
     let rows = [
-        (1e-5, false, report(2, 2, 0), report(2, 0, 0)),
+        (1e-5, false, report(2, 2, 0), report(1, 0, 0)),
         (1e-6, false, report(0, 1, 0), report(0, 0, 0)),
         (1e-7, false, report(0, 0, 0), report(0, 0, 0)),
         (1e-5, true, report(0, 2, 0), report(0, 0, 0)),

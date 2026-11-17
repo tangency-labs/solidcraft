@@ -3319,7 +3319,7 @@
   "render.cpu_body_choose": "Valitse kappale",
   "render.cpu_body_filter": "Suodata kappaleita nimen mukaan",
   "render.cpu_body_filter_more": "Tarkenna suodatinta nähdäksesi lisää kappaleita.",
-  "render.cpu_body_missing": "Heijastuskohde puuttuu, on piilotettu tai monitulkintainen tai sen nimi on yli 128 tavua pitkä. Valitse se uudelleen.",
+  "render.cpu_body_missing": "Heijastuskohde puuttuu, on piilotettu tai monitulkintainen tai sen nimi on yli 512 tavua pitkä. Valitse se uudelleen.",
   "render.cpu_budget": "CPU-resurssiprofiili",
   "render.cpu_budget_bodies": "Kappaleiden yläraja",
   "render.cpu_budget_compact": "Tiivis (vanhat rajat)",

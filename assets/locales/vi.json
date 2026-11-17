@@ -3720,7 +3720,7 @@
   "render.cpu_body_choose": "Chọn một khối",
   "render.cpu_body_filter": "Lọc khối theo tên",
   "render.cpu_body_filter_more": "Thu hẹp bộ lọc để xem thêm các khối.",
-  "render.cpu_body_missing": "Mục tiêu phản xạ bị thiếu, bị ẩn, không rõ ràng hoặc tên dài hơn 128 byte. Hãy chọn lại.",
+  "render.cpu_body_missing": "Mục tiêu phản xạ bị thiếu, bị ẩn, không rõ ràng hoặc tên dài hơn 512 byte. Hãy chọn lại.",
   "render.cpu_budget": "Cấu hình tài nguyên CPU",
   "render.cpu_budget_bodies": "Trần số lượng khối",
   "render.cpu_budget_compact": "Gọn nhẹ (giới hạn cũ)",

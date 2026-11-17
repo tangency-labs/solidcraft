@@ -2894,6 +2894,22 @@ fn compact_move_points_reply_lists_only_missed_moves() {
     assert!(missed[0]["at"].is_array() && missed[0].get("reached").is_none(), "{compact}");
 }
 
+/// The headless server answers `view.pick` with world rays (#16240): the bar of radius 20 along
+/// X, hit straight down at y = 10, at z = √300 on its exact surface. Pixels still need the app.
+#[test]
+fn headless_view_pick_answers_rays_on_the_exact_surface() {
+    let mut s = server();
+    let bar = json!({"radius": 20, "height": 60, "base": [-30, 0, 0], "axis": "X", "name": "Bar", "body_name": "Bar"});
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": bar}));
+    let r = tool(&mut s, "execute", json!({"command": "view.pick", "params": {"rays": [{"origin": [0, 10, 50], "dir": [0, 0, -1]}]}}));
+    let hit = &r["hits"][0];
+    assert_eq!(hit["body"], "Bar", "{r}");
+    let z = hit["point"][2].as_f64().unwrap_or(f64::NAN);
+    assert!((z - 300f64.sqrt()).abs() < 1e-9, "{r}");
+    let refused = raw_tool(&mut s, "execute", json!({"command": "view.pick", "params": {"pixels": [[1, 1]]}}));
+    assert!(refused.to_string().contains("running SolidCraft app"), "{refused}");
+}
+
 /// A connected app sees exactly one engine call; no inventory inspection is needed.
 #[test]
 fn compact_execute_uses_one_backend_call_and_keeps_removed_bodies() {
@@ -3593,6 +3609,42 @@ fn an_app_that_quits_during_a_call_may_have_run_it() {
     let e = remote.call("engine.execute", json!({"command": "solid.box"})).unwrap_err();
     app.join().unwrap();
     assert!(!e.starts_with(crate::backend::NOT_RUNNING) && e.contains("may have quit") && e.contains("Inspect the design"), "{e}");
+}
+
+/// #10967: an app whose connections are all taken refuses the call unrun and closes the
+/// connection. The error says so (not that the app may have quit), and the next call connects
+/// again.
+#[test]
+fn an_app_with_every_connection_taken_refuses_the_call_unrun() {
+    use std::io::{BufRead, BufReader, Write};
+
+    use crate::backend::Backend;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        for (method, refused) in [("engine.batch", true), ("engine.execute", true), ("engine.execute", false)] {
+            let (stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(req["method"], method);
+            let reply =
+                if refused { json!({"ok": false, "error": "too many connections"}) } else { json!({"id": req["id"], "ok": true, "result": "ran"}) };
+            writeln!(&stream, "{reply}").unwrap();
+        }
+    });
+    // Connected on the first call: a batch goes on a fresh connection of its own (#743), so one
+    // opened up front would reach the stub unused.
+    let mut remote = crate::Remote::new(&addr, Some("0123456789abcdef0123456789abcdef"));
+    // A refused batch ran nothing either: not "it may have run".
+    let batch = crate::call_tool(&mut remote, "batch", &json!({"commands": [{"command": "solid.box"}]}));
+    let text = batch["content"][0]["text"].as_str().unwrap_or_default();
+    assert_eq!(batch["isError"], true);
+    assert!(text.contains("refused this call without running it") && !text.contains("may have run"), "{text}");
+    let e = remote.call("engine.execute", json!({"command": "solid.box"})).unwrap_err();
+    assert!(e.contains("refused this call without running it") && !e.contains("may have quit"), "{e}");
+    assert_eq!(remote.call("engine.execute", json!({"command": "solid.box"})).unwrap(), "ran");
+    app.join().unwrap();
 }
 
 /// Tool annotations never understate what a tool may do (#205): `screenshot` writes a file when

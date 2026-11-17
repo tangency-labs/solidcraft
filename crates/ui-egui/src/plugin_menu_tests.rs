@@ -1,5 +1,5 @@
-//! The Plugins menu and its entry dialog: schema fields, required gating, and a run through the
-//! dialog matching `plugin.run`.
+//! The Plugins menu and its entry dialog: schema fields, selection fields picked in the viewport,
+//! required gating, and a run through the dialog matching `plugin.run`.
 use super::*;
 use std::collections::BTreeSet;
 
@@ -71,8 +71,9 @@ fn choice_options_show_their_titles_and_send_their_values() {
 }
 
 #[test]
-fn selections_targets_and_nested_objects_are_not_guessed() {
+fn other_lists_and_nested_objects_are_not_guessed() {
     for property in [
+        // A target list of strings: not body names (only `bodies` and `body_ids` send those).
         json!({"type":"array","items":{"type":"string"}}),
         json!({"type":"object","properties":{"x":{"type":"number"}}}),
         json!({"$ref":"#/definitions/face"}),
@@ -85,6 +86,95 @@ fn selections_targets_and_nested_objects_are_not_guessed() {
     }
     assert_eq!(form(&json!({"type":"array"})), None);
     assert_eq!(form(&json!({"type":"object","required":["missing"],"properties":{}})), None);
+}
+
+/// A schema with two selection fields: the edges to work on, and one body.
+fn pick_schema() -> Value {
+    json!({"type":"object","required":["edges","body"],"properties":{
+        "edges":{"type":"array","title":"Edges","description":"The rims to seat","minItems":1,
+            "x-solidcraft-selection":{"version":1,"accept":["edge"]}},
+        "body":{"type":"array","title":"Body to modify","maxItems":1,"items":{"type":"object"},
+            "x-solidcraft-selection":{"version":1,"accept":["body"]}},
+        "depth":{"type":"number","default":2}
+    }})
+}
+
+#[test]
+fn annotated_and_reserved_lists_become_selection_fields() {
+    use crate::selection::{BODIES, EDGES, EXTERNAL_POINTS, FACES, PROFILES, SKETCH_LINES};
+    let fields = form(&pick_schema()).expect("drawn");
+    let kinds: Vec<(&str, &Kind)> = fields.iter().map(|(f, _)| (f.key.as_str(), &f.kind)).collect();
+    assert_eq!(kinds[0], ("edges", &Kind::Selection { accept: EDGES, min: 1, max: None, names: false }));
+    assert_eq!(kinds[1], ("body", &Kind::Selection { accept: BODIES, min: 0, max: Some(1), names: false }));
+    assert_eq!((fields[0].0.label.as_str(), fields[0].0.tip.as_deref()), ("Edges", Some("The rims to seat")));
+    assert_eq!(fields[0].1, Input::Selection(Vec::new()), "nothing picked yet");
+    let every = json!({"type":"object","properties":{"p":{"type":"array",
+        "x-solidcraft-selection":{"version":1,"accept":["profile","edge","face","body","sketch_point","sketch_curve"]}}}});
+    assert!(
+        matches!(form(&every).unwrap()[0].0.kind, Kind::Selection { accept, .. } if accept == PROFILES | EDGES | FACES | BODIES | EXTERNAL_POINTS | SKETCH_LINES),
+        "each category is its pick kind"
+    );
+    // The lists the manifest reserves are selection fields without the annotation.
+    let reserved = |key: &str, items: Value| {
+        let mut property = json!({"type":"array"});
+        if !items.is_null() {
+            property["items"] = items;
+        }
+        form(&json!({"type":"object","properties":{key:property}})).map(|f| f[0].0.kind.clone())
+    };
+    for key in ["bodies", "body_ids"] {
+        assert_eq!(reserved(key, Value::Null), Some(Kind::Selection { accept: BODIES, min: 0, max: None, names: true }), "{key}");
+        assert!(reserved(key, json!({"type":"string"})).is_some(), "{key}: names are strings");
+        assert_eq!(reserved(key, json!({"type":"object"})), None, "{key}: not references");
+    }
+    for key in ["selection", "target", "targets"] {
+        assert_eq!(reserved(key, Value::Null), Some(Kind::Selection { accept: EDGES | FACES | BODIES, min: 0, max: None, names: false }), "{key}");
+    }
+    assert_eq!(reserved("points", Value::Null), None, "any other list is not guessed");
+}
+
+#[test]
+fn a_selection_annotation_this_host_cannot_honour_is_not_guessed() {
+    let one = |property: Value| form(&json!({"type":"object","properties":{"p":property}}));
+    let annotated = |annotation: Value| json!({"type":"array","x-solidcraft-selection":annotation});
+    for property in [
+        annotated(json!({"version":2,"accept":["edge"]})),
+        annotated(json!({"accept":["edge"]})),
+        annotated(json!({"version":1,"accept":["edge","hole"]})),
+        annotated(json!({"version":1,"accept":[]})),
+        annotated(json!({"version":1,"accept":"edge"})),
+        annotated(json!({"version":1,"accept":["edge"],"tangent_chain":true})),
+        json!({"type":"array","minItems":2,"maxItems":1,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","maxItems":0,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","uniqueItems":true,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","items":{"type":"string"},"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","items":{"type":"object","required":["body"]},"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+        json!({"type":"array","title":3,"x-solidcraft-selection":{"version":1,"accept":["edge"]}}),
+    ] {
+        assert_eq!(one(property.clone()), None, "{property}");
+    }
+}
+
+#[test]
+fn picks_are_sent_as_explicit_references_and_counted() {
+    use solidcore_record::Vec3;
+    let mut fields = form(&pick_schema()).unwrap();
+    assert_eq!(params(&fields), Err(Problem::Missing("Edges".into())), "minItems 1: a pick is needed");
+    let edge = Sel::Edge { body: "Body1".into(), index: 3, point: Vec3::new(1.0, 2.0, 3.0) };
+    fields[0].1 = Input::Selection(vec![edge.clone()]);
+    let sent = params(&fields).unwrap();
+    assert_eq!(sent["edges"], json!([serde_json::to_value(&edge).unwrap()]), "the engine's own selection reference");
+    assert_eq!(sent["edges"][0]["type"], "edge");
+    assert_eq!(sent["body"], json!([]), "required with no minimum: sent, empty");
+    fields[1].1 = Input::Selection(vec![Sel::Body { name: "A".into() }, Sel::Body { name: "B".into() }]);
+    assert_eq!(params(&fields), Err(Problem::Invalid("Body to modify".into())), "more than maxItems");
+    fields[1].1 = Input::Selection(vec![Sel::Body { name: "A".into() }]);
+    assert_eq!(params(&fields).unwrap()["body"], json!([{"type":"body","name":"A"}]));
+    // An optional field with nothing picked is left out; `bodies` sends names.
+    let mut bodies = form(&json!({"type":"object","properties":{"bodies":{"type":"array"}}})).unwrap();
+    assert_eq!(params(&bodies), Ok(json!({})));
+    bodies[0].1 = Input::Selection(vec![Sel::Body { name: "Body1".into() }]);
+    assert_eq!(params(&bodies), Ok(json!({"bodies":["Body1"]})));
 }
 
 #[test]
@@ -324,6 +414,120 @@ fn each_plugin_entry_has_its_own_dialog_with_its_own_values() {
     h.app.plugin_menu.dialogs.remove(0);
     h.frames(2);
     assert_eq!(h.app.plugin_menu.dialogs.iter().map(|d| d.entry.as_str()).collect::<Vec<_>>(), ["hex"]);
+}
+
+/// A 20 x 20 x 10 box in the home view, with a plugin whose one command has [`pick_schema`].
+fn box_and_pick_plugin() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    let mut seats = entry("seats", "edit", json!([]));
+    seats.input_schema = pick_schema();
+    h.app.plugin_menu.listed = vec![listed("inserts", vec![seats])];
+    // The test's own list: the installed plugins are not read over it.
+    h.app.plugin_menu.loaded = true;
+    h
+}
+
+/// Open the plugin's dialog. Its window is in the middle of the view: the picks below are made
+/// on the box's bottom front edge and its right face, beside it.
+fn open_dialog(h: &mut crate::scenario::Harness) {
+    open_entry(&mut h.app, 0, 0);
+    h.frames(2);
+}
+
+fn picks(h: &crate::scenario::Harness) -> Vec<Vec<Sel>> {
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    dialog.fields.iter().flatten().filter_map(|(_, input)| if let Input::Selection(p) = input { Some(p.clone()) } else { None }).collect()
+}
+
+#[test]
+fn selection_fields_pick_in_the_viewport_each_into_its_own_field() {
+    let mut h = box_and_pick_plugin();
+    open_dialog(&mut h);
+    let id = h.app.plugin_menu.dialog().unwrap().id;
+    assert_eq!(picking(&h.app), Some(id), "the first selection field takes the viewport's picks");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    // An edge clicked in the view goes into Edges, and nowhere else.
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.frames(2);
+    let [edges, body] = &picks(&h)[..] else { panic!() };
+    assert!(matches!(edges[..], [Sel::Edge { .. }]), "{edges:?}");
+    assert!(body.is_empty(), "the other field keeps its own picks");
+    // Body to modify, clicked: the next click picks the body there.
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:body"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(1), "the clicked field is the active one");
+    h.step(&json!({"click":{"world":[20,10,5]}})).unwrap();
+    h.frames(2);
+    let [edges, body] = &picks(&h)[..] else { panic!() };
+    assert_eq!(edges.len(), 1, "picking the body leaves Edges alone");
+    let Sel::Edge { body: name, .. } = &edges[0] else { panic!() };
+    assert_eq!(body, &[Sel::Body { name: name.clone() }]);
+    let sent = h.app.plugin_menu.dialog().unwrap().ready(&h.app).expect("both filled");
+    assert_eq!(sent["edges"][0]["type"], "edge");
+    assert_eq!(sent["body"][0]["type"], "body");
+    // Cancel: the picking stops with the window, and the design is as it was.
+    let doc = h.app.session.doc.clone();
+    h.app.plugin_menu.dialogs.clear();
+    h.frames(2);
+    assert!(h.app.dialog.is_none(), "no picks are taken for a closed dialog");
+    assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
+}
+
+#[test]
+fn the_selection_fills_only_the_first_field_and_a_design_change_clears_the_picks() {
+    let mut h = box_and_pick_plugin();
+    // An edge and the body selected: Edges takes the edge, Body to modify stays empty.
+    h.step(&json!({"click":{"world":[10,0,10]}})).unwrap();
+    h.frames(2);
+    let Some(Sel::Edge { body, .. }) = h.app.session.selection.first().cloned() else { panic!("{:?}", h.app.session.selection) };
+    h.app.session.selection.push(Sel::Body { name: body.clone() });
+    open_dialog(&mut h);
+    let [edges, picked_body] = &picks(&h)[..] else { panic!() };
+    assert!(matches!(edges[..], [Sel::Edge { .. }]), "{edges:?}");
+    assert!(picked_body.is_empty(), "one selection never fills two fields");
+    // The design changes under the open dialog: the picks are cleared, and it says so.
+    h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[40,0,0]})).unwrap();
+    h.frames(2);
+    assert!(picks(&h).iter().all(Vec::is_empty), "references into the old model are dropped");
+    assert!(h.app.plugin_menu.dialog().unwrap().picks_cleared);
+    assert_eq!(h.app.plugin_menu.dialog().unwrap().ready(&h.app), Err(solidcraft_ui_text::format("ui.plugin_dialog_missing", &[("field", "Edges")])));
+    // Turning the view changes nothing.
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"call":"ui.view","params":{"view":"top"}})).unwrap();
+    h.settle();
+    assert_eq!(picks(&h)[0].len(), 1, "the camera is not the design");
+    assert!(!h.app.plugin_menu.dialog().unwrap().picks_cleared);
+}
+
+#[test]
+fn an_open_tool_keeps_the_viewport_until_it_is_done() {
+    let mut h = box_and_pick_plugin();
+    h.step(&json!({"start":"solid.fillet"})).unwrap();
+    h.frames(2);
+    open_dialog(&mut h);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Fillet { .. })), "Fillet keeps picking");
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:edges"}})).unwrap();
+    h.frames(2);
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Fillet { .. })), "the click asks; it does not cancel Fillet");
+    assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some((h.app.tr("ui.plugin_dialog_finish_tool"), true)));
+    // Fillet is done: the field picks once clicked.
+    h.app.dialog = None;
+    h.frames(2);
+    assert_eq!(picking(&h.app), None, "nothing takes the viewport by itself");
+    h.step(&json!({"click":{"handle":"plugin_dialog:field:edges"}})).unwrap();
+    h.frames(2);
+    assert_eq!(picking(&h.app), Some(h.app.plugin_menu.dialog().unwrap().id), "with Fillet closed the field picks");
+    // Escape cancels the plugin's dialog as it does a native tool's, and the picking stops with it.
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.is_none());
+    assert!(h.app.plugin_menu.dialogs.is_empty());
 }
 
 #[test]

@@ -32,6 +32,7 @@ pub use design::{
 };
 pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
+pub mod library_files;
 pub mod limits;
 #[cfg(test)]
 mod mutate;
@@ -61,8 +62,7 @@ pub use dxf::{DxfReadProfile, DxfWriteOptions, read_dxf, read_dxf_file, read_dxf
 pub use dxf_out::{
     DxfEntity, DxfEntityWeight, DxfFile, DxfFileEntity, DxfFileLayer, DxfGeometryBounds, DxfLayer, DxfLayerId, DxfLinetype, DxfPath, DxfPathStyle,
     DxfShape, DxfSourceBlock, DxfStandardWeight, DxfTextHorizontalAlignment, DxfTextRecordKind, DxfTextSource, DxfTextVerticalAlignment, DxfVertex,
-    admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing, write_dxf_drawing_units, write_dxf_file,
-    write_dxf_file_with_text_bounds,
+    admit_path, loop_lwpolyline, loop_lwpolyline_scaled, path_shapes, write_dxf_drawing_units, write_dxf_file, write_dxf_file_with_text_bounds,
 };
 pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
 pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
@@ -72,7 +72,7 @@ pub use gerber_set::{
 pub use legacy_dir::{APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
+pub use svg::{CurveWarning, SvgDrawing, decode_svg, read_svg, read_svg_drawing, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod kicad_in;

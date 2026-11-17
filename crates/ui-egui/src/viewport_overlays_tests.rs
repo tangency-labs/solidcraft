@@ -1684,6 +1684,8 @@ fn an_open_extrude_keeps_its_taper_limits_while_the_profiles_stay() {
     h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
     h.settle();
     h.step(&json!({"start":"solid.extrude"})).unwrap();
+    // Keep the profile click clear of the newly opened dialog.
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
     h.step(&json!({"click":{"world":[15,15,0]}})).unwrap();
     h.frames(2);
     assert!(crate::scenario::handle_at("taper").is_some(), "the taper handle is drawn");

@@ -65,6 +65,7 @@ pub(crate) fn described(app: &mut SolveApp, path: String, plugin: Value) {
             })
             .collect(),
         memory_mib: memory_request(&plugin, app.preferences.plugin_max_memory_mib),
+        input_folder: permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false),
     };
     app.plugin_install.ask = Some(Ask { path, plugin, grants });
 }
@@ -103,6 +104,14 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
             _ => "prefs.plugin_folder_read",
         });
         lines.push(format("prefs.plugin_folder", &[("name", name), ("access", access)]));
+    }
+    let opens = list(plugin.get("opens"));
+    if !opens.is_empty() {
+        let extensions = opens.iter().map(|e| std::format!(".{e}")).collect::<Vec<_>>().join(", ");
+        lines.push(format("plugin_install.opens", &[("extensions", &extensions)]));
+    }
+    if permissions.and_then(|p| p.get("input_folder")).and_then(Value::as_bool).unwrap_or(false) {
+        lines.push(tr("plugin_install.input_folder").to_string());
     }
     if permissions.and_then(|p| p.get("clock")).and_then(Value::as_bool).unwrap_or(false) {
         lines.push(tr("plugin_install.clock").to_string());
@@ -227,7 +236,7 @@ fn install_now(app: &mut SolveApp, ask: &Ask) {
     if let Err(error) = crate::plugins::start_package(
         app,
         "plugin.install",
-        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"memory_mib":ask.grants.memory_mib}}),
+        json!({"path": ask.path, "approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}}),
         crate::plugins::PackageAction::Install,
     ) {
         app.set_status(format("plugin_install.failed", &[("error", &error)]), true);
