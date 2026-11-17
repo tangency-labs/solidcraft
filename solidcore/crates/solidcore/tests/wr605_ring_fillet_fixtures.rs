@@ -194,7 +194,8 @@ fn defillet_ring_fillet_removal_leaves_cube_and_boss() {
 /// `nurb_fillet.smb` face 18, a B-spline ring fillet, is removed: the result is one
 /// closed manifold solid with no Level 2 report whose certified volume enclosure holds
 /// its volume estimate, lies strictly lower at both ends than the input's, and is no
-/// wider at its floor (the gaps no refinement narrows) than the input's.
+/// wider at its floor (the gaps no refinement narrows) than the input's; its volume
+/// estimate is below the input's (MEASURED).
 #[test]
 fn nurb_fillet_ring_fillet_removal_takes_material_away() {
     let what = "nurb_fillet.smb 18";
@@ -218,6 +219,14 @@ fn nurb_fillet_ring_fillet_removal_takes_material_away() {
         ea.hi,
         eb.lo,
         eb.hi
+    );
+    // The estimates fall too (MEASURED: lower enclosure ends alone do not order the
+    // values while the enclosures overlap, and neither does this).
+    assert!(
+        after.estimate < before.estimate,
+        "{what}: the estimate after {} is not below the estimate before {}",
+        after.estimate,
+        before.estimate
     );
     assert!(
         ea.floor <= eb.floor,
