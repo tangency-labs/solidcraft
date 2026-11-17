@@ -773,11 +773,15 @@ fn trim_integrand(
     }
     let eval = OdeIsoCurveLength::new(k, iso.surface, p0.x, iso.origin, iso.thickness, iso.layout);
     let mut v0 = lo;
+    // the 15-point rule: an iso-u line up a smooth surface that is no polynomial (a sphere's
+    // rational form, a cylinder's quarter turn) takes the 7-point rule's pieces about as
+    // often as upstream's Runge-Kutta steps; the 15-point rule, exact to degree 22, a fifth
+    // of the evaluations on a sphere at the app's accuracy
     for v1 in surface_knots_inside(k, iso.surface, SurfParamType::V, lo, hi)?
         .into_iter()
         .chain(core::iter::once(hi))
     {
-        kronrod_integrate(k, v0, v1, iso.accuracy, iso.scale, dy, |v, g| {
+        kronrod15_integrate(k, v0, v1, iso.accuracy, iso.scale, dy, |v, g| {
             eval.evaluate(v, scratch)?;
             for (d, x) in g.iter_mut().zip(scratch.iter().skip(1)) {
                 *d = *x;
@@ -811,6 +815,43 @@ const KRONROD_WEIGHTS: [f64; 4] = [
     0.104_656_226_026_467_265_193_823_857_192_073,
 ];
 const GAUSS_WEIGHTS: [f64; 4] = [8.0 / 9.0, 0.0, 5.0 / 9.0, 0.0];
+/// The 15-point Gauss-Kronrod rule on `[-1, 1]` and its embedded 7-point Gauss rule, laid
+/// out as [`KRONROD_NODES`] is: the nodes `0, ±x1, ..., ±x7` (the Gauss nodes `0, ±x2, ±x4,
+/// ±x6`), their Kronrod weights, and the Gauss weights (zero off the Gauss nodes). The
+/// Kronrod rule integrates polynomials of degree 22 exactly, the Gauss rule degree 13.
+const KRONROD15_NODES: [f64; 8] = [
+    0.0,
+    0.207_784_955_007_898_467_600_689_403_773_245,
+    0.405_845_151_377_397_166_906_606_412_076_961,
+    0.586_087_235_467_691_130_294_144_845_693_013,
+    0.741_531_185_599_394_439_863_864_773_280_788,
+    0.864_864_423_359_769_072_789_712_788_640_926,
+    0.949_107_912_342_758_524_526_189_684_047_851,
+    0.991_455_371_120_812_639_206_854_697_526_329,
+];
+const KRONROD15_WEIGHTS: [f64; 8] = [
+    0.209_482_141_084_727_828_012_999_174_891_714,
+    0.204_432_940_075_298_892_414_161_999_234_649,
+    0.190_350_578_064_785_409_913_256_402_421_014,
+    0.169_004_726_639_267_902_826_583_426_598_550,
+    0.140_653_259_715_525_918_745_189_590_510_238,
+    0.104_790_010_322_250_183_839_876_322_541_518,
+    0.063_092_092_629_978_553_290_700_663_189_204,
+    0.022_935_322_010_529_224_963_732_008_058_970,
+];
+const GAUSS7_WEIGHTS: [f64; 8] = [
+    0.417_959_183_673_469_387_755_102_040_816_327,
+    0.0,
+    0.381_830_050_505_118_944_950_369_775_488_975,
+    0.0,
+    0.279_705_391_489_276_667_901_467_771_423_780,
+    0.0,
+    0.129_484_966_168_869_693_270_611_432_679_082,
+    0.0,
+];
+/// A Gauss-Kronrod rule as [`kronrod_integrate_with`] takes it: its nodes on `[0, 1]` (the
+/// first `0`, each other one used at `±x`), their Kronrod weights and their Gauss weights.
+type KronrodRule = (&'static [f64], &'static [f64], &'static [f64]);
 /// The deepest bisection of [`kronrod_integrate`]: a piece `2^-48` of the range.
 const KRONROD_MAX_DEPTH: u32 = 48;
 /// The most pieces [`kronrod_integrate`] evaluates over one range.
@@ -845,6 +886,60 @@ fn kronrod_integrate<F>(
     accuracy: f64,
     scale: &[f64],
     y: &mut [f64],
+    integrand: F,
+) -> Result<()>
+where
+    F: FnMut(f64, &mut [f64]) -> Result<()>,
+{
+    kronrod_integrate_with(
+        (&KRONROD_NODES, &KRONROD_WEIGHTS, &GAUSS_WEIGHTS),
+        k,
+        (a, b),
+        accuracy,
+        scale,
+        y,
+        integrand,
+    )
+}
+
+/// [`kronrod_integrate`] by the 15-point rule ([`KRONROD15_NODES`]): on a smooth integrand
+/// that needs many 7-point pieces (an iso line up a sphere's rational form, held to a
+/// billionth), its degree-22 pieces are fewer.
+///
+/// # Errors
+///
+/// Those of [`kronrod_integrate`].
+fn kronrod15_integrate<F>(
+    k: &Kernel,
+    a: f64,
+    b: f64,
+    accuracy: f64,
+    scale: &[f64],
+    y: &mut [f64],
+    integrand: F,
+) -> Result<()>
+where
+    F: FnMut(f64, &mut [f64]) -> Result<()>,
+{
+    kronrod_integrate_with(
+        (&KRONROD15_NODES, &KRONROD15_WEIGHTS, &GAUSS7_WEIGHTS),
+        k,
+        (a, b),
+        accuracy,
+        scale,
+        y,
+        integrand,
+    )
+}
+
+/// [`kronrod_integrate`] by `rule`.
+fn kronrod_integrate_with<F>(
+    (nodes, kronrod_weights, gauss_weights): KronrodRule,
+    k: &Kernel,
+    (a, b): (f64, f64),
+    accuracy: f64,
+    scale: &[f64],
+    y: &mut [f64],
     mut integrand: F,
 ) -> Result<()>
 where
@@ -875,9 +970,9 @@ where
         if !centre.iter().all(|v| v.is_finite()) {
             return Err(SolidError::mass(OP_INTEGRAND, MassFailure::Integrand));
         }
-        for (i, &x) in KRONROD_NODES.iter().enumerate().skip(1) {
-            let wk = KRONROD_WEIGHTS.get(i).copied().unwrap_or(0.0);
-            let wg = GAUSS_WEIGHTS.get(i).copied().unwrap_or(0.0);
+        for (i, &x) in nodes.iter().enumerate().skip(1) {
+            let wk = kronrod_weights.get(i).copied().unwrap_or(0.0);
+            let wg = gauss_weights.get(i).copied().unwrap_or(0.0);
             for side in [-1.0, 1.0] {
                 dy.fill(0.0);
                 integrand(mid + side * x * half, &mut dy)?;
@@ -2731,6 +2826,59 @@ fn faces_area_about(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The 15-point Gauss-Kronrod rule integrates `x^n` on `[-1, 1]` exactly up to degree 22
+    /// and its embedded 7-point Gauss rule up to degree 13; and the 7-point rule's to 10 and 5.
+    #[test]
+    fn kronrod_rules_are_exact_to_their_degrees() {
+        let rule = |nodes: &[f64], weights: &[f64], n: i32| -> f64 {
+            nodes
+                .iter()
+                .zip(weights)
+                .map(|(&x, &w)| {
+                    if x == 0.0 {
+                        w * if n == 0 { 1.0 } else { 0.0 }
+                    } else {
+                        w * (x.powi(n) + (-x).powi(n))
+                    }
+                })
+                .sum()
+        };
+        let exact = |n: i32| {
+            if n % 2 == 1 {
+                0.0
+            } else {
+                2.0 / f64::from(n + 1)
+            }
+        };
+        for (nodes, kronrod, gauss, dk, dg) in [
+            (
+                &KRONROD_NODES[..],
+                &KRONROD_WEIGHTS[..],
+                &GAUSS_WEIGHTS[..],
+                10,
+                5,
+            ),
+            (
+                &KRONROD15_NODES[..],
+                &KRONROD15_WEIGHTS[..],
+                &GAUSS7_WEIGHTS[..],
+                22,
+                13,
+            ),
+        ] {
+            for n in 0..=dk {
+                let got = rule(nodes, kronrod, n);
+                assert!((got - exact(n)).abs() <= 1e-15, "Kronrod degree {n}: {got}");
+            }
+            for n in 0..=dg {
+                let got = rule(nodes, gauss, n);
+                assert!((got - exact(n)).abs() <= 1e-15, "Gauss degree {n}: {got}");
+            }
+            // and no further: the Gauss rule misses the next even power
+            assert!((rule(nodes, gauss, dg + 1) - exact(dg + 1)).abs() > 1e-15);
+        }
+    }
     use crate::geom::attribute::{Attribute, Behavior};
 
     #[test]

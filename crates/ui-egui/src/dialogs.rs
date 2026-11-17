@@ -2336,7 +2336,8 @@ fn retain_profile_list_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
 /// Keep the profile picks of the sketch just picked; lofts retain their separate sections.
 fn retain_profile_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
     if let Sel::Profile { sketch, .. } = sel
-        && !matches!(kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }))
+        // A plugin's profile field takes what is picked; the plugin decides what it accepts.
+        && !matches!(kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }) | Kind::PluginPick { .. })
     {
         input.items.retain(|x| !matches!(x, Sel::Profile { sketch: other, .. } if other != sketch));
     }
@@ -4524,6 +4525,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     cancel |= !keep;
+    // A Mirror whose preview has not set its operation yet sets it now (#17377).
+    if ok && !cancel {
+        crate::preview::decide_mirror_operation(app, &mut d);
+    }
     // A window still choosing its operation applies once its check is in (#6901).
     let ok = crate::op_auto::hold_ok(&mut d, ok, &mut apply_again, cancel);
     if ok && !cancel && app.applying.is_none() {
@@ -8296,12 +8301,19 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pattern { features, pattern, bodies: copied } => {
+        FeatureKind::Pattern { features, pattern, bodies: copied, placements } => {
             let ids: Vec<u64> = features.iter().map(|f| f.0).collect();
             let bodies: Vec<Sel> = if copied.is_empty() {
                 st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect()
             } else {
-                copied.iter().map(|name| Sel::Body { name: name.to_string() }).collect()
+                // Each body as the placement it was copied from shows it (an instance by its world
+                // name), as a mirror's.
+                let own = s.model.state();
+                let world = |k: usize, name: &str| match (placements.get(k), own.body(name)) {
+                    (Some(path), Some(b)) => s.doc.world_body_name(&own, name, s.doc.model_body_component(b), path),
+                    _ => name.to_string(),
+                };
+                copied.iter().enumerate().map(|(k, name)| Sel::Body { name: world(k, name) }).collect()
             };
             let mut d = match pattern {
                 PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
