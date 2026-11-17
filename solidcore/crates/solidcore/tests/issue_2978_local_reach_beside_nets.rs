@@ -851,8 +851,14 @@ fn closed_fit_spline(points: &[(f64, f64)]) -> solidcore::curve::curve::Curve {
         let (a, b, (ma, mb)) = (at(i), at(i + 1), (m[i], m[(i + 1) % n]));
         let s = h[i] * h[i] / 6.0;
         let chord = (b.0 - a.0, b.1 - a.1);
-        let t0 = (chord.0 - (2.0 * ma.0 + mb.0) * s, chord.1 - (2.0 * ma.1 + mb.1) * s);
-        let t1 = (chord.0 + (ma.0 + 2.0 * mb.0) * s, chord.1 + (ma.1 + 2.0 * mb.1) * s);
+        let t0 = (
+            chord.0 - (2.0 * ma.0 + mb.0) * s,
+            chord.1 - (2.0 * ma.1 + mb.1) * s,
+        );
+        let t1 = (
+            chord.0 + (ma.0 + 2.0 * mb.0) * s,
+            chord.1 + (ma.1 + 2.0 * mb.1) * s,
+        );
         if i == 0 {
             pw.push(CPoint::new(a.0, a.1, 0.0, 1.0));
         }
