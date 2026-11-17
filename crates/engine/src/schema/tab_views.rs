@@ -153,6 +153,9 @@ pub struct TabViewActivateParams {
     /// The view's place in tab order, 0 first. Give this or `id`.
     #[serde(default)]
     pub index: Option<u64>,
+    /// The window containing the view. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
 }
 
 /// `tab.view.rename`: give a view a new name.
@@ -218,6 +221,9 @@ pub struct TabViewReply {
     /// The place asked for (`tab.view.activate`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index: Option<u64>,
+    /// The window asked for (`tab.view.activate`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
     /// The name asked for, trimmed (`tab.view.rename`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,

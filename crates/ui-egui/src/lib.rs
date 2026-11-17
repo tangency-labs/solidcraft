@@ -1709,6 +1709,7 @@ impl SolveApp {
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
+            Some(window) if window.starts_with("tab.window.") => r.and_then(|v| view_windows::command(self, window, v)),
             _ => r,
         };
         // A grant taken back here that the shared store still holds is not taken back: say so.
@@ -4190,7 +4191,11 @@ impl SolveApp {
     /// after all child scopes restore the root; Web calls it after its single root UI pass.
     /// Keeping hidden/live slots avoids consuming their pending CPU scenes a second time.
     pub fn retain_view_pictures(&mut self, state: Option<&egui_wgpu::RenderState>) {
-        let slots = documents::live_view_picture_slots(self);
+        if self.view_windows.is_child() {
+            return;
+        }
+        let mut slots = documents::live_view_picture_slots(self);
+        slots.extend(view_windows::retain_picture_slots(self));
         if let Some(state) = state
             && let Some(renderer) = state.renderer.write().callback_resources.get_mut::<solidcraft_viewport_gpu::view::Renderer>()
         {

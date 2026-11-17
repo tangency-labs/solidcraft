@@ -7100,6 +7100,13 @@ impl ViewportState {
         self.window_scene_slots.iter().flat_map(|slots| slots.values().copied())
     }
 
+    pub(crate) fn retain_window_scene_slots(&mut self, owned: Option<&[u64]>) -> impl Iterator<Item = u64> + '_ {
+        if let Some(slots) = &mut self.window_scene_slots {
+            slots.retain(|view, _| owned.is_some_and(|views| view.is_none_or(|view| views.contains(&view))));
+        }
+        self.window_scene_slots()
+    }
+
     pub(crate) fn scene_slot(&mut self) -> Option<u64> {
         let Some(slots) = &mut self.window_scene_slots else { return self.tile };
         // The lower half belongs to tile ids in the main window and slot 0.
@@ -10023,6 +10030,26 @@ pub fn look_at_selection(app: &mut SolveApp) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_picture_slots_keep_ground_and_hidden_views_but_forget_foreign_ownership() {
+        let mut viewport = super::ViewportState::default();
+        viewport.isolate_window_scenes();
+        let ground = viewport.scene_slot().unwrap();
+        viewport.tile = Some(7);
+        let hidden = viewport.scene_slot().unwrap();
+        viewport.tile = Some(8);
+        let moved = viewport.scene_slot().unwrap();
+        assert!(ground >= 1 << 63 && hidden >= 1 << 63 && moved >= 1 << 63);
+        let live: Vec<_> = viewport.retain_window_scene_slots(Some(&[7])).collect();
+        assert!(live.contains(&ground) && live.contains(&hidden));
+        assert!(!live.contains(&moved));
+        viewport.tile = Some(7);
+        assert_eq!(viewport.scene_slot(), Some(hidden));
+        viewport.tile = Some(8);
+        assert_ne!(viewport.scene_slot(), Some(moved));
+        assert!(viewport.retain_window_scene_slots(None).next().is_none());
+    }
+
     use super::*;
     use crate::navigation::*;
 
