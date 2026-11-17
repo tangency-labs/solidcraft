@@ -331,6 +331,19 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
     runs.into_iter().flat_map(Run::into_segs).collect()
 }
 
+/// How a cut of a curve merges with the cuts next to it.
+#[derive(Clone, Copy, PartialEq)]
+enum Cut {
+    /// An end lying on the curve, or a crossing: one cut with any other a few tolerances away.
+    Firm,
+    /// A crossing next to an end of one of the two curves that misses the other: it gives way to
+    /// any other cut it is merged with.
+    Weak,
+    /// A crossing next to another curve's end that lies on only one of the two: a point of its
+    /// own, one cut only with a cut within the tolerance of it.
+    Apart,
+}
+
 /// A stretch of a profile loop: plain segments, or (part of) an exact free-form segment.
 enum Run {
     Plain(Vec<Seg2>),
@@ -1395,9 +1408,8 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         _ => false,
     };
     let grid = Grid::new(&boxes);
-    // Each cut's parameter, and whether it is weak: a crossing next to an end that misses one of
-    // the two curves (below), which gives way to any other cut it is merged with.
-    let mut cuts: Vec<Vec<(f64, bool)>> = vec![Vec::new(); shapes.len()];
+    // Each cut's parameter, and how it merges with the cuts next to it ([`Cut`]).
+    let mut cuts: Vec<Vec<(f64, Cut)>> = vec![Vec::new(); shapes.len()];
     // End points of other curves lying on each shape.
     let mut end_cells: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
     for (k, p) in ends.iter().enumerate() {
@@ -1424,7 +1436,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 && let Some(t) = sh.param_on(*p, tol)
                 && let Some(cu) = cuts.get_mut(i)
             {
-                cu.push((t, false));
+                cu.push((t, Cut::Firm));
             }
         }
     }
@@ -1518,12 +1530,18 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 for p in pts {
                     let on_x = x.param_on(p, tol).or_else(|| end_param(x, p, tol));
                     let on_y = y.param_on(p, tol).or_else(|| end_param(y, p, tol));
-                    // Crossings at (or next to) curve ends are already cuts. Not next to an end of
-                    // one of the two curves that misses the other: nothing cut the other curve
-                    // there, and it would cross without meeting it (a line 3e-5 from the
-                    // junction of two curves of a loop, #755). Such a crossing is a weak cut.
+                    // Crossings at (or next to) curve ends lying on both curves are already cuts.
+                    // Not next to an end of one of the two curves that misses the other: nothing
+                    // cut the other curve there, and it would cross without meeting it (a line
+                    // 3e-5 from the junction of two curves of a loop, #755). Such a crossing is a
+                    // weak cut. An end of another curve cuts only the curves it lies on: next to
+                    // one lying on one of the two, the crossing is a point of its own on that one,
+                    // apart from the end's (a line crossing a circle 3e-5 from where a spline
+                    // ends on it meets the circle there, and the spline still does, #18208; a
+                    // line crossing a square's side next to its corner leaves the corner); next
+                    // to one lying on neither, the crossing is a plain cut.
                     let on = |sh: &Shape, e: Vec2| sh.param_on(e, tol).is_some() || end_param(sh, e, tol).is_some();
-                    let misses = |e: Vec2| (end_param(x, e, tol).is_some() && !on(y, e)) || (end_param(y, e, tol).is_some() && !on(x, e));
+                    let own = |e: Vec2| end_param(x, e, tol).is_some() || end_param(y, e, tol).is_some();
                     // Every end within reach, whatever the grid's cell size (so an island's
                     // smaller grid finds the same ends as the whole sketch's).
                     let near_ends = || {
@@ -1532,16 +1550,18 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                             Some(cs) => cs.iter().flat_map(|c| end_cells.get(c).map(Vec::as_slice).unwrap_or(&[])).copied().collect(),
                             None => all_ends.clone(),
                         };
-                        cand.into_iter()
-                            .filter_map(|k| ends.get(k).copied())
-                            .filter(|e| e.dist(p) < tol * 100.0)
-                            // Only ends of the two curves decide whether they cut each other here:
-                            // a third curve ending at the crossing (a spline ending on a circle
-                            // where two lines cross it) does not cut either of them for the other.
-                            .filter(|e| end_param(x, *e, tol).is_some() || end_param(y, *e, tol).is_some())
-                            .fold((false, false), |(cut, weak), e| if misses(e) { (cut, true) } else { (true, weak) })
+                        cand.into_iter().filter_map(|k| ends.get(k).copied()).filter(|e| e.dist(p) < tol * 100.0).fold(
+                            (false, Cut::Firm),
+                            |(cut, kind), e| match (on(x, e), on(y, e)) {
+                                (true, true) => (true, kind),
+                                (false, false) => (cut, kind),
+                                _ if own(e) => (cut, Cut::Weak),
+                                _ if kind == Cut::Weak => (cut, kind),
+                                _ => (cut, Cut::Apart),
+                            },
+                        )
                     };
-                    let (already, weak) = near_ends();
+                    let (already, kind) = near_ends();
                     if on_x.is_none() || on_y.is_none() || already {
                         continue;
                     }
@@ -1549,12 +1569,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                         if x.param_on(p, tol).is_some()
                             && let Some(c) = cuts.get_mut(i)
                         {
-                            c.push((tx, weak));
+                            c.push((tx, kind));
                         }
                         if y.param_on(p, tol).is_some()
                             && let Some(c) = cuts.get_mut(j)
                         {
-                            c.push((ty, weak));
+                            c.push((ty, kind));
                         }
                         if (gi, gj) != (i, j) {
                             anchors.push(p);
@@ -1609,16 +1629,21 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
     for (k, (ci, sh)) in shapes.iter().enumerate() {
         let mut ts = cuts.get(k).cloned().unwrap_or_default();
         ts.sort_by(|a, b| a.0.total_cmp(&b.0));
-        // Cuts closer than a few tolerances are one cut (tangent touches give near-double roots).
+        // Cuts closer than a few tolerances are one cut (tangent touches give near-double roots);
+        // a cut apart is one cut only with a cut within the tolerance of it.
         // A weak cut gives way to the other: it only adds a cut where there was none.
         let scale = match *sh {
             Shape::Line { a, b } => a.dist(b),
             Shape::Round { r, .. } => r,
         };
         let close = (tol * 100.0 / scale.max(1e-12)).max(1e-9);
+        let at_point = tol / scale.max(1e-12);
+        let same = |a: (f64, Cut), b: (f64, Cut), gap: f64| {
+            if a.1 == Cut::Apart || b.1 == Cut::Apart { gap <= at_point } else { gap < close }
+        };
         ts.dedup_by(|a, b| {
-            let same = (a.0 - b.0).abs() < close;
-            if same && b.1 && !a.1 {
+            let same = same(*a, *b, (a.0 - b.0).abs());
+            if same && b.1 == Cut::Weak && a.1 != Cut::Weak {
                 *b = *a;
             }
             same
@@ -1626,9 +1651,9 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         if let (Shape::Round { sweep, .. }, Some(&first), Some(&last)) = (*sh, ts.first(), ts.last())
             && sweep >= TAU - 1e-12
             && ts.len() > 1
-            && (first.0 + TAU - last.0).abs() < close
+            && same(first, last, (first.0 + TAU - last.0).abs())
         {
-            if first.1 && !last.1 {
+            if first.1 == Cut::Weak && last.1 != Cut::Weak {
                 ts.remove(0);
             } else {
                 ts.pop();

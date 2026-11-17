@@ -2385,23 +2385,56 @@ fn spline_handle_preview_matches_the_stored_handles() {
     assert!(sk.spline_handle_preview(control).is_none(), "a control point spline has no tangent handles");
 }
 
-/// #18208: two lines cross a circle exactly where a spline ends. The spline's ends are no ends of
-/// the lines or the circle, so they must not stop the lines from cutting the circle: the circle's
-/// inside is divided into the wedge between the lines and the rest, not one undivided profile.
+/// #18208: a circle, two lines from its centre out through it, and a control point spline that
+/// starts and ends on the circle where the lines cross it, leaving it almost along it. The
+/// spline's first end lies on the circle 3e-5 from where a line crosses it: both meet the circle,
+/// at points of their own, and the circle's inside is the two sectors between the lines, not one
+/// undivided disc.
 #[test]
 fn a_spline_ending_where_two_lines_cross_a_circle_does_not_stop_the_cut() {
     let mut sk = Sketch::new();
-    sk.add_circle(v(0.0, 0.0), 10.0, None, Some("c1")).unwrap();
-    let (c, s) = (30.0_f64.to_radians().cos(), 30.0_f64.to_radians().sin());
-    let (top, bottom) = (v(10.0 * c, 10.0 * s), v(10.0 * c, -10.0 * s));
-    sk.add_line(v(0.0, 0.0), v(14.0 * c, 14.0 * s), None, None, Some("l1")).unwrap();
-    sk.add_line(v(0.0, 0.0), v(14.0 * c, -14.0 * s), None, None, Some("l2")).unwrap();
-    let pts: Vec<usize> = [top, v(13.0, 0.0), bottom].iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
-    sk.add_curve(CurveKind::Spline { pts, control: false, degree: 2, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1")).unwrap();
-    let ps = find_profiles(&sk);
-    let wedge = PI * 100.0 / 6.0;
-    assert!(ps.iter().any(|p| (p.area - wedge).abs() < 0.05 * wedge), "no wedge of {wedge}: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
-    assert!(ps.iter().all(|p| p.area < PI * 100.0 - 1.0), "the circle stayed one undivided profile");
+    let r = 2.08;
+    sk.add_circle(v(0.0, 0.0), r, None, Some("c1")).unwrap();
+    let cv = [
+        (-1.727760430510585, 1.1581208460545203),
+        (-1.7704551754195035, 1.094427793845791),
+        (-1.8602686108707067, 0.9619954455824853),
+        (-2.0082668311785956, 0.7482309290893508),
+        (-2.219918047810436, 0.42227985400531376),
+        (-2.4408969965995033, -0.09621730104241367),
+        (-2.5360940677424186, -0.7532678214689044),
+        (-2.4340454808767036, -1.5175745701115857),
+        (-2.0845665468250067, -2.3055516872134776),
+        (-1.4616201843226249, -3.0142984576608765),
+        (-0.5691438973918427, -3.545842586159598),
+        (0.5535051037034185, -3.8351698654996227),
+        (1.8252405439979082, -3.876806028057485),
+        (3.1374196092359834, -3.7063066966936202),
+        (4.367267459489966, -3.3826441317751934),
+        (5.391205060448057, -2.970995008891002),
+        (6.098209331164398, -2.525713439011632),
+        (6.403442080233015, -2.0733146725545795),
+        (6.262610660565516, -1.5949276792607097),
+        (5.661213970461664, -1.0413092615229984),
+        (4.604324454961728, -0.3477302113751667),
+        (3.406490096727586, 0.37153166754270006),
+        (2.3171321631198345, 1.02664386274606),
+        (1.5071019575283753, 1.5177797574350105),
+        (1.0811389357099106, 1.7769464262380543),
+    ];
+    let pts: Vec<usize> = cv.iter().map(|&(x, y)| sk.add_point(v(x, y), None).unwrap()).collect();
+    sk.add_curve(CurveKind::Spline { pts, control: true, degree: 5, periodic: false, nurbs: None, handles: Vec::new() }, Some("s1")).unwrap();
+    sk.add_line(v(0.0, 0.0), v(-2.3016510816076967, 1.5428434089881773), None, None, Some("l1")).unwrap();
+    sk.add_line(v(0.0, 0.0), v(1.440261156344587, 2.367194814046595), None, None, Some("l2")).unwrap();
+    let areas: Vec<f64> = find_profiles(&sk).iter().map(|p| p.area).collect();
+    // The sectors between the lines: the angle from one line to the other, and the rest.
+    let (a1, a2) = (1.5428434089881773_f64.atan2(-2.3016510816076967), 2.367194814046595_f64.atan2(1.440261156344587));
+    let small = (a1 - a2) * r * r / 2.0;
+    // The two sectors and the band between the circle and the spline.
+    assert_eq!(areas.len(), 3, "{areas:?}");
+    for want in [small, PI * r * r - small] {
+        assert!(areas.iter().any(|a| (a - want).abs() < 1e-3 * want), "no sector of {want}: {areas:?}");
+    }
 }
 
 /// A band of rounded caps over the top of a ring (two arcs of radius 15 tangent to the ring's
