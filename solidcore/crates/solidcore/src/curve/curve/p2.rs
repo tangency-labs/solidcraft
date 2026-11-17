@@ -163,12 +163,10 @@
 //!   infallible) when `num_derivs` exceeds [`crate::curve::MAX_EVAL_DERIVS`]; the other
 //!   kinds' evaluators check the bound themselves or fail earlier (B-splines at
 //!   `NL_MAXDER`).
-//! - **No length (WR-663).** With the opt-in `Kernel::fixes.query_statuses_pass_on`,
-//!   `ApproximateLength` is `SM_UNDEF_DOUBLE` (no turn angle) when an evaluation or a
-//!   turn angle fails, as the fork (tangency-labs/smlib 8311f8e).
-//! - **Statuses passed on (WR-663).** With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
-//!   fork (tangency-labs/smlib 8311f8e): `CreateBySplitCurve`'s trims,
+//! - **No length (WR-663).** `ApproximateLength` is `SM_UNDEF_DOUBLE` (no turn angle)
+//!   when an evaluation or a turn angle fails, as the fork (tangency-labs/smlib 8311f8e).
+//! - **Statuses passed on (WR-663).** The statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e):`CreateBySplitCurve`'s trims,
 //!   `SurfaceMaxDistanceBetween`'s samples, `sm_FlushCrv`'s arc `EditParameterization`;
 //!   `SmCurvePropertyGS::BranchMayContainAnswers` rules nothing out (`TRUE`) when an angle
 //!   cannot be measured.
@@ -199,7 +197,7 @@ use crate::curve::offset_curve::OffsetCurve;
 use crate::curve::parabola::Parabola;
 use crate::curve::projected_curve::ProjectedCurve;
 use crate::curve::tangent_field::TangentFieldCurve;
-use crate::error::{ignore_or_pass_on, ignored, ignored_or_pass_on, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::a_object::{self, AObject, CacheStore};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -918,6 +916,24 @@ impl Curve {
         match &self.kind {
             CurveKind::Line(l) => l.segment_over(interval).map(Vec::from),
             CurveKind::BSpline(b) => b.hull_points_over(interval),
+            _ => None,
+        }
+    }
+
+    /// Not upstream: the points whose convex hull holds this curve over `interval`, whose
+    /// first and last are the curve's points at `interval`'s ends, each with the error bound
+    /// of its coordinates: a line's two ends, the control points of the piece over
+    /// `interval` of a B-spline or of the B-spline an ellipse, hyperbola or parabola
+    /// evaluates ([`BSplineCurve::piece_hull_points`]). `None` for the other kinds and when
+    /// no such piece is certain.
+    #[must_use]
+    pub(crate) fn piece_hull_points(&self, interval: &Extent1d) -> Option<Vec<(Point3, f64)>> {
+        match &self.kind {
+            CurveKind::Line(l) => l.segment_over(interval).map(Vec::from),
+            CurveKind::BSpline(b) => b.piece_hull_points(interval),
+            CurveKind::Ellipse(e) => e.base().piece_hull_points(interval),
+            CurveKind::Hyperbola(h) => h.base().piece_hull_points(interval),
+            CurveKind::Parabola(p) => p.base().piece_hull_points(interval),
             _ => None,
         }
     }
@@ -1785,8 +1801,16 @@ impl Curve {
     ) -> Result<LineIntersection> {
         match &self.kind {
             CurveKind::Ellipse(c) => {
-                let r =
-                    c.intersect_with_line(k, interval, other, other_interval, tol, None, None)?;
+                let r = c.intersect_with_line(
+                    k,
+                    interval,
+                    other,
+                    other_interval,
+                    tol,
+                    0.0,
+                    None,
+                    None,
+                )?;
                 Ok(LineIntersection {
                     solutions: r.solutions,
                     needs_more_intersections: r.needs_more_intersections,
@@ -2212,10 +2236,9 @@ impl Curve {
         let mut ivl2 = ivl;
         ivl2.set_min_max(split_param, ivl2.max())?;
         ivl.set_min_max(ivl.min(), split_param)?;
-        // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-        let pass_on = k.fixes.query_statuses_pass_on;
-        ignore_or_pass_on(self.trim(k, &mut ivl, TrimMode::Notify), pass_on)?;
-        ignore_or_pass_on(copy.trim(k, &mut ivl2, TrimMode::Notify), pass_on)?;
+        // (statuses ignored upstream; passed on as the fork, tangency-labs/smlib 8311f8e)
+        self.trim(k, &mut ivl, TrimMode::Notify)?;
+        copy.trim(k, &mut ivl2, TrimMode::Notify)?;
         Ok(copy)
     }
 
@@ -2267,12 +2290,8 @@ impl Curve {
             let per = ii as f64 / (num_samples as f64 - 1.0);
             let mut param = interval.evaluate(per);
 
-            // (status ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-            let crv_pt = ignored_or_pass_on(
-                self.evaluate_point(k, param),
-                k.fixes.query_statuses_pass_on,
-            )?
-            .unwrap_or(Vec3::UNDEF);
+            // (status ignored upstream; passed on as the fork, tangency-labs/smlib 8311f8e)
+            let crv_pt = self.evaluate_point(k, param)?;
             let mut drop = surface_drop_point(k, surface, crv_pt, domain, guess_uv)?;
 
             // If drop failed for first or last point, try moving a small distance from the end.
@@ -2439,38 +2458,6 @@ pub fn base_ends<C: CurveEvaluate + ?Sized>(k: &Kernel, curve: &C) -> Result<End
     })
 }
 
-/// The outcome of [`ignored_or_soft`].
-#[derive(Debug)]
-pub(crate) enum Soft<T> {
-    /// The call failed and, with the opt-in fix, the caller gives the fork's answer.
-    Failed,
-    /// [`ignored`]'s value: the call's result, `None` for a failure upstream ignores.
-    Kept(Option<T>),
-}
-
-/// [`ignored`] at a site of a status-less predicate or helper where SMLib drops the
-/// status and the fork answers only from what it can show (tangency-labs/smlib
-/// 8311f8e): [`Soft::Failed`] when, with `soft` (the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`]), the call failed;
-/// otherwise [`Soft::Kept`] of [`ignored`]'s value.
-pub(crate) fn ignored_or_soft<T>(r: Result<T>, soft: bool) -> Result<Soft<T>> {
-    match ignored(r)? {
-        None if soft => Ok(Soft::Failed),
-        v => Ok(Soft::Kept(v)),
-    }
-}
-
-/// `Unitize` whose status SMLib drops (a zero vector becomes `(0, 0, 1)`) and the fork
-/// passes on (`SER`, tangency-labs/smlib 8311f8e): with `pass_on` (the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`]) a zero vector is the
-/// error of [`Vec3::unitize`].
-pub(crate) fn unitize_or_pass_on(v: Vec3, pass_on: bool) -> Result<Vec3> {
-    if pass_on {
-        return v.unitize();
-    }
-    Ok(v.unitize_or_z())
-}
-
 /// Evaluation whose failure upstream ignores: `None` keeps the caller's previous
 /// values; [`SolidError::Unported`] is propagated.
 fn eval_ignored<C: CurveEvaluate + ?Sized>(
@@ -2486,8 +2473,9 @@ fn eval_ignored<C: CurveEvaluate + ?Sized>(
 /// `SmCurve::ApproximateLength`: the length of the polygon through the curve
 /// points at `samples + 1` equally spaced parameters of `interval` and, for a 2D
 /// curve with `want_turn_angle`, the turning angle of its tangent in degrees
-/// (`pOptUVTurnAngDeg`; `None` otherwise). Evaluation statuses are ignored, as
-/// upstream.
+/// (`pOptUVTurnAngDeg`; `None` otherwise). A curve that cannot be evaluated (or
+/// whose turn angle cannot be measured) has no length: `SM_UNDEF_DOUBLE` and no turn
+/// angle, as the fork (tangency-labs/smlib 8311f8e).
 ///
 /// # Errors
 ///
@@ -2502,33 +2490,28 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
     // init output
     let mut ret = 0.0;
 
-    // with the opt-in fix a curve that cannot be evaluated has no length:
-    // SM_UNDEF_DOUBLE (tangency-labs/smlib 8311f8e)
-    let no_length = k.fixes.query_statuses_pass_on;
+    // as the fork, a curve that cannot be evaluated has no length: SM_UNDEF_DOUBLE
+    // (tangency-labs/smlib 8311f8e)
     let undef = Ok((crate::math::UNDEF_DOUBLE, None));
 
     // switch for turning angles
     if curve.dim() == 2 && want_turn_angle {
         let z = Vec3::new(0.0, 0.0, 1.0);
-        let mut last = [Vec3::UNDEF; 2];
-        let mut curr = [Vec3::UNDEF; 2];
         let mut turn_ang_rad = 0.0;
 
         // Get Start and end Points
-        match eval_ignored(k, curve, interval.min(), 1, true)? {
-            Some(v) => last = [at(&v, 0), at(&v, 1)],
-            None if no_length => return undef,
-            None => (),
-        }
-        match eval_ignored(k, curve, interval.max(), 1, true)? {
-            Some(v) => curr = [at(&v, 0), at(&v, 1)],
-            None if no_length => return undef,
-            None => (),
-        }
+        let mut last = match eval_ignored(k, curve, interval.min(), 1, true)? {
+            Some(v) => [at(&v, 0), at(&v, 1)],
+            None => return undef,
+        };
+        let mut curr = match eval_ignored(k, curve, interval.max(), 1, true)? {
+            Some(v) => [at(&v, 0), at(&v, 1)],
+            None => return undef,
+        };
 
         // Get base of ActTurnAngRad = BaseTurnAngRad +- N*2PI
         let base_turn_ang_rad = match z.ccw_angle_between(last[1], curr[1]) {
-            Err(e) if no_length && !e.is_unported_or_cancelled() => return undef,
+            Err(e) if !e.is_unported_or_cancelled() => return undef,
             r => r?,
         };
 
@@ -2544,14 +2527,13 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
             // Evaluate and accumulate distance
             match eval_ignored(k, curve, param, 1, true)? {
                 Some(v) => curr = [at(&v, 0), at(&v, 1)],
-                None if no_length => return undef,
-                None => (),
+                None => return undef,
             }
             ret += curr[0].distance(last[0]);
 
             // accumulate turn angle
             let this_turn_ang_rad = match z.ccw_angle_between(last[1], curr[1]) {
-                Err(e) if no_length && !e.is_unported_or_cancelled() => return undef,
+                Err(e) if !e.is_unported_or_cancelled() => return undef,
                 r => r?,
             };
             turn_ang_rad += this_turn_ang_rad;
@@ -2567,18 +2549,12 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
         let turn_deg = (base_turn_ang_rad + n * 2.0 * PI) * (180.0 / PI);
         Ok((ret, Some(turn_deg)))
     } else {
-        let point = |t: f64, prev: Point3| -> Result<Option<Point3>> {
-            match ignored(curve.evaluate_point(k, t))? {
-                None if no_length => Ok(None),
-                p => Ok(Some(p.unwrap_or(prev))),
-            }
-        };
+        let point = |t: f64| -> Result<Option<Point3>> { ignored(curve.evaluate_point(k, t)) };
 
         // Get Start Point
-        let Some(mut last) = point(interval.min(), Vec3::UNDEF)? else {
+        let Some(mut last) = point(interval.min())? else {
             return undef;
         };
-        let mut curr = Vec3::UNDEF;
 
         // for every sample point
         for ii in 1..=samples {
@@ -2590,10 +2566,9 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
             };
 
             // evaluate and accumulate distance
-            let Some(p) = point(param, curr)? else {
+            let Some(curr) = point(param)? else {
                 return undef;
             };
-            curr = p;
             ret += curr.distance(last);
 
             // next iter
@@ -2964,15 +2939,13 @@ pub fn add_to_curve(
 ///
 /// [`SolidError::InvalidInput`] when the polygon does not have `3 * (knots - 1) + 1`
 /// points (upstream reads past it); those of the vector, frame, arc and canonical
-/// constructions (`SER`). With `pass_on` (the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`]) also that of the arc's
-/// `EditParameterization`, which upstream ignores (tangency-labs/smlib 8311f8e).
+/// constructions (`SER`), and that of the arc's `EditParameterization`, which upstream
+/// ignores and the fork passes on (tangency-labs/smlib 8311f8e).
 pub fn flush_crv(
     tol: f64,
     cntrl_poly: &mut Vec<Point3>,
     knots: &mut Vec<f64>,
     create_analytics: bool,
-    pass_on: bool,
 ) -> Result<Option<BSplineCurve>> {
     let (Some(&first_knot), Some(&last_knot)) = (knots.first(), knots.last()) else {
         return Ok(None);
@@ -3044,8 +3017,8 @@ pub fn flush_crv(
                             NurbCircleParam::Quadratic,
                         )?;
                         let ivl = Extent1d::from_min_max(first_knot, last_knot);
-                        // status ignored upstream (passed on with the opt-in fix)
-                        ignore_or_pass_on(arc.edit_parameterization(&ivl), pass_on)?;
+                        // status ignored upstream (passed on as the fork, 8311f8e)
+                        arc.edit_parameterization(&ivl)?;
                         // Check whether the approximation is accurate.
                         let mut good_approximation = true;
                         let tol_sq = tol * tol;
@@ -4209,16 +4182,12 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
                                 return Ok(true);
                             }
                             vec = vec.unitize()?;
-                            // with the opt-in fix an angle that cannot be measured
-                            // rules nothing out (tangency-labs/smlib 8311f8e)
+                            // as the fork, an angle that cannot be measured rules
+                            // nothing out (tangency-labs/smlib 8311f8e)
                             let cos_theta = match property_angle(prop, o1, o2, vec) {
-                                Err(e) if self.kernel.fixes.query_statuses_pass_on => {
-                                    if e.is_unported_or_cancelled() {
-                                        return Err(e);
-                                    }
-                                    return Ok(true);
-                                }
-                                r => r?,
+                                Ok(c) => c,
+                                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                                Err(_) => return Ok(true),
                             };
                             if (cos_theta * cos_theta.abs()) + EFF_ZERO_SQRT < best_sq {
                                 return Ok(true);
@@ -4945,11 +4914,7 @@ mod tests {
         // between unset points.
         let empty = Curve::from(BSplineCurve::new(3));
         let ivl = Extent1d::from_min_max(0.0, 1.0);
-        let off = Kernel::default();
-        let mut on = Kernel::default();
-        on.fixes.query_statuses_pass_on = true;
-        let (len_off, _) = approximate_length(&off, &empty, &ivl, 5, false).unwrap();
-        assert_ne!(len_off, crate::math::UNDEF_DOUBLE);
+        let on = Kernel::default();
         let (len_on, turn) = approximate_length(&on, &empty, &ivl, 5, false).unwrap();
         assert_eq!(len_on, crate::math::UNDEF_DOUBLE);
         assert!(turn.is_none());
@@ -5001,7 +4966,7 @@ mod tests {
         add_to_curve(b, c, 1.0, 2.0, &mut poly, &mut knots).unwrap();
         assert!(add_to_curve(a, b, 5.0, 6.0, &mut poly, &mut knots).is_err());
         assert_eq!((poly.len(), knots.len()), (7, 3));
-        let crv = flush_crv(1e-6, &mut poly, &mut knots, true, false)
+        let crv = flush_crv(1e-6, &mut poly, &mut knots, true)
             .unwrap()
             .unwrap();
         assert!(poly.is_empty() && knots.is_empty());

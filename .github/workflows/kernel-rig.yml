@@ -72,7 +72,8 @@ permissions:
 
 concurrency:
   # A new push to a pull request replaces its old run.
-  group: kernel-rig-${{ github.event_name }}-${{ github.ref }}
+  # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
+  group: kernel-rig-${{ github.event_name }}-${{ github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

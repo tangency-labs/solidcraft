@@ -389,6 +389,7 @@ fn run(k: &mut Kernel, input: &TwoOffsetChamfer) -> SolidResult<Vec<f64>> {
         store: &store,
         key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
     };
+    crate::dump::body(k, "mass", &body);
     match solidcore::mass::integrator::properties::brep_mass_properties(
         k,
         &mut body,

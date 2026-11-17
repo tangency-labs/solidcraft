@@ -628,7 +628,11 @@ fn place_compatibly(
         let section = if source.location.zone() != zone || needs_stack || needs_column {
             let section = next_section_id_with_reservations(layout, &reserved.sections)?;
             reserved.sections.insert(section.clone());
-            let size = Size { width: width.unwrap_or(source.size.width).clamp(240.0, 1200.0), height: source.size.height };
+            let registry = integration.runtime().layout().registry();
+            let min = registry.get(&layout.instance(&instance)?.kind)?.min_size.width;
+            let (min, max) =
+                below.and_then(|section| section.column.as_ref()).map_or(Ok((min, 1200.0)), |column| column_bounds(layout, registry, column))?;
+            let size = Size { width: width.unwrap_or(source.size.width).clamp(min, max), height: source.size.height };
             let destination = if let Some(browser) = below {
                 Destination::Relative {
                     section: browser.id.clone(),
@@ -662,7 +666,8 @@ fn place_compatibly(
             section
         } else {
             if let (Some(width), Some(column)) = (width, &source.column) {
-                mutations.push(Mutation::SetColumnWidth { column: column.clone(), width: width.clamp(240.0, 1200.0) });
+                let (min, max) = column_bounds(layout, integration.runtime().layout().registry(), column)?;
+                mutations.push(Mutation::SetColumnWidth { column: column.clone(), width: width.clamp(min, max) });
             }
             source.id.clone()
         };
@@ -923,7 +928,7 @@ fn registry() -> PanelResult<PanelRegistry> {
                 _ => Zone::Left,
             },
             min_size: Size {
-                width: 240.0,
+                width: if history { crate::ui_kit::history_width(false) } else { 240.0 },
                 height: match product {
                     Product::RenderLibrary => 180.0,
                     Product::Bom => 200.0,
@@ -944,6 +949,10 @@ fn registry() -> PanelResult<PanelRegistry> {
             header_actions: product.header_actions(),
             text_heavy: assistant || bom || sketch,
         })?;
+        if history {
+            let strip = crate::ui_kit::history_width(false);
+            registry.set_side_widths(&PanelKind::new(product.kind())?, vec![(strip, strip), (crate::ui_kit::history_width(true), MAX_LOGICAL)])?;
+        }
     }
     Ok(registry)
 }
@@ -1061,6 +1070,7 @@ fn default_layout(app: &crate::SolveApp, placement: &crate::prefs::Prefs, worksp
             instance.memory.column_index = column_index;
         }
     }
+    normalize_column_widths(&mut layout, registry)?;
     validate(&layout, registry)?;
     Ok(layout)
 }
@@ -1097,6 +1107,7 @@ impl PanelController for ProductionController {
         let snapshot = self.state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "content measurement is borrowed"))?;
         Ok(Arc::new(ProductionMetrics {
             extent: snapshot.panels.iter().find(|panel| panel.product == self.product).and_then(|panel| panel.extent),
+            strip_width: (self.product == Product::History).then(|| crate::ui_kit::history_width(false)),
             inset: solidcraft_theme::Tokens::get().space_2 * 2.0,
             policy: spec.side_height_policy,
         }))
@@ -1139,6 +1150,7 @@ impl PanelController for ProductionController {
 #[derive(Debug)]
 struct ProductionMetrics {
     extent: Option<ContentExtent>,
+    strip_width: Option<f32>,
     inset: f32,
     policy: SideHeightPolicy,
 }
@@ -1150,7 +1162,8 @@ impl HostContentMetrics for ProductionMetrics {
             .extent
             .filter(|extent| extent.width_independent || (extent.flow == Flow::Tall && (extent.width - request.width).abs() < 0.5))
             .map_or(MAX_LOGICAL, |extent| (request.chrome_height + extent.height + self.inset).min(MAX_LOGICAL));
-        Ok(SideContentMeasure { request: request.clone(), needed_height, policy: self.policy })
+        let policy = if self.strip_width == Some(request.width) { SideHeightPolicy::Fill } else { self.policy };
+        Ok(SideContentMeasure { request: request.clone(), needed_height, policy })
     }
     fn revision(&self) -> u64 {
         use std::hash::{Hash, Hasher};
@@ -1406,7 +1419,9 @@ impl FramePanelContent for ProductionFrame<'_> {
         }
         let scope = LocalScope { workspace: context.workspace.clone(), document: context.document.clone(), viewport: context.viewport.clone() };
         if let Some(capture) = capture.filter(|_| !context.preview_geometry) {
-            if let Some(mut extent) = capture.extent {
+            if let Some(mut extent) = capture.extent
+                && !(product == Product::History && context.outer.size.width == crate::ui_kit::history_width(false))
+            {
                 extent.width = context.outer.size.width;
                 extent.flow = context.flow;
                 extent.composer = capture.composer;

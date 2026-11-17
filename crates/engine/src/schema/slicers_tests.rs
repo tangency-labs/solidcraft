@@ -32,7 +32,7 @@ fn the_type_reads_no_key_as_the_handler_reads_none() {
 fn strict_keeps_todays_behaviour() {
     assert_strict_keeps_todays_errors(&[]);
     let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
-    assert!(s.execute("file.slicers", &json!({})).is_ok());
+    matches(&s.execute("file.slicers", &json!({})).unwrap());
     assert!(s.execute("file.slicers", &json!({"slicer": "prusa"})).is_err());
 }
 

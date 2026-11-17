@@ -49,6 +49,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TOGGLE_VISIBILITY_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::ToggleVisibilityResult>)
         .params("Show or hide what is selected in the app. Headless calls are refused without changing the design; browser.visibility takes explicit items"),
+    CommandSpec::new("ui.dialog_ok", "Dialog OK", crate::checked!("ui.dialog_ok", dialog_ok))
+        .icon("finish")
+        .noundo()
+        .doc_only()
+        .contract(&DIALOG_OK_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::DialogOkResult>)
+        .params("Runs OK in the feature dialog open in the app, as Enter does; bind it to a key in Preferences. Only the app has a dialog: called here it is refused, and changes nothing"),
     CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
         .icon("undo")
         .key("Ctrl+Z")
@@ -298,6 +305,16 @@ const TOGGLE_VISIBILITY_CONTRACT: crate::schema::TypedContract<crate::schema::ed
 /// it runs in `SolveApp::start`, and its key can be moved in Preferences › Shortcuts.
 fn toggle_visibility(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.toggle_visibility acts on the app's selection; use browser.visibility in a headless session".into()))
+}
+
+const DIALOG_OK_CONTRACT: crate::schema::TypedContract<crate::schema::edit::DialogOkParams> = crate::schema::TypedContract::new();
+
+/// Dialog OK (#17416) confirms the app's open dialog, which only the app has: it does so in
+/// `SolveApp::start` and never reaches this.
+fn dialog_ok(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other(
+        "ui.dialog_ok runs OK in the dialog open in the app; a headless session has no dialog: run the dialog's command itself".into(),
+    ))
 }
 
 const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
@@ -2174,6 +2191,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("old_surface_start").or_insert_with(|| json!(true));
     }
+    // The Hole window sends no tolerance class: an edit that gives none keeps the hole's while its
+    // new thread takes it, and drops it with a size that doesn't (#16336).
+    if let FeatureKind::Hole { thread_class: Some(class), .. } = &old.kind
+        && cid == "solid.hole"
+        && let Some(parameters) = params.as_object_mut()
+        && !parameters.contains_key("thread_class")
+        && let Some(tapped) = parameters.get("thread").and_then(Value::as_str).and_then(solidcraft_doc::parse_tapped_thread)
+        && tapped.check_class(class).is_ok()
+    {
+        parameters.insert("thread_class".into(), json!(class));
+    }
     // Members keep their names through an edit, unless it gives them another name.
     if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
         && cid == "frame.member"
@@ -2182,7 +2210,20 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("names").or_insert_with(|| json!(names));
     }
+    // A hole's and a primitive's `targets` are the bodies it takes part in: an edit that names
+    // them changes them (#17623), rather than the old participants overriding them.
+    let targets_are_participants = matches!(
+        old.kind,
+        FeatureKind::Hole { .. }
+            | FeatureKind::Box { .. }
+            | FeatureKind::Cylinder { .. }
+            | FeatureKind::Sphere { .. }
+            | FeatureKind::Torus { .. }
+            | FeatureKind::Cone { .. }
+    ) && params.get("participants").is_none()
+        && params.get("targets").and_then(Value::as_array).is_some_and(|t| !t.is_empty());
     if !old.participants.is_empty()
+        && !targets_are_participants
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("participants").or_insert_with(|| json!(old.participants));
@@ -2219,7 +2260,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(parameters) = params.as_object_mut() {
         parameters.remove("name");
     }
-    let r = spec.run_nested(&mut trial, &params)?;
+    let r = {
+        // Offset Plane has no parameter mapping in `frames::map_local`: its constructor maps
+        // the complete definition, or captures a face directly in the authoring frame.
+        let _world = (spec.id == "construct.plane.offset").then(crate::frames::world_geometry);
+        spec.run_nested(&mut trial, &params)
+    }?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
@@ -2425,7 +2471,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         slot.edge_names = new.edge_names;
         slot.face_names = new.face_names;
         slot.param_names = param_names;
-        if params.get("participants").is_some() {
+        if params.get("participants").is_some() || targets_are_participants {
             slot.participants = new.participants;
         }
     }

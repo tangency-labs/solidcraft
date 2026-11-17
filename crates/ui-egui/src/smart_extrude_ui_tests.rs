@@ -144,7 +144,8 @@ fn a_new_start_object_decides_the_operation_again() {
         d.inputs.push(from);
     }
     h.frames(2);
-    assert_eq!(h.app.dialog.as_ref().unwrap().inputs.last().unwrap().items.len(), 1, "the bottom face is the start");
+    let from = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "From Object").unwrap();
+    assert_eq!(from.items.len(), 1, "the bottom face is the start");
     assert_eq!(state(&h), (0, JOIN, true), "from the bottom face, 5 mm down: Join");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.dialog.is_none());

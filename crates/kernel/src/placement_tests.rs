@@ -153,3 +153,116 @@ fn a_box_scaled_or_sheared_keeps_its_planes() {
     let stretched = transform_matrix(&periodic_cylinder(), [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 2., 0.], [0., 0., 0., 1.]]).unwrap();
     assert!((volume(&stretched) - 4000. * std::f64::consts::PI).abs() < 5., "{}", volume(&stretched));
 }
+
+/// The kind of each blend face's definition: "procedural" or "exact".
+fn blend_kinds(body: &Body) -> Vec<&'static str> {
+    use solidcore_record::brep::{Surface, blend::BlendDefinition};
+    body.record()
+        .faces
+        .iter()
+        .filter_map(|f| match &f.surface {
+            Surface::Blend { definition } => Some(match definition.as_ref() {
+                BlendDefinition::Procedural(_) => "procedural",
+                BlendDefinition::ExactRound(_) => "exact",
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Rounded bodies, by what their rounds are: a cylinder's rim (the 900-copy pattern's part), a
+/// box's edge, a boss on a plate, and a round where a slanted plane cuts a cylinder.
+fn rounded_bodies() -> Vec<(&'static str, Body)> {
+    let mut out = Vec::new();
+    let rim = crate::cylinder(Vec3::ZERO, Vec3::Z, 3.0, 6.0).unwrap();
+    out.push(("cylinder rim", crate::fillet(&rim, &[Vec3::new(3.0, 0.0, 6.0)], 1.0).unwrap()));
+    let block = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    out.push(("box edge", crate::fillet(&block, &[Vec3::new(5.0, 0.0, 10.0)], 2.0).unwrap()));
+    let plate = crate::box_solid(Vec3::new(-10.0, -10.0, -4.0), Vec3::new(10.0, 10.0, 0.0)).unwrap();
+    let boss = crate::cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 4.0, 7.0).unwrap();
+    let bossed = boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+    out.push(("boss on a plate", crate::fillet(&bossed, &[Vec3::new(4.0, 0.0, 0.0)], 1.0).unwrap()));
+    // Two cylinders meeting at a tee: the round along their quartic edge is of no exact class.
+    let post = crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 20.0).unwrap();
+    let arm = crate::cylinder(Vec3::new(0.0, 0.0, 10.0), Vec3::X, 3.0, 15.0).unwrap();
+    let tee = boolean(&post, &arm, BoolOp::Union).unwrap().unwrap();
+    let foot = Vec3::new((25.0f64 - 9.0).sqrt(), 0.0, 13.0);
+    out.push(("tee", crate::fillet(&tee, &[foot], 1.0).unwrap()));
+    let tube = crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 20.0).unwrap();
+    let slant = solidcore_record::Plane { origin: Vec3::new(0.0, 0.0, 10.0), x: Vec3::X, y: Vec3::new(0.0, 1.0, -0.5).normalized().unwrap() };
+    if let Ok(parts) = split_by_plane(&tube, &slant)
+        && let Some(lower) = parts.into_iter().find(|p| p.mesh(&crate::MeshTolerance::chord(0.1)).is_ok_and(|m| m.bounds().min.z < 1.0))
+        && let Ok(rounded) = crate::fillet(&lower, &[Vec3::new(5.0, 0.0, 10.0)], 1.5)
+    {
+        out.push(("slanted cut", rounded));
+    }
+    out
+}
+
+/// A rounded body moves as exactly as any other: its rounds' definitions move with their nets
+/// (supports, leader and centre; a procedural round's bound takes in the move's rounding), so a
+/// copy is made without the kernel's rebuild, the kernel takes it as it is, and it is the body the
+/// kernel's own move makes. A pattern of 900 rounded cylinders sent each copy through the kernel.
+#[test]
+fn a_rounded_body_moves_exactly_as_the_kernel_moves_it() {
+    let (c, s) = (0.7f64.cos(), 0.7f64.sin());
+    let matrices = [
+        [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [290., 290., 0., 1.]],
+        [[c, s, 0., 0.], [-s, c, 0., 0.], [0., 0., 1., 0.], [10., -20., 30., 1.]],
+    ];
+    let mut kinds = Vec::new();
+    for (what, body) in rounded_bodies() {
+        let found = blend_kinds(&body);
+        kinds.extend(found.iter().copied());
+        let before = body.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
+        for m in matrices {
+            let motion = solidcraft_geom::brep::placement::Rigid::of_matrix(&m).unwrap();
+            assert!(solidcraft_geom::brep::placement::moved(body.record(), &motion).is_some(), "{what} {found:?}: moved exactly");
+            let placed = transform_matrix(&body, m).unwrap();
+            assert_topology(&body, &placed, m);
+            assert_eq!(blend_kinds(&placed), found, "{what}: the rounds stay rounds by their definitions");
+            assert!(placed.smlib().is_ok(), "{what}: the kernel takes the moved body: {:?}", placed.smlib_refusal());
+            let after = placed.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume;
+            assert!((after - before).abs() < 1e-6 * before, "{what}: {after} vs {before}");
+            // The kernel's own move gives the same body.
+            let kernels = transformed(&body, &m).unwrap();
+            for (a, b) in placed.record().vertices.iter().zip(&kernels.record().vertices) {
+                assert!(Vec3::from(a.point).dist(Vec3::from(b.point)) < 1e-9, "{what}");
+            }
+            // It is an operand like any other: cut through a round, as the source is cut.
+            let corner = crate::box_solid(Vec3::new(-50.0, -50.0, 3.0), Vec3::new(50.0, 1.0, 50.0)).unwrap();
+            let cut = |b: &Body, tool: &Body| {
+                boolean(b, tool, BoolOp::Cut).unwrap().unwrap().mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume
+            };
+            let moved_cut = cut(&placed, &transform_matrix(&corner, m).unwrap());
+            assert!((moved_cut - cut(&body, &corner)).abs() < 1e-5 * before, "{what}: cut {moved_cut}");
+        }
+        if found.contains(&"procedural") {
+            // The bound takes in the move's rounding: it only widens.
+            let bounds = |b: &Body| -> Vec<f64> {
+                b.record()
+                    .faces
+                    .iter()
+                    .filter_map(|f| match &f.surface {
+                        solidcore_record::brep::Surface::Blend { definition } => match definition.as_ref() {
+                            solidcore_record::brep::blend::BlendDefinition::Procedural(d) => Some(d.bound),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .collect()
+            };
+            let placed = transform_matrix(&body, matrices[0]).unwrap();
+            assert!(bounds(&body).iter().zip(bounds(&placed)).all(|(a, b)| b > *a), "{what}: {:?} -> {:?}", bounds(&body), bounds(&placed));
+        }
+        if !found.is_empty() {
+            // A rotation only near orthonormal would move the net and its definition apart by
+            // more than rounding: that is left to the kernel, as before.
+            let mut near = matrices[1];
+            near[0][0] *= 1.0 + 1e-12;
+            let motion = solidcraft_geom::brep::placement::Rigid::of_matrix(&near).unwrap();
+            assert!(solidcraft_geom::brep::placement::moved(body.record(), &motion).is_none(), "{what}");
+        }
+    }
+    assert!(kinds.contains(&"exact") && kinds.contains(&"procedural"), "{kinds:?}");
+}
