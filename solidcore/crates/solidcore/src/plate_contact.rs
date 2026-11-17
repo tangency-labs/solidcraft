@@ -1043,6 +1043,33 @@ pub fn strip_across(
         .ok_or_else(|| invalid("the strip's extent could not be found"))
 }
 
+/// S's thickness under `p` (design 6.1's `t_S`): how far below `p` the nearest of S's planar
+/// faces facing away from `n` lies (its highest vertex's depth). `None` when S has no such face
+/// below `p`. S is not changed.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for `tol` not positive and finite or a bad plane; those of the
+/// face reads.
+pub fn slot_thickness(
+    k: &mut crate::kernel::Kernel,
+    s: &crate::topology::Brep,
+    p: Plane,
+    tol: f64,
+) -> Result<Option<f64>> {
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("tol must be positive and finite"));
+    }
+    check_plane(p)?;
+    let frame = frame_of(p)?;
+    let down = -SQUARE_SLACK.cos();
+    Ok(read_faces(k, s, &frame, tol)?
+        .into_iter()
+        .filter(|f| f.plane.is_some_and(|q| q.normal.dot(p.normal) <= down) && f.high < -tol)
+        .map(|f| -f.high)
+        .min_by(f64::total_cmp))
+}
+
 /// The touch level of T's first planar face within `tol` of `p` ([`touch_offset`]).
 fn first_touch(t_faces: &[FaceRead], p: Plane, tol: f64) -> Result<Option<f64>> {
     for q in t_faces.iter().filter_map(|f| f.plane) {

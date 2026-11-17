@@ -237,6 +237,27 @@ pub fn tab_outline(
     Ok(Ok(rectangle((start, -length), (start + width, level))))
 }
 
+/// [`tab_outline`] with the tab's length `h = t_S + protrusion` (design 6.1), `t_S` S's
+/// thickness under P as [`crate::plate_contact::slot_thickness`] reads it.
+///
+/// # Errors
+///
+/// Those of [`tab_outline`], and [`SolidError::InvalidInput`] when S has no face below P
+/// (`slot_thickness` `None`) or a non-finite protrusion.
+pub fn tab_outline_for(
+    start: f64,
+    width: f64,
+    slot_thickness: Option<f64>,
+    protrusion: f64,
+    level: f64,
+) -> Result<std::result::Result<Region2, TabSkip>> {
+    let t_s = slot_thickness.ok_or_else(|| invalid("the slot plate has no face below P"))?;
+    if !protrusion.is_finite() {
+        return Err(invalid("the protrusion must be finite"));
+    }
+    tab_outline(start, width, t_s + protrusion, level)
+}
+
 /// Slot `k`'s laser outline in P's frame `(u, w)` (design 7.2): `u ∈ [u_k − c, u_k + W + c]`,
 /// `w ∈ [w_A − c, w_B + c]`, with `w_A < w_B` the levels of the tab plate's faces A and B.
 /// Counter-clockwise.

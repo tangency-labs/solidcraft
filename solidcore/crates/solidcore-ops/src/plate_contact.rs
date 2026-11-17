@@ -4,9 +4,9 @@
 //! decides, and ops does no float maths of its own.
 
 use solidcore::math::Vec2;
-use solidcore::plate_contact::{self as pc, PairJoint, PairSkip, Plane};
+use solidcore::plate_contact::{self as pc, Contact, PairJoint, PairSkip, Plane};
 use solidcore::prism::profile::Region2;
-use solidcore::tab_slot::{self as ts, Layout, SlotSkip, StretchSkip};
+use solidcore::tab_slot::{self as ts, Layout, SlotSkip, StretchSkip, TabSkip};
 
 use crate::body::Body;
 use crate::contact::{copy_of, poisoned};
@@ -33,6 +33,8 @@ pub struct TabSlotSpec {
     pub clearance: f64,
     /// The least land of S beside a slot.
     pub min_land: f64,
+    /// How far a tab reaches past S's far face (negative: short of it, design 6.1).
+    pub protrusion: f64,
 }
 
 /// One tab of a stretch: where it starts along the strip, its slot outline in P's frame, and
@@ -45,6 +47,8 @@ pub struct TabPlan {
     pub slot: Region2,
     /// The first failing check of design 7.4, if any.
     pub skip: Option<SlotSkip>,
+    /// The tab's outline in T's `(u, z)` frame (design 7.1), or why it is not made.
+    pub tab: core::result::Result<Region2, TabSkip>,
 }
 
 /// One stretch of the strip and its tabs, or why it gets none.
@@ -115,6 +119,21 @@ impl Body {
         })
     }
 
+    /// This body as the slot plate S: its thickness under `p`
+    /// ([`solidcore::plate_contact::slot_thickness`]), `None` when it has no face below `p`. It
+    /// does not change.
+    ///
+    /// # Errors
+    /// [`crate::Error::Refused`], in the kernel's words, for a `tol` not positive and finite or a
+    /// bad plane; those of the session.
+    pub fn slot_thickness(&self, p: Plane, tol: f64) -> Result<Option<f64>> {
+        poisoned(&[self])?;
+        run_on("plate_contact::slot_thickness", &[("s", self)], |k| {
+            let s = copy_of(k, self)?;
+            pc::slot_thickness(k, &s, p, tol)
+        })
+    }
+
     /// This body as the tab plate T against `slot` (S) on `p`: the strip Σ, T's region meeting
     /// S's face in `p` ([`solidcore::plate_contact::strip`], in [`Body::slot_face`]'s `(u, w)`
     /// frame), what the tabs are laid out along. `None` when T meets no area of S's face there.
@@ -161,6 +180,11 @@ impl Body {
         let (band, defects) = pc::strip_defects(&sigma, d, tol).map_err(status)?;
         let across = pc::strip_across(&sigma, d, tol).map_err(status)?;
         let face = slot.slot_face(p, tol)?;
+        let t_s = slot.slot_thickness(p, tol)?;
+        let level = match joint.contact {
+            Contact::Touch { delta } => delta,
+            _ => 0.0,
+        };
         let g_min = ts::laser_g_min(spec.clearance, spec.min_land).map_err(status)?;
         let mut out = Vec::new();
         for stretch in pc::stretches(band, &defects, tol).map_err(status)? {
@@ -185,10 +209,14 @@ impl Body {
                                 break;
                             }
                         }
+                        let tab =
+                            ts::tab_outline_for(start, spec.width, t_s, spec.protrusion, level)
+                                .map_err(status)?;
                         tabs.push(TabPlan {
                             start,
                             slot: outline,
                             skip,
+                            tab,
                         });
                     }
                     Ok(tabs)
@@ -204,7 +232,6 @@ impl Body {
 mod tests {
     use super::*;
     use crate::make_box;
-    use solidcore::plate_contact::Contact;
     use solidcore::tab_slot::{check_slot, slot_outline, SlotSkip};
     use solidcore::Vec3;
 
@@ -292,6 +319,7 @@ mod tests {
             end_distance: 5.0,
             clearance: 0.1,
             min_land: 0.5,
+            protrusion: 1.0,
         };
         let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
         let (d, plan) = wall
@@ -314,6 +342,27 @@ mod tests {
             "{xs:?} {d:?}"
         );
         assert!(tabs.iter().all(|t| t.skip.is_none()), "{tabs:?}");
+        // Tabs: h = t_S + protrusion = 7, from z -7 to the touch level 0, W wide along u.
+        assert_eq!(s.slot_thickness(p, TOL).unwrap(), Some(6.0));
+        for t in tabs {
+            let tab = t.tab.as_ref().expect("a tab");
+            let want = ts::tab_outline(t.start, 10.0, 7.0, 0.0).unwrap().unwrap();
+            assert_eq!(tab, &want, "{t:?}");
+        }
+        let short = TabSlotSpec {
+            protrusion: -7.0,
+            ..spec
+        };
+        let (_, plan) = wall
+            .tab_slot_plan(&s, p, short, TOL)
+            .unwrap()
+            .expect("joint");
+        let tabs = plan[0].tabs.as_ref().expect("tabs");
+        assert!(
+            tabs.iter()
+                .all(|t| matches!(t.tab, Err(TabSkip::TooShort { .. }))),
+            "{tabs:?}"
+        );
         let past = make_box([20.0, 94.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
         let (_, plan) = past
             .tab_slot_plan(&s, p, spec, TOL)
