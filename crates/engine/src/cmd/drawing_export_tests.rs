@@ -8,7 +8,7 @@ use super::*;
 use crate::drawing_scene::tests::{front_and_top, nest};
 use crate::schema::output_schema_for;
 use crate::schema::tests::conforms;
-use crate::tests::Folder;
+use crate::tests::{Folder, png_size};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap()
@@ -295,9 +295,7 @@ fn each_format_agrees_with_the_sheet_and_exports_the_same_once_reopened() {
     assert!(svg.contains(r#"width="420mm" height="297mm" viewBox="0 0 420 297""#), "{}", &svg[..svg.len().min(300)]);
     for data in &before[1..] {
         let png = data.as_str().and_then(base64_decode).unwrap();
-        // Width and height, big-endian, follow the signature and the header chunk's length and name.
-        let size = [16, 20].map(|at| u32::from_be_bytes(png[at..at + 4].try_into().unwrap()));
-        assert_eq!((&png[12..16], size), (&b"IHDR"[..], [2481, 1754]));
+        assert_eq!((&png[12..16], png_size(&png)), (&b"IHDR"[..], (2481, 1754)));
     }
     let drawing = ids::encode(s.drawing("test").unwrap().id);
     let folder = Folder::new("drawing-export-agree");

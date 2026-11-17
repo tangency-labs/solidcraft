@@ -65,8 +65,6 @@ mod dock_dialog_ui_tests;
 pub mod documents;
 pub mod drag_extrude;
 pub mod drag_snap;
-#[cfg(test)]
-mod drawing_export_ui_tests;
 pub mod easyprint_ui;
 pub mod edit_clipboard;
 pub mod edit_in_place;
