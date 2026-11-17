@@ -309,13 +309,18 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
     let on = |loops: &[Loop2], p: Vec2| loops.iter().flat_map(|l| &l.segs).any(|s| s.point_at(s.closest_param(p)).dist(p) <= tolerance);
     let nodes = |raw: &[Loop2]| raw.iter().flat_map(|l| l.segs.iter().map(|s| s.start())).collect::<Vec<_>>();
     let segments = |l: &[Loop2]| l.iter().map(|l| l.segs.len()).sum::<usize>();
+    // The cheap test first: caps of different loop counts are not one section.
+    if other_loops.len() != loops.len() {
+        return Ok(None);
+    }
     let work = (nodes(&raw_loops).len().saturating_add(nodes(&other_raw).len()).saturating_add(walls.len().saturating_mul(4)))
         .saturating_mul(segments(&loops).max(segments(&other_loops)));
     if work > 32_000_000 {
-        return Err(invalid("boundary certification exceeds its work budget"));
+        // Too costly to certify along this axis, so it is not taken as an extrusion: the caller
+        // goes on to the next axis and then to the faceted solid, rather than refusing the mesh.
+        return Ok(None);
     }
-    if other_loops.len() != loops.len()
-        || !nodes(&other_raw).iter().all(|p| on(&loops, *p))
+    if !nodes(&other_raw).iter().all(|p| on(&loops, *p))
         || !nodes(&raw_loops).iter().all(|p| on(&other_loops, *p))
     {
         return Ok(None);
@@ -826,6 +831,98 @@ mod tests {
         assert_eq!(prism.faces(0.01).unwrap().len(), 6);
         assert_eq!(prism.edges(0.01).unwrap().len(), 12);
         assert!((crate::measure(&prism).unwrap().volume - 500.).abs() < 1e-9);
+    }
+
+    /// A closed mesh that is no extrusion but has a flat cap at each end along z: a 60 x 60 x 3 mm
+    /// base (flat underneath) under a 2 mm plate whose outline has `n` points alternating 20 and
+    /// 19.5 mm from the centre, so the plate's top face has `n` edges. Facets are returned
+    /// unwelded (three corners each), turned outward.
+    fn sign_with_star_plate(n: usize) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+        const H: f64 = 30.;
+        let star = |i: usize| {
+            let a = std::f64::consts::TAU * (i as f64 + 0.37) / n as f64;
+            let b = std::f64::consts::TAU * ((i % n) as f64 + 0.37) / n as f64;
+            let r = if i % 2 == 0 { 20. } else { 19.5 };
+            ((r * b.cos(), r * b.sin()), a, b)
+        };
+        // Where the ray from the centre at angle `a` meets the base's square outline.
+        let on_square = |a: f64| {
+            let t = H / a.cos().abs().max(a.sin().abs());
+            (t * a.cos(), t * a.sin())
+        };
+        let side_of = |p: (f64, f64)| {
+            if (p.0 - H).abs() < 1e-9 {
+                0
+            } else if (p.1 - H).abs() < 1e-9 {
+                1
+            } else if (p.0 + H).abs() < 1e-9 {
+                2
+            } else {
+                3
+            }
+        };
+        let at = |p: (f64, f64), z: f64| Vec3::new(p.0, p.1, z);
+        let mut facets: Vec<[Vec3; 3]> = Vec::new();
+        let corners = [(H, H), (-H, H), (-H, -H), (H, -H)];
+        let corner_angles = corners.map(|(x, y)| y.atan2(x).rem_euclid(std::f64::consts::TAU));
+        let mut top_points: [Vec<(f64, f64)>; 4] = Default::default();
+        for i in 0..n {
+            let ((p0, a0, b0), (p1, a1, b1)) = (star(i), star(i + 1));
+            let (q0, q1) = (on_square(b0), on_square(b1));
+            // The plate: its top face and one wall per outline edge.
+            facets.push([Vec3::new(0., 0., 5.), at(p0, 5.), at(p1, 5.)]);
+            facets.push([at(p0, 3.), at(p1, 3.), at(p1, 5.)]);
+            facets.push([at(p0, 3.), at(p1, 5.), at(p0, 5.)]);
+            // The base's top face between the plate and the square, with any corner passed.
+            let mut ring = vec![at(p0, 3.), at(p1, 3.), at(q1, 3.)];
+            let mut passed: Vec<_> = (0..4).filter(|&k| a0 < corner_angles[k] && corner_angles[k] < a1).collect();
+            passed.sort_by(|&x, &y| corner_angles[y].total_cmp(&corner_angles[x]));
+            ring.extend(passed.into_iter().map(|k| at(corners[k], 3.)));
+            ring.push(at(q0, 3.));
+            for k in 1..ring.len() - 1 {
+                facets.push([ring[0], ring[k], ring[k + 1]]);
+            }
+            top_points[side_of(q0)].push(q0);
+        }
+        for k in 0..4 {
+            top_points[k].push(corners[k]);
+            top_points[(k + 1) % 4].push(corners[k]);
+        }
+        // The base's four walls (a fan from each one's bottom corners up to its top points).
+        for (k, points) in top_points.iter_mut().enumerate() {
+            let key = |p: &(f64, f64)| if k % 2 == 0 { p.1 } else { p.0 };
+            points.sort_by(|x, y| key(x).total_cmp(&key(y)));
+            points.dedup();
+            let (Some(&first), Some(&last)) = (points.first(), points.last()) else { continue };
+            let (lo, hi) = (at(first, 0.), at(last, 0.));
+            for w in points.windows(2) {
+                facets.push([lo, at(w[0], 3.), at(w[1], 3.)]);
+            }
+            facets.push([lo, at(last, 3.), hi]);
+        }
+        let square = |x: f64, y: f64| Vec3::new(x, y, 0.);
+        facets.push([square(H, H), square(-H, H), square(-H, -H)]);
+        facets.push([square(H, H), square(-H, -H), square(H, -H)]);
+        let positions: Vec<Vec3> = facets.iter().flatten().copied().collect();
+        let triangles: Vec<[u32; 3]> = (0..facets.len() as u32).map(|f| [3 * f, 3 * f + 1, 3 * f + 2]).collect();
+        let triangles = outward(&positions, &triangles, Vec3::new(0., 0., 2.));
+        (positions, triangles)
+    }
+
+    /// Both ends along z are flat caps, so `extrusion` reaches the comparison of the caps'
+    /// boundaries; over its work budget, that axis counts as no extrusion and the mesh converts as
+    /// the faceted solid it is, rather than the whole conversion failing (#18340).
+    #[test]
+    fn a_mesh_whose_caps_are_too_costly_to_compare_converts_as_a_faceted_solid() {
+        let (positions, triangles) = sign_with_star_plate(2000);
+        let welded = weld(crate::mesh_body(&positions, &triangles).unwrap().mesh.as_ref().unwrap(), 0.05).unwrap();
+        assert!(extrusion(welded.mesh.as_ref().unwrap(), Vec3::Z, 0.05).unwrap().is_none());
+        let converted = convert_prismatic_mesh(&crate::mesh_body(&positions, &triangles).unwrap(), 0.05).unwrap();
+        assert!(!converted.is_mesh());
+        assert!(converted.validity().is_empty());
+        // The base 60 x 60 x 3, and the plate: 2000 triangles of 20 x 19.5 mm (about) x 2 mm.
+        let volume = crate::measure(&converted).unwrap().volume;
+        assert!(volume > 10_000. && volume < 16_000., "volume {volume}");
     }
 
     /// The triangles `triangles` of `positions`, each turned so its normal points away from
