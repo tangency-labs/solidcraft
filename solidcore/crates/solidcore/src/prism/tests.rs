@@ -959,6 +959,30 @@ fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
     assert!(!arc_before_line(&piece(w, 1.0), 5e-5));
     assert!(!arc_before_line(&piece(1.0, 1.0), 1e-5));
     assert!(!arc_before_line(&piece(0.5, 0.5), 1e-5));
+    // a piece of a circle of radius 1e8 (half-angle 6.3e-7, middle weight 1 - 2e-13, bending
+    // 2e-5 off its chord) raised to degree 32: neighbouring weights differ by at most 1.3e-14,
+    // under their rounding, the span's by 1e-13; it is rational
+    let (radius, h) = (1e8, 4e-13_f64.sqrt());
+    let (w, y) = (h.cos(), radius * h.cos() - radius);
+    let x = radius * h.sin();
+    let mut span = vec![
+        [-x, y, 1.0],
+        [0.0, (radius / w - radius) * w, w],
+        [x, y, 1.0],
+    ];
+    for n in 2..32 {
+        let mut up = vec![span[0]];
+        for i in 1..=n {
+            let a = i as f64 / (n + 1) as f64;
+            up.push(std::array::from_fn(|k| {
+                a * span[i - 1][k] + (1.0 - a) * span[i][k]
+            }));
+        }
+        up.push(span[n]);
+        span = up;
+    }
+    assert_eq!(span.len(), 33);
+    assert!(arc_before_line(&[span], 1e-5));
 }
 
 /// Samples do not certify: a C0 quadratic spline on the x axis at every knot k/16 and bowing 1

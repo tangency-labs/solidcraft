@@ -598,10 +598,12 @@ fn span_by_span(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec
 #[must_use]
 pub fn arc_before_line(spans: &[Vec<H2>], zone: f64) -> bool {
     let rational = spans.iter().any(|s| {
-        let max_w = s.iter().map(|p| p[2].abs()).fold(0.0, f64::max);
-        s.iter()
-            .zip(s.iter().skip(1))
-            .any(|(p, q)| (p[2] - q[2]).abs() > max_w * f64::EPSILON * 64.0)
+        let (lo, hi) = s
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                (lo.min(p[2]), hi.max(p[2]))
+            });
+        hi - lo > lo.abs().max(hi.abs()) * f64::EPSILON * 64.0
     });
     let pts: Vec<Point2> = spans.iter().flatten().map(|p| point_of(*p)).collect();
     rational && off_chord(&pts) > zone
