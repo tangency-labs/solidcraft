@@ -467,14 +467,15 @@ impl PendingChecks {
     ///
     /// Returns whether `saved` stands: not when a check healed a part
     /// ([`kernel::ImportChecks::heals`]), since its states hold the import as it was first shown,
-    /// and the model evaluates it again as its healed bodies (with other fingerprints).
+    /// and the model evaluates it again as its healed bodies (with other fingerprints). `saved`
+    /// is then left as it was.
     #[must_use]
     pub fn settle(self, saved: &mut SavedModel) -> bool {
+        if self.0.iter().any(|(_, report)| report.settled().is_some() && report.checks.heals().is_some()) {
+            return false;
+        }
         for (k, report) in self.0 {
             let Some(settled) = report.settled() else { continue };
-            if report.checks.heals().is_some() {
-                return false;
-            }
             let Some(f) = saved.records.get_mut("features").and_then(|f| f.get_mut(k)).and_then(Json::as_object_mut) else { continue };
             match crate::eval::import_warning(&settled.issues.iter().map(|i| i.detail.as_str()).collect::<Vec<_>>()) {
                 Some(w) => f.insert("warning".into(), json!(w)),
