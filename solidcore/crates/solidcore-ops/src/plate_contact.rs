@@ -253,13 +253,28 @@ impl Body {
         spec: TabSlotSpec,
         tol: f64,
     ) -> Result<TabSlotPlan> {
-        let joint = match self.plate_pair(slot, p, tol)? {
-            Ok(joint) => joint,
-            Err(skip) => return Ok(Err(skip)),
-        };
+        match self.plate_pair(slot, p, tol)? {
+            Ok(joint) => self.tab_slot_plan_for(slot, p, &joint, spec, tol).map(Ok),
+            Err(skip) => Ok(Err(skip)),
+        }
+    }
+
+    /// [`Body::tab_slot_plan`] for a `joint` already found ([`Body::plate_pair`] of this body
+    /// against `slot` on `p`): the run and the stretches with their tabs.
+    ///
+    /// # Errors
+    /// Those of [`Body::tab_slot_plan`].
+    pub fn tab_slot_plan_for(
+        &self,
+        slot: &Body,
+        p: Plane,
+        joint: &PairJoint,
+        spec: TabSlotSpec,
+        tol: f64,
+    ) -> Result<(Vec2, Vec<StretchPlan>)> {
         let d = pc::strip_direction(p, joint.faces.a).map_err(status)?;
         let Some(sigma) = self.strip(slot, p, tol)? else {
-            return Ok(Ok((d, Vec::new())));
+            return Ok((d, Vec::new()));
         };
         let (band, defects) = pc::strip_defects(&sigma, d, tol).map_err(status)?;
         let across = pc::strip_across(&sigma, d, tol).map_err(status)?;
@@ -309,7 +324,7 @@ impl Body {
             };
             out.push(StretchPlan { stretch, tabs });
         }
-        Ok(Ok((d, out)))
+        Ok((d, out))
     }
 
     /// [`Body::tab_slot_plan`] applied (design 7): every tab whose slot passes 7.4 and whose
@@ -423,20 +438,15 @@ pub fn tab_slot_joints(
         let (Some(tab), Some(slot)) = (plates.get(t), plates.get(s)) else {
             return Err(Error::Argument);
         };
-        let plan = match tab.tab_slot_plan(slot, p, spec, tol)? {
-            Ok((_, plan)) => plan,
+        let joint = match tab.plate_pair(slot, p, tol)? {
+            Ok(joint) => joint,
             Err(skip) => {
                 out.push(Some(JointSkip::Pair(skip)));
                 continue;
             }
         };
-        let m = match tab.plate_pair(slot, p, tol)? {
-            Ok(joint) => joint.faces.b.normal,
-            Err(skip) => {
-                out.push(Some(JointSkip::Pair(skip)));
-                continue;
-            }
-        };
+        let m = joint.faces.b.normal;
+        let (_, plan) = tab.tab_slot_plan_for(slot, p, &joint, spec, tol)?;
         let mut other_direction = None;
         for (plate, dir) in [(s, p.normal), (t, m)] {
             if let Some(Some((had, by))) = dirs.get(plate) {
