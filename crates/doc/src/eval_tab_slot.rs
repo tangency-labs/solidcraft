@@ -686,7 +686,7 @@ mod tests {
         let frame = solidcore_record::Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y };
         st.sheets.push(base_flange("Bottom", "Steel (mm)", &rv, frame, region));
         let mut warning = None;
-        let report = apply(&BTreeMap::new(), &kind(serde_json::json!({})), &mut st, &mut warning).unwrap();
+        let report = apply(&BTreeMap::new(), &kind(serde_json::json!({"clearance": "0.1"})), &mut st, &mut warning).unwrap();
         assert_eq!(report.joints.len(), 1, "{report:?}");
         let joint = &report.joints[0];
         assert_eq!((joint.tabs, joint.reason.as_deref()), (0, Some("sheet_metal")), "{report:?}");
