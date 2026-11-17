@@ -477,8 +477,9 @@ impl SurfOfExtrusion {
     ///   kept. A range solution (generator in the plane over a range) is a coincident
     ///   patch: its boundary curves typed `RegionBoundary`, cut to the plane domain,
     ///   after the directrices of the point solutions outside the ranges (a point
-    ///   solution whose directrix meets the patch declines it). When the patch fails its in-plane certificate,
-    ///   the general intersection is needed (as upstream for every range).
+    ///   solution whose directrix meets the patch declines it; one inside a range
+    ///   the patch extends over is absorbed). When the patch fails a certificate, the
+    ///   general intersection is needed (as upstream for every range).
     /// * Otherwise the general intersection is needed.
     ///
     /// # Errors
@@ -808,7 +809,7 @@ impl SurfOfExtrusion {
                     .iter()
                     .any(|&(a, b)| a.min(b) - EFF_ZERO_PARAM <= t && t <= a.max(b) + EFF_ZERO_PARAM)
             };
-            let sols: Vec<_> = sols
+            let mut sols: Vec<_> = sols
                 .iter()
                 .filter(|s| {
                     s.solution_type != SolutionType::RangeOfValues
@@ -826,6 +827,7 @@ impl SurfOfExtrusion {
                     gen,
                     extrusion_vec: self.extrusion_vec,
                     gen_ivl: gen_curve_nurb_ivl,
+                    gen_closed: is_closed,
                     v_ivl: if self.swap_uv {
                         uv_domain.u_interval()
                     } else {
@@ -840,7 +842,15 @@ impl SurfOfExtrusion {
                     out.needs_more_intersections = true;
                     return Ok(out);
                 };
-                patch = p;
+                // (the point solutions inside the ranges the patch extends over are
+                // part of it)
+                sols.retain(|s| {
+                    let t = first_param(&s.start.parameters);
+                    !p.ranges
+                        .iter()
+                        .any(|&(a, b)| a - EFF_ZERO_PARAM <= t && t <= b + EFF_ZERO_PARAM)
+                });
+                patch = p.curves;
             }
             // arrive here for the PointSolutions
 
@@ -2245,6 +2255,437 @@ mod tests {
             .unwrap();
         assert!(r.needs_more_intersections);
         assert!(r.curves_3d.is_empty());
+    }
+
+    /// The plane of the review's rotated probes: origin `(0.3, -1.7, 2.2)`, axes in
+    /// general position, UV scale `(2, 0.5)`, over the UV box `dom`.
+    fn rotated_plane(dom: Extent2d) -> Plane {
+        let x = Vec3::new(1.0, 2.0, 3.0);
+        let x = x / x.length();
+        let t = Vec3::new(-2.0, 1.0, 0.5);
+        let y = t - x * x.dot(t);
+        let y = y / y.length();
+        let mut plane = Plane::new(
+            Point3::new(0.3, -1.7, 2.2),
+            x,
+            y,
+            crate::geom::vector2d::Vec2::new(2.0, 0.5),
+            &dom,
+        );
+        plane.make_nurb().unwrap();
+        plane
+    }
+
+    /// A polyline generator through the plane's UV points `uv` swept along the UV
+    /// direction `euv` (its 3D vector `E`), over the extrusion interval `v`.
+    fn uv_polyline(
+        k: &Kernel,
+        plane: &Plane,
+        uv: &[(f64, f64)],
+        euv: (f64, f64),
+        v: (f64, f64),
+    ) -> ExtrusionIntersection {
+        let o = plane.evaluate_point_fast(Point2::new(0.0, 0.0));
+        let e = plane.evaluate_point_fast(Point2::new(euv.0, euv.1)) - o;
+        let pts: Vec<(f64, f64, f64)> = uv
+            .iter()
+            .map(|&(u, w)| {
+                let p = plane.evaluate_point_fast(Point2::new(u, w));
+                (p.x, p.y, p.z)
+            })
+            .collect();
+        let s = swept(k, &pts, None, e);
+        let dom = Extent2d::from_bounds(0.0, v.0, (uv.len() - 1) as f64, v.1);
+        s.intersect_with_plane(k, &dom, plane, &plane.natural_uv_domain(), None)
+            .unwrap()
+    }
+
+    /// The UV polygon `poly` cut to the half-plane `f >= 0` (Sutherland-Hodgman).
+    fn cut(poly: &[Point2], f: &dyn Fn(Point2) -> f64) -> Vec<Point2> {
+        let mut out = Vec::new();
+        for (&p, &q) in poly.iter().zip(poly.iter().cycle().skip(1)) {
+            let (fp, fq) = (f(p), f(q));
+            if fp >= 0.0 {
+                out.push(p);
+            }
+            if (fp >= 0.0) != (fq >= 0.0) {
+                let t = fp / (fp - fq);
+                out.push(Point2::new(p.x + t * (q.x - p.x), p.y + t * (q.y - p.y)));
+            }
+        }
+        out
+    }
+
+    /// The UV polygon `poly` cut to the box `dom`.
+    fn cut_to_box(poly: &[Point2], dom: &Extent2d) -> Vec<Point2> {
+        let (u0, u1) = (dom.u_interval().min(), dom.u_interval().max());
+        let (w0, w1) = (dom.v_interval().min(), dom.v_interval().max());
+        let p = cut(poly, &|p| p.x - u0);
+        let p = cut(&p, &|p| u1 - p.x);
+        let p = cut(&p, &|p| p.y - w0);
+        cut(&p, &|p| w1 - p.y)
+    }
+
+    /// The signed area of a UV polygon (shoelace).
+    fn uv_area(poly: &[Point2]) -> f64 {
+        poly.iter()
+            .zip(poly.iter().cycle().skip(1))
+            .map(|(p, q)| p.x * q.y - q.x * p.y)
+            .sum::<f64>()
+            / 2.0
+    }
+
+    /// Asserts the answer is the boundary of the UV region of area `want` in `plane`
+    /// (UV scale at least `1/2`): every curve `RegionBoundary` and of degree 1 (its
+    /// control polygon is the curve), each end meeting exactly one other end within
+    /// `gap = 16 eps m` in space for the largest coordinate `m` (closed, no curve
+    /// repeated or overlapping another: the corners close to rounding), the loops
+    /// walked end to end without revisiting, and their total area `want` within
+    /// `1e-9` relative plus `2 gap` times the perimeter. A corner is one point
+    /// computed twice (a copy's end and a directrix's end: a plane evaluation and a
+    /// translation, a few roundings of `m` each), and every boundary point is off its
+    /// exact place by as much (the generator's points are plane evaluations), which
+    /// moves the area by at most the perimeter times that in UV (`2 gap`).
+    fn assert_region(r: &ExtrusionIntersection, plane: &Plane, want: f64) {
+        assert!(!r.needs_more_intersections);
+        assert!(!r.curves_3d.is_empty());
+        assert!(
+            r.curve_types
+                .iter()
+                .all(|t| *t == TsectCurveType::RegionBoundary),
+            "{:?}",
+            r.curve_types
+        );
+        let nets: Vec<Vec<Point3>> = r
+            .curves_3d
+            .iter()
+            .map(|c| {
+                let canon = gen_base(c).unwrap().canonical().unwrap();
+                assert_eq!(canon.degree, 1);
+                canon.control_points.clone()
+            })
+            .collect();
+        let ends: Vec<(usize, Point3)> = nets
+            .iter()
+            .enumerate()
+            .flat_map(|(i, n)| [(i, n[0]), (i, *n.last().unwrap())])
+            .collect();
+        let m = nets
+            .iter()
+            .flatten()
+            .map(|p| p.max_dimension())
+            .fold(0.0, f64::max);
+        let gap = 16.0 * f64::EPSILON * m;
+        let mut mate = vec![0; ends.len()];
+        for (a, &(_, p)) in ends.iter().enumerate() {
+            let near: Vec<usize> = (0..ends.len())
+                .filter(|&b| b != a && ends[b].1.distance(p) <= gap)
+                .collect();
+            assert_eq!(near.len(), 1, "end {p:?} meets {} ends", near.len());
+            mate[a] = near[0];
+        }
+        let mut used = vec![false; nets.len()];
+        let (mut total, mut perimeter) = (0.0, 0.0);
+        for start in 0..nets.len() {
+            if used[start] {
+                continue;
+            }
+            let mut loop_uv: Vec<Point2> = Vec::new();
+            let (mut cur, mut reversed) = (start, false);
+            loop {
+                assert!(!used[cur], "a loop revisits a curve");
+                used[cur] = true;
+                let mut pts: Vec<Point3> = nets[cur].clone();
+                if reversed {
+                    pts.reverse();
+                }
+                loop_uv.extend(
+                    pts.iter()
+                        .skip(1)
+                        .map(|&p| plane.project_point_to_uv_domain(p)),
+                );
+                let exit = 2 * cur + usize::from(!reversed);
+                let next = mate[exit];
+                let (nc, at_end) = (next / 2, next % 2 == 1);
+                if nc == start {
+                    break;
+                }
+                cur = nc;
+                reversed = at_end;
+            }
+            total += uv_area(&loop_uv).abs();
+            perimeter += loop_uv
+                .iter()
+                .zip(loop_uv.iter().cycle().skip(1))
+                .map(|(p, q)| (*q - *p).length())
+                .sum::<f64>();
+        }
+        assert!(
+            (total - want).abs() <= 1e-9 * want + 2.0 * gap * perimeter,
+            "area {total:e}, want {want:e}"
+        );
+    }
+
+    /// Review r3 B4: a generator in the plane over `0 <= x <= 1`, leaving it by `d`
+    /// over the next span (shape 0: then parallel to it; 1: back to it; 2: across it
+    /// and sideways), swept along `Y`. At `d = 1e-12` the whole generator is within
+    /// the in-plane bound: the solver's ranges extend over the spans between them and
+    /// the region is the whole sweep, with its point solutions absorbed. Beyond, the
+    /// generator stays within the in-plane bound past the range end for longer than
+    /// the tolerance (a slow departure): the general intersection, as before, never a
+    /// region mixed with the departure's tangent directrices.
+    #[test]
+    fn slow_departure_extends_the_range_or_declines() {
+        let k = k();
+        let plane = xy_plane(Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0));
+        for d in [1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 5e-7, 2e-6] {
+            for shape in 0..3 {
+                let pts = match shape {
+                    0 => [
+                        (0.0, 0.0, 0.0),
+                        (1.0, 0.0, 0.0),
+                        (2.0, 0.0, d),
+                        (3.0, 0.0, d),
+                    ],
+                    1 => [
+                        (0.0, 0.0, 0.0),
+                        (1.0, 0.0, 0.0),
+                        (2.0, 0.0, d),
+                        (3.0, 0.0, 0.0),
+                    ],
+                    _ => [
+                        (0.0, 0.0, 0.0),
+                        (1.0, 0.0, 0.0),
+                        (2.0, 0.5, d),
+                        (3.0, 0.0, -d),
+                    ],
+                };
+                let s = swept(&k, &pts, None, Vec3::Y);
+                for tol in [None, Some(1e-9)] {
+                    let dom = Extent2d::from_bounds(0.0, -1.0, 3.0, 1.0);
+                    let r = s
+                        .intersect_with_plane(&k, &dom, &plane, &plane.natural_uv_domain(), tol)
+                        .unwrap();
+                    if d > 1e-12 {
+                        assert!(r.needs_more_intersections, "d {d:e} shape {shape}");
+                        assert!(r.curves_3d.is_empty());
+                        continue;
+                    }
+                    // the sweep (length 2 along Y) of a generator 3 long in X
+                    assert_region(&r, &plane, 6.0);
+                    if shape < 2 {
+                        assert_segments(
+                            &k,
+                            &r,
+                            &[
+                                [(0.0, -1.0), (3.0, -1.0)],
+                                [(0.0, 1.0), (3.0, 1.0)],
+                                [(0.0, -1.0), (0.0, 1.0)],
+                                [(3.0, -1.0), (3.0, 1.0)],
+                            ],
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Review r3 B4, the rotated fuzz at scale `1e6` (seed 7, cases 9, 263 and 295):
+    /// a monotone polyline in a plane in general position, a sweep oblique to the UV
+    /// axes. The region was cut short at a range end with tangent directrices after
+    /// it; now it is the whole clipped sweep, closed, with the exact area.
+    #[test]
+    fn far_rotated_regions_are_whole() {
+        type Case = (&'static [(f64, f64)], (f64, f64), (f64, f64), [f64; 4]);
+        let k = k();
+        let cases: [Case; 3] = [
+            (
+                &[
+                    (562688.465356203, 142952.31039695354),
+                    (-667267.8924107907, -412543.76405498874),
+                    (-162335.81507902325, -739602.3145067472),
+                    (286749.2593539145, -1034862.3717900242),
+                ],
+                (-0.9996072490739965, -0.02802405393081653),
+                (481030.0799755236, 2118761.057265442),
+                [
+                    -1787116.426513385,
+                    -1155947.2023147312,
+                    -268241.6221215105,
+                    1472542.7257044706,
+                ],
+            ),
+            (
+                &[
+                    (198301.87075739048, -979548.7612060617),
+                    (16164.094044531841, 360873.9146343507),
+                    (258988.53315406173, 180662.42693427886),
+                    (1187720.5897254841, -513446.0198680909),
+                    (1404052.4932117404, -468659.68286636716),
+                ],
+                (0.32641331590522, -0.9452271405327711),
+                (-743923.2371680021, 414544.6994434725),
+                [
+                    -1730936.9026290602,
+                    57869.12514012022,
+                    439369.71942081506,
+                    2215342.4406051408,
+                ],
+            ),
+            (
+                &[
+                    (-196740.74656389002, 626253.4783405891),
+                    (-541820.6501602847, 79968.19499988858),
+                    (-659768.832935693, -107521.40912442948),
+                    (-934369.5466458122, -261140.02759837),
+                    (-787099.2292372237, -481367.9300678842),
+                ],
+                (-0.7702605656069884, 0.6377293007780044),
+                (481397.686141372, 2147538.1813933733),
+                [
+                    -1113501.2017365587,
+                    -1205839.219819479,
+                    -572033.279387745,
+                    1748459.2408306338,
+                ],
+            ),
+        ];
+        for (uv, euv, v, [u0, w0, u1, w1]) in cases {
+            let dom = Extent2d::from_bounds(u0, w0, u1, w1);
+            let plane = rotated_plane(dom);
+            let r = uv_polyline(&k, &plane, uv, euv, v);
+            let mut sweep: Vec<Point2> = uv
+                .iter()
+                .map(|&(a, b)| Point2::new(a + euv.0 * v.0, b + euv.1 * v.0))
+                .collect();
+            sweep.extend(
+                uv.iter()
+                    .rev()
+                    .map(|&(a, b)| Point2::new(a + euv.0 * v.1, b + euv.1 * v.1)),
+            );
+            let want = uv_area(&cut_to_box(&sweep, &dom)).abs();
+            assert_region(&r, &plane, want);
+        }
+    }
+
+    /// Review r3 B5: the fuzz's case 117 (axis-aligned plane) and rotated case 280
+    /// (seed 7) and slab case 19 (seed 11, an infinite sweep) at scales `1e-3`, `1e-5`
+    /// and `1e-6`. Every bound is relative to the magnitudes it compares, and every
+    /// generator piece is split exactly (no zone tolerance dropping a short end span
+    /// and cutting a corner of the copies): each region is closed, without overlaps,
+    /// with the exact area. (The copies cut a corner at `1e-3`; at `1e-5` the sweep's
+    /// slack, relative to the infinite sweep, dropped whole runs.)
+    #[test]
+    fn tiny_regions_are_exact() {
+        let k = k();
+        let case_117: &[(f64, f64)] = &[
+            (1.0327866959632181, 0.26703211727930065),
+            (-0.05926350971526267, -0.3611441030101076),
+            (0.17752993222538088, -0.7155730224847894),
+            (-0.947039949845586, -1.1766257639222346),
+            (0.16758925544507486, -1.7908016065640358),
+        ];
+        let case_280: &[(f64, f64)] = &[
+            (-0.3046276560209673, 0.7163869347209829),
+            (-0.04831049147074139, -0.2309458413693064),
+            (0.27154988620888476, 0.24380258684344763),
+        ];
+        let slab_19: &[(f64, f64)] = &[
+            (0.3195513055574201, -0.9605401256962343),
+            (0.9090117337835634, -0.1849036346823752),
+            (0.45791172581877326, -0.2617570663046048),
+            (0.34217941953255465, 0.9142898701673123),
+            (-0.7398659000072707, 0.4908003779576198),
+        ];
+        for scale in [1e-3, 1e-5, 1e-6] {
+            let sc = |p: &[(f64, f64)]| -> Vec<(f64, f64)> {
+                p.iter().map(|&(a, b)| (a * scale, b * scale)).collect()
+            };
+            // (generator, sweep, V, box, rotated)
+            let monotone = [
+                (
+                    sc(case_117),
+                    (-0.9891847911799043, 0.14667463617943338),
+                    (-0.8991957428959085 * scale, -0.5440694482425046 * scale),
+                    [
+                        -0.6721708812185043,
+                        -1.3713910036936614,
+                        1.3113552358355924,
+                        -0.48806237109542194,
+                    ],
+                    false,
+                ),
+                (
+                    sc(case_280),
+                    (-1.8369701987210297e-16, -1.0),
+                    (-0.7619615177941612 * scale, 0.4513821250947778 * scale),
+                    [
+                        -0.051955980183495454,
+                        -1.06544553462776,
+                        2.764494625867272,
+                        1.5073483367603193,
+                    ],
+                    true,
+                ),
+            ];
+            for (uv, euv, v, b, rot) in monotone {
+                let dom =
+                    Extent2d::from_bounds(b[0] * scale, b[1] * scale, b[2] * scale, b[3] * scale);
+                let plane = if rot {
+                    rotated_plane(dom)
+                } else {
+                    xy_plane(dom)
+                };
+                let r = uv_polyline(&k, &plane, &uv, euv, v);
+                let mut sweep: Vec<Point2> = uv
+                    .iter()
+                    .map(|&(a, b)| Point2::new(a + euv.0 * v.0, b + euv.1 * v.0))
+                    .collect();
+                sweep.extend(
+                    uv.iter()
+                        .rev()
+                        .map(|&(a, b)| Point2::new(a + euv.0 * v.1, b + euv.1 * v.1)),
+                );
+                let want = uv_area(&cut_to_box(&sweep, &dom)).abs();
+                assert_region(&r, &plane, want);
+            }
+            // the slab case: an infinite sweep (ten times the UV direction) over a
+            // monotone polyline, so the region is the box cut to the polyline's mu range
+            let euv = (-0.6432384559040851, -0.765665912030912);
+            let uv = sc(slab_19);
+            let dom = Extent2d::from_bounds(
+                -0.057647689489415566 * scale,
+                -1.6318337630541604 * scale,
+                1.2209494150168338 * scale,
+                -0.925508607302209 * scale,
+            );
+            let plane = xy_plane(dom);
+            let r = uv_polyline(
+                &k,
+                &plane,
+                &uv,
+                (euv.0 * 10.0, euv.1 * 10.0),
+                (-1234567.0, 1234567.0),
+            );
+            let mu = |p: Point2| -euv.1 * p.x + euv.0 * p.y;
+            let mus: Vec<f64> = uv.iter().map(|&(a, b)| mu(Point2::new(a, b))).collect();
+            let (lo, hi) = mus
+                .iter()
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), &m| {
+                    (l.min(m), h.max(m))
+                });
+            let (u0, u1) = (dom.u_interval().min(), dom.u_interval().max());
+            let (w0, w1) = (dom.v_interval().min(), dom.v_interval().max());
+            let corners = [
+                Point2::new(u0, w0),
+                Point2::new(u1, w0),
+                Point2::new(u1, w1),
+                Point2::new(u0, w1),
+            ];
+            let slab = cut(&cut(&corners, &|p| mu(p) - lo), &|p| hi - mu(p));
+            let want = uv_area(&slab).abs();
+            assert_region(&r, &plane, want);
+        }
     }
 
     #[test]

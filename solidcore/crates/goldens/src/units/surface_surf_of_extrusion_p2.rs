@@ -2116,6 +2116,15 @@ mod tests {
     /// The Euclidean control points of `c` over `ivl` (positive weights asserted:
     /// the curve lies in their convex hull).
     fn net_3d(k: &Kernel, c: &solidcore::curve::curve::Curve, ivl: Extent1d) -> Vec<Vec3> {
+        net_canon(k, c, ivl).control_points
+    }
+
+    /// The canonical form of `c` trimmed to `ivl` (positive weights asserted).
+    fn net_canon(
+        k: &Kernel,
+        c: &solidcore::curve::curve::Curve,
+        ivl: Extent1d,
+    ) -> solidcore::nurbs::b_spline_curve::p2::CurveCanonical {
         use solidcore::curve::curve::CurveKind;
         use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
         let mut piece = c.clone();
@@ -2131,7 +2140,7 @@ mod tests {
         };
         let canon = base.canonical().unwrap();
         assert!(canon.weights.iter().all(|w| *w > 0.0));
-        canon.control_points
+        canon
     }
 
     /// The UV images of [`net_3d`].
@@ -2220,7 +2229,10 @@ mod tests {
                 let ev = |t: f64| pl.project_point_to_uv_domain(c.evaluate(k, t, 0, true, true).unwrap()[0]);
                 let (a, b) = (ev(ivl.min()), ev(ivl.max()));
                 // straight: every control point on the chord (the convex hull), to the
-                // rounding of points at their coordinates' scale
+                // rounding of points at their coordinates' scale (claim precision: the
+                // answer's segments are degree 1 with two control points, the chord's
+                // ends, so `off` is the rounding of a 2x2 cross product of projected
+                // points, a few gamma(1) of the coordinates; measured 0)
                 let chord = b - a;
                 let len = chord.length();
                 assert!(len > 0.0, "{name}: a segment of no length");
@@ -2285,12 +2297,16 @@ mod tests {
                 (d.u_interval(), d.v_interval())
             };
             let (vmin, vmax) = (v_ivl.min(), v_ivl.max());
-            // the generator lies in the plane over its whole interval
+            // the generator lies in the plane over its whole interval (the solver's
+            // profile certificate, `plane_patch::certify_in_plane`, admits a control
+            // point within SM_EFF_ZERO = 1e-12 of the net's coordinates; the pin
+            // restates it at the scale of the point and the origin; measured 2.6e-16)
             for p in net_3d(&k, gen, s_ivl) {
                 let bound = 1e-12 * (1.0 + p.max_dimension() + o.max_dimension());
                 assert!(n.dot(p - o).abs() <= bound, "{name}: generator off the plane");
             }
-            // and so does the sweep
+            // and so does the sweep (the sweep certificate: |n . E| within
+            // SM_EFF_ZERO |E|; measured 4e-16)
             assert!(n.dot(e).abs() <= 1e-12 * e.length(), "{name}: sweep off the plane");
             let f = TestFrame::new(&pl, e);
             let net = net_uv(&k, gen, s_ivl, &pl);
@@ -2430,20 +2446,72 @@ mod tests {
                 .collect();
             assert_uv_segments(&k, name, &r, &pl, &expected);
             // the matching above is relative to the points' scale (about 1e6 on the
-            // unbounded planes); pin the fold lines' mu to their own scale, and the
-            // side pieces' fixed coordinate, each to the rounding of evaluating and
-            // projecting points at the coordinates' scale
+            // unbounded planes); pin the fold lines' mu, and the side pieces' fixed
+            // coordinate, to the solver's error terms and the rounding of evaluating
+            // and projecting points at the coordinates' scale (u = eps / 2,
+            // gamma(n) = n u / (1 - n u)):
+            // - mu = dmu . (X - O) with dmu = (eu dw - ew du) (the solver's frame);
+            // - a control value of a range piece (`plane_patch::net_points` and
+            //   `Affine::at`): the piece's net is within the convex hull of the
+            //   generator's (homogeneous points and weights are convex combinations),
+            //   so its error is at most
+            //   E = |dmu|_1 (gamma(6p + 4) (max w |P|_1 + |P|_1 max w) / min w
+            //       + (gamma(8) + gamma(1)) (|P|_1 + |O|_1));
+            // - the solver's fold value is an evaluation within its bracket width
+            //   (`plane_patch::extreme_width`: 1e-12 max |mu| + 2 E) above the true
+            //   extreme, the test's alpha within half its bracket (lower hull value,
+            //   upper evaluation);
+            // - an evaluation of the generator (the solver's and the bracket's, de
+            //   Boor with at most 3p operations per coordinate), its projection to UV
+            //   (a subtraction, a dot product of three and a division) and its mu (two
+            //   products and a sum) is within |dmu|_1 gamma(3p + 16) (|P|_1 + |O|_1);
+            // - a fold line's end X is its stored control point (a clamped end), placed
+            //   at the solver's mu on a side (the free coordinate: three operations),
+            //   mapped to space (three), projected back (four) and its mu taken (two):
+            //   within |dmu|_1 gamma(12) (|X|_1 + |O|_1)
+            let gamma = |n: f64| {
+                let u = f64::EPSILON / 2.0;
+                n * u / (1.0 - n * u)
+            };
+            let canon = net_canon(&k, gen, s_ivl);
+            let deg = canon.degree as f64;
+            let w_of = |i: usize| canon.weights.get(i).copied().unwrap_or(1.0);
+            let (w_min, w_max, hom_max, p_max) = canon.control_points.iter().enumerate().fold(
+                (f64::MAX, 0.0_f64, 0.0_f64, 0.0_f64),
+                |(lo, hi, h, m), (i, p)| {
+                    let n1 = p.x.abs() + p.y.abs() + p.z.abs();
+                    (lo.min(w_of(i)), hi.max(w_of(i)), h.max(w_of(i) * n1), m.max(n1))
+                },
+            );
+            let pos = *pl.position();
+            let sc = pl.uv_scale();
+            let dmu = pos.y_axis() * (f.eu / sc.y) - pos.x_axis() * (f.ew / sc.x);
+            let dmu1 = dmu.x.abs() + dmu.y.abs() + dmu.z.abs();
+            let o1 = o.x.abs() + o.y.abs() + o.z.abs();
+            let value_err = dmu1
+                * (gamma(6.0 * deg + 4.0) * (hom_max + p_max * w_max) / w_min
+                    + (gamma(8.0) + gamma(1.0)) * (p_max + o1));
+            let mu_scale = net.iter().map(|p| f.mu(*p).abs()).fold(0.0_f64, f64::max) + value_err;
+            let solver_width = 1e-12 * mu_scale + 2.0 * value_err;
+            let half_brackets = [(ahi - alo) / 2.0, (bnhi - bnlo) / 2.0];
             let mut on_bounds = [0, 0];
             for c in &r.curves_3d {
                 let ivl = c.natural_interval();
-                let ev = |t: f64| pl.project_point_to_uv_domain(c.evaluate(&k, t, 0, true, true).unwrap()[0]);
-                let (a, b) = (ev(ivl.min()), ev(ivl.max()));
+                let ev3 = |t: f64| c.evaluate(&k, t, 0, true, true).unwrap()[0];
+                let (a3, b3) = (ev3(ivl.min()), ev3(ivl.max()));
+                let (a, b) = (pl.project_point_to_uv_domain(a3), pl.project_point_to_uv_domain(b3));
                 let coords = a.x.abs().max(a.y.abs()).max(b.x.abs()).max(b.y.abs());
                 let round = 1e-14 * coords;
+                let x1 = [a3, b3]
+                    .iter()
+                    .map(|p| p.x.abs() + p.y.abs() + p.z.abs())
+                    .fold(0.0_f64, f64::max);
+                let gen_round = dmu1 * gamma(3.0 * deg + 16.0) * (p_max + o1);
+                let end_round = dmu1 * gamma(12.0) * (x1 + o1);
                 for (i, bound) in [alpha, beta].into_iter().enumerate() {
                     let close = |p: Point2| (f.mu(p) - bound).abs() <= 1e-6 * (1.0 + bound.abs()) + round;
                     if close(a) && close(b) {
-                        let tight = 1e-9 * (1.0 + bound.abs()) + round;
+                        let tight = half_brackets[i] + solver_width + 2.0 * gen_round + end_round;
                         assert!(
                             (f.mu(a) - bound).abs() <= tight && (f.mu(b) - bound).abs() <= tight,
                             "{name}: a fold line off mu = {bound}"
@@ -2458,6 +2526,10 @@ mod tests {
                     for side in sides {
                         let close = |x: f64| (x - side).abs() <= 1e-6 * (1.0 + side.abs());
                         if close(fixed.0) && close(fixed.1) {
+                            // claim precision: the solver snaps a side piece's fixed
+                            // coordinate to the side (`plane_patch::side_point`), so it
+                            // is off only by mapping the end to space and projecting it
+                            // back (gamma(8) of the coordinates); measured 2.8e-14 abs
                             let tight = 1e-12 * (1.0 + side.abs()) + round;
                             assert!(
                                 (fixed.0 - side).abs() <= tight && (fixed.1 - side).abs() <= tight,

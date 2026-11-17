@@ -36,11 +36,24 @@
 //!   are the answer: the fold (or end) directrices at `alpha` and `beta` and the parts
 //!   of `D`'s sides between them.
 //!
-//! The certificates rest on the solver for the breaks and extremes (ARGUED, the
-//! property analyses' existing contract): the monotone sweep's breaks are the roots
-//! of `affine_roots`, and the slab's `alpha`, `beta` are evaluations at the range
-//! ends, the roots of `turning_params` and the interior knots; a root the solver
-//! missed would move them.
+//! The ranges are the solver's, checked and completed here. Every piece of the
+//! generator a certificate reads is split from it exactly at its ends (no zone
+//! tolerance, so a short end span is kept) and certified on its control net (see
+//! `net_points`). A range end inside the generator interval is followed span by span
+//! while the next span is certified in the plane (the range extends over it, merging
+//! ranges it reaches, and absorbs the point solutions inside); then the span past it
+//! must be certified to leave the plane (`past_end`): beyond a parameter whose
+//! generator point is within the tolerance of the end, it is farther from the plane
+//! than the in-plane bound, and a point solution where it may still be within the
+//! solver's tolerance of the plane declines (it is that same departure).
+//!
+//! The monotone sweep's breaks (where `mu` passes a corner of `D`, where a copy
+//! crosses a side) are isolated on control nets (`roots`: a piece whose values keep
+//! one certain sign has no root, one with a single certain sign change has exactly
+//! one, found by bisection; others are halved), and the slab's `alpha`, `beta` are a
+//! branch and bound over control nets (`extreme`): within `extreme_width` of the true
+//! extremes, at an attained value. Both searches share a budget of `PIECE_BUDGET`
+//! split pieces and decline past it.
 //!
 //! A point solution outside the ranges whose directrix (a line of constant `mu`)
 //! meets a region's `[alpha, beta]` declines: it would cross the region or repeat
@@ -48,26 +61,26 @@
 //!
 //! Ranges with disjoint `mu` ranges have disjoint regions, answered one by one. A
 //! region of no area (a range of constant `mu`, a slab touching `D` at a point)
-//! declines. Every loop is bounded by the number of ranges, domain sides and solver
-//! roots; nothing recurses.
+//! declines. Every loop is bounded by the number of ranges, knots, domain sides and
+//! the piece budget; nothing recurses (the searches use explicit worklists).
+//!
+//! Every slack is relative to the magnitudes it compares (no absolute floor), so the
+//! certificates hold at every model scale.
 
-use crate::curve::curve::p7::PropertyAnalysisOptions;
-use crate::curve::curve::{Curve, CurveKind, CurvePropertyType};
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, Result};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::solution_array::SolutionType;
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::EFF_ZERO;
+use crate::math::{EFF_ZERO, EFF_ZERO_PARAM};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::math::gamma;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p2::TsectCurveType;
-use crate::surface::surface::p4::NoObject;
 
 use super::p1::gen_base;
 
@@ -80,6 +93,9 @@ pub(super) struct PatchInputs<'a> {
     pub extrusion_vec: Vec3,
     /// The generator interval of the caller's domain.
     pub gen_ivl: Extent1d,
+    /// Whether the generator is closed over `gen_ivl` (a range end at one end of the
+    /// interval continues at the other).
+    pub gen_closed: bool,
     /// The extrusion interval `V` of the caller's domain.
     pub v_ivl: Extent1d,
     /// The plane.
@@ -88,6 +104,15 @@ pub(super) struct PatchInputs<'a> {
     pub plane_domain: Extent2d,
     /// The special case's tolerance (`min(approx, SM_EFF_ZERO_SQRT)`).
     pub tol: f64,
+}
+
+/// The coincident patch: its boundary curves, and the generator ranges it covers
+/// (the solver's, extended and merged; the point solutions inside them are absorbed).
+pub(super) struct Patch {
+    /// The boundary curves, typed `RegionBoundary`.
+    pub curves: Vec<(Curve, TsectCurveType)>,
+    /// The generator ranges covered.
+    pub ranges: Vec<(f64, f64)>,
 }
 
 /// `|x| + |y| + |z|`.
@@ -100,12 +125,39 @@ fn norm1(v: Vec3) -> f64 {
 /// any geometric tolerance. Within it a copy and a side of the domain coincide.
 const REL_SLACK: f64 = 1e-12;
 
-/// The Euclidean control points of a generator piece with a bound on each one's
-/// error from the exact split of the generator: the split's rounding (at most `2p`
-/// knot insertions of three operations each, on homogeneous coordinates) and the
-/// division by the weight. `None` for non-finite data or a non-positive weight (no
-/// NaN passes the comparisons).
-fn net_points(piece: &Curve) -> Option<Vec<(Point3, f64)>> {
+/// The most generator pieces the certified searches of one patch may split (each a
+/// trim and a control net); past it the patch declines.
+const PIECE_BUDGET: usize = 4000;
+
+/// The narrowest piece (relative to its range) the root isolation halves; a piece
+/// still undecided there gives a break at its middle (a break is harmless: it only
+/// splits a run of the sweep).
+const MIN_SPLIT: f64 = 1.0 / 68_719_476_736.0; // 2^-36
+
+/// A generator piece's control net: its Euclidean control points with a bound on
+/// each one's error from the exact split of the generator, its weights (1 for a
+/// polynomial piece), the relative error bound of those weights, and its degree.
+struct Net {
+    pts: Vec<(Point3, f64)>,
+    weights: Vec<f64>,
+    weight_err: f64,
+    degree: usize,
+}
+
+impl Net {
+    /// The largest coordinate magnitude of the control points.
+    fn scale(&self) -> f64 {
+        self.pts
+            .iter()
+            .fold(0.0_f64, |m, &(p, _)| m.max(p.max_dimension()))
+    }
+}
+
+/// The control net of a generator piece: the split's rounding (at most `2p` knot
+/// insertions of three operations each, on homogeneous coordinates) and the division
+/// by the weight bound each point's error. `None` for non-finite data or a
+/// non-positive weight (no NaN passes the comparisons).
+fn net_points(piece: &Curve) -> Option<Net> {
     let base = gen_base(piece).ok()?;
     let canon = base.canonical().ok()?;
     let weights_of = |i: usize| -> f64 {
@@ -131,12 +183,40 @@ fn net_points(piece: &Curve) -> Option<Vec<(Point3, f64)>> {
         return None;
     }
     let split_ops = 6 * canon.degree + 4;
-    let mut out = Vec::new();
+    let mut pts = Vec::new();
+    let mut weights = Vec::new();
     for (i, &p) in canon.control_points.iter().enumerate() {
         let w = weights_of(i);
-        out.push((p, gamma(split_ops) * (max_hom + norm1(p) * max_w) / w));
+        pts.push((p, gamma(split_ops) * (max_hom + norm1(p) * max_w) / w));
+        weights.push(w);
     }
-    Some(out)
+    let weight_err = if canon.weights.is_empty() {
+        0.0
+    } else {
+        gamma(split_ops)
+    };
+    Some(Net {
+        pts,
+        weights,
+        weight_err,
+        degree: canon.degree,
+    })
+}
+
+/// The generator piece over `[lo, hi]`, split exactly at its ends (zone tolerance 0:
+/// no short end span is dropped, so a certificate on the piece covers the generator
+/// itself), with the interval made (snapped to a knot within the split's rounding).
+/// `None` when the split fails (the caller declines).
+fn split(k: &Kernel, gen: &Curve, lo: f64, hi: f64) -> Option<(Curve, Extent1d)> {
+    let ordered = lo < hi;
+    if !ordered {
+        return None;
+    }
+    let mut ivl = Extent1d::from_min_max(lo, hi);
+    let mut piece = gen.clone();
+    let made = ignore_status(piece.trim_with_zone_tol(k, &mut ivl, TrimMode::Silent, 0.0));
+    let ok = made.is_ok() && ivl.min() < ivl.max();
+    ok.then_some((piece, ivl))
 }
 
 /// A bound on the error of `d . (P - O)` computed for a control point `P` known to
@@ -145,16 +225,41 @@ fn functional_err(d: Vec3, p: Point3, o: Point3, err: f64) -> f64 {
     norm1(d) * (err + gamma(8) * (norm1(p) + norm1(o)))
 }
 
-/// The certificate that the patch over the generator piece `net` (its control points
-/// with their errors) lies in the plane, in two parts. The sweep: `|n . E| + err <=
-/// SM_EFF_ZERO |E|` (`E` in the plane to the working precision). The profile: every
-/// Euclidean control point `P` has `|n . (P - O)| + err <= SM_EFF_ZERO (1 + |P|)`.
+/// The affine function `g(X) = d . (X - o) - c` of the plane's points.
+#[derive(Clone, Copy)]
+struct Affine {
+    d: Vec3,
+    o: Point3,
+    c: f64,
+}
+
+impl Affine {
+    /// `g` at a control point known to `err`, with a bound on the value's error.
+    fn at(&self, p: Point3, err: f64) -> (f64, f64) {
+        let x = self.d.dot(p - self.o);
+        (
+            x - self.c,
+            functional_err(self.d, p, self.o, err) + gamma(1) * (x.abs() + self.c.abs()),
+        )
+    }
+
+    /// `g` at a point.
+    fn value(&self, p: Point3) -> f64 {
+        self.d.dot(p - self.o) - self.c
+    }
+}
+
+/// The certificate that the patch over the generator piece `net` lies in the plane,
+/// in two parts. The sweep: `|n . E| + err <= SM_EFF_ZERO |E|` (`E` in the plane to
+/// the working precision). The profile: every Euclidean control point `P` has
+/// `|n . (P - O)| + err <= SM_EFF_ZERO s`, `s` the largest coordinate of the net (the
+/// scale of the piece's coordinates, so the bound is relative at every model scale).
 /// With positive weights a rational curve lies in the convex hull of its Euclidean
-/// control points, so every point `C(s)` of the range is within the largest of those
-/// bounds of the plane, and every patch point `C(s) + v E` within that plus
-/// `|v| SM_EFF_ZERO |E|`: the scale of the point itself. `err` counts the rounding of
-/// the split, of `P - O`, of the dot products and of the plane normal (`|n|_1`).
-fn certify_in_plane(net: &[(Point3, f64)], e: Vec3, plane: &Plane) -> bool {
+/// control points, so every point `C(s)` of the piece is within that bound of the
+/// plane, and every patch point `C(s) + v E` within that plus `|v| SM_EFF_ZERO |E|`:
+/// the scale of the point itself. `err` counts the rounding of the split, of `P - O`,
+/// of the dot products and of the plane normal (`|n|_1`).
+fn certify_in_plane(net: &Net, e: Vec3, plane: &Plane) -> bool {
     let n = plane.position().z_axis();
     let o = plane.position().origin();
     let n1 = norm1(n);
@@ -163,87 +268,217 @@ fn certify_in_plane(net: &[(Point3, f64)], e: Vec3, plane: &Plane) -> bool {
     if !sweep_in_plane {
         return false;
     }
-    net.iter().all(|&(p, err)| {
-        let bound = EFF_ZERO * (1.0 + p.max_dimension());
+    let bound = EFF_ZERO * net.scale();
+    net.pts.iter().all(|&(p, err)| {
         // (a NaN anywhere fails the check)
         n.dot(p - o).abs() + functional_err(n, p, o, err) <= bound
     })
 }
 
-/// The generator parameters in the open interval `(a, b)` where `dir . C(s) = value`
-/// (a plane intersection of the generator; the ends of a range solution count).
-fn affine_roots(
+/// Bisects for the single root of `g(C(s))` in `[a, b]`, `g` negative at `a` when
+/// `neg_at_a` (on evaluations: the root to the rounding of `g`).
+fn bisect(
+    k: &Kernel,
+    gen: &Curve,
+    g: Affine,
+    (mut a, mut b): (f64, f64),
+    neg_at_a: bool,
+) -> Result<f64> {
+    // (a halving per bit of the parameter: at most a few hundred)
+    for _ in 0..1100 {
+        let m = a + (b - a) / 2.0;
+        let interior = a < m && m < b;
+        if !interior {
+            break;
+        }
+        let v = g.value(gen.evaluate_point(k, m)?);
+        if v == 0.0 {
+            return Ok(m);
+        }
+        if (v < 0.0) == neg_at_a {
+            a = m;
+        } else {
+            b = m;
+        }
+    }
+    Ok(a + (b - a) / 2.0)
+}
+
+/// The parameters of `ivl` where `g(C(s))` may vanish, certified on control nets
+/// (with positive weights the number of roots of a piece is at most the sign changes
+/// of its control values: variation diminishing): a piece whose values all keep one
+/// certain sign has none; one whose values have certain signs with one change has
+/// exactly one (its end values are its end points'), found by bisection; one whose
+/// values are all within their errors of zero may vanish throughout and gives its
+/// ends; any other is halved, down to `MIN_SPLIT` of `ivl`, where it gives its middle.
+/// Every root lies in a returned parameter's piece. `None` past the budget or when a
+/// split fails.
+fn roots(
     k: &Kernel,
     gen: &Curve,
     ivl: &Extent1d,
-    dir: Vec3,
-    value: f64,
-    tol: f64,
-) -> Result<Vec<f64>> {
-    let len = dir.length();
-    let usable = len > 0.0 && len.is_finite() && value.is_finite();
-    if !usable {
-        return Ok(Vec::new());
-    }
-    let vecs = [dir / len];
-    let opts = PropertyAnalysisOptions::<NoObject> {
-        property_value: Some(-value / len),
-        opt_vectors: &vecs,
-        want_comb: false,
-        handle: None,
-    };
-    let sols = gen
-        .global_property_analysis(k, ivl, CurvePropertyType::PlaneIntersection, tol, &opts)?
-        .solutions;
-    Ok(params_of(sols.as_slice(), ivl))
-}
-
-/// The generator parameters in the open interval of `ivl` where `C'(s)` is
-/// perpendicular to `dir` (where `dir . C(s)` turns).
-fn turning_params(
-    k: &Kernel,
-    gen: &Curve,
-    ivl: &Extent1d,
-    dir: Vec3,
-    tol: f64,
-) -> Result<Vec<f64>> {
-    let len = dir.length();
-    let usable = len > 0.0 && len.is_finite();
-    if !usable {
-        return Ok(Vec::new());
-    }
-    let vecs = [dir / len];
-    let opts = PropertyAnalysisOptions::<NoObject> {
-        property_value: None,
-        opt_vectors: &vecs,
-        want_comb: false,
-        handle: None,
-    };
-    let sols = gen
-        .global_property_analysis(k, ivl, CurvePropertyType::PerpendicularToVector, tol, &opts)?
-        .solutions;
-    Ok(params_of(sols.as_slice(), ivl))
-}
-
-/// The parameters of solutions strictly inside `ivl` (both ends of a range).
-fn params_of<O>(sols: &[crate::geom::solution_array::Solution<O>], ivl: &Extent1d) -> Vec<f64> {
+    g: Affine,
+    budget: &mut usize,
+) -> Result<Option<Vec<f64>>> {
+    let min_width = (ivl.max() - ivl.min()) * MIN_SPLIT;
+    let mut todo = vec![(ivl.min(), ivl.max())];
     let mut out = Vec::new();
-    for s in sols {
-        let mut push = |t: f64| {
-            if t > ivl.min() && t < ivl.max() {
-                out.push(t);
-            }
-        };
-        if let Some(&t) = s.start.parameters.first() {
-            push(t);
+    while let Some((a, b)) = todo.pop() {
+        if *budget == 0 {
+            return Ok(None);
         }
-        if s.solution_type == SolutionType::RangeOfValues {
-            if let Some(&t) = s.end.parameters.first() {
-                push(t);
+        *budget -= 1;
+        let Some((piece, _)) = split(k, gen, a, b) else {
+            return Ok(None);
+        };
+        let Some(net) = net_points(&piece) else {
+            return Ok(None);
+        };
+        let vals: Vec<(f64, f64)> = net.pts.iter().map(|&(p, err)| g.at(p, err)).collect();
+        let positive = vals.iter().all(|&(v, err)| v > err);
+        let negative = vals.iter().all(|&(v, err)| v < -err);
+        if positive || negative {
+            continue;
+        }
+        let certain = vals.iter().all(|&(v, err)| v.abs() > err);
+        let changes = vals
+            .windows(2)
+            .filter(|w| matches!(w, [(x, _), (y, _)] if (*x < 0.0) != (*y < 0.0)))
+            .count();
+        if certain && changes == 1 {
+            let neg_at_a = vals.first().is_some_and(|&(v, _)| v < 0.0);
+            out.push(bisect(k, gen, g, (a, b), neg_at_a)?);
+            continue;
+        }
+        let on = vals.iter().all(|&(v, err)| v.abs() <= err);
+        if on {
+            out.extend([a, b]);
+            continue;
+        }
+        let m = a + (b - a) / 2.0;
+        let splits = b - a > min_width && a < m && m < b;
+        if !splits {
+            out.push(m);
+            continue;
+        }
+        todo.push((m, b));
+        todo.push((a, m));
+    }
+    Ok(Some(out))
+}
+
+/// The width within which `extreme` brackets an extreme of `mu` over a range whose
+/// control net has `mus` (values and errors): the relative slack of the values and
+/// twice their largest error (a piece's hull bound is within those of its values).
+fn extreme_width(mus: &[(f64, f64)]) -> f64 {
+    let (scale, err) = mus.iter().fold((0.0_f64, 0.0_f64), |(s, e), &(m, me)| {
+        (s.max(m.abs()), e.max(me))
+    });
+    REL_SLACK * scale + 2.0 * err
+}
+
+/// The least value of `sign * mu(C(s))` over `ivl` (`sign` 1 for the least `mu`, -1
+/// for the greatest), by branch and bound on control nets: a piece's least control
+/// value (less its error) bounds it below (convex hull), the evaluated values at the
+/// piece ends bound the extreme above, and the least-bounded piece is halved until
+/// every piece's bound is within `width` of the best value found. The value returned
+/// is attained (an evaluation), within `width` (and the rounding of the evaluations)
+/// of the true extreme. The initial pieces are the knot spans, so a corner of the
+/// generator is an evaluated end. `None` past the budget or when a split fails.
+fn extreme(
+    k: &Kernel,
+    inputs: &PatchInputs<'_>,
+    frame: &Frame,
+    ivl: &Extent1d,
+    sign: f64,
+    width: f64,
+    budget: &mut usize,
+) -> Result<Option<f64>> {
+    let gen = inputs.gen;
+    let mu_at = |s: f64| -> Result<f64> {
+        Ok(sign
+            * frame.mu(inputs
+                .plane
+                .project_point_to_uv_domain(gen.evaluate_point(k, s)?)))
+    };
+    let g = Affine {
+        d: frame.dmu * sign,
+        o: frame.o,
+        c: 0.0,
+    };
+    let mut lower_of = |a: f64, b: f64| -> Option<f64> {
+        if *budget == 0 {
+            return None;
+        }
+        *budget -= 1;
+        let (piece, _) = split(k, gen, a, b)?;
+        let net = net_points(&piece)?;
+        let lb = net
+            .pts
+            .iter()
+            .map(|&(p, err)| {
+                let (v, e) = g.at(p, err);
+                v - e
+            })
+            .fold(f64::INFINITY, f64::min);
+        lb.is_finite().then_some(lb)
+    };
+    let mut cuts = vec![ivl.min()];
+    if let CurveKind::BSpline(bs) = gen.kind() {
+        cuts.extend(
+            bs.knots(None)?
+                .0
+                .into_iter()
+                .filter(|&t| t > ivl.min() && t < ivl.max()),
+        );
+    }
+    cuts.push(ivl.max());
+    let mut upper = f64::INFINITY;
+    for &t in &cuts {
+        upper = upper.min(mu_at(t)?);
+    }
+    let mut cands: Vec<(f64, f64, f64)> = Vec::new();
+    for w in cuts.windows(2) {
+        let [a, b] = w else {
+            continue;
+        };
+        let Some(lb) = lower_of(*a, *b) else {
+            return Ok(None);
+        };
+        cands.push((lb, *a, *b));
+    }
+    loop {
+        // the least-bounded piece (the first of equals)
+        let mut best: Option<(usize, f64)> = None;
+        for (i, &(lb, _, _)) in cands.iter().enumerate() {
+            if best.is_none_or(|(_, b)| lb < b) {
+                best = Some((i, lb));
+            }
+        }
+        let Some((i, lb)) = best else {
+            break;
+        };
+        let bracketed = lb >= upper - width;
+        if bracketed {
+            break;
+        }
+        let (_, a, b) = cands.swap_remove(i);
+        let m = a + (b - a) / 2.0;
+        let interior = a < m && m < b;
+        if !interior {
+            return Ok(None);
+        }
+        upper = upper.min(mu_at(m)?);
+        for (x, y) in [(a, m), (m, b)] {
+            let Some(lb) = lower_of(x, y) else {
+                return Ok(None);
+            };
+            if lb < upper - width {
+                cands.push((lb, x, y));
             }
         }
     }
-    out
+    Ok(upper.is_finite().then_some(upper))
 }
 
 /// The plane's UV frame of the sweep: `E` in UV (`(eu, ew)`, a component within its
@@ -405,97 +640,75 @@ fn chord(
     meets.then_some((lo.0, lo.1, hi.0, hi.1))
 }
 
-/// The segment `a`-`b` (in the plane) cut to the plane domain as a curve, or `None`
-/// outside the domain or of no length (within `SM_EFF_ZERO`, relative). The cut is
-/// made in the plane's UV coordinates (no tolerance): an end cut by a side of the
-/// domain has that side's coordinate exactly, so it meets the curves along that side
-/// however long the segment. A segment along a side (`on_side`) has that side's
-/// coordinate exactly, and is cut along the other one only.
-fn trimmed_segment(
+/// The directrix through the generator point `p`, swept over `V` and cut to the
+/// domain: the line `uv + v (eu, ew)` from `p`'s UV point (`v` measured from `p`, so
+/// its precision does not depend on `|V| |E|`), over `V` cut to its chord of the box.
+/// An end cut by a side is that side's point at the directrix's `mu` (`side_point`:
+/// the side's coordinate exactly, the same point as the side segments' ends at that
+/// `mu`); an uncut end is `p + v E` (the copies' end there). `on_side`: the directrix
+/// lies along that side parallel to the sweep, whose coordinate it keeps exactly.
+/// `None` outside the domain or of no length.
+fn directrix(
     inputs: &PatchInputs<'_>,
-    a: Point3,
-    b: Point3,
+    frame: &Frame,
+    p: Point3,
     on_side: Option<Side>,
 ) -> Result<Option<Curve>> {
     let plane = inputs.plane;
-    let dom = &inputs.plane_domain;
-    let (mut ua, mut ub) = (
-        plane.project_point_to_uv_domain(a),
-        plane.project_point_to_uv_domain(b),
-    );
-    match on_side {
-        Some(Side { axis: 0, value }) => (ua.x, ub.x) = (value, value),
-        Some(Side { value, .. }) => (ua.y, ub.y) = (value, value),
+    let dom = inputs.plane_domain;
+    let e = inputs.extrusion_vec;
+    let (vmin, vmax) = (inputs.v_ivl.min(), inputs.v_ivl.max());
+    let mut uv = plane.project_point_to_uv_domain(p);
+    let fix = |q: &mut Point2| match on_side {
+        Some(Side { axis: 0, value }) => q.x = value,
+        Some(Side { value, .. }) => q.y = value,
         None => {}
-    }
-    // Liang-Barsky: the parameters entering and leaving the box, and which
-    // coordinate (0 = u, 1 = w) and bound fixed them
-    let mut t0 = 0.0_f64;
-    let mut t1 = 1.0_f64;
-    let mut fix0: Option<(usize, f64)> = None;
-    let mut fix1: Option<(usize, f64)> = None;
-    let axes = [
-        (ua.x, ub.x, dom.min().x, dom.max().x),
-        (ua.y, ub.y, dom.min().y, dom.max().y),
-    ];
-    for (i, (pa, pb, lo, hi)) in axes.into_iter().enumerate() {
-        let finite = pa.is_finite() && pb.is_finite() && lo.is_finite() && hi.is_finite();
-        if !finite {
-            return Ok(None);
-        }
-        let d = pb - pa;
-        if d == 0.0 {
-            if pa < lo || pa > hi {
-                return Ok(None);
-            }
-            continue;
-        }
-        let (t_lo, t_hi) = ((lo - pa) / d, (hi - pa) / d);
-        let ((enter, enter_at), (leave, leave_at)) = if d > 0.0 {
-            ((t_lo, lo), (t_hi, hi))
-        } else {
-            ((t_hi, hi), (t_lo, lo))
-        };
-        if enter > t0 {
-            t0 = enter;
-            fix0 = Some((i, enter_at));
-        }
-        if leave < t1 {
-            t1 = leave;
-            fix1 = Some((i, leave_at));
-        }
-    }
-    if t0 > t1 {
+    };
+    fix(&mut uv);
+    let finite = uv.x.is_finite() && uv.y.is_finite();
+    if !finite {
         return Ok(None);
     }
-    let end = |t: f64, fix: Option<(usize, f64)>| -> Point2 {
-        let mut uv = Point2::new(ua.x + t * (ub.x - ua.x), ua.y + t * (ub.y - ua.y));
-        match fix {
-            Some((0, bound)) => uv.x = bound,
-            Some((_, bound)) => uv.y = bound,
-            None => {}
+    let Some((dlo, lo_side, dhi, hi_side)) = chord(frame, &dom, uv) else {
+        return Ok(None);
+    };
+    let mu = frame.mu(uv);
+    let end = |v: f64, cut: Option<Side>| -> Point3 {
+        match (cut, on_side) {
+            (Some(side), _) => {
+                let mut q = side_point(frame, &dom, side, mu);
+                fix(&mut q);
+                plane.evaluate_point_fast(q)
+            }
+            (None, Some(_)) => {
+                let mut q = Point2::new(uv.x + v * frame.eu, uv.y + v * frame.ew);
+                fix(&mut q);
+                plane.evaluate_point_fast(q)
+            }
+            (None, None) => p + e * v,
         }
-        uv
     };
-    let (s, e) = (end(t0, fix0), end(t1, fix1));
-    // (an unclipped end of a segment off any side is the caller's point)
-    let s3 = if fix0.is_none() && on_side.is_none() && t0 == 0.0 {
-        a
+    let (v0, cut0) = if dlo > vmin {
+        (dlo, lo_side)
     } else {
-        plane.evaluate_point_fast(s)
+        (vmin, None)
     };
-    let e3 = if fix1.is_none() && on_side.is_none() && t1 == 1.0 {
-        b
+    let (v1, cut1) = if dhi < vmax {
+        (dhi, hi_side)
     } else {
-        plane.evaluate_point_fast(e)
+        (vmax, None)
     };
-    segment(s3, e3)
+    let spans = v0 < v1;
+    if !spans {
+        return Ok(None);
+    }
+    segment(end(v0, cut0), end(v1, cut1))
 }
 
-/// The segment `a`-`b`, or `None` when it has no length (within `SM_EFF_ZERO`,
-/// relative).
+/// The segment `a`-`b`, or `None` when it has no length (within `SM_EFF_ZERO`
+/// relative to its coordinates).
 fn segment(a: Point3, b: Point3) -> Result<Option<Curve>> {
-    let short = a.distance(b) <= EFF_ZERO * (1.0 + a.max_dimension());
+    let short = a.distance(b) <= EFF_ZERO * a.max_dimension().max(b.max_dimension());
     if short {
         return Ok(None);
     }
@@ -505,12 +718,12 @@ fn segment(a: Point3, b: Point3) -> Result<Option<Curve>> {
 }
 
 /// A generator range, split from the generator and certified in the plane, with its
-/// `mu` extent (the values and parameters of its least and greatest `mu`), whether
-/// its `mu` is certified monotone, and bounds on its `nu`.
+/// `mu` extent (its least and greatest `mu`), whether its `mu` is certified
+/// monotone, and bounds on its `nu`.
 struct RangePiece {
     ivl: Extent1d,
-    alpha: (f64, f64),
-    beta: (f64, f64),
+    alpha: f64,
+    beta: f64,
     monotone: bool,
     nu_lo: f64,
     nu_hi: f64,
@@ -558,6 +771,7 @@ fn range_piece(
     inputs: &PatchInputs<'_>,
     frame: &Frame,
     (a, b): (f64, f64),
+    budget: &mut usize,
 ) -> Result<Measured> {
     let gen = inputs.gen;
     let lo = a.min(b).max(inputs.gen_ivl.min());
@@ -566,10 +780,9 @@ fn range_piece(
     if !nonempty {
         return Ok(Measured::Empty);
     }
-    let mut ivl = Extent1d::from_min_max(lo, hi);
-    let mut piece = gen.clone();
-    // (may snap the interval to a knot: the certificates cover the piece made)
-    ignore_status(piece.trim(k, &mut ivl, TrimMode::Silent))?;
+    let Some((piece, ivl)) = split(k, gen, lo, hi) else {
+        return Ok(Measured::Declined);
+    };
     let Some(net) = net_points(&piece) else {
         return Ok(Measured::Declined);
     };
@@ -584,6 +797,7 @@ fn range_piece(
     // within the errors may hide a fold no larger than them; a flat stretch is a
     // segment along the sweep, whose copies are the region's boundary there.)
     let mus: Vec<(f64, f64)> = net
+        .pts
         .iter()
         .map(|&(p, err)| {
             (
@@ -603,6 +817,7 @@ fn range_piece(
         && last < first;
     // nu over the convex hull of the control points
     let nus: Vec<(f64, f64)> = net
+        .pts
         .iter()
         .map(|&(p, err)| {
             (
@@ -625,35 +840,25 @@ fn range_piece(
     let short_flats = flat_stretches_shorter_than(&mus, &nus, sweep);
     let monotone = mus.len() >= 2 && (rising || falling) && short_flats;
 
-    // the extremes of mu: at the ends, the turns, or the knots (a polyline turns at
-    // its corners without a perpendicular)
-    let mut cands = vec![ivl.min(), ivl.max()];
-    if !monotone {
-        let tol = inputs.tol;
-        cands.extend(turning_params(k, gen, &ivl, frame.dmu, tol)?);
-        if let CurveKind::BSpline(bs) = gen.kind() {
-            cands.extend(
-                bs.knots(None)?
-                    .0
-                    .into_iter()
-                    .filter(|&t| t > ivl.min() && t < ivl.max()),
-            );
-        }
-    }
-    let mut alpha = (f64::INFINITY, f64::NAN);
-    let mut beta = (f64::NEG_INFINITY, f64::NAN);
-    for s in cands {
-        let mu = frame.mu(inputs
+    // the extremes of mu: at the ends when monotone, else the certified search
+    let mu_at = |s: f64| -> Result<f64> {
+        Ok(frame.mu(inputs
             .plane
-            .project_point_to_uv_domain(gen.evaluate_point(k, s)?));
-        if mu < alpha.0 {
-            alpha = (mu, s);
-        }
-        if mu > beta.0 {
-            beta = (mu, s);
-        }
-    }
-    let spread = alpha.0 < beta.0 && alpha.0.is_finite() && beta.0.is_finite();
+            .project_point_to_uv_domain(gen.evaluate_point(k, s)?)))
+    };
+    let (alpha, beta) = if monotone {
+        let (m0, m1) = (mu_at(ivl.min())?, mu_at(ivl.max())?);
+        (m0.min(m1), m0.max(m1))
+    } else {
+        let width = extreme_width(&mus);
+        let lo = extreme(k, inputs, frame, &ivl, 1.0, width, budget)?;
+        let hi = extreme(k, inputs, frame, &ivl, -1.0, width, budget)?;
+        let (Some(lo), Some(hi)) = (lo, hi) else {
+            return Ok(Measured::Declined);
+        };
+        (lo, -hi)
+    };
+    let spread = alpha < beta && alpha.is_finite() && beta.is_finite();
     if !spread {
         // (a range of constant mu sweeps no area)
         return Ok(Measured::Declined);
@@ -666,6 +871,185 @@ fn range_piece(
         nu_lo,
         nu_hi,
     }))
+}
+
+/// What lies just past a range end along the generator, from [`past_end`].
+enum Past {
+    /// The next span, to this parameter, is certified in the plane: the range
+    /// extends over it.
+    Extends(f64),
+    /// The generator leaves the plane: past a parameter whose generator point is
+    /// within the tolerance of the end, it is farther from the plane than the
+    /// in-plane bound. A point solution within `zone` of the end (in parameter) may
+    /// be where the generator is within the solver's tolerance of the plane: that
+    /// same departure (infinite: anywhere past the end).
+    Departs { zone: f64 },
+    /// No certificate either way: the patch declines.
+    Declined,
+}
+
+/// The least `t` in `[0, 1]` past which `G(t) = (a t^j - eps t) / w - c > x` holds on
+/// all of `[t, 1]` (`G` is convex for `j >= 2`, linear for `j = 1`, `G(0) = -c <= x`:
+/// one crossing), or `None` when `G(1) <= x`. By bisection, rounded up.
+fn crossing(g: impl Fn(f64) -> f64, x: f64) -> Option<f64> {
+    let above = g(1.0) > x;
+    if !above {
+        return None;
+    }
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    for _ in 0..200 {
+        let m = lo + (hi - lo) / 2.0;
+        let interior = lo < m && m < hi;
+        if !interior {
+            break;
+        }
+        if g(m) > x {
+            hi = m;
+        } else {
+            lo = m;
+        }
+    }
+    Some(hi)
+}
+
+/// The certificate past the range end `end`, going `dir` (`1` or `-1`) along the
+/// generator. The span `Q` from `end` to the next knot (the generator must be a
+/// B-spline curve) is split exactly. Certified in the plane: the range extends over
+/// it. Else `Q` must be one Bezier span: with `f = n . (C - O)` (the distance to the
+/// plane) its control values `c_i` (from the end outward, weights `w_i`) and
+/// `D_i = w_i (c_i - c_0)`, when every `D_i` from an index `j` on has one certain sign
+/// with `|D_i| >= a` and those before it `|D_i| <= eps`, then (Bernstein: the terms
+/// `i >= j` sum to at least `t^j`, the others to at most `1 - (1 - t)^p <= p t`)
+/// `|f(t)| >= (a t^j - eps p t) / w_max - |c_0|`, which exceeds `x` past `t_x`
+/// (`crossing`), and the generator over `[0, t]` stays within
+/// `p t max_i w_i |P_i - P_0| / w_min` of the end point. The departure needs
+/// `t_B < 1` for the in-plane bound `B` of `certify_in_plane` and the end point within
+/// the tolerance of the point at `t_B`; its zone is `t_tol` (the solver's tolerance).
+fn past_end(k: &Kernel, inputs: &PatchInputs<'_>, end: f64, dir: f64) -> Result<Past> {
+    let gen = inputs.gen;
+    let CurveKind::BSpline(bs) = gen.kind() else {
+        return Ok(Past::Declined);
+    };
+    let (ivl_lo, ivl_hi) = (inputs.gen_ivl.min(), inputs.gen_ivl.max());
+    let gap = EFF_ZERO_PARAM * (1.0 + end.abs());
+    let knots = bs.knots(None)?.0;
+    let next = if dir > 0.0 {
+        knots
+            .iter()
+            .copied()
+            .filter(|&t| t > end + gap)
+            .fold(ivl_hi, f64::min)
+    } else {
+        knots
+            .iter()
+            .copied()
+            .filter(|&t| t < end - gap)
+            .fold(ivl_lo, f64::max)
+    };
+    let (a, b) = if dir > 0.0 { (end, next) } else { (next, end) };
+    let Some((piece, made)) = split(k, gen, a, b) else {
+        return Ok(Past::Declined);
+    };
+    let Some(net) = net_points(&piece) else {
+        return Ok(Past::Declined);
+    };
+    if certify_in_plane(&net, inputs.extrusion_vec, inputs.plane) {
+        return Ok(Past::Extends(next));
+    }
+    let p = net.degree;
+    let bezier = p >= 1 && net.pts.len() == p + 1 && net.weights.len() == p + 1;
+    if !bezier {
+        return Ok(Past::Declined);
+    }
+    let n = inputs.plane.position().z_axis();
+    let o = inputs.plane.position().origin();
+    // from the end outward
+    let mut cps: Vec<(Point3, f64, f64)> = net
+        .pts
+        .iter()
+        .zip(&net.weights)
+        .map(|(&(q, err), &w)| (q, err, w))
+        .collect();
+    if dir < 0.0 {
+        cps.reverse();
+    }
+    let vals: Vec<(f64, f64)> = cps
+        .iter()
+        .map(|&(q, err, _)| (n.dot(q - o), functional_err(n, q, o, err)))
+        .collect();
+    let (Some(&(c0, e0)), Some(&(p0, pe0, _))) = (vals.first(), cps.first()) else {
+        return Ok(Past::Declined);
+    };
+    let c0_abs = c0.abs() + e0;
+    // D_i with its error (that of c_i - c_0, and the weight's)
+    let ws = 1.0 + net.weight_err;
+    let diffs: Vec<(f64, f64)> = vals
+        .iter()
+        .zip(&cps)
+        .skip(1)
+        .map(|(&(c, e), &(_, _, w))| {
+            let d = c - c0;
+            (w * d, w * ws * (e + e0 + gamma(2) * (c.abs() + c0.abs())))
+        })
+        .collect();
+    let Some(&(d_last, _)) = diffs.last() else {
+        return Ok(Past::Declined);
+    };
+    let outward = d_last > 0.0;
+    // the tail of certain, common signs
+    let mut j = diffs.len();
+    for (i, &(d, err)) in diffs.iter().enumerate().rev() {
+        let certain = d.abs() > err && (d > 0.0) == outward;
+        if !certain {
+            break;
+        }
+        j = i;
+    }
+    let tail = diffs.get(j..).unwrap_or_default();
+    let head = diffs.get(..j).unwrap_or_default();
+    if tail.is_empty() {
+        return Ok(Past::Declined);
+    }
+    let a_lo = tail
+        .iter()
+        .map(|&(d, err)| d.abs() - err)
+        .fold(f64::INFINITY, f64::min);
+    let eps = head
+        .iter()
+        .map(|&(d, err)| d.abs() + err)
+        .fold(0.0_f64, f64::max);
+    let (w_min, w_max) = net
+        .weights
+        .iter()
+        .fold((f64::INFINITY, 0.0_f64), |(lo, hi), &w| {
+            (lo.min(w), hi.max(w))
+        });
+    let (w_min, w_max) = (w_min / ws, w_max * ws);
+    // (j counts from the first difference, D_1)
+    let power = j + 1;
+    let pf = p as f64;
+    let lower = |t: f64| (a_lo * t.powi(power as i32) - eps * pf * t) / w_max - c0_abs;
+    // the extent of the generator over [0, t] from the end point
+    let reach = cps
+        .iter()
+        .skip(1)
+        .map(|&(q, err, w)| w * ws * ((q - p0).length() * (1.0 + gamma(8)) + err + pe0))
+        .fold(0.0_f64, f64::max)
+        / w_min;
+    let extent = |t: f64| pf * t * reach;
+    let bound = EFF_ZERO * net.scale();
+    let Some(t_b) = crossing(lower, bound) else {
+        return Ok(Past::Declined);
+    };
+    let departs = t_b < 1.0 && extent(t_b) <= inputs.tol;
+    if !departs {
+        return Ok(Past::Declined);
+    }
+    let zone = match crossing(lower, inputs.tol) {
+        Some(t) if t < 1.0 => t * (made.max() - made.min()),
+        _ => f64::INFINITY,
+    };
+    Ok(Past::Departs { zone })
 }
 
 /// What bounds a monotone region's slice from below or above: a copy of the
@@ -706,12 +1090,14 @@ fn push_run(runs: &mut Vec<Run>, bound: Bound, a: (f64, f64), b: (f64, f64)) {
 }
 
 /// The boundary of the region of one range of monotone `mu` (see the module
-/// documentation), or `None` when a root is missing (the caller then declines).
+/// documentation), or `None` when a search declines or a root is missing (the caller
+/// then declines).
 fn monotone_region(
     k: &Kernel,
     inputs: &PatchInputs<'_>,
     frame: &Frame,
     rp: &RangePiece,
+    budget: &mut usize,
     out: &mut Vec<Curve>,
 ) -> Result<Option<()>> {
     let gen = inputs.gen;
@@ -720,7 +1106,6 @@ fn monotone_region(
     let dom = inputs.plane_domain;
     let (vmin, vmax) = (inputs.v_ivl.min(), inputs.v_ivl.max());
     let (s0, s1) = (rp.ivl.min(), rp.ivl.max());
-    let tol = inputs.tol;
     let uv_at = |s: f64| -> Result<Point2> {
         Ok(plane.project_point_to_uv_domain(gen.evaluate_point(k, s)?))
     };
@@ -738,8 +1123,15 @@ fn monotone_region(
     ];
     for c in corners {
         let mu = frame.mu(c);
-        let value = mu + frame.dmu.dot(frame.o);
-        for r in affine_roots(k, gen, &rp.ivl, frame.dmu, value, tol)? {
+        let g = Affine {
+            d: frame.dmu,
+            o: frame.o,
+            c: mu,
+        };
+        let Some(rs) = roots(k, gen, &rp.ivl, g, budget)? else {
+            return Ok(None);
+        };
+        for r in rs {
             breaks.push((r, Some(mu)));
         }
     }
@@ -747,12 +1139,20 @@ fn monotone_region(
         let d = if side.axis == 0 { frame.du } else { frame.dw };
         let ea = frame.e_along(side.axis);
         for v in [vmin, vmax] {
-            let value = side.value - v * ea + d.dot(frame.o);
-            for r in affine_roots(k, gen, &rp.ivl, d, value, tol)? {
+            let g = Affine {
+                d,
+                o: frame.o,
+                c: side.value - v * ea,
+            };
+            let Some(rs) = roots(k, gen, &rp.ivl, g, budget)? else {
+                return Ok(None);
+            };
+            for r in rs {
                 breaks.push((r, None));
             }
         }
     }
+    breaks.retain(|b| s0 <= b.0 && b.0 <= s1);
     breaks.sort_by(|p, q| p.0.total_cmp(&q.0));
     // (one break per parameter, keeping a corner's exact mu)
     let mut merged: Vec<(f64, Option<f64>)> = Vec::new();
@@ -790,16 +1190,18 @@ fn monotone_region(
         let Some((dlo, lo_side, dhi, hi_side)) = chord(frame, &dom, uvm) else {
             continue;
         };
-        let slack = REL_SLACK * (1.0 + vmin.abs().max(vmax.abs()).max(dlo.abs()).max(dhi.abs()));
+        // (each slack relative to the two values compared: a huge sweep does not
+        // swallow a small domain)
+        let slack = |x: f64, y: f64| REL_SLACK * x.abs().max(y.abs());
         let (lo_v, lo_bound) = match lo_side {
-            Some(side) if dlo >= vmin - slack => (dlo.max(vmin), Bound::Side(side)),
+            Some(side) if dlo >= vmin - slack(dlo, vmin) => (dlo.max(vmin), Bound::Side(side)),
             _ => (vmin, Bound::Copy),
         };
         let (hi_v, hi_bound) = match hi_side {
-            Some(side) if dhi <= vmax + slack => (dhi.min(vmax), Bound::Side(side)),
+            Some(side) if dhi <= vmax + slack(dhi, vmax) => (dhi.min(vmax), Bound::Side(side)),
             _ => (vmax, Bound::Copy),
         };
-        let open = lo_v < hi_v - slack;
+        let open = lo_v < hi_v - slack(lo_v, hi_v);
         if !open {
             continue;
         }
@@ -807,14 +1209,15 @@ fn monotone_region(
         push_run(&mut upper, hi_bound, *a, *b);
     }
 
-    // the runs' curves: copies of the generator, or segments of the sides
+    // the runs' curves: copies of the generator (split exactly, as certified), or
+    // segments of the sides
     for (runs, v) in [(&lower, vmin), (&upper, vmax)] {
         for run in runs {
             match run.bound {
                 Bound::Copy => {
-                    let mut ivl = Extent1d::from_min_max(run.a, run.b);
-                    let mut copy = gen.clone();
-                    ignore_status(copy.trim(k, &mut ivl, TrimMode::Silent))?;
+                    let Some((mut copy, _)) = split(k, gen, run.a, run.b) else {
+                        return Ok(None);
+                    };
                     let mut shift = Axis2Placement::IDENTITY;
                     shift.translate(e * v);
                     ignore_status(copy.transform(k, &shift, None))?;
@@ -833,8 +1236,7 @@ fn monotone_region(
     // between them, cut to the domain. A side within the slack of an end's mu stands
     // for that end's directrix (the side wins the tie, as against the copies): the
     // directrix may lie just outside the domain, and the side bounds the region there.
-    let (mu0, mu1) = (rp.alpha.0, rp.beta.0);
-    let slack = EFF_ZERO * (1.0 + mu0.abs().max(mu1.abs()));
+    let (mu0, mu1) = (rp.alpha, rp.beta);
     let side_mu = |side: &Side| {
         frame.mu(if side.axis == 0 {
             Point2::new(side.value, 0.0)
@@ -842,37 +1244,37 @@ fn monotone_region(
             Point2::new(0.0, side.value)
         })
     };
+    let slack_of = |mu: f64| EFF_ZERO * mu0.abs().max(mu1.abs()).max(mu.abs());
     for s in [s0, s1] {
         let p = gen.evaluate_point(k, s)?;
         let mu_s = frame.mu(plane.project_point_to_uv_domain(p));
-        let at_side = sides
-            .iter()
-            .find(|side| parallel(side) && (side_mu(side) - mu_s).abs() <= slack);
-        out.extend(trimmed_segment(
-            inputs,
-            p + e * vmin,
-            p + e * vmax,
-            at_side.copied(),
-        )?);
+        let at_side = sides.iter().find(|side| {
+            let mu = side_mu(side);
+            parallel(side) && (mu - mu_s).abs() <= slack_of(mu)
+        });
+        out.extend(directrix(inputs, frame, p, at_side.copied())?);
     }
     for side in sides.iter().filter(|s| parallel(s)) {
         let mu = side_mu(side);
+        let slack = slack_of(mu);
         let inside = mu0 + slack < mu && mu < mu1 - slack;
         if !inside {
             continue;
         }
-        let roots = affine_roots(k, gen, &rp.ivl, frame.dmu, mu + frame.dmu.dot(frame.o), tol)?;
-        let [r] = roots.as_slice() else {
-            // (monotone: exactly one; anything else declines)
+        let g = Affine {
+            d: frame.dmu,
+            o: frame.o,
+            c: mu,
+        };
+        let Some(rs) = roots(k, gen, &rp.ivl, g, budget)? else {
+            return Ok(None);
+        };
+        let [r] = rs.as_slice() else {
+            // (monotone, the side strictly inside: exactly one; else decline)
             return Ok(None);
         };
         let p = gen.evaluate_point(k, *r)?;
-        out.extend(trimmed_segment(
-            inputs,
-            p + e * vmin,
-            p + e * vmax,
-            Some(*side),
-        )?);
+        out.extend(directrix(inputs, frame, p, Some(*side))?);
     }
     Ok(Some(()))
 }
@@ -889,8 +1291,8 @@ fn slab_region(
     let (mut alpha, mut beta) = (f64::INFINITY, f64::NEG_INFINITY);
     let (mut nu_lo, mut nu_hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for rp in group {
-        alpha = alpha.min(rp.alpha.0);
-        beta = beta.max(rp.beta.0);
+        alpha = alpha.min(rp.alpha);
+        beta = beta.max(rp.beta);
         nu_lo = nu_lo.min(rp.nu_lo);
         nu_hi = nu_hi.max(rp.nu_hi);
     }
@@ -938,7 +1340,7 @@ fn slab_region(
         area2 += p.x * q.y - q.x * p.y;
         scale = scale.max(p.x.abs()).max(p.y.abs());
     }
-    let flat = area2.abs() <= EFF_ZERO * (1.0 + scale) * (1.0 + scale);
+    let flat = area2.abs() <= EFF_ZERO * scale * scale;
     if flat {
         return Ok(None);
     }
@@ -947,8 +1349,8 @@ fn slab_region(
     let (vmin, vmax) = (inputs.v_ivl.min(), inputs.v_ivl.max());
     for &p in &poly {
         let nu = frame.nu(p);
-        let slack = REL_SLACK
-            * (1.0 + nu.abs() + nu_lo.abs().max(nu_hi.abs()) + vmin.abs().max(vmax.abs()));
+        let slack =
+            REL_SLACK * (nu.abs() + nu_lo.abs().max(nu_hi.abs()) + vmin.abs().max(vmax.abs()));
         let covered = nu - nu_hi >= vmin - slack && nu - nu_lo <= vmax + slack;
         if !covered {
             return Ok(None);
@@ -965,23 +1367,82 @@ fn slab_region(
     Ok(Some(()))
 }
 
+/// The solver's ranges cut to the generator interval, each extended span by span
+/// over the spans certified in the plane past its ends, then merged where they meet;
+/// `None` when an extension does not end.
+fn extended_ranges(
+    k: &Kernel,
+    inputs: &PatchInputs<'_>,
+    ranges: &[(f64, f64)],
+) -> Result<Option<Vec<(f64, f64)>>> {
+    let (ivl_lo, ivl_hi) = (inputs.gen_ivl.min(), inputs.gen_ivl.max());
+    let steps = match inputs.gen.kind() {
+        CurveKind::BSpline(bs) => bs.knots(None)?.0.len() + 2,
+        _ => 2,
+    };
+    let mut spans = Vec::new();
+    for &(a, b) in ranges {
+        let (mut lo, mut hi) = (a.min(b).max(ivl_lo), a.max(b).min(ivl_hi));
+        let nonempty = lo < hi;
+        if !nonempty {
+            continue;
+        }
+        for dir in [-1.0, 1.0] {
+            let mut ended = false;
+            for _ in 0..steps {
+                let end = if dir < 0.0 { lo } else { hi };
+                let inside = ivl_lo < end && end < ivl_hi;
+                if !inside {
+                    ended = true;
+                    break;
+                }
+                match past_end(k, inputs, end, dir)? {
+                    Past::Extends(t) if dir < 0.0 => lo = t,
+                    Past::Extends(t) => hi = t,
+                    Past::Departs { .. } | Past::Declined => {
+                        ended = true;
+                        break;
+                    }
+                }
+            }
+            if !ended {
+                return Ok(None);
+            }
+        }
+        spans.push((lo, hi));
+    }
+    spans.sort_by(|p, q| p.0.total_cmp(&q.0));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (lo, hi) in spans {
+        match merged.last_mut() {
+            Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+            _ => merged.push((lo, hi)),
+        }
+    }
+    Ok(Some(merged))
+}
+
 /// The boundary curves of the coincident region of the generator `ranges` (each
-/// `(s0, s1)`) swept over `V`, cut to the plane's domain, or `None` when no
-/// certificate covers them (the caller then needs the general intersection).
-/// `points` are the generator parameters of the point solutions outside the ranges:
-/// their directrices are lines of constant `mu`, so one whose `mu` is within a
-/// region's `[alpha, beta]` (with the solver's tolerance) would run through the region
-/// or along its edge, and the region declines.
+/// `(s0, s1)`) swept over `V`, cut to the plane's domain, with the ranges covered
+/// (extended over the spans in the plane past them and merged), or `None` when no
+/// certificate covers them (the caller then needs the general intersection). Every
+/// range end inside the generator interval (or at the seam of a closed generator)
+/// must be certified to leave the plane (see `past_end`). `points` are the generator
+/// parameters of the point solutions outside the solver's ranges: those inside the
+/// covered ranges are absorbed; one in a departure's zone declines (it is that
+/// departure); the others' directrices are lines of constant `mu`, so one whose `mu`
+/// is within a region's `[alpha, beta]` (with the solver's tolerance) would run
+/// through the region or along its edge, and the region declines.
 ///
 /// # Errors
 ///
-/// Those of the generator's copies, trims, evaluations and property analyses.
+/// Those of the generator's copies, trims and evaluations.
 pub(super) fn coincident_patch(
     k: &Kernel,
     inputs: &PatchInputs<'_>,
     ranges: &[(f64, f64)],
     points: &[f64],
-) -> Result<Option<Vec<(Curve, TsectCurveType)>>> {
+) -> Result<Option<Patch>> {
     let (vmin, vmax) = (inputs.v_ivl.min(), inputs.v_ivl.max());
     let sweeps = vmin < vmax && vmin.is_finite() && vmax.is_finite();
     if !sweeps {
@@ -990,43 +1451,85 @@ pub(super) fn coincident_patch(
     let Some(frame) = Frame::new(inputs.plane, inputs.extrusion_vec) else {
         return Ok(None);
     };
+    let mut budget = PIECE_BUDGET;
+
+    // the ranges covered, and the departures past their ends: (end, direction, zone)
+    let Some(covered) = extended_ranges(k, inputs, ranges)? else {
+        return Ok(None);
+    };
+    let (ivl_lo, ivl_hi) = (inputs.gen_ivl.min(), inputs.gen_ivl.max());
+    let whole = matches!(covered.as_slice(), [(lo, hi)] if *lo <= ivl_lo && *hi >= ivl_hi);
+    let mut departures: Vec<(f64, f64, f64)> = Vec::new();
+    for &(lo, hi) in &covered {
+        for (end, dir) in [(lo, -1.0), (hi, 1.0)] {
+            let inside = ivl_lo < end && end < ivl_hi;
+            // (at the seam of a closed generator, the span past it starts at the
+            // interval's other end)
+            let (from, dir) = if inside {
+                (end, dir)
+            } else if inputs.gen_closed && !whole {
+                (if dir < 0.0 { ivl_hi } else { ivl_lo }, dir)
+            } else {
+                continue;
+            };
+            match past_end(k, inputs, from, dir)? {
+                Past::Departs { zone } => departures.push((from, dir, zone)),
+                // (in the plane past the seam: the range wraps around it)
+                Past::Extends(_) | Past::Declined => return Ok(None),
+            }
+        }
+    }
 
     // split, certify and measure every range first: one failure keeps today's answer
     let mut pieces = Vec::new();
-    for &r in ranges {
-        match range_piece(k, inputs, &frame, r)? {
+    for &r in &covered {
+        match range_piece(k, inputs, &frame, r, &mut budget)? {
             Measured::Declined => return Ok(None),
             Measured::Empty => {}
             Measured::Piece(p) => pieces.push(p),
         }
     }
-    pieces.sort_by(|p, q| p.alpha.0.total_cmp(&q.alpha.0));
+    pieces.sort_by(|p, q| p.alpha.total_cmp(&q.alpha));
 
     // the groups of overlapping mu ranges (ranges merely touching decline: their
     // regions would share a directrix)
     let mut groups: Vec<Vec<&RangePiece>> = Vec::new();
     let mut reach = f64::NEG_INFINITY;
     for p in &pieces {
-        let slack = EFF_ZERO * (1.0 + reach.abs().max(p.alpha.0.abs()));
+        let slack = EFF_ZERO * reach.abs().max(p.alpha.abs());
         match groups.last_mut() {
-            Some(g) if p.alpha.0 <= reach => g.push(p),
-            Some(_) if p.alpha.0 <= reach + slack => return Ok(None),
+            Some(g) if p.alpha <= reach => g.push(p),
+            Some(_) if p.alpha <= reach + slack => return Ok(None),
             _ => groups.push(vec![p]),
         }
-        reach = reach.max(p.beta.0);
+        reach = reach.max(p.beta);
     }
 
-    // the point solutions' directrices: off every region (a point found within `tol`
-    // in space is within `tol |dmu|` of its mu)
+    // the point solutions: absorbed inside the covered ranges, declining in a
+    // departure's zone, else their directrices off every region (a point found within
+    // `tol` in space is within `tol |dmu|` of its mu)
     for &t in points {
+        let absorbed = covered
+            .iter()
+            .any(|&(lo, hi)| lo - EFF_ZERO_PARAM <= t && t <= hi + EFF_ZERO_PARAM);
+        if absorbed {
+            continue;
+        }
+        let departing = departures.iter().any(|&(from, dir, zone)| {
+            let past = (t - from) * dir;
+            past >= 0.0 && past <= zone
+        });
+        if departing || !t.is_finite() {
+            return Ok(None);
+        }
         let mu = frame.mu(inputs
             .plane
             .project_point_to_uv_domain(inputs.gen.evaluate_point(k, t)?));
         for g in &groups {
-            let alpha = g.iter().map(|p| p.alpha.0).fold(f64::INFINITY, f64::min);
-            let beta = g.iter().map(|p| p.beta.0).fold(f64::NEG_INFINITY, f64::max);
+            let alpha = g.iter().map(|p| p.alpha).fold(f64::INFINITY, f64::min);
+            let beta = g.iter().map(|p| p.beta).fold(f64::NEG_INFINITY, f64::max);
             let slack = inputs.tol * frame.dmu.length()
-                + EFF_ZERO * (1.0 + alpha.abs().max(beta.abs()).max(mu.abs()));
+                + EFF_ZERO * alpha.abs().max(beta.abs()).max(mu.abs());
             let on_region = alpha - slack <= mu && mu <= beta + slack;
             if on_region || !mu.is_finite() {
                 return Ok(None);
@@ -1037,16 +1540,18 @@ pub(super) fn coincident_patch(
     let mut out: Vec<Curve> = Vec::new();
     for g in &groups {
         let answered = match g.as_slice() {
-            [rp] if rp.monotone => monotone_region(k, inputs, &frame, rp, &mut out)?,
+            [rp] if rp.monotone => monotone_region(k, inputs, &frame, rp, &mut budget, &mut out)?,
             _ => slab_region(inputs, &frame, g, &mut out)?,
         };
         if answered.is_none() {
             return Ok(None);
         }
     }
-    Ok(Some(
-        out.into_iter()
+    Ok(Some(Patch {
+        curves: out
+            .into_iter()
             .map(|c| (c, TsectCurveType::RegionBoundary))
             .collect(),
-    ))
+        ranges: covered,
+    }))
 }
