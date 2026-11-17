@@ -833,7 +833,7 @@ impl Cone {
             let points = segment_segment_intersect(bottom, top, other_bottom, other_top, tol)?;
             #[allow(clippy::print_stderr, clippy::disallowed_methods)]
             if true {
-                eprintln!("DIAGCC tol {tol} approx {approx_tol_3d:?} points {}", points.len());
+                eprintln!("DIAGCC tol {tol} approx {approx_tol:?} points {}", points.len());
             }
             let [point] = points.as_slice() else {
                 return Ok(true);

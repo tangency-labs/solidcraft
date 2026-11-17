@@ -2804,7 +2804,7 @@ pub fn face_intersect_breps_cached(
             format!("{:?}", core::mem::discriminant(surface_of(ob, other)?.kind())),
         );
         let is_cone = |s: &crate::surface::surface::Surface| {
-            matches!(s.kind(), crate::surface::surface::p2::SurfaceKind::Cone(_))
+            matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_))
         };
         if is_cone(surface_of(b, f)?) && is_cone(surface_of(ob, other)?) {
             eprintln!("DIAGFF approx {approx_tol_3d} zones {this_zone_tol} {other_zone_tol} edges={curves_are_edges} n={} {kinds:?}", curves_3d.len());
