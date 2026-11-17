@@ -34,5 +34,9 @@
   "zh": {
     "settings.cadmpeg_import": "使用 cadmpeg 将 STEP、FreeCAD 和 Rhino 文件直接读取为 B-rep，而不经过 SolidCraft 的 STEP 读取器",
     "prefs.cadmpeg_import": "使用 cadmpeg 导入"
+  },
+  "ko": {
+    "settings.cadmpeg_import": "STEP, FreeCAD 및 Rhino 파일을 SolidCraft의 STEP 리더를 거치지 않고 cadmpeg로 B-rep에 직접 읽기",
+    "prefs.cadmpeg_import": "cadmpeg로 가져오기"
   }
 }
