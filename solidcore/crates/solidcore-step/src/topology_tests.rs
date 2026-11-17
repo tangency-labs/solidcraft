@@ -1260,6 +1260,100 @@ fn a_spindle_torus_band_splits_its_circle_just_short_of_a_vertex_near_the_quarte
     spindle_torus_band(40.0, 60.0, 5e-9);
 }
 
+/// A spike on a disk: the part of a torus whose tube reaches its axis (major radius `major`,
+/// minor radius `minor` no smaller, its centre `c`) from the circle a tube radius below `c` up
+/// to the nearest point where the tube meets the axis, closed by the disk in the circle. Read,
+/// validated, its faces pointing out; returns the solid and that point, the surface's pole.
+fn torus_spike(c: V, major: f64, minor: f64) -> (Solid, V) {
+    let (z, x) = ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let below = [c[0], c[1], c[2] - minor];
+    let pole = [c[0], c[1], c[2] - (minor * minor - major * major).max(0.0).sqrt()];
+    let mut w = W::default();
+    let v = w.vertex([c[0] + major, c[1], c[2] - minor]);
+    let k = w.circle(below, z, x, major);
+    let rim = w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"));
+    let apex = w.vertex(pole);
+    let point = w.add(format!("VERTEX_LOOP('',#{apex})"));
+    let point = w.add(format!("FACE_BOUND('',#{point},.T.)"));
+    let a = w.axis(c, z, x);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},{},{})", real(major), real(minor)));
+    // The torus's normal points out of its tube, into the spike: the face is its other side.
+    let o = w.oe(rim, true);
+    let bound = w.bound(&[o], false, true);
+    let side = w.face(&[point, bound], torus, false);
+    let plane = w.plane(below, z, x);
+    let o = w.oe(rim, false);
+    let bound = w.bound(&[o], false, true);
+    let disk = w.face(&[bound], plane, false);
+    let shell = closed_shell(&mut w, &[side, disk]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('spike',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2], "{c:?}");
+    // The spike is thin at its rim: the material lies under a point of its face and over a
+    // point of its disk.
+    let floor = c[2] - minor;
+    faces_away(&s.brep, 0, |p| if p[2] > floor + 1e-8 * minor { [p[0], p[1], floor] } else { [p[0], p[1], floor + 1e-8 * minor] });
+    (s, pole)
+}
+
+/// The end of the form of [`torus_spike`]'s face that lies nearer `pole`: its parameter along
+/// the tube, whether it is the form's own end (its first or last knot), and how far the form
+/// is from `pole` there, at its farthest round the axis.
+fn spike_form_end(s: &Solid, pole: V) -> (f64, bool, f64) {
+    let face = s.brep.faces.iter().find(|f| f.nurbs.is_some()).unwrap();
+    let Some(form @ BSurface::RationalSpline { v_knots, .. }) = &face.nurbs else { panic!("{:?}", face.nurbs) };
+    let eval = SurfaceEval::new(form).unwrap();
+    let [[u0, u1], [v0, v1]] = face.domain;
+    let first = eval.point([u0, v0]).unwrap().dist(v3(pole)) < eval.point([u0, v1]).unwrap().dist(v3(pole));
+    let (end, knot) = if first { (v0, v_knots[0]) } else { (v1, v_knots[v_knots.len() - 1]) };
+    let off = (0..=8).map(|i| eval.point([u0 + (u1 - u0) * f64::from(i) / 8.0, end]).unwrap().dist(v3(pole))).fold(0.0, f64::max);
+    (end, end == knot, off)
+}
+
+/// A horn torus has its major radius equal to its minor radius `r`: its tube touches its axis
+/// in one point, the torus's centre. A face that reaches that point is the tube's circle
+/// revolved about the axis from where the circle touches it, so its form ends on that point,
+/// the surface's pole. Whether the circle touches is the torus's two radii being equal. Worked
+/// out from the circle's centre, with the torus off the origin, it came out a few units in the
+/// last place either side: read as a miss, the face was refused ("a face around an open
+/// surface of revolution with one bound"); read as a crossing, its form ended 5e-8 of a quarter
+/// short of the pole and the kernel's check refused the body. The solid has the volume under
+/// the tube's quarter arc, π r³ (5/3 − π/2).
+#[test]
+fn a_horn_torus_face_to_its_pole_has_a_form_that_ends_on_the_pole() {
+    let r: f64 = 1.3;
+    for c in [[0.0; 3], [137.3, 23.7, 17.9], [44.58, -23.18, 17.91], [3.3, 3.3, 3.3], [1e3, 1e3, 1e3], [0.0, 0.0, 1e6]] {
+        let (s, pole) = torus_spike(c, r, r);
+        assert_eq!(pole, c);
+        let (_, on_end, off) = spike_form_end(&s, pole);
+        assert!(on_end, "{c:?}: the form ends on the pole");
+        assert!(off <= 1e-12 * (1.0 + v3(c).len()), "{c:?}: {off}");
+        let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+        assert!(body.is_manifold_solid().unwrap(), "{c:?}");
+        let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "{c:?}: {report}");
+        assert_eq!(body.check_solid(), Ok(()), "{c:?}");
+        let volume = PI * r.powi(3) * (5.0 / 3.0 - 0.5 * PI);
+        let mass = body.mass_properties(1e-6).unwrap();
+        assert!((mass.volume - volume).abs() < 1e-5 * volume, "{c:?}: {} vs {volume}", mass.volume);
+    }
+}
+
+/// A spindle torus whose tube crosses its axis by 1e-9 (its minor radius that much over its
+/// major radius) is no horn torus, however far from the origin it sits: its face's form ends
+/// where the tube crosses the axis, 5.1e-5 below the torus's centre, not on the centre.
+#[test]
+fn a_spindle_torus_a_hair_from_a_horn_ends_its_form_where_its_tube_crosses_the_axis() {
+    let (major, minor): (f64, f64) = (1.3, 1.3 + 1e-9);
+    for c in [[0.0; 3], [137.3, 23.7, 17.9], [0.0, 0.0, 1e4]] {
+        let (s, pole) = torus_spike(c, major, minor);
+        assert!((c[2] - pole[2] - 5.1e-5).abs() < 1e-6, "{pole:?}");
+        let (_, on_end, off) = spike_form_end(&s, pole);
+        assert!(on_end, "{c:?}: the form ends on the pole");
+        assert!(off <= 1e-9 * (1.0 + v3(c).len()), "{c:?}: {off}");
+    }
+}
+
 /// A quarter elbow: a torus face winding round its tube between two tube circles (at u = 0 and
 /// u = π/2), closed by the two disks they bound. The tube face gets a seam round the axis at a
 /// vertex's angle round the tube, as a band round the axis gets one round the tube.
