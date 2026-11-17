@@ -2,7 +2,6 @@
 const ROWS: &[Row] = &[
     Row { case: "attributed_box_face0_in", main: 0xb45770c6877602c6, new: 0xb45770c6877602c6, moved: &[] },
     Row { case: "attributed_box_face0_out", main: 0x84902ff4c487f88e, new: 0x84902ff4c487f88e, moved: &[] },
-    Row { case: "attributed_box_face0_same", main: 0x408b89cc9bd0312e, new: 0x408b89cc9bd0312e, moved: &[] },
     Row { case: "attributed_box_face1_out", main: 0xbf16feb022651770, new: 0xbf16feb022651770, moved: &[] },
     Row { case: "attributed_box_face2_out", main: 0x24ff9f94e368f0a5, new: 0x24ff9f94e368f0a5, moved: &[] },
     Row { case: "attributed_box_face3_in", main: 0x0342fb5cc240e548, new: 0x0342fb5cc240e548, moved: &[] },
@@ -10,7 +9,6 @@ const ROWS: &[Row] = &[
     Row { case: "attributed_box_face5_tilt", main: 0x7568f4bb27867606, new: 0x926897f7bbb64823, moved: &[("record", 6, -0.1999999999999999, -0.19999999999999998), ("record", 10, -0.1999999999999999, -0.19999999999999996), ("record", 14, -0.19999999999999993, -0.19999999999999998), ("record", 18, -0.19999999999999996, -0.19999999999999998), ("record", 202, -0.1999999999999999, -0.19999999999999998), ("record", 206, -0.1999999999999999, -0.19999999999999996), ("record", 210, -0.19999999999999993, -0.19999999999999998), ("record", 214, -0.19999999999999996, -0.19999999999999998), ("record", 262, -0.19999999999999993, -0.19999999999999996), ("record", 266, -0.19999999999999993, -0.19999999999999998), ("record", 270, -0.1999999999999999, -0.19999999999999998), ("record", 274, -0.1999999999999999, -0.19999999999999998), ("record", 322, -0.19999999999999993, -0.19999999999999996), ("record", 326, -0.1999999999999999, -0.19999999999999996), ("record", 330, -0.1999999999999999, -0.19999999999999996), ("geometry", 100, -0.1999999999999999, -0.19999999999999998), ("geometry", 103, 2.0000000000166535e-05, 2.000000000008327e-05), ("geometry", 112, -0.1999999999999999, -0.19999999999999998), ("geometry", 115, 2.000000000069389e-05, 2.0000000000777158e-05), ("geometry", 124, -0.1999999999999999, -0.19999999999999998), ("geometry", 127, 2.0000000000166535e-05, 2.000000000008327e-05)] },
     Row { case: "box_face0_in", main: 0x9d8f6f023ad11a97, new: 0x9d8f6f023ad11a97, moved: &[] },
     Row { case: "box_face0_out", main: 0x239847f91a5126b7, new: 0x239847f91a5126b7, moved: &[] },
-    Row { case: "box_face0_same", main: 0x97ac4c52dc639d7f, new: 0x97ac4c52dc639d7f, moved: &[] },
     Row { case: "box_face1_out", main: 0x90acc1f8147c596d, new: 0x90acc1f8147c596d, moved: &[] },
     Row { case: "box_face2_out", main: 0xbaac5af1f6e73aa0, new: 0xbaac5af1f6e73aa0, moved: &[] },
     Row { case: "box_face3_in", main: 0x221b75d305becd9d, new: 0x221b75d305becd9d, moved: &[] },

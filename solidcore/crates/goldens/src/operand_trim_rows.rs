@@ -844,7 +844,7 @@ mod local_operation {
 
     include!("operand_trim_rows/local_operation.rs");
 
-    /// Every `topology.brep_local_operation` row the copy moves (67): certified as the
+    /// Every `topology.brep_local_operation` row the copy moves (65): certified as the
     /// module docs say; none farther.
     #[test]
     fn local_operation_rows_are_certified() {
@@ -866,7 +866,7 @@ mod local_operation {
             "{} rows: moved values closer {closer}, equal {equal}",
             ROWS.len()
         );
-        assert_eq!(ROWS.len(), 67);
+        assert_eq!(ROWS.len(), 65);
     }
 }
 
@@ -955,9 +955,10 @@ mod feature_executive {
     }
 }
 
-/// The rows of `boolean.merge_p4` and `topology.brep_p7` the copy moves: their outputs write
-/// whole bodies (`topology.brep_p10`'s snapshot, `p7`'s destination graph), where the move is
-/// a UV trim block that main left empty. A row is certified by
+/// The rows of `topology.brep_p7` the copy moves (`boolean.merge_p4`'s are main's, bit for
+/// bit, since a plane keeps `MakeFace`'s trim of a line edge): their outputs write whole
+/// bodies (`topology.brep_p10`'s snapshot, `p7`'s destination graph), where the move is a UV
+/// trim block that main left empty. A row is certified by
 /// * **replay**: the case's Rust side, run again, has the output digest ([`digest`]) recorded
 ///   for this branch, so the run is the row;
 /// * **only trims moved**: run again with every edge use's trim cleared on each body the
@@ -1063,20 +1064,12 @@ mod trim_blocks {
         (trims, made)
     }
 
-    /// The 15 `boolean.merge_p4` rows.
-    #[test]
-    fn merge_p4_rows_are_certified() {
-        let (trims, _) = certify(&crate::units::boolean_merge_p4::Runner, MERGE_P4, false);
-        eprintln!("{} rows, {trims} trims", MERGE_P4.len());
-        assert_eq!(MERGE_P4.len(), 15);
-    }
-
-    /// The 9 `topology.brep_p7` rows.
+    /// The 6 `topology.brep_p7` rows.
     #[test]
     fn brep_p7_rows_are_certified() {
         let (trims, _) = certify(&crate::units::topology_brep_p7::Runner, BREP_P7, false);
         eprintln!("{} rows, {trims} trims", BREP_P7.len());
-        assert_eq!(BREP_P7.len(), 9);
+        assert_eq!(BREP_P7.len(), 6);
     }
 
     /// The `topology.brep_p10` subdivide cases the trim drop moves (two rows, plus two that
@@ -1251,9 +1244,10 @@ mod trim_blocks {
     include!("operand_trim_rows/drop_rows.rs");
 }
 
-/// The rows of `blend.fillet_executive_p3` the copy moves: a fillet (or fillet then shell)
-/// of a Boolean's result, whose faces now keep their operands' UV trims. A row is certified
-/// as follows.
+/// The rows of `blend.fillet_executive_p3` the copy moves: a fillet then shell of a
+/// Boolean's result, whose faces now keep their operands' UV trims (the box unions' fillet
+/// rows are main's, bit for bit, since a plane keeps `MakeFace`'s trim of a line edge). A
+/// row is certified as follows.
 /// * **Replay.** The case's Rust side is run again; its output has the digest ([`digest`])
 ///   recorded for this branch, so the run is the row.
 /// * **Only the listed values moved, up to a relabeling.** The output's vertices and edges
@@ -1264,13 +1258,14 @@ mod trim_blocks {
 ///   then has main's digest, bit for bit. So the body is main's, entity for entity, but for
 ///   the listed values.
 /// * **Soundness.** The result body's `check_brep` level 2 reports nothing (as main's
-///   bodies: all nine clean), it is one manifold solid of positive volume, and its volume is
+///   bodies: both clean), it is one manifold solid of positive volume, and its volume is
 ///   enclosed ([`enclose_volume`], refined towards a relative width of 1e-9).
 /// * **Geometry.** Each moved vertex point, edge sample or face sample is classed as in the
 ///   module docs (enclosed distances to the surfaces of the faces it lies on), each moved
 ///   vertex or edge tolerance against its need ([`vertex_need`], [`edge_need`], from the
 ///   body's trims certified on their edges); a moved edge interval or face domain bound is
-///   classed as the most distant of its edge's or face's moved samples (one must have moved).
+///   classed as the most distant of its edge's or face's moved samples, or, where none
+///   moved, by its exact distance to the bound's closed form (`DOMAIN_BOUNDS`).
 /// * **Mass.** A moved volume is classed by its distance to the true volume, enclosed by
 ///   the enclosure (`equal` where main's and this branch's distances meet). The other mass properties (area,
 ///   centroid, inertia; at most 4.8e-7 relative) have no enclosure here: they are reported,
@@ -1447,6 +1442,19 @@ mod fillet_p3 {
         }
     }
 
+    /// Face domain bounds known in closed form: (case, face, slot of its block, value). A
+    /// moved bound with no moved sample of its face is classed by its exact distance to it.
+    ///
+    /// `real-box-fillet4v-r3-shell-closed`: the box `[0, 30] × [0, 20] × [0, 10]` with its
+    /// four vertical edges rounded r 3 (axes at `x, y ∈ {3, 27} × {3, 17}`), shelled
+    /// inwards by 2. Face 16 is the inner wall `x = 28` (a plane with `u = y`, `v = z`): the
+    /// offset of the wall `x = 30` whose flat part runs `y ∈ [3, 17]` between the rounds'
+    /// tangent lines (`y = 3` and `17`, where each axis lies at distance 3 from the wall), and
+    /// whose offset rounds (radius 1, same axes) meet it on the same lines, between the floor
+    /// and roof `z = 2` and `8`. Its natural domain's `u0` (slot 1) is therefore `3`.
+    const DOMAIN_BOUNDS: &[(&str, usize, usize, f64)] =
+        &[("real-box-fillet4v-r3-shell-closed", 16, 1, 3.0)];
+
     /// Classes `row`'s moved geometry values (in the relabeled array `g`, key `key`) on this
     /// branch's body `b`.
     fn certify_geometry(row: &Row, key: &str, g: &[f64], b: &Brep) -> Vec<Class> {
@@ -1503,6 +1511,8 @@ mod fillet_p3 {
         let mut edge_samples: Vec<(usize, Class)> = Vec::new();
         let mut face_samples: Vec<(usize, Class)> = Vec::new();
         let (mut bound_edges, mut bound_faces) = (Vec::new(), Vec::new());
+        // per moved face domain bound: (face, slot, main, now)
+        let mut face_bounds: Vec<(usize, usize, f64, f64)> = Vec::new();
         for &&(_, i, _, _) in &moved {
             if let Some(bv) = vb.iter().position(|r| r.contains(&i)) {
                 let vid = vertices[unmap(row.vertices, bv)];
@@ -1568,6 +1578,7 @@ mod fillet_p3 {
                 if (1..=4).contains(&(i - j)) {
                     eprintln!("  face {bf} domain: main {:e}, now {:e}", main_of(i), g[i]);
                     bound_faces.push(bf);
+                    face_bounds.push((bf, i - j, main_of(i), g[i]));
                 } else {
                     let (n, s) = sample_at(j, 6, i)
                         .unwrap_or_else(|| panic!("{name}: face {bf} slot {} moved", i - j));
@@ -1595,9 +1606,46 @@ mod fillet_p3 {
             for x in bounds {
                 let of: Vec<Class> = samples.iter().filter(|s| s.0 == x).map(|s| s.1).collect();
                 if of.is_empty() {
-                    // OPEN: a bound moved, none of its samples did: not classed yet
-                    eprintln!("  {what} {x} bound: NO MOVED SAMPLE (unclassed)");
-                    classes.push(Class::Farther);
+                    // a face bound with a closed form (DOMAIN_BOUNDS) is classed against it
+                    let closed: Option<Vec<Class>> = (what == "face")
+                        .then(|| {
+                            face_bounds
+                                .iter()
+                                .filter(|m| m.0 == x)
+                                .map(|&(_, slot, main, now)| {
+                                    let r = DOMAIN_BOUNDS
+                                        .iter()
+                                        .find(|d| d.0 == name && d.1 == x && d.2 == slot)?
+                                        .3;
+                                    // exact: each difference is within a factor 2 of `r`
+                                    // (Sterbenz), so it rounds to itself
+                                    let (dm, dn) = ((main - r).abs(), (now - r).abs());
+                                    let class = match dn.partial_cmp(&dm)? {
+                                        std::cmp::Ordering::Less => Class::Closer,
+                                        std::cmp::Ordering::Equal => Class::Equal,
+                                        std::cmp::Ordering::Greater => Class::Farther,
+                                    };
+                                    eprintln!(
+                                        "  face {x} domain slot {slot}: main {main:e}, now \
+                                         {now:e}, closed form {r:e}: {class:?}"
+                                    );
+                                    Some(class)
+                                })
+                                .collect()
+                        })
+                        .flatten();
+                    match closed {
+                        Some(of) if !of.is_empty() => {
+                            let class = worst(&of);
+                            eprintln!("  {what} {x} bound: {class:?} (closed form)");
+                            classes.push(class);
+                        }
+                        _ => {
+                            // OPEN: a bound moved, none of its samples did: not classed
+                            eprintln!("  {what} {x} bound: NO MOVED SAMPLE (unclassed)");
+                            classes.push(Class::Farther);
+                        }
+                    }
                     continue;
                 }
                 let class = worst(&of);
@@ -1609,11 +1657,6 @@ mod fillet_p3 {
     }
 
     #[test]
-    #[ignore = "OPEN (#17896): 3 of 9 rows not yet certified: corner3x2-union-overhang-front-edges15-24-r1 \
-                (v20/v21/e28 tolerance 4e-5 -> 1.0356e-4, need 1.29e-5: farther), \
-                overhang-union-y-both-overhang-all-edges-r0.5 (edge 38 samples 3.09e-6 -> 3.24e-6 off \
-                face 40: farther), real-box-fillet4v-r3-shell-closed (face 16 domain bound moved, no \
-                sample moved: unclassed)"]
     fn fillet_p3_rows_are_certified() {
         let (mut closer, mut equal, mut measured) = (0, 0, 0);
         let mut farther = Vec::new();
@@ -1725,6 +1768,6 @@ mod fillet_p3 {
             farther.len()
         );
         assert!(farther.is_empty(), "moved values farther in {farther:?}");
-        assert_eq!(ROWS.len(), 9);
+        assert_eq!(ROWS.len(), 2);
     }
 }

@@ -1,7 +1,8 @@
 //! #17896 (retiring `keep_operand_uv_trims`): the golden rows the affine fix moves
 //! (`CPoint::affine2` in `nurbs/math.rs`, a knot insertion keeping a coordinate exactly
-//! when both control points it combines share it), and the `boolean.api_brep` face areas,
-//! replayed and classed against exact references.
+//! when both control points it combines share it), replayed and classed against exact
+//! references. (`boolean.api_brep`'s rows are main's, bit for bit, since a plane keeps
+//! `MakeFace`'s trim of a line edge.)
 //!
 //! Run: `cargo test --profile goldens -p goldens --test keepuv_moved_rows`.
 //!
@@ -27,11 +28,9 @@
 //!   surface's boundary) is 0;
 //! * a trim's control points, knots and parameters are the case's decimal inputs (`0.1`,
 //!   `0.9`, `t = 0.55`, `0.438`) as exact rationals; a unit derivative is 1;
-//! * a face area of a box union is the closed form of its polygon (below).
 //!
-//! Not here: the three `issue383_seed4_*_tangent_torus` rows of `boolean.api_brep`
-//! (torus face areas, measured farther by quadrature, no closed form). Elements with no
-//! reference narrower than their move are [`Ref::Open`] and listed, not classed.
+//! Elements with no reference narrower than their move are [`Ref::Open`] and listed, not
+//! classed.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -393,9 +392,6 @@ enum Ref {
     Q(Dy, Dy),
     /// A value known to lie in the interval.
     I(Iv),
-    /// The element is one of several values, not known which: decided only where every
-    /// candidate gives the same class.
-    Any(Vec<Iv>),
     /// A discrete choice among values equal in exact arithmetic (an argmax over gaps that
     /// are all 0, or the kind of the record holding it): equal.
     Tie,
@@ -486,17 +482,6 @@ fn class_of(e: &El) -> Option<Class> {
             })
         }
         Ref::I(r) => Some(enclosed_class(e.new, e.main, *r)),
-        Ref::Any(rs) => {
-            let cs: Vec<Class> = rs
-                .iter()
-                .map(|r| enclosed_class(e.new, e.main, *r))
-                .collect();
-            Some(if cs.iter().all(|c| *c == cs[0]) {
-                cs[0]
-            } else {
-                Class::Equal
-            })
-        }
         Ref::R(r) => Some(r.class(e.new, e.main)),
         Ref::Tie | Ref::Cert => Some(Class::Equal),
         Ref::Skip | Ref::Open(_) => None,
@@ -932,35 +917,6 @@ fn adversarial_biquadratic() -> Bss {
         u: vec![0.0, 0.0, 0.0, 0.1116114584111405, 1.0, 1.0, 1.0],
         v: vec![0.0, 0.0, 0.0, 0.48093325471811293, 1.0, 1.0, 1.0],
     }
-}
-
-// ---- face areas ------------------------------------------------------------------------
-
-/// `crossing_creases_union_d1e-05`: the faces of area near `a` (100 or 200) are either
-/// whole (`a`) or carry the crease dent `2√2 δ²`, `δ = 10 − 9.999992928932189` (the exact
-/// clipping of the case's two boxes, checked in exact decimal arithmetic).
-fn crease(a: f64) -> Vec<Iv> {
-    let delta = Iv::p(10.0).sub(Iv::p(9.999992928932189));
-    let dent = Iv::p(2.0).sqrt().mul(Iv::p(2.0)).mul(delta.mul(delta));
-    vec![Iv::p(a), Iv::p(a).sub(dent)]
-}
-
-/// `wr614_strip_measured_union_*`: the union of the 4-box at `(−2, 16, 0)` and the 4-box
-/// turned by `(10, 1)/√101` and moved to `(tx, ty, 0)`, `δ = 20 − ty`. Its 4-wide side
-/// faces have areas `16`, `16 − 4δ·101/10`, `16 − 4δ√101` and `16 − 4δ√101/10` (all
-/// candidates, `.0`); the last is the face the strip cuts (`.1`).
-fn strip(ty: f64) -> (Vec<Iv>, Iv) {
-    let delta = Iv::p(20.0).sub(Iv::p(ty));
-    let r = Iv::p(101.0).sqrt();
-    let four = Iv::p(4.0);
-    let cut = Iv::p(16.0).sub(four.mul(delta).mul(r).div(Iv::p(10.0)));
-    let all = vec![
-        Iv::p(16.0),
-        Iv::p(16.0).sub(four.mul(delta).mul(Iv::p(101.0)).div(Iv::p(10.0))),
-        Iv::p(16.0).sub(four.mul(delta).mul(r)),
-        cut,
-    ];
-    (all, cut)
 }
 
 // ---- heal corners ----------------------------------------------------------------------
@@ -1744,153 +1700,6 @@ fn query_face_seam_start() {
         ],
     }];
     check("query.face_p4", &rows);
-}
-
-/// `boolean.api_brep` (4 rows): face areas against the closed forms of the boxes' union
-/// ([`crease`], [`strip`]). A wr614 strip's `[5]` is the cut face (PROVEN that the new
-/// value is within 3e-15 of its area and `main` 1e-5 off; ARGUED that the sorted position
-/// is that face); its `[3]` lies below every candidate and moves 1 ulp down: farther.
-#[test]
-fn api_brep_face_areas() {
-    let rows = vec![
-        Row {
-            case: "crossing_creases_union_d1e-05",
-            want: RowClass::Closer,
-            els: vec![
-                el(
-                    "measures",
-                    6,
-                    100.0,
-                    99.99999999999999,
-                    Ref::Any(crease(100.0)),
-                    Class::Equal,
-                ),
-                el(
-                    "measures",
-                    10,
-                    100.00000000000001,
-                    100.0,
-                    Ref::Any(crease(100.0)),
-                    Class::Closer,
-                ),
-                el(
-                    "measures",
-                    12,
-                    199.99985857864374,
-                    199.99999999999994,
-                    Ref::Any(crease(200.0)),
-                    Class::Closer,
-                ),
-                el(
-                    "measures",
-                    13,
-                    199.99999999999997,
-                    199.99999999999994,
-                    Ref::Any(crease(200.0)),
-                    Class::Equal,
-                ),
-                el(
-                    "measures",
-                    14,
-                    200.0,
-                    199.99999999999997,
-                    Ref::Any(crease(200.0)),
-                    Class::Equal,
-                ),
-            ],
-        },
-        Row {
-            case: "wr614_strip_measured_union_d1e-05",
-            want: RowClass::Mixed,
-            els: vec![
-                el(
-                    "measures",
-                    3,
-                    15.999199990099072,
-                    15.999199990099068,
-                    Ref::Any(strip(19.99999).0),
-                    Class::Farther,
-                ),
-                el(
-                    "measures",
-                    5,
-                    15.999970148884294,
-                    15.999959800497514,
-                    Ref::I(strip(19.99999).1),
-                    Class::Closer,
-                ),
-                el(
-                    "measures",
-                    10,
-                    16.000000000000014,
-                    16.00000000000001,
-                    Ref::Any(strip(19.99999).0),
-                    Class::Closer,
-                ),
-            ],
-        },
-        Row {
-            case: "wr614_strip_measured_union_d2e-06",
-            want: RowClass::Mixed,
-            els: vec![
-                el(
-                    "measures",
-                    3,
-                    15.999839998019816,
-                    15.999839998019812,
-                    Ref::Any(strip(19.999998).0),
-                    Class::Farther,
-                ),
-                el(
-                    "measures",
-                    5,
-                    15.999994029776857,
-                    15.999991960099505,
-                    Ref::I(strip(19.999998).1),
-                    Class::Closer,
-                ),
-                el(
-                    "measures",
-                    7,
-                    16.0,
-                    15.999999999999998,
-                    Ref::Any(strip(19.999998).0),
-                    Class::Equal,
-                ),
-                el(
-                    "measures",
-                    10,
-                    16.000000000000014,
-                    16.00000000000001,
-                    Ref::Any(strip(19.999998).0),
-                    Class::Closer,
-                ),
-            ],
-        },
-        Row {
-            case: "wr614_strip_measured_union_d5e-06",
-            want: RowClass::Mixed,
-            els: vec![
-                el(
-                    "measures",
-                    3,
-                    15.999599995049532,
-                    15.999599995049529,
-                    Ref::Any(strip(19.999995).0),
-                    Class::Farther,
-                ),
-                el(
-                    "measures",
-                    5,
-                    15.999985074442126,
-                    15.999979900248748,
-                    Ref::I(strip(19.999995).1),
-                    Class::Closer,
-                ),
-            ],
-        },
-    ];
-    check("boolean.api_brep", &rows);
 }
 
 /// `topology.edgeuse_p3` (15 rows): trims of the adversarial biquadratic face at
