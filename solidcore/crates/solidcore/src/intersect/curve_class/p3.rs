@@ -42,7 +42,8 @@
 //! - **3D-distinct snaps (solidcore-native).** `FindInterval` snaps a parameter within
 //!   `SM_EFF_ZERO_PARAM` of an interval end to that end only when it is not strictly
 //!   inside the interval at a 3D distance of at least the pair intersection tolerance
-//!   from the end's point; such a parameter goes on to the 3D tests (an interior point).
+//!   (and more than the curve's scaled zero) from the end's point; such a parameter goes
+//!   on to the 3D tests (an interior point).
 //!   Upstream snaps on the parameter alone, which on a fast-parametrised curve (a loop
 //!   bisector over an infinite cylinder's ±1234567 axial range) merged two edge
 //!   crossings 3.5e-3 apart and lost a loop crossing (#18342).
@@ -85,7 +86,7 @@ use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::{
     are_parallel, are_same, are_same_to_tol, eff_zero_param, eff_zero_sq, is_zero_to_tol,
-    scaled_zero_sqrt_of, xsect_tol_3d_from_zones, ScaledZero,
+    scaled_zero_of_curve, scaled_zero_sqrt_of, xsect_tol_3d_from_zones, ScaledZero,
 };
 use crate::intersect::curve_class::p1::{
     object_dimension, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,
@@ -746,8 +747,10 @@ impl<O: ClassObject> CurveClassification<O> {
     /// strictly inside the interval and yet a distinct point in 3D: the curve point at
     /// `param` is at least the pair intersection tolerance (`XSectTol3d` of the
     /// parameter's object and the end's object, mapped to working space) away from the
-    /// curve point at the interval end. Such a point is classified by the 3D tests that
-    /// follow instead of being snapped.
+    /// curve point at the interval end, and more than the curve's scaled zero
+    /// (`SmTol::GetScaledZero` of the curve: `SM_EFF_ZERO` times its size), below which
+    /// its evaluation cannot tell points apart. Such a point is classified by the 3D
+    /// tests that follow instead of being snapped.
     ///
     /// A parameter tolerance alone cannot tell points apart on a fast-parametrised
     /// curve: a loop bisector across an infinite cylinder spans the ±1234567 sentinel
@@ -768,6 +771,11 @@ impl<O: ClassObject> CurveClassification<O> {
         if !(param > ivl.min() && param < ivl.max()) {
             return Ok(false);
         }
+        // a classification without a resolvable curve has no 3D separation to measure:
+        // keep upstream's parameter snap (which needs no curve)
+        let Some(curve) = self.curve().and_then(|c| geometry.curve(c)) else {
+            return Ok(false);
+        };
         let (end_param, end_pc) = if end == IntervalPosition::Start {
             (ivl.min(), &test.start)
         } else {
@@ -783,10 +791,15 @@ impl<O: ClassObject> CurveClassification<O> {
             end_param,
             end_pc.obj_zone_tol_3d(k, geometry)?,
         )?;
-        let curve = cc_curve(self, geometry, OP_FIND)?;
         let end_pt = curve.evaluate_point(k, end_param)?;
         let classify_pt = curve.evaluate_point(k, param)?;
-        Ok(classify_pt.distance(end_pt) >= tol)
+        let dist = classify_pt.distance(end_pt);
+        if dist < tol {
+            return Ok(false);
+        }
+        // and beyond the curve's scaled zero (its size times SM_EFF_ZERO): closer points
+        // are not told apart by its evaluation
+        Ok(dist > scaled_zero_of_curve(k, curve)?)
     }
 
     /// The point classification at curve parameter `param`
@@ -2716,6 +2729,27 @@ mod tests {
             .find_interval(&k, &geo, near, BIG_DOUBLE, tol)
             .expect("near");
         assert_eq!((r.index, r.position), (0, IntervalPosition::End));
+    }
+
+    #[test]
+    fn find_interval_snaps_on_the_parameter_without_a_curve() {
+        // no classification curve: no 3D separation to measure, so upstream's
+        // parameter snap stands instead of failing on the missing curve
+        let k = Kernel::default();
+        let geo = Geo(Vec::new());
+        let mut cc = CurveClassification::<H>::new(&k);
+        cc.set_size(&k, 2).expect("size");
+        for (i, w) in [0.0, 0.5, 1.0].windows(2).enumerate() {
+            cc.at_mut(i).expect("interval").interval = Extent1d::from_min_max(w[0], w[1]);
+        }
+        let r = cc
+            .find_interval(&k, &geo, 0.5 - 1e-9, BIG_DOUBLE, 1e-6)
+            .expect("snaps to the end");
+        assert_eq!((r.index, r.position), (0, IntervalPosition::End));
+        let r = cc
+            .find_interval(&k, &geo, 0.5 + 1e-9, BIG_DOUBLE, 1e-6)
+            .expect("snaps to the start");
+        assert_eq!((r.index, r.position), (1, IntervalPosition::Start));
     }
 
     #[test]
