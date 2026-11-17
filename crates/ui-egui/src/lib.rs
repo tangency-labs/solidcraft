@@ -1610,6 +1610,9 @@ impl SolveApp {
         let selection_changed = self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look");
         if done.is_ok() && selection_changed {
             self.tree.clear_folder_pick();
+            if id == "select.set" {
+                sketch_attachment_ui::selection_picked(self);
+            }
         }
         // Render focus already applies its semantic selection after clearing object picks.
         // A tab switch brings in the other design's own Render selection.
@@ -3095,7 +3098,9 @@ impl SolveApp {
     /// planes (Mirror's plane, Offset Plane, Midplane, the construct tools)? The origin planes are
     /// shown for it, so they can be picked in the view rather than only in the browser (#2581).
     pub fn picking_plane(&self) -> bool {
-        self.picking_sketch_plane() || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
+        self.picking_sketch_plane()
+            || self.tree.redefine.is_some()
+            || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
     }
 
     /// Is the Sketch Project dialog open, picking its geometry? Its pick takes origin planes,
