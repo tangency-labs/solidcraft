@@ -475,9 +475,9 @@ impl SurfOfExtrusion {
     ///   degrees of the plane) or crossing; of close tangent points, and of close
     ///   points at the two ends of a closed generator, only the better solution is
     ///   kept. A range solution (generator in the plane over a range) is a coincident
-    ///   patch: its boundary curves typed `RegionBoundary` (degenerate ones
-    ///   `Touching`), cut to the plane domain, after the directrices of the point
-    ///   solutions outside the ranges. When the patch fails its in-plane certificate,
+    ///   patch: its boundary curves typed `RegionBoundary`, cut to the plane domain,
+    ///   after the directrices of the point solutions outside the ranges (a point
+    ///   solution whose directrix meets the patch declines it). When the patch fails its in-plane certificate,
     ///   the general intersection is needed (as upstream for every range).
     /// * Otherwise the general intersection is needed.
     ///
@@ -802,6 +802,24 @@ impl SurfOfExtrusion {
                     )
                 })
                 .collect();
+            // the point solutions outside the ranges (all of them without a range)
+            let in_range = |t: f64| {
+                ranges
+                    .iter()
+                    .any(|&(a, b)| a.min(b) - EFF_ZERO_PARAM <= t && t <= a.max(b) + EFF_ZERO_PARAM)
+            };
+            let sols: Vec<_> = sols
+                .iter()
+                .filter(|s| {
+                    s.solution_type != SolutionType::RangeOfValues
+                        && !in_range(first_param(&s.start.parameters))
+                })
+                .collect();
+
+            let points: Vec<f64> = sols
+                .iter()
+                .map(|s| first_param(&s.start.parameters))
+                .collect();
             let mut patch = Vec::new();
             if !ranges.is_empty() {
                 let inputs = PatchInputs {
@@ -817,27 +835,13 @@ impl SurfOfExtrusion {
                     plane_domain: *other_uv_domain,
                     tol,
                 };
-                let Some(p) = coincident_patch(k, &inputs, &ranges)? else {
+                let Some(p) = coincident_patch(k, &inputs, &ranges, &points)? else {
                     // Some Surf/Surf coincidence - handle it at a higher level
                     out.needs_more_intersections = true;
                     return Ok(out);
                 };
                 patch = p;
             }
-            // the point solutions outside the ranges (all of them without a range)
-            let in_range = |t: f64| {
-                ranges
-                    .iter()
-                    .any(|&(a, b)| a.min(b) - EFF_ZERO_PARAM <= t && t <= a.max(b) + EFF_ZERO_PARAM)
-            };
-            let sols: Vec<_> = sols
-                .iter()
-                .filter(|s| {
-                    s.solution_type != SolutionType::RangeOfValues
-                        && !in_range(first_param(&s.start.parameters))
-                })
-                .collect();
-
             // arrive here for the PointSolutions
 
             // for every SweptCurve/Plane point intersection - build, trim and if
@@ -1990,6 +1994,152 @@ mod tests {
             .unwrap();
         assert!(r.needs_more_intersections);
         assert!(r.curves_3d.is_empty());
+    }
+
+    /// The general intersection's request (upstream's answer whenever a range exists):
+    /// `needs_more` with no curve.
+    fn assert_declines(k: &Kernel, s: &SurfOfExtrusion, dom: &Extent2d, plane: &Plane) {
+        let r = s
+            .intersect_with_plane(k, dom, plane, &plane.natural_uv_domain(), None)
+            .unwrap();
+        assert!(r.needs_more_intersections, "{:?}", r.curve_types);
+        assert!(r.curves_3d.is_empty());
+    }
+
+    /// Review r2 B1: a generator in the plane over `0 <= x <= 1` that leaves it and
+    /// crosses back at `x = 0.75`; the crossing's directrix would run through the
+    /// region, so the region declines.
+    #[test]
+    fn crossing_directrix_through_the_region_declines() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 0.0, 1.0),
+                (0.5, 0.0, -1.0),
+            ],
+            None,
+            Vec3::Y,
+        );
+        let plane = xy_plane(Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0));
+        assert_declines(&k, &s, &s.base().natural_uv_domain(), &plane);
+    }
+
+    /// Review r2 B1: a generator in the plane over `0 <= x <= 1` that comes back to
+    /// touch it at `x = 1`; the touching directrix would repeat the region's end edge,
+    /// so the region declines.
+    #[test]
+    fn touching_directrix_on_the_region_edge_declines() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.5, 0.0, 1.0),
+                (1.0, 0.0, 0.0),
+                (0.5, 0.0, 1.0),
+            ],
+            None,
+            Vec3::Y,
+        );
+        let plane = xy_plane(Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0));
+        assert_declines(&k, &s, &s.base().natural_uv_domain(), &plane);
+    }
+
+    /// Review r2 B2: a domain side parallel to the sweep at (or within the slack of)
+    /// the generator's end bounds the region there, whichever side of the end it lies;
+    /// the boundary keeps four edges.
+    #[test]
+    fn side_at_a_range_end_keeps_its_edge() {
+        let k = k();
+        let s = swept(&k, &[(0.0, 0.0, 0.0), (2.0, 0.0, 0.0)], None, Vec3::Y);
+        for umin in [0.0, 1e-13, -1e-13, 1e-11] {
+            let plane = xy_plane(Extent2d::from_bounds(umin, -5.0, 5.0, 5.0));
+            let r = patch_in_xy_plane(&k, &s, &plane);
+            let x0 = umin.max(0.0);
+            assert_segments(
+                &k,
+                &r,
+                &[
+                    [(x0, -5.0), (x0, 5.0)],
+                    [(2.0, -5.0), (2.0, 5.0)],
+                    [(x0, -5.0), (2.0, -5.0)],
+                    [(x0, 5.0), (2.0, 5.0)],
+                ],
+            );
+        }
+    }
+
+    /// Review r2 B3: a monotone generator with a stretch along the sweep longer than
+    /// the sweep: its two copies would overlap along the stretch, so the region
+    /// declines (no slab covers it either).
+    #[test]
+    fn flat_stretch_longer_than_the_sweep_declines() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 3.0, 0.0),
+                (2.0, 3.0, 0.0),
+            ],
+            None,
+            Vec3::Y,
+        );
+        let plane = xy_plane(Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0));
+        assert_declines(&k, &s, &Extent2d::from_bounds(0.0, 0.0, 3.0, 1.0), &plane);
+    }
+
+    /// The same stretch shorter than the sweep: its copies bound the region on
+    /// either side of the stretch, without overlap.
+    #[test]
+    fn flat_stretch_shorter_than_the_sweep_gives_its_copies() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 0.5, 0.0),
+                (2.0, 0.5, 0.0),
+            ],
+            None,
+            Vec3::Y,
+        );
+        let plane = xy_plane(Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0));
+        let r = s
+            .intersect_with_plane(
+                &k,
+                &Extent2d::from_bounds(0.0, 0.0, 3.0, 1.0),
+                &plane,
+                &plane.natural_uv_domain(),
+                None,
+            )
+            .unwrap();
+        assert!(!r.needs_more_intersections);
+        // the copies at v = 0 and 1 (each the polyline) and the end directrices
+        let mut got: Vec<Vec<(f64, f64)>> = r
+            .curves_3d
+            .iter()
+            .map(|c| {
+                let canon = gen_base(c).unwrap().canonical().unwrap();
+                canon.control_points.iter().map(|p| (p.x, p.y)).collect()
+            })
+            .collect();
+        got.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(
+            got,
+            vec![
+                vec![(0.0, 0.0), (0.0, 1.0)],
+                vec![(0.0, 0.0), (1.0, 0.0), (1.0, 0.5), (2.0, 0.5)],
+                vec![(0.0, 1.0), (1.0, 1.0), (1.0, 1.5), (2.0, 1.5)],
+                vec![(2.0, 0.5), (2.0, 1.5)],
+            ]
+        );
     }
 
     /// A generator part in the plane and part crossing it: the patch for the part,

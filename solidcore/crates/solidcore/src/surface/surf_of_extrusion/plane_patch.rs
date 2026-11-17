@@ -18,14 +18,16 @@
 //! domain box `D`: `R = I ∩ D`. Two configurations are answered, each on a certificate;
 //! any other declines (the caller keeps the general intersection, as upstream):
 //! - **monotone**: one range whose `mu` is monotone (certified on its control
-//!   polygon, see `range_piece`). Then every `mu` but those of flat stretches (along
-//!   the sweep, bounded by the copies) meets the range once, the slice of `I` at `mu`
+//!   polygon, see `range_piece`), each flat stretch (along the sweep) spanning less
+//!   than the sweep so that its two copies bound it without overlapping. Then every
+//!   `mu` but those of flat stretches meets the range once, the slice of `I` at `mu`
 //!   is one interval `[nu(s) + vmin, nu(s) + vmax]`, and the slice of `R` is that
 //!   interval cut to the slice of `D`. The boundary is swept along the range: below,
 //!   the copy at `vmin` or the side of `D` above it; above, the copy at `vmax` or the
 //!   side of `D` below it; across, the directrices at the range ends and the sides of
 //!   `D` parallel to the sweep, each cut to `D`. A copy and a side that coincide give
-//!   the side only.
+//!   the side only, and a side parallel to the sweep within the slack of an end's
+//!   `mu` stands for that end's directrix.
 //! - **slab**: ranges whose `mu` ranges overlap (one connected `mu` interval
 //!   `[alpha, beta]`, folds allowed), when every `nu` of `D` in the slab
 //!   `alpha <= mu <= beta` is within `[nu_max + vmin, nu_min + vmax]` (`nu_min`,
@@ -33,6 +35,16 @@
 //!   the slice of `D`, so `R` is the convex polygon `D` cut to the slab, and its edges
 //!   are the answer: the fold (or end) directrices at `alpha` and `beta` and the parts
 //!   of `D`'s sides between them.
+//!
+//! The certificates rest on the solver for the breaks and extremes (ARGUED, the
+//! property analyses' existing contract): the monotone sweep's breaks are the roots
+//! of `affine_roots`, and the slab's `alpha`, `beta` are evaluations at the range
+//! ends, the roots of `turning_params` and the interior knots; a root the solver
+//! missed would move them.
+//!
+//! A point solution outside the ranges whose directrix (a line of constant `mu`)
+//! meets a region's `[alpha, beta]` declines: it would cross the region or repeat
+//! its edge.
 //!
 //! Ranges with disjoint `mu` ranges have disjoint regions, answered one by one. A
 //! region of no area (a range of constant `mu`, a slab touching `D` at a point)
@@ -514,6 +526,32 @@ enum Measured {
     Piece(RangePiece),
 }
 
+/// Whether every maximal run of flat control-polygon steps (`mu` steps within the
+/// values' errors `mus`) spans a `nu` extent (with the errors `nus`) below `sweep`.
+fn flat_stretches_shorter_than(mus: &[(f64, f64)], nus: &[(f64, f64)], sweep: f64) -> bool {
+    let flat = |i: usize| match (mus.get(i), mus.get(i + 1)) {
+        (Some(&(m0, e0)), Some(&(m1, e1))) => (m1 - m0).abs() <= e0 + e1,
+        _ => false,
+    };
+    let mut run: Option<(f64, f64)> = None;
+    for (i, &(nu, err)) in nus.iter().enumerate() {
+        let (lo, hi) = (nu - err, nu + err);
+        // (a run holds the points of consecutive flat steps)
+        let in_run = i > 0 && flat(i - 1);
+        run = match (run, in_run) {
+            (Some((a, b)), true) => Some((a.min(lo), b.max(hi))),
+            _ => Some((lo, hi)),
+        };
+        if let Some((a, b)) = run {
+            let long = in_run && b - a >= sweep * (1.0 - REL_SLACK);
+            if long {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Splits, certifies and measures the generator range `(a, b)`.
 fn range_piece(
     k: &Kernel,
@@ -563,16 +601,29 @@ fn range_piece(
         .windows(2)
         .all(|w| matches!(w, [(m0, e0), (m1, e1)] if m1 - e1 <= m0 + e0))
         && last < first;
-    let monotone = mus.len() >= 2 && (rising || falling);
-
     // nu over the convex hull of the control points
+    let nus: Vec<(f64, f64)> = net
+        .iter()
+        .map(|&(p, err)| {
+            (
+                frame.dnu.dot(p - frame.o),
+                functional_err(frame.dnu, p, frame.o, err),
+            )
+        })
+        .collect();
     let (mut nu_lo, mut nu_hi) = (f64::INFINITY, f64::NEG_INFINITY);
-    for &(p, err) in &net {
-        let nu = frame.dnu.dot(p - frame.o);
-        let slack = functional_err(frame.dnu, p, frame.o, err);
+    for &(nu, slack) in &nus {
         nu_lo = nu_lo.min(nu - slack);
         nu_hi = nu_hi.max(nu + slack);
     }
+
+    // a flat stretch (control-polygon steps of mu within the errors) runs along the
+    // sweep; its two copies bound the region there only while they do not overlap,
+    // that is while its nu extent stays below the sweep's length (else the slab's
+    // certificate, or the decline)
+    let sweep = inputs.v_ivl.max() - inputs.v_ivl.min();
+    let short_flats = flat_stretches_shorter_than(&mus, &nus, sweep);
+    let monotone = mus.len() >= 2 && (rising || falling) && short_flats;
 
     // the extremes of mu: at the ends, the turns, or the knots (a polyline turns at
     // its corners without a perpendicular)
@@ -779,19 +830,33 @@ fn monotone_region(
     }
 
     // across: the directrices at the range ends, and the sides parallel to the sweep
-    // strictly between them, cut to the domain
-    for s in [s0, s1] {
-        let p = gen.evaluate_point(k, s)?;
-        out.extend(trimmed_segment(inputs, p + e * vmin, p + e * vmax, None)?);
-    }
+    // between them, cut to the domain. A side within the slack of an end's mu stands
+    // for that end's directrix (the side wins the tie, as against the copies): the
+    // directrix may lie just outside the domain, and the side bounds the region there.
     let (mu0, mu1) = (rp.alpha.0, rp.beta.0);
-    for side in sides.iter().filter(|s| parallel(s)) {
-        let mu = frame.mu(if side.axis == 0 {
+    let slack = EFF_ZERO * (1.0 + mu0.abs().max(mu1.abs()));
+    let side_mu = |side: &Side| {
+        frame.mu(if side.axis == 0 {
             Point2::new(side.value, 0.0)
         } else {
             Point2::new(0.0, side.value)
-        });
-        let slack = EFF_ZERO * (1.0 + mu0.abs().max(mu1.abs()));
+        })
+    };
+    for s in [s0, s1] {
+        let p = gen.evaluate_point(k, s)?;
+        let mu_s = frame.mu(plane.project_point_to_uv_domain(p));
+        let at_side = sides
+            .iter()
+            .find(|side| parallel(side) && (side_mu(side) - mu_s).abs() <= slack);
+        out.extend(trimmed_segment(
+            inputs,
+            p + e * vmin,
+            p + e * vmax,
+            at_side.copied(),
+        )?);
+    }
+    for side in sides.iter().filter(|s| parallel(s)) {
+        let mu = side_mu(side);
         let inside = mu0 + slack < mu && mu < mu1 - slack;
         if !inside {
             continue;
@@ -903,6 +968,10 @@ fn slab_region(
 /// The boundary curves of the coincident region of the generator `ranges` (each
 /// `(s0, s1)`) swept over `V`, cut to the plane's domain, or `None` when no
 /// certificate covers them (the caller then needs the general intersection).
+/// `points` are the generator parameters of the point solutions outside the ranges:
+/// their directrices are lines of constant `mu`, so one whose `mu` is within a
+/// region's `[alpha, beta]` (with the solver's tolerance) would run through the region
+/// or along its edge, and the region declines.
 ///
 /// # Errors
 ///
@@ -911,6 +980,7 @@ pub(super) fn coincident_patch(
     k: &Kernel,
     inputs: &PatchInputs<'_>,
     ranges: &[(f64, f64)],
+    points: &[f64],
 ) -> Result<Option<Vec<(Curve, TsectCurveType)>>> {
     let (vmin, vmax) = (inputs.v_ivl.min(), inputs.v_ivl.max());
     let sweeps = vmin < vmax && vmin.is_finite() && vmax.is_finite();
@@ -944,6 +1014,24 @@ pub(super) fn coincident_patch(
             _ => groups.push(vec![p]),
         }
         reach = reach.max(p.beta.0);
+    }
+
+    // the point solutions' directrices: off every region (a point found within `tol`
+    // in space is within `tol |dmu|` of its mu)
+    for &t in points {
+        let mu = frame.mu(inputs
+            .plane
+            .project_point_to_uv_domain(inputs.gen.evaluate_point(k, t)?));
+        for g in &groups {
+            let alpha = g.iter().map(|p| p.alpha.0).fold(f64::INFINITY, f64::min);
+            let beta = g.iter().map(|p| p.beta.0).fold(f64::NEG_INFINITY, f64::max);
+            let slack = inputs.tol * frame.dmu.length()
+                + EFF_ZERO * (1.0 + alpha.abs().max(beta.abs()).max(mu.abs()));
+            let on_region = alpha - slack <= mu && mu <= beta + slack;
+            if on_region || !mu.is_finite() {
+                return Ok(None);
+            }
+        }
     }
 
     let mut out: Vec<Curve> = Vec::new();

@@ -2218,8 +2218,19 @@ mod tests {
             .map(|c| {
                 let ivl = c.natural_interval();
                 let ev = |t: f64| pl.project_point_to_uv_domain(c.evaluate(k, t, 0, true, true).unwrap()[0]);
-                let (a, b, m) = (ev(ivl.min()), ev(ivl.max()), ev(ivl.mid()));
-                assert!(near(m, (a + b) / 2.0), "{name}: a straight segment");
+                let (a, b) = (ev(ivl.min()), ev(ivl.max()));
+                // straight: every control point on the chord (the convex hull), to the
+                // rounding of points at their coordinates' scale
+                let chord = b - a;
+                let len = chord.length();
+                assert!(len > 0.0, "{name}: a segment of no length");
+                for q in net_uv(k, c, ivl, pl) {
+                    let scale = 1.0 + a.x.abs().max(a.y.abs()).max(b.x.abs()).max(b.y.abs());
+                    let off = (chord.x * (q.y - a.y) - chord.y * (q.x - a.x)).abs() / len;
+                    let t = (chord.x * (q.x - a.x) + chord.y * (q.y - a.y)) / (len * len);
+                    let along = (-1e-12..=1.0 + 1e-12).contains(&t);
+                    assert!(off <= 1e-13 * scale && along, "{name}: a straight segment");
+                }
                 (a, b)
             })
             .collect();
@@ -2279,6 +2290,8 @@ mod tests {
                 let bound = 1e-12 * (1.0 + p.max_dimension() + o.max_dimension());
                 assert!(n.dot(p - o).abs() <= bound, "{name}: generator off the plane");
             }
+            // and so does the sweep
+            assert!(n.dot(e).abs() <= 1e-12 * e.length(), "{name}: sweep off the plane");
             let f = TestFrame::new(&pl, e);
             let net = net_uv(&k, gen, s_ivl, &pl);
 
@@ -2319,6 +2332,20 @@ mod tests {
             let mus: Vec<f64> = net.iter().map(|p| f.mu(*p)).collect();
             let rising = mus.windows(2).all(|w| w[1] >= w[0]) && mus[0] < mus[mus.len() - 1];
             let falling = mus.windows(2).all(|w| w[1] <= w[0]) && mus[0] > mus[mus.len() - 1];
+            // a flat stretch (along the sweep) is bounded by its copies only while they
+            // do not overlap: every run of flat steps spans less nu than the sweep
+            let mut flats_short = true;
+            let mut run_lo_hi: Option<(f64, f64)> = None;
+            for (i, p) in net.iter().enumerate() {
+                let nu = f.nu(*p);
+                let in_run = i > 0 && mus[i] == mus[i - 1];
+                run_lo_hi = match (run_lo_hi, in_run) {
+                    (Some((a, b)), true) => Some((a.min(nu), b.max(nu))),
+                    _ => Some((nu, nu)),
+                };
+                let (a, b) = run_lo_hi.unwrap();
+                flats_short &= !in_run || b - a < vmax - vmin;
+            }
             let in_dom = |p: Point2| {
                 let slack = 1e-12 * (1.0 + p.x.abs().max(p.y.abs()));
                 od.u_interval().min() - slack <= p.x
@@ -2330,7 +2357,7 @@ mod tests {
             let copies_inside = net
                 .iter()
                 .all(|p| in_dom(*p + e_uv * vmin) && in_dom(*p + e_uv * vmax));
-            if (rising || falling) && copies_inside {
+            if (rising || falling) && flats_short && copies_inside {
                 assert_eq!(r.curves_3d.len(), 4, "{name}");
                 let ends: Vec<Point2> = [s_ivl.min(), s_ivl.max()]
                     .iter()
@@ -2402,6 +2429,55 @@ mod tests {
                 .filter(|(a, b)| (*a - *b).length() > 1e-9 * (1.0 + a.x.abs().max(a.y.abs())))
                 .collect();
             assert_uv_segments(&k, name, &r, &pl, &expected);
+            // the matching above is relative to the points' scale (about 1e6 on the
+            // unbounded planes); pin the fold lines' mu to their own scale, and the
+            // side pieces' fixed coordinate, each to the rounding of evaluating and
+            // projecting points at the coordinates' scale
+            let mut on_bounds = [0, 0];
+            for c in &r.curves_3d {
+                let ivl = c.natural_interval();
+                let ev = |t: f64| pl.project_point_to_uv_domain(c.evaluate(&k, t, 0, true, true).unwrap()[0]);
+                let (a, b) = (ev(ivl.min()), ev(ivl.max()));
+                let coords = a.x.abs().max(a.y.abs()).max(b.x.abs()).max(b.y.abs());
+                let round = 1e-14 * coords;
+                for (i, bound) in [alpha, beta].into_iter().enumerate() {
+                    let close = |p: Point2| (f.mu(p) - bound).abs() <= 1e-6 * (1.0 + bound.abs()) + round;
+                    if close(a) && close(b) {
+                        let tight = 1e-9 * (1.0 + bound.abs()) + round;
+                        assert!(
+                            (f.mu(a) - bound).abs() <= tight && (f.mu(b) - bound).abs() <= tight,
+                            "{name}: a fold line off mu = {bound}"
+                        );
+                        on_bounds[i] += 1;
+                    }
+                }
+                for (fixed, sides) in [
+                    ((a.x, b.x), [od.u_interval().min(), od.u_interval().max()]),
+                    ((a.y, b.y), [od.v_interval().min(), od.v_interval().max()]),
+                ] {
+                    for side in sides {
+                        let close = |x: f64| (x - side).abs() <= 1e-6 * (1.0 + side.abs());
+                        if close(fixed.0) && close(fixed.1) {
+                            let tight = 1e-12 * (1.0 + side.abs()) + round;
+                            assert!(
+                                (fixed.0 - side).abs() <= tight && (fixed.1 - side).abs() <= tight,
+                                "{name}: a side piece off its side {side}"
+                            );
+                        }
+                    }
+                }
+            }
+            let expected_on = |bound: f64| {
+                expected
+                    .iter()
+                    .filter(|(a, b)| {
+                        let close = |p: Point2| (f.mu(p) - bound).abs() <= 1e-6 * (1.0 + bound.abs()) + 1e-14 * p.x.abs().max(p.y.abs());
+                        close(*a) && close(*b)
+                    })
+                    .count()
+            };
+            assert_eq!(on_bounds, [expected_on(alpha), expected_on(beta)], "{name}");
+            assert!(on_bounds.iter().sum::<usize>() >= 1, "{name}: no fold line pinned");
             forms.insert(name, "slab");
         }
         // every moved row is certified, in the form its geometry takes
