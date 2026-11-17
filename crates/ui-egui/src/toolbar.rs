@@ -449,11 +449,15 @@ impl FileAction {
 }
 
 /// New Drawing: enter Drawing first, then make the drawing, so it opens on its first sheet. A
-/// drawing open in Design would refuse every model command, so a refused create goes back.
+/// drawing open in Design would refuse every model command, so a refused create goes back, but
+/// only if this call entered Drawing: started in Drawing, the user stays where they were.
 fn new_drawing(app: &mut SolveApp) {
+    let entered = !crate::drawing_workspace::active(app);
     let made = crate::workspace::enter(app, "drawing").and_then(|()| {
         app.run("drawing.create", json!({})).map(drop).inspect_err(|_| {
-            let _ = crate::workspace::enter(app, "design");
+            if entered {
+                let _ = crate::workspace::enter(app, "design");
+            }
         })
     });
     if let Err(error) = made {
@@ -3015,6 +3019,30 @@ mod header_report_tests {
         assert!(!crate::drawing_workspace::active(&h.app), "back in Design");
         assert!(h.app.session.doc.drawings.is_empty() && h.app.session.open_drawing.is_none());
         h.app.run("solid.box", json!({"length":5,"width":5,"height":5})).unwrap();
+    }
+
+    /// A New Drawing refused in Drawing leaves the user where they were: in Drawing's empty state, or
+    /// on the drawing they had open.
+    #[test]
+    fn file_menu_new_drawing_that_fails_in_drawing_stays_in_drawing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        let template = h.app.preferences.part_drawing_template.clone();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.app.preferences.part_drawing_template = "no-such-template".into();
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(crate::drawing_workspace::active(&h.app), "still in Drawing's empty state");
+        assert!(h.app.session.doc.drawings.is_empty());
+        h.app.preferences.part_drawing_template = template;
+        FileAction::NewDrawing.run(&mut h.app);
+        let open = h.app.session.open_drawing;
+        assert!(open.is_some());
+        h.app.preferences.part_drawing_template = "no-such-template".into();
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(crate::drawing_workspace::active(&h.app), "still in Drawing");
+        assert_eq!(h.app.session.open_drawing, open, "on the drawing that was open");
+        assert_eq!(h.app.session.doc.drawings.len(), 1);
     }
 
     /// The browser build's File > Download design hands the open design to the host as a
