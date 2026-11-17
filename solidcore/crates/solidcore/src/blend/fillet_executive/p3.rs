@@ -4613,22 +4613,31 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // face use's neighbours crosses its boundary edges to the other side, so the
             // "both sides gathered" check of the closed-solid orientation fires without
             // the body being non-orientable. Such a result is kept only when
-            // `finish_keeps_open_result` says so: the input was open, every lamina edge
-            // of the result has its ends on the input's boundary, and no lamina edge lies
-            // on another (a seam the stitch did not join); the session then checks the
-            // finished body at level 2 and returns this failure if it is not clean.
-            // Anything else (a closed input left open, a gap the stitch left, an invalid
-            // body) returns the orientation's failure.
-            // ARGUED, not checked here: the orientation may already have flipped faces
-            // when the check fires (`orient_ray_votes` swaps a face between two regions
-            // before it returns, and the `faces_to_swap_uv` faces are swapped as its loop
-            // starts), so the kept body's faces need not agree. The edge-list wrappers
-            // then run `StitchAndOrient`, which unifies an open body's normals
-            // (`bJustUnifyNormals` for lamina); `chamfer_fillet` has no
-            // `StitchAndOrient`, so a chamfered open body keeps the normals it has here.
+            // `finish_keeps_open_result` says so (the input was open, the result's
+            // boundary is the input's cut back where a fillet meets it, and no seam is
+            // left unjoined), and when the open body's own orientation then succeeds: the
+            // one `StitchAndOrient` runs for a body with lamina edges (outward, just
+            // unifying the normals). That orientation may flip faces, so the kept body's
+            // normals agree whatever the failed closed-solid pass left; it runs here for
+            // every caller of this finish, `chamfer_fillet` included. The session then
+            // checks the finished body at level 2 and returns this failure if it is not
+            // clean. Anything else (a closed input left open, a gap the stitch left, a
+            // failed unify, an invalid body) returns the orientation's failure.
             Err(e) if lamina > 0 && gathered_both_sides(&e) => {
                 if !access.finish_keeps_open_result(k, target, &e)? {
                     return Err(e);
+                }
+                let mut unified_not_solid = false;
+                match access.finish_orient_trimmed_surfaces(
+                    k,
+                    target,
+                    true,
+                    &mut unified_not_solid,
+                    true,
+                ) {
+                    Ok(()) => {}
+                    Err(unify) if unify.is_unported_or_cancelled() => return Err(unify),
+                    Err(_) => return Err(e),
                 }
             }
             other => other?,

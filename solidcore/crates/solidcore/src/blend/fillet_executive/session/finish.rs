@@ -99,14 +99,17 @@ const fn mate_entity(object: FilletObject) -> Option<EntityRef> {
     }
 }
 
-/// (not upstream, WR-661) The target's boundary before filleting: each lamina edge's
-/// curve, the interval between its vertices and its tolerance. An open result is kept
-/// only when its boundary is this one, cut back where a fillet meets it
+/// (not upstream, WR-661) The target's boundary before filleting (each lamina edge's
+/// curve, the interval between its vertices and its tolerance) and its faces. An open
+/// result is kept only when its boundary is this one, cut back where a fillet meets it
 /// ([`OpenInput::keeps_open_result`]). A closed input has no boundary, so a result the
 /// fillet left open is never kept.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OpenInput {
     boundary: Vec<BoundaryPiece>,
+    /// The target's faces before filleting, sorted. Ids are never reused, so a face of
+    /// the result that is not here was made by the fillet.
+    faces: Vec<crate::topology::FaceId>,
     /// The orientation's failure, when an open result was kept in its place: the
     /// finished body must pass the level-2 check ([`OpenInput::check_kept`]).
     kept: Option<SolidError>,
@@ -145,17 +148,19 @@ fn boundary_of(b: &Brep) -> Result<(Vec<(EdgeId, BoundaryPiece)>, bool)> {
 }
 
 /// Whether `point` lies on one of `pieces`: its drop point on the piece's curve, over the
-/// piece's interval, is within the larger of the piece's tolerance and `tolerance`. NaN
-/// distances are not within.
+/// piece's interval, is within the larger of the piece's tolerance and `tolerance`. A
+/// piece the point cannot be measured against (a failed drop, a NaN distance) counts as
+/// `unmeasured_is_on`, so each caller can take the side that refuses.
 fn on_one_of<'a>(
     k: &Kernel,
     pieces: impl IntoIterator<Item = &'a BoundaryPiece>,
     point: crate::math::Point3,
     tolerance: f64,
+    unmeasured_is_on: bool,
 ) -> Result<bool> {
     for (curve, interval, piece_tolerance) in pieces {
         let within = piece_tolerance.max(tolerance);
-        match curve.drop_point(
+        let measured = match curve.drop_point(
             k,
             interval,
             point,
@@ -164,10 +169,14 @@ fn on_one_of<'a>(
             None,
             crate::geom::global_solver::SolverOperation::Minimize,
         ) {
-            Ok(dropped) if dropped.success && dropped.distance <= within => return Ok(true),
-            // a point the curve cannot be measured against lies off that piece
+            Ok(dropped) if dropped.success && !dropped.distance.is_nan() => {
+                Some(dropped.distance <= within)
+            }
             Err(error) if error.is_unported_or_cancelled() => return Err(error),
-            Ok(_) | Err(_) => {}
+            Ok(_) | Err(_) => None,
+        };
+        if measured.unwrap_or(unmeasured_is_on) {
+            return Ok(true);
         }
     }
     Ok(false)
@@ -181,8 +190,11 @@ impl OpenInput {
     /// Lookup failures.
     pub(crate) fn capture(target: &Brep) -> Result<Self> {
         let (pieces, _) = boundary_of(target)?;
+        let mut faces = p1::faces(target, None)?;
+        faces.sort_unstable();
         Ok(Self {
             boundary: pieces.into_iter().map(|(_, piece)| piece).collect(),
+            faces,
             kept: None,
         })
     }
@@ -213,17 +225,21 @@ impl OpenInput {
     /// WR-661: whether `result`, which the stitch left open, is kept. All of these must hold:
     /// - the input was open (it had a boundary);
     /// - every end vertex of every lamina edge of `result` lies on the input's boundary
-    ///   (to the result's tolerance), so the result's boundary is the input's, cut back
-    ///   where a fillet meets it;
+    ///   (to the result's tolerance);
+    /// - a lamina edge on a face the input had runs along the input's boundary: its
+    ///   curve's middle point lies on it too. Only an edge whose faces the fillet made
+    ///   (a blend's end) may leave the boundary, with both ends on it. So the result's
+    ///   boundary is the input's, cut back where a fillet meets it, and a seam the stitch
+    ///   left unjoined, at any distance, is refused whenever one side of it is an input
+    ///   face: its edge there runs off the boundary;
     /// - no lamina edge of `result` lies on another one (its curve's middle point is on
-    ///   no other lamina edge): two such edges are a seam the stitch did not join, such
-    ///   as a fillet rail and the trimmed face it runs along, whose ends are both on the
-    ///   boundary;
+    ///   no other lamina edge, and one that cannot be measured counts as on): two such
+    ///   edges are a seam within the tolerance that the stitch did not join;
     /// - and, checked when the filleting is done ([`Self::check_kept`]), the finished body
     ///   passes the level-2 check.
     ///
     /// Anything else is refused: a closed input left open, or an open input that gained
-    /// a boundary elsewhere (a gap the stitch left).
+    /// a boundary along an input face (a gap the stitch left, a missing face).
     ///
     /// # Errors
     /// Lookup failures; unported or cancelled curve and check steps.
@@ -242,16 +258,22 @@ impl OpenInput {
                     return Ok(false);
                 };
                 let point = crate::topology::vertex::point(result, vertex)?;
-                if !on_one_of(k, &self.boundary, point, tolerance)? {
+                if !on_one_of(k, &self.boundary, point, tolerance, false)? {
                     return Ok(false);
                 }
             }
             let middle = curve.evaluate_point(k, interval.mid())?;
+            let on_input_face = crate::topology::edge::faces(result, *edge, None)?
+                .iter()
+                .any(|face| self.faces.binary_search(face).is_ok());
+            if on_input_face && !on_one_of(k, &self.boundary, middle, tolerance, false)? {
+                return Ok(false);
+            }
             let others = lamina
                 .iter()
                 .filter(|(other, _)| other != edge)
                 .map(|(_, piece)| piece);
-            if on_one_of(k, others, middle, tolerance)? {
+            if on_one_of(k, others, middle, tolerance, true)? {
                 return Ok(false);
             }
         }
@@ -1252,7 +1274,11 @@ mod open_input_tests {
         assert!(lines.is_empty(), "{lines:?}");
         assert!(input.keeps_open_result(&mut k, &mut b).unwrap());
         // the opposite face's edges become boundary, and their ends lie nowhere on the
-        // input's boundary
+        // input's boundary. The input's faces are cleared, as if the fillet had made
+        // every face, so that only the end rule can refuse (the edges also run off the
+        // boundary along input faces, which `a_tube_missing_a_side_is_refused` covers).
+        let mut input = input;
+        input.faces.clear();
         open(&mut k, &mut b, bottom);
         let lines = crate::topology::brep::validation::check_brep(
             &mut k,
@@ -1265,20 +1291,29 @@ mod open_input_tests {
         assert!(!input.keeps_open_result(&mut k, &mut b).unwrap());
     }
 
-    /// A seam the stitch left open is refused: a tube (a box without two opposite faces)
-    /// with one side unstitched has its boundary's ends all on the tube's rims, and passes
-    /// the level-2 check, but the side's two long edges each lie on a neighbour's.
+    /// A tube: a box without two opposite faces.
+    fn a_tube(k: &mut Kernel) -> Brep {
+        let mut b = a_box(k);
+        let top = p1::faces(&b, None).unwrap()[0];
+        let bottom = opposite(&b, top);
+        open(k, &mut b, top);
+        open(k, &mut b, bottom);
+        b
+    }
+
+    /// A seam the stitch left open within the tolerance is refused, even where the
+    /// fillet made both faces: a tube with one side unstitched has its boundary's ends all
+    /// on the tube's rims, and passes the level-2 check, but the side's two long edges
+    /// each lie on a neighbour's. The input's faces are cleared here, as if the fillet
+    /// had made every face, so that only the seam rule can refuse.
     #[test]
     fn an_open_seam_is_refused() {
         let mut k = Kernel::default();
-        let mut b = a_box(&mut k);
-        let top = p1::faces(&b, None).unwrap()[0];
-        let bottom = opposite(&b, top);
-        open(&mut k, &mut b, top);
-        open(&mut k, &mut b, bottom);
-        let input = OpenInput::capture(&b).unwrap();
+        let mut b = a_tube(&mut k);
+        let mut input = OpenInput::capture(&b).unwrap();
         assert_eq!(input.boundary.len(), 8);
         assert!(input.keeps_open_result(&mut k, &mut b).unwrap());
+        input.faces.clear();
         let side = p1::faces(&b, None).unwrap()[0];
         crate::topology::brep::p7::unstitch(&mut k, &mut b, Some(&[side])).unwrap();
         let (lamina, _) = boundary_of(&b).unwrap();
@@ -1292,6 +1327,36 @@ mod open_input_tests {
         .lines();
         assert!(lines.is_empty(), "{lines:?}");
         assert!(!input.keeps_open_result(&mut k, &mut b).unwrap());
+    }
+
+    /// An open result whose boundary moved along an input face is refused, however wide
+    /// the gap: a tube missing one side face (a gap of the whole side, 10 or 20 wide,
+    /// far beyond any stitch tolerance) has every boundary end on the tube's rims, no
+    /// two boundary edges on each other, and passes the level-2 check. Its two new
+    /// boundary edges lie on the input's side faces and run across, not along, the rims.
+    /// Were those faces made by the fillet, the result would be kept: the input-face
+    /// rule is what refuses it.
+    #[test]
+    fn a_tube_missing_a_side_is_refused() {
+        let mut k = Kernel::default();
+        let mut b = a_tube(&mut k);
+        let mut input = OpenInput::capture(&b).unwrap();
+        let side = p1::faces(&b, None).unwrap()[0];
+        open(&mut k, &mut b, side);
+        let (lamina, _) = boundary_of(&b).unwrap();
+        assert_eq!(lamina.len(), 8, "six rim edges and the two side edges");
+        assert_eq!(p1::faces(&b, None).unwrap().len(), 3);
+        let lines = crate::topology::brep::validation::check_brep(
+            &mut k,
+            &mut b,
+            crate::topology::brep::validation::CheckLevel::Level2,
+        )
+        .unwrap()
+        .lines();
+        assert!(lines.is_empty(), "{lines:?}");
+        assert!(!input.keeps_open_result(&mut k, &mut b).unwrap());
+        input.faces.clear();
+        assert!(input.keeps_open_result(&mut k, &mut b).unwrap());
     }
 }
 
