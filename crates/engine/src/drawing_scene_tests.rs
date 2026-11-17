@@ -4134,6 +4134,34 @@ fn a_views_sketch_whose_view_isnt_drawn_says_so_and_the_sheets_own_still_draws()
     assert_eq!(scene.groups.iter().filter(|group| group.kind == ObjectKind::Sketch).map(|group| group.object).collect::<Vec<_>>(), [102]);
 }
 
+/// A view's sketch reaches paper through its view's frame stroke by stroke: an item of another kind
+/// (text, a fill, a picture) would stay in the plane's coordinates, so its sketch is refused and says
+/// why. The view's other sketches still draw.
+#[test]
+fn a_views_sketch_holding_anything_but_strokes_is_refused_and_says_why() {
+    let (s, sheet, [front, _]) = front_and_top();
+    let d = s.drawing("test").unwrap();
+    let record = d.sheets.iter().find(|record| record.id == sheet).unwrap();
+    let frame = ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap();
+    let group = Some(Arc::new(Group { object: front, kind: ObjectKind::View, items: Vec::new() }));
+    let view = Drawn { group, status: Status::Drawn, stats: None, boundary: None, frame: Some(frame), owners: None, why: None, hatches: Vec::new() };
+    let stroke = Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: Vec2::X }], closed: false, width_mm: 0.5, pattern: None };
+    let style = solidcraft_sketch::TextStyle::default();
+    let (runs, _) = solidcraft_sketch::paper_text("A", None, "", Vec2::ZERO, 3.5, 0.0, &style).unwrap().unwrap();
+    let sketch = |id, items| DrawnSketch {
+        group: Some(Group { object: id, kind: ObjectKind::Sketch, items }),
+        status: SketchStatus::Drawn,
+        view: Some(front),
+    };
+    let sketches = [sketch(101, vec![stroke.clone(), Item::Text(runs[0].clone())]), sketch(102, vec![stroke])];
+    let drawn = sketches.iter().enumerate().map(|(i, drawn)| (101 + i as u64, drawn));
+    let (scene, _, _, states) =
+        assemble_with_sketches(record, Projection::Third, &[], std::iter::once((front, Vec2::new(100.0, 100.0), &view)), drawn).unwrap();
+    assert!(matches!(&states[0].status, SketchStatus::Failed(why) if why.contains("not supported yet")), "{:?}", states[0].status);
+    assert_eq!(states[1].status, SketchStatus::Drawn);
+    assert_eq!(scene.groups.iter().filter(|group| group.kind == ObjectKind::Sketch).map(|group| group.object).collect::<Vec<_>>(), [102]);
+}
+
 #[test]
 fn sheet_sketch_provider_reuses_sheets_and_retires_deleted_undone_and_closed_owners() {
     let (mut s, drawing, first) = stroke_editor();

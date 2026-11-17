@@ -19,11 +19,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.sketch.edit", "Edit Sheet Sketch", crate::checked!("drawing.sketch.edit", edit))
         .in_drawing().doc_only().noundo().icon("sketch")
         .contract(&contract::EDIT).output(output_schema_for::<contract::Reading>)
-        .params("sketch: exact encoded sketch id in the open drawing. Enters that sheet sketch without changing its data or the source design."),
+        .params("sketch: exact encoded sketch id in the open drawing. Enters that sketch (a sheet's in paper XY millimetres, a view's in model millimetres in the view's plane) without changing its data or the source design."),
     CommandSpec::new("drawing.sketch.inspect", "Inspect Sheet Sketch", crate::checked!("drawing.sketch.inspect", inspect))
         .in_drawing().doc_only().noundo().icon("inspect")
         .contract(&contract::INSPECT).output(output_schema_for::<contract::Reading>)
-        .params("sketch?: exact encoded id, else the active sheet sketch. Reports resolved paper-mm points and local entity ids without adopting the solution."),
+        .params("sketch?: exact encoded id, else the active sheet sketch. Reports resolved points in its owner's frame (paper millimetres for a sheet's sketch, model millimetres in the view's plane for a view's) and local entity ids without adopting the solution."),
 
 ];
 
