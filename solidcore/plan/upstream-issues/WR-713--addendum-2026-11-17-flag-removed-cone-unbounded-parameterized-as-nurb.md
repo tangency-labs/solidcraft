@@ -23,12 +23,12 @@ Running with the fix always on exposed further defects in the same constructors.
   - The kept cone of a truncated offset runs from the cone's own STEP heights. Upstream placed it as if the bottom were at the origin, which for an unbounded cone gives another cone.
   - A copied offset rebuilds its polar circle on the offset cone. Upstream kept the original's circle, which is off the offset by the offset distance.
 
-- **Results:** 4,625 goldens rows move (against main after the WR-662 retirement, #18066):
+- **Results:** 4,522 goldens rows move (against main after the WR-662 retirement, #18066):
 
   | Unit | Rows |
   |---|---|
-  | `surface.cone_p1` | 3,622 |
-  | `surface.surface_p2` | 941 |
+  | `surface.cone_p1` | 3,561 |
+  | `surface.surface_p2` | 899 |
   | `surface.cone_p2` | 27 |
   | `surface.cone_p3` | 14 |
   | `intersect.api_intersectors` | 8 |
@@ -37,14 +37,16 @@ Running with the fix always on exposed further defects in the same constructors.
   | `surface.surf_of_extrusion_p2` | 1 |
 
   `crates/goldens/tests/wr704_wr713_cone_moves.rs` (ignored; it runs on the inventory of moved rows) certifies every row by closed form or certificate, with no sampling:
-  - 4,152 rows are CLOSER: the new output meets the closed form and the old one does not.
-  - 473 rows are EQUAL: both outputs meet it.
+  - 4,027 rows are CLOSER: the new output meets the closed form and the old one does not.
+  - 495 rows are EQUAL: both outputs meet it.
   - No row is FARTHER.
+
+  179 rows change a built cone into a refusal, each for inputs that define no cone, decided in closed form from the input numbers: 165 unbounded cones with a semi-angle of exactly 90 degrees (a plane), 13 with a zero axis (no direction), and one cylinder of radius 0 (a line). Two `surface.cone_p2` trims refuse where main succeeded; they rest on reading an axis of `(0, -1e-300, 0)` as the direction `-Y`, a convention (main replaced it by `Z`). The 6 `nurbs.b_spline_surface_n_lib_p2` corner blends are certified for G0 only: their tangency is best effort on both sides.
   
   The certificates:
   - Built cones are checked net by net with `implicit::lies_on`.
   - Intersections of cylinders, of a cylinder and a cone, and of a cylinder and a plane are checked against their closed-form lines or emptiness.
-  - The corner blends are checked side by side against their loop curves, by Bézier blossoms.
+  - The corner blends are checked side by side against their loop curves, by Bézier blossoms, and the curves on their cylinder.
   - The extrusion and cone curves are checked by convex-hull plane distances and by Bernstein bounds of the implicit cone.
 - **Tests:**
   - `crates/solidcore/tests/issue_2313_unbounded_cone_iso_circle.rs` asserts the fixed behaviour only.

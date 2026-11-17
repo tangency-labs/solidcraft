@@ -191,7 +191,7 @@
 {"case":"gen0064","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0],"status":[1000.0]}}
 {"case":"gen0065","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"gen0066","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0],"status":[1000.0]}}
-{"case":"gen0067","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"gen0067","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"gen0068","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[4.626797904445427,1571.6050817792566],"status":[1000.0]}}
 {"case":"gen0069","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[22.783789168347397,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"gen0070","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[827.245838857204,1195.581771615167,-2768.6846084860094,0.26589383200944283,0.3806876574652036,-0.8856508214601226,0.0,0.0,0.0],"status":[1000.0]}}
@@ -354,7 +354,7 @@
 {"case":"gen0227","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"],[20.655352053232345,20.655352053232345,20.655352053232345]],"n":257},"status":[1000.0]}}
 {"case":"gen0228","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1001.0]}}
 {"case":"gen0229","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
-{"case":"gen0230","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"gen0230","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"gen0231","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.384448393263202,9312.263962401721],"status":[1000.0]}}
 {"case":"gen0232","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"gen0233","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":256}}}
@@ -445,7 +445,7 @@
 {"case":"gen0318","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"gen0319","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
 {"case":"gen0320","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
-{"case":"gen0321","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"gen0321","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.7055767125958347,-1231074.3645054528],"status":[1000.0]}}
 {"case":"gen0322","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":256},"status":[1000.0]}}
 {"case":"gen0323","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-9193.838743556802,1166.9419949715887,-2588.679892180138,0.9553327001557134,-0.1217299430041953,0.2692977032753703,-0.0002392043272175153,0.022442613422295525,0.010993252941127565,0.0,0.0,0.0],"status":[1000.0]}}
 {"case":"gen0324","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14589.032942824348,14617.181111599848,30326.73950384211]],"n":26},"status":[1000.0]}}
@@ -520,7 +520,7 @@
 {"case":"gen0393","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
 {"case":"gen0394","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0],"status":[1000.0]}}
 {"case":"gen0395","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1001.0]}}
-{"case":"gen0396","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"gen0396","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"gen0397","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"gen0398","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"gen0399","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-30.555446546703863,-55.31193253532575,-76.14851763944665,-0.22982920266844153],"status":[1000.0]}}
@@ -1267,7 +1267,7 @@
 {"case":"gen1140","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-3.7547628516354434,0.0],"status":[1000.0]}}
 {"case":"gen1141","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
 {"case":"gen1142","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
-{"case":"gen1143","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"gen1143","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
 {"case":"gen1144","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14017.77385023702,11041993.665411454,-1026207.090825662]],"n":22},"status":[1000.0]}}
 {"case":"gen1145","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-25.87779002273473,-6.805628964168394,52.35386093568305,0.0],"status":[1000.0]}}
 {"case":"gen1146","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-0.3654855912742613,0.0],"status":[1000.0]}}
@@ -1418,7 +1418,7 @@
 {"case":"gen1291","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[133385.6927022918,288755.81061823084,231375.0334894655]],"n":27},"status":[1000.0]}}
 {"case":"gen1292","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-3.5633382159160863e-7,-7.238184586915608e-7,0.000010619460722020382,-0.000011362281481528301],"status":[1000.0]}}
 {"case":"gen1293","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[9.43540665734465,2.7252793735688843,1234571.0401643976],"status":[1000.0]}}
-{"case":"gen1294","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"gen1294","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[171.64215035520198,-295382.31687774626],"status":[1000.0]}}
 {"case":"gen1295","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-66757.51650209098,-205141.33403189914,-5362.987490365981,0.0],"status":[1000.0]}}
 {"case":"gen1296","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.012830067114057216,-3766.3296905123843],"status":[1000.0]}}
 {"case":"gen1297","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":200},"status":[1000.0]}}
@@ -1493,7 +1493,7 @@
 {"case":"gen1366","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"],[1234567.0,1234567.0,1234567.0]],"n":257},"status":[1000.0]}}
 {"case":"gen1367","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14036.356414998894,14064.636042497232,42388.32916805672]],"n":22},"status":[1000.0]}}
 {"case":"gen1368","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-8.44895679012049,-147.15336113918045,47.74766682925609,0.0],"status":[1000.0]}}
-{"case":"gen1369","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"gen1369","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-2159.503250932459,138625.26015223423,-936388.378868921]],"n":56},"status":[1000.0]}}
 {"case":"gen1370","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"gen1371","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[20.018777582688063,-6618.882324998589],"status":[1000.0]}}
 {"case":"gen1372","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
@@ -1599,7 +1599,7 @@
 {"case":"gen1472","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"gen1473","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[44970.51891321831,44970.51891321831,825503.9960430295]],"n":56},"status":[1000.0]}}
 {"case":"gen1474","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1001.0]}}
-{"case":"gen1475","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"gen1475","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"gen1476","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[269.4725391493229,30241.150643417182],"status":[1000.0]}}
 {"case":"gen1477","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,2.0],"status":[1000.0]}}
 {"case":"gen1478","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-2785.9161618692956,-2400.449738475736,-834.9329164827019],"status":[1000.0]}}
@@ -14135,40 +14135,40 @@
 {"case":"review2_far_semi_unb_0b_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"review2_far_semi_unb_0b_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"review2_far_semi_unb_0b_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
-{"case":"review2_far_semi_unb_120_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_adj_[10, 0, 90, 2]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_build","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_eq_bnd_mngc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_eq_can_h0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_eq_cyl_can","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_eq_semi_unb_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_es_200_-5_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_es_360_3_31","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_es_45_1.5_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_es_45_1.5_22","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_ev_-0.1_1.2_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_ic6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_ic8","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_icb1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_icb5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_iso1_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_isoz0_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_oob_es_200_-5_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_oob_ev_0.3_0.7_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_oob_ev_0_0_21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_oob_ic3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_oob_ic9","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_oob_inv1_1e-06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_oob_inv5_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_tr_id","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_tr_idsc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_far_semi_unb_120_ts_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"review2_far_semi_unb_120_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
+{"case":"review2_far_semi_unb_120_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
+{"case":"review2_far_semi_unb_120_adj_[10, 0, 90, 2]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
+{"case":"review2_far_semi_unb_120_build","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
+{"case":"review2_far_semi_unb_120_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_eq_bnd_mngc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_eq_can_h0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_eq_cyl_can","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_eq_semi_unb_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_es_200_-5_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[999996.6959985294,-3000005.0,199990.92233056572,0.5923962654520475,1.0,1.6275953626987472,-0.1584352200358308,0.0,0.05766570415245863,0.0,0.0,0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_es_360_3_31","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-1800000.1547005386,4200002.154700538,-4400004.237604307]],"n":24},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_es_45_1.5_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1000000.0,-2999999.422649731,200000.00000000003,-1.2247448713915887,1.0,-1.224744871391589,6.298836412431968e-13,0.0,-6.298836412431967e-13,0.0,0.0,0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_es_45_1.5_22","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-1800000.872139474,4200002.914891134,-4400006.049996515]],"n":27},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_ev_-0.1_1.2_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-1799198.2631285442,4200869.558282402,-4367192.962389693]],"n":48},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_ic6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_ic8","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_icb1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_icb5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_iso1_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-14076747.996116018,32893814.75236112,-372588102.06937623]],"n":58},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_isoz0_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_far_semi_unb_120_oob_es_200_-5_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[999996.6959985294,-3000005.0,199990.92233056572],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_oob_ev_0.3_0.7_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[999999.7969406509,-2999999.3,200000.06241610507],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_oob_ev_0_0_21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-1799990.1507416298,4200142.825369805,-4399738.128542694]],"n":18},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_oob_ic3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_oob_ic9","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0],"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_oob_inv1_1e-06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_far_semi_unb_120_oob_inv5_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_far_semi_unb_120_tr_id","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_tr_idsc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_far_semi_unb_120_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_far_semi_unb_120_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_far_semi_unb_120_ts_0_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"review2_far_semi_unb_89_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"review2_far_semi_unb_89_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"review2_far_semi_unb_89_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
@@ -14783,32 +14783,32 @@
 {"case":"review2_skew_semi_unb_0b_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"review2_skew_semi_unb_0b_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"review2_skew_semi_unb_0b_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
-{"case":"review2_skew_semi_unb_120_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_adj_[10, 0, 90, 2]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_build","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_eq_bnd_mngc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_eq_can_h0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_eq_cyl_can","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_eq_semi_unb_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_es_0_0_02","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_ev_0_0_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_isod0_-0.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_isoz0_0.0001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_oob_es_-10_-1_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_oob_es_0_0_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_oob_es_360_3_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_oob_es_45_1.5_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_oob_ev_1_1_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_pos6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_tn_90_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_tr_id","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_tr_idsc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_skew_semi_unb_120_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"review2_skew_semi_unb_120_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
+{"case":"review2_skew_semi_unb_120_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
+{"case":"review2_skew_semi_unb_120_adj_[10, 0, 90, 2]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
+{"case":"review2_skew_semi_unb_120_build","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
+{"case":"review2_skew_semi_unb_120_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_eq_bnd_mngc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_eq_can_h0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_eq_cyl_can","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_eq_semi_unb_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_es_0_0_02","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0,-1.7320508075688767,0.0,1.0,0.0,0.0,0.0],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_ev_0_0_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[339.18719225292807,1371.9312718589727,15031.300603412508]],"n":48},"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_isod0_-0.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_skew_semi_unb_120_isoz0_0.0001","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_skew_semi_unb_120_oob_es_-10_-1_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.690544816917094,-0.4744156440278008,-1.0],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_oob_es_0_0_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_oob_es_360_3_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-4.19615242270663,1.0277609266404173e-15,3.0,-1.7320508075688767,4.242300954899626e-16,1.0,-1.7937812093223185e-17,-0.07323667569176756,-0.0,0.0,0.0,0.0],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_oob_es_45_1.5_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-2.208076195558144,7.293153878711065,-3.915006900284088]],"n":48},"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_oob_ev_1_1_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.7320508075688767,1.7930073566049198e-16,1.0,-1.7320508075688772,0.0,1.0000000000000002,0.0,-4.141104721640331,-8.881784197001252e-16,0.0,-9.797958971132715,-1.359019894639794e-15],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_pos6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0,-1.845299461620748,0.577350269189626],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_tn_90_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.25,1.0],"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_tr_id","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_tr_idsc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_skew_semi_unb_120_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_skew_semi_unb_120_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"review2_skew_semi_unb_89_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"review2_skew_semi_unb_89_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"review2_skew_semi_unb_89_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
@@ -15426,36 +15426,36 @@
 {"case":"review2_std_semi_unb_0b_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"review2_std_semi_unb_0b_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"review2_std_semi_unb_0b_ts_0.5_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[180.0,0.0],"status":[1000.0]}}
-{"case":"review2_std_semi_unb_120_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_adj_[10, 0, 90, 2]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_build","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_eq_bnd_mngc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_eq_can_h0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_eq_cyl_can","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_eq_semi_unb_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_es_-10_-1_31","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_es_-10_-1_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_es_360_3_02","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_es_45_1.5_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_es_90_1000.0_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_ev_-0.1_1.2_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_ev_0.3_0.7_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_ev_0_0_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_ic2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_inv2_1e-06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_iso0_0.9999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_iso1_-0.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_oob_es_360_3_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_oob_ev_-0.1_1.2_21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_oob_ic9","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_tr_id","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_tr_idsc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
-{"case":"review2_std_semi_unb_120_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
+{"case":"review2_std_semi_unb_120_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
+{"case":"review2_std_semi_unb_120_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
+{"case":"review2_std_semi_unb_120_adj_[10, 0, 90, 2]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
+{"case":"review2_std_semi_unb_120_build","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
+{"case":"review2_std_semi_unb_120_copy","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":249},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_eq_bnd_mngc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_eq_can_h0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_eq_cyl_can","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_eq_semi_unb_120","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_es_-10_-1_31","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1.0468365264978126,6.512631652487634,-0.8257956639624487]],"n":24},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_es_-10_-1_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1.01713414994185,6.54338925473948,-1.0490808486056302]],"n":48},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_es_360_3_02","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0,0.577350269189626,-1.7320508075688767,4.242300954899626e-16,1.0,0.0,0.0,0.0],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_es_45_1.5_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-0.8713933163483107,4.070337830223439,-3.2907633839687587]],"n":48},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_es_90_1000.0_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-0.12394293612740628,3.3401586790103477,-0.42922262722275584]],"n":48},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_ev_-0.1_1.2_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0,0.577350269189626,-1.7320508075688767,0.0,1.0,-0.0,1.7350852961085884e-11,-7.390469775492819e-28,0.0,-9.79795897113271,4.173369447604564e-16],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_ev_0.3_0.7_33","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-453.31269708485894,875.4098666630537,-19061.496142304695]],"n":48},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_ev_0_0_00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_ic2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_inv2_1e-06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_std_semi_unb_120_iso0_0.9999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-2787332.427539025,7091044.2148600565,-44923712.57711645]],"n":22},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_iso1_-0.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14419.609151861128,14435.742609401757,44980.07436029102]],"n":58},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_oob_es_360_3_11","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-4.19615242270663,1.0277609266404173e-15,3.0,-1.7320508075688767,4.242300954899626e-16,1.0,-1.7937812093223185e-17,-0.07323667569176756,-0.0,0.0,0.0,0.0],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_oob_ev_-0.1_1.2_21","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-46.75075794050275,106.3144595293303,-664.7949047336982]],"n":18},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_oob_ic9","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0],"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_tr_id","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_tr_idsc","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_tr_near","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
+{"case":"review2_std_semi_unb_120_tr_neg","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
+{"case":"review2_std_semi_unb_120_tr_nu","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"review2_std_semi_unb_89_adj_[0, -1, 360, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"review2_std_semi_unb_89_adj_[0, -10, 360, -5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1007.0]}}
 {"case":"review2_std_semi_unb_89_adj_[0, 0, 360, 3]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
