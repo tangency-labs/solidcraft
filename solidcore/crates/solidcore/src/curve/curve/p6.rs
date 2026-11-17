@@ -2969,4 +2969,225 @@ mod tests {
         assert!((sub_on.this_t - 0.25).abs() < 1.0e-12, "{sub_on:?}");
         assert!((sub_on.other_t - 0.25).abs() < 1.0e-12, "{sub_on:?}");
     }
+
+    /// #18212: the two edges of face 9 of the `blend.feature_executive` case
+    /// `single_face_fillet1019_6` (its base body) that start at the same vertex: e21, a
+    /// line along -y, and e24, a cubic B-spline. e24 leaves the vertex with a hook (its
+    /// tangent turns back within its first two spans, 1e-5 long), then runs off at about
+    /// 38 degrees to the line. The hook makes every piece of e24 that holds its start
+    /// half closed, so the coincidence check splits e24 toward the vertex again and
+    /// again (`split_in_three`).
+    const E24_POINTS: [[f64; 3]; 49] = [
+        [-23.583494549520516, -18.522825108202344, 20.76275230723294],
+        [-23.58349459143391, -18.52282395378618, 20.762751828162166],
+        [-23.583494595634157, -18.5228233855534, 20.762751780152975],
+        [-23.583494490683165, -18.52282618259411, 20.762752979743382],
+        [-23.583494480323253, -18.522826458695306, 20.76275309815723],
+        [-23.583494475854078, -18.522826775110488, 20.76275314923958],
+        [-23.583494459603386, -18.52282701089772, 20.762753334984925],
+        [-23.57975849664189, -18.577033463388723, 20.80545537693825],
+        [-23.576299150809056, -18.59481795336009, 20.840961491732475],
+        [-23.570566298018644, -18.641506058425936, 20.891588722963668],
+        [-23.54654350148155, -18.837146673962945, 21.103735749857037],
+        [-23.50653855063268, -19.044679767419034, 21.327508136798212],
+        [-23.455165778582174, -19.239079127244253, 21.53590303455785],
+        [-23.40349431437229, -19.434608766052875, 21.745509584317777],
+        [-23.335658662649085, -19.63623910179359, 21.96038290867134],
+        [-23.256275701436827, -19.828640610325692, 22.164139357777195],
+        [-23.074565734169486, -20.269053405258784, 22.630543950552934],
+        [-22.819172928322157, -20.701735998971227, 23.082036679774845],
+        [-22.487751803872957, -21.10604782090713, 23.495808567678164],
+        [-22.340142761229725, -21.286121076842413, 23.6800951678386],
+        [-22.184240193141484, -21.453672645044414, 23.849943504779972],
+        [-22.005844048743693, -21.621357645936385, 24.017970032779992],
+        [-21.887249900768204, -21.7328312423876, 24.1296706695438],
+        [-21.767080516242284, -21.836521080702738, 24.232709389564906],
+        [-21.63461668383053, -21.940843293861924, 24.335365007227068],
+        [-21.50189328039518, -22.04536993281161, 24.438221784883392],
+        [-21.3695751656428, -22.14064516919224, 24.53098268154603],
+        [-21.22296483491195, -22.236366133425825, 24.62298129408234],
+        [-21.07615235958569, -22.3322190765963, 24.715106753220912],
+        [-20.932020914683036, -22.41755908610193, 24.795953912783766],
+        [-20.771654379641078, -22.502666145431935, 24.875125579042553],
+        [-20.61121003287725, -22.58781449970435, 24.95433566032149],
+        [-20.455930010450004, -22.661498076158615, 25.021442324367364],
+        [-20.282825292484432, -22.733707553710197, 25.085375223486487],
+        [-20.168212803509658, -22.78151738839882, 25.127705142517772],
+        [-20.056935280731047, -22.823934953036566, 25.164421683625797],
+        [-19.937305755801546, -22.86516127680678, 25.19910297484565],
+        [-19.81778136440151, -22.906351369814335, 25.233753787247217],
+        [-19.702341267930038, -22.942088438398383, 25.262790246539474],
+        [-19.57848521208208, -22.976010541556747, 25.28910281100417],
+        [-19.454798265032633, -23.009886328642242, 25.315379449198392],
+        [-19.33589327912489, -23.038354204575455, 25.336152176336377],
+        [-19.208765003590884, -23.06433026986784, 25.353476642490936],
+        [-19.081869599573096, -23.090258752624514, 25.37076937396897],
+        [-18.960376411451612, -23.11093009443519, 25.382777570192548],
+        [-18.83112589494237, -23.128431954946468, 25.390636145229386],
+        [-18.72734100533557, -23.142485505447727, 25.3969463818512],
+        [-18.627420157321055, -23.1532564794986, 25.399999883347043],
+        [-18.522831575897523, -23.161612169449725, 25.399999999996652],
+    ];
+    /// e24's knots: its breakpoints, the ends four times and the others three times
+    /// (a C0 piecewise cubic).
+    const E24_BREAKS: [f64; 17] = [
+        1.3321546162e-5,
+        2.2457257262e-5,
+        2.335906065e-5,
+        0.207344008492958,
+        1.076095040715497,
+        1.949897175135157,
+        3.950056337993551,
+        4.840891464011217,
+        5.433100634861487,
+        6.026470275991541,
+        6.620658048186671,
+        7.215134127251169,
+        7.608736241961278,
+        8.001992448923703,
+        8.394711717387553,
+        8.78671160905571,
+        9.101477588963798,
+    ];
+    const E21_POINTS: [[f64; 3]; 2] = [
+        [-23.583494648739176, -18.522825582433015, 20.762751173157692],
+        [-23.58349464873918, -23.58349464873912, 20.76275117315766],
+    ];
+    const E21_KNOTS: [f64; 4] = [
+        0.6216137551118551,
+        0.6216137551118551,
+        0.6548401635662747,
+        0.6548401635662747,
+    ];
+    const E21_POINT: [f64; 3] = [-23.583494648739105, 76.15431973709104, 20.762751173158243];
+    const E21_VECTOR: [f64; 3] = [-7.464240906760062e-16, -1.0, -5.8314382084062985e-15];
+    const E21_DOMAIN: [f64; 2] = [0.6216137551118551, 0.6548401635662747];
+    const E21_SCALE: f64 = 152.3086394741821;
+
+    /// e21 (the line) and e24 (the B-spline) with their edge intervals.
+    fn issue_18212_edges() -> ((Curve, Extent1d), (Curve, Extent1d)) {
+        use crate::curve::line::Line;
+        use crate::nurbs::math::{CPoint, NOW};
+        let cpoint = |p: &[f64; 3]| CPoint {
+            x: p[0],
+            y: p[1],
+            z: p[2],
+            w: NOW,
+        };
+        let e24_points: Vec<CPoint> = E24_POINTS.iter().map(cpoint).collect();
+        let last = E24_BREAKS.len() - 1;
+        let e24_knots: Vec<f64> = E24_BREAKS
+            .iter()
+            .enumerate()
+            .flat_map(|(i, &u)| std::iter::repeat_n(u, if i == 0 || i == last { 4 } else { 3 }))
+            .collect();
+        assert_eq!(e24_knots.len(), 53);
+        let e24 = BSplineCurve::from_data(3, 48, 52, 3, &e24_points, &e24_knots).unwrap();
+        let e24_interval = Extent1d::from_min_max(E24_BREAKS[0], E24_BREAKS[last]);
+        let e21_points: Vec<CPoint> = E21_POINTS.iter().map(cpoint).collect();
+        let e21_base = BSplineCurve::from_data(3, 1, 3, 1, &e21_points, &E21_KNOTS).unwrap();
+        let [x, y, z] = E21_POINT;
+        let [vx, vy, vz] = E21_VECTOR;
+        let e21 = Line::from_parts(
+            e21_base,
+            Vec3::new(x, y, z),
+            Vec3::new(vx, vy, vz),
+            Extent1d::from_min_max(E21_DOMAIN[0], E21_DOMAIN[1]),
+            E21_SCALE,
+            false,
+        );
+        let e21_interval = Extent1d::from_min_max(E21_DOMAIN[0], E21_DOMAIN[1]);
+        (
+            (Curve::from(e21), e21_interval),
+            (Curve::from(e24), e24_interval),
+        )
+    }
+
+    /// The range solutions of the check of `a` against `b` at `tol`, as `test #34` asks
+    /// (`snap_to_ends`).
+    fn issue_18212_ranges(
+        k: &Kernel,
+        (a, ai): &(Curve, Extent1d),
+        (b, bi): &(Curve, Extent1d),
+        tol: f64,
+    ) -> Vec<[f64; 4]> {
+        use crate::surface::surface::p4::NoObject;
+        let found = a
+            .global_coincidence_checker::<NoObject>(k, ai, b, bi, tol, true, [None, None])
+            .unwrap();
+        found
+            .solutions
+            .iter()
+            .filter(|s| s.solution_type == SolutionType::RangeOfValues)
+            .map(|s| {
+                [
+                    s.start.param(0).unwrap(),
+                    s.end.param(0).unwrap(),
+                    s.start.param(1).unwrap(),
+                    s.end.param(1).unwrap(),
+                ]
+            })
+            .collect()
+    }
+
+    /// #18212: e21 and e24 touch only at their shared vertex, so no tolerance makes
+    /// them coincident over a range. Before, every tolerance whose split put a piece
+    /// of e24 inside the stretch where the two run within the tolerance of each other
+    /// next to the vertex reported that piece as a range (1.4e-3, 1.4897e-3, 2.5e-3,
+    /// 4e-3 and 1e-2 among the issue's), and the tolerances between did not.
+    #[test]
+    fn issue_18212_edges_that_only_share_a_vertex_have_no_range_at_any_tolerance() {
+        let k = Kernel::default();
+        let (e21, e24) = issue_18212_edges();
+        let issue = [
+            1e-4, 5e-4, 1e-3, 1.3e-3, 1.4e-3, 1.4897e-3, 2e-3, 2.5e-3, 2.889e-3, 4e-3, 1e-2,
+        ];
+        // and 200 tolerances spaced evenly in log from 1e-5 to 2e-2
+        let sweep = (0..200).map(|i| 1e-5 * 2000.0_f64.powf(f64::from(i) / 199.0));
+        for tol in issue.into_iter().chain(sweep) {
+            let ranges = issue_18212_ranges(&k, &e21, &e24, tol);
+            assert!(ranges.is_empty(), "tol {tol:e}: {ranges:?}");
+            let ranges = issue_18212_ranges(&k, &e24, &e21, tol);
+            assert!(ranges.is_empty(), "tol {tol:e}, e24 first: {ranges:?}");
+        }
+    }
+
+    /// #18212, the counter-cases: a stretch the curves really share stays one range,
+    /// from the shared vertex on (the first half of e21 against e21) and away from it
+    /// (e24 over [1, 3] against e24, through the hook's splits).
+    #[test]
+    fn issue_18212_a_shared_stretch_stays_a_range() {
+        let k = Kernel::default();
+        let ((e21, e21_interval), (e24, e24_interval)) = issue_18212_edges();
+        let [a, b] = [e21_interval.min(), e21_interval.max()];
+        let half = (e21.clone(), Extent1d::from_min_max(a, 0.5 * (a + b)));
+        let middle = (e24.clone(), Extent1d::from_min_max(1.0, 3.0));
+        for tol in [1e-5, 1.4e-3, 4e-3] {
+            let ranges = issue_18212_ranges(&k, &half, &(e21.clone(), e21_interval), tol);
+            assert_eq!(ranges.len(), 1, "tol {tol:e}: {ranges:?}");
+            let [s0, e0, s1, e1] = ranges[0];
+            for (got, want) in [(s0, a), (e0, 0.5 * (a + b)), (s1, a), (e1, 0.5 * (a + b))] {
+                assert!((got - want).abs() < 1e-12, "tol {tol:e}: {ranges:?}");
+            }
+            let ranges = issue_18212_ranges(&k, &middle, &(e24.clone(), e24_interval), tol);
+            assert!(!ranges.is_empty(), "tol {tol:e}");
+            for r in &ranges {
+                let p = e24.evaluate_point(&k, r[0]).unwrap();
+                let q = e24.evaluate_point(&k, r[2]).unwrap();
+                assert!(p.distance(q) < tol, "tol {tol:e}: {ranges:?}");
+            }
+            let lo = ranges
+                .iter()
+                .map(|r| r[0].min(r[1]))
+                .fold(f64::MAX, f64::min);
+            let hi = ranges
+                .iter()
+                .map(|r| r[0].max(r[1]))
+                .fold(f64::MIN, f64::max);
+            assert!(
+                lo <= 1.0 + 1e-9 && hi >= 3.0 - 1e-9,
+                "tol {tol:e}: {ranges:?}"
+            );
+        }
+    }
 }
