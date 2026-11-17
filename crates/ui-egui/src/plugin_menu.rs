@@ -1125,11 +1125,7 @@ type Claim = Option<(usize, bool)>;
 /// also prevents two documents' dialogs for the same plugin entry from sharing one window.
 fn dialog_window_id(dialog: &EntryDialog, remember_position: bool) -> egui::Id {
     let id = egui::Id::unique("sc_plugin_entry");
-    if remember_position {
-        id.with((dialog.plugin.id.as_str(), dialog.entry.as_str(), dialog.session))
-    } else {
-        id.with(dialog.id)
-    }
+    if remember_position { id.with((dialog.plugin.id.as_str(), dialog.entry.as_str(), dialog.session)) } else { id.with(dialog.id) }
 }
 
 /// Draw one dialog. Returns whether it stays open, whether Run was pressed, and a selection field
@@ -1151,11 +1147,7 @@ fn show_dialog(app: &mut SolveApp, ctx: &egui::Context, dialog: &mut EntryDialog
     let (closed, action) = ui_kit::Window::new(dialog_window_id(dialog, app.preferences.plugin_remember_dialog_position), &icon, &title)
         .fields()
         .actions(&run_label, &close_label, None)
-        .show(
-            ctx,
-            ready.is_ok() && !running,
-            |ui| body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim),
-        );
+        .show(ctx, ready.is_ok() && !running, |ui| body(app, ui, dialog, ready.as_ref().err(), &mut picker, &mut claim));
     if let Some(picker) = picker {
         take_picks(dialog, &picker, &app.session.doc.clone());
         app.dialog = Some(picker);
