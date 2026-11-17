@@ -2767,7 +2767,7 @@ fn entries(app: &SolveApp, comp: u64, folder: &str) -> Vec<Entry> {
     }
 }
 
-fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
+pub(crate) fn construction_sel(f: &solidcraft_engine::doc::Feature) -> Sel {
     let name = f.name.clone();
     match f.kind {
         FeatureKind::ConstructionPoint { .. } => Sel::ConstructionPoint { name },

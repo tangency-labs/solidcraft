@@ -1010,7 +1010,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         | Kind::ChatContext
         | Kind::PluginPick { .. }
         | Kind::Construct { t: None, .. } => {}
-        Kind::Rib { thickness, depth, flip, normal, .. } => {
+        Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
                 ui_kit::segmented(ui, &mut i, &["In plane", "Normal"], Default::default());
@@ -1018,7 +1018,13 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             enter |= expr_row_positive(ui, "Thickness", thickness);
             enter |= hint_row_positive(ui, "Depth", depth, tr("to the next face"));
-            ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            // A rib along the sketch normal has no ends to run on, so it has no Extend option.
+            if *normal {
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            } else {
+                let extend_label = solidcraft_ui_text::tr("ui.rib_extend_ends");
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip), (extend_label, extend)]);
+            }
         }
         Kind::Emboss { depth, deboss } => {
             enter |= expr_row(ui, "Depth", depth);

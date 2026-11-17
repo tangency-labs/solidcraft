@@ -782,6 +782,44 @@ impl StandUpUnknown {
     }
 }
 
+/// Where a new Extrude dialog starts its distance (Preferences, Tools: "New extrude distance").
+/// Editing an extrude always keeps its own distance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtrudeStart {
+    /// The distance of the last new extrude applied (`extrude_last_distance`); 10 until there is one.
+    LastUsed,
+    /// The length typed in `extrude_custom_distance`; 10 while it isn't a usable length.
+    Custom,
+    /// 10 in the design's unit, as before (the default). A saved value this version doesn't know
+    /// reads as this.
+    #[default]
+    #[serde(other)]
+    Fixed,
+}
+
+impl ExtrudeStart {
+    pub const ALL: [Self; 3] = [Self::Fixed, Self::LastUsed, Self::Custom];
+
+    /// The choice as `ui.prefs` and the saved preferences spell it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed",
+            Self::LastUsed => "last_used",
+            Self::Custom => "custom",
+        }
+    }
+
+    /// The message id of the choice's label.
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::Fixed => "prefs.extrude_start.fixed",
+            Self::LastUsed => "prefs.extrude_start.last_used",
+            Self::Custom => "prefs.extrude_start.custom",
+        }
+    }
+}
+
 /// Which program reads the 3D mouse on Linux when both spacenavd and the device itself (hidraw)
 /// are there (Preferences: "3D mouse driver"). Read by the app's reader, not by this crate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1058,6 +1096,8 @@ preference_settings! {
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
+    /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.
+    touchscreen_navigation: bool = false, PAGE_NAVIGATION => check_tr("nav.touchscreen.label");
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, PAGE_NAVIGATION;
@@ -1569,6 +1609,14 @@ preference_settings! {
     /// switches the extent to To Object (off: picks only add profiles, as before). A click into the
     /// Profiles box makes the next picks profiles again.
     extrude_auto_to_object: bool = true, PAGE_TOOLS => check_tr("ui.extrude_auto_to_object");
+    /// Where a new Extrude starts its distance: `fixed` (the default: 10 in the design's unit, as
+    /// before), `last_used` (the last new extrude's distance) or `custom` (`extrude_custom_distance`).
+    extrude_start: ExtrudeStart = ExtrudeStart::default(), PAGE_TOOLS;
+    /// The length a new Extrude starts at with `extrude_start` `custom` (any length expression).
+    extrude_custom_distance: String = "10 mm".into(), PAGE_TOOLS;
+    /// The distance the last new extrude was applied with, in mm (empty until one is); kept when
+    /// defaults are restored.
+    extrude_last_distance: String = String::new();
     /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
     /// Off (the default): the view stays as it is.
     extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
@@ -1861,6 +1909,10 @@ preference_settings! {
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
+    /// Web app Pencil mode: pen taps toggle items and a pen double-tap takes the whole body or
+    /// sketch; finger touches in the view only navigate, and a finger double-tap on a flat face
+    /// starts a sketch on it. Off (the default): pens and fingers act as the mouse does.
+    pencil_mode: bool = false, PAGE_SKETCH;
     /// Prefer movable sketch points on exact selection ties; off keeps point insertion order.
     prefer_free_sketch_points: bool = true, PAGE_SKETCH;
     /// Opt in to displaying and selecting drawn 3D curve nodes as construction references.
@@ -4525,6 +4577,11 @@ fn prepare_preferences(
         && !StandUpUnknown::ALL.iter().any(|c| v.as_str() == Some(c.id()))
     {
         return Err("`stand_up_unknown` must be ask, note or off".into());
+    }
+    if let Some(v) = p.get("extrude_start")
+        && !ExtrudeStart::ALL.iter().any(|c| v.as_str() == Some(c.id()))
+    {
+        return Err("`extrude_start` must be fixed, last_used or custom".into());
     }
     if let Some(v) = p.get("dimension_input")
         && !matches!(v.as_str(), Some("view" | "window"))
