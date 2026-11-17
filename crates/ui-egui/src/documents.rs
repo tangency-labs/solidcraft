@@ -500,6 +500,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     }
     let reveals = crate::browser::take_reveals(app);
     if !presenting {
+        crate::select_other::close(app);
         crate::semantic_content::leave_document(app);
         if crate::render_workspace::active(app) {
             let _ = crate::render_workspace::enter(app, false);
