@@ -33,7 +33,8 @@
 //! under [`Contract::Proved`] prove the body before and the result after; the chamfers by
 //! sides and the variable rounds take it in their `_with` forms. The blend corner's Roll-over takes the proof
 //! under either contract, once its passes have built: there the proof chooses between two
-//! constructions.
+//! constructions. Proved, a blend also refuses rounds that leave a face whose boundary crosses
+//! itself ([`Error::RoundsCross`]); closed, it tests the result as topology only.
 
 use std::collections::{HashMap, HashSet};
 
@@ -833,6 +834,9 @@ struct Pass<'a> {
     chamfer_corner: ChamferCorner,
     /// The blend corner's Roll-over step of the pass (#10876).
     roll_over: RollOverStep<'a>,
+    /// The call's contract: under [`Contract::Proved`] the pass refuses rounds that leave a
+    /// face whose boundary crosses itself.
+    contract: Contract,
 }
 
 /// A pass's part in the blend corner's Roll-over (#10876,
@@ -972,13 +976,16 @@ fn pass(
     if faces.is_empty() {
         return Ok(Err(Refused::Error(Error::NoEffect)));
     }
-    // the rounds' faces and their neighbours: none may cross its own boundary
-    match rounds_cross(k, b, &faces) {
-        Ok(()) => {}
-        Err(e @ SolidError::RoundRefused { .. }) => {
-            return Ok(Err(Refused::Error(room::refusal(b, e, false))))
+    // proved, the rounds' faces and their neighbours are checked: none may cross its own
+    // boundary. Closed, a result is tested as topology only ([`Contract::Closed`])
+    if p.contract == Contract::Proved {
+        match rounds_cross(k, b, &faces) {
+            Ok(()) => {}
+            Err(e @ SolidError::RoundRefused { .. }) => {
+                return Ok(Err(Refused::Error(room::refusal(b, e, false))))
+            }
+            Err(e) => return Err(e),
         }
-        Err(e) => return Err(e),
     }
     let mut patches = Vec::new();
     if p.patches {
@@ -1031,6 +1038,7 @@ fn together<'a>(
     section: Section<'a>,
     turn: Turn,
     earlier: &'a [FaceId],
+    contract: Contract,
 ) -> Pass<'a> {
     Pass {
         edges,
@@ -1043,6 +1051,7 @@ fn together<'a>(
         turn,
         chamfer_corner: ChamferCorner::Mitre,
         roll_over: RollOverStep::No,
+        contract,
     }
 }
 
@@ -1102,6 +1111,7 @@ fn overflow_first(
     turn: Turn,
     mitred: &[EdgeId],
     dropped: &mut [bool],
+    contract: Contract,
 ) -> solidcore::Result<Result<Brep>> {
     let order = b.edge_list().to_vec();
     let fresh_list = fresh.edge_list().to_vec();
@@ -1129,6 +1139,7 @@ fn overflow_first(
             turn,
             chamfer_corner: ChamferCorner::Mitre,
             roll_over: RollOverStep::No,
+            contract,
         };
         match pass(k, b, alone, &mut stopped)? {
             Err(Refused::Error(why)) if stopped.overflow.is_none() => return Ok(Err(why)),
@@ -1183,14 +1194,18 @@ fn overflow_first(
     if lead.is_empty() || rest.is_empty() {
         // a single pass: its rounds go together
         let sizes: Vec<f64> = sizes.to_vec();
-        let one = pass_or_refuse(k, &mut fresh, together(&again, section(&sizes), turn, &[]))?;
+        let one = pass_or_refuse(
+            k,
+            &mut fresh,
+            together(&again, section(&sizes), turn, &[], contract),
+        )?;
         if let Err(e) = one {
             return Ok(Err(e));
         }
         untagged(&mut fresh)?;
         return Ok(Ok(fresh));
     }
-    let lead_pass = together(&lead, section(&lead_sizes), turn, &[]);
+    let lead_pass = together(&lead, section(&lead_sizes), turn, &[], contract);
     let first = match pass_or_refuse(k, &mut fresh, lead_pass)? {
         Ok(made) => made.faces,
         Err(e) => return Ok(Err(e)),
@@ -1213,7 +1228,7 @@ fn overflow_first(
     }
     if !rest_edges.is_empty() {
         // the second pass meets the first rounds as one blend: it is handed their faces
-        let second = together(&rest_edges, section(&rest_sizes), turn, &first);
+        let second = together(&rest_edges, section(&rest_sizes), turn, &first, contract);
         if let Err(e) = pass_or_refuse(k, &mut fresh, second)? {
             return Ok(Err(e));
         }
@@ -1241,6 +1256,7 @@ fn roll_over(
     turn: Turn,
     roll_overs: &[RollOver],
     dropped: &mut [bool],
+    contract: Contract,
 ) -> solidcore::Result<Result<Brep>> {
     let order = b.edge_list().to_vec();
     let fresh_list = fresh.edge_list().to_vec();
@@ -1268,7 +1284,7 @@ fn roll_over(
     let first = match pass_or_refuse(
         k,
         &mut fresh,
-        together(&lead, section(&lead_sizes), turn, &[]),
+        together(&lead, section(&lead_sizes), turn, &[], contract),
     )? {
         Ok(made) => made.faces,
         Err(e) => return Ok(Err(e)),
@@ -1312,7 +1328,7 @@ fn roll_over(
         let chain_sizes = vec![size; chain.len()];
         let p = Pass {
             roll_over: RollOverStep::Concave(&ends),
-            ..together(&chain, section(&chain_sizes), turn, &first)
+            ..together(&chain, section(&chain_sizes), turn, &first, contract)
         };
         if let Err(e) = pass_or_refuse(k, &mut fresh, p)? {
             return Ok(Err(e));
@@ -1407,7 +1423,8 @@ const NO_COMMENT: &str = "<no comment>";
 /// [`Error::CornerUnsupported`] for a vertex no corner kind handles; [`Error::EdgeNotBlendable`]
 /// for an edge with no blend; [`Error::RoundTooSmall`] for a round within its edge's tolerance;
 /// [`Error::ContinuesInto`] for a blend that cannot end where its edge runs on tangentially;
-/// [`Error::NoEffect`] for a blend that made no face; [`Error::RoundsCross`] for blends that
+/// [`Error::NoEffect`] for a blend that made no face; under [`Contract::Proved`],
+/// [`Error::RoundsCross`] for blends that
 /// leave a face whose boundary crosses itself (the kernel's `rounds_cross`, on the blends' faces
 /// and their neighbours); with [`Corners::Open`], [`Error::NotSolid`] for a body that is no
 /// closed solid once blended and [`Error::Unsupported`] for a corner patch that is not a disc
@@ -1627,6 +1644,7 @@ fn blend_on_body(
                 turn,
                 chamfer_corner: options.chamfer_corner,
                 roll_over: RollOverStep::No,
+                contract,
             };
             if let Err(e) = pass_or_refuse(k, b, p)? {
                 return Ok(Err(e));
@@ -1696,6 +1714,7 @@ fn blend_on_body(
         turn,
         chamfer_corner: ChamferCorner::Mitre,
         roll_over: step,
+        contract,
     };
     let made = pass(k, b, p, &mut stopped)?;
     // the blend corner's Roll-over (#10876): the corners step refused it; it is built in two
@@ -1718,6 +1737,7 @@ fn blend_on_body(
                 turn,
                 &stopped.roll_overs,
                 &mut rolled_dropped,
+                contract,
             )
             .and_then(|r| match r {
                 // taken only where it is proved a solid as the input is
@@ -1774,7 +1794,7 @@ fn blend_on_body(
             if let (Some(mapped), false) = (mapped, ends.is_empty()) {
                 let p = Pass {
                     roll_over: RollOverStep::Concave(&ends),
-                    ..together(&mapped, section(each), turn, &[])
+                    ..together(&mapped, section(each), turn, &[], contract)
                 };
                 match pass_or_refuse(k, &mut copy, p).and_then(|r| match r {
                     // taken only where it is proved a solid as the input is
@@ -1814,6 +1834,7 @@ fn blend_on_body(
             turn,
             &mitred,
             &mut dropped,
+            contract,
         )? {
             Ok(made) => {
                 *b = made;
@@ -2687,6 +2708,7 @@ fn chamfer_sides_impl(
             turn: Turn::Mitre,
             chamfer_corner: ChamferCorner::Mitre,
             roll_over: RollOverStep::No,
+            contract,
         };
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));
@@ -3011,6 +3033,7 @@ fn fillet_variable_impl(
             turn: Turn::Mitre,
             chamfer_corner: ChamferCorner::Mitre,
             roll_over: RollOverStep::No,
+            contract,
         };
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));

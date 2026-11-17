@@ -807,6 +807,7 @@ fn chamfers_by_sides_and_variable_rounds_build_alike_under_either_contract() {
         edge_faces_along_ordered, fillet_variable_from_with, fillet_variable_ordered_with,
         fillet_variable_with, Contract,
     };
+    type Call<'a> = &'a dyn Fn(&Body, Contract);
     all_fixes();
     let (knots, radii) = ([0.0, 0.0, 1.0, 1.0], [1.0, 2.0]);
     let second = ChamferSecond::Distance(3.0);
@@ -844,7 +845,6 @@ fn chamfers_by_sides_and_variable_rounds_build_alike_under_either_contract() {
             .unwrap();
         (order, e)
     };
-    type Call<'a> = &'a dyn Fn(&Body, Contract);
     let cases: [Call<'_>; 6] = [
         &|b, c| {
             let e = top_front(b);
