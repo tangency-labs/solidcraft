@@ -56,6 +56,11 @@ pub struct SaveMesh {
     /// Send to Slicer: the bodies and the print faces the Print face input last showed, to tell
     /// a pick or a clear in it from a change of the bodies.
     shown: Option<(Vec<String>, Vec<Sel>)>,
+    /// Send to Slicer: keep the file in `copy_folder` instead of the slicer folder (#18311).
+    copy: bool,
+    copy_folder: String,
+    /// With `copy`: one file replaced each time, not a new version each time.
+    copy_overwrite: bool,
 }
 
 impl SaveMesh {
@@ -87,6 +92,8 @@ pub struct SlicerMenu {
     icons: HashMap<String, Option<egui::TextureHandle>>,
     /// A program chosen in the Custom… file dialog, waiting for the open dialog to take it.
     picked: Option<String>,
+    /// A folder chosen for the kept file, waiting for the dialog to take it.
+    picked_folder: Option<String>,
 }
 
 impl SlicerMenu {
@@ -142,7 +149,20 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         _ => String::new(),
     };
     let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
-    let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true, shown: None });
+    // The folder this design's file was last kept in, if it was (#18311).
+    let copy_folder = p.slicer_copy_folders.get(&app.session.path.clone().unwrap_or_default()).cloned().unwrap_or_default();
+    let copy = open && id == "file.send_to_slicer" && !copy_folder.is_empty();
+    let kind = Kind::SaveMesh(SaveMesh {
+        format,
+        quality,
+        open,
+        slicer,
+        stale: true,
+        shown: None,
+        copy,
+        copy_folder,
+        copy_overwrite: p.slicer_copy_overwrite,
+    });
     let mut inputs = vec![SelInput::new("Bodies", BODIES, true)];
     // The design's only body is the one to export (#13098); with more, nothing says which.
     let only = body_picks(app, false);
@@ -424,7 +444,31 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
         let choosing = app.file_picker_busy();
         ui.add_enabled_ui(!choosing, |ui| slicer_combo(app, ui, k));
     });
+    // A browser has no folder dialog, and EasyPrint keeps no file.
+    if k.slicer != EASYPRINT && app.services.pick_folder.is_some() {
+        copy_rows(app, ui, k);
+    }
     false
+}
+
+/// Keep the file in a folder of the user's (#18311): the choice, the folder, and whether each send
+/// replaces the file or adds a version.
+fn copy_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
+    form_row(ui, "", |ui| crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.send_copy_keep"), &mut k.copy));
+    if !k.copy {
+        return;
+    }
+    if let Some(folder) = app.slicer_menu.picked_folder.take() {
+        k.copy_folder = folder;
+    }
+    form_row(ui, solidcraft_ui_text::tr("ui.send_copy_folder"), |ui| {
+        let busy = app.file_picker_busy();
+        if crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.send_copy_choose"), crate::ui_kit::Button::Small).clicked() && !busy {
+            app.pick_folder(|app, path| app.slicer_menu.picked_folder = path);
+        }
+        ui.add(egui::Label::new(k.copy_folder.as_str()).truncate());
+    });
+    form_row(ui, "", |ui| crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.send_copy_replace"), &mut k.copy_overwrite));
 }
 
 fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
@@ -576,6 +620,15 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
             return Ok(vec![("file.open_in_easyprint".into(), p)]);
         }
         p["slicer"] = json!(k.slicer);
+        if k.copy {
+            if k.copy_folder.trim().is_empty() {
+                return Err(solidcraft_ui_text::tr("ui.send_copy_no_folder").into());
+            }
+            p["copy_to"] = json!(k.copy_folder);
+            if k.copy_overwrite {
+                p["copy_overwrite"] = json!(true);
+            }
+        }
         return Ok(vec![("file.send_to_slicer".into(), p)]);
     }
     Ok(vec![("file.save_mesh".into(), p)])
@@ -605,6 +658,14 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
         if k.slicer == EASYPRINT {
             crate::easyprint_ui::request(app, params);
         } else {
+            // The folder is remembered for this design; turned off, it is forgotten.
+            let key = app.session.path.clone().unwrap_or_default();
+            if k.copy {
+                app.preferences.slicer_copy_folders.insert(key, k.copy_folder.clone());
+                app.preferences.slicer_copy_overwrite = k.copy_overwrite;
+            } else {
+                app.preferences.slicer_copy_folders.remove(&key);
+            }
             send_to_slicer(app, params);
         }
         return Ok(());
@@ -638,6 +699,11 @@ fn report(app: &mut SolveApp, result: &Value) {
     match result.get("slicer_error").and_then(Value::as_str) {
         Some(e) => app.set_status(e.to_string(), true),
         None => match result.get("slicer").and_then(Value::as_str) {
+            // A file kept in the user's folder: say where, and skip the hint about the slicer's own folder.
+            Some(s) if result.get("copy").and_then(Value::as_bool) == Some(true) => {
+                let line = solidcraft_ui_text::format("ui.sent_to_slicer_saved", &[("slicer", s), ("path", path)]);
+                app.set_status(line, false);
+            }
             Some(s) => {
                 let mut line = match (result.get("numbered").and_then(Value::as_bool), std::path::Path::new(path).file_name()) {
                     (Some(true), Some(file)) => {
@@ -726,6 +792,46 @@ mod tests {
         app.run("file.send_to_slicer", params).unwrap();
         assert!(app.dialog.is_none());
         assert_eq!(sent(&seen), 1);
+        let _ = std::fs::remove_dir_all(seen.parent().unwrap());
+        solidcraft_engine::slicers::set_chosen_programs(&[]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_for_the_file_is_asked_kept_per_design_and_forgotten_when_turned_off() {
+        let (mut app, seen, _) = app_with_fake_slicer("folder");
+        let keep = seen.parent().unwrap().join("kept");
+        let key = app.preferences.custom_slicers[0].clone();
+        app.preferences.send_slicer = key.clone();
+        let (Kind::SaveMesh(mut k), mut inputs) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+        inputs[0].items = body_picks(&app, false);
+        assert!(!k.copy && k.copy_folder.is_empty(), "nothing remembered for a design that has none");
+        k.slicer = key;
+        // Off: the command has no folder; on without one: refused; on with one: named, numbered by default.
+        let (_, plain) = commands(&k, &inputs).unwrap().remove(0);
+        assert!(plain.get("copy_to").is_none());
+        k.copy = true;
+        assert!(commands(&k, &inputs).is_err());
+        k.copy_folder = keep.to_string_lossy().into_owned();
+        let (_, kept) = commands(&k, &inputs).unwrap().remove(0);
+        assert_eq!((kept["copy_to"].as_str(), kept.get("copy_overwrite")), (Some(keep.to_str().unwrap()), None));
+        k.copy_overwrite = true;
+        assert_eq!(commands(&k, &inputs).unwrap().remove(0).1["copy_overwrite"], json!(true));
+        // Sending keeps the file in the folder and remembers the folder for this design.
+        run(&mut app, &k, &inputs).unwrap();
+        assert_eq!(std::fs::read_dir(&keep).unwrap().count(), 1);
+        let (Kind::SaveMesh(again), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+        assert_eq!((again.copy, again.copy_folder.as_str(), again.copy_overwrite), (true, keep.to_str().unwrap(), true));
+        // Another design does not take it.
+        app.session.path = Some("/elsewhere/other.solidcraft".into());
+        let (Kind::SaveMesh(other), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+        assert!(!other.copy);
+        app.session.path = None;
+        // Turned off, it is forgotten.
+        k.copy = false;
+        run(&mut app, &k, &inputs).unwrap();
+        let (Kind::SaveMesh(off), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+        assert!(!off.copy && off.copy_folder.is_empty());
         let _ = std::fs::remove_dir_all(seen.parent().unwrap());
         solidcraft_engine::slicers::set_chosen_programs(&[]);
     }
@@ -951,7 +1057,17 @@ mod tests {
 
     #[test]
     fn send_to_slicer_asks_for_bodies_and_a_slicer_but_not_a_format() {
-        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
+        let k = SaveMesh {
+            format: 0,
+            quality: 0,
+            open: true,
+            slicer: "prusa".into(),
+            stale: false,
+            shown: None,
+            copy: false,
+            copy_folder: String::new(),
+            copy_overwrite: false,
+        };
         let mut input = SelInput::new("Bodies", BODIES, true);
         assert!(commands(&k, std::slice::from_ref(&input)).is_err());
         input.items = vec![Sel::Body { name: "Part".into() }];
@@ -970,7 +1086,17 @@ mod tests {
     fn a_remembered_quality_goes_to_save_but_not_to_send() {
         let mut input = SelInput::new("Bodies", BODIES, true);
         input.items = vec![Sel::Body { name: "Part".into() }];
-        let k = SaveMesh { format: 0, quality: 2, open: true, slicer: "prusa".into(), stale: false, shown: None };
+        let k = SaveMesh {
+            format: 0,
+            quality: 2,
+            open: true,
+            slicer: "prusa".into(),
+            stale: false,
+            shown: None,
+            copy: false,
+            copy_folder: String::new(),
+            copy_overwrite: false,
+        };
         let (_, sent) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
         assert_eq!(sent.get("quality"), None, "sending has no quality row: the default applies");
         let (_, saved) = commands(&SaveMesh { open: false, ..k }, &[input]).unwrap().remove(0);
@@ -993,7 +1119,17 @@ mod tests {
         h.app.session.doc_mut().name = "Bracket".into();
         let mut bodies = SelInput::new("Bodies", BODIES, true);
         bodies.items = vec![Sel::Body { name: "Base".into() }];
-        let stl = SaveMesh { format: 0, quality: 0, open: false, slicer: String::new(), stale: false, shown: None };
+        let stl = SaveMesh {
+            format: 0,
+            quality: 0,
+            open: false,
+            slicer: String::new(),
+            stale: false,
+            shown: None,
+            copy: false,
+            copy_folder: String::new(),
+            copy_overwrite: false,
+        };
         let offer = |h: &mut crate::scenario::Harness| {
             // One file picker at a time: the STEP export finishes before the mesh asks.
             crate::toolbar::export(&mut h.app, "step");
@@ -1093,7 +1229,17 @@ mod tests {
             assert_eq!(bodies(&mut h, id), one, "{id}");
         }
         let (_, p) = commands(
-            &SaveMesh { format: 0, quality: 0, open: false, slicer: String::new(), stale: true, shown: None },
+            &SaveMesh {
+                format: 0,
+                quality: 0,
+                open: false,
+                slicer: String::new(),
+                stale: true,
+                shown: None,
+                copy: false,
+                copy_folder: String::new(),
+                copy_overwrite: false,
+            },
             &h.app.dialog.as_ref().unwrap().inputs,
         )
         .map(|mut c| c.remove(0))

@@ -1724,6 +1724,12 @@ preference_settings! {
     view_dxf_zero: String = "target".into();
     /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
     send_slicer: String = String::new();
+    /// Send to Slicer: the folder the file is kept in for each saved design (its path), asked for in
+    /// the Send window (#18311). A design with no entry keeps it in the slicer folder; one that was
+    /// never saved is under the empty path.
+    slicer_copy_folders: std::collections::BTreeMap<String, String> = Default::default();
+    /// Send to Slicer: a file kept in a folder is replaced each time, not numbered (#18311).
+    slicer_copy_overwrite: bool = false;
     /// Slicers that can load a file into the window that is already open do so (default on).
     slicer_single_instance: bool = true, 0;
     /// Export STL, Export 3MF and Send to Slicer start with the design's body in Bodies when it

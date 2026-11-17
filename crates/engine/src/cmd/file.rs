@@ -162,7 +162,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("INSERT", "FILES")
         .icon("mesh_export")
         .noundo()
-        .params("slicer: id or name from file.slicers, or a program the user added under Custom…; bodies?: [names] (default: the selected bodies); wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); format?: 3mf|stl|3mf-tagged (default 3mf, in millimetres; STL if that can't be written) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk)"),
+        .params("slicer: id or name from file.slicers, or a program the user added under Custom…; bodies?: [names] (default: the selected bodies); wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); format?: 3mf|stl|3mf-tagged (default 3mf, in millimetres; STL if that can't be written); copy_to?: a folder to keep the file in instead (made if missing): it is named after the design with the next free -v<N>, and the reply has `version` and `copy`; copy_overwrite?: bool (default false; with copy_to: one file named after the design, replaced each time) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk); with copy_to the slicer opens the file in that folder instead"),
     CommandSpec::new("file.open_in_easyprint", "Open with EasyPrint", easyprint::open_in_easyprint)
         .icon("mesh_export")
         .noundo()
@@ -2566,6 +2566,7 @@ fn save_mesh(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality,
                 dest: send::Dest::Path(path),
+                copy: None,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait: send::Wait::Block,
             },
@@ -2602,6 +2603,15 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;
+        // A folder to keep the file in, in place of the slicer folder; an agent reaches only its own folders.
+        let copy = match str_(p, "copy_to").map(str::trim).filter(|d| !d.is_empty()) {
+            None => None,
+            Some(dir) if dir.len() < 4096 => {
+                solidcraft_io::vfs::check(dir).map_err(|e| EngineError::Other(e.to_string()))?;
+                Some(send::Copy { dir: dir.into(), overwrite: bool_(p, "copy_overwrite").unwrap_or(false) })
+            }
+            Some(_) => return Err(bad(cmd, "`copy_to` is too long")),
+        };
         send::send(
             s,
             send::Send {
@@ -2613,6 +2623,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
                 format,
                 quality: Default::default(),
                 dest: send::Dest::Folder,
+                copy,
                 single_instance: bool_(p, "single_instance").unwrap_or(true),
                 wait,
             },
