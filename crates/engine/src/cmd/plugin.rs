@@ -16,7 +16,7 @@ use serde_json::Value;
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.import", "Import with Plugin", checked!("file.import", import)).icon("import").noundo()
         .contract(&TypedContract::<ImportParams>::new()).output(output_schema_for::<ImportedDesign>)
-        .params("path, format?: installed importer plugin_id.entry (default: the one claiming the file's extension; see plugin.list importers), options?: the importer's declared options; opens the file as a new, unsaved design made by the importer plugin and returns its loss_report; never opens a dialog"),
+        .params("path, format?: installed importer plugin_id.entry (default: the one claiming the file's extension; see plugin.list importers), options?: the importer's declared options, named?: bool (refusals name the missing grant and how to approve it); opens the file as a new, unsaved design made by the importer plugin and returns its loss_report; never opens a dialog"),
     CommandSpec::new("model.mesh", "Read Body Mesh", checked!("model.mesh", mesh)).icon("inspect").noundo().read_only()
         .contract(&TypedContract::<MeshParams>::new()).output(output_schema_for::<MeshResult>)
         .params("body, tolerance?: finite positive chord tolerance in mm (default 0.05); evaluated component-local mesh, at most 8192 vertices and 16384 triangles; no files or model changes"),
@@ -237,7 +237,10 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let path = p.path.0;
     let importer = plugin::importer_for(s, &path, p.format.as_deref())?
         .ok_or_else(|| bad("file.import", "no installed, enabled importer plugin reads this file"))?;
-    let imported = plugin::import_file(s, &importer, &path, &p.options)?;
+    let imported = plugin::import_file(s, &importer, &path, &p.options).map_err(|e| match p.named {
+        true => plugin::explain_importer(s, &importer, e),
+        false => e,
+    })?;
     serde_json::to_value(imported).map_err(|e| bad("file.import", e.to_string()))
 }
 

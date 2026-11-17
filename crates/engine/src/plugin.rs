@@ -98,10 +98,15 @@ impl AppState {
 
     /// Take in grants another program stored or revoked since this session last looked. Nothing
     /// to do unless this session keeps its grants in the store.
+    ///
+    /// The store is read with the app's own authority, whatever the caller's file scope: what the
+    /// user approved for a plugin applies whoever calls it, so an agent confined to its folders
+    /// runs a plugin with its approvals, not with none. Writes still need the caller's scope.
     pub fn refresh_stored(&mut self) {
         let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return };
         if let Some(synced) = self.stored.as_mut() {
-            synced.refresh(&dir, &mut self.grants);
+            let grants = &mut self.grants;
+            solidcraft_io::vfs::scoped(None, || synced.refresh(&dir, grants));
         }
     }
 
@@ -356,7 +361,7 @@ pub use import::{Importer, describe as describe_importers, import_file, importer
 #[cfg(test)]
 mod tests;
 mod tools;
-pub use tools::{explain_named, missing_grant, structured_error as structured_tool_error, tools};
+pub use tools::{explain_importer, explain_named, missing_grant, structured_error as structured_tool_error, tools};
 
 /// The application adapter owns a scratch transaction. Wasmtime sees only PluginHost.
 pub struct SolidCraftHost {

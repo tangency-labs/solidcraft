@@ -414,7 +414,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              materials appearances); the result reports the component (id, component_name). Replaces the current design; insert into it \
              instead with the file.insert_step (STEP) or file.insert_mesh (mesh) commands. A STEP file from a system \
              that has Y up opens lying on its back: `up: \"y\"` turns its component a quarter turn about X (Y becomes Z). glTF is Y up, \
-             so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful.",
+             so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful. \
+             A file of another kind opens with an installed importer plugin that claims its extension (the `<plugin>.<entry>` tools \
+             titled \"Open .ext files with …\" list them).",
             object(
                 json!({
                     "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),

@@ -108,7 +108,7 @@ pub fn call(b: &mut dyn Backend, name: &str, args: &Map<String, Value>) -> Resul
     match str_field(t, "kind") {
         "importer" => {
             let options = args.get("options").cloned().unwrap_or_else(|| json!({}));
-            exec(b, "file.import", json!({"path": args.get("path"), "format": name, "options": options}))
+            exec(b, "file.import", json!({"path": args.get("path"), "format": name, "options": options, "named": true}))
         }
         _ => {
             let approval = t.get("approval").and_then(Value::as_str).ok_or_else(|| format!("`{name}` has no approval hash to run with"))?;

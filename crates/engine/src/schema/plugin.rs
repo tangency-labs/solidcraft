@@ -191,6 +191,10 @@ pub struct ImportParams {
     /// The importer's declared options. Default: its defaults.
     #[serde(default = "empty_params")]
     pub options: Value,
+    /// Called as the importer's tool: a missing grant comes back naming the plugin, the grant and
+    /// how to approve it.
+    #[serde(default)]
+    pub named: bool,
 }
 
 /// What an importer made: the new design, and what it could not carry over.

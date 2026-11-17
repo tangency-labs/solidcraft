@@ -7,7 +7,7 @@ use crate::schema::plugin::{PluginTool, PluginToolKind};
 
 /// How a person approves a grant a plugin lacks.
 pub const APPROVE: &str = "approve it in Preferences › Plugins by installing the plugin again and allowing it, \
-or headlessly with plugin.install and its approve object";
+or headlessly with plugin.install and its approve object (kept for later sessions; plugin.grants lists what is approved)";
 
 /// Every installed, enabled plugin's entries as tools, sorted by name, or only the tool `name`.
 /// Reads each manifest, and for the one tool `name` asks for its component (for the approval
@@ -130,6 +130,14 @@ pub fn explain_named(session: &Session, manifest: &Manifest, entry: &str, error:
     match error {
         EngineError::Plugin(e) => explain(e, manifest, &session.plugin_state.grants.get(&manifest.id).cloned().unwrap_or_default(), entry),
         e => e,
+    }
+}
+
+/// A failed importer tool call's error in words an agent can act on, as [`explain_named`].
+pub fn explain_importer(session: &Session, importer: &import::Importer, error: EngineError) -> EngineError {
+    match with_installed(session, &importer.folder, || import::read_manifest(&importer.folder)) {
+        Ok(manifest) => explain_named(session, &manifest, &importer.entry, error),
+        Err(_) => error,
     }
 }
 
