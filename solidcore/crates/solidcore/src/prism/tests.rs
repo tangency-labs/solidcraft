@@ -20,7 +20,8 @@ use super::profile::{
     Loop2, ProfileRefusal, Region2, Seg2,
 };
 use super::read::{planar_curves, planar_pieces, PlanarPiece, Run};
-use super::sheet::{parallel_faces, region_loops, sheet_regions};
+use super::sheet::parallel_faces;
+use super::sheet::{region_loops, sheet_regions};
 use crate::boolean::api_brep::{boolean_2d, Boolean2dOutcome};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::eval::Frame;
