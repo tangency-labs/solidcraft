@@ -1,0 +1,10 @@
+{
+  "en": {"dialog.invert_profiles": "Invert"},
+  "de": {"dialog.invert_profiles": "Umkehren"},
+  "ja": {"dialog.invert_profiles": "選択反転"},
+  "zh": {"dialog.invert_profiles": "反选"},
+  "ar": {"dialog.invert_profiles": "عكس التحديد"},
+  "he": {"dialog.invert_profiles": "היפוך בחירה"},
+  "ko": {"dialog.invert_profiles": "선택 반전"},
+  "vi": {"dialog.invert_profiles": "Đảo chọn"}
+}

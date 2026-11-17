@@ -169,6 +169,43 @@ fn deleting_the_edited_feature_closes_its_editor_and_undo_restores_the_design() 
     assert_eq!(crate::open_meshing::session_world(&h.app.session).body("Main").unwrap().mesh().bounds().max.z, 10.0);
 }
 
+/// Invert on the Extrude Profiles row selects every drawn profile when none was selected,
+/// swaps a partial selection with its complement, and clears a complete selection (#18704).
+/// It changes only dialog picks until OK is pressed.
+#[test]
+fn extrude_profiles_invert_selection_uses_one_sketch_and_preserves_the_design() {
+    use solidcraft_engine::Sel;
+
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Cuts"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[30,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let original = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    h.app.start("solid.extrude");
+    h.frames(7);
+    let count = |h: &Harness| {
+        h.app.dialog.as_ref().expect("Extrude dialog").inputs[0].items.iter().filter(|x| matches!(x, Sel::Profile { .. })).count()
+    };
+    assert_eq!(count(&h), 0, "two disjoint profiles are not selected automatically");
+    assert!(crate::scenario::handle_at("dialog:invert_profiles").is_some(), "Invert appears next to Profiles");
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(count(&h), 2, "empty selection inverts to all drawn profiles");
+    let picks = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert!(matches!(&picks[..], [Sel::Profile { sketch: a, .. }, Sel::Profile { sketch: b, .. }] if a == b));
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(count(&h), 0, "inverting all clears the selection");
+
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![picks[0].clone()];
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(count(&h), 1, "a partial selection inverts to its complement");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![picks[1].clone()]);
+    assert_eq!(h.app.session.undo.len(), undo, "no command runs before OK");
+    assert_eq!(h.app.session.doc.to_json(), original.to_json(), "inversion changes no design geometry");
+}
+
 #[test]
 fn unchanged_all_profiles_includes_profiles_added_after_edit() {
     let mut h = make(json!({}));

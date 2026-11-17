@@ -2356,6 +2356,58 @@ fn retain_profile_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
     }
 }
 
+/// The sketch whose drawn profiles Extrude's Invert Selection works on: prefer an already
+/// picked profile, then an active sketch, then the most recent sketch (#18704).
+fn invert_profile_sketch(d: &Dialog, s: &Session) -> Option<u64> {
+    if !matches!(d.kind, Kind::Extrude { .. }) || !d.inputs.first().is_some_and(|i| i.accept & PROFILES != 0) {
+        return None;
+    }
+    d.inputs
+        .first()?
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Sel::Profile { sketch, .. } => Some(*sketch),
+            _ => None,
+        })
+        .or(s.active_sketch)
+        .or_else(|| s.doc.features.iter().rev().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id))
+}
+
+/// Swap picked and unpicked drawn profiles of one sketch, including when no profile is picked.
+/// Other input items (for example picked faces) are preserved. The sketch's existing hole and
+/// projection rules are shared with the Browser's "pick sketch" action (#18704).
+fn invert_extrude_profiles(d: &mut Dialog, s: &Session) -> bool {
+    let Some(sketch) = invert_profile_sketch(d, s) else { return false };
+    let state = crate::open_meshing::session_world(s);
+    let Some(solved) = state.sketch(sketch) else { return false };
+    let candidates = drawn_profiles(solved);
+    if candidates.is_empty() {
+        return false;
+    }
+    let Some(input) = d.inputs.first_mut() else { return false };
+    let selected: Vec<usize> = input
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Sel::Profile { sketch: id, index } if *id == sketch => Some(*index),
+            _ => None,
+        })
+        .collect();
+    input.items.retain(|item| !matches!(item, Sel::Profile { sketch: id, .. } if *id == sketch));
+    input.items.extend(candidates.into_iter().filter(|index| !selected.contains(index)).map(|index| Sel::Profile { sketch, index }));
+    d.profile_selection_changed = true;
+    d.active = 0;
+    d.awaiting_pick = true;
+    d.pick_refused = None;
+    d.error = None;
+    if let Kind::Extrude { smart, .. } = &mut d.kind {
+        smart.profiles_chosen = true;
+    }
+    d.sync_thread(s);
+    true
+}
+
 /// The profiles of a sketch that aren't the island inside another profile's hole: a circle in a
 /// rectangle gives the rectangle-with-hole and the disc, and taking both would fill the hole.
 /// Loops are compared as sets of curve ids, so where a loop starts or which way it runs doesn't matter.
@@ -3455,6 +3507,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     }
     let t = Tokens::get();
     let mut clear: Option<usize> = None;
+    let mut invert = false;
     let mut activate: Option<usize> = None;
     let mut remove = None;
     // Only one field may look active at a time (#10066): while a text editor holds the keyboard,
@@ -3524,6 +3577,14 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     activate = Some(i);
                     surrender_keyboard_focus(ui);
                 }
+                if i == 0 && invert_profile_sketch(d, s).is_some() {
+                    let response = crate::ui_kit::button(ui, solidcraft_ui_text::tr("dialog.invert_profiles"), crate::ui_kit::Button::Small);
+                    crate::scenario::publish_target("dialog:invert_profiles", response.rect);
+                    if response.clicked() {
+                        invert = true;
+                        surrender_keyboard_focus(ui);
+                    }
+                }
                 if !inp.items.is_empty() || stored_reference.is_some() {
                     let rect = egui::Rect::from_center_size(
                         egui::pos2(chip_rect.right() - t.space_24 / 2.0, chip_rect.center().y),
@@ -3589,6 +3650,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         }
         d.awaiting_pick = true;
         d.pick_refused = None;
+    }
+    if invert {
+        invert_extrude_profiles(d, s);
     }
     if let Some(i) = clear {
         if let Some(key) = stored_input_reference_key(d, i) {
