@@ -311,10 +311,10 @@ mod tests {
         let mut s = Session::default();
         let h = new_hinge(&s.doc);
         assert_eq!([h.slot_length, h.bridge, h.row_spacing, h.slot_width, h.margin], ["20 mm", "3 mm", "1.5 mm", "0.2 mm", "0 mm"]);
-        s.doc.units = "cm".into();
+        std::sync::Arc::make_mut(&mut s.doc).units = "cm".into();
         let h = new_hinge(&s.doc);
         assert_eq!([h.slot_length, h.bridge, h.row_spacing, h.slot_width], ["2 cm", "0.3 cm", "0.15 cm", "0.02 cm"]);
-        s.doc.units = "in".into();
+        std::sync::Arc::make_mut(&mut s.doc).units = "in".into();
         let h = new_hinge(&s.doc);
         assert_eq!([h.slot_length, h.bridge, h.row_spacing, h.slot_width], ["0.75 in", "0.125 in", "0.0625 in", "0.008 in"]);
     }
