@@ -186,6 +186,70 @@ fn sketch_under_the_part_drills_up_into_it() {
 }
 
 #[test]
+fn a_hole_on_a_sketch_alone_skips_arc_centres() {
+    // A rounded corner's arc centre is the arc's geometry, not a hole site (#18429): only the
+    // stand-alone point drills, one Ø10 x 8 hole (628.3 mm³).
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [5, 5], "start": [0, 5], "end": [5, 0]}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "mine"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": 10, "depth": 8, "name": "H"}));
+    near(removed(&mut s), 628.3);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0) && solid_at(&s, 5.0, 5.0, 4.0));
+}
+
+#[test]
+fn a_hole_on_a_sketch_alone_skips_a_construction_rectangles_centre() {
+    // A construction rectangle's centre is reference geometry, not a hole site (#18429): only the
+    // stand-alone point drills, one Ø10 x 8 hole (628.3 mm³).
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [8, 8], "corner": [12, 12], "construction": true}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "mine"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": 10, "depth": 8, "name": "H"}));
+    near(removed(&mut s), 628.3);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0) && solid_at(&s, 8.0, 8.0, 4.0));
+}
+
+#[test]
+fn a_hole_on_a_sketch_alone_drills_a_point_at_a_lone_construction_lines_midpoint() {
+    // Only a whole construction rectangle makes its centre reference geometry: a point held at the
+    // midpoint of one construction line is still a hole site, one Ø10 x 8 hole (628.3 mm³).
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.line", json!({"points": [[15, 20], [25, 20]], "construction": true, "ids": ["guide"]}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "mine"}));
+    run(&mut s, "sketch.constraint.midpoint", json!({"point": "mine", "line": "guide"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": 10, "depth": 8, "name": "H"}));
+    near(removed(&mut s), 628.3);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0));
+}
+
+#[test]
+fn a_hole_on_a_sketch_alone_drills_a_rectangle_centre_with_a_regular_diagonal() {
+    // A construction rectangle whose second diagonal is regular geometry is not all reference:
+    // its centre drills, with the stand-alone point, two Ø10 x 8 holes (1256.6 mm³).
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    let r = run(&mut s, "sketch.rectangle.center", json!({"center": [8, 8], "corner": [12, 12], "construction": true}));
+    // the four edges come first; the diagonals follow them, the second one last
+    assert_eq!(r["curves"], json!(["l1", "l2", "l3", "l4"]), "{r}");
+    run(&mut s, "sketch.construction", json!({"curves": ["l6"], "value": false}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "mine"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "diameter": 10, "depth": 8, "name": "H"}));
+    near(removed(&mut s), 1256.6);
+    assert!(!solid_at(&s, 20.0, 20.0, 4.0) && !solid_at(&s, 8.0, 8.0, 4.0));
+}
+
+#[test]
 fn sketch_under_the_part_counterbore_and_four_points() {
     let one = std::f64::consts::PI * 36.0 * 3.0 + std::f64::consts::PI * 9.0 * 7.0;
     let mut s = Session::default();
