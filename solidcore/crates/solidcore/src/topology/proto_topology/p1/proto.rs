@@ -3134,8 +3134,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// seam, an iso line of its face's surface, and its vertex ends that line; a vertex
     /// moved off it leaves the seam edge's trims off the seam, which the face's seam test
     /// refuses (test 36, a suspicious edge near the seam) however small the move. The
-    /// other object takes the gap, as the definition's position already is that vertex
-    /// (`find_position_from_pcs` weights a vertex over an edge or a face).
+    /// other object takes the gap: the position is set to that vertex's own point (with two
+    /// vertices `find_position_from_pcs` blends their points, so the position it gave
+    /// may lie off the seam).
     ///
     /// # Errors
     ///
@@ -3171,10 +3172,24 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.pv(v.proto_vertex)?;
         let tol = self.tolerance(k);
 
-        // (not upstream) a seam's vertex is not moved off the seam
-        let on_seam = on_seam_vertex(geometry, &v.pc1)? || on_seam_vertex(geometry, &v.pc2)?;
+        // (not upstream) a definition on a seam's vertex is at that vertex's own point:
+        // `find_position_from_pcs` blends two vertices' points, and the move below blends
+        // even an equal pair, either of which leaves the seam
+        let seam_point = if on_seam_vertex(geometry, &v.pc1)? {
+            Some(pt1)
+        } else if on_seam_vertex(geometry, &v.pc2)? {
+            Some(pt2)
+        } else {
+            None
+        };
+        if let Some(point) = seam_point {
+            if let Some(v) = self.vertex_def_mut(vd) {
+                v.position = point;
+            }
+            return Ok(0);
+        }
 
-        if dist > tol && dist1 + dist2 > EFF_ZERO && !on_seam {
+        if dist > tol && dist1 + dist2 > EFF_ZERO {
             // Put it proportionally closer to the topo object with the smaller gap,
             // but not out of Tolerance
             let vec = pt2 - pt1;

@@ -2628,6 +2628,19 @@ fn rod(base: [f64; 3], radius: f64, height: f64) -> Body {
     .unwrap()
 }
 
+/// The record's vertex nearest `corner`, its distance from the seam (`off_seam` of its
+/// point) and the record's tolerance.
+fn seam_vertex_gap(r: &Body, corner: [f64; 3], off_seam: impl Fn([f64; 3]) -> f64) -> (f64, f64) {
+    let (rec, _) = r.to_record().unwrap();
+    let dist = |p: [f64; 3]| (0..3).map(|i| (p[i] - corner[i]).powi(2)).sum::<f64>();
+    let v = rec
+        .vertices
+        .iter()
+        .min_by(|a, b| dist(a.point).total_cmp(&dist(b.point)))
+        .unwrap();
+    (off_seam(v.point), rec.tolerance)
+}
+
 /// #18274: a boss of radius 0.07 and height 0.14 joined under the flat face of a half
 /// torus, centred on the torus's seam meridian, its side `d` beyond the flat face's outer
 /// edge, both through their records as SolidCraft hands them on. The boss's top crosses
@@ -2649,6 +2662,13 @@ fn a_boss_overhanging_a_half_torus_flat_face_by_a_tolerance_at_its_seam_joins() 
         let report = r.check(CheckLevel::All).unwrap();
         assert!(report.is_valid(), "d {d}: {}", report.text);
         assert_eq!(r.solid_count().unwrap(), 1, "d {d}");
+        // the torus, its flat face, the boss's side and bottom
+        assert_eq!(r.counts().unwrap(), [4, 7, 4], "d {d}");
+        // the seam meridian: radius 0.6 about (1.8, 0, 0) in the xz plane
+        let (gap, tol) = seam_vertex_gap(&r, [2.4, 0.0, 0.0], |[x, y, z]| {
+            y.hypot((x - 1.8).hypot(z) - 0.6)
+        });
+        assert!(gap <= tol, "d {d}: the seam's vertex is {gap} off the seam");
         let v = volume(&r);
         assert!((v - want).abs() <= 1e-8 * want, "d {d}: {v} vs {want}");
     }
@@ -2707,6 +2727,13 @@ fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
         let report = res.check(CheckLevel::All).unwrap();
         assert!(report.is_valid(), "d {d}: {}", report.text);
         assert_eq!(res.solid_count().unwrap(), 1, "d {d}");
+        // the ball, the cap, the notch's side and bottom
+        assert_eq!(res.counts().unwrap(), [4, 8, 6], "d {d}");
+        // the seam meridian: radius 2 about the origin in the xz plane, on +x
+        let (gap, tol) = seam_vertex_gap(&res, [edge, 0.0, cap], |[x, y, z]| {
+            y.hypot(x.hypot(z) - big)
+        });
+        assert!(gap <= tol, "d {d}: the seam's corner is {gap} off the seam");
         let v = volume(&res);
         assert!((v - want).abs() <= 1e-8 * want, "d {d}: {v} vs {want}");
     }
