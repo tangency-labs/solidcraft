@@ -6,8 +6,10 @@
   Produces, in $env:DIST (default: dist/release):
     solidcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
     solidcraft-<version>-windows-<arch>-portable.zip   solidcraft.exe + solidcraft-cli.exe + licences
-                                                       (+ the solvecraft-cli.exe compatibility alias)
     SolidCraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
+    solidcraft-<version>-windows-policy-templates.zip  solidcraft.admx + en-US/solidcraft.adml for
+                                                       Intune and Group Policy (x64 job only; the
+                                                       templates are the same for every arch)
 
   The binaries link the C runtime statically (+crt-static), so nothing else needs installing.
   The icon comes from $env:SOLIDCRAFT_ICONS (solidcraft.ico, made by `solidcraft-cli icon`), or
@@ -35,7 +37,9 @@
 param(
   [ValidateSet('x64', 'x86', 'arm64')] [string] $Arch = 'x64',
   [switch] $SkipBuild,
-  [ValidateSet('all', 'stage', 'package')] [string] $Phase = 'all'
+  [ValidateSet('all', 'stage', 'package')] [string] $Phase = 'all',
+  # Only the portable zip (solidcraft.exe + the CLI): no MSI, no plain .exe. For test builds.
+  [switch] $PortableOnly
 )
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -89,9 +93,7 @@ function Get-PeHeader([string] $Path) {
   return @{ Machine = [BitConverter]::ToUInt16($bytes, $pe + 4); Subsystem = [BitConverter]::ToUInt16($bytes, $pe + 0x5C) }
 }
 $Machine = switch ($Arch) { 'x64' { 0x8664 } 'x86' { 0x14C } 'arm64' { 0xAA64 } }
-# solvecraft-cli.exe: the old CLI name, forwarding to solidcraft-cli.exe (compatibility shim,
-# docs/compatibility.md). Built by `-p solidcraft-cli` with the CLI.
-foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3), @('solvecraft-cli.exe', 3))) {
+foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3))) {
   $h = Get-PeHeader (Join-Path $CheckDir $check[0])
   if ($h.Machine -ne $Machine) { throw "$($check[0]) is for machine 0x$('{0:X}' -f $h.Machine), expected 0x$('{0:X}' -f $Machine) ($Arch)" }
   if ($h.Subsystem -ne $check[1]) { throw "$($check[0]) has PE subsystem $($h.Subsystem), expected $($check[1])" }
@@ -112,7 +114,7 @@ function Get-DllImports([string] $Path) {
   if (-not $dumpbin) { throw 'cannot check the CLI imports: neither llvm-objdump nor dumpbin was found' }
   return & $dumpbin.FullName /nologo /dependents $Path | Select-String '^\s+(\S+\.dll)\s*$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
 }
-foreach ($exe in 'solidcraft-cli.exe', 'solvecraft-cli.exe') {
+foreach ($exe in 'solidcraft-cli.exe') {
   $imports = @(Get-DllImports (Join-Path $CheckDir $exe))
   if ($imports.Count -eq 0) { throw "could not read the DLL imports of $exe" }
   if ($imports -contains 'opengl32.dll') {
@@ -124,7 +126,7 @@ foreach ($exe in 'solidcraft-cli.exe', 'solvecraft-cli.exe') {
 if ($Phase -ne 'package') {
   Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-  Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe'), (Join-Path $Bin 'solvecraft-cli.exe') $Stage
+  Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe') $Stage
   foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt') { Copy-Item (Join-Path $Root $f) $Stage }
 }
 if ($Phase -eq 'stage') {
@@ -137,6 +139,7 @@ if (-not (Test-Path $Icon)) { throw "Missing package icon: $Icon" }
 
 # ---- MSI ---------------------------------------------------------------------------------------
 $Msi = Join-Path $Dist "solidcraft-$Version-windows-$Arch.msi"
+if (-not $PortableOnly) {
 Invoke-Native 'wix build' {
   wix build (Join-Path $Root 'assets/platforms/windows/solidcraft.wxs') -arch $Arch `
     -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
@@ -149,6 +152,7 @@ Invoke-Native 'MSI shortcut icon validation (ICE50)' {
 }
 # wix writes its debug symbols (.wixpdb) next to the MSI; keep them out of the release assets.
 Remove-Item -Force -ErrorAction SilentlyContinue ([IO.Path]::ChangeExtension($Msi, '.wixpdb'))
+}
 
 # ---- portable zip ------------------------------------------------------------------------------
 $Portable = Join-Path $TargetDir "windows-package\solidcraft-$Version-windows-$Arch-portable"
@@ -160,12 +164,49 @@ $Zip = Join-Path $Dist "solidcraft-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $Portable -DestinationPath $Zip
 
+# ---- debug symbols (separate asset) ------------------------------------------------------------
+# solidcraft.pdb (profile.release debug = "line-tables-only") maps crash offsets to file and line.
+# It is not in the MSI or the portable zip, so those downloads stay small.
+$Outputs = @()
+if (-not $PortableOnly) {
+  $Pdb = Join-Path $Bin 'solidcraft.pdb'
+  if (-not (Test-Path $Pdb)) { throw "Missing debug symbols: $Pdb" }
+  $PdbZip = Join-Path $Dist "solidcraft-$Version-windows-$Arch.pdb.zip"
+  Remove-Item -Force $PdbZip -ErrorAction SilentlyContinue
+  Compress-Archive -Path $Pdb -DestinationPath $PdbZip
+  $Outputs += $PdbZip
+}
+
 # ---- the app as a plain download (x64) ---------------------------------------------------------
-$Outputs = @($Msi, $Zip)
-if ($Arch -eq 'x64') {
+$Outputs += if ($PortableOnly) { @($Zip) } else { @($Msi, $Zip) }
+if ($Arch -eq 'x64' -and -not $PortableOnly) {
   $Exe = Join-Path $Dist "SolidCraft-$Version-windows-$Arch.exe"
   Copy-Item (Join-Path $Stage 'solidcraft.exe') $Exe
   $Outputs += $Exe
+}
+
+# ---- administrative templates (x64) ------------------------------------------------------------
+# packaging/windows/policies as it is: the .admx at the top and en-US\solidcraft.adml, the layout
+# PolicyDefinitions uses, so an admin copies the zip's contents in or uploads both files to Intune.
+if ($Arch -eq 'x64' -and -not $PortableOnly) {
+  $Policies = Join-Path $Root 'packaging\windows\policies'
+  $Templates = Join-Path $Dist "solidcraft-$Version-windows-policy-templates.zip"
+  Remove-Item -Force $Templates -ErrorAction SilentlyContinue
+  # Entries written one by one with '/' in their names: Compress-Archive in Windows PowerShell 5.1
+  # (Archive module before 1.2.3) stores 'en-US\solidcraft.adml', which other unzip tools take as
+  # one file name with a backslash in it.
+  $Names = 'solidcraft.admx', 'en-US/solidcraft.adml'
+  Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+  $zip = [IO.Compression.ZipFile]::Open($Templates, 'Create')
+  try {
+    foreach ($name in $Names) { $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $Policies $name), $name) }
+  } finally { $zip.Dispose() }
+  $zip = [IO.Compression.ZipFile]::OpenRead($Templates)
+  try { $entries = @($zip.Entries | ForEach-Object { $_.FullName }) }
+  finally { $zip.Dispose() }
+  if (($entries -join '|') -cne ($Names -join '|')) { throw "$Templates holds $($entries -join ', '), expected $($Names -join ', ')" }
+  Write-Output "ok $(Split-Path -Leaf $Templates): $($entries -join ', ')"
+  $Outputs += $Templates
 }
 
 if ($CanRun) {

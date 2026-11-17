@@ -538,6 +538,49 @@ mod mapped_tests {
         same_curve_on(&out, &want, [3.0, 5.0]);
     }
 
+    /// A 1.26 µm edge at the start of a straight Bézier whose knots span 1.02e-7 (Siemens NX
+    /// writes both, solidcraft#15065) lies on [0, 6.4e-12], and the rest of the curve's edge
+    /// starts there, its trim a rounding before it (SMLib's, as handed over). A floor of 1 on the
+    /// rounding (10⁻⁹ absolute) snapped every knot of the micro edge's trim onto its start, an
+    /// empty domain the record refuses, and the solid was lost. Each trim maps onto its edge as
+    /// a valid record, unchanged on it.
+    #[test]
+    fn a_micro_edges_trim_on_a_tiny_interval_keeps_its_span() {
+        let (t, end) = (6.430814112915728e-12, 1.020781457822e-7);
+        let line = |a: f64, b: f64| b::Curve2::Spline { knots: vec![a, a, b, b], points: vec![[a, 0.0], [b, 0.0]] };
+        for (trim, edge) in [(line(0.0, t), [0.0, t]), (line(6.430814112910789e-12, end), [t, end])] {
+            let out = mapped(&trim, true, [1.0, 0.0], edge, &|_, _| false).unwrap();
+            check_curve2(&out, &mut Budget::input()).unwrap();
+            assert_eq!(out.interval(), Some(edge));
+            let at = |c: &b::Curve2, s: f64| eval(c, s).unwrap()[0];
+            for s in edge {
+                assert!((at(&out, s) - s).abs() <= 1e-9 * edge[1], "{out:?} at {s}");
+            }
+        }
+        // A trim genuinely off that edge is still refused, even where the caller finds its ends
+        // on the edge: SMLib's [0, 1] (the issue's message), and one on [0, 5e-10], which the
+        // floor took for a rounding of [0, 6.4e-12].
+        for z in [1.0, 5e-10] {
+            assert!(mapped(&line(0.0, z), true, [1.0, 0.0], [0.0, t], &|_, _| true).is_err(), "[0, {z}]");
+        }
+    }
+
+    /// An edge on an interval of at most `SM_EFF_ZERO` (10⁻¹²) is below SMLib's knot resolution:
+    /// SMLib's check takes its trim's end knots for one ("Bad Knot Count") and its mass properties
+    /// find a trim of fewer than two knots. Such a trim is refused, its interval named, even when
+    /// it lies exactly on the edge (a 1.283 nm edge on solidcraft#15065's Bézier, [0, 6.549e-15]);
+    /// an interval just above the resolution maps.
+    #[test]
+    fn a_trim_on_an_interval_below_smlibs_knot_resolution_is_refused() {
+        let line = |b: f64| b::Curve2::Spline { knots: vec![0.0, 0.0, b, b], points: vec![[0.0, 0.0], [b, 0.0]] };
+        for t in [6.5490500023792094e-15, 1e-12] {
+            let e = mapped(&line(t), true, [1.0, 0.0], [0.0, t], &|_, _| true).unwrap_err();
+            assert!(e.to_string().contains(&format!("its edge on [0, {t}]")), "{e}");
+        }
+        let out = mapped(&line(2e-12), true, [1.0, 0.0], [0.0, 2e-12], &|_, _| false).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+    }
+
     /// A trim already on its edge is left as it is.
     #[test]
     fn a_trim_on_its_edge_is_unchanged() {

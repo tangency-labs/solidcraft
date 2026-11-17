@@ -30,7 +30,7 @@ use crate::blend::fillet_executive::session::ball_regular::{
     ball_law, ball_section_at, rolls_a_ball, set_ball_radius,
 };
 use crate::blend::fillet_executive::session::SolverObject;
-use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use crate::blend::fillet_solver::p1::{FilletSurfaceGeneratorType, SeamDomain};
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::p2::EllipseOptions;
 use crate::curve::ellipse::Ellipse;
@@ -454,7 +454,16 @@ fn keeps(
         return Ok(out);
     }
     let evaluated = (|| -> Result<Option<(TsectPnt, [Point3; 3])>> {
-        let Some(pnt) = ball_section_at(k, target, solver, edge_curve, t, near.as_ref())? else {
+        let Some(pnt) = ball_section_at(
+            k,
+            target,
+            solver,
+            edge_curve,
+            t,
+            near.as_ref(),
+            SeamDomain::Wrapped,
+        )?
+        else {
             return Ok(None);
         };
         let uvs = [pnt.uv_pos(SrfIndex::First), pnt.uv_pos(SrfIndex::Second)];

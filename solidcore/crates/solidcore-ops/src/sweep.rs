@@ -255,7 +255,7 @@ pub enum DraftCorner {
 }
 
 /// Which sweep a [`sweep_placed`] took.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SweepRoute {
     /// The linear sweep along a path proved straight: exact.
     Line,
@@ -266,18 +266,27 @@ pub enum SweepRoute {
     Segments,
     /// The kernel's curve sweep along the path joined into one curve, carried as the frame
     /// says. With [`SweepFrame::Translate`] it is exact for the joined curve; with
-    /// [`SweepFrame::Follow`] it is fitted to a tolerance and carries no certified bound (see
-    /// [`sweep_placed`]).
+    /// [`SweepFrame::Follow`] or [`SweepFrame::Upright`] it is fitted to a tolerance and
+    /// carries no certified bound (see [`sweep_placed`]).
     Curve(SweepFrame),
 }
 
 /// How the profile is carried along a [`sweep_placed`] path.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SweepFrame {
-    /// It turns with the path, keeping its attitude to the path's tangent.
+    /// It turns with the path, keeping its attitude to the path's tangent: the path's
+    /// rotation-minimising frame (exact along lines and arcs; the kernel's projection-normal
+    /// frame along any other path, which the kernel brings back to its start round a closed
+    /// one, so the sheet closes).
     Follow,
     /// It only moves along the path, keeping its orientation.
     Translate,
+    /// It stays upright: square to the path, keeping the up direction (any length; the
+    /// kernel makes it unit) made square to the path's tangent, so it turns only about the up
+    /// direction as the path turns (a screen or a canopy along an outline). Drawn at the
+    /// path's start, it is swept as drawn there. A path running along the up direction is
+    /// refused.
+    Upright([f64; 3]),
 }
 
 /// How the ends of a [`sweep_stations`] close.
@@ -776,6 +785,9 @@ fn unplaced() -> [Affine; 3] {
 /// piece. Any other path takes the kernel's curve sweep, once every join of the path is proved
 /// to meet (to the path gap).
 ///
+/// With [`SweepFrame::Upright`] a straight path is the linear sweep as with any frame, and any
+/// other path the kernel's curve sweep kept upright.
+///
 /// The curve sweep is exact for [`SweepFrame::Translate`] (for the path joined into one curve)
 /// but not for [`SweepFrame::Follow`]: there it samples the path and skins the sections it
 /// places, to a tolerance its own sampling can widen, and returns no bound (the kernel's curve
@@ -785,16 +797,23 @@ fn unplaced() -> [Affine; 3] {
 /// closed path), keeps the curve sweep until that issue is fixed.
 ///
 /// # Errors
-/// [`Error::Argument`] for a curve list refused; [`Error::PathUndecided`] for a `Follow` path
+/// [`Error::Argument`] for a curve list refused or an up direction not finite;
+/// [`Error::PathUndecided`] for a `Follow` path
 /// left undecided; [`Error::PathGap`] for a curve-sweep path whose join is not proved to meet,
 /// or whose ends neither meet to the path gap nor are proved apart (the closing join, the last);
-/// the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+/// the kernel's status (an upright path running along its up direction: [`Error::Unsupported`]);
+/// [`Error::Empty`], [`Error::NotSolid`].
 pub fn sweep_placed(
     profile: &[Curve],
     path: &[Curve],
     frame: SweepFrame,
     cap: bool,
 ) -> Result<(Body, [Affine; 3], SweepRoute)> {
+    if let SweepFrame::Upright(u) = frame {
+        if !u.iter().all(|x| x.is_finite()) {
+            return Err(Error::Argument);
+        }
+    }
     let mut placed = unplaced();
     let mut route = SweepRoute::Curve(frame);
     let expect = if cap { Expect::SOLID } else { Expect::FACES };
@@ -895,6 +914,10 @@ pub fn sweep_placed(
             cap_ends: cap && !closed,
             translational_sweep: frame == SweepFrame::Translate,
             profile_at_path_start: true,
+            up: match frame {
+                SweepFrame::Upright(u) => Some(v3(u)),
+                SweepFrame::Follow | SweepFrame::Translate => None,
+            },
             ..SweepOptions::default()
         };
         let r = match create_curve_sweep_with_placements(
@@ -915,7 +938,9 @@ pub fn sweep_placed(
         if closed {
             let tol = b.tolerance();
             match stitch_faces(k, &mut b, tol, None, false) {
-                Ok(s) if s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
+                // a solid asked for has no free edge left; a sheet (an open profile, or one
+                // not capped) keeps the profile's own ends free
+                Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
                 Ok(_) => b.refresh_cached_topology(),
                 Err(e) => return Ok(Err(status(e))),
             }
@@ -923,6 +948,69 @@ pub fn sweep_placed(
         finish(k, b, expect)
     })?;
     Ok((body, placed, route))
+}
+
+/// A closed loft section for [`match_loft_sections`]: its sketch plane and its loop in the
+/// plane's coordinates, end to end.
+#[derive(Clone, Debug)]
+pub struct LoftSection {
+    /// The section's plane.
+    pub plane: solidcore_record::Plane,
+    /// The loop, in the plane's coordinates.
+    pub segs: Vec<solidcore_record::Seg2>,
+}
+
+/// A section as a loft's walls are built through it ([`match_loft_sections`]): its segments,
+/// and for each the indices of the given section's segments it runs over (increasing).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatchedSection {
+    /// The segments, in the plane's coordinates.
+    pub segs: Vec<solidcore_record::Seg2>,
+    /// For each segment, the given segments it runs over.
+    pub from: Vec<Vec<usize>>,
+}
+
+/// A loft's closed sections, in loft order, matched as its walls are built through them (the
+/// kernel's `sweep::loft_sections::match_loft_sections`): each wound the way the one before it
+/// is, cut to the vertices it shares with the others (a corner pairs with the corner it lines up
+/// with, a vertex only one section has splits the others' segments where it lands, a full circle
+/// splits at the directions of the section it follows), and started at the segment that joins the
+/// first segment of the section before it. `None` when the match would give a section more than
+/// `max_segments` segments, or the sections are too large to pair: valid sections the caller
+/// builds another way.
+///
+/// # Errors
+/// [`Error::Argument`] for a section with no segments, no length or a point that is not finite,
+/// plane axes that move its points by more than the zone tolerance (their skew from a frame of
+/// perpendicular unit vectors times the section's extent past 1e-5), or a circle whose centre,
+/// radius or angles are not finite; [`Error::Invariant`] when the pairing breaks down.
+pub fn match_loft_sections(
+    sections: &[LoftSection],
+    max_segments: usize,
+) -> Result<Option<Vec<MatchedSection>>> {
+    use solidcore::sweep::loft_sections as kl;
+    let given: Vec<kl::LoftSection> = sections
+        .iter()
+        .map(|s| kl::LoftSection {
+            origin: convert::vec3(s.plane.origin),
+            x: convert::vec3(s.plane.x),
+            y: convert::vec3(s.plane.y),
+            segs: s.segs.iter().map(convert::seg2).collect(),
+        })
+        .collect();
+    let matched = match kl::match_loft_sections(&given, max_segments) {
+        Err(e) if kl::too_large(&e) => return Ok(None),
+        r => r.map_err(argument_or_status)?,
+    };
+    Ok(Some(
+        matched
+            .into_iter()
+            .map(|m| MatchedSection {
+                segs: m.segs.iter().map(convert::record_seg2).collect(),
+                from: m.from,
+            })
+            .collect(),
+    ))
 }
 
 /// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them.

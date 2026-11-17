@@ -146,7 +146,7 @@ fn install_capturer(capturer: solidcraft_viewport_gpu::capture::Capturer) {
     solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| picture(&capturer, scene, cam, w, h)));
 }
 
-/// `scene` drawn by `capturer`, or by the CPU rasterizer once its device is lost.
+/// `scene` drawn by `capturer`, or by the CPU rasterizer if the device is lost or the picture is invisible.
 #[cfg(not(target_arch = "wasm32"))]
 fn picture(
     capturer: &solidcraft_viewport_gpu::capture::Capturer,
@@ -155,9 +155,25 @@ fn picture(
     w: u32,
     h: u32,
 ) -> Result<solidcraft_engine::capture::Picture, String> {
-    match capturer.rgba(scene, cam, w, h) {
-        Ok(rgba) => Ok(solidcraft_engine::capture::Picture { rgba, renderer: capturer.renderer() }),
-        Err(solidcraft_viewport_gpu::GpuError::DeviceLost) => Ok(cpu_picture(scene, cam, w, h)),
+    picture_result(capturer.rgba(scene, cam, w, h), capturer.renderer(), || cpu_picture(scene, cam, w, h))
+}
+
+/// Keep a captured picture or draw its CPU replacement when the device is lost or returns no visible pixels.
+#[cfg(not(target_arch = "wasm32"))]
+fn picture_result(
+    captured: solidcraft_viewport_gpu::Result<Vec<u8>>,
+    renderer: &'static str,
+    cpu: impl FnOnce() -> solidcraft_engine::capture::Picture,
+) -> Result<solidcraft_engine::capture::Picture, String> {
+    match captured {
+        // Capturer draws an opaque backdrop before the model. An entirely transparent picture
+        // cannot be a successful capture, even when the readback reports no error (#15986).
+        Ok(rgba) if !rgba.is_empty() && rgba.len().is_multiple_of(4) && rgba.iter().skip(3).step_by(4).all(|&alpha| alpha == 0) => {
+            log::warn!("GPU picture was fully transparent; drawing it with the CPU rasterizer");
+            Ok(cpu())
+        }
+        Ok(rgba) => Ok(solidcraft_engine::capture::Picture { rgba, renderer }),
+        Err(solidcraft_viewport_gpu::GpuError::DeviceLost) => Ok(cpu()),
         Err(e) => Err(e.to_string()),
     }
 }
@@ -499,6 +515,8 @@ pub(crate) fn render_offscreen(
             ssaa: 1.0,
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -531,6 +549,8 @@ pub(crate) fn render_product_offscreen(
             ssaa: 1.0,
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -548,6 +568,46 @@ struct Offscreen<'a> {
     ssaa: f32,
     ao_radius: f32,
     ao_samples: u32,
+    /// The live preview's scene (`Frame::pv_slot`); `None`: no preview.
+    preview: Option<GpuScene>,
+    /// The frame's moving layer (`Frame::moving`): a scene and where it is drawn, column-major.
+    moving: Option<(GpuScene, [[f32; 4]; 4])>,
+}
+
+/// [`render_offscreen`] of a scene with a live preview over it: `preview` as the preview's
+/// scene, and `moving` as the frame's moving layer (a scene and the motion it is drawn with,
+/// column-major), as a preview that only moves bodies draws them.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn render_offscreen_preview(
+    scene: GpuScene,
+    preview: GpuScene,
+    moving: Option<(GpuScene, [[f32; 4]; 4])>,
+    view_proj: [[f32; 4]; 4],
+    back: [f32; 3],
+    eye: [f32; 4],
+    size: u32,
+) -> Option<Vec<u8>> {
+    offscreen(
+        scene,
+        None,
+        view_proj,
+        back,
+        eye,
+        size,
+        Offscreen {
+            tess: None,
+            product_lights: None,
+            product: false,
+            srgb: false,
+            analysis: [0.0; 8],
+            analysis_colors: [0.0; 36],
+            ssaa: 1.0,
+            ao_radius: 0.0,
+            ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: Some(preview),
+            moving,
+        },
+    )
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -577,6 +637,8 @@ pub(crate) fn render_ao_offscreen(
             ssaa: 1.0,
             ao_radius,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -608,6 +670,8 @@ pub(crate) fn render_offscreen_ssaa(
             ssaa,
             ao_radius: 0.0,
             ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -641,6 +705,8 @@ pub(crate) fn render_offscreen_ao(
             ssaa: 1.0,
             ao_radius,
             ao_samples,
+            preview: None,
+            moving: None,
         },
     )
 }
@@ -655,7 +721,7 @@ fn offscreen(
     size: u32,
     options: Offscreen<'_>,
 ) -> Option<Vec<u8>> {
-    let Offscreen { tess, product_lights, product, srgb, analysis, analysis_colors, ssaa, ao_radius, ao_samples } = options;
+    let Offscreen { tess, product_lights, product, srgb, analysis, analysis_colors, ssaa, ao_radius, ao_samples, preview, moving } = options;
     let (adapter, device, queue) = offscreen_device()?;
     eprintln!("offscreen adapter: {:?}", adapter.get_info().backend);
     let format = if srgb { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm };
@@ -677,8 +743,8 @@ fn offscreen(
         sketch_slot: none(),
         hl_key: u64::from(highlight.is_some()),
         hl_slot: Arc::new(Mutex::new(highlight)),
-        pv_key: 0,
-        pv_slot: none(),
+        pv_key: u64::from(preview.is_some()),
+        pv_slot: Arc::new(Mutex::new(preview)),
         pv_hide: false,
         preview_bounds: None,
         view_proj,
@@ -701,7 +767,7 @@ fn offscreen(
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: Default::default(),
-        moving: None,
+        moving: moving.map(|(scene, transform)| MovingLayer { key: 1, slot: Arc::new(Mutex::new(Some(scene))), transform }),
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {
@@ -1081,6 +1147,9 @@ mod tests {
             app.home.open = false;
             app.preferences.ambient_occlusion = false;
             app.cpu_meshing = true;
+            // Refinement uses wall time and can change the scene between fixed-time frames.
+            // These fixtures check blur caching against stable display geometry.
+            app.viewport.suspend_refinement = true;
             app.cam.distance = 110.0;
             app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.5);
             let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
@@ -1395,6 +1464,9 @@ mod tests {
                         "positive rendering fixtures must pass the shared app-aware capability policy"
                     );
                     assert_eq!(f.app.blur.radius(), radius);
+                    let panels = &f.app.universal_panel_frame().unwrap().layout.sections;
+                    assert!(!panels.is_empty());
+                    assert!(panels.iter().all(|panel| panel.paint_alpha == Some(180)), "the shared panels keep the ribbon's blur tint alpha");
                     assert!(f.app.blur.painted_frame().is_some(), "guard evidence comes from actual submitted visible marker work");
                     let source = f.pixels(true);
                     let resting = f.pixels(false);
@@ -1648,6 +1720,59 @@ mod tests {
                 None => eprintln!("skipping {policy:?}: no adapter of that tier"),
             }
         }
+    }
+
+    /// Captures draw an opaque backdrop, so an invisible result is a failed picture even if
+    /// the GPU reports success (#15986). RGB bytes do not make a pixel visible without alpha.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_fully_transparent_gpu_picture_falls_back_to_the_cpu() {
+        let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
+        let expected = super::cpu_picture(&scene, &cam, 4, 2);
+        for pixel in [[0, 0, 0, 0], [120, 180, 240, 0]] {
+            let calls = std::cell::Cell::new(0);
+            let picture = super::picture_result(Ok(pixel.repeat(8)), "gpu", || {
+                calls.set(calls.get() + 1);
+                super::cpu_picture(&scene, &cam, 4, 2)
+            })
+            .unwrap();
+            assert_eq!(calls.get(), 1, "an invisible capture must be redrawn");
+            assert_eq!(picture.renderer, "cpu");
+            assert_eq!(picture.rgba, expected.rgba);
+            assert!(picture.rgba.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 255));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_visible_gpu_picture_keeps_its_pixels_and_renderer() {
+        for renderer in ["gpu", "gpu-software"] {
+            for rgba in [vec![10, 20, 30, 255, 40, 50, 60, 255], vec![0, 0, 0, 0, 40, 50, 60, 1]] {
+                let picture = super::picture_result(Ok(rgba.clone()), renderer, || panic!("a visible picture needs no CPU replacement")).unwrap();
+                assert_eq!(picture.renderer, renderer);
+                assert_eq!(picture.rgba, rgba);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn picture_errors_keep_device_loss_recovery_and_other_errors() {
+        use solidcraft_viewport_gpu::GpuError;
+        let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
+        let calls = std::cell::Cell::new(0);
+        let picture = super::picture_result(Err(GpuError::DeviceLost), "gpu", || {
+            calls.set(calls.get() + 1);
+            super::cpu_picture(&scene, &cam, 4, 2)
+        })
+        .unwrap();
+        assert_eq!(calls.get(), 1);
+        assert_eq!(picture.renderer, "cpu");
+        assert_eq!(picture.rgba, super::cpu_picture(&scene, &cam, 4, 2).rgba);
+        let error = GpuError::Render("capture readback failed".into());
+        let expected = error.to_string();
+        let actual = super::picture_result(Err(error), "gpu", || panic!("other capture errors must be reported")).err().unwrap();
+        assert_eq!(actual, expected);
     }
 
     /// A device the driver loses (#4172): its lost callback marks it, the painter's probe sees it
