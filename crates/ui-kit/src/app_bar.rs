@@ -1553,10 +1553,8 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
         let slot = drop_slot(left, start, &widths, first, d.from);
         let at = slot_left(start, &widths, first, d.from, slot) - 1.0;
         painter.line_segment([pos2(at, cy - 10.0), pos2(at, cy + 10.0)], Stroke::new(2.0, t.accent));
-        if released {
-            if slot != d.from {
-                pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
-            }
+        if released && slot != d.from {
+            pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
         }
     }
     if released {

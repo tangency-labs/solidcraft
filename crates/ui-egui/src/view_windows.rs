@@ -38,6 +38,7 @@ struct Host {
     menu: crate::context_menu::MenuState,
     preview: crate::preview::PreviewState,
     ready: bool,
+    startup: Option<f64>,
 }
 
 struct Display {
@@ -267,8 +268,9 @@ pub fn prepare(app: &mut SolveApp, ctx: &Context) {
     if ctx.input(|input| input.viewport().focused == Some(true)) {
         app.view_windows.last_focus = Some((app.docs.current_tab(), 0));
     }
-    (app.view_windows.root_rect, app.view_windows.monitor_size, app.view_windows.root_scale) = ctx
-        .input(|i| (i.viewport().outer_rect, i.viewport().monitor_size, i.viewport().native_pixels_per_point.map(|scale| scale * ctx.zoom_factor())));
+    let zoom = ctx.zoom_factor();
+    (app.view_windows.root_rect, app.view_windows.monitor_size, app.view_windows.root_scale) =
+        ctx.input(|i| (i.viewport().outer_rect, i.viewport().monitor_size, i.viewport().native_pixels_per_point.map(|scale| scale * zoom)));
     if app.view_windows.focus == Some((app.docs.current_tab(), 0)) {
         ctx.send_viewport_cmd(ViewportCommand::Focus);
         app.view_windows.focus = None;
@@ -422,6 +424,7 @@ impl Host {
             menu: Default::default(),
             preview: Default::default(),
             ready: false,
+            startup: None,
         }
     }
 
@@ -469,6 +472,9 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         let os_id = viewport_id(tab, id);
         let custom = !cfg!(target_os = "macos");
         let mut builder = crate::window_chrome::viewport("SolidCraft", solidcraft_engine::io::APP_ID, custom).with_min_inner_size([640.0, 420.0]);
+        // The shared builder carries the main window's size. Only ask for a child size at startup,
+        // so subsequent frames leave user resizing alone.
+        builder.inner_size = None;
         if !host.ready {
             builder = builder.with_visible(false);
             if let Some(p) = &window.placement {
@@ -484,6 +490,26 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                     .with_maximized(p.maximised)
                     .with_fullscreen(p.fullscreen);
             }
+            // An immediate viewport requires eframe to call its draw callback. The native
+            // integration cannot call it when creating the OS window failed. Negotiate a hidden
+            // viewport first, as the panel host does, then paint it once the OS has reported DPI.
+            let created = ctx.input(|input| {
+                input.raw.viewports.get(&os_id).and_then(|info| info.native_pixels_per_point).is_some_and(|scale| scale.is_finite() && scale > 0.0)
+            });
+            if !created {
+                let start = *host.startup.get_or_insert(app.now);
+                documents::put_view_window(app, tab, window);
+                if app.now - start >= 2.0 {
+                    let _ = close(app, id, false);
+                    app.set_status(solidcraft_ui_text::format("multi_window.open_failed", &[("design", &app.session.doc.name)]), true);
+                    ctx.send_viewport_cmd_to(os_id, ViewportCommand::Close);
+                } else {
+                    ctx.show_viewport_deferred(os_id, builder, |_, _| {});
+                    ctx.request_repaint_after(std::time::Duration::from_millis(30));
+                    app.view_windows.hosts.push(host);
+                }
+                continue;
+            }
         }
         let mut refused = false;
         let mut close_request = None;
@@ -492,11 +518,14 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 refused = true;
                 return;
             }
-            if let Some(p) = window.placement.as_mut() {
+            if host.ready
+                && let Some(p) = window.placement.as_mut()
+            {
+                let zoom = ui.ctx().zoom_factor();
                 ui.input(|i| {
                     let viewport = i.viewport();
                     if let Some(rect) = viewport.outer_rect.filter(|r| r.is_positive() && r.is_finite()) {
-                        let scale = viewport.native_pixels_per_point.unwrap_or(1.0) * ui.ctx().zoom_factor();
+                        let scale = viewport.native_pixels_per_point.unwrap_or(1.0) * zoom;
                         let physical = (rect.center().to_vec2() * scale).to_pos2();
                         let display = app.view_windows.displays.iter().find(|display| display.bounds.contains(physical));
                         let origin = display.map_or(egui::Vec2::ZERO, |display| display.bounds.min.to_vec2() / display.scale);
@@ -516,6 +545,9 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             }
             if !host.ready {
                 host.ready = true;
+                if let Some(p) = &window.placement {
+                    ui.ctx().send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(p.w, p.h)));
+                }
                 ui.ctx().send_viewport_cmd(ViewportCommand::Visible(true));
             }
             if app.view_windows.focus == Some((tab, id)) {
