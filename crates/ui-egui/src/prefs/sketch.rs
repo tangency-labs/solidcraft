@@ -73,6 +73,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.sketch_snap_to_visible_grid_note"),
                     &mut app.preferences.sketch_snap_to_visible_grid,
                 );
+                setting::sketch_square_rectangles(app, ui);
             });
         });
         let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.hold_stop_snapping"));
@@ -516,6 +517,8 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
                 (&[ctrl, click], toggle),
             ],
         );
+        #[cfg(target_arch = "wasm32")]
+        check(ui, "pencil_mode", "prefs.pencil_mode", Some("prefs.pencil_mode_tip"), &mut app.preferences.pencil_mode);
         check(ui, "prefer_free_sketch_points", "prefs.sketch.prefer_free_points", None, &mut app.preferences.prefer_free_sketch_points);
         check(
             ui,
