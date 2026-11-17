@@ -115,7 +115,7 @@ fn in_own_process(test: &str, f: impl FnOnce()) {
 }
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 14] = [
+const NO_KERNEL: [&str; 15] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -130,6 +130,7 @@ const NO_KERNEL: [&str; 14] = [
     "words",
     "in_call",
     "hold_a_kernel",
+    "start",
 ];
 
 const ANSWERING: [&str; 68] = [
@@ -202,6 +203,24 @@ const ANSWERING: [&str; 68] = [
     "screw_sweep_radial",
     "screw_sweep_with_options",
 ];
+
+/// solidcore-ops' session runs with this crate's fix set once the crate has started: every fix
+/// this crate's kernels run with, and no other. (Before, it ran with every fix off.)
+#[test]
+fn starting_names_this_crates_fixes_to_solidcore_ops() {
+    crate::start();
+    assert_eq!(solidcore_ops::session::fixes(), crate::trace::fixes());
+    assert!(!crate::trace::fixes().is_empty());
+}
+
+/// This crate's first kernel call starts it: an application that never called [`crate::start`]
+/// has solidcore-ops on the same fixes by the time a body exists.
+#[test]
+fn a_kernel_call_names_the_fixes_to_solidcore_ops() {
+    let made = crate::Brep::make_box([0.0; 3], [1.0; 3]);
+    assert!(made.is_ok());
+    assert_eq!(solidcore_ops::session::fixes(), crate::trace::fixes());
+}
 
 /// Every `pub fn` of the files that hold the crate's kernel entry points is accounted for.
 #[test]
