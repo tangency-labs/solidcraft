@@ -662,3 +662,32 @@ fn the_pair_read_from_the_bodies() {
     );
     assert!(pair_at(&mut k, &wall, &bottom, p, 0.0).is_err());
 }
+
+/// S's face in P for the 7.4 checks: Bottom's top (z = 6) is one 160 × 100 region in P's frame
+/// (x along X, y along Y), no holes; a slot [69.9, 80.1] × [29.9, 36.1] on it is cut, one
+/// running past x = 160 is `at_edge`. A plane S has no face in (z = 3) gives none; tol 0 refused.
+#[test]
+fn the_slot_face_read_from_the_body() {
+    use crate::tab_slot::{check_slot, slot_outline, SlotSkip};
+    let mut k = crate::kernel::Kernel::default();
+    let bottom = box_solid(&mut k, [0.0, 0.0, 0.0], [160.0, 100.0, 6.0]);
+    let p = plane(0.0, 0.0, 6.0, 0.0, 0.0, 1.0);
+    let face = slot_face(&mut k, &bottom, p, TOL).expect("face");
+    assert_eq!(face.len(), 1, "{face:?}");
+    assert!(face[0].holes.is_empty(), "{face:?}");
+    let inside = slot_outline(70.0, 10.0, (30.0, 36.0), 0.1).expect("slot");
+    assert_eq!(
+        check_slot(&inside, &face[0], 0.5, TOL).expect("check"),
+        None
+    );
+    let past = slot_outline(155.0, 10.0, (30.0, 36.0), 0.1).expect("slot");
+    assert_eq!(
+        check_slot(&past, &face[0], 0.5, TOL).expect("check"),
+        Some(SlotSkip::AtEdge)
+    );
+    let mid = plane(0.0, 0.0, 3.0, 0.0, 0.0, 1.0);
+    assert!(slot_face(&mut k, &bottom, mid, TOL)
+        .expect("none")
+        .is_empty());
+    assert!(slot_face(&mut k, &bottom, p, 0.0).is_err());
+}

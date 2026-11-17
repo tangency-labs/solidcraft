@@ -849,6 +849,52 @@ fn frame_of(p: Plane) -> Result<crate::eval::Frame> {
     })
 }
 
+/// S's faces in `p` (design 7.4's face region): the regions, in the frame of `p` ([`pair_at`]'s
+/// `(u, w)` plane: x the world axis least along `n` made square to `n`, y `n × x`), of S's planar
+/// faces facing `n` with every vertex within `tol` of `p`, holes included. Empty when S has no
+/// face there. S is not changed.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for `tol` not positive and finite or a bad plane; those of the
+/// face reads.
+pub fn slot_face(
+    k: &mut crate::kernel::Kernel,
+    s: &crate::topology::Brep,
+    p: Plane,
+    tol: f64,
+) -> Result<Vec<crate::prism::profile::Region2>> {
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("tol must be positive and finite"));
+    }
+    check_plane(p)?;
+    let frame = frame_of(p)?;
+    face_regions_in(k, s, p, &frame, tol)
+}
+
+/// [`slot_face`] in `frame` (`p`'s, already checked).
+fn face_regions_in(
+    k: &mut crate::kernel::Kernel,
+    s: &crate::topology::Brep,
+    p: Plane,
+    frame: &crate::eval::Frame,
+    tol: f64,
+) -> Result<Vec<crate::prism::profile::Region2>> {
+    let n = p.normal;
+    let up = SQUARE_SLACK.cos();
+    let s_on: Vec<_> = read_faces(k, s, frame, tol)?
+        .into_iter()
+        .filter(|f| {
+            f.plane.is_some_and(|q| q.normal.dot(n) >= up) && f.low >= -tol && f.high <= tol
+        })
+        .map(|f| f.face)
+        .collect();
+    Ok(
+        crate::prism::sheet::planar_face_regions(k, s, frame, tol, |f, _| Ok(s_on.contains(&f)))?
+            .regions,
+    )
+}
+
 /// The pair (T, S) at `p` read from the two bodies and decided by [`pair`] (design v2 5.3, 5.4):
 /// S's faces in `p` facing `n` (every vertex within `tol` of it), T's footprint on `p`
 /// ([`footprint_on`]) and the touch level of T's first planar face facing `−n` within `tol`
@@ -880,17 +926,7 @@ pub fn pair_at(
     let n = p.normal;
     let frame = frame_of(p)?;
     let t_faces = read_faces(k, t, &frame, tol)?;
-    let up = SQUARE_SLACK.cos();
-    let s_on: Vec<_> = read_faces(k, s, &frame, tol)?
-        .into_iter()
-        .filter(|f| {
-            f.plane.is_some_and(|q| q.normal.dot(n) >= up) && f.low >= -tol && f.high <= tol
-        })
-        .map(|f| f.face)
-        .collect();
-    let s_regions =
-        crate::prism::sheet::planar_face_regions(k, s, &frame, tol, |f, _| Ok(s_on.contains(&f)))?
-            .regions;
+    let s_regions = face_regions_in(k, s, p, &frame, tol)?;
     let on_s = |a: &Region2| -> Result<bool> {
         for b in &s_regions {
             match regions_overlap(a, b, tol) {
