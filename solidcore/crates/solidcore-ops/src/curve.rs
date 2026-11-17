@@ -1,7 +1,7 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
 //! moved, the curve under an affine map, the curve seen in two views, its curvature comb, the
 //! blend from one curve's end to another's, circles and arcs, a curve extended at an end, two
-//! curves joined end to end, the point of a curve nearest a given point, and a planar curve
+//! curves joined end to end, the point of a curve nearest a given point or a ray, and a planar curve
 //! offset in its plane ([`offset_planar`]: the kernel's trimmed offset, its distance measured by
 //! [`solidcore::query::deviation::distance_deviation`]), and a curve on a sheet offset along its
 //! surface ([`offset_on_surface`]: the kernel's
@@ -46,6 +46,30 @@ use crate::curve_knots::{net_of, nurb_of, record_of};
 use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
+
+/// What an imported cubic Bezier curve on `[0, 1]` stands as in the model: its chord, a curve,
+/// or a curve the B-spline curve check refuses.
+pub use solidcore::curve::hermite_curve::CubicStanding;
+
+impl crate::session::Answer for CubicStanding {}
+
+/// [`CubicStanding`] of the cubic Bezier curve through `points` on `[0, 1]`, the curve a profile
+/// cubic is built as: its chord where the whole curve (bounded by the larger distance of its
+/// inner control points from the finite chord, the convex hull property) lies within the model's
+/// zone tolerance of it, else whether the B-spline curve check passes it
+/// ([`solidcore::curve::hermite_curve::classify_cubic`]).
+///
+/// # Errors
+/// [`Error::Argument`] if a coordinate is not finite or exceeds the coordinate bound; those of
+/// the session.
+pub fn classify_cubic(points: [[f64; 3]; 4]) -> Result<CubicStanding> {
+    if !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    run("classify_cubic", |k| {
+        solidcore::curve::hermite_curve::classify_cubic(k, points.map(point))
+    })
+}
 
 /// Which end of a curve a blend meets, and how ([`blend_curve`]).
 pub use solidcore::curve::blend::{Contact, End};
@@ -906,6 +930,73 @@ pub fn crossings(
     })?
 }
 
+/// The point of a free curve nearest a ray ([`closest_to_ray`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CurveRayPoint {
+    /// The curve's parameter there, the record's.
+    pub parameter: f64,
+    /// The curve's point there.
+    pub point: [f64; 3],
+    /// The ray's point nearest it.
+    pub on_ray: [f64; 3],
+    /// The distance between the two: the kernel solve's (not certified).
+    pub distance: f64,
+}
+
+/// The point of `curve` nearest the ray from `origin` along `direction`, over the record's own
+/// range (as [`closest_point`] takes it): a pick through the view lands on the curve drawn
+/// under the pointer in any view, where the curve point nearest one point of the ray does so
+/// only when that point is the nearest. The curve as the kernel's ([`from_parameters`]), the
+/// kernel's curve/ray solve ([`solidcore::query::curve::closest_point_to_ray`], the one an
+/// edge's pick uses) within `tolerance`, and its parameter as the record's
+/// ([`solidcore::curve::from_parameters::record_parameter`]: radians on a circle or ellipse).
+/// `None` where the solve finds no point.
+///
+/// # Errors
+/// [`Error::Argument`] for an origin or direction not finite or past the coordinate bound, a
+/// direction of no length, a tolerance not finite and positive, or a curve the record or the
+/// kernel's constructors refuse; the kernel's status otherwise.
+pub fn closest_to_ray(
+    curve: &Curve,
+    origin: [f64; 3],
+    direction: [f64; 3],
+    tolerance: f64,
+) -> Result<Option<CurveRayPoint>> {
+    if !coord_ok(&origin) || !coord_ok(&direction) || !tolerance.is_finite() || tolerance <= 0.0 {
+        return Err(Error::Argument);
+    }
+    if check_curve(curve, &mut Budget::input()).is_err() {
+        return Err(Error::Argument);
+    }
+    let range = own_range(curve).ok_or(Error::Argument)?;
+    let record = solidcore_convert::curve(curve).map_err(|_| Error::Argument)?;
+    run("curve::closest_to_ray", |k| {
+        let made = match from_parameters(k, &record, range) {
+            Ok(made) => made,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        let found = match solidcore::query::curve::closest_point_to_ray(
+            k,
+            &made.curve,
+            &made.interval,
+            point(origin),
+            point(direction),
+            tolerance,
+        ) {
+            Ok(found) => found,
+            Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+            Err(e) => return Err(e),
+        };
+        Ok(Ok(found.map(|f| CurveRayPoint {
+            parameter: record_parameter(&record, range, f.parameter, f.point),
+            point: [f.point.x, f.point.y, f.point.z],
+            on_ray: [f.on_ray.x, f.on_ray.y, f.on_ray.z],
+            distance: f.distance,
+        })))
+    })?
+}
+
 /// Isolated intersections of `curve` over the record's parameter `interval` with `plane`,
 /// in curve order and in the plane's local coordinates. The kernel solves the exact curve
 /// against the plane at its model tolerance; contacts at both interval endpoints count.
@@ -1100,6 +1191,32 @@ mod tests {
         [10.0, 10.0, 0.0],
         [0.0, 10.0, 0.0],
     ];
+
+    #[test]
+    fn a_cubic_is_its_chord_only_within_the_zone_tolerance() {
+        // Chord 10 along x; the zone tolerance is 1e-5.
+        let off = |y: f64| [[0., 0., 0.], [3., y, 0.], [7., 0., 0.], [10., 0., 0.]];
+        let class = |p| classify_cubic(p).unwrap();
+        assert_eq!(class(off(0.)), CubicStanding::Chord);
+        assert_eq!(class(off(0.9e-5)), CubicStanding::Chord);
+        assert_eq!(class(off(1.1e-5)), CubicStanding::Curve);
+        assert_eq!(class(off(2.)), CubicStanding::Curve);
+        // A point is its own chord.
+        assert_eq!(class([[1., 2., 3.]; 4]), CubicStanding::Chord);
+        // Inner control points almost on the start, 0.002 off a chord of 100: the speed
+        // there falls below the check's tolerance (#16190).
+        assert_eq!(
+            class([
+                [0., 0., 0.],
+                [0.001, 0.002, 0.],
+                [0.002, 0.001, 0.],
+                [0., 100., 0.]
+            ]),
+            CubicStanding::Refused
+        );
+        assert!(classify_cubic([[f64::NAN, 0., 0.]; 4]).is_err());
+        assert!(classify_cubic([[f64::INFINITY, 0., 0.]; 4]).is_err());
+    }
 
     #[test]
     fn a_cubic_through_four_points_is_clamped_on_its_end_points() {

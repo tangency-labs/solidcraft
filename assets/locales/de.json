@@ -3399,7 +3399,7 @@
   "render.cpu_body_choose": "Körper wählen",
   "render.cpu_body_filter": "Körper nach Namen filtern",
   "render.cpu_body_filter_more": "Verfeinern Sie den Filter, um weitere Körper zu sehen.",
-  "render.cpu_body_missing": "Ein Reflexionsziel fehlt, ist ausgeblendet, mehrdeutig oder hat einen Namen von mehr als 128 Byte. Wählen Sie es erneut.",
+  "render.cpu_body_missing": "Ein Reflexionsziel fehlt, ist ausgeblendet, mehrdeutig oder hat einen Namen von mehr als 512 Byte. Wählen Sie es erneut.",
   "render.cpu_budget": "CPU-Ressourcenprofil",
   "render.cpu_budget_bodies": "Körperobergrenze",
   "render.cpu_budget_compact": "Kompakt (bisherige Grenzen)",

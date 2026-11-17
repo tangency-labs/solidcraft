@@ -781,3 +781,74 @@ fn renaming_an_imported_body_after_a_repeated_part_keeps_every_body_in_its_compo
     assert_eq!(names(&s), ["Bracket", "Peg", "Base plate", "Handle"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Deleting a component of an imported assembly deletes its bodies too (#17578). The Import
+/// feature that builds them sits in the assembly's own component, so deleting the part's
+/// component only dropped the bodies' component assignment, and they stayed in the design.
+/// The bodies left keep their names and places, also when the deleted body had their name first.
+#[test]
+fn deleting_a_component_of_an_imported_assembly_deletes_its_bodies() {
+    let dir = temp_dir("delete-subcomponent");
+    // `Plate` (a 20 × 20 × 10 box) and `Pin` (a 10 × 10 × 20 box at x = 40), each with a body
+    // named "Part": the import names them "Part" and "Part (2)".
+    let plate = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)).unwrap();
+    let pin = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 20.0)).unwrap();
+    let part = |name: &str, body| ExportProduct {
+        name: name.into(),
+        bodies: vec![ExportBody { name: "Part".into(), body, color: None }],
+        children: Vec::new(),
+    };
+    let products = vec![
+        ExportProduct {
+            name: "TwoParts".into(),
+            bodies: Vec::new(),
+            children: vec![(1, at(0.0, 0.0, 0.0), "Plate-1".into()), (2, at(40.0, 0.0, 0.0), "Pin-1".into())],
+        },
+        part("Plate", &plate),
+        part("Pin", &pin),
+    ];
+    let path = dir.join("two_parts.step").to_string_lossy().to_string();
+    std::fs::write(&path, step_export_products(&products, 0, &StepHeader::default()).unwrap()).unwrap();
+    let volumes = |s: &mut Session| -> Vec<(String, i64)> {
+        let m = run(s, "inspect.measure", json!({}));
+        let mut out: Vec<(String, i64)> = m["bodies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| (b["name"].as_str().unwrap().to_string(), b["volume_mm3"].as_f64().unwrap().round() as i64))
+            .collect();
+        out.sort();
+        out
+    };
+    let holding = |s: &mut Session| -> Vec<(String, Vec<String>)> { bodies_by_component(s).into_iter().filter(|(_, b)| !b.is_empty()).collect() };
+
+    // The issue's steps: the pin goes with its component, the plate stays.
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    assert_eq!(volumes(&mut s), [("Part".to_string(), 4000), ("Part (2)".to_string(), 2000)]);
+    run(&mut s, "component.delete", json!({"component": "Pin"}));
+    assert_eq!(volumes(&mut s), [("Part".to_string(), 4000)]);
+    assert_eq!(holding(&mut s), [("Plate".to_string(), vec!["Part".to_string()])]);
+    // Undo brings the pin back.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(volumes(&mut s).len(), 2);
+
+    // The plate goes: the pin keeps its name, though the plate's "Part" is free now, and its place.
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let pin_box = shown_boxes(&s).into_iter().find(|b| b[0] == 40_000).unwrap();
+    run(&mut s, "component.delete", json!({"component": "Plate"}));
+    let expected = [("Pin".to_string(), vec!["Part (2)".to_string()])];
+    assert_eq!(holding(&mut s), expected);
+    run(&mut s, "timeline.compute_all", json!({}));
+    assert_eq!(holding(&mut s), expected, "rebuilt");
+    assert_eq!(shown_boxes(&s), [pin_box]);
+    // Saved and opened again, it is the same.
+    let design = dir.join("pin.solidcraft").to_string_lossy().to_string();
+    run(&mut s, "file.save_as", json!({"path": design}));
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": design}));
+    assert_eq!(holding(&mut again), expected, "reopened");
+    assert_eq!(shown_boxes(&again), [pin_box]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

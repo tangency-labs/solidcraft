@@ -154,6 +154,7 @@ pub mod tab_views;
 pub mod timeline_clipboard;
 pub mod ui_prefs;
 pub mod view_navigation;
+pub mod view_pick;
 
 pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, issues, output_schema_for, run_checked, run_checked_as};
 pub use types::*;

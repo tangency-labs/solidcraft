@@ -3012,7 +3012,7 @@
   "render.cpu_body_choose": "Choisir un corps",
   "render.cpu_body_filter": "Filtrer les corps par nom",
   "render.cpu_body_filter_more": "Affinez le filtre pour voir plus de corps.",
-  "render.cpu_body_missing": "Une cible de réflexion est introuvable, masquée, ambiguë ou porte un nom de plus de 128 octets. Choisissez-la à nouveau.",
+  "render.cpu_body_missing": "Une cible de réflexion est introuvable, masquée, ambiguë ou porte un nom de plus de 512 octets. Choisissez-la à nouveau.",
   "render.cpu_budget": "Profil de ressources CPU",
   "render.cpu_budget_bodies": "Plafond de corps",
   "render.cpu_budget_compact": "Compact (anciennes limites)",

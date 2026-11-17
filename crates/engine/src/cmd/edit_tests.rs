@@ -1546,7 +1546,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
     run(&mut s, "timeline.rename", json!({"feature": "Shelf", "name": "Ledge"}));
     run(&mut s, "timeline.rename", json!({"feature": "Guide", "name": "Rail"}));
     assert_eq!(plane_link(&s), "Ledge");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Rail"]);
     assert_eq!(s.selection, [Sel::Plane { name: "Ledge".into() }]);
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
@@ -1559,7 +1559,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(plane_link(&s), "Shelf");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into(), placement: None });
     assert_eq!(s.visibility.hidden_origin, ["Guide"], "the hidden plane stays hidden");
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
     assert!((projected_z(&mut s) - 20.0).abs() < 1e-9);
@@ -2503,4 +2503,32 @@ fn hostile_params_and_stale_selections_never_fail_badly() {
     for v in [json!(null), json!([]), json!("x"), json!(f64::MAX), json!({"detail": null})] {
         assert!(s.execute("selection.get", &v).is_ok(), "{v}");
     }
+}
+
+/// A feature's or a folder's name is 1…128 characters, as the refusal says, not 128 bytes of its
+/// UTF-8: a hundred `ł` (200 bytes) is taken, 129 characters are not.
+#[test]
+fn feature_and_folder_names_count_characters_not_bytes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    let base = s.doc.find_feature("Base").unwrap().id;
+    let group = run(&mut s, "timeline.group", json!({"name": "Housing", "features": [base]}))["group"].as_u64().unwrap();
+    let long = "ł".repeat(100);
+    run(&mut s, "timeline.rename", json!({"feature": base, "name": long}));
+    assert_eq!(s.doc.features.iter().find(|f| f.id == base).map(|f| f.name.as_str()), Some(long.as_str()));
+    run(&mut s, "timeline.rename_group", json!({"group": group, "name": long}));
+    assert_eq!(s.doc.timeline_groups[0].name, long);
+    let too_long = "ł".repeat(129);
+    for (command, params) in
+        [("timeline.rename", json!({"feature": base, "name": too_long})), ("timeline.rename_group", json!({"group": group, "name": too_long}))]
+    {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("1…128 characters"), "{command}: {error}");
+    }
+    // A new folder is given such a name too.
+    let made = run(&mut s, "timeline.group", json!({"name": too_long.chars().skip(1).collect::<String>()}))["group"].as_u64().unwrap();
+    assert_eq!(s.doc.timeline_groups.iter().find(|g| g.id == made).map(|g| g.name.chars().count()), Some(128));
+    // A design with such names is saved and opens again.
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).map_err(|e| e.to_string());
+    assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
 }

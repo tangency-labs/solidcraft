@@ -1,0 +1,30 @@
+{
+  "en": {
+    "prefs.construction_line_classic": "Classic construction line tools",
+    "prefs.construction_line_classic_note": "Construction line tools work as before: a Construction/Normal switch beside their Length value, and the Sketch Palette's Line Type icons leave them alone. Off: those icons set the tool's line type."
+  },
+  "es": {
+    "prefs.construction_line_classic": "Herramientas de línea de construcción clásicas",
+    "prefs.construction_line_classic_note": "Las herramientas de línea de construcción funcionan como antes: un selector Construcción/Normal junto a su valor de Longitud, y los íconos de Tipo de línea de la paleta de boceto no las cambian. Desactivado: esos íconos eligen el tipo de línea de la herramienta."
+  },
+  "ar": {
+    "prefs.construction_line_classic": "أدوات خطوط الإنشاء الكلاسيكية",
+    "prefs.construction_line_classic_note": "تعمل أدوات خطوط الإنشاء كما كانت من قبل: مفتاح إنشاء/عادي بجوار قيمة الطول، ولا تغيّرها أيقونات نوع الخط في لوحة الرسم. عند الإيقاف: تحدد تلك الأيقونات نوع خط الأداة."
+  },
+  "he": {
+    "prefs.construction_line_classic": "כלי קווי בנייה קלאסיים",
+    "prefs.construction_line_classic_note": "כלי קווי הבנייה פועלים כמו קודם: מתג בנייה/רגיל ליד ערך האורך, וסמלי סוג הקו בלוח הסקיצה אינם משנים אותם. כבוי: הסמלים האלה קובעים את סוג הקו של הכלי."
+  },
+  "ja": {
+    "prefs.construction_line_classic": "従来の補助線ツール",
+    "prefs.construction_line_classic_note": "補助線ツールが以前と同じように動作します。長さの値の横に補助線/通常の切り替えが表示され、スケッチパレットの線種アイコンはツールを変更しません。オフ: それらのアイコンでツールの線種を設定します。"
+  },
+  "vi": {
+    "prefs.construction_line_classic": "Công cụ đường dựng kiểu cũ",
+    "prefs.construction_line_classic_note": "Các công cụ đường dựng hoạt động như trước: công tắc Dựng/Thường cạnh giá trị Chiều dài, và các biểu tượng Kiểu đường của bảng phác thảo không thay đổi chúng. Tắt: các biểu tượng đó đặt kiểu đường của công cụ."
+  },
+  "zh": {
+    "prefs.construction_line_classic": "经典构造线工具",
+    "prefs.construction_line_classic_note": "构造线工具按以前的方式工作：长度值旁边有构造/普通切换，草图面板的线型图标不会改变它们。关闭：这些图标设置工具的线型。"
+  }
+}

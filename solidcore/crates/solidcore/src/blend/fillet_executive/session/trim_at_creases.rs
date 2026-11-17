@@ -1,7 +1,8 @@
 //! The cliff overflow trimmed at its creases on the live session (not upstream): the
 //! fork's `SmFilletExecutive::TrimAtCreases` (`source/SMLib/src/SmFilletOverflow.cpp`,
 //! tangency-labs/smlib#79 step 6 at 5e8c9c1: 99e57b8, 668fe9f, bacd0bb, 2d4b154, bc8c44d,
-//! de5df14, 8832ead; `fixes.fillet_overflow_trim_at_creases`, WR-695). The geometry steps
+//! de5df14, 8832ead; WR-695, unconditional since `fillet_overflow_trim_at_creases` was
+//! removed). The geometry steps
 //! are in [`crate::blend::fillet_overflow`].
 //!
 //! | Rust                                | Fork                                 |
@@ -12,8 +13,8 @@
 //! | `open_setback_springs` (private)    | `TrimAtCreases`' open setback corners' spring curves and hole edges (ef57570) |
 //!
 //! Deviations:
-//! - **The sheet leaves the session.** As in `subtract_removal_region`, the sheet (the
-//!   intermediate body) is taken out of the session first and edited on its own; the
+//! - **The sheet leaves the session.** As in the removed `subtract_removal_region`, the
+//!   sheet (the intermediate body) is taken out of the session first and edited on its own; the
 //!   target is edited in place through the session's notifications, as the fork edits
 //!   it, and put back as it was when the trim fails (the fork leaves whatever it reached).
 //! - **Sets.** The fork's pointer-keyed `std::set` / `std::map` are `BTreeSet` /
@@ -24,17 +25,16 @@
 //!   edge and the extension, `NoteFitRadius` from `sm_CornerTakesPerRadius` after the
 //!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) note them (WR-696, #2278).
 //! - **Section ends (not the fork's).** A round with WR-674's section ends is trimmed here
-//!   with `fixes.fillet_overflow_trim_at_creases` (WR-706, #2223): each such end is
-//!   cut by its section's plane and closed by the section's flat face, and a side of that
-//!   face that lies along an edge of the body is sewn to the edge's piece the rail's
-//!   imprint cuts off, not imprinted.
-//! - **Creases along an edge (not the fork's).** With
-//!   `fixes.fillet_overflow_crease_along_edge` (WR-717, #2385), a crease that runs along an
-//!   edge of the face it crosses, within the trim's tolerance, is that edge: the sheet is
-//!   split along it, and the edge stands as its imprint, so the material taken off stops
-//!   there and the sheet is sewn to it. The fork drops such a crease as not inside the
-//!   face, leaves the sheet's piece past the face, and refuses at the sewing (a disc 2 high
-//!   rounded 2.001: the crease runs 2.5e-7 inside the bottom edge). Without it the caller subtracts the round, as before.
+//!   (WR-706, #2223): each such end is cut by its section's plane and closed by the
+//!   section's flat face, and a side of that face that lies along an edge of the body is
+//!   sewn to the edge's piece the rail's imprint cuts off, not imprinted.
+//! - **Creases along an edge (not the fork's).** (WR-717, #2385; once the flag
+//!   `fillet_overflow_crease_along_edge`) A crease that runs along an edge of the face it
+//!   crosses, within the trim's tolerance, is that edge: the sheet is split along it, and
+//!   the edge stands as its imprint, so the material taken off stops there and the sheet
+//!   is sewn to it. The fork drops such a crease as not inside the face, leaves the
+//!   sheet's piece past the face, and refuses at the sewing (a disc 2 high rounded 2.001:
+//!   the crease runs 2.5e-7 inside the bottom edge).
 //! - **A strip below resolution (not the fork's, #2404).** A body edge that runs along the
 //!   kept sheet, just off it, leaves a strip whose sides the trim's tolerances cannot tell
 //!   apart: refused (`NoRoomReason::StripBelowResolution`), not left to fail at the sewing or
@@ -885,15 +885,14 @@ fn move_spline_end(spline: &mut BSplineCurve, at_end: bool, q: Point3) -> Result
 /// The run-on is not limited to that approach: any stretch from a piece to the crease's
 /// end that lies along the face's edges is taken into the piece, whether it is a shallow
 /// approach or a crease that runs along an edge to its end. Either way the sheet is split
-/// along the same stretch as the piece and its along-edge runs together
-/// (`fixes.fillet_overflow_crease_along_edge`), now as one curve. A stretch along an edge
-/// followed by another run inside the face, or a crease that ends off the face's
-/// boundary, is not run on: those pieces are clipped as before.
+/// along the same stretch as the piece and its along-edge runs together (WR-717), now as
+/// one curve. A stretch along an edge followed by another run inside the face, or a
+/// crease that ends off the face's boundary, is not run on: those pieces are clipped as
+/// before.
 ///
-/// With `along` (`fixes.fillet_overflow_crease_along_edge`), the crease's along-edge runs
-/// ([`crate::blend::fillet_overflow::pieces_along_edges`], from the same classification)
-/// are appended to it, each marked whether a piece was run on over it, so that the caller
-/// splits the sheet along each stretch once.
+/// The crease's along-edge runs ([`crate::blend::fillet_overflow::pieces_along_edges`],
+/// from the same classification) are appended to `along`, each marked whether a piece was
+/// run on over it, so that the caller splits the sheet along each stretch once.
 fn pieces_in_face_to_ends(
     k: &Kernel,
     crease: &Curve,
@@ -901,7 +900,7 @@ fn pieces_in_face_to_ends(
     f: FaceId,
     tol: f64,
     pieces: &mut Vec<Curve>,
-    along: Option<&mut Vec<(Curve, bool)>>,
+    along: &mut Vec<(Curve, bool)>,
 ) -> Result<()> {
     let natural = crease.natural_interval();
     let runs = face::p2::classify_free_curve_on_face(k, b, f, crease, natural, tol, true)?;
@@ -957,9 +956,6 @@ fn pieces_in_face_to_ends(
             taken.iter_mut().skip(i + 1).for_each(|t| *t = true);
         }
     }
-    let Some(along) = along else {
-        return Ok(());
-    };
     // `pieces_along_edges`, step for step, on the same runs
     for (run, &taken) in runs.iter().zip(&taken) {
         if run.mid != PointClassType::Edge {
@@ -1646,11 +1642,6 @@ impl FilletSession<'_> {
             faces_of.insert(solver, self.fillet_faces(solver)?);
         }
         let open_ends = self.executive.open_ends.clone();
-        // WR-706: a section end (WR-674) is trimmed here only with the crease trim
-        let section_trim = k.fixes.fillet_overflow_trim_at_creases;
-        if !section_trim && open_ends.iter().any(|end| end.section) {
-            return Err(invalid("a section end is not trimmed at its creases"));
-        }
 
         let mut sheet = self
             .objects
@@ -1907,10 +1898,7 @@ impl FilletSession<'_> {
                         continue;
                     }
                     holds = edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)?;
-                    if holds
-                        && k.fixes.fillet_overflow_crease_along_edge
-                        && edge_on_surface(k, &sheet, e, self.objects.target, f, tol)?
-                    {
+                    if holds && edge_on_surface(k, &sheet, e, self.objects.target, f, tol)? {
                         held.insert(f);
                     }
                 }
@@ -1922,12 +1910,7 @@ impl FilletSession<'_> {
                 // WR-717: a face that holds a rail only to the looser `on_tol` (a rail that
                 // runs past it by less than that, beside the edge where the sheet crosses
                 // it) is still looked at for creases
-                let skip = if k.fixes.fillet_overflow_crease_along_edge {
-                    held.contains(&f)
-                } else {
-                    supports.contains(&f)
-                };
-                if bx.are_disjoint(&sheet_box, on_tol) || skip {
+                if bx.are_disjoint(&sheet_box, on_tol) || held.contains(&f) {
                     continue;
                 }
                 // fitted to a thousandth of the body's accuracy (#17673, `SECTION_FIT`), so
@@ -1963,7 +1946,6 @@ impl FilletSession<'_> {
                 };
                 // each crease where it lies inside both faces
                 let mut in_face = Vec::new();
-                let along_edges = k.fixes.fillet_overflow_crease_along_edge;
                 let mut along = Vec::new();
                 for c in &found {
                     pieces_in_face_to_ends(
@@ -1973,7 +1955,7 @@ impl FilletSession<'_> {
                         f,
                         tol,
                         &mut in_face,
-                        along_edges.then_some(&mut along),
+                        &mut along,
                     )?;
                 }
                 // Not the fork's (WR-717, #2385): a crease that runs along an edge of the
