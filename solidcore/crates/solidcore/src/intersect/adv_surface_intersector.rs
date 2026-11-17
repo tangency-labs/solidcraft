@@ -85,8 +85,8 @@
 //!   (cyclic tree links, which recurse forever upstream) is
 //!   [`SolidError::InvalidInput`], as is nesting past the base solver's
 //!   [`MAX_SOLVE_DEPTH`](crate::geom::global_solver::MAX_SOLVE_DEPTH).
-//! - **Tangential contact points** (not upstream, WR-74, tangency-labs/solidcore#394,
-//!   opt-in `Kernel::fixes.ssi_tangent_contact_points`, off by default). The node
+//! - **Tangential contact points** (not upstream, WR-74, tangency-labs/solidcore#394).
+//!   The node
 //!   pairs `FindInteriorCurves` drops (normals within 5 degrees, no local
 //!   intersection, normals within 2 degrees at the solution) seed the SolidCraft
 //!   fork's search for isolated tangential contacts (`tangent_contacts`,
@@ -107,6 +107,11 @@
 //!   direction. Upstream leaves the output at `aSingDirections[0]`, so where the first
 //!   inside direction is the nearest (or the only one) the curve starts along a
 //!   direction that need not point into either domain.
+//! - **Closure is no self intersection** (not upstream, #18117). A self intersection also
+//!   rejects two patches that are neighbours across the surface's closure (one at the start
+//!   and one at the end of a direction it closes in, meeting across it), as it rejects two
+//!   that share a side: upstream reports a closed surface's seam as a self intersection,
+//!   so a closed offset surface failed its own validity test.
 //! - **Not ported.** `Dump` and the `SM_DEBUG_CODE` drawing blocks; `SM_ASSERT`s.
 
 use crate::curve::conic::{Conic, ConicType};
@@ -608,7 +613,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         // curves): this loop only appends curves, so slot `i` stays curve `i`'s.
         let mut drop_caches = DropPointCaches::default();
 
-        // Opt-in (WR-74, #394): the patch UV domains of the node pairs that cannot
+        // Not upstream (WR-74, #394): the patch UV domains of the node pairs that cannot
         // start a crossing curve seed the tangential contact point search below.
         let mut tangent_seeds: Vec<[Extent2d; 2]> = Vec::new();
         // Fix WR-79 part 2 (#396, opt-in): the 3D curves traced from low-angle start
@@ -650,7 +655,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     angle_rad = PI - angle_rad;
                 }
                 if angle_rad * (180.0 / PI) < 5.0 {
-                    self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
+                    self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
                     // (WR-75, opt-in) a seed of the tangential curve pass
                     if k.fixes.ssi_tangent_curve_tracer {
                         self.tangent_curve_seeds.push([uv_guess1, uv_guess2]);
@@ -679,7 +684,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
             // for nodes that do not intersect - skip to next node pair
             if !found_answer {
-                self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
+                self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
                 continue;
             }
 
@@ -697,7 +702,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     angle_rad = PI - angle_rad;
                 }
                 if angle_rad * (180.0 / PI) < 2.0 {
-                    self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
+                    self.push_tangent_seed(&mut tangent_seeds, node1, node2)?;
                     // (WR-75, opt-in) a seed of the tangential curve pass
                     if k.fixes.ssi_tangent_curve_tracer {
                         self.tangent_curve_seeds.push([uv, uv2]);
@@ -799,8 +804,8 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             }
         }
 
-        // Opt-in (WR-74, #394): isolated tangential contact points
-        if k.fixes.ssi_tangent_contact_points && !self.base.doing_self_intersection {
+        // Not upstream (WR-74, #394): isolated tangential contact points
+        if !self.base.doing_self_intersection {
             tangent_contacts::find_tangent_contact_points(
                 k,
                 &self.base,
@@ -813,22 +818,18 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         Ok(())
     }
 
-    /// Opt-in (WR-74, #394): records the patch UV domains of a node pair
-    /// `FindInteriorCurves` drops as a seed of the tangential contact point search
-    /// (nothing without `Kernel::fixes.ssi_tangent_contact_points`).
+    /// Not upstream (WR-74, #394): records the patch UV domains of a node pair
+    /// `FindInteriorCurves` drops as a seed of the tangential contact point search.
     fn push_tangent_seed(
         &self,
-        k: &Kernel,
         seeds: &mut Vec<[Extent2d; 2]>,
         node1: Option<NodeId>,
         node2: Option<NodeId>,
     ) -> Result<()> {
-        if k.fixes.ssi_tangent_contact_points {
-            seeds.push([
-                *self.patch(0, node1)?.aux.uv_domain(),
-                *self.patch(1, node2)?.aux.uv_domain(),
-            ]);
-        }
+        seeds.push([
+            *self.patch(0, node1)?.aux.uv_domain(),
+            *self.patch(1, node2)?.aux.uv_domain(),
+        ]);
         Ok(())
     }
 
@@ -1001,6 +1002,22 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     }
 }
 
+/// Not upstream (#18117): whether two patch domains of a self intersection are neighbours
+/// across the surface's closure: in a direction the surface closes in over the intersected
+/// domain (`m_bClosedU`, `m_bClosedV`), one reaches the domain's start and the other its end,
+/// and their ranges across that direction overlap or touch. There the surface meets itself by
+/// its closure (its seam's two sides are one curve), which is no self intersection, as patches
+/// that share a side are none; upstream takes a closed surface's seam for one.
+fn neighbours_across_closure(base: &SurfaceIntersector<'_>, a: &Extent2d, b: &Extent2d) -> bool {
+    let dom = &base.uv_domains[0];
+    let ends_u = |p: &Extent2d, q: &Extent2d| p.u_min() <= dom.u_min() && q.u_max() >= dom.u_max();
+    let ends_v = |p: &Extent2d, q: &Extent2d| p.v_min() <= dom.v_min() && q.v_max() >= dom.v_max();
+    let meet_v = a.v_min() <= b.v_max() && b.v_min() <= a.v_max();
+    let meet_u = a.u_min() <= b.u_max() && b.u_min() <= a.u_max();
+    (base.closed_u[0] && meet_v && (ends_u(a, b) || ends_u(b, a)))
+        || (base.closed_v[0] && meet_u && (ends_v(a, b) || ends_v(b, a)))
+}
+
 impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_, 't, O> {
     fn solver(&self) -> &GlobalSolver<'t, O> {
         &self.solver
@@ -1062,8 +1079,11 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for AdvSurfaceIntersector<'_
         }
 
         // If we are doing self intersection then reject case where domains are not
-        // disjoint.
-        if self.base.doing_self_intersection && !uv_domain1.are_disjoint(&uv_domain2, 0.0) {
+        // disjoint (not upstream, #18117: nor neighbours across the surface's closure).
+        if self.base.doing_self_intersection
+            && (!uv_domain1.are_disjoint(&uv_domain2, 0.0)
+                || neighbours_across_closure(&self.base, &uv_domain1, &uv_domain2))
+        {
             return Ok(false);
         }
 

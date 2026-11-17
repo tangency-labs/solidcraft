@@ -103,6 +103,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.line_hover_tangent_arc",
             "prefs.sketch.center_arc",
             "prefs.sketch_construction_lines",
+            "prefs.construction_line_classic",
             "prefs.sketch_mirror_auto_line",
             "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
@@ -111,6 +112,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "ui.first_dimension_scales_about_origin",
         ];
         let right_labels = [
+            "prefs.sketch.shortcut_again_ends_tool",
             "prefs.sketch.shortcut_cycles_modes",
             "prefs.ribbon_click_ends_tool",
             "ui.project_face_edges_sketch",
@@ -160,6 +162,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.center_arc_follows_cursor,
                 );
                 check(ui, "sketch_construction_lines", "prefs.sketch_construction_lines", None, &mut app.preferences.sketch_construction_lines);
+                check(
+                    ui,
+                    "construction_line_classic",
+                    "prefs.construction_line_classic",
+                    Some("prefs.construction_line_classic_note"),
+                    &mut app.preferences.construction_line_classic,
+                );
                 check(ui, "sketch_mirror_auto_line", "prefs.sketch_mirror_auto_line", None, &mut app.preferences.sketch_mirror_auto_line);
                 check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
                 check(
@@ -196,6 +205,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                check(
+                    ui,
+                    "shortcut_again_ends_tool",
+                    "prefs.sketch.shortcut_again_ends_tool",
+                    Some("prefs.sketch.shortcut_again_ends_tool_tip"),
+                    &mut app.preferences.shortcut_again_ends_tool,
+                );
                 check(
                     ui,
                     "shortcut_cycles_modes",
@@ -589,6 +605,7 @@ fn targets(key: &str, response: &egui::Response) {
         "sketch_auto_locate" => "Also place them from the origin (fully constrained)",
         "first_dimension_scales" => "The first dimension scales the drawing",
         "center_arc_follows_cursor" => "Center point arc follows the cursor's direction",
+        "shortcut_again_ends_tool" => "Pressing an active tool's shortcut again closes it",
         "shortcut_cycles_modes" => "Pressing a tool's shortcut again switches its mode",
         "project_options_dialog" => "Project options dialog",
         "sketch_state_icons" => "Sketch icons in the color of their state",

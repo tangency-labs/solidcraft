@@ -183,6 +183,11 @@ pub(crate) fn picked_feature(app: &SolveApp) -> Option<u64> {
     })
 }
 
+/// The feature under the pointer (in the 3D view, Browser, or timeline) or picked in the 3D view.
+pub(crate) fn from_view(app: &SolveApp) -> [Option<u64>; 2] {
+    [hovered_feature(app).or(app.viewport.hover_feature), picked_feature(app)]
+}
+
 /// A new face or edge picked in the view scrolls the history shown to the feature that made it,
 /// once per pick; the history stays where it is while the pick does not change.
 pub(crate) fn follow_view_pick(app: &mut SolveApp) {
@@ -599,6 +604,30 @@ pub(crate) fn status_tip(name: &str, ty: &str, error: Option<&str>, warning: Opt
     }
 }
 
+/// A feature's tooltip in the bottom and the left History: its name and type, its error and
+/// warning, then why a rolled-back feature isn't shown, a sketch's state, the time it took and
+/// the edit hint. Both Histories show this one, so the two stay identical (#14027).
+pub(crate) fn feature_tooltip(
+    name: &str,
+    ty: &str,
+    result: Option<&FeatureResult>,
+    rolled: bool,
+    sketch_state: Option<crate::sketch_state::SketchState>,
+) -> StatusTip {
+    // The type as a user reads it, translated, without the programmatic `Feature` suffix: a
+    // user sees "Fillet", not "FilletFeature".
+    let kind = solidcraft_ui_text::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
+    let mut lines = Vec::new();
+    // Greyed out says only "not shown": say why (#8100).
+    if rolled {
+        lines.push(solidcraft_ui_text::tr("timeline.feature_rolled_back").to_string());
+    }
+    lines.extend(sketch_state.map(|state| state.text()));
+    lines.extend(result.map(|r| format!("{:.1} ms", r.ms)));
+    lines.push(solidcraft_ui_text::tr("timeline.feature_hint").to_string());
+    StatusTip { tail: lines.join("\n"), ..feature_status_tip(name, kind, result) }
+}
+
 /// A feature's mark: an error, else a warning; none while it is suppressed or rolled back, as
 /// it isn't built then.
 pub(crate) fn feature_status(app: &SolveApp, id: u64) -> Option<Status> {
@@ -700,6 +729,22 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
         None => return None,
     };
     result.import_report.as_deref().map(import_summary)
+}
+
+/// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
+/// what it found joins the import's result, so its History chip warns, and a part to repair is
+/// said on the status line, once per import, in history order. While a check runs the window
+/// looks again a few times a second.
+pub(crate) fn tick_import_checks(app: &mut SolveApp, ctx: &egui::Context) {
+    app.session.model.settle_import_checks();
+    for id in app.session.model.take_import_notices() {
+        if let Some(summary) = app.session.model.result(id).and_then(|r| r.import_report.as_deref()).map(import_summary) {
+            app.set_status(summary, false);
+        }
+    }
+    if app.session.model.checking_imports() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+    }
 }
 
 /// An import's warnings for a person who uses CAD: how many of the file's parts came in as
@@ -1148,8 +1193,8 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     let n = app.session.doc.features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
     let mut bar = bar(app, floating);
-    // The feature that made what is under the cursor or picked in the viewport.
-    let from_view = [hovered_feature(app), picked_feature(app)];
+    // The feature under the cursor (viewport, browser, or timeline) or picked in the viewport.
+    let from_view = from_view(app);
     // Long runs of one component's features show as one chip (`timeline_fold`). The bar shows the
     // edited or picked component's features, after the path to it (`timeline_scope`).
     let strip = crate::timeline_fold::Strip { marker, from_view, floating, accent };
@@ -1241,6 +1286,7 @@ struct BarSteps<'a> {
 }
 
 impl history_bar::Contents for BarSteps<'_> {
+    /// Draws the bar's chips: each feature, and the folded runs, folders, joints and trays around it.
     fn entries(&mut self, s: &mut history_bar::Strip<'_, '_>) {
         let t = Tokens::get();
         let app = &mut *self.app;
@@ -1305,17 +1351,7 @@ impl history_bar::Contents for BarSteps<'_> {
             let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
             let res = results.get(&app.session.model, at, *id);
             let rolled = i >= self.marker_view;
-            let tip = || {
-                let mut lines = Vec::new();
-                // Greyed out says only "not shown": say why (#8100).
-                if rolled {
-                    lines.push(solidcraft_ui_text::tr("timeline.feature_rolled_back").to_string());
-                }
-                lines.extend(sketch_state.map(|state| state.text()));
-                lines.extend(res.map(|r| format!("{:.1} ms", r.ms)));
-                lines.push(solidcraft_ui_text::tr("timeline.feature_hint").to_string());
-                StatusTip { tail: lines.join("\n"), ..feature_status_tip(name, ty, res) }
-            };
+            let tip = || feature_tooltip(name, ty, res, rolled, sketch_state);
             let rect = s.step(&history_bar::Step {
                 id: *id,
                 slot: i,
@@ -1584,6 +1620,7 @@ mod tests {
                 issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
                 issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
             ],
+            ..Default::default()
         };
         let summary = super::import_summary(&report);
         assert_eq!(
@@ -1595,7 +1632,8 @@ mod tests {
         );
         assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
         // Only repairs: no advice, and a part alone has no "of" count.
-        let repaired = ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")] };
+        let repaired =
+            ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")], ..Default::default() };
         assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
@@ -3908,7 +3946,7 @@ mod tests {
         let h = two_boxes(false);
         let plain = h.app.session.model.results[0].clone();
         let issue = ImportIssue { kind: IssueKind::Repaired, item: Some(3), part: String::new(), faces: 0, times: 1, detail: "solid #3: …".into() };
-        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues }));
+        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, ..Default::default() }));
         let with = |warning: Option<&str>, import_report| {
             let mut result = plain.clone();
             result.warning = warning.map(str::to_string);
@@ -3925,6 +3963,43 @@ mod tests {
         for (result, warned, what) in cases {
             assert_eq!(super::has_warning(&result), warned, "{what}");
             assert_eq!(super::has_warning(&result), super::warning_text(&result).is_some(), "{what}");
+        }
+    }
+
+    #[test]
+    fn browser_row_hover_highlights_feature_and_sketch_in_timeline() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.ui.show_browser = true;
+            h.app.ui.show_timeline = true;
+            h.app.run("view.history_layout", json!({"dock": if left { "left" } else { "bottom" }})).unwrap();
+            h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+            let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+            h.app.run("sketch.create", json!({"plane":"XY","name":"MySketch"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let sketch = h.app.session.doc.find_feature("MySketch").unwrap().id;
+            h.app.tree.expanded.insert("c0/features".into());
+            h.app.tree.expanded.insert("c0/sketches".into());
+            h.frames(2);
+
+            // Hovering a feature row in the browser sets hover_feature and highlights it in the timeline.
+            let row_feature = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
+            h.step(&json!({"move":[row_feature.x, row_feature.y]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, Some(round), "left={left}");
+            assert_eq!(super::from_view(&h.app), [Some(round), None], "left={left}");
+
+            // Hovering a sketch row in the browser sets hover_feature and highlights it in the timeline.
+            let row_sketch = crate::scenario::handle_at("row:MySketch").unwrap();
+            h.step(&json!({"move":[row_sketch.x, row_sketch.y]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, Some(sketch), "left={left}");
+            assert_eq!(super::from_view(&h.app), [Some(sketch), None], "left={left}");
+
+            // Moving the cursor away clears the timeline highlight.
+            h.step(&json!({"move":[5, 5]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, None, "left={left}");
+            assert_eq!(super::from_view(&h.app), [None, None], "left={left}");
         }
     }
 }

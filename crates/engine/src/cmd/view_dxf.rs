@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 use solidcore_record::Vec2;
-use solidcraft_io::{DxfEntity, DxfFile, DxfLayerId, DxfLinetype, DxfShape};
+use solidcraft_io::{DxfFile, DxfLayerId, DxfLinetype, DxfShape};
 use solidcraft_viewport::Camera;
 
 use super::CommandSpec;
@@ -124,18 +124,14 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             visible_lines.push((line.a, line.b));
         }
     }
-    let hidden_paths = connect(hidden_lines);
-    let mut entities: Vec<DxfEntity> =
-        visible_lines.into_iter().map(|(a, b)| DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(a, b) }).collect();
-    for path in hidden_paths {
-        entities.push(DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points: path.points } });
-    }
+    let hidden_paths: Vec<DxfShape> = connect(hidden_lines).into_iter().map(|path| DxfShape::Polyline { points: path.points }).collect();
+    // The entity order is part of the file's bytes: with arcs recognised, the hidden lines come first.
     if as_arcs {
-        entities = arcs::recognise(entities, tolerance);
-    }
-    for entity in entities {
-        let layer = if entity.layer == "VISIBLE" { visible_layer } else { hidden_layer.ok_or_else(|| bad(CMD, "missing hidden DXF layer"))? };
-        file.push(layer, entity.shape, None)?;
+        push_all(&mut file, hidden_layer, hidden_paths)?;
+        push_all(&mut file, Some(visible_layer), arcs::recognise(visible_lines, tolerance))?;
+    } else {
+        push_all(&mut file, Some(visible_layer), visible_lines.into_iter().map(|(a, b)| DxfShape::Line(a, b)).collect())?;
+        push_all(&mut file, hidden_layer, hidden_paths)?;
     }
     let sketch = sketch_entities(drawing.sketch, dashed, &mut file, hidden_layer, sketch_layer)?;
     let text = solidcraft_io::write_dxf_file(&file)?;
@@ -171,6 +167,18 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| bad(CMD, e.to_string()))
+}
+
+/// `shapes` on `layer`, which must be declared when there are any.
+fn push_all(file: &mut DxfFile<DxfShape>, layer: Option<DxfLayerId>, shapes: Vec<DxfShape>) -> Result<()> {
+    if shapes.is_empty() {
+        return Ok(());
+    }
+    let layer = layer.ok_or_else(|| bad(CMD, "missing hidden DXF layer"))?;
+    for shape in shapes {
+        file.push(layer, shape, None)?;
+    }
+    Ok(())
 }
 
 /// Sketch runs as entities: visible ones on SKETCH, hidden ones dashed on HIDDEN or omitted.

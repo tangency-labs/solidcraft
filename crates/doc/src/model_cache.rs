@@ -391,14 +391,29 @@ impl Model {
     /// The model as a design file keeps it: `None` unless it is `doc`'s evaluation without an
     /// error and `doc` keeps no names saved before format 14. Works out
     /// the face names not asked for yet (a saved model keeps them as worked out).
+    ///
+    /// An import whose SMLib check of its parts is still running is saved with what the check
+    /// found: this waits for it ([`Self::saved_now`] does not).
     pub fn saved(&self, doc: &Document) -> Option<SavedModel> {
+        let (mut saved, pending) = self.saved_now(doc)?;
+        pending.settle(&mut saved);
+        Some(saved)
+    }
+
+    /// [`Self::saved`] without waiting for the imports' checks: the records hold what each import
+    /// found before its check, and [`PendingChecks::settle`] adds what the check finds.
+    pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
         if self.results.is_empty() || self.results.iter().any(|r| r.error.is_some()) || !self.is_current(doc) || has_legacy_names(doc) {
             return None;
         }
         kernel::guard("save the model", || {
             let mut w = Writer::default();
             let mut features = Vec::with_capacity(self.results.len());
-            for r in &self.results {
+            let mut pending = Vec::new();
+            for (k, r) in self.results.iter().enumerate() {
+                if let Some(report) = r.import_report.as_ref().filter(|i| !i.checks.is_empty()) {
+                    pending.push((k, report.clone()));
+                }
                 let state = w.state(&r.state).ok_or_else(|| kernel::KernelError::Invalid("not kept".into()))?;
                 let mut f = json!({"id": r.id, "fingerprint": hex(r.fingerprint), "ms": r.ms, "skipped": r.skipped, "state": state});
                 if let Some(w) = &r.warning {
@@ -416,9 +431,38 @@ impl Model {
                 "sketch_key_sets": w.sketch_key_sets,
                 "named_faces": w.named_faces,
             });
-            Ok(SavedModel { records, bodies: w.bodies })
+            Ok((SavedModel { records, bodies: w.bodies }, PendingChecks(pending)))
         })
         .ok()
+    }
+}
+
+/// Imports of a saved model ([`Model::saved_now`]) whose SMLib check of their parts may still
+/// be running: by feature record, the report that holds the check.
+pub struct PendingChecks(Vec<(usize, Arc<kernel::ImportReport>)>);
+
+impl PendingChecks {
+    /// No import's check is left to wait for.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Wait for the checks and write what they found into `saved`'s feature records: each
+    /// import's report and warning as an import that waited for its check has them. A check a
+    /// token stopped leaves its record as it was.
+    pub fn settle(self, saved: &mut SavedModel) {
+        for (k, report) in self.0 {
+            let Some(settled) = report.settled() else { continue };
+            let Some(f) = saved.records.get_mut("features").and_then(|f| f.get_mut(k)).and_then(Json::as_object_mut) else { continue };
+            match crate::eval::import_warning(&settled.issues.iter().map(|i| i.detail.as_str()).collect::<Vec<_>>()) {
+                Some(w) => f.insert("warning".into(), json!(w)),
+                None => f.remove("warning"),
+            };
+            match serde_json::to_value(&settled) {
+                Ok(v) if !settled.issues.is_empty() => f.insert("import_report".into(), v),
+                _ => f.remove("import_report"),
+            };
+        }
     }
 }
 

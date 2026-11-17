@@ -102,9 +102,16 @@ pub struct Tool {
     /// The Line tool's chain, which a rest on its last point switches to tangent arcs and back
     /// (#9489).
     pub chain: crate::sketch_line_arc::LineChain,
-    /// The construction line tools' Construction/Normal switch (#10258): a segment with a length
-    /// becomes a normal sketch line. Each start of a tool begins at Construction.
-    pub normal: bool,
+    /// A construction line tool's line type (#10258, #15066), numbered as the Sketch Palette's
+    /// Line Type icons: 0 normal, 1 construction, 2 centerline, 3 infinite. Infinite draws an
+    /// infinite construction line in one click, or a construction segment once a length is
+    /// typed; the others always draw a segment. A tool starts at the type last chosen, so
+    /// switching between the construction line methods keeps it.
+    pub line_type: u8,
+    /// A construction line tool works as before #15066 (`construction_line_classic`): the
+    /// Construction/Normal switch under the Length box sets `line_type`, and only a typed length
+    /// makes a segment. Kept in step with the preference while the tool runs.
+    pub classic: bool,
 }
 
 impl Tool {
@@ -158,7 +165,8 @@ impl Tool {
             arc_turn: 0.0,
             lined: Vec::new(),
             chain: Default::default(),
-            normal: false,
+            line_type: 3,
+            classic: false,
         })
     }
 }
@@ -198,6 +206,10 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 }
 
 /// Shift exposes a line midpoint as a point target, only in the alignment tool.
+/// How near (screen pixels) a Coincident pick on a model edge must be to the edge's middle to
+/// take that middle, as near as a sketch line's middle is offered.
+const EDGE_MIDDLE_PX: f32 = 8.0;
+
 fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(Vec2, String)> {
     let sid = app.session.active_sketch?;
     let state = crate::open_meshing::session_world(&app.session);
@@ -349,10 +361,16 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
             // reference): the command projects it, so any body can be constrained to, a mirrored
             // copy too (#6348). Projected geometry is already fixed, so Fix takes sketch entities.
+            // Coincident at an edge's middle takes that middle (#17920), as at a sketch line's.
             let model = || {
                 hits.iter()
                     .filter(|h| tool.cmd != "sketch.constraint.fix" && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. }))
-                    .find_map(|h| crate::sketch_tools::model_ref(app, h))
+                    .find_map(|h| {
+                        let r = crate::sketch_tools::model_ref(app, h)?;
+                        let middle = matches!(h, Hit::Edge { mid, .. } if tool.cmd == "sketch.constraint.coincident"
+                            && proj.to_screen(*mid).is_some_and(|at| at.distance(pos) <= EDGE_MIDDLE_PX));
+                        Some(if middle { json!({"midpoint": r}) } else { r })
+                    })
                     .map(|r| r.to_string())
             };
             if let Some(id) = entity.or_else(model) {

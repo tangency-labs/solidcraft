@@ -16,6 +16,9 @@
     clippy::needless_range_loop
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
+
 use solidcore::blend::blend_setback::{
     certified_scale, containment, distances, fill_hole, Edge, Face, Round,
 };
@@ -621,7 +624,16 @@ fn eased_asked_setback_is_the_setback_fill() {
     let ask = asked(8.0, 2.0);
     let mut k = all_fixes();
     let r = blend_box(&mut k, [60.0, 40.0, 20.0], &ASKED_AT, &[5.0; 3], Some(&ask));
-    built(&mut k, r, (15, 36, 23), 47413.5259896674);
+    // The fork printed 47413.5259896674; `brep_volume` closing the tolerant edges' gaps
+    // (#16735) moved it by 9.6e-5, within the old integrator's leak bound (MEASURED).
+    let mut b = built(&mut k, r, (15, 36, 23), 47413.52608616617);
+    volume_leak::assert_moved_by_the_old_leak(
+        &k,
+        &mut b,
+        47413.5259896674,
+        47413.52608616617,
+        PIN_ACCURACY,
+    );
 }
 
 /// A setback asked for that does not fit on the corner's edges (20, the upright edge's

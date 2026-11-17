@@ -122,6 +122,12 @@
 //!   edge in the vertex's order: where a 5 mm round's cylinder grazed a 1 mm round and the
 //!   corner patch beside it within the tolerance, the gap at the corner was "closed" up the
 //!   round's tangent line, and the round's own end stayed open.
+//! - **Not upstream (#17200).** `IIREdgeBrep` reports what its `MergeCurveClasses` deleted
+//!   also when the merge fails after squeezing (it sets `m_bTopologyDeleted` and fills the
+//!   deletion lists before returning the status), and `CloseIntersectionLoop` passes those
+//!   deletions on before its error. Upstream's `SER` returned before setting the flag, so
+//!   `SmMerge::MarkCommon` kept the squeezed vertex as a loop end and `FixGaps` read it once
+//!   deleted (#1036's coincident skins).
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
@@ -150,7 +156,7 @@ use crate::topology::proto_topology::{
     ProtoBrep, ProtoEdgeId, ProtoTopologyManager, ProtoVertexId,
 };
 
-use super::coincident_strip::crossing_inside_coincident_pair;
+use super::coincident_strip::{crossing_inside_coincident_pair, strip_contacts};
 use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
@@ -323,6 +329,17 @@ pub struct DeletedTopology<O> {
     pub deleted_edges: Vec<O>,
     /// `paDeletedVerts`.
     pub deleted_vertices: Vec<O>,
+}
+
+impl<O> DeletedTopology<O> {
+    /// Nothing deleted.
+    const fn none() -> Self {
+        Self {
+            topology_deleted: false,
+            deleted_edges: Vec::new(),
+            deleted_vertices: Vec::new(),
+        }
+    }
 }
 
 /// What [`TopologyIntersector::fix_gaps`] returns.
@@ -898,6 +915,37 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         swap_order: bool,
         force_face_intersections: bool,
     ) -> Result<DeletedTopology<O>> {
+        let mut out = DeletedTopology::none();
+        self.iir_edge_brep_into(
+            k,
+            brep,
+            edge,
+            target,
+            (swap_order, force_face_intersections),
+            &mut out,
+        )?;
+        Ok(out)
+    }
+
+    /// [`TopologyIntersector::iir_edge_brep`] writing its outputs to `out`, also when
+    /// `MergeCurveClasses` fails after its squeeze deleted topology: `out` then holds the
+    /// deletions and `topology_deleted` is set, so the caller drops the deleted entities
+    /// and starts a new pass instead of reading them (#17200; upstream's `SER` returns
+    /// before `m_bTopologyDeleted` is set, though its out-params already hold the lists).
+    /// The flag pair is (`bSwapOrder`, `bForceFaceIntersections`).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`TopologyIntersector::iir_edge_brep`].
+    fn iir_edge_brep_into(
+        &mut self,
+        k: &mut Kernel,
+        brep: &mut impl IntersectorBrepP3<O>,
+        edge: O,
+        target: O,
+        (swap_order, force_face_intersections): (bool, bool),
+        out: &mut DeletedTopology<O>,
+    ) -> Result<()> {
         let curve = brep
             .edge_curve(edge)
             .ok_or(invalid(OP_IIR_EDGE, "edge handle is unknown"))?
@@ -957,22 +1005,24 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         cc_insert_topology_intersections(k, &*brep, &mut crv_class2, &solutions)?;
 
         // merge curveClassifications into Breps
-        let merge = if swap_order {
-            self.merge_curve_classes(k, brep, &mut crv_class2, &mut crv_class1, true)?
+        let (merge, status) = if swap_order {
+            self.merge_curve_classes_attempt(k, brep, &mut crv_class2, &mut crv_class1, true)
         } else {
-            self.merge_curve_classes(k, brep, &mut crv_class1, &mut crv_class2, true)?
+            self.merge_curve_classes_attempt(k, brep, &mut crv_class1, &mut crv_class2, true)
         };
-        let merged = DeletedTopology {
-            topology_deleted: merge.topology_was_deleted,
-            deleted_edges: merge.deleted_edges.unwrap_or_default(),
-            deleted_vertices: merge.deleted_vertices.unwrap_or_default(),
-        };
+        out.deleted_edges = merge.deleted_edges.unwrap_or_default();
+        out.deleted_vertices = merge.deleted_vertices.unwrap_or_default();
+        // Not upstream (#17200): a failed merge whose squeeze already deleted topology
+        // reports it too (the merge's flag covers its deletion lists on every exit).
+        // Upstream returns the status first, so `SmMerge::MarkCommon` kept the deleted
+        // vertex in its single-vertex list and `FixGaps` read it.
+        out.topology_deleted = merge.topology_was_deleted;
 
         // set output values and return
-        if merged.topology_deleted {
+        if out.topology_deleted {
             self.topology_deleted = true;
         }
-        Ok(merged)
+        status
     }
 
     /// `CloseIntersectionLoop(pBrepVertex, rbMadeNewTopology, rDeletedVertices,
@@ -988,9 +1038,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// the other B-rep, the same is tried the other way round for the other vertex's
     /// unmated edges. Returns `rbMadeNewTopology`; `deleted_vertices` and
     /// `deleted_edges` are reset once the vertex and its mate are found, then receive
-    /// the vertices and edges (of either B-rep) each completed
-    /// [`TopologyIntersector::iir_edge_brep`] deleted by squeezing, so they hold the
-    /// completed calls' deletions also when a later call fails. Unowned in `units.json`
+    /// the vertices and edges (of either B-rep) its
+    /// [`TopologyIntersector::iir_edge_brep`] deleted by squeezing, also when that call
+    /// then fails (#17200: its error comes after the deletions). Unowned in `units.json`
     /// (called from `SmMerge.cpp:2961`); co-ported into this part.
     ///
     /// # Errors
@@ -1122,9 +1172,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let old_edges = brep.brep_edges(other)?;
 
                 // intersect, insert, and relate target Edge with m_pOther brep
-                let deleted = self.iir_edge_brep(k, brep, be, other, false, true)?;
+                // the deletions are kept also when it fails (#17200)
+                let mut deleted = DeletedTopology::none();
+                let status =
+                    self.iir_edge_brep_into(k, brep, be, other, (false, true), &mut deleted);
                 deleted_vertices.extend(deleted.deleted_vertices);
                 deleted_edges.extend(deleted.deleted_edges);
+                status?;
 
                 // remember if  new edges were added to m_pOther
                 let new_edges = brep.brep_edges(other)?;
@@ -1169,9 +1223,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let old_edges = brep.brep_edges(this)?;
 
                     // intersect, insert, and relate target edge into this  m_pBrep
-                    let deleted = self.iir_edge_brep(k, brep, oe, this, true, true)?;
+                    // the deletions are kept also when it fails (#17200)
+                    let mut deleted = DeletedTopology::none();
+                    let status =
+                        self.iir_edge_brep_into(k, brep, oe, this, (true, true), &mut deleted);
                     deleted_vertices.extend(deleted.deleted_vertices);
                     deleted_edges.extend(deleted.deleted_edges);
+                    status?;
 
                     // remember if new topology was added to m_pBrep
                     let new_edges = brep.brep_edges(this)?;
@@ -1388,10 +1446,6 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             capture_distance,
             0.0,
         )?;
-        // Not upstream unless opted in (`Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate`,
-        // WR-214, tangency-labs/solidcore#480): a self-loop proto edge on a vertex is
-        // dropped, not split onto that vertex. Off (the default), upstream's split.
-        mgr.set_split_self_loops_on_vertices(!k.fixes.proto_edge_self_loop_on_vertex_degenerate);
         mgr.set_coincident_edges(coincident_edges);
         self.proto_topo_mgr = Some(mgr);
 
@@ -1562,7 +1616,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .is_none()
             .then(|| SpatialIndex::new(boxes2.iter().copied().map(Some)));
 
-        // Finally, the Face-Face intersections.
+        // Finally, the Face-Face intersections: first every pair's curves and points (no
+        // proto topology of theirs yet), so that the contacts a rule declares from them are
+        // known before the first of their proto vertices is made.
+        let mut intersections = Vec::new();
         for (ii, &f1) in faces1.iter().enumerate() {
             k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
             let pairs: Vec<usize> = match (&pair_search, boxes1.get(ii)) {
@@ -1606,7 +1663,6 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let surf2 = s2.ok_or(invalid(OP_INTERSECT_TOPOLOGY, "face without surface"))?;
                 let (are_coincident, _coincident_distance) =
                     surface_coincidence_check(k, brep, surf1, surf2, tol, false)?;
-                let mut coinc_pes = Vec::new();
 
                 // Not upstream (#15718; replaces WR-614's removal after the fact): two planes
                 // whose crossing lies inside a coincident pair of their faces make no curve,
@@ -1653,87 +1709,109 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     continue;
                 }
 
-                let mgr = self
-                    .proto_topo_mgr
-                    .as_mut()
-                    .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "no proto topology manager"))?;
+                // (SM_ASSERT(sCCs2.GetSize() == lNumCCs) only reports; a shorter second
+                // list is read past its end)
+                if fi.cc2.len() < fi.cc1.len() {
+                    return Err(invalid(
+                        OP_INTERSECT_TOPOLOGY,
+                        "classification lists differ",
+                    ));
+                }
 
-                // for each CurveClassification pair returned from intersector
-                // (SM_ASSERT(sCCs2.GetSize() == lNumCCs) only reports; a shorter
-                // second list is read past its end)
-                let num_ccs = fi.cc1.len();
-                for kk in 0..num_ccs {
-                    let (Some(cc1), Some(cc2)) = (fi.cc1.get_mut(kk), fi.cc2.get_mut(kk)) else {
-                        return Err(invalid(
-                            OP_INTERSECT_TOPOLOGY,
-                            "classification lists differ",
-                        ));
-                    };
-                    let num_ivls = cc1.size();
-
-                    // Make sure that all PointClasses can evaluate their positions.
+                // Make sure that all PointClasses can evaluate their positions.
+                for (cc1, cc2) in fi.cc1.iter_mut().zip(fi.cc2.iter_mut()) {
                     cc1.set_point_class_parameters_mut(k, brep, false)?;
                     cc2.set_point_class_parameters_mut(k, brep, false)?;
+                }
+                intersections.push((f1, f2, are_coincident, fi, int_pts));
+            }
+        }
 
-                    for ll in 0..num_ivls {
-                        let mut ci1 = *cc1.at(ll)?;
-                        let mut ci2 = *cc2.at(ll)?;
-                        // (status unchecked)
-                        let found = ignore_soft(mgr.find_or_create_proto_edge(
-                            k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
-                        ))?;
-                        *cc1.at_mut(ll)? = ci1;
-                        *cc2.at_mut(ll)? = ci2;
+        // Not upstream: the contact points the strip rule proves (module docs of
+        // `coincident_strip`), declared before any proto vertex of a face pair is made.
+        let contacts = strip_contacts(k, brep, &intersections, approx_tol)?;
+        self.proto_topo_mgr
+            .as_mut()
+            .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "no proto topology manager"))?
+            .set_declared_contacts(contacts);
 
-                        // remember pNewPE is part of the trim boundary of this
-                        // coincident face pair
-                        if let Some((Some(pe), _was_created)) = found {
-                            if are_coincident {
-                                add_unique(&mut coinc_pes, pe);
-                            }
+        for (f1, f2, are_coincident, mut fi, int_pts) in intersections {
+            k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
+            let mut coinc_pes = Vec::new();
+            let mgr = self
+                .proto_topo_mgr
+                .as_mut()
+                .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "no proto topology manager"))?;
+
+            // for each CurveClassification pair returned from intersector
+            // (SM_ASSERT(sCCs2.GetSize() == lNumCCs) only reports; a shorter
+            // second list is read past its end)
+            let num_ccs = fi.cc1.len();
+            for kk in 0..num_ccs {
+                let (Some(cc1), Some(cc2)) = (fi.cc1.get_mut(kk), fi.cc2.get_mut(kk)) else {
+                    return Err(invalid(
+                        OP_INTERSECT_TOPOLOGY,
+                        "classification lists differ",
+                    ));
+                };
+                let num_ivls = cc1.size();
+
+                for ll in 0..num_ivls {
+                    let mut ci1 = *cc1.at(ll)?;
+                    let mut ci2 = *cc2.at(ll)?;
+                    // (status unchecked)
+                    let found = ignore_soft(mgr.find_or_create_proto_edge(
+                        k, brep, approx_tol, cc1, &mut ci1, cc2, &mut ci2,
+                    ))?;
+                    *cc1.at_mut(ll)? = ci1;
+                    *cc2.at_mut(ll)? = ci2;
+
+                    // remember pNewPE is part of the trim boundary of this
+                    // coincident face pair
+                    if let Some((Some(pe), _was_created)) = found {
+                        if are_coincident {
+                            add_unique(&mut coinc_pes, pe);
                         }
                     }
                 }
+            }
 
-                // Process single-point intersections.
-                let f1_zone_tol = tol_of(brep, f1)?;
-                let f2_zone_tol = tol_of(brep, f2)?;
-                for &pt in &int_pts {
-                    let mut pc1 = PointClassification::new(f1_zone_tol);
-                    let mut pc2 = PointClassification::new(f2_zone_tol);
+            // Process single-point intersections.
+            let f1_zone_tol = tol_of(brep, f1)?;
+            let f2_zone_tol = tol_of(brep, f2)?;
+            for &pt in &int_pts {
+                let mut pc1 = PointClassification::new(f1_zone_tol);
+                let mut pc2 = PointClassification::new(f2_zone_tol);
 
-                    // classify the point against both faces; skip what doesn't classify
-                    let st1 =
-                        brep.face_point_3d_classify(k, f1, pt, f1_zone_tol, true, &mut pc1, None);
-                    let st2 =
-                        brep.face_point_3d_classify(k, f2, pt, f2_zone_tol, true, &mut pc2, None);
-                    if ignore_soft(st1)?.is_none() {
-                        continue;
-                    }
-                    if ignore_soft(st2)?.is_none() {
-                        continue;
-                    }
-
-                    // skip what doesn't classify to imprintable topology in both
-                    if !can_imprint(pc1.point_class()) {
-                        continue;
-                    }
-                    if !can_imprint(pc2.point_class()) {
-                        continue;
-                    }
-
-                    // (status unchecked upstream; passed on here, WR-658)
-                    mgr.find_or_create_proto_vertex_pcs(k, brep, &mut pc1, &mut pc2)?;
+                // classify the point against both faces; skip what doesn't classify
+                let st1 = brep.face_point_3d_classify(k, f1, pt, f1_zone_tol, true, &mut pc1, None);
+                let st2 = brep.face_point_3d_classify(k, f2, pt, f2_zone_tol, true, &mut pc2, None);
+                if ignore_soft(st1)?.is_none() {
+                    continue;
+                }
+                if ignore_soft(st2)?.is_none() {
+                    continue;
                 }
 
-                // If the Faces are coincident, and there is some overlap - create a
-                // ProtoFace. (status unchecked upstream; passed on here, WR-658)
-                if are_coincident && !coinc_pes.is_empty() {
-                    let pf = mgr.create_proto_face(Some(f1), Some(f2), &coinc_pes)?;
-                    // Relate New ProtoFace to every pNewPF->CoincPE
-                    for &pe in &coinc_pes {
-                        ignore_soft(mgr.relate_coincident_pf(pe, pf))?;
-                    }
+                // skip what doesn't classify to imprintable topology in both
+                if !can_imprint(pc1.point_class()) {
+                    continue;
+                }
+                if !can_imprint(pc2.point_class()) {
+                    continue;
+                }
+
+                // (status unchecked upstream; passed on here, WR-658)
+                mgr.find_or_create_proto_vertex_pcs(k, brep, &mut pc1, &mut pc2)?;
+            }
+
+            // If the Faces are coincident, and there is some overlap - create a
+            // ProtoFace. (status unchecked upstream; passed on here, WR-658)
+            if are_coincident && !coinc_pes.is_empty() {
+                let pf = mgr.create_proto_face(Some(f1), Some(f2), &coinc_pes)?;
+                // Relate New ProtoFace to every pNewPF->CoincPE
+                for &pe in &coinc_pes {
+                    ignore_soft(mgr.relate_coincident_pf(pe, pf))?;
                 }
             }
         }
@@ -1742,6 +1820,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .proto_topo_mgr
             .as_mut()
             .ok_or(invalid(OP_INTERSECT_TOPOLOGY, "no proto topology manager"))?;
+
+        // Not upstream: proto vertices that a point's uncertainty region does not tell
+        // apart are one (docs/booleans.md, "One point or two")
+        mgr.combine_proto_vertices_not_proved_apart(
+            k,
+            k.fixes.ssi_proto_topology_statuses_pass_on,
+        )?;
 
         // 1. for every ProtoEdge pair - split ProtoEdges at ProtoEdge/ProtoEdge XSects
         // (the list is re-read after each split: splitting appends proto edges)

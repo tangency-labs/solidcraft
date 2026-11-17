@@ -8,9 +8,6 @@ pub(super) struct Job {
     /// Where the body goes (its instance's placement in the assembly).
     pub placement: M4,
     pub check_mesh: bool,
-    /// Check the body placed, in SMLib ([`PlacedCheck`]): the first instance of its part under
-    /// its placement's class ([`super::check_class`]).
-    pub check: bool,
 }
 
 /// What a job places: a solid item to read from the file (and orient), or a part an earlier
@@ -43,22 +40,6 @@ pub(super) struct Made {
     pub part: Arc<Part>,
     /// This job read the item: what the read repaired and the faces it left out.
     pub read: Option<Vec<Note>>,
-    /// SMLib's check of the body placed, when the job asked for it.
-    pub check: Option<PlacedCheck>,
-}
-
-/// SMLib's check of a placed body, as an operation on it takes it
-/// ([`crate::validation::failing_check`]): operations that check their results refuse them
-/// while it fails or cannot run.
-pub(super) enum PlacedCheck {
-    /// Not run: the part is made of surfaces (no B-rep could be made of the whole solid).
-    Skipped,
-    /// It passes (or SMLib refuses the body outright, which [`Body::smlib_refusal`] says).
-    Passes,
-    Fails(crate::CheckFailure),
-    CouldNotRun(String),
-    /// The token over the import's work stopped it: the import is stopped.
-    Stopped,
 }
 
 /// What reading an item noted.
@@ -67,9 +48,6 @@ pub(super) enum Note {
     Repaired(String),
     /// A face left out, with the reason.
     LeftOut(String),
-    /// The heal of the part's check failures failed inside the kernel, with why: the part
-    /// stands as read, and still needs repair.
-    HealFailed(String),
 }
 
 /// Why a job made no body: the item could not be read (`read`), or its body not made.
@@ -78,7 +56,7 @@ pub(super) struct Failure {
     pub msg: String,
 }
 
-pub(super) type Prepared = std::result::Result<Made, Failure>;
+type Prepared = std::result::Result<Made, Failure>;
 
 pub(super) fn workers() -> usize {
     #[cfg(not(target_arch = "wasm32"))]
@@ -93,121 +71,38 @@ pub(super) fn workers() -> usize {
 
 pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     let _span = solidcraft_profile::span("import", "step.body");
-    // This job's body placed and its check, when the read already made them deciding the heal.
-    let mut done: Option<(Body, PlacedCheck)> = None;
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
-            let (mut part, mut read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
-            if part.refused.is_none() {
-                done = decide_heal(&mut part, &mut read, &job.placement, *item)?;
-            }
+            let (part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
             (Arc::new(part), Some(read))
         }
     };
-    let (body, check) = match done {
-        Some((body, check)) => (body, Some(check)),
-        None => (place(&part.body, &job.placement)?, None),
-    };
+    let body = solidcraft_profile::scope("import", "step.place", || placed(&part.body, &job.placement))
+        .map_err(|e| Failure { read: false, msg: e.to_string() })?;
     // Counted on the part (a placement meshes the same faces).
     let missing = if job.check_mesh { solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()) } else { 0 };
-    // The body as placed, which is what operations take: a placement that scales, shears or
-    // mirrors the part maps its geometry without its tolerances, so its check can differ from
-    // the part's. A check that cannot run refuses an operation's result too (check_kept). A stop
-    // met while deciding the heal is the import's stop, whatever the job asked.
-    let check = match check {
-        Some(PlacedCheck::Stopped) => Some(PlacedCheck::Stopped),
-        made => job.check.then(|| {
-            if part.refused.is_some() {
-                return PlacedCheck::Skipped;
-            }
-            made.unwrap_or_else(|| check_placed(&body))
-        }),
-    };
-    Ok(Made { body, missing, part, read, check })
-}
-
-fn place(body: &Body, m: &M4) -> std::result::Result<Body, Failure> {
-    solidcraft_profile::scope("import", "step.place", || placed(body, m)).map_err(|e| Failure { read: false, msg: e.to_string() })
-}
-
-/// SMLib's check of `body` ([`crate::validation::failing_check`]), as [`PlacedCheck`] says it.
-fn check_placed(body: &Body) -> PlacedCheck {
-    match solidcraft_profile::scope("import", "step.check", || crate::validation::failing_check(body)) {
-        Ok(None) => PlacedCheck::Passes,
-        Ok(Some(failure)) => PlacedCheck::Fails(failure),
-        Err(_) if solidcraft_smlib::stop::current().is_some_and(|s| s.is_stopped()) => PlacedCheck::Stopped,
-        Err(e) => PlacedCheck::CouldNotRun(e.to_string()),
-    }
-}
-
-/// Whether the part just read is healed ([`heal`]), decided by its own check, and this job's
-/// body placed with its check when that check is already the one the job needs.
-///
-/// The heal changes the part every instance shares, so only the part's own check decides it:
-/// the part checked where the file defines it, whatever this job's placement, so the instance
-/// the import happens to read the part at never changes the decision. A placement maps the
-/// geometry and, when it scales, shears or mirrors, not its tolerances, so an instance's
-/// verdict is its own: each is placed and checked again by the caller (`None` here), except at
-/// the identity, where the part's check is the job's. Only a check that ran and failed is
-/// healed: one that passes needs nothing, and one that could not run or was stopped says
-/// nothing about the part. A healed part is checked as kept by the heal itself
-/// ([`crate::ToleranceHeal::check`]), which is the job's check at the identity.
-///
-/// A stop is the job's [`PlacedCheck::Stopped`], with the body placed under no token
-/// ([`solidcraft_smlib::stop::unstoppable`]): a placement stopped part way would turn the
-/// import's stop into a part refused.
-pub(super) fn decide_heal(part: &mut Part, read: &mut Vec<Note>, m: &M4, item: u64) -> std::result::Result<Option<(Body, PlacedCheck)>, Failure> {
-    let at_identity = *m == IDENTITY;
-    let stopped = |part: &Part| -> std::result::Result<Option<(Body, PlacedCheck)>, Failure> {
-        Ok(Some((solidcraft_smlib::stop::unstoppable(|| place(&part.body, m))?, PlacedCheck::Stopped)))
-    };
-    let check = check_placed(&part.body);
-    match check {
-        PlacedCheck::Fails(_) => {}
-        PlacedCheck::Stopped => return stopped(part),
-        // The part's own check, deciding nothing: this job's at the identity.
-        check => return Ok(at_identity.then(|| (part.body.clone(), check))),
-    }
-    match solidcraft_profile::scope("import", "step.heal", || heal(part, item)) {
-        Healed::Kept(note, kept) => {
-            read.push(note);
-            Ok(at_identity.then(|| (part.body.clone(), kept.map_or(PlacedCheck::Passes, PlacedCheck::Fails))))
-        }
-        Healed::Stopped => stopped(part),
-        Healed::NotKept => Ok(at_identity.then(|| (part.body.clone(), check))),
-        Healed::CouldNotRun(e) => {
-            // A panic in the heal is the kernel's internal error: reported, as the import
-            // reports a check that cannot run. Any other failure leaves the check's verdict.
-            if let KernelError::Internal(why) = &e {
-                log::warn!(target: "step", "the heal of item #{item} failed: {e}");
-                read.push(Note::HealFailed(format!("the tolerance heal failed: kernel internal error: {why}")));
-            } else {
-                log::debug!(target: "step", "the heal of item #{item} could not run: {e}");
-            }
-            Ok(at_identity.then(|| (part.body.clone(), check)))
-        }
-    }
+    Ok(Made { body, missing, part, read })
 }
 
 /// What [`heal`] did with a part.
 pub(super) enum Healed {
-    /// Healed: the part's body and file faces replaced, the note the import shows, and SMLib's
-    /// check of the body kept ([`crate::ToleranceHeal::check`]: `None` when it passes).
-    Kept(Note, Option<crate::CheckFailure>),
+    /// Healed: the part with its body and file faces replaced, what the import says of it, and
+    /// SMLib's check of the body kept ([`crate::ToleranceHeal::check`]: `None` when it passes).
+    Kept(Part, String, Option<crate::CheckFailure>),
     /// Nothing the heal could prove, or a result whose check is not better: the part as it was.
     NotKept,
     /// The heal could not run (the part as it was): never a reason to change it.
     CouldNotRun(KernelError),
-    /// The token over the import's work stopped it (the part as it was): the import is stopped.
+    /// The token over the import's work stopped it (the part as it was).
     Stopped,
 }
 
 /// A part whose check fails, healed of its tolerance-scale defects
 /// ([`crate::heal_tolerance_defects`]) when that can be proved and leaves the check failing
-/// fewer tests: its body and its faces' file faces (the heal only removes faces) replaced.
-/// Otherwise left as it is, and [`Healed`] says why.
-pub(super) fn heal(part: &mut Part, item: u64) -> Healed {
+/// fewer tests: a new part, with its body and its faces' file faces (the heal only removes
+/// faces) replaced. Otherwise [`Healed`] says why not.
+pub(super) fn heal(part: &Part, item: u64) -> Healed {
     let (body, heal) = match crate::tolerance_heal::heal_tolerance_defects(&part.body) {
         Ok(Some(healed)) => healed,
         Ok(None) => return Healed::NotKept,
@@ -219,15 +114,13 @@ pub(super) fn heal(part: &mut Part, item: u64) -> Healed {
             "the heal of item #{item} named a face the part does not have"
         ))));
     };
-    part.body = body;
-    part.face_origin = face_origin;
-    let note = Note::Repaired(format!("healed SMLib's check failures: {}", heal.summary()));
-    Healed::Kept(note, heal.check)
+    let healed = Part { body, closed: part.closed, file_faces: part.file_faces, face_origin, refused: part.refused.clone() };
+    Healed::Kept(healed, format!("healed SMLib's check failures: {}", heal.summary()), heal.check)
 }
 
 /// The part's body where its instance goes: the very same body at the identity (it keeps the
 /// SMLib body the read made), else its record moved there.
-fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
+pub(super) fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
     if *m == IDENTITY {
         return Ok(body.clone());
     }

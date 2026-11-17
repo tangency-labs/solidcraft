@@ -61,6 +61,20 @@ impl ProtoBrep<FilletObject> for InsertionGeometry<'_> {
     ) -> Result<Vec<FilletObject>> {
         InsertionGeometry::vertex_common_edges(self, first, second)
     }
+    fn face_edge_proved_along(
+        &self,
+        k: &Kernel,
+        face: FilletObject,
+        start: FilletObject,
+        end: FilletObject,
+        curve: &Curve,
+        interval: Extent1d,
+        tolerance: f64,
+    ) -> Result<Option<FilletObject>> {
+        InsertionGeometry::face_edge_proved_along(
+            self, k, face, start, end, curve, interval, tolerance,
+        )
+    }
     fn raise_edge_tolerance(
         &mut self,
         k: &Kernel,

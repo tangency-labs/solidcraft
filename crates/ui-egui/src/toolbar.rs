@@ -189,7 +189,6 @@ const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
     home_rect: &["titlebar:home", "appbar:home"],
     file: &["appbar:file", "appbar:folder"],
     file_rect: &["appbar:file"],
-    plugins: "appbar:plugins",
     button: &["appbar:", "titlebar:"],
     separator: "titlebar:separator:",
     search: "titlebar:search",
@@ -242,9 +241,6 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
                 file: app.tr("ui.file"),
                 file_open,
-                // The web build runs no plugins: no Plugins menu there. Its accessible name says
-                // "menu", so it is not taken for Preferences' Plugins page.
-                plugins: (!cfg!(target_arch = "wasm32")).then(|| (app.tr("ui.plugins"), app.plugin_menu.open, app.tr("ui.plugin_menu_name"))),
                 actions: vec![
                     action("save", "save", &save_tip, shown, false),
                     action("undo", "undo", &undo_tip, shown, true),
@@ -270,21 +266,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 handles: APP_BAR_HANDLES,
             };
             let out = app_bar::show(ui, &bar, r, content);
-            app.plugin_menu.in_file_menu = out.plugins_in_file;
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
             for action in &out.actions {
                 match action {
                     app_bar::BarAction::Home => app.home.show(app.session.revision),
-                    app_bar::BarAction::Plugins { rect } => {
-                        app.ui.palette_open = false;
-                        crate::plugin_menu::toggle(app, &ui.ctx().clone(), *rect);
-                    }
                     app_bar::BarAction::File { .. } => {
                         app.ui.palette_open = false;
                         app.plugin_menu.open = false;
-                        if app.plugin_menu.in_file_menu {
-                            crate::plugin_menu::refresh(app);
-                        }
                         let ctx = ui.ctx().clone();
                         let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
                         let pass = ctx.cumulative_pass_nr();
@@ -474,7 +462,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// The File menu's rows, each named by what it runs ([`run_file_row`]).
-fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
+pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     use app_bar::{FileItem, FileRow};
     let row = |id: &str, label: &str, key: &str, icon: &str, enabled: bool| {
         FileRow::Item(FileItem { id: id.to_string(), label: label.to_string(), key: key.to_string(), icon: icon.to_string(), enabled })
@@ -532,9 +520,10 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
     rows.push(FileRow::Separator);
-    // A narrow app bar has no room for the Plugins button: its menu is here instead.
-    if app.plugin_menu.in_file_menu {
-        rows.push(crate::plugin_menu::file_submenu(app));
+    // Plugins… opens Preferences on the Plugins page: install, turn on or off, and remove plugins
+    // there. The web build runs no plugins.
+    if !cfg!(target_arch = "wasm32") {
+        rows.push(row("plugins.preferences", &format!("{}…", app.tr("ui.plugins")), "", "prefs_plugins", true));
         rows.push(FileRow::Separator);
     }
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
@@ -549,15 +538,15 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         rows.push(FileRow::Separator);
     }
     for item in entries {
-        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown));
+        rows.push(row(&item.command, &item.label, "", "prefs_plugins", shown || item.importer));
     }
     rows
 }
 
 /// Runs the File menu's row `id` ([`file_rows`]).
-fn run_file_row(app: &mut SolveApp, id: &str) {
-    if let Some(id) = id.strip_prefix("plugins:") {
-        crate::plugin_menu::choose(app, id);
+pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
+    if id == "plugins.preferences" {
+        crate::prefs::open_at(app, crate::prefs::PAGE_PLUGINS);
         return;
     }
     if crate::plugin_slots::items(app, crate::plugin_slots::Slot::Menu("File")).iter().any(|item| item.command == id) {
@@ -1964,7 +1953,9 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
     }
     if let Some((id, br)) = start {
         // The exact pinned command, without replacing its family's remembered ribbon choice.
-        app.start_pinned(id, Some(br));
+        if !end_running_tool(app, id) {
+            app.start_pinned(id, Some(br));
+        }
     }
     if let Some((at, id)) = menu {
         crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
@@ -2410,17 +2401,30 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::checkbox(ui, &label, &mut app.ui.lasso_select);
 }
 
-/// A click on the lit button of the sketch tool that is running ends the tool, as a toggle does,
-/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
-/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
-/// the tool was ended. A persistent analysis button already turns its analysis off its own way.
-fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
-    if !app.preferences.ribbon_click_ends_tool || persistent_available(app, id) || !app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+/// Ends the active sketch tool or dialog when `id` is its command, as `Esc` does.
+/// Returns whether anything was closed.
+pub(crate) fn end_running_command(app: &mut SolveApp, id: &str) -> bool {
+    if persistent_available(app, id) {
         return false;
     }
-    crate::dim_view::cancel();
-    app.tool = None;
-    true
+    if app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+        crate::dim_view::cancel();
+        app.tool = None;
+        return true;
+    }
+    if app.dialog.as_ref().and_then(|d| d.command()) == Some(id) {
+        crate::dialogs::cancel(app);
+        return true;
+    }
+    false
+}
+
+/// A click on the lit button of the tool or dialog that is running ends it, as a toggle does,
+/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
+/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
+/// it was ended. A persistent analysis button already turns its analysis off its own way.
+fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
+    app.preferences.ribbon_click_ends_tool && end_running_command(app, id)
 }
 
 /// Two Esc presses within this many seconds finish the open sketch.
@@ -4342,6 +4346,21 @@ mod dropdown_toggle_tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"));
+        // A second click on a dialog command's button (Extrude) also closes it when enabled.
+        h.app.preferences.ribbon_click_ends_tool = true;
+        h.app.finish_sketch();
+        h.settle();
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert!(h.app.dialog.is_none(), "second click closes the extrude dialog");
+        h.app.preferences.ribbon_click_ends_tool = false;
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
     }
 
     /// A tool pinned into the Finish Sketch group, the one at the ribbon's right edge, shows
