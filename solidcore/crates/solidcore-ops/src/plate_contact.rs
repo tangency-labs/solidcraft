@@ -372,6 +372,26 @@ impl Body {
     }
 }
 
+/// The tool faces one pair's cuts bring to each plate's boolean (design v2 6.4, counted against
+/// `MAX_TOOL_FACES` and `SLOW_TOOL_FACES` per plate): `(T's, S's)`, over the tabs that
+/// [`Body::tab_slot_cut`] makes (tab outline made and slot not skipped). A prism of a region has
+/// one face per segment of each of its loops and two caps.
+#[must_use]
+pub fn tool_faces(plan: &[StretchPlan]) -> (usize, usize) {
+    let prism = |r: &Region2| {
+        r.holes
+            .iter()
+            .fold(r.outer.segs.len(), |n, h| n + h.segs.len())
+            + 2
+    };
+    plan.iter()
+        .filter_map(|st| st.tabs.as_ref().ok())
+        .flatten()
+        .filter(|t| t.skip.is_none())
+        .filter_map(|t| t.tab.as_ref().ok().map(|tab| (prism(tab), prism(&t.slot))))
+        .fold((0, 0), |(a, b), (t, s)| (a + t, b + s))
+}
+
 /// Tab `k`'s prism ([`solidcore::plate_contact::tab_prism`]): `outline` (a [`TabPlan`]'s tab,
 /// in T's `(u, z)` frame on `p`, `u` along `d`) extruded across T from `faces.0` to `faces.1`.
 ///
@@ -1080,5 +1100,47 @@ mod tests {
             "meets_other_plate_joint"
         );
         assert_eq!(JointSkip::OtherDirection(1).reason_id(), "other_direction");
+    }
+
+    /// Design v2 6.4: two made laser tabs bring 6 + 6 faces to each plate; a skipped slot, a
+    /// tab too short and a stretch with no tabs bring none.
+    #[test]
+    fn tool_faces_count_made_tabs() {
+        use solidcore::tab_slot::{tab_outline, StretchSkip, TabSkip};
+        let tab = |start: f64, skip: Option<SlotSkip>, short: bool| {
+            let outline = tab_outline(start, 18.0, 12.0, 0.0).unwrap().unwrap();
+            TabPlan {
+                start,
+                slot: outline.clone(),
+                skip,
+                tab: if short {
+                    Err(TabSkip::TooShort { length: -1.0 })
+                } else {
+                    Ok(outline)
+                },
+                faces: (0.0, 6.0),
+            }
+        };
+        let plan = [
+            StretchPlan {
+                stretch: (0.0, 100.0),
+                tabs: Ok(vec![
+                    tab(10.0, None, false),
+                    tab(40.0, Some(SlotSkip::AtEdge), false),
+                    tab(60.0, None, true),
+                    tab(80.0, None, false),
+                ]),
+            },
+            StretchPlan {
+                stretch: (110.0, 115.0),
+                tabs: Err(StretchSkip::TooShort {
+                    length: 5.0,
+                    need: 24.0,
+                    most: 0,
+                }),
+            },
+        ];
+        assert_eq!(tool_faces(&plan), (12, 12));
+        assert_eq!(tool_faces(&[]), (0, 0));
     }
 }
