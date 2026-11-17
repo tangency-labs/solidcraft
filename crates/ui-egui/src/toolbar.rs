@@ -365,6 +365,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
 pub enum FileAction {
     /// Create a design using the document lifecycle.
     New,
+    /// Make a drawing of the open design and show its first sheet in Drawing.
+    NewDrawing,
     /// Pick a design or an exchange file to open.
     Open,
     /// Save the active design, asking for a path when needed.
@@ -402,14 +404,16 @@ pub enum FileAction {
 impl FileAction {
     /// Whether this action is available in the current document, picker and report state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
-        let needs_design =
-            matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature)
-                || matches!(self, Self::Export(extension) if *extension != "json");
+        let needs_design = matches!(
+            self,
+            Self::NewDrawing | Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_) | Self::VerifySignature
+        ) || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
         // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
         // with unsaved changes under the report, and ask about it where it can't be answered.
         let behind_report = app.issue_report.draft.is_some();
         let available = match self {
+            Self::NewDrawing => crate::drawing_workspace::enabled(app) && app.session.doc.has_something_to_draw(),
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
@@ -433,6 +437,7 @@ impl FileAction {
         }
         match self {
             Self::New => crate::documents::new_design(app),
+            Self::NewDrawing => new_drawing(app),
             Self::Open => app.pick_open(|app, path| {
                 if let Some(path) = path {
                     app.open_chosen_file(&path);
@@ -465,6 +470,23 @@ impl FileAction {
     }
 }
 
+/// New Drawing: enter Drawing first, then make the drawing, so it opens on its first sheet. A
+/// drawing open in Design would refuse every model command, so a refused create goes back, but
+/// only if this call entered Drawing: started in Drawing, the user stays where they were.
+fn new_drawing(app: &mut SolveApp) {
+    let entered = !crate::drawing_workspace::active(app);
+    let made = crate::workspace::enter(app, "drawing").and_then(|()| {
+        app.run("drawing.create", json!({})).map(drop).inspect_err(|_| {
+            if entered {
+                let _ = crate::workspace::enter(app, "design");
+            }
+        })
+    });
+    if let Err(error) = made {
+        app.set_status(error, true);
+    }
+}
+
 fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let id = egui::Id::unique("sc_file_menu");
     if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
@@ -494,8 +516,13 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     };
     // Insert, Save and Export act on the design, which Home hides.
     let shown = design_shown(app);
-    let mut rows =
-        vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true), row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true)];
+    let mut rows = vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true)];
+    // Drawings are a preview (Preferences > Design > Drawings): off, the File menu has no New Drawing.
+    if crate::drawing_workspace::enabled(app) {
+        // The icon `drawing.create` itself uses.
+        rows.push(row("new_drawing", app.tr("ui.new_drawing"), "", "new", FileAction::NewDrawing.enabled(app)));
+    }
+    rows.push(row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true));
     let mut recent: Vec<FileRow> = app
         .home
         .recent
@@ -582,6 +609,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
     }
     match id {
         "new" => FileAction::New.run(app),
+        "new_drawing" => FileAction::NewDrawing.run(app),
         "open" => FileAction::Open.run(app),
         "clear_recent" => FileAction::ClearRecent.run(app),
         "file.insert_step" => FileAction::Command("file.insert_step").run(app),
@@ -2633,7 +2661,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             continue;
         }
         if drawing && k == Key::Escape {
-            if crate::drawing_workspace::close_panel(app) {
+            if crate::drawing_workspace::close_panel(app) || crate::drawing_sheet_page::clear_view_selection(app) {
                 app.esc_handled = true;
             }
             continue;
@@ -2937,6 +2965,8 @@ mod header_report_tests {
     #[test]
     fn native_menu_actions_disable_save_on_home() {
         let mut h = crate::scenario::Harness::new();
+        // New Drawing is there with drawings on (Preferences > Design > Drawings).
+        h.app.preferences.drawings_preview = true;
         h.app.home.open = true;
         assert!(!FileAction::Save.enabled(&h.app));
         assert!(!FileAction::SaveAs.enabled(&h.app));
@@ -2946,9 +2976,12 @@ mod header_report_tests {
         assert!(!FileAction::Export("step").enabled(&h.app));
         assert!(!FileAction::ExportMesh("stl").enabled(&h.app));
         assert!(!FileAction::Command("document.metadata").enabled(&h.app));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        assert!(!FileAction::NewDrawing.enabled(&h.app), "Home hides the design a drawing would draw");
         h.app.home.open = false;
         assert!(FileAction::Save.enabled(&h.app));
         assert!(FileAction::Export("step").enabled(&h.app));
+        assert!(FileAction::NewDrawing.enabled(&h.app));
     }
 
     /// File › Export STEP…, STL…, 3MF…, OBJ… and URDF… each run a command of their own, so each
@@ -3072,6 +3105,7 @@ mod header_report_tests {
         for action in [
             FileAction::Undo,
             FileAction::New,
+            FileAction::NewDrawing,
             FileAction::Open,
             FileAction::OpenRecent("elsewhere.solidcraft".into()),
             FileAction::ClearRecent,
@@ -3179,6 +3213,70 @@ mod header_report_tests {
             let found = crate::shortcut_box::search(&h.app, q);
             assert!(found.iter().any(|r| r.0 == "file.save_mesh"), "{q}: {:?}", found.iter().map(|r| r.0).collect::<Vec<_>>());
         }
+    }
+
+    /// File › New Drawing draws the open design: it enters Drawing and shows the new drawing's first
+    /// sheet, in one undo step. With nothing to draw the row is greyed and nothing changes.
+    #[test]
+    fn file_menu_new_drawing_opens_the_first_sheet_of_the_open_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.drawings_preview = true;
+        assert!(!FileAction::NewDrawing.enabled(&h.app), "an empty design has nothing to draw");
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(h.app.session.doc.drawings.is_empty() && !crate::drawing_workspace::active(&h.app));
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        let undo = h.app.session.undo.len();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
+        h.step(&json!({"widget":"New Drawing"})).unwrap();
+        h.frames(3);
+        assert!(crate::drawing_workspace::active(&h.app), "New Drawing enters Drawing");
+        assert_eq!(h.app.session.doc.drawings.len(), 1);
+        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+        let first = h.app.run("drawing.inspect", json!({})).unwrap()["sheets"][0]["id"].clone();
+        assert!(first.is_string());
+        assert_eq!(crate::drawing_sheet_page::inspect(&h.app)["sheet"], first, "the first sheet is shown");
+    }
+
+    /// A New Drawing the command refuses (the preferred template is gone) leaves the user in Design
+    /// with no drawing open, so modelling goes on.
+    #[test]
+    fn file_menu_new_drawing_that_fails_goes_back_to_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.drawings_preview = true;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.preferences.part_drawing_template = "no-such-template".into();
+        assert!(FileAction::NewDrawing.enabled(&h.app));
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(!crate::drawing_workspace::active(&h.app), "back in Design");
+        assert!(h.app.session.doc.drawings.is_empty() && h.app.session.open_drawing.is_none());
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5})).unwrap();
+    }
+
+    /// A New Drawing refused in Drawing leaves the user where they were: in Drawing's empty state, or
+    /// on the drawing they had open.
+    #[test]
+    fn file_menu_new_drawing_that_fails_in_drawing_stays_in_drawing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        let template = h.app.preferences.part_drawing_template.clone();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.app.preferences.part_drawing_template = "no-such-template".into();
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(crate::drawing_workspace::active(&h.app), "still in Drawing's empty state");
+        assert!(h.app.session.doc.drawings.is_empty());
+        h.app.preferences.part_drawing_template = template;
+        FileAction::NewDrawing.run(&mut h.app);
+        let open = h.app.session.open_drawing;
+        assert!(open.is_some());
+        h.app.preferences.part_drawing_template = "no-such-template".into();
+        FileAction::NewDrawing.run(&mut h.app);
+        assert!(crate::drawing_workspace::active(&h.app), "still in Drawing");
+        assert_eq!(h.app.session.open_drawing, open, "on the drawing that was open");
+        assert_eq!(h.app.session.doc.drawings.len(), 1);
     }
 
     /// The browser build's File > Download design hands the open design to the host as a
