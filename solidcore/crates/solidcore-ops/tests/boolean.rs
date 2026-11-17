@@ -2635,19 +2635,35 @@ fn zz_diag_18475() {
     all_fixes();
     let r = 0.9;
     let want = 25.0 * 20.9 * 4.5 - PI * r * r * (4.5 + 20.9) + 16.0 / 3.0 * r * r * r;
+    let seam = 0.6131;
+    let circle = |o: [f64; 3], x: [f64; 3], y: [f64; 3], h: f64| {
+        let plane = Plane { origin: solidcore_record::Vec3::new(o[0], o[1], o[2]), x: solidcore_record::Vec3::new(x[0], x[1], x[2]), y: solidcore_record::Vec3::new(y[0], y[1], y[2]) };
+        let reg = Region2 { outer: Loop2::circle_from(Vec2::new(0.0, 0.0), r, seam), holes: vec![] };
+        extrude_planar_regions(&plane, &[reg], 0.0, h).unwrap()
+    };
+    for app in [false, true] {
     for d in [0.0, -1e-6, -5e-6, -9e-6, -9.99e-6, -1e-5, -1.01e-5, -1.2e-5, -1.5e-5, -2e-5, -2.1e-5, -3e-5, -5e-5, -1e-4, 1e-5, 1.01e-5, 2e-5, 3e-5, 1e-3] {
-        let block = make_box([0.0, -10.45, 0.0], [25.0, 20.9, 4.5]).unwrap();
-        let along_z = solidcore_ops::make_cylinder([12.5, 0.0, -1.0], r, 6.5).unwrap();
-        let first = boolean(block, along_z, BooleanOp::Subtract).unwrap().unwrap();
-        let rim = [Curve::Arc { center: [12.5 + d, -11.45, 2.25], axis: [0.0, 1.0, 0.0], reference: [1.0, 0.0, 0.0], radius: r, start: 0.0, end: TAU }];
-        let along_y = extrude(&rim, [0.0, 1.0, 0.0], 22.9, 0.0, DraftCorner::Curvature, true).unwrap();
+        let (first, along_y) = if app {
+            let sq = Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, -10.45), Vec2::new(25.0, -10.45), Vec2::new(25.0, 10.45), Vec2::new(0.0, 10.45)]), holes: vec![] };
+            let block = extrude_planar_regions(&Plane::XY, &[sq], 0.0, 4.5).unwrap();
+            let z = circle([12.5, 0.0, -1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 6.5);
+            let first = boolean(block, z, BooleanOp::Subtract).unwrap().unwrap();
+            (first, circle([12.5 + d, -11.45, 2.25], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], 22.9))
+        } else {
+            let block = make_box([0.0, -10.45, 0.0], [25.0, 20.9, 4.5]).unwrap();
+            let along_z = solidcore_ops::make_cylinder([12.5, 0.0, -1.0], r, 6.5).unwrap();
+            let first = boolean(block, along_z, BooleanOp::Subtract).unwrap().unwrap();
+            let rim = [Curve::Arc { center: [12.5 + d, -11.45, 2.25], axis: [0.0, 1.0, 0.0], reference: [1.0, 0.0, 0.0], radius: r, start: 0.0, end: TAU }];
+            (first, extrude(&rim, [0.0, 1.0, 0.0], 22.9, 0.0, DraftCorner::Curvature, true).unwrap())
+        };
         match boolean(first, along_y, BooleanOp::Subtract) {
-            Err(e) => eprintln!("DIAG {d}: ERR {e:?}"),
-            Ok(None) => eprintln!("DIAG {d}: none"),
+            Err(e) => eprintln!("DIAG app={app} {d}: ERR {e:?}"),
+            Ok(None) => eprintln!("DIAG app={app} {d}: none"),
             Ok(Some(c)) => {
                 let rep = c.check(CheckLevel::All).unwrap();
-                eprintln!("DIAG {d}: valid {} solids {} counts {:?} dv {}", rep.is_valid(), c.solid_count().unwrap(), c.counts().unwrap(), volume(&c) - want);
+                eprintln!("DIAG app={app} {d}: valid {} solids {} counts {:?} dv {}", rep.is_valid(), c.solid_count().unwrap(), c.counts().unwrap(), volume(&c) - want);
             }
         }
+    }
     }
 }
