@@ -7395,7 +7395,8 @@ fn centered_extrude(
     // An extrude that spans its sketch plane (symmetric) has no cap on it, so its low cap, which
     // faces the way the start cap of a one-sided extrude does, also answers to `start`: a
     // reference to `start` picked before the direction became symmetric still finds a cap.
-    let spans = !two_sided && lo < -1e-6 * (1.0 + lo.abs()) && hi > 1e-6 * (1.0 + hi.abs());
+    // It spans the plane when its caps lie on both sides of it, as their roles already say.
+    let spans = caps[0].as_deref() == Some("bottom") && caps[1].as_deref() == Some("top") && !two_sided;
     let cap_synonyms = [spans.then(|| "start".to_string()), None];
     let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
     // Fit cap surfaces in their own coordinates. Fitting a distant world-space
@@ -7632,8 +7633,9 @@ fn feature_tools_with_constructor(
                 let mut tools: Vec<Traced> = regions
                     .iter()
                     .map(|r| {
-                        let roles =
-                            crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r),
+                        let roles = crate::lineage::ProfileRoles {
+                            sketch: Some(&ss),
+                            region: Some(r),
                             caps: caps.clone(),
                             cap_synonyms: [None, None],
                             thin: thin_roles.as_ref(),
