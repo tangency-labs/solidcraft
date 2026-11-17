@@ -1259,17 +1259,38 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
 mod tests {
     use super::*;
 
+    /// A file replaced with content of the same size and its old modified time still gets a new
+    /// picture: its change time (ctime) moved. The kernel stamps ctime from a coarse clock that
+    /// ticks every 1 to 10 ms, so a replacement a few ms later can carry the same ctime on a busy
+    /// machine (#18328). The test replaces the file until its ctime has moved, as a later real
+    /// replacement would, and then checks that the picture's name follows.
     #[cfg(unix)]
     #[test]
     fn library_cache_identity_tracks_replacements_with_preserved_mtime() {
+        use std::os::unix::fs::MetadataExt;
+        let ctime = |path: &std::path::Path| {
+            let meta = std::fs::metadata(path).unwrap();
+            (meta.ctime(), meta.ctime_nsec())
+        };
         let h = crate::scenario::Harness::new();
         let path = h.dir.join("replaced.sc");
         std::fs::write(&path, b"old").unwrap();
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-        let before = cache_path(path.to_str().unwrap()).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        std::fs::write(&path, b"new").unwrap();
-        std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        let (before, first) = (cache_path(path.to_str().unwrap()).unwrap(), ctime(&path));
+        let replace = || {
+            std::fs::write(&path, b"new").unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        };
+        replace();
+        for _ in 0..200 {
+            if ctime(&path) != first {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            replace();
+        }
+        assert_ne!(ctime(&path), first, "the file system never moved the replaced file's ctime");
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), modified, "the replacement keeps the old modified time");
         assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
     }
 
