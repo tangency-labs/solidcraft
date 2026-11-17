@@ -422,6 +422,80 @@ fn json_import_resolves_forward_references() {
     }
 }
 
+#[test]
+fn parameter_import_preserves_input_and_existing_table_order() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "existing", "expression": "1"}));
+    let rows = json!([
+        {"name": "a", "expression": "b + 1 mm"},
+        {"name": "b", "expression": "2 mm"},
+        {"name": "c", "expression": "3 mm"}
+    ]);
+    let imported = run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(imported["imported"], json!(["a", "b", "c"]));
+    let names: Vec<_> = s.doc.params.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["existing", "a", "b", "c"]);
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "a")["value"], 3.0);
+}
+
+#[test]
+fn parameter_import_keeps_last_duplicate_and_inherited_metadata() {
+    let mut s = Session::default();
+    let rows = json!([
+        {"name": "a", "expression": "b", "unit": "", "comment": "kept"},
+        {"name": "b", "expression": "a", "unit": ""},
+        {"name": "a", "expression": "1", "unit": ""}
+    ]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    let list = run(&mut s, "parameters.list", json!({}));
+    assert_eq!(row(&list, "a")["value"], 1.0);
+    assert_eq!(row(&list, "b")["value"], 1.0);
+    assert_eq!(row(&list, "a")["comment"], "kept");
+    let rows = json!([
+        {"name": "a", "expression": "c", "unit": ""},
+        {"name": "a", "expression": "5", "unit": ""},
+        {"name": "c", "expression": "7", "unit": ""}
+    ]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(row(&run(&mut s, "parameters.list", json!({})), "a")["value"], 5.0);
+}
+
+#[test]
+fn parameter_import_keeps_text_literal_with_explicit_or_inherited_unit() {
+    let mut s = Session::default();
+    let rows = json!([{"name": "label", "unit": "Text", "expression": "label"}]);
+    run(&mut s, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(s.doc.text_param("label").unwrap().text, "label");
+    // An existing text parameter stays text when unit is omitted.
+    run(&mut s, "parameters.import", json!({"text": "name,expression\nlabel,label\n"}));
+    let exported = run(&mut s, "parameters.export", json!({"format": "csv"}));
+    let mut fresh = Session::default();
+    run(&mut fresh, "parameters.import", json!({"text": exported["text"]}));
+    assert_eq!(fresh.doc.text_param("label").unwrap().text, "label");
+    // The second definition inherits the first definition's text unit.
+    let rows = json!([
+        {"name": "other", "unit": "text", "expression": "first"},
+        {"name": "other", "expression": "other"}
+    ]);
+    run(&mut fresh, "parameters.import", json!({"text": rows.to_string()}));
+    assert_eq!(fresh.doc.text_param("other").unwrap().text, "other");
+}
+
+#[test]
+fn parameter_import_rejects_final_cycles_and_oversized_expressions_atomically() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "existing", "expression": "1"}));
+    let before = s.doc.to_json();
+    for rows in [
+        json!([{"name": "a", "expression": "b"}, {"name": "b", "expression": "a"}]),
+        json!([{"name": "a", "expression": "x".repeat(4097)}]),
+        json!([{"name": "a", "expression": "1", "unit": "invalid"}, {"name": "a", "expression": "2"}]),
+    ] {
+        assert!(s.execute("parameters.import", &json!({"text": rows.to_string()})).is_err());
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
 /// A value a spreadsheet would run as a formula is exported as text, with a `'` first, and
 /// imports back as it was (#12728). A plain number keeps its sign, and `;` makes a field quoted.
 #[test]
