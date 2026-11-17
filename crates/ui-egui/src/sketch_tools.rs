@@ -1047,7 +1047,8 @@ fn on_open_sketch_plane(app: &SolveApp, plane: &Value, at: Vec3) -> bool {
     let Some(ss) = app.session.active_sketch.and_then(|id| world.sketch(id)) else { return false };
     let (n, o) = (ss.plane.normal(), ss.plane.origin);
     let through = (at - o).dot(n).abs() <= 1e-6 * (1.0 + (at - o).len());
-    let facing = plane.as_str().is_none_or(|name| crate::dialogs::plane_by_name(&app.session, name).is_some_and(|pl| pl.normal().cross(n).len() < 1e-9));
+    let facing =
+        plane.as_str().is_none_or(|name| crate::dialogs::plane_by_name(&app.session, name).is_some_and(|pl| pl.normal().cross(n).len() < 1e-9));
     through && facing
 }
 

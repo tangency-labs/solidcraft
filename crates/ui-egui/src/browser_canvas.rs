@@ -82,7 +82,8 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::text(ui, solidcraft_ui_text::tr("browser.canvas_anchored"), ui_kit::Text::Note("canvas_anchored"));
                 let (mut op, mut flip) = (c.opacity, c.flip);
                 let mut changed =
-                    ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default())).changed();
+                    ui_kit::row(ui, solidcraft_ui_text::tr_label("Opacity"), |ui| ui_kit::slider(ui, &mut op, 0.0..=1.0, Default::default()))
+                        .changed();
                 if ui_kit::checkbox_row(ui, "flip", solidcraft_ui_text::tr_label("Flip"), flip) {
                     flip = !flip;
                     changed = true;
