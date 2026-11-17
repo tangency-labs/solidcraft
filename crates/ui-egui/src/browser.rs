@@ -437,11 +437,7 @@ pub(crate) fn bodies_of_component(app: &SolveApp, id: u64) -> Vec<String> {
 /// clicked row is in it. A row outside the selection acts on that row alone (#18716).
 pub(crate) fn selected_component_bodies(app: &SolveApp, clicked: u64) -> Vec<String> {
     let selected = &app.tree.picked_components;
-    let ids = if clicked != 0 && selected.contains(&clicked) && selected.len() > 1 {
-        selected.clone()
-    } else {
-        vec![clicked]
-    };
+    let ids = if clicked != 0 && selected.contains(&clicked) && selected.len() > 1 { selected.clone() } else { vec![clicked] };
     let mut bodies = Vec::new();
     for id in ids {
         for name in bodies_of_component(app, id) {
@@ -466,6 +462,24 @@ pub(crate) fn selected_occurrence_paths(app: &SolveApp, clicked: &[u64]) -> Vec<
         })
         .collect();
     if selected.iter().any(|path| path.as_slice() == clicked) { selected } else { vec![clicked.to_vec()] }
+}
+
+/// A drag over eye controls has one target visibility for the entire gesture.
+/// Without a drag, use the current state of the selected batch (#18716).
+fn selected_eye_visible(ctx: &egui::Context, fallback: bool) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(crate::ui_kit::eye_drag_id())).unwrap_or(fallback)
+}
+
+#[cfg(test)]
+#[test]
+fn selected_eye_drag_reuses_its_first_visibility_target() {
+    let ctx = egui::Context::default();
+    assert!(selected_eye_visible(&ctx, true));
+    assert!(!selected_eye_visible(&ctx, false));
+    ctx.data_mut(|d| d.insert_temp(crate::ui_kit::eye_drag_id(), false));
+    assert!(!selected_eye_visible(&ctx, true), "later selected rows keep the drag's hide target");
+    ctx.data_mut(|d| d.insert_temp(crate::ui_kit::eye_drag_id(), true));
+    assert!(selected_eye_visible(&ctx, false), "later selected rows keep the drag's show target");
 }
 
 /// How a browser click changes a dialog input that takes bodies.
@@ -1681,7 +1695,7 @@ fn component_rows_inner(
     if r.eye {
         let bodies = selected_component_bodies(app, id);
         if !bodies.is_empty() {
-            let show = bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+            let show = selected_eye_visible(rows.ui().ctx(), bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b)));
             let _ = app.run("browser.visibility", json!({"items": bodies, "visible": show}));
         }
     }
@@ -1880,7 +1894,7 @@ fn occurrence_rows_inner(
     }
     if r.eye {
         let paths = selected_occurrence_paths(app, path);
-        let show = paths.iter().all(|p| app.session.occurrence_hidden(p));
+        let show = selected_eye_visible(rows.ui().ctx(), paths.iter().all(|p| app.session.occurrence_hidden(p)));
         let _ = app.run("browser.visibility", json!({"visible": show, "paths": paths}));
     }
     let takes_components = app.dialog.as_ref().is_some_and(|d| d.takes_components());

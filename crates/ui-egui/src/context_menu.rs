@@ -1242,7 +1242,12 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
     v.push(Item::sep());
-    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": visibility_bodies })).on(!bodies.is_empty()));
+    v.push(
+        act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
+            .key("V")
+            .with(json!({ "bodies": visibility_bodies }))
+            .on(!visibility_bodies.is_empty()),
+    );
     if bodies_hidden(app) {
         v.push(act("ui.showAll", "Show All Bodies", "eye"));
     }

@@ -673,11 +673,7 @@ fn component_menu_activates_grounds_and_pastes() {
 fn browser_hide_applies_to_selected_components_and_occurrences() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     for (name, x) in [("Base", 0), ("Lid", 25)] {
-        app.run(
-            "solid.box",
-            json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name}),
-        )
-        .unwrap();
+        app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
     }
     for name in ["Base", "Lid"] {
         app.run("component.from_bodies", json!({"bodies":[name]})).unwrap();
@@ -707,6 +703,15 @@ fn browser_hide_applies_to_selected_components_and_occurrences() {
     assert_eq!(hide.params.as_ref().unwrap()["paths"], json!(paths));
     context_menu::run_item(&mut app, &hide, pos2(0.0, 0.0));
     assert!(paths.iter().all(|path| app.session.occurrence_hidden(path)));
+
+    // An empty component can still open the Show/Hide action when a populated component
+    // is selected with it. The batch target set, not the clicked row, enables it.
+    let empty = app.run("component.create", json!({"name":"Empty"})).unwrap()["component"].as_u64().unwrap();
+    app.tree.picked_components = vec![empty, a];
+    let empty_menu = Target::Component { id: empty };
+    let item = find(&context_menu::items(&app, &empty_menu), "Show/Hide");
+    assert!(item.enabled, "a selected populated component provides a visibility target");
+    assert_eq!(item.params.as_ref().unwrap()["bodies"], json!(["Base"]));
 
     // Clicking a row outside the selection does not change the selected rows.
     assert_eq!(crate::browser::selected_occurrence_paths(&app, &[u64::MAX]), vec![vec![u64::MAX]]);
