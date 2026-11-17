@@ -13,6 +13,10 @@
 //!   thread. wgpu hands every thread one DXC compiler, which is not documented as safe to share,
 //!   and OpenGL works through one context. There, and in the browser, which has no threads, each
 //!   job runs when it is joined, one after another, as before.
+//! - On Direct3D 12, the threads need `vendor/wgpu-hal` (#8530): wgpu-hal 30's shader cache
+//!   handed the jobs that share a shader one FXC blob, whose reference count is not thread-safe,
+//!   and a lost reference freed it while the cache still held it (a crash at start). The vendored
+//!   copy keeps the compiled bytes instead (gfx-rs/wgpu#10805).
 
 #[cfg(target_arch = "wasm32")]
 use std::marker::PhantomData;
@@ -268,5 +272,38 @@ mod tests {
             job.join()
         });
         assert_eq!(built, 7);
+    }
+
+    /// The viewport's pipelines, built on several threads again and again on one device (#8530).
+    /// On Direct3D 12 with FXC, every build after the first takes its shaders from wgpu-hal's
+    /// cache, and the jobs that share a shader take it at the same time. Before the vendored fix
+    /// (vendor/wgpu-hal), they shared one FXC blob whose reference count is not thread-safe, and
+    /// the test process died of heap corruption or an access violation: in 6 of 9 runs of 5,000
+    /// builds on an NVIDIA GPU, and in 2 of 4 runs of 2,000 builds on WARP. 300 builds catch that
+    /// in only some runs; for a longer run, in PowerShell on Windows (FXC named, since DXC builds
+    /// on one thread):
+    /// `$env:WGPU_BACKEND='dx12'; $env:WGPU_DX12_COMPILER='fxc'; $env:VIEWPORT_TEST_PIPELINE_BUILDS='5000'`,
+    /// then `cargo test -p solidcraft-viewport-gpu the_viewports_pipelines`.
+    /// Other backends have no such cache and compile every build, so they build twice. Only a
+    /// missing adapter skips the test, and not with `VIEWPORT_TEST_REQUIRE_GPU` (the Windows CI job).
+    #[test]
+    fn the_viewports_pipelines_build_again_and_again_on_several_threads() {
+        let (adapter, device, _) = match crate::open_headless(crate::test_env::policy()) {
+            Ok(d) => d,
+            Err(e @ crate::GpuError::NoAdapter(_)) if crate::test_env::skip_unless_required(crate::test_env::required(), &e) => return,
+            Err(e) => panic!("the pipeline builds need a GPU: {e}"),
+        };
+        let d3d12 = adapter.get_info().backend == wgpu::Backend::Dx12;
+        let builds = std::env::var("VIEWPORT_TEST_PIPELINE_BUILDS").ok().and_then(|n| n.parse().ok()).unwrap_or(if d3d12 { 300 } else { 2 });
+        let target = crate::view::GpuTarget {
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            depth: Some(crate::depth_format(&device, true)),
+            samples: 4,
+            tess: false,
+            oit: false,
+        };
+        for _ in 0..builds {
+            drop(crate::view::Renderer::new(&device, target, None));
+        }
     }
 }
