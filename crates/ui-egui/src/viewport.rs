@@ -7354,21 +7354,18 @@ fn alignment_circle_region(app: &SolveApp, proj: &Proj, candidate: &Option<(Hit,
     let (hit, Some(sel @ Sel::Edge { body, index, .. })) = candidate.as_ref()? else { return None };
     let dialog = app.dialog.as_ref()?;
     dialog.candidate(&app.session, hit)?;
-    let snap = crate::dialogs_assembly::snap_of(&app.session, sel)?;
+    let scratch = interaction_session(app);
+    let snap = crate::dialogs_assembly::snap_of(scratch.as_ref().unwrap_or(&app.session), sel)?;
     if snap.kind != crate::dialogs_assembly::SnapKind::CircleCenter {
         return None;
     }
     let state = interaction_state(app);
     let mesh = state.body(body)?.mesh();
     let edge = mesh.edges.get(*index)?;
-    let (center, normal) = crate::dialogs_assembly::circle_of(edge)?;
-    let radius = center.dist(*edge.first()?);
-    let x = normal.any_perp();
-    let y = normal.cross(x);
     let mut rect = Rect::NOTHING;
-    for i in 0..32 {
-        let angle = f64::from(i) * std::f64::consts::TAU / 32.0;
-        rect.extend_with(proj.to_screen(center + (x * angle.cos() + y * angle.sin()) * radius)?);
+    rect.extend_with(proj.to_screen(snap.at)?);
+    for point in edge {
+        rect.extend_with(proj.to_screen(*point)?);
     }
     // The circle's projected footprint, including its center marker and the normal
     // edge-picking margin. This is geometry-bound, never a timeout/global sticky pick.
@@ -7392,6 +7389,7 @@ pub(crate) fn stable_alignment_hover(
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     dialog.highlight_key().hash(&mut hash);
     app.session.revision.hash(&mut hash);
+    app.preview.rolled_back.hash(&mut hash);
     for value in
         [proj.cam.yaw, proj.cam.pitch, proj.cam.roll, proj.cam.distance, proj.cam.fov, proj.cam.target.x, proj.cam.target.y, proj.cam.target.z]
     {

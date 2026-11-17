@@ -817,6 +817,14 @@ fn axis_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
 
 /// A joint origin from parameters: a named origin, or a snap given in world coordinates.
 pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin> {
+    let origin = read_origin_param(s, v, cmd)?;
+    if persistent_alignment(&origin).is_some() {
+        check_alignment_path(s, &origin, cmd)?;
+    }
+    Ok(origin)
+}
+
+fn read_origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin> {
     let v = v.ok_or_else(|| bad(cmd, "joint origins `a` and `b` are required"))?;
     if let Value::String(name) = v {
         if let Some(o) = s.doc.assembly.origins.iter().find(|o| &o.name == name) {
@@ -1471,9 +1479,7 @@ pub(crate) fn alignment_param(s: &Session, mut origin: JointOrigin, alignment: O
         // A missing reference can still be cleared and returns to the default frame.
         joints::resolve_origin(&s.doc, &s.model.state(), &origin).ok().map(|m| XRef::Dir(Vec3::new(m[0][0], m[0][1], m[0][2])))
     } else {
-        if !origin.inside.is_empty() || s.doc.occurrences.iter().any(|o| o.id == origin.occurrence && o.parent != 0) {
-            return Err(bad(cmd, "secondary alignment on nested occurrence paths is not supported yet"));
-        }
+        check_alignment_path(s, &origin, cmd)?;
         let reverse = match v.get("reverse") {
             None => false,
             Some(Value::Bool(b)) => *b,
@@ -1509,6 +1515,51 @@ pub(crate) fn alignment_param(s: &Session, mut origin: JointOrigin, alignment: O
     Ok(origin)
 }
 
+fn persistent_alignment(origin: &JointOrigin) -> Option<&XRef> {
+    let x = match &origin.snap {
+        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } => x.as_ref(),
+        _ => None,
+    };
+    x.filter(|x| matches!(x, XRef::Reference { .. } | XRef::Planar { .. }))
+}
+
+fn check_alignment_path(s: &Session, origin: &JointOrigin, cmd: &str) -> Result<()> {
+    if !origin.inside.is_empty() || s.doc.occurrences.iter().any(|o| o.id == origin.occurrence && o.parent != 0) {
+        return Err(bad(cmd, "secondary alignment on nested occurrence paths is not supported yet"));
+    }
+    Ok(())
+}
+
+fn check_alignment_offsets(a: &JointOrigin, b: &JointOrigin, offset_xy: [f64; 2], cmd: &str) -> Result<()> {
+    if offset_xy != [0.0; 2] && (persistent_alignment(a).is_some() || persistent_alignment(b).is_some()) {
+        return Err(bad(cmd, "secondary alignment on lateral-offset joint frames is not supported yet"));
+    }
+    Ok(())
+}
+
+fn retain_alignment(
+    s: &Session,
+    replacement: Option<JointOrigin>,
+    saved: &JointOrigin,
+    input: Option<&Value>,
+    cmd: &str,
+) -> Result<Option<JointOrigin>> {
+    let Some(origin) = replacement else { return Ok(None) };
+    if origin.occurrence != saved.occurrence
+        || origin.inside != saved.inside
+        || input.is_some_and(|v| v.is_string() || v.get("x").is_some())
+        || persistent_alignment(&origin).is_some()
+    {
+        return Ok(Some(origin));
+    }
+    let alignment = match persistent_alignment(saved) {
+        Some(XRef::Reference { reference, reverse }) => json!({"reference":reference,"reverse":reverse}),
+        Some(XRef::Planar { planar_face, reverse }) => json!({"face":planar_face,"reverse":reverse}),
+        _ => return Ok(Some(origin)),
+    };
+    alignment_param(s, origin, Some(&alignment), cmd).map(Some)
+}
+
 fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.create";
     let kind = kind_param(p, cmd)?;
@@ -1521,7 +1572,6 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
 /// A joint of `kind` between origins `a` and `b`, with the values, limits, flip, offset, angle and
 /// name `p` gives (as joint.create reads them), not yet added.
 fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: JointOrigin, cmd: &str) -> Result<Joint> {
-    let id = s.doc_mut().allocate_id()?;
     let name = new_joint_name(s, p, kind);
     let offset = match p.get("offset") {
         Some(v) => value(s, v, false, cmd)?,
@@ -1531,6 +1581,8 @@ fn new_joint(s: &mut Session, p: &Value, kind: JointKind, a: JointOrigin, b: Joi
         p.get("offset_x").map(|v| lateral_value(s, v, cmd)).transpose()?.unwrap_or(0.0),
         p.get("offset_y").map(|v| lateral_value(s, v, cmd)).transpose()?.unwrap_or(0.0),
     ];
+    check_alignment_offsets(&a, &b, offset_xy, cmd)?;
+    let id = s.doc_mut().allocate_id()?;
     let angle = match p.get("angle") {
         Some(v) => Some(value(s, v, true, cmd)?),
         None => None,
@@ -2385,13 +2437,19 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
     let a = if p.get("a_alignment").is_some() {
         Some(alignment_param(s, a.clone().unwrap_or_else(|| saved.a.clone()), p.get("a_alignment"), cmd)?)
     } else {
-        a
+        retain_alignment(s, a, &saved.a, p.get("a"), cmd)?
     };
     let b = if p.get("b_alignment").is_some() {
         Some(alignment_param(s, b.clone().unwrap_or_else(|| saved.b.clone()), p.get("b_alignment"), cmd)?)
     } else {
-        b
+        retain_alignment(s, b, &saved.b, p.get("b"), cmd)?
     };
+    check_alignment_offsets(
+        a.as_ref().unwrap_or(&saved.a),
+        b.as_ref().unwrap_or(&saved.b),
+        [offset_x.unwrap_or(saved.offset_xy[0]), offset_y.unwrap_or(saved.offset_xy[1])],
+        cmd,
+    )?;
 
     if saved.constraint.is_some()
         && kind.is_none_or(|k| k == saved.kind)

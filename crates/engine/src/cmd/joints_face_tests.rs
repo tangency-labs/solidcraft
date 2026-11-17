@@ -150,30 +150,34 @@ const WIDTHS: [f64; 9] = [302.0, 304.0, 310.0, 330.0, 400.0, 450.0, 510.0, 301.0
 fn secondary_alignment_circle_centers_clock_parallel_hole_origins_and_recompute() {
     let mut s = Session::default();
     run(&mut s, "parameters.change", json!({"name":"guideY","expression":"20 mm"}));
-    for (name, x) in [("A", 0), ("B", 150)] {
+    for (name, corner, first_hole, guide_hole) in [("A", 0, 20, 80), ("B", 150, 170, 230)] {
         run(&mut s, "component.activate", json!({"component":"root"}));
         run(&mut s, "component.create", json!({"name":name}));
-        run(&mut s, "solid.box", json!({"length":100,"width":80,"height":10,"corner":[x,0,0]}));
-        run(&mut s, "solid.hole", json!({"position":[x+20,20,10],"diameter":6}));
-        run(&mut s, "solid.hole", json!({"position":[x+80,"guideY",10],"diameter":6}));
+        run(&mut s, "solid.box", json!({"length":100,"width":80,"height":10,"corner":[corner,0,0]}));
+        run(&mut s, "solid.hole", json!({"position":[first_hole,20,10],"diameter":6}));
+        run(&mut s, "solid.hole", json!({"position":[guide_hole,"guideY",10],"diameter":6}));
     }
     run(&mut s, "component.activate", json!({"component":"root"}));
     run(&mut s, "occurrence.ground", json!({"occurrence":"A:1","grounded":true}));
-    let names = |s: &Session, component: &str, x: f64| {
+    let names = |s: &Session, component: &str, wall_pick: Vec3, end_pick: Vec3| {
         let c = s.doc.find_component(component).unwrap();
         let st = s.model.state();
-        let wall = solidcraft_doc::joints::face_name_at(&s.doc, &st, c, Vec3::new(x + 83.0, 20.0, 5.0), true).unwrap();
-        let end = solidcraft_doc::joints::face_name_at(&s.doc, &st, c, Vec3::new(x + 50.0, 40.0, 10.0), false).unwrap();
+        let wall = solidcraft_doc::joints::face_name_at(&s.doc, &st, c, wall_pick, true).unwrap();
+        let end = solidcraft_doc::joints::face_name_at(&s.doc, &st, c, end_pick, false).unwrap();
         json!({"reference":{"type":"circle_center","name":wall,"end":end}})
     };
-    let (a, b) = (names(&s, "A", 0.0), names(&s, "B", 150.0));
+    let (a, b) = (
+        names(&s, "A", Vec3::new(83.0, 20.0, 5.0), Vec3::new(50.0, 40.0, 10.0)),
+        names(&s, "B", Vec3::new(233.0, 20.0, 5.0), Vec3::new(200.0, 40.0, 10.0)),
+    );
     let p = json!({"name":"Clocked","type":"rigid","a":{"occurrence":"A","circle":[23,20,9]},"b":{"occurrence":"B","circle":[173,20,9]},"a_alignment":a,"b_alignment":b});
     run(&mut s, "joint.create", p);
     run(&mut s, "parameters.change", json!({"name":"guideY","expression":"40 mm"}));
     let joint = &s.doc.assembly.joints[0];
     let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &joint.a).unwrap();
     let x = Vec3::new(frame[0][0], frame[0][1], frame[0][2]);
-    assert!(x.dot(Vec3::new(60.0, 20.0, 0.0).normalized().unwrap()) > 0.999);
+    // The independent direction of the 60-by-20 fixture is (3/sqrt(10), 1/sqrt(10), 0).
+    assert!(near(x, Vec3::new(0.9486832980505138, 0.31622776601683794, 0.0)));
     let reopened: solidcraft_doc::Document = serde_json::from_value(serde_json::to_value(&*s.doc).unwrap()).unwrap();
     assert_eq!(reopened.assembly.joints, s.doc.assembly.joints);
     let before = s.doc.clone();
@@ -247,6 +251,28 @@ fn alignment_boxes() -> (Session, String, String, Value) {
 }
 
 #[test]
+fn coderabbit_review_primary_replacement_preserves_planar_alignment() {
+    for (side, occurrence, parallel_pick) in [("a", "A", Vec3::new(20.0, 10.0, 5.0)), ("b", "B", Vec3::new(40.0, 20.0, 5.0))] {
+        let (mut s, _, _, p) = alignment_boxes();
+        let component = s.doc.find_component(occurrence).unwrap();
+        let parallel = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), component, parallel_pick, false).unwrap();
+        run(&mut s, "joint.create", p);
+        let before = s.doc.assembly.joints[0].clone();
+        let old = if side == "a" { &before.a.snap } else { &before.b.snap };
+        let Snap::FaceCenter { face: Some(primary), x: old_x, .. } = old else { panic!("saved planar-aligned face") };
+        run(&mut s, "joint.edit", json!({"joint":"Aligned", side:{"occurrence":occurrence, "face":primary}}));
+        let current = &s.doc.assembly.joints[0];
+        let Snap::FaceCenter { x, .. } = (if side == "a" { &current.a.snap } else { &current.b.snap }) else {
+            panic!("restored planar-aligned face")
+        };
+        assert_eq!(x, old_x);
+        let before = s.doc.clone();
+        assert!(s.execute("joint.edit", &json!({"joint":"Aligned", side:{"occurrence":occurrence,"face":parallel}})).is_err());
+        assert_eq!(s.doc, before);
+    }
+}
+
+#[test]
 fn secondary_alignment_refuses_duplicate_incident_faces_on_a_single_rim_cap() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10}));
@@ -293,14 +319,18 @@ fn secondary_alignment_refuses_nested_primary_paths_before_resolving_geometry() 
 fn secondary_alignment_feedback_named_edges_save_reopen_and_reject_missing_identity() {
     let (mut s, _, _, mut p) = alignment_boxes();
     let state = s.model.state();
-    let body = state.body("Body1").unwrap();
-    let mesh = body.mesh();
-    let index = mesh.edges.iter().position(|e| e.len() >= 2 && (e.last().unwrap().x - e[0].x).abs() > 19.0).unwrap();
-    let name = solidcraft_doc::naming::edge_names(body)[index].clone();
+    let component = s.doc.find_component("A").unwrap();
+    let mut faces = [
+        solidcraft_doc::joints::face_name_at(&s.doc, &state, component, Vec3::new(10.0, 10.0, 0.0), false).unwrap(),
+        solidcraft_doc::joints::face_name_at(&s.doc, &state, component, Vec3::new(10.0, 0.0, 5.0), false).unwrap(),
+    ];
+    faces.sort();
+    let name = faces.join("|");
     p["a_alignment"] = json!({"reference":{"type":"edge","name":name},"reverse":true});
     run(&mut s, "joint.create", p);
     let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &s.doc.assembly.joints[0].a).unwrap();
-    assert!(Vec3::new(frame[0][0], frame[0][1], frame[0][2]).dot(Vec3::X).abs() > 0.999);
+    let x = Vec3::new(frame[0][0], frame[0][1], frame[0][2]);
+    assert!(near(x, Vec3::X) || near(x, -Vec3::X));
     let path = std::env::temp_dir().join(format!("solidcraft-directional-alignment-{}.solidcraft", std::process::id()));
     run(&mut s, "file.save", json!({"path":path}));
     run(&mut s, "file.new", json!({}));
@@ -331,7 +361,7 @@ fn secondary_alignment_feedback_construction_and_component_axes_keep_author_iden
     {
         run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":{"reference":reference}}));
         let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &s.doc.assembly.joints[0].a).unwrap();
-        assert!(Vec3::new(frame[0][0], frame[0][1], frame[0][2]).dot(Vec3::X) > 0.999);
+        assert!(near(Vec3::new(frame[0][0], frame[0][1], frame[0][2]), Vec3::X));
     }
     let old = s.doc.assembly.joints[0].clone();
     for reference in [json!({"type":"construction","feature":99999}), json!({"type":"origin_axis","axis":"Z"})] {
@@ -356,7 +386,7 @@ fn secondary_alignment_feedback_sketch_line_is_saved_by_sketch_and_curve_identit
     run(&mut s, "joint.create", p);
     let old = s.doc.assembly.joints[0].clone();
     let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &old.a).unwrap();
-    assert!(Vec3::new(frame[0][0], frame[0][1], frame[0][2]).dot(Vec3::X) > 0.999);
+    assert!(near(Vec3::new(frame[0][0], frame[0][1], frame[0][2]), Vec3::X));
     assert!(
         s.execute("joint.edit", &json!({"joint":"Aligned","a_alignment":{"reference":{"type":"sketch_line","sketch":sketch,"curve":"gone"}}}))
             .is_err()
@@ -376,14 +406,15 @@ fn secondary_alignment_feedback_cylinder_and_circular_edge_follow_geometry_chang
     run(&mut s, "joint.create", p);
     run(&mut s, "parameters.change", json!({"name":"guideRadius","expression":"7 mm"}));
     let state = s.model.state();
-    let body = state.body("Guide").unwrap();
-    let mesh = body.mesh();
-    let index = mesh.edges.iter().position(|e| e.len() > 8 && e.iter().all(|p| (p.x - e[0].x).abs() < 1e-6)).unwrap();
-    let edge = solidcraft_doc::naming::edge_names(body)[index].clone();
+    let cap = solidcraft_doc::joints::face_name_at(&s.doc, &state, component, Vec3::new(70.0, 0.0, 0.0), false).unwrap();
+    let mut faces = [face, cap];
+    faces.sort();
+    let edge = faces.join("|");
     run(&mut s, "joint.edit", json!({"joint":"Aligned","a_alignment":{"reference":{"type":"edge","name":edge}}}));
     run(&mut s, "parameters.change", json!({"name":"guideRadius","expression":"9 mm"}));
     let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &s.doc.assembly.joints[0].a).unwrap();
-    assert!(Vec3::new(frame[0][0], frame[0][1], frame[0][2]).dot(Vec3::X).abs() > 0.999);
+    let x = Vec3::new(frame[0][0], frame[0][1], frame[0][2]);
+    assert!(near(x, Vec3::X) || near(x, -Vec3::X));
     assert!(near(place(&s, "B", Vec3::new(40.0, 10.0, 0.0)), Vec3::new(10.0, 10.0, 10.0)));
 }
 
@@ -403,17 +434,19 @@ fn secondary_alignment_inverts_each_frame_without_changing_angle_or_anchor() {
                 );
                 let j = &s.doc.assembly.joints[0];
                 assert_eq!(j.exprs.angle.as_deref(), Some("jointTurn"));
-                assert!((j.angle - 17_f64.to_radians()).abs() < 1e-10);
+                assert!((j.angle - 0.29670597283903605).abs() < 1e-10);
                 for (origin, want) in [(&j.a, if ra { -Vec3::X } else { Vec3::X }), (&j.b, if rb { -Vec3::Y } else { Vec3::Y })] {
                     let m = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), origin).unwrap();
                     assert!(near(Vec3::new(m[0][0], m[0][1], m[0][2]), want));
                 }
                 assert!(near(place(&s, "B", Vec3::new(40.0, 10.0, 0.0)), Vec3::new(10.0, 10.0, 10.0)));
-                // Analytic world direction of B's +Y: mate preserves A's x, Angle turns it.
-                let axis = place(&s, "B", Vec3::new(40.0, 11.0, 0.0)) - place(&s, "B", Vec3::new(40.0, 10.0, 0.0));
-                let sign = if ra == rb { 1.0 } else { -1.0 };
-                let angle = 17_f64.to_radians();
-                assert!(near(axis, Vec3::new(angle.cos(), angle.sin(), 0.0) * sign), "{axis:?}, {ra} {rb} {flip}");
+                // Fixed endpoints: the anchor plus or minus (cos(17deg), sin(17deg), 0).
+                let expected = if ra == rb {
+                    Vec3::new(10.956304755963036, 10.292371704722737, 10.0)
+                } else {
+                    Vec3::new(9.043695244036964, 9.707628295277263, 10.0)
+                };
+                assert!(near(place(&s, "B", Vec3::new(40.0, 11.0, 0.0)), expected), "{ra} {rb} {flip}");
             }
         }
     }
@@ -512,7 +545,7 @@ fn secondary_alignment_roundtrips_and_reports_a_lost_reference() {
     run(&mut s, "doc.open", json!({"path": path}));
     run(&mut s, "parameters.change", json!({"name": "jointTurn", "expression": "32 deg"}));
     assert_eq!(s.doc.assembly.joints[0].exprs.angle.as_deref(), Some("jointTurn"));
-    assert!((s.doc.assembly.joints[0].angle - 32_f64.to_radians()).abs() < 1e-10);
+    assert!((s.doc.assembly.joints[0].angle - 0.5585053606381855).abs() < 1e-10);
     let before = s.doc.assembly.joints[0].clone();
     run(&mut s, "joint.edit", json!({"joint": "Aligned", "b_alignment": {"face": b, "reverse": true}}));
     run(&mut s, "edit.undo", json!({}));
@@ -542,13 +575,16 @@ fn secondary_alignment_follows_a_parametric_guide_face_instead_of_a_captured_vec
     let face = solidcraft_doc::joints::face_name_at(&s.doc, &s.model.state(), component, Vec3::new(80.0, 5.0, 5.0), false).unwrap();
     p["a_alignment"] = json!({"face":face});
     run(&mut s, "joint.create", p);
-    for degrees in [40.0, -25.0, 80.0] {
+    // Fixed endpoint oracles include the authored 17deg joint turn: 57deg, -8deg and 97deg.
+    for (degrees, expected) in [
+        (40.0, Vec3::new(10.544639035015027, 10.838670567945424, 10.0)),
+        (-25.0, Vec3::new(10.990268068741571, 9.860826899039934, 10.0)),
+        (80.0, Vec3::new(9.878130656594853, 10.992546151641322, 10.0)),
+    ] {
         run(&mut s, "parameters.change", json!({"name":"guideTurn","expression":format!("{degrees} deg")}));
         let r = run(&mut s, "joint.solve", json!({}));
         assert_eq!(r["errors"].as_array().unwrap().len(), 0, "{r}");
-        let angle = (degrees + 17.0_f64).to_radians();
-        let axis = place(&s, "B", Vec3::new(40.0, 11.0, 0.0)) - place(&s, "B", Vec3::new(40.0, 10.0, 0.0));
-        assert!(near(axis, Vec3::new(angle.cos(), angle.sin(), 0.0)), "{degrees}: {axis:?}");
+        assert!(near(place(&s, "B", Vec3::new(40.0, 11.0, 0.0)), expected), "{degrees}");
         assert!(near(place(&s, "B", Vec3::new(40.0, 10.0, 0.0)), Vec3::new(10.0, 10.0, 10.0)));
     }
 }

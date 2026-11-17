@@ -2282,7 +2282,7 @@ fn alignment_pick(s: &Session, sel: &Sel, center: bool) -> Result<Value, String>
                                 json!({"reference":{"type":"circle_center","name":face_name(*cylinder)?,"end":face_name(*end)?}})
                             }
                             [cylinder] => json!({"reference":{"type":"cylinder","name":face_name(*cylinder)?}}),
-                            [] if !center => json!({"reference":{"type":"edge","name":edge_name()?}}),
+                            [] => json!({"reference":{"type":"edge","name":edge_name()?}}),
                             _ => return Err("select a circular rim with one cylindrical wall and one end face".into()),
                         }
                     }
@@ -2304,6 +2304,22 @@ fn alignment_pick(s: &Session, sel: &Sel, center: bool) -> Result<Value, String>
         Sel::ExternalSketchCurve { sketch, id } => feature_ref(*sketch, json!({"type":"sketch_line","sketch":sketch,"curve":id})),
         Sel::Axis { name } | Sel::Plane { name } => {
             let axis = matches!(sel, Sel::Axis { .. });
+            if let Some(datum) = solidcraft_engine::doc::construct::DatumRef::parse_key(name) {
+                let [occurrence] = datum.path.as_slice() else {
+                    return Err("secondary alignment on nested occurrence paths is not supported yet".into());
+                };
+                let placed = s.doc.occurrences.iter().find(|o| o.id == *occurrence).ok_or("alignment occurrence no longer exists")?;
+                if placed.parent != 0 {
+                    return Err("secondary alignment on nested occurrence paths is not supported yet".into());
+                }
+                let item = datum.item.name();
+                let matching = if axis { matches!(item, "X" | "Y" | "Z") } else { matches!(item, "XY" | "XZ" | "YZ") };
+                if !matching {
+                    return Err("select a planar face, cylindrical axis, exact edge, sketch line, axis or plane".into());
+                }
+                let reference = if axis { json!({"type":"origin_axis","axis":item}) } else { json!({"type":"origin_plane","plane":item}) };
+                return Ok(json!({"reference":reference,"occurrence":occurrence}));
+            }
             let origin = if axis { matches!(name.as_str(), "X" | "Y" | "Z") } else { matches!(name.as_str(), "XY" | "XZ" | "YZ") };
             if origin {
                 let reference = if axis { json!({"type":"origin_axis","axis":name}) } else { json!({"type":"origin_plane","plane":name}) };
@@ -2666,9 +2682,10 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             let mut to_document = std::collections::HashMap::new();
             for (name, _, _, _, frame) in preview.doc.body_frames_with_source(&raw) {
                 if let Some((_, _, _, _, before)) = before_frames.iter().find(|(old, ..)| old == &name)
-                    && let Some(inverse) = solidcraft_engine::doc::mat_inverse(&frame)
+                    && let Ok(inverse) = solidcore_ops::affine::inverse(&frame)
+                    && let Ok(mapping) = solidcore_ops::affine::then(&inverse, before)
                 {
-                    to_document.insert(name, solidcraft_engine::doc::mat_mul(before, &inverse));
+                    to_document.insert(name, mapping);
                 }
             }
             let fixed_occurrences = cmds
@@ -2765,7 +2782,10 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     let under = app.viewport.hover.as_ref().and_then(|h| d.candidate(&app.session, h)).filter(|_| accepting);
     let center_frame = under
         .as_ref()
-        .filter(|sel| matches!(sel, Sel::Edge { .. }))
+        .filter(|sel| {
+            matches!(sel, Sel::Edge { .. })
+                && alignment_pick(&app.session, sel, true).is_ok_and(|reference| reference["reference"]["type"] == "circle_center")
+        })
         .and_then(|_| alignment_side(&d.kind, d.active))
         .and_then(|side| primary_alignment_frame(&app.session, d, side));
     let t = Tokens::get();
@@ -2893,12 +2913,16 @@ fn placed_snap(app: &SolveApp, sel: &Sel, mut snap: SnapPt) -> SnapPt {
         && !app.preview.rolled_back
         && let Some(interaction) = &app.preview.interaction
     {
-        let frame = body_of(sel).and_then(|body| interaction.to_document.get(body)).and_then(solidcraft_engine::doc::mat_inverse).or_else(|| {
-            let occurrence = alignment_occurrence(&app.session, sel)?;
-            let before = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, occurrence);
-            let after = solidcraft_engine::doc::joints::occurrence_world(&interaction.document, occurrence);
-            Some(solidcraft_engine::doc::mat_mul(&after, &solidcraft_engine::doc::mat_inverse(&before)?))
-        });
+        let frame = body_of(sel)
+            .and_then(|body| interaction.to_document.get(body))
+            .and_then(|frame| solidcore_ops::affine::inverse(frame).ok())
+            .or_else(|| {
+                let occurrence = alignment_occurrence(&app.session, sel)?;
+                let before = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, occurrence);
+                let after = solidcraft_engine::doc::joints::occurrence_world(&interaction.document, occurrence);
+                let inverse = solidcore_ops::affine::inverse(&before).ok()?;
+                solidcore_ops::affine::then(&inverse, &after).ok()
+            });
         if let Some(frame) = frame {
             snap.at = solidcraft_engine::doc::apply_point(&frame, snap.at);
             snap.z = solidcraft_engine::doc::apply_vector(&frame, snap.z);
