@@ -182,6 +182,53 @@ fn a_held_view_and_its_dimension_are_out_of_date() {
     assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
 }
 
+/// A deferred drawing whose model moved on lists a sketch drawn on its sheet and a fill of it as out
+/// of date, each by its own kind, beside the view: a held drawing solves no sketch and paints no fill
+/// again, so the sheet shows them as they last were.
+#[test]
+fn a_held_sheets_sketch_and_fill_are_out_of_date_by_their_kinds() {
+    let (mut s, _) = plate();
+    let (sheet, view) = drawn(&mut s);
+    let sketch = run(&mut s, "drawing.sketch.create", json!({"owner": ids::encode(sheet)}))["sketch"].clone();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [15, 10], "p1": [55, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let boundary = run(&mut s, "drawing.fill.profiles", json!({"sketch": sketch}))["fill_profiles"]["boundaries"][0].clone();
+    let filled = run(&mut s, "drawing.sketch.fill", json!({"sketch": sketch, "boundary": boundary, "paint": {"kind": "solid"}}));
+    let fill = filled["fills"][0]["fill"].clone();
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
+    with_model_changed(&mut s, |s| {
+        run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
+    });
+    let reply = checked(&mut s, json!({}));
+    let mut expected = vec![named("fill", &fill), named("sketch", &sketch), named("view", &json!(ids::encode(view)))];
+    expected.sort();
+    assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
+}
+
+/// A deferred drawing whose model moved on lists a note on its view as out of date, as a note, beside
+/// the view and its dimension, each by the kind the sheet listed it as; a note on the sheet reads no
+/// model, so it is never listed.
+#[test]
+fn a_held_views_note_is_out_of_date_as_a_note() {
+    let (mut s, _) = plate();
+    let (sheet, view) = drawn(&mut s);
+    let width = length(&mut s, view, [50.0, 0.0, 0.0]);
+    let note = note_on(&mut s, view, [50.0, 0.0, 8.0]);
+    run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 20], "content": "General"}));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
+    with_model_changed(&mut s, |s| {
+        run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
+    });
+    let reply = checked(&mut s, json!({}));
+    let mut expected = vec![named("dimension", &width), named("note", &note), named("view", &json!(ids::encode(view)))];
+    expected.sort();
+    assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
+}
+
 /// A deferred drawing is checked as its sheet shows the model: a bar added since it was drawn neither
 /// pushes the held view off its sheet nor is drawn by it, until the drawing is updated.
 #[test]

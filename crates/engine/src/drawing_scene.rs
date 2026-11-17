@@ -328,8 +328,10 @@ pub struct SheetScene {
     pub tables: Vec<TableState>,
     /// Each revision tag on the sheet, in the drawing's order.
     pub tags: Vec<TagState>,
-    /// The views, dimensions, notes and balloons a deferred drawing shows as they last were ([`as_shown`]).
-    pub out_of_date: Vec<u64>,
+    /// The views, dimensions, notes, balloons, sketches and fills a deferred drawing shows as they last
+    /// were ([`as_shown`]), each with its kind as the scene knew it, so no reader works the kind out again
+    /// from the id.
+    pub out_of_date: Vec<(u64, ObjectKind)>,
     /// What each view whose lines are in the scene drew them from: its world state and its bodies.
     drawn: Vec<(Arc<ModelState>, Arc<Owners>)>,
 }
@@ -568,11 +570,14 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
     let shown = extract(s, sheet)?;
     // A held view's dimensions, notes and balloons are out of date with it: listed after the views,
     // never read again here against its old lines. `stale_dimensions`, `stale_notes` and
-    // `stale_balloons` hold those of the views up to date.
-    let up_to_date = shown.stale_dimensions.into_iter().chain(shown.stale_notes).chain(shown.stale_balloons);
+    // `stale_balloons` hold those of the views up to date, each list one kind, as do the sheet's
+    // `stale_sketches` and `stale_fills`.
+    let of = |listed: Vec<u64>, kind: ObjectKind| listed.into_iter().map(move |id| (id, kind));
+    let notes_and_balloons = of(shown.stale_notes, ObjectKind::Note).chain(of(shown.stale_balloons, ObjectKind::Balloon));
+    let up_to_date = of(shown.stale_dimensions, ObjectKind::Dimension).chain(notes_and_balloons);
     let annotations = out_of_date_annotations(d, &shown.stale, up_to_date);
-    let out_of_date =
-        shown.stale.iter().copied().chain(annotations).chain(shown.stale_sketches.iter().copied()).chain(shown.stale_fills.iter().copied()).collect();
+    let on_the_sheet = of(shown.stale_sketches, ObjectKind::Sketch).chain(of(shown.stale_fills, ObjectKind::Fill));
+    let out_of_date = shown.stale.iter().map(|&view| (view, ObjectKind::View)).chain(annotations).chain(on_the_sheet).collect();
     let (scene, objects) = (Arc::unwrap_or_clone(shown.scene), shown.objects.to_vec());
     // Each view in the scene as it was last drawn, from the world state it was drawn from.
     let entries = &s.drawing_scenes.views;
@@ -997,12 +1002,12 @@ fn draw_dimensions(
     lines
 }
 
-/// The dimensions, notes and balloons of `d` a sheet shows as they last were, by id: those of each
-/// view out of date (`stale_views`), as their view is, then `up_to_date`, those of the views up to
-/// date that were read from another record, model, drawing of their view, lettering or revision
-/// ([`Cache::stale_dimensions`]).
-fn out_of_date_annotations(d: &Drawing, stale_views: &[u64], up_to_date: impl IntoIterator<Item = u64>) -> Vec<u64> {
-    let held = dimensions_on(d, stale_views.iter().copied()).into_iter().map(|record| record.id());
+/// The dimensions, notes and balloons of `d` a sheet shows as they last were, by id with their kind:
+/// those of each view out of date (`stale_views`), as their view is, then `up_to_date`, those of the
+/// views up to date that were read from another record, model, drawing of their view, lettering or
+/// revision ([`Cache::stale_dimensions`]).
+fn out_of_date_annotations(d: &Drawing, stale_views: &[u64], up_to_date: impl IntoIterator<Item = (u64, ObjectKind)>) -> Vec<(u64, ObjectKind)> {
+    let held = dimensions_on(d, stale_views.iter().copied()).into_iter().map(|record| (record.id(), record.kind()));
     held.chain(up_to_date).collect()
 }
 
@@ -2099,7 +2104,9 @@ pub fn standing(s: &mut Session, d: &Drawing) -> Standing {
     let on: Vec<(u64, ResolvedView, Vec2)> =
         d.views.iter().filter_map(|v| Some((v.id, d.resolve_view(v.id).ok()?, d.view_centre(v.id).ok()?))).collect();
     let stale_dimensions = state.as_ref().map_or_else(Vec::new, |state| cache.stale_dimensions(d, &on, state, &lettering, revision));
-    let annotations = out_of_date_annotations(d, &stale, stale_dimensions.iter().map(Annotation::id));
+    // By id alone: its readers ask after a dimension, note or balloon by its id.
+    let up_to_date = stale_dimensions.iter().map(|record| (record.id(), record.kind()));
+    let annotations = out_of_date_annotations(d, &stale, up_to_date).into_iter().map(|(id, _)| id).collect();
     Standing { views, annotations }
 }
 
