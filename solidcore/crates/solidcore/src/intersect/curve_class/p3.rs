@@ -43,7 +43,8 @@
 //!   `SM_EFF_ZERO_PARAM` of an interval end to that end only when it is not strictly
 //!   inside the interval at a 3D distance of at least the pair intersection tolerance
 //!   (and more than the curve's scaled zero) from the end's point; such a parameter goes
-//!   on to the 3D tests (an interior point).
+//!   on to the 3D tests (an interior point). Without a curve, or when that distance,
+//!   tolerance or scaled zero cannot be computed, upstream's snap stands (no new error).
 //!   Upstream snaps on the parameter alone, which on a fast-parametrised curve (a loop
 //!   bisector over an infinite cylinder's ±1234567 axial range) merged two edge
 //!   crossings 3.5e-3 apart and lost a loop crossing (#18342).
@@ -618,7 +619,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     param,
                     param_obj_zone_tol_3d,
                     IntervalPosition::End,
-                )?
+                )
             {
                 out.index = i;
                 out.position = IntervalPosition::End;
@@ -635,7 +636,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     param,
                     param_obj_zone_tol_3d,
                     IntervalPosition::Start,
-                )?
+                )
             {
                 out.index = i;
                 out.position = IntervalPosition::Start;
@@ -752,6 +753,10 @@ impl<O: ClassObject> CurveClassification<O> {
     /// its evaluation cannot tell points apart. Such a point is classified by the 3D
     /// tests that follow instead of being snapped.
     ///
+    /// Infallible: without a classification curve, or when a tolerance, point or
+    /// scaled zero cannot be computed, it answers `false` and upstream's parameter
+    /// snap stands, as upstream needed none of them to snap.
+    ///
     /// A parameter tolerance alone cannot tell points apart on a fast-parametrised
     /// curve: a loop bisector across an infinite cylinder spans the ±1234567 sentinel
     /// axial range over [0, 1], so 1.2e-8 in parameter is 0.03 in 3D. There two
@@ -765,41 +770,45 @@ impl<O: ClassObject> CurveClassification<O> {
         param: f64,
         param_obj_zone_tol_3d: f64,
         end: IntervalPosition,
-    ) -> Result<bool> {
+    ) -> bool {
         let ivl = test.interval;
         // only a parameter strictly inside the interval can become an interior point
         if !(param > ivl.min() && param < ivl.max()) {
-            return Ok(false);
+            return false;
         }
         // a classification without a resolvable curve has no 3D separation to measure:
         // keep upstream's parameter snap (which needs no curve)
         let Some(curve) = self.curve().and_then(|c| geometry.curve(c)) else {
-            return Ok(false);
+            return false;
         };
         let (end_param, end_pc) = if end == IntervalPosition::Start {
             (ivl.min(), &test.start)
         } else {
             (ivl.max(), &test.end)
         };
-        let tol = pair_tol(
-            k,
-            geometry,
-            self,
-            OP_FIND,
-            param,
-            param_obj_zone_tol_3d,
-            end_param,
-            end_pc.obj_zone_tol_3d(k, geometry)?,
-        )?;
-        let end_pt = curve.evaluate_point(k, end_param)?;
-        let classify_pt = curve.evaluate_point(k, param)?;
-        let dist = classify_pt.distance(end_pt);
-        if dist < tol {
-            return Ok(false);
-        }
-        // and beyond the curve's scaled zero (its size times SM_EFF_ZERO): closer points
-        // are not told apart by its evaluation
-        Ok(dist > scaled_zero_of_curve(k, curve)?)
+        // any failure to measure keeps upstream's snap, which needed none of these
+        let measured = || -> Result<bool> {
+            let tol = pair_tol(
+                k,
+                geometry,
+                self,
+                OP_FIND,
+                param,
+                param_obj_zone_tol_3d,
+                end_param,
+                end_pc.obj_zone_tol_3d(k, geometry)?,
+            )?;
+            let end_pt = curve.evaluate_point(k, end_param)?;
+            let classify_pt = curve.evaluate_point(k, param)?;
+            let dist = classify_pt.distance(end_pt);
+            if dist < tol {
+                return Ok(false);
+            }
+            // and beyond the curve's scaled zero (its size times SM_EFF_ZERO): closer
+            // points are not told apart by its evaluation
+            Ok(dist > scaled_zero_of_curve(k, curve)?)
+        };
+        measured().unwrap_or(false)
     }
 
     /// The point classification at curve parameter `param`

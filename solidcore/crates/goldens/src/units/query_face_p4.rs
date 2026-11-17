@@ -1388,6 +1388,102 @@ mod tests {
         );
     }
 
+    /// `i` with its cylinder or cone `scale` multiplied by `f`.
+    fn scaled(i: &Inputs, f: f64) -> Inputs {
+        let mut i = i.clone();
+        if let BrepIn::Curves { surface, .. } | BrepIn::Natural { surface } = &mut i.brep {
+            if let AnySrf::Cylinder { scale, .. } | AnySrf::Cone { scale, .. } = surface {
+                *scale *= f;
+            }
+        }
+        i
+    }
+
+    /// `ClassifyLoops` of `i` gives the same answer as the same face 1000 times larger:
+    /// there no two crossings lie within the parameter snap band of the bisector or of
+    /// its ends, so the larger face is an independent reference.
+    fn assert_same_as_scaled_up(i: &Inputs) -> Output {
+        let out = rust(i).unwrap();
+        let big = rust(&scaled(i, 1e3)).unwrap();
+        assert_eq!(out.error, None);
+        assert_eq!(big.error, None);
+        assert_eq!(out.ints, big.ints, "scale {:?}", i.brep);
+        out
+    }
+
+    /// #18342: `cyl_natural_1e-3_gen0157` itself (`swap: true`). Its bisector's ends leave
+    /// the face across no seam image an edge use could bound, so their type is `None`
+    /// (1), as for the same face at scale 1. Before the fix the two circle crossings
+    /// merged into the bisector's ends and both were typed `SeamNoEdgeuse` (9).
+    #[test]
+    fn short_natural_cylinder_gen0157_bisector_ends_are_none() {
+        let i = Inputs {
+            brep: BrepIn::Natural {
+                surface: AnySrf::Cylinder {
+                    scale: 1e-3,
+                    a: 0.6278941237582317,
+                    c: 3.538075172749348,
+                    swap: true,
+                },
+            },
+            validate_only: false,
+            init_gaps: true,
+            face: 32,
+            props: 1,
+            loops: 2,
+        };
+        let out = assert_same_as_scaled_up(&i);
+        assert_eq!(out.ints.get("classifiable"), Some(&vec![0]));
+        assert_eq!(out.ints.get("start_stop"), Some(&vec![1, 1]));
+    }
+
+    /// #18342: two opposite u-isolines 1e-6 apart in normalized v on a cylinder (the
+    /// faces of generated cases 84 and 331 with every loop as target), 3.1e-6 and 2.6e-6
+    /// apart in 3D against a classification pair tolerance of 2e-7, are a no-area pair:
+    /// each crossing keeps its own point of the bisector.
+    #[test]
+    fn close_opposite_isolines_classify_as_a_no_area_pair() {
+        for (a, c, v0, v1, face) in [
+            (0.7503165792421282, 3.1025197902685333, 0.08420134538839802, 0.08420234538839802, 50),
+            (1.7416486248859733, 2.5778465526264056, 0.3680146569383668, 0.3680156569383668, 30),
+        ] {
+            let line = |a: f64, b: f64, c: f64, d: f64| {
+                serde_json::json!({"t": "line", "a": a, "b": b, "c": c, "d": d, "rev": false})
+            };
+            let i: Inputs = serde_json::from_value(serde_json::json!({
+                "brep": {
+                    "kind": "curves",
+                    "copies": 1,
+                    "surface": {"kind": "cylinder", "scale": 1.0, "a": a, "c": c, "swap": false},
+                    "loops": [[line(0.0, v0, 1.0, v0)], [line(1.0, v1, 0.0, v1)]],
+                    "points": []
+                },
+                "init_gaps": false,
+                "face": face,
+                "props": 1,
+                "loops": 1
+            }))
+            .unwrap();
+            let out = assert_same_as_scaled_up(&i);
+            assert_eq!(out.ints.get("classifiable"), Some(&vec![0]));
+            assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![0, 1]));
+            assert_eq!(out.ints.get("start_stop"), Some(&vec![1, 1]));
+        }
+    }
+
+    /// #18342: four parallel circles on a cone at scale 1e-3 (generated case 73) nest as
+    /// they do on the same cone at scale 1. The seam classification's crossings lie
+    /// 2.0e-9 to 2.1e-9 from its start in the curve's parameter but about 5e-3 from it
+    /// in 3D; compared with the face's UV tolerance they were taken as touches on the
+    /// curve's start (`Lamina`), so loop 3 dropped out of the tree.
+    #[test]
+    fn cone_parallel_circles_at_small_scale_nest_as_at_scale_one() {
+        let mut rng = Rng::new(CaseContext::seed_for("query.face_p4", 73));
+        let i = gen_case(&mut rng);
+        let out = assert_same_as_scaled_up(&i);
+        assert_eq!(out.ints.get("ordered_no_area"), Some(&vec![3, 2, 1, 0]));
+    }
+
     /// A circular UV trim spans both axes and winds in the requested direction.
     #[test]
     fn circular_trims_keep_their_uv_bounds_and_orientation() {

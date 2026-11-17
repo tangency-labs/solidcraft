@@ -73,6 +73,13 @@
 //!   leaves them (an edge use outside a loop touches neither; any later failure sets the
 //!   point to `(0,0,0)` and keeps the binormal), and only [`SolidError::Unported`] and
 //!   [`SolidError::InvalidInput`] (a null dereference upstream) propagate.
+//! - **3D-distinct end touches (solidcore-native, #18342).** `GetLoopTouches` types the
+//!   first and last touch as on the curve's start or end by comparing the curve parameter
+//!   with the face's zone tolerance mapped to UV. A touch strictly inside the interval
+//!   whose point is at least the face's intersection tolerance and more than the curve's
+//!   scaled zero from that end stays inside (`distinct_end_type`), as `FindInterval` keeps
+//!   such points off an interval end (part 3). When a point or the scaled zero cannot be
+//!   computed, upstream's type stands (no new error).
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
@@ -83,8 +90,8 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::periodic_extent1d::PeriodicExtent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::tol::{
-    are_same, eff_zero, is_degenerate_vec3, scaled_zero2, xsect_tol_3d_from_zones, zone_tol_3d,
-    SmallTopoType, ANG_TOL_DEG,
+    are_same, eff_zero, is_degenerate_vec3, scaled_zero2, scaled_zero_of_curve,
+    xsect_tol_3d_from_zones, zone_tol_3d, SmallTopoType, ANG_TOL_DEG,
 };
 use crate::heal::face_props::{FaceProps, HealerOpType, LoopObject, PropStage, Tri, UNDEF_ULONG};
 use crate::intersect::curve_class::p1::{
@@ -759,6 +766,43 @@ fn drop_vector(k: &Kernel, surface: &Surface, uv: Point2, v: Vec3) -> Result<Vec
 /// `sU.CCWAngleBetween(v, angle)` with the status ignored.
 fn ccw_angle(v: Vec2) -> Result<f64> {
     Ok(ignored(Vec2::new(1.0, 0.0).ccw_angle_between(v))?.unwrap_or(UNDEF_DOUBLE))
+}
+
+/// solidcore-native: `ty` (a touch's `ClassifyPoint` against the classification interval
+/// with a UV tolerance) with `Start` or `End` turned into `Inside` when `param` is strictly
+/// inside `ivl` and its curve point is 3D-distinct from that end: at least `tol_3d` (the
+/// face's intersection tolerance) and more than the curve's scaled zero away. Upstream
+/// compares the curve parameter with a tolerance mapped into the surface's UV space, which
+/// marks a crossing far from the curve's end as an end touch when the curve parameter is
+/// much finer than the UV one (the loop bisector over the sentinel range). Infallible: when
+/// a point or the scaled zero cannot be computed, `ty` stands.
+fn distinct_end_type(
+    k: &Kernel,
+    curve: &Curve,
+    ivl: &Extent1d,
+    param: f64,
+    ty: ExtentPointType,
+    tol_3d: f64,
+) -> ExtentPointType {
+    let end = match ty {
+        ExtentPointType::Start => ivl.min(),
+        ExtentPointType::End => ivl.max(),
+        _ => return ty,
+    };
+    if !(param > ivl.min() && param < ivl.max()) {
+        return ty;
+    }
+    let distinct = || -> Result<bool> {
+        let dist = curve
+            .evaluate_point(k, param)?
+            .distance(curve.evaluate_point(k, end)?);
+        Ok(dist >= tol_3d && dist > scaled_zero_of_curve(k, curve)?)
+    };
+    if distinct().unwrap_or(false) {
+        ExtentPointType::Inside
+    } else {
+        ty
+    }
 }
 
 /// `SM_IS_BETWEEN(c, a, b)` (`SmMath.h`).
@@ -1530,10 +1574,23 @@ impl<O: ClassObject> CurveClassification<O> {
         };
 
         // remember when first/last touch is on ClassifyCrv Start/Stop
-        let mut touch_1st_type =
-            crv_classification_interval.classify_point(first_touch.param, first_zone_tol_2d);
-        let mut touch_last_type =
-            crv_classification_interval.classify_point(last_touch.param, last_zone_tol_2d);
+        // (solidcore-native: a touch 3D-distinct from that end stays inside)
+        let mut touch_1st_type = distinct_end_type(
+            k,
+            classify_crv,
+            &crv_classification_interval,
+            first_touch.param,
+            crv_classification_interval.classify_point(first_touch.param, first_zone_tol_2d),
+            face_xsect_tol_3d,
+        );
+        let mut touch_last_type = distinct_end_type(
+            k,
+            classify_crv,
+            &crv_classification_interval,
+            last_touch.param,
+            crv_classification_interval.classify_point(last_touch.param, last_zone_tol_2d),
+            face_xsect_tol_3d,
+        );
 
         // check state - stored params must be on or inside the interval
         if touch_1st_type == ExtentPointType::Outside || touch_last_type == ExtentPointType::Outside
