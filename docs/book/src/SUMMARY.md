@@ -48,3 +48,4 @@
 
 - [Command reference](reference/commands.md)
 - [Glossary](reference/glossary.md)
+- [Timber estimates](reference/wood-estimates.md)

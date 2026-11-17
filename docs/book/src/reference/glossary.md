@@ -353,6 +353,12 @@ Radius of the surface neighbourhood used to estimate illumination from nearby ph
 
 - **In SolidCraft:** Caustics `radius_mm`; smaller values preserve sharper details and require more photons to reduce noise.
 
+### glue-up
+
+One batch of glue, assembly and clamping in the workshop.
+
+- **In SolidCraft:** `wood.estimate.glue_ups` takes the number of batches, because the assembly order is a workshop decision.
+
 ### grain direction
 
 The direction of the fibres in wood relative to a part's stock dimensions.
@@ -796,6 +802,12 @@ The space left between frame members where they meet, for a weld to fill.
 - **Don't use:** clearance; gap on its own where it could mean a hem gap.
 - **Elsewhere:** weld gap, root gap, root opening.
 - **For translators:** not a sheet metal hem gap and not a clearance.
+
+### workshop estimate
+
+The known stock and finishing cost, an optional labour cost, and the time for saw cuts, router edges and glue-ups.
+
+- **In SolidCraft:** `wood.estimate` uses a shared JSON file of time rates and one currency; labour is off until an hourly rate is set. Estimates are not saved in designs.
 
 ### workshop mark
 

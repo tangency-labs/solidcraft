@@ -23,6 +23,9 @@ pub struct StockChoice {
 #[serde(deny_unknown_fields)]
 pub struct StockLibrary {
     pub stock: Vec<StockChoice>,
+    /// Optional job finishing supplies, in the same currency as stock prices.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub finishing: Vec<super::wood_estimate::Supply>,
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
