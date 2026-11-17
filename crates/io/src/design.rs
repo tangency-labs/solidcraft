@@ -1,9 +1,7 @@
 //! Versioned design packages. Entries are never extracted to filesystem paths. The optional
 //! model cache is only read back by the build that wrote it, for the exact document it was
 //! written with.
-#[cfg(test)]
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 #[cfg(test)]
 use std::io::Write;
 use std::io::{Cursor, Read, Seek, SeekFrom};
@@ -13,6 +11,7 @@ mod drawing;
 mod import_cache;
 mod native_cache;
 mod provenance;
+mod sheet_cache;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
@@ -21,6 +20,7 @@ pub use provenance::{
     OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
     ProvenanceSummary, SignatureSource, Signer,
 };
+pub use sheet_cache::{FiledSheet, SheetLines, SheetPixels, SheetView, ShownBody, sheet_views};
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
 use serde_json::{Map, Value, json};
@@ -203,8 +203,20 @@ pub fn write_design_container_with_thumbnail(
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
-    let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None)
+    write_design_container_with_sheets(doc, compression, preview, geometry, thumbnail, &[])
+}
+
+/// Include each drawing's last lines (the sheet cache) where the file has room for them.
+pub fn write_design_container_with_sheets(
+    doc: &Document,
+    compression: DesignCompression,
+    preview: Option<&DesignPreview>,
+    geometry: Option<&solidcraft_doc::SavedModel>,
+    thumbnail: Option<&[u8]>,
+    sheets: &[(u64, SheetLines)],
+) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_with_sheets");
+    write_container(doc, compression, preview, geometry, thumbnail, sheets, max_design(), None)
 }
 
 /// Write a container with one signed provenance record appended to `save.chain` (see
@@ -219,17 +231,20 @@ pub fn write_design_container_with_provenance(
     save: &ProvenanceSave<'_>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_provenance");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save))
+    // A signed design never takes up its caches' lines as current, so it keeps none.
+    write_container(doc, compression, preview, geometry, thumbnail, &[], max_design(), Some(save))
 }
 
 /// The common container writer. `provenance` records a signed record when present; the budget
 /// bounds the optional caches (tests pass less).
+#[allow(clippy::too_many_arguments)]
 fn write_container(
     doc: &Document,
     compression: DesignCompression,
     preview: Option<&DesignPreview>,
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
+    sheets: &[(u64, SheetLines)],
     budget: usize,
     provenance: Option<&ProvenanceSave<'_>>,
 ) -> Result<Vec<u8>> {
@@ -370,6 +385,9 @@ fn write_container(
         writer.part("cache/preview.json", &manifest, false)?;
         writer.part("cache/preview.bin", &data, false)?;
     }
+    // After the model cache, which saves a whole evaluation: each drawing's lines save its views'
+    // projections.
+    sheet_cache::write(&mut writer, sheets, budget)?;
     if let Some(png) = thumbnail {
         thumbnail::write(&mut writer, png, &metadata)?;
     }
@@ -806,6 +824,15 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
 /// keeps one seekable file handle instead of buffering the complete archive. JSON continues
 /// through the normal migrations.
 pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+    read_design_file_with_sheets(path, notify).map(|(document, model, _)| (document, model))
+}
+
+/// [`read_design_file`], with each drawing's last lines the file keeps, unread ([`sheet_views`]
+/// reads one): from the same read of the file.
+pub fn read_design_file_with_sheets(
+    path: &str,
+    notify: Option<impl FnOnce(DesignPreview)>,
+) -> Result<(Document, Option<solidcraft_doc::SavedModel>, BTreeMap<u64, FiledSheet>)> {
     let _span = solidcraft_profile::span("io", "read_design_file");
     let mut source = open_regular_file(path)?;
     if is_container_source(&mut source)? {
@@ -818,11 +845,12 @@ pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) 
         {
             notify(preview);
         }
-        Ok((reader.read_document()?, model))
+        let sheets = sheet_cache::read(&mut reader.reader);
+        Ok((reader.read_document()?, model, sheets))
     } else {
         let mut bytes = Vec::new();
         source.take((max_design() as u64).saturating_add(1)).read_to_end(&mut bytes).map_err(invalid)?;
-        Ok((crate::read_design(&bytes)?, None))
+        Ok((crate::read_design(&bytes)?, None, BTreeMap::new()))
     }
 }
 
@@ -1684,12 +1712,12 @@ mod tests {
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, &[], 70_000, None).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, &[], crate::MAX_DESIGN_BYTES, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
     }
 
@@ -2112,6 +2140,175 @@ mod tests {
                 })
                 .is_ok()
             );
+        }
+    }
+
+    /// One view's lines as the sheet cache keeps them: a 40 mm line.
+    fn sheet_view(view: u64) -> SheetView {
+        use solidcore_record::{Seg2, Vec2};
+        use solidcraft_geom::paper::{Group, Item, ObjectKind};
+        let line = Seg2::Line { a: Vec2::new(-20.0, 0.0), b: Vec2::new(20.0, 0.0) };
+        let stroke = Item::Stroke { path: vec![line], closed: false, width_mm: 0.35, pattern: None };
+        SheetView {
+            view,
+            resolved: 7,
+            shows: vec![ShownBody { path: vec![1], body: "Block".into(), reference: false, geometry: u64::MAX, threads: Vec::new() }],
+            group: Arc::new(Group { object: view, kind: ObjectKind::View, items: vec![stroke] }),
+            boundary: None,
+            model_centre: Vec2::new(50.0, 25.0),
+            why: None,
+            pictures: Vec::new(),
+        }
+    }
+
+    /// Each drawing's sheet cache entry as the file keeps it.
+    fn sheet_entries(bytes: &[u8]) -> BTreeMap<u64, FiledSheet> {
+        sheet_cache::read(&mut PackageReader::new(Cursor::new(bytes)).unwrap())
+    }
+
+    /// The views of an entry with no picture parts.
+    fn views_of(entry: &[u8]) -> Vec<SheetView> {
+        sheet_views(&FiledSheet::from(entry))
+    }
+
+    /// View `view` with picture `source`: 3 by 2 pixels, each its own colour.
+    fn pictured(view: u64, source: u64) -> SheetView {
+        let rows: Vec<u8> = (0..24).map(|k| (k * 10 + source as usize) as u8).collect();
+        let picture = SheetPixels { source, looks: 11, dpi: 150.0, tests: 6, size: [3, 2], rows: Some(Arc::from(rows)) };
+        SheetView { pictures: vec![picture], ..sheet_view(view) }
+    }
+
+    /// A drawing's lines come back as saved; lines kept unread are saved again byte for byte; a
+    /// drawing with no current view has no entry; the document is the same with them or without.
+    #[test]
+    fn a_drawings_lines_come_back_from_the_file() {
+        let doc = document();
+        let lines = [(3, SheetLines::Views(vec![sheet_view(30), sheet_view(31)])), (4, SheetLines::Views(Vec::new()))];
+        let bytes = write_design_container_with_sheets(&doc, DesignCompression::Fast, None, None, None, &lines).unwrap();
+        let entries = sheet_entries(&bytes);
+        assert_eq!(entries.keys().copied().collect::<Vec<_>>(), [3]);
+        assert_eq!(sheet_views(&entries[&3]), [sheet_view(30), sheet_view(31)]);
+        assert!(entries[&3].pictures.is_empty());
+        assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+        let kept = [(3, SheetLines::Kept(entries[&3].clone()))];
+        let again = write_design_container_with_sheets(&doc, DesignCompression::Fast, None, None, None, &kept).unwrap();
+        assert_eq!(sheet_entries(&again)[&3], entries[&3]);
+    }
+
+    /// Lines too big for the file are left out, never a failed save.
+    #[test]
+    fn a_sheet_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
+        let doc = document();
+        let lines = [(3, SheetLines::Views((0..400).map(sheet_view).collect()))];
+        let bytes = write_container(&doc, DesignCompression::Fast, None, None, None, &lines, 70_000, None).unwrap();
+        assert!(sheet_entries(&bytes).is_empty());
+        assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+    }
+
+    /// An entry of another build or format, one that doesn't read, or a view whose lines fail a
+    /// paper scene's checks is a miss: none of its views, or that view alone.
+    #[test]
+    fn a_sheet_cache_mismatch_is_only_a_miss() {
+        let lines = [(3, SheetLines::Views(vec![sheet_view(30)]))];
+        let bytes = write_design_container_with_sheets(&document(), DesignCompression::Fast, None, None, None, &lines).unwrap();
+        let entry: Value = serde_json::from_slice(&sheet_entries(&bytes)[&3].entry).unwrap();
+        for (key, value) in [("build", json!("another/x86_64-linux")), ("format", json!("solidcraft-sheet-cache/0")), ("more", json!(1))] {
+            let mut changed = entry.clone();
+            changed[key] = value;
+            assert!(views_of(&serde_json::to_vec(&changed).unwrap()).is_empty(), "{key}");
+        }
+        assert!(views_of(b"{").is_empty());
+        // A line reaching past the paper scene's coordinate bound.
+        let mut far = sheet_view(31);
+        let line = solidcore_record::Seg2::Line { a: solidcore_record::Vec2::new(0.0, 0.0), b: solidcore_record::Vec2::new(1e6, 0.0) };
+        let stroke = solidcraft_geom::paper::Item::Stroke { path: vec![line], closed: false, width_mm: 0.35, pattern: None };
+        Arc::make_mut(&mut far.group).items = vec![stroke];
+        let mut two = entry.clone();
+        two["views"].as_array_mut().unwrap().push(serde_json::to_value(&far).unwrap());
+        assert_eq!(views_of(&serde_json::to_vec(&two).unwrap()), [sheet_view(30)]);
+    }
+
+    /// A shaded view's picture comes back pixel for pixel from a PNG part of its own, stored as it is;
+    /// an unread drawing's parts are saved again byte for byte.
+    #[test]
+    fn a_views_pictures_come_back_from_the_file() {
+        let doc = document();
+        let lines = [(3, SheetLines::Views(vec![pictured(30, 40), sheet_view(31)]))];
+        let bytes = write_design_container_with_sheets(&doc, DesignCompression::Fast, None, None, None, &lines).unwrap();
+        let entries = sheet_entries(&bytes);
+        assert_eq!(entries[&3].pictures.keys().copied().collect::<Vec<_>>(), [(30, 40)]);
+        assert_eq!(sheet_views(&entries[&3]), [pictured(30, 40), sheet_view(31)]);
+        let kept = [(3, SheetLines::Kept(entries[&3].clone()))];
+        let again = write_design_container_with_sheets(&doc, DesignCompression::Fast, None, None, None, &kept).unwrap();
+        assert_eq!(sheet_entries(&again)[&3], entries[&3]);
+    }
+
+    /// A picture whose part is missing, doesn't decode, or isn't the size or type its entry says is a
+    /// miss for that picture alone: its view's lines and the other pictures still read.
+    #[test]
+    fn a_picture_that_doesnt_match_its_entry_is_only_a_miss() {
+        let lines = [(3, SheetLines::Views(vec![pictured(30, 40), pictured(31, 41)]))];
+        let bytes = write_design_container_with_sheets(&document(), DesignCompression::Fast, None, None, None, &lines).unwrap();
+        let filed = sheet_entries(&bytes).remove(&3).unwrap();
+        let png = filed.pictures[&(30, 40)].clone();
+        let grey = {
+            let mut out = Vec::new();
+            let mut encoder = ::png::Encoder::new(&mut out, 3, 2);
+            encoder.set_color(::png::ColorType::Grayscale);
+            encoder.write_header().unwrap().write_image_data(&[0; 6]).unwrap();
+            out
+        };
+        for (what, part) in
+            [("missing", None), ("cut short", Some(&png[..png.len() / 2])), ("grey", Some(&grey[..])), ("not a PNG", Some(&b"PNG"[..]))]
+        {
+            let mut broken = filed.clone();
+            match part {
+                Some(bytes) => broken.pictures.insert((30, 40), Arc::from(bytes)),
+                None => broken.pictures.remove(&(30, 40)),
+            };
+            let views = sheet_views(&broken);
+            assert_eq!((views[0].pictures.len(), views[1].pictures.len()), (0, 1), "{what}");
+            assert_eq!(views[0], sheet_view(30), "{what}");
+        }
+        let mut entry: Value = serde_json::from_slice(&filed.entry).unwrap();
+        for size in [json!([3, 3]), json!([0, 0]), json!([65536, 65536])] {
+            entry["views"][0]["pictures"][0]["size"] = size.clone();
+            let sized = FiledSheet { entry: Arc::from(serde_json::to_vec(&entry).unwrap()), ..filed.clone() };
+            assert!(sheet_views(&sized)[0].pictures.is_empty(), "{size}");
+        }
+    }
+
+    #[test]
+    fn sheet_cache_prefixes_and_mutations_never_panic() {
+        let lines = [(3, SheetLines::Views(vec![sheet_view(30)]))];
+        let bytes = write_design_container_with_sheets(&document(), DesignCompression::Fast, None, None, None, &lines).unwrap();
+        let entry = sheet_entries(&bytes)[&3].entry.to_vec();
+        for n in 0..entry.len() {
+            let mut changed = entry.clone();
+            changed[n] ^= 0xff;
+            assert!(std::panic::catch_unwind(|| (views_of(&entry[..n]), views_of(&changed))).is_ok());
+        }
+        let lines = [(3, SheetLines::Views(vec![pictured(30, 40)]))];
+        let pictured = write_design_container_with_sheets(&document(), DesignCompression::Fast, None, None, None, &lines).unwrap();
+        let filed = sheet_entries(&pictured).remove(&3).unwrap();
+        let png = filed.pictures[&(30, 40)].to_vec();
+        for n in 0..png.len() {
+            let mut changed = png.clone();
+            changed[n] ^= 0xff;
+            for part in [&png[..n], &changed[..]] {
+                let broken = FiledSheet { pictures: [((30, 40), Arc::from(part))].into(), ..filed.clone() };
+                assert!(std::panic::catch_unwind(|| sheet_views(&broken)).is_ok());
+            }
+        }
+        for n in (0..bytes.len()).step_by((bytes.len() / 128).max(1)) {
+            let mut changed = bytes.clone();
+            changed[n] ^= 0xff;
+            for bytes in [&bytes[..n], &changed[..]] {
+                if let Ok(mut reader) = PackageReader::new(Cursor::new(bytes)) {
+                    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sheet_cache::read(&mut reader)));
+                    assert!(read.is_ok_and(|entries| entries.values().all(|entry| std::panic::catch_unwind(|| sheet_views(entry)).is_ok())));
+                }
+            }
         }
     }
 

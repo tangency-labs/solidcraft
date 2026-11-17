@@ -265,7 +265,7 @@ fn ask(pictures: &dyn Pictures, source: u64, grid: &PixelGrid, window: GridWindo
 /// Picture `source`'s pixels in `window` of its own `grid` as a PNG file of their own (RGBA,
 /// straight alpha), for SVG and PDF to embed: asked for [`BAND_BYTES`] of rows at a time, and
 /// refused once the file passes `max_bytes`.
-pub(super) fn picture_png(source: u64, grid: &PixelGrid, window: GridWindow, pictures: &dyn Pictures, max_bytes: usize) -> Result<Vec<u8>> {
+pub(crate) fn picture_png(source: u64, grid: &PixelGrid, window: GridWindow, pictures: &dyn Pictures, max_bytes: usize) -> Result<Vec<u8>> {
     let png_error = |e: png::EncodingError| IoError::Invalid(format!("picture {source}: {e}"));
     let io_error = |e: std::io::Error| IoError::Invalid(format!("picture {source}: {e}"));
     let pixels = [window.x1.saturating_sub(window.x0), window.y1.saturating_sub(window.y0)];
