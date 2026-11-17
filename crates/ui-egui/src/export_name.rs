@@ -81,12 +81,17 @@ fn is_windows_device(name: &str) -> bool {
 /// the first exported body's name. The `{body}` template restores that earlier choice.
 pub(crate) fn default_for_bodies(app: &crate::SolveApp, bodies: &[String]) -> String {
     let all = crate::open_meshing::session_world(&app.session);
-    if !bodies.is_empty() && all.bodies.len() == bodies.len()
-        && all.bodies.iter().all(|body| bodies.contains(&body.name))
-    {
-        return app.session.doc.name.clone();
+    if !bodies.is_empty() && all.bodies.len() == bodies.len() && all.bodies.iter().all(|body| bodies.contains(&body.name)) {
+        return safe_design_name(app);
     }
-    bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone())
+    bodies.first().cloned().unwrap_or_else(|| safe_design_name(app))
+}
+
+/// Sanitize the design name before using it as a filename fallback. Explicit templates
+/// already go through `stem` and retain their existing behaviour.
+fn safe_design_name(app: &crate::SolveApp) -> String {
+    let names = Names { design: &app.session.doc.name, body: None, metadata: &app.session.doc.metadata };
+    stem("{design}", &names, "Untitled")
 }
 
 /// The file name, without extension, that an export of `body` from the open design offers, from
