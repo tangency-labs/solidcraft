@@ -42,9 +42,8 @@
 //!   uninitialised locals) leave [`Vec3::UNDEF`]; a failed `EvaluateGeometric` keeps
 //!   what `smgu_FrenetFromDerivatives` wrote before failing (see
 //!   `evaluate_geometric_partial`).
-//! - **Statuses passed on (WR-663).** With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
-//!   fork (tangency-labs/smlib 8311f8e): `SmCCIGlobalSolver::LocalSolve` (box projections
+//! - **Statuses passed on (WR-663).** The statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e):`SmCCIGlobalSolver::LocalSolve` (box projections
 //!   and intersection, end points, continuities, end-point drops) and
 //!   `GlobalPropertyAnalysis`'s angle, evaluations and frame (its `EvaluateGeometric` and
 //!   comb unitizations stay dropped, as the fork).
@@ -61,11 +60,11 @@ use crate::curve::curve::p2::{
     at, evaluate_continuity, CciGlobalSolver, Curve, CurvePropertyGs, CurvePropertyType,
 };
 use crate::curve::curve::p3::{eval_n, local_curve_intersect, set_param, PointSolveOptions};
-use crate::curve::curve::p4::{filter_solution, point_or_pass_on};
+use crate::curve::curve::p4::filter_solution;
 use crate::curve::curve::p5::{find_additional_cc_tangent_guess, make_curve_cache};
 use crate::curve::curve_cache::BezierSpan;
 use crate::curve::projected_curve::{OwnsCurve, ProjectedCurve};
-use crate::error::{ignore_or_pass_on, ignored, ignored_or_pass_on, passed_on, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -94,14 +93,14 @@ const OP_GPA: &str = "curve::curve::p7::Curve::global_property_analysis";
 const COMB_COUNT: usize = 150;
 
 /// `pBox->ProjectToPlane(*pBox, ...)`: the box projected in place (status ignored;
-/// a failed projection leaves what it wrote). With `pass_on` (the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`]) the status is returned,
-/// as the fork (`SER`, tangency-labs/smlib 8311f8e).
-fn project_in_place(b: &mut PseudoBox, proj: &Projection, pass_on: bool) -> Result<()> {
+/// a failed projection leaves what it wrote). The status is returned, as the fork
+/// (`SER`, tangency-labs/smlib 8311f8e).
+fn project_in_place(b: &mut PseudoBox, proj: &Projection) -> Result<()> {
     let mut out = *b;
     let r = b.project_to_plane_into(proj, &mut out);
     *b = out;
-    ignore_or_pass_on(r, pass_on)
+    r?;
+    Ok(())
 }
 
 /// `SmExtent1d::operator==`: both ends the same within the scaled zero.
@@ -187,7 +186,6 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         let interval1 = self.interval1;
         let interval2 = self.interval2;
         // the fork passes on the statuses SMLib drops here (tangency-labs/smlib 8311f8e)
-        let pass_on = k.fixes.query_statuses_pass_on;
 
         // expand target interval 3d bounding boxes
         let mut expanded_box = pseudo_box1;
@@ -271,9 +269,9 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
             projected = Some([make(parent_curve1)?, make(parent_curve2)?]);
 
             // project the bounding boxes to the common plane
-            project_in_place(&mut expanded_box, &proj, pass_on)?;
-            project_in_place(&mut pseudo_box1, &proj, pass_on)?;
-            project_in_place(&mut pseudo_box2, &proj, pass_on)?;
+            project_in_place(&mut expanded_box, &proj)?;
+            project_in_place(&mut pseudo_box1, &proj)?;
+            project_in_place(&mut pseudo_box2, &proj)?;
         } // end looking for a projection solution
 
         let (curve1, curve2): (&Curve, &Curve) = match &projected {
@@ -319,10 +317,9 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         if self.base.operation == SolverOperation::IntersectionTest {
             let mut bbox = curve_node1.bbox;
             bbox.expand_absolute(tol);
-            // (status ignored: a disjoint result stays Init(); passed on with the
-            // opt-in fix)
-            let mut result = passed_on(bbox.intersect(&curve_node2.bbox), pass_on)?
-                .unwrap_or_else(|_| Extent3d::new());
+            // (status ignored upstream: a disjoint result stays Init(); passed on as the
+            // fork)
+            let mut result = bbox.intersect(&curve_node2.bbox)?;
 
             // Store a union of the intersection 3D bounding box and UV box for
             // the intersections.
@@ -433,8 +430,8 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         }
 
         // get sIvl1 endPoints and the chord between them
-        let line_pt1 = point_or_pass_on(k, curve1, ivl1.min())?;
-        let end1 = point_or_pass_on(k, curve1, ivl1.max())?;
+        let line_pt1 = curve1.evaluate_point(k, ivl1.min())?;
+        let end1 = curve1.evaluate_point(k, ivl1.max())?;
         let line_vec1 = end1 - line_pt1;
 
         // trim sIvl2 to m_crInterval2 - set trimmed endContinuities = SM_CT_DISCONTINUOUS
@@ -453,8 +450,8 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
         }
 
         // get sIvl2 EndPoints and the chord between them
-        let line_pt2 = point_or_pass_on(k, curve2, ivl2.min())?;
-        let end2 = point_or_pass_on(k, curve2, ivl2.max())?;
+        let line_pt2 = curve2.evaluate_point(k, ivl2.min())?;
+        let end2 = curve2.evaluate_point(k, ivl2.max())?;
         let line_vec2 = end2 - line_pt2;
 
         // adjust continuity for boundary endSpans on closed curves
@@ -472,22 +469,19 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
                     && is_zero(crv_ivl.max() - parent_ivl.max()))
                 && parent.is_closed(k, &parent_ivl, 0.0)?
             {
-                // get the curve's end continuity (status ignored; passed on with the
-                // opt-in fix)
-                let continuity = ignored_or_pass_on(
-                    evaluate_continuity(
-                        k,
-                        parent,
-                        parent_ivl.min(),
-                        false,
-                        parent,
-                        parent_ivl.max(),
-                        true,
-                        ANG_TOL_DEG,
-                    ),
-                    pass_on,
+                // get the curve's end continuity (status ignored upstream; passed on as
+                // the fork)
+                let continuity = evaluate_continuity(
+                    k,
+                    parent,
+                    parent_ivl.min(),
+                    false,
+                    parent,
+                    parent_ivl.max(),
+                    true,
+                    ANG_TOL_DEG,
                 )?
-                .map_or(ContinuityType::Discontinuous, |c| c.continuity);
+                .continuity;
                 // set span endContinuities as appropriate
                 if is_zero(ivl.min() - parent_ivl.min()) {
                     conts[0] = continuity;
@@ -818,19 +812,16 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
             }
 
             // find min distance between the other span and this span end point
-            // (status ignored; passed on with the opt-in fix)
-            let (found_answer, point_solution): (bool, Solution<O>) = ignored_or_pass_on(
-                other_curve.local_point_solve(
+            // (status ignored upstream; passed on as the fork)
+            let (found_answer, point_solution): (bool, Solution<O>) = other_curve
+                .local_point_solve(
                     k,
                     &other_ivl,
                     SolverOperation::Minimize,
                     end_pt,
                     &point_opts,
                     other_ivl.evaluate(0.5),
-                ),
-                pass_on,
-            )?
-            .unwrap_or((false, Solution::new()));
+                )?;
 
             // when the end point is within tolerance
             if !(found_answer && point_solution.start.solution_value < tol) {
@@ -1173,13 +1164,9 @@ impl Curve {
 
             let planar = self.is_planar(k, EFF_ZERO)?;
             if planar.is_planar {
-                // (status ignored: a failed angle is 0; passed on with the opt-in fix,
+                // (status ignored upstream: a failed angle is 0; passed on as the fork,
                 // tangency-labs/smlib 8311f8e)
-                let angle = passed_on(
-                    planar.normal.angle_between(opt(0)?),
-                    k.fixes.query_statuses_pass_on,
-                )?
-                .unwrap_or(0.0);
+                let angle = planar.normal.angle_between(opt(0)?)?;
                 if angle < EFF_ZERO {
                     return Ok(());
                 }
@@ -1283,13 +1270,10 @@ impl Curve {
                         | P::MinimizeRadiusOfCurvature
                         | P::MaximizeRadiusOfCurvature
                 );
-                // (status ignored; this and the frame below are passed on with the
-                // opt-in fix, tangency-labs/smlib 8311f8e; the geometric evaluation's
+                // (status ignored upstream; this and the frame below are passed on as
+                // the fork, tangency-labs/smlib 8311f8e; the geometric evaluation's
                 // status stays dropped, as the fork: a straight sample has no torsion)
-                let pass_on = k.fixes.query_statuses_pass_on;
-                let mut pv: [Vec3; 3] =
-                    ignored_or_pass_on(eval_n(k, self, t, 2, true, !exact), pass_on)?
-                        .unwrap_or([Vec3::UNDEF; 3]);
+                let mut pv: [Vec3; 3] = eval_n(k, self, t, 2, true, !exact)?;
                 let geom = evaluate_geometric_partial(k, self, t)?;
                 out.comb_points.push(pv[0]);
 
@@ -1302,9 +1286,10 @@ impl Curve {
                 let dir = if degenerate {
                     Vec3::new(0.0, 0.0, 1.0)
                 } else if linear {
-                    // (status ignored: the Y axis output stays uninitialised)
-                    passed_on(geom[1].make_unit_ortho_vectors(None), pass_on)?
-                        .map_or(Vec3::UNDEF, |[_, y, _]| y)
+                    // (status ignored upstream: the Y axis output stays uninitialised;
+                    // passed on as the fork)
+                    let [_, y, _] = geom[1].make_unit_ortho_vectors(None)?;
+                    y
                 } else {
                     geom[2] / kappa
                 };

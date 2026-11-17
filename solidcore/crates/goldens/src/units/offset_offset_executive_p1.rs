@@ -3779,7 +3779,9 @@ mod tests {
         for (branch, dependency, record) in [
             (Probe::ReplaceEmpty, None::<&str>, plain(1000)),
             (Probe::RemoveNoMerge, None, plain(1000)),
-            (Probe::RemoveEmpty, None, plain(1000)),
+            // RemoveFaces refuses the empty result whose editing is disabled; upstream
+            // ignores that status and the fork passes it on (WR-658)
+            (Probe::RemoveEmpty, None, plain(1001)),
             (Probe::SideWallNull, None, plain(1000)),
             (Probe::SideWallUnmapped, None, plain(1000)),
             (Probe::FillEmpty, None, plain(1000)),

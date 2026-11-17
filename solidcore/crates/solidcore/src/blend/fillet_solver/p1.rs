@@ -398,7 +398,7 @@ impl FilletSurfaceGenerator {
                     .ok_or_else(|| none("the second side's uv curve"))?
                     .clone();
                 let mut g = *g;
-                // (a blend by its definition with `fillet_round_as_definition`, 4a10ed8)
+                // (a blend by its definition, 4a10ed8)
                 return g.create_surface(
                     k,
                     approx_tol_3d,
@@ -426,7 +426,7 @@ impl FilletSurfaceGenerator {
     /// thumbweight, the certificate), as the fork's generator object does.
     ///
     /// `ball`: what the circular generator reads off the solver (`None` where the caller
-    /// has no such solver); with it and `fixes.fillet_round_as_definition` a constant
+    /// has no such solver); with it a constant
     /// round between NURBS faces is its definition, the rails and uv curves rebuilt on its
     /// stations ([`CircularCrossSectionFsg::definition_surface`], the fork's cc08236).
     /// With it, a round whose centre line or a
@@ -704,6 +704,11 @@ pub struct FilletSolver {
     /// surface before the trace ([`crate::blend::fillet_tangent_rollover`]); the rails are made
     /// on it.
     pub rolled_faces: [Option<FaceId>; 2],
+    /// Not upstream (solidcore-native, #15767): how a base surface that closes on itself bounds
+    /// the plane solves ([`SeamDomain`]): wrapped across its seam while the ball's section
+    /// (`ball_section_at`) is solved, extended past it (as upstream) for every other solve, the
+    /// trace's included.
+    pub seam_domain: SeamDomain,
 }
 
 impl FilletSolver {
@@ -750,6 +755,7 @@ impl FilletSolver {
             g1_knots: Vec::new(),
             detached: Vec::new(),
             rolled_faces: [None, None],
+            seam_domain: SeamDomain::Extended,
             chamfer: None,
             law_corner_pieces: Vec::new(),
         }
@@ -1932,6 +1938,83 @@ impl FilletSolver {
         }
         Ok(())
     }
+}
+
+/// Not upstream (solidcore-native, #15767): how a base surface that closes on itself in a
+/// direction bounds a plane solve ([`FilletSolver::seam_domain`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SeamDomain {
+    /// Over its natural domain extended past its ends (`SetupOffsetExtension`), as upstream.
+    #[default]
+    Extended,
+    /// Over its natural interval in each direction in which it closes ([`seam_periods`]),
+    /// wrapping across its seam: a root just past the seam is found on the same surface, where
+    /// the extension past the seam is no longer the closed surface.
+    Wrapped,
+}
+
+/// Not upstream (solidcore-native, #15767): each parameter direction, `(u, v)`, in which
+/// `surface` closes on itself over its natural domain, with its natural interval there: the
+/// directions `IsPeriodic` finds periodic, the test [`FilletSolver::setup_offset_extension`]
+/// extends a periodic direction by. `None` in a direction that does not close, and where the
+/// test fails (the solve is then bounded there as before). Wrapping a direction only widens
+/// where a solve looks for its root: the root it returns is a point of the surface wherever it
+/// is found, and is judged as such by its caller.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`], a cancellation and a not-certified result from the evaluations.
+pub(crate) fn seam_periods(k: &Kernel, surface: &Surface) -> Result<[Option<Extent1d>; 2]> {
+    let natural = surface.natural_uv_domain_with_nurb(k)?;
+    let mut out = [None, None];
+    for (slot, (dir, interval)) in out.iter_mut().zip([
+        (SurfParamType::U, natural.u_interval()),
+        (SurfParamType::V, natural.v_interval()),
+    ]) {
+        let periodic = match surface.is_periodic(k, &natural, dir) {
+            Ok(periodic) => periodic,
+            Err(e)
+                if matches!(
+                    e,
+                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                ) || e.is_not_certified() =>
+            {
+                return Err(e);
+            }
+            Err(_) => false,
+        };
+        if periodic && interval.max() > interval.min() {
+            *slot = Some(interval);
+        }
+    }
+    Ok(out)
+}
+
+/// Not upstream (solidcore-native, #15767): the solve parameters `index` and `index + 1`,
+/// `surface`'s `u` and `v`, over its natural interval and wrapping there, in each direction in
+/// which it closes on itself ([`seam_periods`]); the others as they were. A parameter the solve
+/// does not have is left alone.
+///
+/// # Errors
+///
+/// Those of [`seam_periods`].
+pub(crate) fn wrap_closed_directions(
+    k: &Kernel,
+    surface: &Surface,
+    intervals: &mut ExtentNd,
+    periodicities: &mut [bool],
+    index: usize,
+) -> Result<()> {
+    for (i, period) in (index..).zip(seam_periods(k, surface)?) {
+        let Some(interval) = period else {
+            continue;
+        };
+        if let (Some(slot), Some(periodic)) = (intervals.get_mut(i), periodicities.get_mut(i)) {
+            *slot = interval;
+            *periodic = true;
+        }
+    }
+    Ok(())
 }
 
 /// An `SmBoolean` query whose failed evaluation upstream returns the status, read as
@@ -3529,7 +3612,6 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
     tk.rng = k.rng.clone();
     tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
-    tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     b.edge_mut(rail)?
         .curve
         .as_mut()

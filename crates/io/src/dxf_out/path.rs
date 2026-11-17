@@ -62,14 +62,13 @@ fn refusal(error: geometry::PathRefusal) -> IoError {
         None => invalid(&reason),
     }
 }
-// Match Out::num exactly for admission; do not replace unrounded output controls.
-const ENCODING: geometry::ScalarEncoding = geometry::ScalarEncoding { round_trip: legacy_number, min_ellipse_ratio: 1e-12, turn_snap_radians: 1e-12 };
-fn legacy_number(value: f64) -> Option<f64> {
-    if !value.is_finite() {
-        return None;
-    }
-    format!("{value:.12}").parse::<f64>().ok().filter(|v| v.is_finite())
-}
+// Admission certifies what the writer writes: its own length and number rules, not a copy.
+const ENCODING: geometry::ScalarEncoding = geometry::ScalarEncoding {
+    length: |value| super::written_length(value).ok(),
+    dimensionless: |value| super::written_number(value).ok(),
+    min_ellipse_ratio: 1e-12,
+    turn_snap_radians: 1e-12,
+};
 fn parts(path: DxfPath<'_>) -> (&[Seg2], bool) {
     match path {
         DxfPath::Open(segs) => (segs, false),

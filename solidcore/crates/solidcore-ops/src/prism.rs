@@ -262,7 +262,7 @@ pub struct PrismSection {
     pub hi: f64,
     /// Its section, exact: lines and arcs, the outer loop counter-clockwise, the holes clockwise.
     pub region: Region2,
-    /// How far the levels may be off the body's caps.
+    /// How far the levels and section may be off the body's caps, including frame conversion.
     pub tolerance: f64,
     /// An enclosure of its volume.
     pub volume: Interval,
@@ -299,7 +299,7 @@ pub fn prism_equivalent(a: &Body, b: &Body) -> Result<Option<bool>> {
         });
     }
     run_on("prism_equivalent", &[("a", a), ("b", b)], |k| {
-        let (ga, gb) = (a.lock(), b.lock());
+        let (ga, gb) = Body::lock_pair(a, b);
         Ok(measure::equivalent(k, &ga, &gb))
     })
 }
@@ -391,6 +391,32 @@ pub fn region_area(region: &Region2) -> Result<kp::Area> {
         .map_err(|_| Error::Profile(ProfileRefusal::FreeForm))
 }
 
+/// The section loop a closed chain of nodes samples ([`solidcore::prism::fit::fit_loop`]): a
+/// full circle where the nodes are one within `tolerance`, else the polygon of their corners,
+/// each straight run joined within three times `epsilon`. For a mesh's cap boundary, which the
+/// caller certifies against the mesh afterwards.
+///
+/// # Errors
+/// [`Error::Status`] (input refused) past the straight-run join's work bound.
+pub fn fitted_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Result<Loop2> {
+    let points: Vec<_> = points.iter().map(|p| convert::vec2(*p)).collect();
+    Ok(
+        match solidcore::prism::fit::fit_loop(&points, tolerance, epsilon)
+            .map_err(crate::error::status)?
+        {
+            solidcore::prism::fit::FittedLoop::Circle { center, radius } => {
+                Loop2::circle(convert::record_vec2(center), radius)
+            }
+            solidcore::prism::fit::FittedLoop::Polygon(corners) => Loop2::polygon(
+                &corners
+                    .into_iter()
+                    .map(convert::record_vec2)
+                    .collect::<Vec<_>>(),
+            ),
+        },
+    )
+}
+
 /// Whether `lp` holds `p` by the even–odd rule, decided exactly ([`kp::Loop2::holds`]): `None`
 /// when `p` is on the loop or within rounding of it.
 #[must_use]
@@ -428,6 +454,15 @@ pub fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc>
         start: arc.start,
         end: arc.end,
     })
+}
+
+/// Whether a piece of a planar curve within the reading tolerance of its chord is read as the
+/// arc it is proved on before that line ([`read::arc_before_line`]): `spans` its Bézier spans
+/// (`[x w, y w, w]` in the plane), `zone` the model's zone tolerance
+/// ([`crate::sweep::zone_tolerance`]).
+#[must_use]
+pub fn arc_before_line(spans: &[Vec<[f64; 3]>], zone: f64) -> bool {
+    read::arc_before_line(spans, zone)
 }
 
 /// Recognize one directed turn of arcs with the same stored support.

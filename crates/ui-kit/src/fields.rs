@@ -981,14 +981,35 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 
 /// Native dropdown with kit arrow and scenario option handles. Tokens: `text_dim; scope control/font tokens`.
 pub fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
+    dropdown_indexed(ui, id, selected, options, false)
+}
+
+/// Close after keyboard or accessibility selection, return focus to the trigger, and keep
+/// the Enter that picked the option from submitting the enclosing form.
+pub fn dropdown_with_keyboard_close(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
+    dropdown_indexed(ui, id, selected, options, true)
+}
+
+fn dropdown_indexed(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], close_on_keyboard: bool) -> Response {
     let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
-    dropdown_menu(ui, id, text, |ui| {
+    let mut restore_focus = false;
+    let trigger = dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
             solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            // Non-pointer activation does not trigger the popup's click-to-close.
+            if close_on_keyboard && response.clicked() && !response.clicked_by(egui::PointerButton::Primary) {
+                ui.close();
+                restore_focus = true;
+            }
         }
-    })
+    });
+    if restore_focus {
+        trigger.request_focus();
+        ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    }
+    trigger
 }
 
 /// The standard dropdown with a leading application icon on the current value and each option.
@@ -1312,11 +1333,22 @@ pub fn cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, in
 
 /// Stable-ID cell/name editor with a caller-supplied character cap. Tokens: cell_editor tokens.
 pub fn bounded_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize) -> Response {
-    cell_editor_frame(ui, id, value, hint, invalid, limit, true)
+    cell_editor_frame(ui, id, value, hint, invalid, limit, EditorSurface::Form)
 }
 
-fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, frame: bool) -> Response {
-    let t = Tokens::get();
+enum EditorSurface {
+    Form,
+    Frameless,
+    Shell,
+}
+
+fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, surface: EditorSurface) -> Response {
+    let mut t = Tokens::get();
+    let frame = !matches!(surface, EditorSurface::Frameless);
+    if matches!(surface, EditorSurface::Shell) {
+        t.control_fill = t.field;
+        t.form_ink = t.text;
+    }
     let editor = text_input(egui::TextEdit::singleline(value))
         .char_limit(limit)
         .id(id)
@@ -1475,6 +1507,22 @@ pub fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     solidcraft_theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
     response
+}
+
+/// Search on application chrome uses the shell palette, including custom themes.
+pub fn shell_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+    let t = Tokens::get();
+    ui.scope(|ui| {
+        let visuals = ui.visuals_mut();
+        visuals.weak_text_color = Some(t.text_dim);
+        visuals.selection.bg_fill = t.accent_soft;
+        visuals.selection.stroke = egui::Stroke::new(1.0, t.accent);
+        for state in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active] {
+            state.bg_stroke = egui::Stroke::new(1.0, t.border);
+        }
+        cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Shell)
+    })
+    .inner
 }
 
 /// Compact icon action opening the shared searchable menu.
@@ -2092,7 +2140,7 @@ pub fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, m
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(field).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(field));
-            cell_editor_frame(ui, id, value, hint, false, usize::MAX, false)
+            cell_editor_frame(ui, id, value, hint, false, usize::MAX, EditorSurface::Frameless)
         })
         .inner;
     let button = egui::Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);

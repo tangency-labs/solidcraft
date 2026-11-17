@@ -294,9 +294,9 @@ fn corner_forms(schema: &mut Schema) {
 // Trim, break, extend
 
 /// Remove the piece of a curve between the nearest crossings around a point (a curve nothing
-/// crosses goes whole). The cut ends are joined to the curve that cut them. Trimming a line that
-/// has single-line offsets, or one that is such an offset, releases their linked extents into
-/// the dimensions that held them. One undo step.
+/// crosses goes whole). The cut ends are joined to the curve that cut them. Trimming a curve that
+/// has offsets, or a piece of an offset's copy, releases the offset into the dimensions that held
+/// it (#8074). One undo step.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = trim_required)]
 pub struct TrimParams {
