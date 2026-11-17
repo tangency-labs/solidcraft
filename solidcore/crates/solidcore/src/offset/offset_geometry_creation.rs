@@ -1853,7 +1853,8 @@ fn join_through_tangent_points(
 
 /// Not upstream: the joined curve `curve` without the copies of its joint knot at `at`
 /// whose removal moves the curve by no more than its own scaled zero,
-/// `SM_EFF_ZERO (1 + max |P|)` over its control points' coordinates, each.
+/// `SM_EFF_ZERO (1 + extent)`, where the extent is the largest spread of the curve's
+/// control points along a coordinate axis ([`joint_knot_tolerance`]).
 ///
 /// Where the two pieces were cut from one curve (`intersect::surface_intersector::
 /// singular_splits` splits a crossing curve at the tangent node it passes through, WR-77),
@@ -1868,11 +1869,21 @@ fn join_through_tangent_points(
 /// sheet of `tests/issue_1502_thicken_rim_halves.rs` took tolerance 9.3e-5 from a drop span
 /// that fits to 7e-8 once the knot is gone).
 ///
-/// The test is the curve's shape at the joint, not where the pieces came from. Pieces
-/// traced apart that meet at a true break (a corner, a turn of the tangent) keep their
-/// knot. Pieces traced apart whose join happens to be smooth to rounding lose it as cut
-/// pieces do: two collinear line pieces through a saddle's node (#17210) join into one
-/// line. Either way the bound below covers the move.
+/// The test is the curve's shape at the joint, not where the pieces came from or where
+/// they lie: the tolerance scales with the curve's size, not its distance from the origin,
+/// so a translated joint is decided the same way (or, far out, where the coordinates'
+/// rounding passes that tolerance, keeps its knot). Pieces traced apart that meet at a
+/// true break (a corner, a turn of the tangent) keep their knot. Pieces traced apart whose
+/// join happens to be smooth to rounding lose it as cut pieces do: two collinear line
+/// pieces through a saddle's node (#17210) join into one line. Either way the bound below
+/// covers the move.
+///
+/// The 3D curve and each UV curve are decided on their own, so they can keep different
+/// knot vectors, against `docs/ssi.md` section 8, invariant 5. That happens at the
+/// `HoodCorner` node: the 3D curve is smooth there and loses all three copies, while the
+/// first UV curve turns there and keeps all three (one copy would come out only within
+/// `1e-8`, a second not even within `1e-4`). Keeping the knot in the 3D curve too brings
+/// the 9.3e-5 edge tolerance back.
 ///
 /// Returns the bound on how far the curve moved: the copies removed times the
 /// tolerance, rounded up. [`BSplineCurve::remove_knot_certified`] keeps a removal only
@@ -1894,12 +1905,7 @@ fn remove_exact_joint_knot(curve: &mut BSplineCurve, at: f64) -> Result<f64> {
     else {
         return Ok(0.0);
     };
-    let mut scale = 0.0_f64;
-    for i in 0..curve.number_control_points()? {
-        let (p, _) = curve.control_point(ControlPointForm::EuclideanRational, i)?;
-        scale = scale.max(p.x.abs()).max(p.y.abs()).max(p.z.abs());
-    }
-    let tol = (Ivl::from(EFF_ZERO) * (Ivl::from(1.0) + Ivl::from(scale))).hi;
+    let tol = joint_knot_tolerance(curve)?;
     if times == 0 || !tol.is_finite() {
         return Ok(0.0);
     }
@@ -1908,6 +1914,30 @@ fn remove_exact_joint_knot(curve: &mut BSplineCurve, at: f64) -> Result<f64> {
         return Ok(0.0);
     }
     Ok((Ivl::from(removed as f64) * Ivl::from(tol)).hi)
+}
+
+/// Not upstream: the tolerance of [`remove_exact_joint_knot`] for `curve`,
+/// `SM_EFF_ZERO (1 + extent)` rounded up, where the extent is the largest spread
+/// `max - min` of the curve's control points along one coordinate axis (a 2D curve's
+/// `z` is `0`): the curve's size, which a translation leaves alone.
+///
+/// # Errors
+///
+/// Those of the control-point queries.
+fn joint_knot_tolerance(curve: &BSplineCurve) -> Result<f64> {
+    let mut low = [f64::INFINITY; 3];
+    let mut high = [f64::NEG_INFINITY; 3];
+    for i in 0..curve.number_control_points()? {
+        let (p, _) = curve.control_point(ControlPointForm::EuclideanRational, i)?;
+        for ((lo, hi), x) in low.iter_mut().zip(high.iter_mut()).zip([p.x, p.y, p.z]) {
+            *lo = lo.min(x);
+            *hi = hi.max(x);
+        }
+    }
+    let extent = low.iter().zip(&high).fold(0.0_f64, |m, (&lo, &hi)| {
+        m.max((Ivl::from(hi) - Ivl::from(lo)).hi)
+    });
+    Ok((Ivl::from(EFF_ZERO) * (Ivl::from(1.0) + Ivl::from(extent))).hi)
 }
 
 /// Removes the element at `index` when it exists; an out-of-range index leaves the list as is.
@@ -7225,6 +7255,96 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
 mod tests {
     use super::*;
     use crate::nurbs::math::CPoint;
+
+    /// The cubic of the joint-knot tests (simple knot `1`, ends `0` and `2.5`), moved by
+    /// `offset` along every axis, cut at `cut` and joined back: the joint knot `cut` at
+    /// full multiplicity. With `kink`, the joint's control point (the one the curve passes
+    /// through there) is moved by `kink` along `y`, which makes the joint a corner.
+    fn rejoined_cubic(offset: f64, cut: f64, kink: f64) -> (BSplineCurve, f64) {
+        let k = Kernel::default();
+        let o = offset;
+        let pw = [
+            CPoint::new(o, o, o, NOW),
+            CPoint::new(1.0 + o, 2.0 + o, 0.5 + o, NOW),
+            CPoint::new(3.0 + o, 3.0 + o, -1.0 + o, NOW),
+            CPoint::new(4.0 + o, 1.0 + o, 2.0 + o, NOW),
+            CPoint::new(6.0 + o, o, 1.0 + o, NOW),
+        ];
+        let u = [0.0, 0.0, 0.0, 0.0, 1.0, 2.5, 2.5, 2.5, 2.5];
+        let whole = BSplineCurve::from_data(3, 4, 8, 3, &pw, &u).unwrap();
+        let mut head = Curve::from(whole.clone_exact());
+        let tail = head.create_by_split_curve(&k, cut).unwrap();
+        let piece = |c: &Curve| match c.kind() {
+            CurveKind::BSpline(b) => b.clone_exact(),
+            _ => panic!("not a B-spline"),
+        };
+        let mut segments = [piece(&head), piece(&tail)];
+        let (mut joined, breaks) =
+            BSplineCurve::create_by_joining_with_breaks(&mut segments, Some(&[true, true]))
+                .unwrap();
+        let at = breaks[1];
+        assert_eq!(at, cut);
+        if kink != 0.0 {
+            let on = joined.evaluate_point(at).unwrap();
+            let i = (0..joined.number_control_points().unwrap())
+                .find(|&i| {
+                    let (p, _) = joined
+                        .control_point(ControlPointForm::EuclideanRational, i)
+                        .unwrap();
+                    p.distance(on) <= 1e-9 * (1.0 + offset.abs())
+                })
+                .expect("the curve passes through a control point at its joint");
+            let (p, _) = joined
+                .control_point(ControlPointForm::EuclideanRational, i)
+                .unwrap();
+            let moved = Point3::new(p.x, p.y + kink, p.z);
+            joined
+                .set_control_point(ControlPointForm::NonRational, i, moved, 1.0)
+                .unwrap();
+        }
+        (joined, at)
+    }
+
+    /// The joint-knot decision depends on the curve's shape, not on where it lies. The
+    /// cubic rejoined at 1.7, moved 1000 out along every axis, loses its knot as at the
+    /// origin, within the same bound. With a kink of 1e-10 at the joint it keeps its knot,
+    /// at the origin and moved out alike, though a tolerance scaled by the largest
+    /// coordinate (1e-9 out there) would take the kink's knot out.
+    #[test]
+    fn a_joint_far_from_the_origin_is_decided_as_at_the_origin() {
+        // the curve's extent is 6 wherever it lies: tolerance EFF_ZERO (1 + 6)
+        let tol = 7.0 * EFF_ZERO * (1.0 + 1e-12);
+        for offset in [0.0, 1000.0] {
+            let (mut smooth, at) = rejoined_cubic(offset, 1.7, 0.0);
+            let whole = rejoined_cubic(offset, 1.7, 0.0).0;
+            let bound = remove_exact_joint_knot(&mut smooth, at).unwrap();
+            assert!(bound > 0.0 && bound <= 3.0 * tol, "{offset}: {bound}");
+            assert_eq!(
+                smooth.knots(None).unwrap(),
+                (vec![0.0, 1.0, 2.5], vec![4, 1, 4])
+            );
+            for j in 0..=25 {
+                let t = 0.1 * f64::from(j);
+                let a = whole.evaluate_point(t).unwrap();
+                let b = smooth.evaluate_point(t).unwrap();
+                assert!(a.distance(b) <= bound, "{offset} {t}: {a:?} {b:?}");
+            }
+
+            let (mut kinked, at) = rejoined_cubic(offset, 1.7, 1e-10);
+            let before = kinked.knots(None).unwrap();
+            assert_eq!(
+                remove_exact_joint_knot(&mut kinked, at).unwrap(),
+                0.0,
+                "{offset}"
+            );
+            assert_eq!(kinked.knots(None).unwrap(), before);
+        }
+        // a tolerance from the largest coordinate, 1e-12 (1 + 1002) out there, takes the
+        // kink's knot out
+        let (mut kinked, at) = rejoined_cubic(1000.0, 1.7, 1e-10);
+        let by_coordinate = (Ivl::from(EFF_ZERO) * (Ivl::from(1.0) + Ivl::from(1002.0))).hi;
+        assert!(kinked.remove_knot_certified(at, 3, by_coordinate).unwrap() > 0);
+    }
 
     /// A vertex move with a NaN distance or a NaN tolerance does not fit.
     #[test]
