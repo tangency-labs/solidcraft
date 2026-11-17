@@ -959,7 +959,7 @@ impl Session {
             project_construction: false,
             disabled_plugins: Default::default(),
             plugin_limits: plugin::default_host_limits(),
-            plugin_state: Default::default(),
+            plugin_state: plugin::AppState::for_process(),
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             keep_print_faces: true,
@@ -1951,6 +1951,8 @@ impl Session {
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();
         let live = spec.live.filter(|_| params.get("live").and_then(Value::as_bool) == Some(true));
+        // What an import's SMLib check found since it was shown is in the model a command reads.
+        self.model.settle_import_checks();
         if live.is_none() {
             self.live_links = None;
             if spec.reads_model && self.model.is_stale() {

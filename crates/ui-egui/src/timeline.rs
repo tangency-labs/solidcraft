@@ -746,6 +746,22 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
     result.import_report.as_deref().map(import_summary)
 }
 
+/// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
+/// what it found joins the import's result, so its History chip warns, and a part to repair is
+/// said on the status line, once per import, in history order. While a check runs the window
+/// looks again a few times a second.
+pub(crate) fn tick_import_checks(app: &mut SolveApp, ctx: &egui::Context) {
+    app.session.model.settle_import_checks();
+    for id in app.session.model.take_import_notices() {
+        if let Some(summary) = app.session.model.result(id).and_then(|r| r.import_report.as_deref()).map(import_summary) {
+            app.set_status(summary, false);
+        }
+    }
+    if app.session.model.checking_imports() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+    }
+}
+
 /// An import's warnings for a person who uses CAD: how many of the file's parts came in as
 /// solids, then what happened to the others, by kind, counted by part (faces for the faces left
 /// out or not drawn), and what may help. Entity numbers and the kernel's wording stay in the
@@ -1624,6 +1640,7 @@ mod tests {
                 issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
                 issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
             ],
+            ..Default::default()
         };
         let summary = super::import_summary(&report);
         assert_eq!(
@@ -1635,7 +1652,8 @@ mod tests {
         );
         assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
         // Only repairs: no advice, and a part alone has no "of" count.
-        let repaired = ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")] };
+        let repaired =
+            ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")], ..Default::default() };
         assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
@@ -3974,7 +3992,7 @@ mod tests {
         let h = two_boxes(false);
         let plain = h.app.session.model.results[0].clone();
         let issue = ImportIssue { kind: IssueKind::Repaired, item: Some(3), part: String::new(), faces: 0, times: 1, detail: "solid #3: …".into() };
-        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues }));
+        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, ..Default::default() }));
         let with = |warning: Option<&str>, import_report| {
             let mut result = plain.clone();
             result.warning = warning.map(str::to_string);

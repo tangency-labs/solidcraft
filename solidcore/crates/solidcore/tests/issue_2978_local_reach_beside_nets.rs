@@ -793,3 +793,126 @@ fn two_revolution_faces_given_planes_build_a_sound_solid() {
         true,
     );
 }
+
+/// The closed C2 cubic through `points` (taken round, each chord's parameter length its
+/// length over the first's), as Bézier spans joined at knots of multiplicity 3, in z = 0:
+/// the periodic fit spline a sketch makes. Each span is the Hermite cubic of its chord and
+/// the second derivatives `m` solving the cyclic system
+/// `h_(i−1) m_(i−1) + 2 (h_(i−1) + h_i) m_i + h_i m_(i+1) = 6 (Δ_i / h_i − Δ_(i−1) / h_(i−1))`.
+fn closed_fit_spline(points: &[(f64, f64)]) -> solidcore::curve::curve::Curve {
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    use solidcore::nurbs::crv_basic::Curve as NurbCurve;
+    use solidcore::nurbs::math::CPoint;
+    let n = points.len();
+    let at = |i: usize| points[i % n];
+    let h: Vec<f64> = (0..n)
+        .map(|i| {
+            let (a, b) = (at(i), at(i + 1));
+            (b.0 - a.0).hypot(b.1 - a.1)
+        })
+        .collect();
+    // the cyclic system, x and y as two right-hand sides, by Gaussian elimination
+    let mut rows: Vec<Vec<f64>> = (0..n)
+        .map(|i| {
+            let p = (i + n - 1) % n;
+            let mut row = vec![0.0; n + 2];
+            row[p] += h[p];
+            row[i] += 2.0 * (h[p] + h[i]);
+            row[(i + 1) % n] += h[i];
+            let (a, b, c) = (at(p), at(i), at(i + 1));
+            row[n] = 6.0 * ((c.0 - b.0) / h[i] - (b.0 - a.0) / h[p]);
+            row[n + 1] = 6.0 * ((c.1 - b.1) / h[i] - (b.1 - a.1) / h[p]);
+            row
+        })
+        .collect();
+    for c in 0..n {
+        let pivot = rows[c].clone();
+        for row in rows.iter_mut().skip(c + 1) {
+            let f = row[c] / pivot[c];
+            for (x, p) in row.iter_mut().zip(&pivot) {
+                *x -= f * p;
+            }
+        }
+    }
+    let mut m = vec![(0.0, 0.0); n];
+    for r in (0..n).rev() {
+        let row = &rows[r];
+        let (mut x, mut y) = (row[n], row[n + 1]);
+        for (a, mj) in row.iter().zip(&m).skip(r + 1).take(n - r - 1) {
+            x -= a * mj.0;
+            y -= a * mj.1;
+        }
+        m[r] = (x / row[r], y / row[r]);
+    }
+    let mut pw = Vec::new();
+    let mut knots = vec![0.0; 4];
+    let mut t = 0.0;
+    for i in 0..n {
+        let (a, b, (ma, mb)) = (at(i), at(i + 1), (m[i], m[(i + 1) % n]));
+        let s = h[i] * h[i] / 6.0;
+        let chord = (b.0 - a.0, b.1 - a.1);
+        let t0 = (
+            chord.0 - (2.0 * ma.0 + mb.0) * s,
+            chord.1 - (2.0 * ma.1 + mb.1) * s,
+        );
+        let t1 = (
+            chord.0 + (ma.0 + 2.0 * mb.0) * s,
+            chord.1 + (ma.1 + 2.0 * mb.1) * s,
+        );
+        if i == 0 {
+            pw.push(CPoint::new(a.0, a.1, 0.0, 1.0));
+        }
+        pw.push(CPoint::new(a.0 + t0.0 / 3.0, a.1 + t0.1 / 3.0, 0.0, 1.0));
+        pw.push(CPoint::new(b.0 - t1.0 / 3.0, b.1 - t1.1 / 3.0, 0.0, 1.0));
+        pw.push(CPoint::new(b.0, b.1, 0.0, 1.0));
+        t += h[i] / h[0];
+        knots.extend(std::iter::repeat_n(t, if i + 1 == n { 4 } else { 3 }));
+    }
+    solidcore::curve::curve::Curve::from(BSplineCurve::from_nurb(
+        NurbCurve::new(pw, 3, knots).unwrap(),
+        3,
+        false,
+    ))
+}
+
+/// tangency-labs/solidcraft#18510: the top of a 1 mm extrusion of a closed fit spline
+/// through eight points, 1000 wide, offset up 0.4. The wall is the spline's extrusion, a
+/// net closed round its seam; the top's reach beside it is the plane's trace meeting it,
+/// proved by Krawczyk's boxes. Near the seam Newton's root, carried from piece to piece,
+/// lands on the net's parameters a period or more off the knots: a box there was not
+/// enclosed at all (or, wholly past an end, from the seam all the way to it), and the top
+/// was refused for want of a certified bound. It builds the prism 1.4 tall: 1.4 times the
+/// volume, sound.
+#[test]
+fn a_closed_spline_extrusions_top_offsets_beside_its_seam() {
+    use solidcore::offset::offset_faces::OffsetFacesExecutive;
+    let points = [
+        (500.0, 0.0),
+        (379.0, 75.7),
+        (0.0, 90.0),
+        (-379.0, 75.7),
+        (-500.0, 0.0),
+        (-329.0, -65.7),
+        (0.0, -110.0),
+        (329.0, -65.7),
+    ];
+    let mut k = Kernel::default();
+    let outline = closed_fit_spline(&points);
+    let mut b = solidcore::sweep::api_brep::create_linear_sweep(
+        &mut k,
+        &[Some(&outline)],
+        Vec3::Z,
+        1.0,
+        true,
+    )
+    .unwrap();
+    let before = volume(&mut k, &mut b).unwrap();
+    let top = cap_at(&k, &b, 1.0);
+    let mut ex = OffsetFacesExecutive::new();
+    let r = ex.offset_faces(&mut k, &mut b, &[top], 0.4);
+    assert!(r.is_ok(), "{r:?}: {:?} {}", ex.refusal(), ex.reason());
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let after = volume(&mut k, &mut b).unwrap();
+    let want = 1.4 * before;
+    assert!((after - want).abs() <= AGREE * want, "{after} vs {want}");
+}
