@@ -59,6 +59,9 @@ const STALL_RESIDUAL: f64 = 1e-4;
 /// How much less it costs a solve to move a point held on a curve than any other point: such a
 /// point is placed relative to the curve, so it follows the curve rather than the curve it.
 const SLIDE_WEIGHT: f64 = 0.01;
+/// A point that is an end of a mirror axis resists moving: damping it heavily keeps the axis
+/// put when the geometry it mirrors is edited.
+const MIRROR_AXIS_WEIGHT: f64 = 1e8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -159,6 +162,10 @@ struct Layout {
     /// Per variable: a coordinate of a point held on a curve (point on curve, midpoint), which
     /// a solve slides along it before moving the curve (see [`SLIDE_WEIGHT`]).
     slide: Vec<bool>,
+    /// Per variable: a coordinate of a point that is an end of a line used as a mirror axis
+    /// (a `Symmetric` constraint's line). Such a line is a reference for the mirrored geometry
+    /// and must not drift to satisfy an edit made to that geometry: it is made expensive to move.
+    heavy: Vec<bool>,
 }
 
 impl Layout {
@@ -235,7 +242,26 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
             }
         }
     }
-    Layout { pvar, rvar, n, points, slide }
+    let mut heavy = vec![false; n];
+    // Mirror axes: every point that is an end of a line used as the `l` of a Symmetric
+    // constraint is made expensive to move, so the axis stays put when the mirrored geometry
+    // is edited.
+    for c in &sk.constraints {
+        if let ConstraintKind::Symmetric { l, .. } = c.kind
+            && let Some(CurveKind::Line { a, b }) = sk.curves.get(l).map(|cc| &cc.kind)
+        {
+            for pt in [*a, *b] {
+                if let Some(Some(v)) = pvar.get(pt) {
+                    for k in [*v, *v + 1] {
+                        if let Some(h) = heavy.get_mut(k) {
+                            *h = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Layout { pvar, rvar, n, points, slide, heavy }
 }
 
 /// Read-only view of the sketch with variable values substituted.
@@ -880,7 +906,7 @@ fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
 /// What a dimension measures on the sketch as it stands (mm, radians for angles); `None` for a
 /// constraint that is not a dimension.
 pub fn measure_dimension(sk: &Sketch, k: &ConstraintKind) -> Option<f64> {
-    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
     measure(&State { sk, lay: &lay, x: &[] }, k).filter(|v| v.is_finite())
 }
 
@@ -891,7 +917,7 @@ pub fn point_along(sk: &Sketch, c: usize, at: f64) -> Option<Vec2> {
     if !(at.is_finite() && (0.0..=1.0).contains(&at)) {
         return None;
     }
-    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
     crate::curves::point_along(&State { sk, lay: &lay, x: &[] }.segs(c), at).filter(|p| p.x.is_finite() && p.y.is_finite())
 }
 
@@ -1481,7 +1507,18 @@ fn lm_run(
         // cheap to move: a point held on a line made the line's far end swing round instead of
         // the point sliding along it.) A point held on a curve is cheaper still, so it slides
         // rather than the curve's ends moving.
-        let weight: Vec<f64> = vars.iter().map(|&v| if lay.slide.get(v).copied().unwrap_or(false) { SLIDE_WEIGHT } else { 1.0 }).collect();
+        let weight: Vec<f64> = vars
+            .iter()
+            .map(|&v| {
+                if lay.heavy.get(v).copied().unwrap_or(false) {
+                    MIRROR_AXIS_WEIGHT
+                } else if lay.slide.get(v).copied().unwrap_or(false) {
+                    SLIDE_WEIGHT
+                } else {
+                    1.0
+                }
+            })
+            .collect();
         for _attempt in 0..30 {
             let linear_work = n.saturating_mul(n).saturating_mul(n).saturating_add(evaluation_work);
             if !within_budget(&mut budget, linear_work) {
@@ -3653,7 +3690,8 @@ fn solve_inner(
 /// Geometry can also be finalized by feasible cursor motion, without another solve.
 /// Both paths must measure reference dimensions from the pose they publish.
 fn refresh_driven_dimensions(sk: &mut Sketch) {
-    let fixed_lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+    let fixed_lay =
+        Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
     let measured: Vec<Option<f64>> =
         sk.constraints.iter().map(|c| if c.driven { measure(&State { sk, lay: &fixed_lay, x: &[] }, &c.kind) } else { None }).collect();
     for (c, m) in sk.constraints.iter_mut().zip(measured) {
@@ -3697,7 +3735,8 @@ mod continuation_unit_tests {
         let a = sk.add_point(Vec2::new(0.0, 0.0), None).unwrap();
         let b = sk.add_point(Vec2::new(40.0, 0.0), None).unwrap();
         let c = sk.add_point(Vec2::new(20.0, 1e-6), None).unwrap();
-        let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+        let lay =
+            Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
         let turn = Orient::Turn([a, b, c]);
         let state =
             |sk: &Sketch| (orientation(&State { sk, lay: &lay, x: &[] }, turn), reference_orientation(&State { sk, lay: &lay, x: &[] }, turn));
@@ -3717,7 +3756,8 @@ mod continuation_unit_tests {
         let q = sk.add_point(Vec2::new(10.0, 5.0), None).unwrap();
         let r = sk.add_point(Vec2::new(0.0, 10.0), None).unwrap();
         let l = sk.add_line(Vec2::new(-5.0, -5.0), Vec2::new(5.0, -5.0), None, None, None).unwrap();
-        let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+        let lay =
+            Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new(), heavy: Vec::new() };
         let sign = |sk: &Sketch, o: Orient| orientation(&State { sk, lay: &lay, x: &[] }, o);
         let checks = [Orient::SideX(p, q, 10.0), Orient::SideY(p, q, 5.0), Orient::OfLine(q, l, 10.0), Orient::Turn([p, q, r])];
         let before: Vec<_> = checks.iter().map(|o| sign(&sk, *o)).collect();

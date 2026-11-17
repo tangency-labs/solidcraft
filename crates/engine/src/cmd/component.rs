@@ -628,15 +628,52 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if id == 0 {
         return Err(bad(cmd, "the design itself can't be deleted"));
     }
+    let imported = imported_bodies_within(s, id);
     let removed = s.doc_mut().remove_component_tree(id).map_err(|e| match e {
         solidcraft_doc::DocError::Invalid(msg) => bad(cmd, msg),
         e => e.into(),
     })?;
+    let d = s.doc_mut();
+    for (feature, made, skipped) in imported {
+        let Some(f) = d.feature_mut(feature) else { continue };
+        // The bodies left keep the names they have now, though a skipped one had a name first.
+        f.pin_body_names(&made, &[]);
+        if let FeatureKind::Import { skip, .. } = &mut f.kind {
+            skip.extend(skipped);
+            skip.sort_unstable();
+            skip.dedup();
+        }
+    }
     let gone = removed.components;
     if gone.contains(&s.active_component) {
         s.active_component = 0;
     }
     reply(DeleteResult { deleted: gone, features: removed.features, param_warnings: Vec::new() })
+}
+
+/// The bodies of the component tree `root` that an Import feature outside it builds (#17578): an
+/// inserted STEP assembly's Import sits in the assembly's own component and builds every part's
+/// bodies there, so deleting a part's component deletes no feature of its own. For each such
+/// Import: its id, the names of the bodies it builds now (in the order it builds them), and the
+/// file's body indices of those inside `root`, for its `skip` list.
+fn imported_bodies_within(s: &Session, root: u64) -> Vec<(u64, Vec<String>, Vec<u64>)> {
+    let doc = &s.doc;
+    let inside = |c: u64| doc.component_within(c, root);
+    doc.features
+        .iter()
+        .filter(|f| matches!(f.kind, FeatureKind::Import { .. }) && !inside(f.component))
+        .filter_map(|f| {
+            let made: Vec<String> = s.model.result(f.id)?.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect();
+            let slots = f.body_name_slots(made.len());
+            let skipped: Vec<u64> = slots
+                .iter()
+                .zip(&made)
+                .filter(|(_, name)| doc.body_components.get(*name).is_some_and(|c| inside(*c)))
+                .map(|(k, _)| *k as u64)
+                .collect();
+            (!skipped.is_empty()).then_some((f.id, made, skipped))
+        })
+        .collect()
 }
 
 fn unlock(s: &mut Session, p: &Value) -> Result<Value> {

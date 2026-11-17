@@ -516,8 +516,8 @@ impl SessionObjects<'_> {
                 },
             )?;
 
-            // (the fork's EaseSurface takes the G^n target, a blend by its definition with
-            // `fillet_round_as_definition`, and the round's own surface as they are)
+            // (the fork's EaseSurface takes the G^n target, a blend by its definition, and the
+            // round's own surface as they are)
             let eased = ease_surface_of(k, &own_surface, &g2, along, geom_ramps)?;
             self.pseudo
                 .geom_mut(fg)?

@@ -4467,6 +4467,209 @@ fn extrude_to_and_from_objects() {
     assert!(s.execute("solid.extrude", &json!({"sketch": "P", "to": "nope"})).is_err());
 }
 
+/// A wedge 40 long and 20 deep whose top slopes from z 30 at x 0 to z 10 at x 40: z = 30 - x / 2.
+fn slanted_wedge(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XZ", "name": "Side"}));
+    run(s, "sketch.line", json!({"closed": true, "points": [[0, 0], [40, 0], [40, -10], [0, -30]]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"sketch": "Side", "distance": 20, "direction": "negative", "body_name": "Wedge"}));
+}
+
+/// The least and greatest z of `body`'s bounding box, and its volume.
+fn z_span_and_volume(s: &mut Session, body: &str) -> (f64, f64, f64) {
+    let m = run(s, "inspect.measure", json!({"bodies": [body]}));
+    let b = &m["bodies"][0];
+    let f = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
+    (f(&b["bbox"]["min"][2]), f(&b["bbox"]["max"][2]), f(&b["volume_mm3"]))
+}
+
+/// From Object on a slanted flat face starts on the face, so a disc of radius 4 at x 20,
+/// extruded 5 mm From the slope, runs from z 22 - 4 / 2 = 18 at x 24 up to 22 + 5 = 27 at x 16.
+/// A design saved before keeps its flat start at the slope's level under the disc's centre,
+/// z 20 to 25 (#17639). It keeps that start through an edit that keeps its From face, and an
+/// edit that picks another face on the same plane, even with no name to match, and an edit that
+/// picks a face on another plane, the top of a ramp z = 15 + x / 2 over the wedge, starts on that
+/// face: z 25 - 2 = 23 at x 16 up to 25 + 2 + 6 = 33 at x 24 for a 6 mm post.
+#[test]
+fn extrude_from_a_slanted_face_starts_on_the_face() {
+    let mut s = Session::default();
+    slanted_wedge(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "RampSide"}));
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[0, 0], [40, 0], [40, -35], [0, -15]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "RampSide", "distance": 20, "direction": "negative", "operation": "new", "body_name": "Ramp"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, -10], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Disc", "from": [20, -10, 20], "distance": 5, "operation": "new", "body_name": "Post"}));
+    let disc = PI * 16.0 * 5.0;
+    let (lo, hi, v) = z_span_and_volume(&mut s, "Post");
+    assert!((lo - 18.0).abs() < 1e-6 && (hi - 27.0).abs() < 1e-6 && rel(v, disc) < 1e-6, "{lo} {hi} {v}");
+    // Only the side and the two slanted ends: no piece of the prism's flat caps is left.
+    let faces = run(&mut s, "model.faces", json!({"body": "Post"}));
+    assert_eq!(faces["faces"].as_array().map(Vec::len), Some(3), "{faces}");
+
+    let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    legacy["format"] = json!("solidcraft/57");
+    legacy.as_object_mut().unwrap().remove("format_pending");
+    // Without the From face's name, as after a paste or in a design named in an older form, the
+    // edits below still find the face by where it is.
+    let names =
+        legacy["features"].as_array_mut().and_then(|f| f.last_mut()).and_then(Value::as_object_mut).and_then(|post| post.remove("face_names"));
+    assert!(names.is_some(), "the post had stored face names");
+    let dir = std::env::temp_dir().join(format!("solidcraft-17639-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let design = dir.join("post.solidcraft");
+    std::fs::write(&design, legacy.to_string()).unwrap();
+    let mut old = Session::default();
+    run(&mut old, "doc.open", json!({"path": design.to_string_lossy()}));
+    let (lo, hi, v) = z_span_and_volume(&mut old, "Post");
+    assert!((lo - 20.0).abs() < 1e-6 && (hi - 25.0).abs() < 1e-6 && rel(v, disc) < 1e-6, "{lo} {hi} {v}");
+    let post = s.doc.features.last().map(|f| f.name.to_string()).unwrap_or_default();
+    let six = PI * 16.0 * 6.0;
+    run(&mut old, "timeline.edit", json!({"feature": post, "set": {"extent": {"distance": "6"}}}));
+    let (lo, hi, v) = z_span_and_volume(&mut old, "Post");
+    assert!((lo - 20.0).abs() < 1e-6 && (hi - 26.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
+    run(&mut old, "timeline.edit", json!({"feature": post, "set": {"extent": {"from": [22, -12, 19]}}}));
+    let (lo, hi, v) = z_span_and_volume(&mut old, "Post");
+    assert!((lo - 20.0).abs() < 1e-6 && (hi - 26.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
+    run(&mut old, "timeline.edit", json!({"feature": post, "set": {"extent": {"from": [20, -10, 25]}}}));
+    let (lo, hi, v) = z_span_and_volume(&mut old, "Post");
+    assert!((lo - 23.0).abs() < 1e-6 && (hi - 33.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
+    // The same through a redefine, which builds the extrude again from the command's inputs.
+    run(&mut old, "edit.undo", json!({}));
+    let redefine = |s: &mut Session, from: [f64; 3]| {
+        let params = json!({"sketch": "Disc", "from": from, "distance": 6, "operation": "new"});
+        run(s, "timeline.redefine", json!({"feature": post, "command": "solid.extrude", "params": params}));
+        z_span_and_volume(s, "Post")
+    };
+    let (lo, hi, v) = redefine(&mut old, [18.0, -8.0, 21.0]);
+    assert!((lo - 20.0).abs() < 1e-6 && (hi - 26.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
+    let (lo, hi, v) = redefine(&mut old, [20.0, -10.0, 25.0]);
+    assert!((lo - 23.0).abs() < 1e-6 && (hi - 33.0).abs() < 1e-6 && rel(v, six) < 1e-6, "{lo} {hi} {v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// To Object on a slanted flat face ends a profile that overhangs the face on the face's plane,
+/// as on a face square to the extrusion. An 8 mm deep block from z 40 down to the slope over
+/// x 30 to 45, past the wedge's end at x 40, holds 8 (10 * 15 + (45^2 - 30^2) / 4) = 3450 mm3
+/// (#17639).
+#[test]
+fn extrude_to_a_slanted_face_ends_an_overhanging_profile_on_its_plane() {
+    let mut s = Session::default();
+    slanted_wedge(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 40, "name": "Above"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [30, -14], "p1": [45, -6]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "Above", "to": [35, -10, 12.5], "direction": "negative", "operation": "new", "body_name": "Block"}),
+    );
+    let (lo, hi, v) = z_span_and_volume(&mut s, "Block");
+    assert!((lo - 7.5).abs() < 1e-6 && (hi - 40.0).abs() < 1e-6 && rel(v, 3450.0) < 1e-9, "{lo} {hi} {v}");
+}
+
+/// A boss joined From the slope of `slanted_wedge` keeps the history of every face it joins:
+/// each face of the result is exact, as after an extrude from the sketch plane, and a sketch on
+/// the boss's slanted top end follows it when the boss gets longer. The boss lies wholly above
+/// the slope, so it adds its own pi 16 5; the nub on its top adds pi 1 2, and lengthening the
+/// boss to 8 mm adds pi 16 3 more (#17639).
+#[test]
+fn a_boss_joined_from_a_slanted_face_keeps_its_faces_history() {
+    let mut s = Session::default();
+    slanted_wedge(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, -10], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Disc", "from": [20, -10, 20], "distance": 5, "operation": "join", "name": "Boss"}));
+    let wedge = 40.0 * 20.0 * 20.0;
+    assert!(rel(volume(&mut s), wedge + PI * 80.0) < 1e-9, "{}", volume(&mut s));
+    let faces = run(&mut s, "model.faces", json!({"body": "Wedge"}));
+    let inexact: Vec<&Value> = faces["faces"].as_array().into_iter().flatten().filter(|f| f["exact"] != json!(true)).collect();
+    assert!(inexact.is_empty(), "faces without history: {inexact:?}");
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, -10, 25]}, "name": "OnTop"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 1}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "OnTop", "distance": 2, "operation": "join", "name": "Nub"}));
+    assert!(rel(volume(&mut s), wedge + PI * 82.0) < 1e-9, "{}", volume(&mut s));
+    run(&mut s, "timeline.edit", json!({"feature": "Boss", "set": {"extent": {"distance": "8"}}}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!(rel(volume(&mut s), wedge + PI * 130.0) < 1e-9, "{}", volume(&mut s));
+}
+
+/// From the slope with the sketch's normal pointing down, away from the slope's (the other
+/// side of each cut): a disc on a flipped sketch at z 50, extruded 5 mm From the slope, runs
+/// down from the slope, z 22 - 4 / 2 - 5 = 13 up to 18 + 4 = 22. A cut 3 mm deep From the slope
+/// into the wedge takes pi 16 3 (#17639).
+#[test]
+fn extrude_from_a_slanted_face_against_its_normal_and_as_a_cut() {
+    let mut s = Session::default();
+    slanted_wedge(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 50, "flip": true, "name": "Down"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, -10], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    let down = run(&mut s, "solid.extrude", json!({"sketch": "Down", "from": [20, -10, 20], "distance": 5, "operation": "new", "body_name": "Post"}));
+    let (lo, hi, v) = z_span_and_volume(&mut s, "Post");
+    assert!((lo - 13.0).abs() < 1e-6 && (hi - 22.0).abs() < 1e-6 && rel(v, PI * 80.0) < 1e-6, "{lo} {hi} {v} {down}");
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, -10], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Disc", "from": [20, -10, 20], "distance": 3, "direction": "negative", "operation": "cut"}));
+    assert!(rel(volume(&mut s), 16000.0 - PI * 48.0) < 1e-9, "{}", volume(&mut s));
+}
+
+/// From a face within 5 degrees of running along the extrusion the extrude still starts at the
+/// face's level under the disc's middle, and says so: the wedge's end leans 1 mm over its 30 mm
+/// height, about 1.9 degrees, and the 5 mm post From it at z 15 runs z 15 to 20 (#17639).
+#[test]
+fn extrude_from_a_face_nearly_along_the_extrusion_starts_at_its_level_and_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Side"}));
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[0, 0], [40, 0], [39, -30], [0, -30]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Side", "distance": 20, "direction": "negative", "body_name": "Wedge"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Disc"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [40, -10], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Disc", "from": [39.5, -10, 15], "distance": 5, "operation": "new", "body_name": "Post"}));
+    let (lo, hi, v) = z_span_and_volume(&mut s, "Post");
+    assert!((lo - 15.0).abs() < 1e-6 && (hi - 20.0).abs() < 1e-6 && rel(v, PI * 80.0) < 1e-6, "{lo} {hi} {v}");
+    let warning = s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert!(warning.contains("within 5 degrees"), "{warning:?}");
+}
+
+/// To the slope with a profile far past the wedge's end, and over other material: the block
+/// over x 30 to 70 ends on the slope's plane all the way, z = 30 - x / 2 down to -5, holding
+/// 8 (10 * 40 + (70^2 - 30^2) / 4) = 11200 mm3. With a step 35 mm tall over x 40 to 50, the
+/// block over x 30 to 55 ends on the step's top where it lies over it, as a profile that stays
+/// over the part does, and on the slope's plane past it: 8 (275 + 50 + 181.25) = 4050 mm3
+/// (#17639).
+#[test]
+fn extrude_to_a_slanted_face_reaches_its_plane_and_stops_at_material_first() {
+    let block = |side: Value, p1: [f64; 2]| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Side"}));
+        run(&mut s, "sketch.line", json!({"closed": true, "points": side}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Side", "distance": 20, "direction": "negative", "body_name": "Wedge"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 40, "name": "Above"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [30, -14], "p1": p1}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "solid.extrude",
+            json!({"sketch": "Above", "to": [20, -10, 20], "direction": "negative", "operation": "new", "body_name": "Block"}),
+        );
+        z_span_and_volume(&mut s, "Block")
+    };
+    let (lo, hi, v) = block(json!([[0, 0], [40, 0], [40, -10], [0, -30]]), [70.0, -6.0]);
+    assert!((lo + 5.0).abs() < 1e-6 && (hi - 40.0).abs() < 1e-6 && rel(v, 11200.0) < 1e-9, "{lo} {hi} {v}");
+    let (lo, hi, v) = block(json!([[0, 0], [50, 0], [50, -35], [40, -35], [40, -10], [0, -30]]), [55.0, -6.0]);
+    assert!((lo - 2.5).abs() < 1e-6 && (hi - 40.0).abs() < 1e-6 && rel(v, 4050.0) < 1e-9, "{lo} {hi} {v}");
+}
+
 /// Revolve Two Sides, Symmetric and To Object.
 #[test]
 fn revolve_two_sides_symmetric_and_to_object() {
