@@ -550,7 +550,10 @@ impl Cone {
         // `SetCanonical` can succeed without a frame: an axis whose squared length
         // overflows (a coordinate of 1e300) unitizes to zero
         let unit = |a: Vec3| {
-            a.x.is_finite() && a.y.is_finite() && a.z.is_finite() && (a.dot(a) - 1.0).abs() <= EFF_ZERO
+            a.x.is_finite()
+                && a.y.is_finite()
+                && a.z.is_finite()
+                && (a.dot(a) - 1.0).abs() <= EFF_ZERO
         };
         let framed = |f: &Axis2Placement| {
             unit(f.x_axis()) && unit(f.y_axis()) && f.x_axis().dot(f.y_axis()).abs() <= EFF_ZERO

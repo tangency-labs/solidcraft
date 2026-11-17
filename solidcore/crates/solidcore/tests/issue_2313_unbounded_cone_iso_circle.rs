@@ -243,3 +243,79 @@ fn unbounded_cone_domain_and_nurb_points_agree() {
         assert!(close(p.z, 1.0, 1.0), "semi {semi}: NURB point at {p:?}");
     }
 }
+
+/// `Cone::create_canonical` with `height <= 0` makes the infinite cone of `top_radius` as the
+/// semi-angle; for `bot 1, top -20, height -1` (#18194) that is the cone of radius
+/// `1 + tan(-20 deg) h`. Before WR-713's fix its generator stayed parallel to the axis, so
+/// the net was the radius-1 cylinder while the definition said the cone.
+///
+/// Shown by construction, nothing sampled: the canonical data are the inputs exactly; the
+/// domain runs from `-SM_INFINITE_PARAMETER` to the apex `1 / tan(20 deg)`; the NURB form
+/// lies on the cone's implicit equation ([`lies_on`]: every Bernstein coefficient of every
+/// Bézier patch, to the rounding of computing it) and not on the radius-1 cylinder; and with
+/// positive weights every control point is at or below the apex, so the rational net (inside
+/// the convex hull of its control points) is on the cone's lower nappe, the one its domain
+/// names.
+#[test]
+fn create_canonical_negative_semi_angle_net_is_its_cone() {
+    use solidcore::math::INFINITE_PARAMETER;
+    use solidcore::nurbs::math::NOW;
+    use solidcore::surface::implicit::{lies_on, Implicit};
+
+    let k = kernel();
+    let t = (-20f64).to_radians().tan();
+    let apex = -1.0 / t;
+    for (n, pl) in placements().iter().enumerate() {
+        for inside_out in [false, true] {
+            for swap in [false, true] {
+                let what = format!("placement {n}, inside out {inside_out}, swap {swap}");
+                let cone = Cone::create_canonical(&k, pl, 1.0, -20.0, -1.0, swap, inside_out)
+                    .unwrap_or_else(|e| panic!("{what}: {e:?}"));
+                assert_eq!(cone.base_radius(), 1.0, "{what}");
+                assert_eq!(cone.semi_angle_deg(), -20.0, "{what}");
+                assert_eq!(cone.bot_height(), -INFINITE_PARAMETER, "{what}");
+                assert!(
+                    close(cone.top_height(), apex, 1.0),
+                    "{what}: top {}",
+                    cone.top_height()
+                );
+
+                let on = |tan_angle: f64| Implicit::Cone {
+                    origin: pl.origin(),
+                    axis: pl.z_axis(),
+                    radius: 1.0,
+                    tan_angle,
+                };
+                let form = cone.rev().base();
+                assert!(lies_on(form, &on(t)).unwrap(), "{what}: net off its cone");
+                assert!(
+                    !lies_on(form, &on(0.0)).unwrap(),
+                    "{what}: net on the radius-1 cylinder"
+                );
+
+                let nurb = form.gw_nurb().expect("the cone's NURB");
+                let pts: Vec<(Vec3, f64)> = nurb
+                    .rows()
+                    .flatten()
+                    .map(|c| {
+                        let w = if c.w == NOW { 1.0 } else { c.w };
+                        (Vec3::new(c.x / w, c.y / w, c.z / w), w)
+                    })
+                    .collect();
+                let size = pts
+                    .iter()
+                    .map(|(p, _)| p.x.abs().max(p.y.abs()).max(p.z.abs()))
+                    .fold(0.0, f64::max);
+                let round = 64.0 * f64::EPSILON * size;
+                for (p, w) in &pts {
+                    assert!(*w > 0.0, "{what}: weight {w}");
+                    let h = (*p - pl.origin()).dot(pl.z_axis());
+                    assert!(
+                        h <= apex + round,
+                        "{what}: control point at {h}, apex {apex}"
+                    );
+                }
+            }
+        }
+    }
+}
