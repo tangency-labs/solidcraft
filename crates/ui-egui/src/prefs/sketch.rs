@@ -73,6 +73,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.sketch_snap_to_visible_grid_note"),
                     &mut app.preferences.sketch_snap_to_visible_grid,
                 );
+                setting::sketch_square_rectangles(app, ui);
             });
         });
         let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.hold_stop_snapping"));

@@ -1749,6 +1749,9 @@ preference_settings! {
     /// Snap a drawing point to where the two most recent centre or midpoint guides cross.
     /// Off: the guides stay visual and the cursor does not move (#8694).
     sketch_recent_snap: bool = false, PAGE_SKETCH;
+    /// Shift while drawing a Two-Point or Center Rectangle makes it a square and adds an Equal
+    /// constraint (#18114). Off: Shift prefers a line midpoint there, as before.
+    sketch_square_rectangles: bool = true, PAGE_SKETCH => check_tr("prefs.sketch_square_rectangles");
     /// Drawing lines a point up with the sketch's points on both axes at once, keeping the
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.

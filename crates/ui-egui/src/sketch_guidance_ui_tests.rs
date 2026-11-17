@@ -693,8 +693,9 @@ fn shift_in_a_sketch_doesnt_keep_the_snap_points() {
 /// Draws a rectangle from `a` to `b` with the tool `cmd`, Shift held for the second corner when
 /// `square` is set, and returns the corner points the new curves span (width, height) and whether
 /// the sketch holds an Equal constraint.
-fn drawn_rectangle(cmd: &str, a: [f64; 2], b: [f64; 2], square: bool) -> ((f64, f64), bool) {
+fn drawn_rectangle(cmd: &str, a: [f64; 2], b: [f64; 2], square: bool, preference: bool) -> ((f64, f64), bool) {
     let mut h = fixture();
+    h.app.preferences.sketch_square_rectangles = preference;
     step(&mut h, json!({"start": cmd}));
     step(&mut h, json!({"click":{"sketch":a}}));
     step(&mut h, json!({"move":{"sketch":b},"shift":square}));
@@ -716,17 +717,24 @@ fn drawn_rectangle(cmd: &str, a: [f64; 2], b: [f64; 2], square: bool) -> ((f64, 
 
 #[test]
 fn shift_makes_a_two_point_rectangle_a_square_with_equal_sides() {
-    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], true);
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], true, true);
     assert!((w - 30.0).abs() < 1e-6 && (h - 30.0).abs() < 1e-6, "{w} x {h}");
     assert!(equal, "a square keeps its sides equal");
-    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], false);
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], false, true);
     assert!((w - 30.0).abs() < 1e-6 && (h - 15.0).abs() < 1e-6, "{w} x {h}");
     assert!(!equal, "without Shift nothing changes");
 }
 
 #[test]
+fn square_rectangles_preference_off_keeps_shift_for_midpoints() {
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.two_point", [20.0, -30.0], [50.0, -15.0], true, false);
+    assert!((w - 30.0).abs() < 1e-6 && (h - 15.0).abs() < 1e-6, "{w} x {h}");
+    assert!(!equal);
+}
+
+#[test]
 fn shift_makes_a_centre_rectangle_a_square() {
-    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.center", [30.0, -30.0], [40.0, -25.0], true);
+    let ((w, h), equal) = drawn_rectangle("sketch.rectangle.center", [30.0, -30.0], [40.0, -25.0], true, true);
     assert!((w - 20.0).abs() < 1e-6 && (h - 20.0).abs() < 1e-6, "{w} x {h}");
     assert!(equal);
 }
