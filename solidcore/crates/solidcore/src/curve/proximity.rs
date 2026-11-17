@@ -45,6 +45,15 @@
 //! above `d` once they are about `sqrt(8 R (radius - d))` long, `R` their radius of
 //! curvature.
 //!
+//! **A seam.** A closed curve's two ends are one point, its seam, and a point about the seam
+//! drops on either end of its interval. Where the other curve is closed within the radius
+//! (its ends within the radius of each other), the piece of it between two feet may run
+//! either way round: between the feet, or from the higher foot to the interval's end and
+//! from its start to the lower one. Each of those parts is a piece of the other curve, so
+//! each gives a true bound and the least is kept. This curve is cut where the other's seam
+//! drops on it, so that no piece of it runs past the other's seam and the pieces on either
+//! side are each faced by one of those parts (#18163).
+//!
 //! **The run.** Two curves that run together over part of each (two sheets' edges along one
 //! seam, one shorter or shifted along the other) meet over a run whose ends are ends of the
 //! curves: at each end of the run, one curve ends on the other. [`Curve::proved_overlap`] drops
@@ -52,6 +61,18 @@
 //! (on this curve, the first and last of them by its parameter), and the run is then proved by
 //! [`Curve::proved_together`] over its two intervals. The drops only find where to look: a run
 //! is reported only as proved, or as found and not proved.
+//!
+//! **A loop.** Where the first and last of those ends lie within the radius of each other, the
+//! run's two ends are one point. Between them this curve either stays at that point (the
+//! curves touch) or goes round a loop back to it: the whole of a closed curve, whose two ends
+//! are its seam (#18163). Its parameters alone cannot tell which: two closed curves that touch
+//! where both their seams are have both of each curve's ends at the point of contact, as two
+//! coincident ones do. The middle of the run's interval tells: a loop leaves the ball of the
+//! radius about its ends there, and runs along the other curve only if the middle lies within
+//! the radius of it. The run then spans the ends' parameters on each curve (on a closed curve
+//! the seam's foot may fall at either end of its interval, so the first and last ends by this
+//! curve's parameter need not hold the other's), and the other runs the loop's way where their
+//! tangents at the middle and its foot agree.
 //!
 //! Deviations: not a port. Curves of other kinds (offset, composite, iso, projected and
 //! curve-on-surface curves, a Hermite curve, a conic without its B-spline) have no hull
@@ -139,7 +160,8 @@ fn foot_on(k: &Kernel, curve: &Curve, interval: &Extent1d, p: Vec3) -> Result<Op
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Overlap {
     /// No run: fewer than two ends of the curves lie within the radius of the other, or the
-    /// ends that do are within the radius of each other (the curves touch at a point).
+    /// ends that do are within the radius of each other and the curves touch at a point there
+    /// or meet only there (module docs, "A loop").
     Apart,
     /// The curves run together over the run, proved: every point of each part within the
     /// radius of the other part.
@@ -558,9 +580,22 @@ impl Curve {
         let (Some(mine), Some(theirs)) = (form(self), form(other)) else {
             return Ok(false);
         };
-        let Some(cuts) = soft(mine.breaks(a, b))? else {
+        let Some(mut cuts) = soft(mine.breaks(a, b))? else {
             return Ok(false);
         };
+        // the other curve closed within the radius: this one is cut where its seam drops
+        // (module docs, "A seam")
+        let closed = soft(other.is_closed(k, other_interval, radius))?.unwrap_or(false);
+        if closed {
+            if let Some(seam) = soft(other.evaluate_point(k, lo))? {
+                if let Some((t, _)) = foot_on(k, self, interval, seam)? {
+                    if a < t && t < b && !cuts.contains(&t) {
+                        cuts.push(t);
+                        cuts.sort_by(f64::total_cmp);
+                    }
+                }
+            }
+        }
         let mut stack: Vec<(f64, f64, usize)> = cuts
             .windows(2)
             .filter_map(|w| match *w {
@@ -594,12 +629,26 @@ impl Curve {
             let (Some(s), Some(t)) = (foot(piece.a)?, foot(piece.b)?) else {
                 return Ok(false);
             };
-            let Some(facing) = soft(theirs.tube(s.min(t), s.max(t)))?.flatten() else {
+            // the bound against the other curve's piece over `[u, v]`
+            let against = |u: f64, v: f64| -> Result<Option<f64>> {
+                Ok(soft(theirs.tube(u, v))?.flatten().map(|facing| {
+                    let reach = segment_distance(piece.a, facing.a, facing.b)
+                        .max(segment_distance(piece.b, facing.a, facing.b));
+                    (piece.rho + reach + facing.rho) * (1.0 + gamma(3))
+                }))
+            };
+            let (low, high) = (s.min(t), s.max(t));
+            let Some(mut bound) = against(low, high)? else {
                 return Ok(false);
             };
-            let reach = segment_distance(piece.a, facing.a, facing.b)
-                .max(segment_distance(piece.b, facing.a, facing.b));
-            let bound = (piece.rho + reach + facing.rho) * (1.0 + gamma(3));
+            if closed && bound > radius {
+                // the other curve's piece round its seam (module docs, "A seam")
+                for (u, v) in [(lo, low), (high, hi)] {
+                    if let Some(round) = against(u, v)? {
+                        bound = bound.min(round);
+                    }
+                }
+            }
             if bound <= radius {
                 continue;
             }
@@ -693,12 +742,31 @@ impl Curve {
         let (Some(&(t0, s0, p0)), Some(&(t1, s1, p1))) = (first, last) else {
             return Ok(Overlap::Apart);
         };
-        // ends within the radius of each other: a point of contact, not a run
-        if (p1 - p0).length() <= radius {
-            return Ok(Overlap::Apart);
-        }
-        let mine = Extent1d::from_min_max(t0, t1);
-        let theirs = Extent1d::from_min_max(s0.min(s1), s0.max(s1));
+        let (mine, theirs, same_sense) = if (p1 - p0).length() > radius {
+            // the run lies between its two ends
+            (
+                Extent1d::from_min_max(t0, t1),
+                Extent1d::from_min_max(s0.min(s1), s0.max(s1)),
+                s0 <= s1,
+            )
+        } else {
+            // its ends are one point: a point of contact, or a loop through it
+            let span = |pick: fn(&(f64, f64, Vec3)) -> f64| {
+                ends.iter()
+                    .map(pick)
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                        (lo.min(v), hi.max(v))
+                    })
+            };
+            let (t_lo, t_hi) = span(|e| e.0);
+            let (s_lo, s_hi) = span(|e| e.1);
+            let mine = Extent1d::from_min_max(t_lo, t_hi);
+            let theirs = Extent1d::from_min_max(s_lo, s_hi);
+            match self.loop_along(k, &mine, other, &theirs, p0, radius)? {
+                Some(same_sense) => (mine, theirs, same_sense),
+                None => return Ok(Overlap::Apart),
+            }
+        };
         let fraction = |ivl: &Extent1d, v: f64| ivl.inversion(v).parameter;
         let (Some(a0), Some(a1), Some(b0), Some(b1)) = (
             fraction(interval, mine.min()),
@@ -711,7 +779,7 @@ impl Curve {
         let run = Run {
             intervals: [mine, theirs],
             fractions: [[a0, a1], [b0, b1]],
-            same_sense: s0 <= s1,
+            same_sense,
         };
         Ok(
             if self.proved_together(k, &mine, other, &theirs, radius, &[])? {
@@ -720,6 +788,46 @@ impl Curve {
                 Overlap::Unproved(run)
             },
         )
+    }
+
+    /// Whether this curve over `mine`, whose ends both lie at `at` (to `radius`), is a loop
+    /// along `other` over `theirs` (module docs, "A loop"): its middle leaves the ball of
+    /// radius `radius` about `at` and lies within `radius` of `other`. `Some` with whether
+    /// `other` runs the loop's way there (their tangents at the middle and its foot), `None`
+    /// for a point of contact, a loop away from `other` or a failed evaluation. The drop only
+    /// finds where to look.
+    fn loop_along(
+        &self,
+        k: &Kernel,
+        mine: &Extent1d,
+        other: &Self,
+        theirs: &Extent1d,
+        at: Vec3,
+        radius: f64,
+    ) -> Result<Option<bool>> {
+        let middle = 0.5 * (mine.min() + mine.max());
+        let Some(at_middle) = soft(self.evaluate(k, middle, 1, false, false))? else {
+            return Ok(None);
+        };
+        let &[p, dp, ..] = at_middle.as_slice() else {
+            return Ok(None);
+        };
+        if (p - at).length() <= radius {
+            return Ok(None);
+        }
+        let Some((s, d)) = foot_on(k, other, theirs, p)? else {
+            return Ok(None);
+        };
+        if d > radius {
+            return Ok(None);
+        }
+        let Some(at_foot) = soft(other.evaluate(k, s, 1, false, false))? else {
+            return Ok(None);
+        };
+        let &[_, dq, ..] = at_foot.as_slice() else {
+            return Ok(None);
+        };
+        Ok(Some(dp.dot(dq) > 0.0))
     }
 }
 
@@ -732,9 +840,15 @@ mod tests {
 
     /// A full circle or ellipse about `centre` in the plane z = `centre.z`.
     fn ellipse(k: &Kernel, centre: Point3, rx: f64, ry: f64) -> Curve {
+        circle_along(k, centre, Vec3::X, Vec3::Y, rx, ry)
+    }
+
+    /// A full circle or ellipse about `centre`, radius `rx` along `x` (its seam, angle 0, at
+    /// `centre + rx x`) and `ry` along `y` (angle 90 degrees).
+    fn circle_along(k: &Kernel, centre: Point3, x: Vec3, y: Vec3, rx: f64, ry: f64) -> Curve {
         let domain = Extent1d::from_min_max(0.0, 360.0);
         let opts = EllipseOptions::default();
-        Curve::from(Ellipse::new(k, centre, Vec3::X, Vec3::Y, domain, rx, ry, &opts).unwrap())
+        Curve::from(Ellipse::new(k, centre, x, y, domain, rx, ry, &opts).unwrap())
     }
 
     /// The parameter of `curve` nearest `p`.
@@ -888,6 +1002,47 @@ mod tests {
         );
         assert!(a.proved_overlap(&k, &ia, &copy, &ia, f64::NAN).is_err());
         assert!(a.proved_overlap(&k, &ia, &copy, &ia, 0.0).is_err());
+    }
+
+    /// Two circles of radius 4 about the origin in z = 0 (#18163): a closed curve has no ends,
+    /// and its two ends, at its seam, are one point; the run is the whole of both, whether
+    /// their seams fall together (angle 0 of both along x), apart (the other's along y) or
+    /// the other runs the other way (its angle 90 along -y). A circle that touches it at one
+    /// point, (0, 4, 0) away from both seams or (4, 0, 0) where both seams are, is apart.
+    #[test]
+    fn two_closed_curves_along_one_another_run_together_over_the_whole_of_each() {
+        let k = Kernel::default();
+        let o = Point3::new(0.0, 0.0, 0.0);
+        let a = ellipse(&k, o, 4.0, 4.0);
+        let ia = a.natural_interval();
+        // 1e-3: the circles' tubes are proved in pieces of about sqrt(8 * 4 * 1e-3) = 0.18
+        let radius = 1e-3;
+        for (x, y, same) in [
+            (Vec3::X, Vec3::Y, true),
+            (Vec3::Y, -Vec3::X, true),
+            (Vec3::X, -Vec3::Y, false),
+        ] {
+            let b = circle_along(&k, o, x, y, 4.0, 4.0);
+            let ib = b.natural_interval();
+            let Overlap::Proved(run) = a.proved_overlap(&k, &ia, &b, &ib, radius).unwrap() else {
+                panic!("not proved: x {x:?}, y {y:?}");
+            };
+            assert_eq!(run.intervals, [ia, ib], "x {x:?}, y {y:?}");
+            assert_eq!(run.fractions, [[0.0, 1.0]; 2], "x {x:?}, y {y:?}");
+            assert_eq!(run.same_sense, same, "x {x:?}, y {y:?}");
+        }
+        for (centre, x) in [
+            (Point3::new(0.0, 8.0, 0.0), Vec3::X),
+            (Point3::new(8.0, 0.0, 0.0), -Vec3::X),
+        ] {
+            let b = circle_along(&k, centre, x, Vec3::Y, 4.0, 4.0);
+            assert_eq!(
+                a.proved_overlap(&k, &ia, &b, &b.natural_interval(), radius)
+                    .unwrap(),
+                Overlap::Apart,
+                "{centre:?}"
+            );
+        }
     }
 
     /// An arc and its chord share their ends but part by the sagitta between them: at a
