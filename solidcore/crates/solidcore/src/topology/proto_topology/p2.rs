@@ -571,7 +571,10 @@ fn within_tolerance_of_segment(x: Point3, a: Point3, b: Point3, tol: f64) -> boo
 /// times the exact sum. So `old·(1 + γ_8) < d` gives `old_exact < D`, and
 /// `D' <= reach_exact` gives `d' <= reach·(1 + γ_8)`: the test may refuse a growth that
 /// misses by a rounding, and of balls it finds apart before it never passes one that
-/// reaches. A non-finite distance or bound (NaN compares false) reaches nothing.
+/// reaches. A distance that overflows to infinity stands for what it proves, an exact
+/// distance of at least `√MAX·(1 - γ_4)` (the squares' sum overflowed, or a difference
+/// did): clear of a smaller reach, possibly reached by a larger one. A NaN distance or
+/// bound reaches nothing.
 fn grown_into(
     before: Point3,
     old_tol: f64,
@@ -581,9 +584,13 @@ fn grown_into(
     tol: f64,
 ) -> bool {
     let margin = 1.0 + gamma(8);
+    let overflowed = f64::MAX.sqrt() * (1.0 - gamma(4));
+    let at_least = |d: f64| if d == f64::INFINITY { overflowed } else { d };
+    let reach = (grown + tol) * margin;
+    let after = centre.distance(at);
     grown.partial_cmp(&old_tol) == Some(core::cmp::Ordering::Greater)
-        && (old_tol + tol) * margin < before.distance(at)
-        && centre.distance(at) <= (grown + tol) * margin
+        && (old_tol + tol) * margin < at_least(before.distance(at))
+        && (after <= reach || (after == f64::INFINITY && overflowed <= reach))
 }
 
 /// `SM_CAST_PTR(SmTopology, obj)`.
@@ -6221,6 +6228,21 @@ mod tests {
                 assert_eq!(v.raw_tolerance(), far.distance(p) * (1.0 + gamma(4)));
             }
         }
+    }
+
+    /// #18312: a distance that overflows (an exact distance above `√MAX`, about 1.34e154)
+    /// still decides the growth test. A vertex 2e154 away along each of x and y (its
+    /// squared distance overflows) with tolerance 1e154 is reached by a ball grown to 2e154,
+    /// not by one grown to 1, and is clear of the ball before.
+    #[test]
+    fn a_growth_test_whose_distance_overflows_still_decides() {
+        let o = Point3::new(0.0, 0.0, 0.0);
+        let far = Point3::new(2e154, 2e154, 0.0);
+        assert_eq!(o.distance(far), f64::INFINITY);
+        assert!(grown_into(o, 1e-4, o, 2e154, far, 1e154));
+        assert!(!grown_into(o, 1e-4, o, 1.0, far, 1e154));
+        let nan = Point3::new(f64::NAN, 0.0, 0.0);
+        assert!(!grown_into(o, 1e-4, o, 2e154, nan, 1.0));
     }
 
     #[test]
