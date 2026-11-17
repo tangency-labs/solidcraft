@@ -7364,6 +7364,14 @@ mod tests {
                 assert!(width(i) < 1e-3, "order {d}: {i:?}");
             }
         }
+        // at its start the quarter's middle: (−300 + r/√2, r/√2, 1), along (−1, 1)
+        let half = r * core::f64::consts::FRAC_1_SQRT_2;
+        let near_value = |i: Ivl, v: f64| i.lo <= v + 1e-12 && v - 1e-12 <= i.hi;
+        assert!(near_value(near[0].x + Ivl::from(about[0]), -300.0 + half));
+        assert!(near_value(near[0].y + Ivl::from(about[1]), half));
+        assert!(near_value(near[0].z + Ivl::from(about[2]), 1.0));
+        let along = near[1].x + near[1].y;
+        assert!(along.lo <= 0.0 && 0.0 <= along.hi, "{along:?}");
         for t in [s.lo, s.mid(), s.hi] {
             let at = curve_derivs_over(&cn, Ivl::from(t), 2, None).unwrap();
             // both hold the derivative at t

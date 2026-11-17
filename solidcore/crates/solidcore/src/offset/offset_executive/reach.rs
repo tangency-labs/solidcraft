@@ -1835,20 +1835,29 @@ fn edge_nurbs(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<NurbsCurve>
 }
 
 /// The edge point and tangent over the parameters `s`, each with its rate (from the
-/// curve's derivatives to order 2 enclosed over `s`, [`curve_derivs_over`]); `None` where
-/// no piece of the curve covers `s`.
+/// curve's derivatives to order 2 enclosed over `s`, [`curve_derivs_over`], about a point
+/// near `s`, [`curve_derivs_over_about`]); `None` where no piece of the curve covers `s`.
 ///
-/// The derivatives are enclosed about the curve's point at the middle of `s`
-/// ([`curve_derivs_over_about`]), which is added back to the point: a rational edge's
-/// enclosures are then of the size of the edge near `s`, not of its distance from the
-/// origin (a hole's rim r 0.2 three hundred from the origin had its tangent enclosed over
-/// a piece of width 2.4e-4 as wide as the tangent itself, so no piece was decided).
+/// Over a range the derivatives are enclosed about the curve's point at its middle, which
+/// is added back to the point: a rational edge's enclosures are of the size of the edge
+/// near `s`, not of its distance from the origin, which the quotient's weight terms
+/// would otherwise carry into every derivative.
 fn point_and_tangent(cn: &NurbsCurve, s: Ivl) -> Result<Option<(Dv, Dv)>> {
     let enclosed = |found: Result<Vec<V3<Ivl>>>| match found {
         Ok(d) => Ok(Some(d)),
         Err(e @ SolidError::Cancelled { .. }) => Err(e),
         Err(_) => Ok(None),
     };
+    // at a single parameter the enclosures are the rounding's only
+    if s.lo >= s.hi {
+        let Some(ders) = enclosed(curve_derivs_over(cn, s, 2, None))? else {
+            return Ok(None);
+        };
+        let (Some(&d0), Some(&d1), Some(&d2)) = (ders.first(), ders.get(1), ders.get(2)) else {
+            return Ok(None);
+        };
+        return Ok(Some((Dv::of(d0, d1), Dv::of(d1, d2))));
+    }
     let Some(middle) = enclosed(curve_derivs_over(cn, Ivl::from(s.mid()), 0, None))? else {
         return Ok(None);
     };
