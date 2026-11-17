@@ -626,7 +626,10 @@ fn enter_workspace(app: &mut SolveApp, render: bool) {
 /// is the active view (opened when the design has none for it), and with neither the Model view
 /// is, as the app left them by itself. Called each frame and after a design switch, so a view
 /// entered from anywhere in the app (a ribbon button, a command, Finish Sketch) shows in the strip.
+/// A view of a sketch the design no longer has (cancelled, undone or deleted) closes (#18264).
 pub(crate) fn sync_views(app: &mut SolveApp) {
+    let session = &app.session;
+    app.docs.views.drop_views(|view| view.kind != ViewKind::Sketch || can_restore(session, view.kind, view.subject.as_deref()));
     let shown = if crate::render_workspace::active(app) {
         Some((ViewKind::Render, None))
     } else {
@@ -3658,6 +3661,41 @@ mod tests {
     /// With "Reopen a design's views" on, a saved design's views come back when it opens again:
     /// those that can still be shown, nothing from a stale memory, and nothing at all when the
     /// preference is off.
+    /// #18264: cancelling a new sketch closes its view instead of leaving a tab that says the
+    /// sketch no longer exists; so does undoing a finished sketch away, and Reopen does not bring
+    /// either back. A finished sketch that stays keeps its view.
+    #[test]
+    fn a_view_closes_when_its_sketch_is_cancelled_or_undone_away() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let sketch_views = |h: &crate::scenario::Harness| h.app.docs.views.views().iter().filter(|view| view.kind == ViewKind::Sketch).count();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch1"})).unwrap();
+        h.frames(2);
+        h.app.run("sketch.line", json!({"points": [[0, 0], [20, 10]]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(sketch_views(&h), 1, "the finished sketch keeps its view");
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Sketch2"})).unwrap();
+        h.frames(2);
+        assert_eq!(sketch_views(&h), 2);
+        h.app.run("sketch.cancel", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(sketch_views(&h), 1, "the cancelled sketch's view closes");
+        assert_eq!(h.app.docs.views.active().kind, ViewKind::Model);
+        assert!(!h.app.docs.views.can_reopen(), "Reopen has no dead view to bring back");
+        // Undo steps back into Sketch1 before it removes it; undo until the design has no sketch.
+        for _ in 0..8 {
+            if h.app.session.doc.features.iter().all(|feature| feature.name != "Sketch1") {
+                break;
+            }
+            h.app.run("edit.undo", json!({})).unwrap();
+            h.frames(2);
+        }
+        assert!(h.app.session.doc.features.iter().all(|feature| feature.name != "Sketch1"));
+        assert_eq!(sketch_views(&h), 0, "undoing Sketch1 away closes its view too");
+        assert_eq!(h.app.docs.views.len(), 1);
+    }
+
     #[test]
     fn a_design_gets_its_remembered_views_back_when_the_preference_is_on() {
         let dir = std::env::temp_dir().join(format!("solidcraft-documents-views-{}", std::process::id()));
