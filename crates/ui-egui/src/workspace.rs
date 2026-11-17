@@ -196,6 +196,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                     "construct.plane.tangent",
                     "construct.plane.along_path",
                     "construct.plane.perpendicular",
+                    "construct.plane.square_to_line",
                 ],
             },
             CommandGroup {
