@@ -78,10 +78,10 @@
 //!   An unresolved closed-direction seam jump cannot use
 //!   the inaccurate-short-span escape: subdivision must resolve its branch.
 //! - **A span proved off the curve fails.** On an analytic sphere a span that passes the
-//!   sampled test, or the short-span escape, fails when its UV image is proved farther than
-//!   the tolerance from the curve's 3D Hermite span (`span_proved_off`, the certificate of
-//!   `surface_intersector::sphere_span`), and is subdivided: near a pole the clamped samples
-//!   missed a span 5e-4 off its circle. Upstream accepts it.
+//!   sampled test, or the short-span escape, fails when its UV image is proved farther
+//!   than the tolerance from the 3D Hermite span of the curve's drop (`span_proved_off`,
+//!   the certificate of `surface_intersector::sphere_span`), and is subdivided: near a
+//!   pole the clamped samples missed a span 5e-4 off its circle. Upstream accepts it.
 //! - **Bounded subdivision.** The span stack of the subdivision loop is at most
 //!   [`MAX_SPAN_DEPTH`] drop points deep (upstream fixtures reach about 15: a span
 //!   passes once shorter than `1/8000` of the interval; upstream is unbounded,
@@ -109,6 +109,7 @@ use crate::kernel::Kernel;
 use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::knots::Side;
 use crate::surface::plane::PlaneDropCurve;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::{
@@ -414,8 +415,12 @@ fn uv_curve_gap(
 
 /// Not upstream: whether, on an analytic sphere, the surface image of the UV Hermite span
 /// [`DropPt::test_span_accuracy`] builds from `start` to `end` is proved farther than
-/// `approx_tol_3d` from the 3D Hermite span of `curve` over the same parameters at some
-/// parameter ([`sphere_span::sphere_span_image`] refuses with [`sphere_span::Refusal::Off`]).
+/// `approx_tol_3d` from the 3D Hermite span of the curve's drop at some parameter
+/// ([`sphere_span::sphere_span_image`] refuses with [`sphere_span::Refusal::Off`]): the
+/// Hermite runs between the surface points of the span's two UV ends with `curve`'s
+/// tangents there projected into the surface's tangent planes, so a curve that lies off the
+/// surface within the drop's own tests is compared with its drop, not with itself (at a
+/// span shrunk to a point the two ends agree and nothing is proved off).
 /// `false` on any other surface kind, and where the distance is not proved over the
 /// tolerance (certified, or not decided).
 ///
@@ -443,17 +448,22 @@ fn span_proved_off(
         return Ok(false);
     }
     let delta_t = end.t - start.t;
-    let at = |t: f64| -> Result<(Vec3, Vec3)> {
+    // the drop of the curve at `t`: the surface point at `uv` and the curve's tangent in
+    // the surface's tangent plane there, scaled to the span
+    let at = |t: f64, uv: Point2| -> Result<(Vec3, Vec3)> {
         let pd = curve.evaluate(k, t, 1, true, true)?;
-        match (pd.first(), pd.get(1)) {
-            (Some(&p), Some(&d)) => Ok((p, d * delta_t)),
-            _ => Err(SolidError::intersect_failed(
+        let Some(&d) = pd.get(1) else {
+            return Err(SolidError::intersect_failed(
                 OP,
                 "the curve's first derivative was not evaluated",
-            )),
-        }
+            ));
+        };
+        let p = surface.evaluate_point(k, uv)?;
+        let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
+        Ok((Vec3::from(p), d.project_to_plane(n) * delta_t))
     };
-    let ((p0, d0), (p1, d1)) = (at(start.t)?, at(end.t)?);
+    let (p0, d0) = at(start.t, start.uv_pd[0])?;
+    let (p1, d1) = at(end.t, end.uv_pd[0])?;
     let lift = |p: Point2| Vec3::new(p.x, p.y, 0.0);
     let uv = [
         lift(start.uv_pd[0]),
