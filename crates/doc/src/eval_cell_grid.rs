@@ -138,16 +138,23 @@ pub(crate) fn tools(
         crate::Direction::Symmetric if *through_all => (-reach, reach),
         crate::Direction::Symmetric => (-reach / 2.0, reach / 2.0),
     };
+    let mut regions: Vec<Region2> = Vec::new();
+    for cell in &plan.cells {
+        regions.extend(solidcore_ops::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?);
+    }
+    prism_tool(&ss.plane, &regions, lo, hi)
+}
+
+/// One cutting tool from `regions` lying apart on `plane`: every region a prism from `lo` to `hi`
+/// along the plane's normal, joined into one body. Shared by Cell Grid and Living Hinge.
+pub(crate) fn prism_tool(plane: &Plane, regions: &[Region2], lo: f64, hi: f64) -> Result<Vec<Traced>> {
     extrude_within_reach([lo, hi])?;
     let mut tools: Vec<Traced> = Vec::new();
-    for cell in &plan.cells {
-        let pieces = solidcore_ops::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?;
-        for region in &pieces {
-            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false)?);
-        }
+    for region in regions {
+        tools.extend(centered_extrude(plane, region, lo, hi, None, None, false)?);
     }
-    // The cells lie apart by the web, so the kernel's own check of their boxes (which a
-    // staggered grid's neighbours fail) is not asked.
+    // The regions lie apart (a cell grid's web, a hinge's bridges), so the kernel's own check of
+    // their boxes (which a staggered grid's neighbours fail) is not asked.
     if tools.len() > 1 {
         let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
         if let Some(one) = kernel::join_apart(&bodies)? {

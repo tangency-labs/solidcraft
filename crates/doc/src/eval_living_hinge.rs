@@ -131,23 +131,11 @@ pub(crate) fn plan(inputs: &HingeInputs, plate: &[Loop2], warning: &mut Option<S
 /// The cutting tool of `plan`: every slot a prism from `-reach` to `reach` along the normal of
 /// `plane`, as one body. The slots are in the hinge frame, the sketch frame turned by `angle`.
 pub(crate) fn cut(plane: &Plane, angle: f64, plan: &LivingHingePlan, slot_width: f64, reach: f64) -> Result<Vec<Traced>> {
-    extrude_within_reach([-reach, reach])?;
     let (s, c) = angle.sin_cos();
     let frame = Plane { origin: plane.origin, x: plane.x * c + plane.y * s, y: plane.y * c - plane.x * s };
-    let mut tools: Vec<Traced> = Vec::new();
-    for slot in &plan.slots {
-        let region = kernel::living_hinge::slot_region(slot, slot_width)?;
-        tools.extend(centered_extrude(&frame, &region, -reach, reach, None, None, false)?);
-    }
-    // The slots lie apart (the planner keeps material between them), so the kernel's own check of
-    // their boxes is not asked.
-    if tools.len() > 1 {
-        let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-        if let Some(one) = kernel::join_apart(&bodies)? {
-            return Ok(vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())]);
-        }
-    }
-    Ok(tools)
+    // The slots lie apart: the planner keeps material between them.
+    let regions = plan.slots.iter().map(|slot| kernel::living_hinge::slot_region(slot, slot_width)).collect::<std::result::Result<Vec<_>, _>>()?;
+    cell_grid::prism_tool(&frame, &regions, -reach, reach)
 }
 
 /// The tool of a living hinge feature and its report: plan, checks, cut.
