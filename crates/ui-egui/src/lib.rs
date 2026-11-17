@@ -125,6 +125,7 @@ mod linked_source;
 pub mod links;
 #[cfg(test)]
 mod loft_rails_dialog_tests;
+pub mod log_file;
 #[cfg(test)]
 mod look_at_tests;
 #[cfg(test)]
@@ -234,6 +235,7 @@ pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
 pub(crate) mod place_gizmo;
+mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
 mod plugin_slots;
@@ -1611,6 +1613,7 @@ impl SolveApp {
             self.status = None;
         }
         let done = self.command_completed(id, r);
+        issue_report::ticket::step_params(self, id, params);
         if self.session.revision != revision {
             timeline::stop_playback(self);
         }
@@ -1875,6 +1878,7 @@ impl SolveApp {
     /// the status line when it failed, what opening and saving update, and the toolbar tab.
     pub(crate) fn finish_command(&mut self, id: &str, r: &Result<Value, String>) {
         let id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+        issue_report::ticket::record_step(self, id, r);
         match r {
             Ok(v) => {
                 // Programmatic callers (the control channel, scripts) run outside a render
@@ -2035,6 +2039,47 @@ impl SolveApp {
         } else {
             let at = self.viewport.rect.map(|rect| rect.center()).unwrap_or(egui::pos2(300.0, 200.0));
             context_menu::open_for(self, at, target);
+        }
+    }
+
+    /// Ground (or, when every one is already grounded, unground) the selected placements, the
+    /// placements owning the bodies or faces picked in the view, and the components picked in the
+    /// Browser, the way the Browser's Ground row toggles one. With
+    /// nothing to act on it says what to pick.
+    fn ground_selected_occurrences(&mut self) {
+        let mut targets: Vec<(u64, bool)> = Vec::new();
+        for sel in &self.session.selection {
+            use solidcraft_engine::Sel;
+            // A body, face, edge or vertex picked in the view stands for the placement that owns
+            // it, the one a drag on it would move (the outermost inside the active component).
+            let path = match sel {
+                Sel::Occurrence { path } => Some(path.clone()),
+                Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+                    occurrence_drag::placement_of(self, body)
+                }
+                _ => None,
+            };
+            if let Some(placement) = path.and_then(|path| self.session.occurrence_placement(&path).ok()) {
+                targets.push((placement.occurrence, placement.grounded));
+            }
+        }
+        for &component in &self.tree.picked_components {
+            if let Some(occurrence) = self.session.doc.occurrence_of(component).filter(|_| component != 0) {
+                targets.push((occurrence.id, occurrence.grounded));
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        targets.retain(|(occurrence, _)| seen.insert(*occurrence));
+        if targets.is_empty() {
+            self.set_status(self.tr("ui.ground_select_first"), false);
+            return;
+        }
+        let grounded = !targets.iter().all(|(_, grounded)| *grounded);
+        for (occurrence, _) in targets {
+            if let Err(why) = self.run("occurrence.ground", json!({ "occurrence": occurrence, "grounded": grounded })) {
+                self.set_status(why, true);
+                return;
+            }
         }
     }
 
@@ -2231,6 +2276,13 @@ impl SolveApp {
             let label = self.tr_label(info.label).to_string();
             let why = self.tr_label(&why).to_string();
             self.set_status(format!("{label}: {why}"), true);
+            return;
+        }
+        // The ribbon's Ground acts on the selected placements, or the components picked in the
+        // Browser, as the Browser's Placement ▸ Ground does (#14911). It used to run with no
+        // occurrence and the engine answered "`occurrence` must be an id or name".
+        if id == "occurrence.ground" {
+            self.ground_selected_occurrences();
             return;
         }
         if render_workspace::start_interactive(self, id) {
@@ -3749,6 +3801,7 @@ impl SolveApp {
         file_load::tick(self, ctx);
         save_job::tick(self, false);
         verify_job::tick(self);
+        timeline::tick_import_checks(self, ctx);
         edit_in_place::tick(self);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {

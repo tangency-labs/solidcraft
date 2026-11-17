@@ -1065,7 +1065,7 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
         if !s.doc.assembly.joints.is_empty() {
             keys.open.insert("c0/joints".into());
         }
-        if s.section.is_some() {
+        if !s.section.is_empty() || !s.section_hidden.is_empty() {
             keys.open.insert("analysis".into());
         }
     }
@@ -1936,6 +1936,53 @@ mod tests {
         assert!(s.model.state().body("KB").is_some_and(|b| !b.body.is_surface()), "the body both placements show is closed");
         let err = s.execute("body.repair", &json!({"body": "KB (K:9)"})).unwrap_err().to_string();
         assert!(err.contains("no body `KB (K:9)`"), "{err}");
+    }
+
+    /// #17689: a STEP part SMLib takes but whose check fails. The import says so, naming it; a
+    /// join on it is refused saying the part already failed the check; and Repair runs the same
+    /// check, saying what fails rather than that there is nothing to repair. The block's edge
+    /// curve lies 2 µm off its face (tests/step-regressions/README.md).
+    #[test]
+    fn a_step_part_the_check_fails_is_named_at_import_at_the_join_and_by_repair() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-17689-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step");
+        std::fs::write(&path, include_str!("../../../../tests/step-regressions/block_edge_off_its_face.step")).unwrap();
+        let mut s = Session::default();
+        let r = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
+        assert_eq!(r["created_bodies"], json!(["Bloco"]), "{r}");
+        // The check runs on after the import returns (#17697): what it finds joins the import's
+        // result once it ends, and a window is told of it once.
+        let id = r["feature"].as_u64().unwrap_or_else(|| panic!("{r}"));
+        let report = s.model.result(id).and_then(|f| f.import_report.clone()).expect("the import's check is pending or done");
+        report.settled().expect("the check ends");
+        // A copy of the model evaluated beside it (a scratch evaluation) takes no notice from it.
+        let mut copy = s.model.clone();
+        copy.settle_import_checks();
+        assert_eq!(copy.take_import_notices(), [id]);
+        s.model.settle_import_checks();
+        let result = s.model.result(id).unwrap();
+        let warning = result.warning.clone().unwrap_or_default();
+        assert!(warning.contains("solid 'Bloco': needs repair before it can be modelled: SMLib's check fails it: "), "{warning}");
+        let issues = &result.import_report.as_ref().unwrap().issues;
+        assert!(issues.iter().any(|i| i.kind == solidcraft_kernel::IssueKind::NeedsRepair && i.part == "Bloco"), "{issues:?}");
+        assert_eq!(s.model.take_import_notices(), [id], "a window is told once");
+        s.model.settle_import_checks();
+        assert_eq!(s.model.take_import_notices(), Vec::<u64>::new());
+        // A box joined to it at its far corner: the default each_feature check refuses the result,
+        // and the message says the check fails the part as it was before the join.
+        let err = s
+            .execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [18, 28, 8], "operation": "join", "targets": ["Bloco"]}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("body `Bloco` (SMLib's check fails it as it was before this feature): "), "{err}");
+        assert!(err.contains("SMLib's check refuses the result"), "{err}");
+        // Repair: refused with the check's failures, nothing added.
+        let n = s.doc.features.len();
+        let err = s.execute("body.repair", &json!({"body": "Bloco"})).unwrap_err().to_string();
+        assert!(err.contains("SMLib's check fails the part") && !err.contains("nothing to repair"), "{err}");
+        assert_eq!(s.doc.features.len(), n);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

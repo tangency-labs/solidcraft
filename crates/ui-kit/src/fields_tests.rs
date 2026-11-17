@@ -734,6 +734,39 @@ fn count_steps_stay_within_limits_and_keep_expressions() {
     assert_eq!(super::step_count("5", i64::MIN, &wide).as_deref(), Some("-9223372036854775803"));
 }
 
+/// The same quantity editor is used by solid and sketch pattern dialogs. Up/Down steps
+/// its value only when focused, leaving limits and expression values intact.
+#[test]
+fn count_keyboard_arrows_step_only_a_focused_count_within_limits() {
+    for (initial, arrow, expected) in [
+        ("5", egui::Key::ArrowUp, "6"),
+        ("5", egui::Key::ArrowDown, "4"),
+        ("1", egui::Key::ArrowDown, "1"),
+        ("10", egui::Key::ArrowUp, "10"),
+        ("n", egui::Key::ArrowUp, "n + 1"),
+    ] {
+        let ctx = crate::test_support::context();
+        let eval = |text: &str| match text.trim() {
+            "n" => Some(4.0),
+            "n + 1" => Some(5.0),
+            text => text.parse::<f64>().ok(),
+        };
+        let mut count = initial.to_string();
+        let mut draw = |ui: &mut Ui| {
+            count_row(ui, "Instances", &mut count, &Count { min: 1, max: 10, eval: &eval });
+        };
+        frame(&ctx, vec![], &mut draw);
+        // A key outside the field does nothing, even with the dialog visible.
+        frame(&ctx, key(egui::Key::ArrowUp), &mut draw);
+        let field = registry::rect_of("dialog:widget:Instances").expect("count field has a rect");
+        let at = field.left_center() + egui::vec2(16.0, 0.0);
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        frame(&ctx, key(arrow), &mut draw);
+        assert_eq!(count, expected, "{initial} with {arrow:?}");
+    }
+}
+
 /// A count's step arrows stand inside the editor, which asks for the text cursor across its
 /// whole rect, so the arrows showed an I-beam and read as part of the text. They are not text:
 /// the pointer over one is the ordinary cursor, whether it can step or not, and the number

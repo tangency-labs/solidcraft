@@ -550,12 +550,31 @@ fn open_step(
     let mut reply = add_step_bytes(&mut fresh, path, None, &options, &bytes, profiled)?;
     reply["import_reused"] = json!(false);
     if let Some(cache) = cache
-        && let Some(saved) = saved_geometry(&fresh, &fresh.doc)
-        && let Err(e) = cache.write(&key, &fresh.doc, &saved, &reply)
+        && let Some((saved, pending)) = saved_geometry_now(&fresh, &fresh.doc)
     {
-        log::info!("import was not cached: {e}");
+        write_import_cache(cache, key, &fresh.doc, saved, pending, &reply);
     }
     Ok((fresh, reply))
+}
+
+/// Cache an opened import. While SMLib's check of its parts runs on (after the design shows),
+/// the write waits for it on a thread of its own, so the cached import says what the check found
+/// ([`solidcraft_io::ImportCache::write_after`]).
+fn write_import_cache(
+    cache: &solidcraft_io::ImportCache,
+    key: String,
+    doc: &Document,
+    saved: solidcraft_doc::SavedModel,
+    pending: solidcraft_doc::PendingChecks,
+    reply: &Value,
+) {
+    if pending.is_empty() {
+        if let Err(e) = cache.write(&key, doc, &saved, reply) {
+            log::info!("import was not cached: {e}");
+        }
+        return;
+    }
+    cache.write_after(key, doc.clone(), saved, reply.clone(), move |saved| pending.settle(saved));
 }
 
 /// Add a FreeCAD file's rebuilt history (`design`) in a new component named after the file.
@@ -1351,9 +1370,24 @@ fn reads_natively(path: &str) -> bool {
         || matches!(extension.as_str(), "sc" | "solidcraft" | "json")
 }
 
+/// Why a file read as a design could not be: with a design's own extension, what the reader said;
+/// with any other, that SolidCraft does not open that kind of file (#18465). A file of another
+/// CAD program reaches the design reader because nothing else claims it, and its words about a
+/// "design container" or an environment resource say nothing of that.
+fn unreadable_design(path: &str, reason: &str) -> EngineError {
+    let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default();
+    if matches!(extension.to_ascii_lowercase().as_str(), "sc" | "solidcraft" | "json") {
+        return EngineError::Other(format!("{path}: {reason}"));
+    }
+    let kind = if extension.is_empty() { "this file".to_string() } else { format!(".{extension} files") };
+    EngineError::Other(format!(
+        "{path}: SolidCraft can't open {kind}; export STEP (or another format it opens) from the program that made it ({reason})"
+    ))
+}
+
 /// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
 fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
-    let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| unreadable_design(path, &e.to_string()))?;
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
@@ -2086,6 +2120,14 @@ fn saved_geometry(s: &Session, design: &Document) -> Option<solidcraft_doc::Save
         return None;
     }
     s.model.saved(design)
+}
+
+/// [`saved_geometry`] without waiting for the imports' checks ([`solidcraft_doc::Model::saved_now`]).
+fn saved_geometry_now(s: &Session, design: &Document) -> Option<(solidcraft_doc::SavedModel, solidcraft_doc::PendingChecks)> {
+    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.state().bodies.is_empty() {
+        return None;
+    }
+    s.model.saved_now(design)
 }
 
 /// Cache only warm display geometry. A save never waits for an unevaluated mesh.

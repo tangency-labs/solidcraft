@@ -924,6 +924,18 @@ fn every_other_offset_refusal_says_why_and_where() {
             },
         ),
         (
+            O::WallsMeetAcross {
+                face: named,
+                distance: 1.0,
+                largest: 1.0,
+            },
+            Some(7),
+            R::WallsMeetAcross {
+                distance: 1.0,
+                largest: 1.0,
+            },
+        ),
+        (
             O::LoopsCross {
                 face: Some(named),
                 crossing: LoopCrossing::SharesEdge,
@@ -1045,6 +1057,16 @@ fn every_other_offset_refusal_says_why_and_where() {
         };
         assert_eq!(matches!(why, R::Phrase { .. }), o.is_phrase(), "{o:?}");
     }
+    // walls meeting across a square boss name the largest wall, not a radius of curvature
+    let across = R::WallsMeetAcross {
+        distance: 1.0,
+        largest: 1.0,
+    };
+    assert_eq!(
+        across.to_string(),
+        "the wall reaches half the width between two opposite faces of a boss; the largest wall \
+         that fits is 1"
+    );
     // the face the kernel sets on a failure whose reason names none (a draft's face without a
     // surface) is the one said
     let what = "the face has no surface or no outer face use";
@@ -1965,5 +1987,33 @@ mod drafts {
                 "parted cylinder step={step}: measured={measured:.12}, expected={expected:.12}"
             );
         }
+    }
+
+    /// #18374: a cylinder r 1.5, z 0 to 4, with a 0.36 cube joined on its top 0.12 in from the
+    /// rim (x 1.02 to 1.38), its side drafted 3 degrees about its base. The side's cone is
+    /// r 1.5 - 4 tan 3 degrees (about 1.29) at the top, so the cube now overhangs it; the cube
+    /// stays as it was, its underside outside the cone uncovered. The frustum plus the cube,
+    /// in nine faces: the cone, the base, the top, the cube's underside past the cone, and
+    /// the cube's five.
+    #[test]
+    fn a_cylinder_with_a_boss_near_its_rim_drafts_under_the_boss() {
+        all_fixes();
+        let cylinder = make_cylinder([0.0; 3], 1.5, 4.0).unwrap();
+        let cube = make_box([1.02, -0.18, 4.0], [0.36, 0.36, 0.36]).unwrap();
+        let b = crate::boolean::boolean(cylinder, cube, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let o = order(&b);
+        draft(&b, &o, &[curved(&b, &o)], [0.0; 3], Z, Z, THREE).unwrap();
+        let (big, h) = (1.5, 4.0);
+        let small = big - h * TAN_THREE;
+        let v = PI * h * (big * big + big * small + small * small) / 3.0 + 0.36 * 0.36 * 0.36;
+        let got = volume(&b);
+        assert!(rel(got, v) < 1e-9, "{got} {v}");
+        assert_eq!(b.counts().unwrap()[0], 9);
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
     }
 }

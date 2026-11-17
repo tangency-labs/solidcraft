@@ -70,10 +70,18 @@
 //!   parameter of the trim off its edge's by the trimmed length (a 1e-6 corner gap left a
 //!   thread edge's trim 5e-5 off its edge, tolerance 1e-5). That is the default here, as
 //!   upstream; with [`UpstreamFixes::uv_trim_corner_end_points_only`](crate::kernel::UpstreamFixes::uv_trim_corner_end_points_only)
-//!   only the end control points move, by the UV gap.
+//!   only the trims' ends move onto the vertex's UV point (spread, below).
 //!   Each `Trim` uses the tolerance of the edge reached through the UV curve's actual
 //!   holding edge use, matching `SmTol::GetZoneTol3d(curve)`; an owner path without an
 //!   edge uses the system tolerance. Notification probes use that same tolerance.
+//! - **Not upstream (#14257): the end move is spread.** Upstream moves each trim's end
+//!   control point alone onto the vertex's UV point, which turns the end control leg by
+//!   any angle when the gap is not small against it (WR-794). Here the control points
+//!   within `END_MOVE_REACH` (20) gaps of the end along the control polygon move part of
+//!   the way first (`spread_end_move`, which states what that keeps): no point of the trim
+//!   moves by more than the gap, no control leg turns by more than `asin(1/20)` unless the
+//!   whole polygon is shorter than the reach, and a trim whose end leg is at least 20 gaps
+//!   long is edited as upstream.
 //! - **Edit notifications.** [`fix_uv_trim_curves_notified`] notifies its two
 //!   `EditEndPoint`s (`SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`, caller and first data
 //!   object the UV trim curve under its kernel-issued identity) through the caller's
@@ -3057,15 +3065,132 @@ fn notified_curve_edit(
     notify_around_edit(b, env, holder, edit)
 }
 
-/// `SmBSplineCurve::EditEndPoint(point, bEditStart, pdWeight)` of a UV trim curve.
+/// Not upstream (#14257): how far along a UV trim's control polygon an end move reaches,
+/// in gaps ([`spread_end_move`]). It is the ratio `sm_FixUVTrimCurves` already calls
+/// small: a gap above a twentieth of the face's UV domain is left alone.
+const END_MOVE_REACH: f64 = 20.0;
+
+/// Not upstream (#14257): moves the control points next to the start (`edit_start`) or
+/// end of a UV trim part of the way to the UV point `target`, before `EditEndPoint`
+/// puts the end control point on it.
+///
+/// Upstream moves the end control point alone ("no protection from introducing kinks").
+/// Where the gap is not small against the end control leg, that turns the leg by any
+/// angle: a gap of 1.04e-4 at an end leg of 3.9e-5 hooked an imported trim back on
+/// itself (radius of curvature 7.2e-5 on a trim 0.73 long).
+///
+/// With `g` the gap from the end control point to `target` and `d_i` the length of the
+/// control polygon from the end to control point `i`, the move stops at control point
+/// `j`: the second one when the end leg is at least `END_MOVE_REACH * g` long, else the
+/// first with `d_j >= END_MOVE_REACH * g` at which the knots keep the curve
+/// tangent-continuous, else the far end. Control point `i < j` moves by `1 - d_i / d_j`
+/// of the gap; `j` and the control points past it stay. Then, on the Euclidean control
+/// polygon:
+/// - No point of the trim moves by more than `g`: a point of the curve is a convex
+///   combination of control points (positive weights), each moved along the gap by a
+///   share in `[0, 1]`. The far end does not move.
+/// - A control leg `l` before `j` changes by `|l| g / d_j` along the gap, so it turns by
+///   at most `asin(g / d_j)`, which is at most `asin(1 / END_MOVE_REACH)` (2.9 degrees)
+///   unless the whole control polygon is shorter than the reach.
+/// - Legs before `j` that were parallel stay parallel, so no tangent break is added at a
+///   knot of full multiplicity before `j`. None is added at `j` either, where the knots
+///   allow none, but for a trim of degree 1 stopped at its second control point: its end
+///   leg turns at that corner, by the bound above.
+/// - With an end leg of at least `END_MOVE_REACH * g` the end control point moves alone,
+///   as upstream.
+///
+/// A control polygon of length zero has nothing to spread the move over: its end control
+/// point moves alone.
+///
+/// # Errors
+///
+/// `SM_ERR` without a NURB.
+fn spread_end_move(c: &mut BSplineCurve, target: Point3, edit_start: bool) -> Result<()> {
+    use crate::nurbs::math::{NOW, NOZ};
+    let cur = c.get_or_create_gw_nurb()?;
+    let degree = cur.degree();
+    let knots = cur.knots();
+    // each control point from the moved end: its Euclidean point, its weight and whether
+    // the knots keep the curve tangent-continuous there (fewer than `degree` equal knots)
+    let mut poles: Vec<(Point3, f64, bool)> = cur
+        .cpts()
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let w = if p.w == NOW { 1.0 } else { p.w };
+            let z = if p.z == NOZ { 0.0 } else { p.z };
+            let smooth =
+                matches!((knots.get(i + 1), knots.get(i + degree)), (Some(a), Some(b)) if a < b);
+            (Point3::new(p.x / w, p.y / w, z / w), w, smooth)
+        })
+        .collect();
+    if !edit_start {
+        poles.reverse();
+    }
+    let Some(&(end, ..)) = poles.first() else {
+        return Ok(());
+    };
+    let delta = target - end;
+    let gap = delta.length();
+
+    // d_i, and the control point j the move stops at with d_j
+    let mut reach = Vec::new();
+    let (mut at, mut d) = (end, 0.0);
+    for (p, ..) in &poles {
+        d += at.distance(*p);
+        reach.push(d);
+        at = *p;
+    }
+    let last = poles.len().saturating_sub(1);
+    let stop = poles
+        .iter()
+        .zip(&reach)
+        .enumerate()
+        .find(|&(q, (&(_, _, smooth), &d))| {
+            q == last || ((q == 1 || (q > 1 && smooth)) && d >= END_MOVE_REACH * gap)
+        })
+        .map(|(q, (_, &d))| (q, d));
+    let Some((stop, length)) = stop else {
+        return Ok(());
+    };
+    if gap <= 0.0 || length <= 0.0 {
+        return Ok(());
+    }
+
+    let cpts = cur.cpts_mut();
+    let from_end: Box<dyn Iterator<Item = &mut crate::nurbs::math::CPoint>> = if edit_start {
+        Box::new(cpts.iter_mut())
+    } else {
+        Box::new(cpts.iter_mut().rev())
+    };
+    for (p, (&(_, w, _), &d)) in from_end.zip(poles.iter().zip(&reach)).take(stop).skip(1) {
+        // (homogeneous coordinates: the Euclidean move times the weight)
+        let share = (1.0 - d / length) * w;
+        p.x += share * delta.x;
+        p.y += share * delta.y;
+        if p.z != NOZ {
+            p.z += share * delta.z;
+        }
+    }
+    Ok(())
+}
+
+/// `SmBSplineCurve::EditEndPoint(point, bEditStart, pdWeight)` of a UV trim curve onto
+/// the UV point `uv`: `weight` is the end's weight for a rational curve, whose end
+/// control point upstream passes multiplied by it. Not upstream: a B-spline's control
+/// points next to the end move first ([`spread_end_move`]).
 fn edit_end_point(
     curve: &mut Curve,
-    point: Point3,
+    uv: Point3,
     edit_start: bool,
     weight: Option<f64>,
 ) -> Result<()> {
+    let point = weight.map_or(uv, |w| uv * w);
     match curve.kind_mut() {
-        CurveKind::BSpline(c) => c.edit_end_point(point, edit_start, weight),
+        CurveKind::BSpline(c) => {
+            spread_end_move(c, uv, edit_start)?;
+            c.edit_end_point(point, edit_start, weight)
+        }
         CurveKind::Line(l) => {
             // MakeNurb (the SmLine override) when missing, then RefreshAnalytics
             if l.base.gw_nurb().is_none() {
@@ -3084,7 +3209,8 @@ fn edit_end_point(
 /// curve and the end of `eu_previous`'s (its clockwise neighbour in the loop) by
 /// moving their end control points onto the vertex's UV point after trimming at their
 /// drop points and stretching back over their intervals (unless the opt-in fix skips
-/// those edits; module docs, #570). Gaps below `SM_EFF_ZERO / 10` or above a twentieth of the
+/// those edits; module docs, #570). The control points next to each end move part of the
+/// way with it (`spread_end_move`, not upstream). Gaps below `SM_EFF_ZERO / 10` or above a twentieth of the
 /// smaller side of `uv_domain` are left alone. `vertex` is the vertex between the two
 /// edge uses; `tol_3d` and `uv_dist_between` (the current UV gap) as upstream.
 /// Returns whether the curves were modified.
@@ -3308,35 +3434,21 @@ pub fn fix_uv_trim_curves_notified(
     let w_curr = end_weight(held_curve(b, curr_holder)?, edit_curr_start);
     let w_prev = end_weight(held_curve(b, prev_holder)?, edit_prev_start);
 
-    // move Currcurve endPoint to target point - no protection from introducing kinks
-    if held_curve(b, curr_holder)?.is_rational()? {
-        let p = uv_vertex_3d * w_curr;
-        notified_end_point_edit(
-            b,
-            env.as_deref_mut(),
-            curr_holder,
-            p,
-            edit_curr_start,
-            Some(w_curr),
-        )?;
-    } else {
-        notified_end_point_edit(
-            b,
-            env.as_deref_mut(),
-            curr_holder,
-            uv_vertex_3d,
-            edit_curr_start,
-            None,
-        )?;
-    }
+    // move Currcurve endPoint to target point (upstream: "no protection from introducing
+    // kinks"; here the move is spread, `spread_end_move`)
+    let w_curr = held_curve(b, curr_holder)?.is_rational()?.then_some(w_curr);
+    notified_end_point_edit(
+        b,
+        env.as_deref_mut(),
+        curr_holder,
+        uv_vertex_3d,
+        edit_curr_start,
+        w_curr,
+    )?;
 
     // move PrevCurve endPoint to target point
-    if held_curve(b, prev_holder)?.is_rational()? {
-        let p = uv_vertex_3d * w_prev;
-        notified_end_point_edit(b, env, prev_holder, p, edit_prev_start, Some(w_prev))?;
-    } else {
-        notified_end_point_edit(b, env, prev_holder, uv_vertex_3d, edit_prev_start, None)?;
-    }
+    let w_prev = held_curve(b, prev_holder)?.is_rational()?.then_some(w_prev);
+    notified_end_point_edit(b, env, prev_holder, uv_vertex_3d, edit_prev_start, w_prev)?;
 
     // all done
     Ok(true)
@@ -4122,6 +4234,316 @@ mod tests {
             panic!("UV trim curve is no longer a B-spline");
         };
         assert_ne!(c0.knots(None).unwrap(), c1.knots(None).unwrap());
+    }
+
+    /// A straight cubic UV trim along u from the origin in two Bezier pieces (knot
+    /// multiplicities 4, 3, 4), the layout of the imported trim of #14257: three control
+    /// legs `short`, then three legs `long`. With `weights` it is rational; `reversed`
+    /// lists the control points from the far end, so the short piece is at the end.
+    fn two_piece_trim(short: f64, long: f64, weights: Option<[f64; 7]>, reversed: bool) -> Curve {
+        use crate::nurbs::math::{CPoint, NOW};
+        let mut x = vec![0.0];
+        for leg in [short, short, short, long, long, long] {
+            x.push(x.last().unwrap() + leg);
+        }
+        let mut pw: Vec<CPoint> = x
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| match weights {
+                Some(w) => CPoint::new(x * w[i], 0.0, 0.0, w[i]),
+                None => CPoint::new(x, 0.0, 0.0, NOW),
+            })
+            .collect();
+        let mut u = [0.0, 0.0, 0.0, 0.0, 0.01, 0.01, 0.01, 1.0, 1.0, 1.0, 1.0];
+        if reversed {
+            pw.reverse();
+            u = [0.0, 0.0, 0.0, 0.0, 0.99, 0.99, 0.99, 1.0, 1.0, 1.0, 1.0];
+        }
+        Curve::from(BSplineCurve::from_data(2, 6, 10, 3, &pw, &u).unwrap())
+    }
+
+    /// The Euclidean control points of a B-spline UV trim.
+    fn polygon(c: &Curve) -> Vec<Point3> {
+        let CurveKind::BSpline(c) = c.kind() else {
+            panic!("UV trim curve is not a B-spline");
+        };
+        c.control_polygon().unwrap().0
+    }
+
+    /// The curvature of a B-spline UV trim at `t`.
+    fn curvature(c: &Curve, t: f64, from_left: bool) -> f64 {
+        let CurveKind::BSpline(c) = c.kind() else {
+            panic!("UV trim curve is not a B-spline");
+        };
+        let d = c.evaluate(t, 2, from_left, false).unwrap();
+        (d[1].x * d[2].y - d[1].y * d[2].x).abs() / d[1].length().powi(3)
+    }
+
+    /// The angle from `a` to `b`, both in the UV plane.
+    fn turn(a: Vec3, b: Vec3) -> f64 {
+        (a.x * b.y - a.y * b.x).atan2(a.dot(b)).abs()
+    }
+
+    /// #14257: an end 1e-4 beside its vertex, at end control legs of 4e-5. Upstream's move
+    /// of the end control point alone turns the end leg by 68 degrees. Spread, the move
+    /// stops at the first control point past the short piece (0.01572 along the polygon,
+    /// over 20 gaps): the four control points before it take the closed-form shares, every
+    /// leg before it turns by `atan(g / d_j)`, the trim stays tangent-continuous at its
+    /// triple knot and within the gap of the old trim, and its radius of curvature is
+    /// nowhere below `1.5 L d_j / g` (the second piece is `y = a (1 - s)^3` over
+    /// `x' = 3 L` with `a = g L / d_j`).
+    #[test]
+    fn issue_14257_an_end_move_longer_than_the_end_leg_is_spread() {
+        let (s, l, g) = (4e-5, 0.0156, 1e-4);
+        let before = two_piece_trim(s, l, None, false);
+        let mut after = before.clone();
+        edit_end_point(&mut after, Point3::new(0.0, g, 0.0), true, None).unwrap();
+        let (p0, p1) = (polygon(&before), polygon(&after));
+
+        // the shares, and the control points from the stop on untouched
+        let d = [0.0, s, 2.0 * s, 3.0 * s];
+        let d_j = 3.0 * s + l;
+        assert_eq!(p1[0], Point3::new(0.0, g, 0.0));
+        for i in 0..4 {
+            let want = Point3::new(p0[i].x, g * (1.0 - d[i] / d_j), 0.0);
+            assert!(p1[i].distance(want) < 1e-15, "{i}: {:?} vs {want:?}", p1[i]);
+        }
+        assert_eq!(p0[4..], p1[4..]);
+
+        // every leg before the stop turns by atan(g / d_j): 0.36 degrees
+        for i in 0..4 {
+            let angle = turn(p0[i + 1] - p0[i], p1[i + 1] - p1[i]);
+            assert!((angle - (g / d_j).atan()).abs() < 1e-9, "leg {i}: {angle}");
+        }
+        // tangent-continuous at the triple knot
+        let (into, out) = (p1[3] - p1[2], p1[4] - p1[3]);
+        assert!(turn(into, out) < 1e-12, "{}", turn(into, out));
+
+        // within the gap of the old trim, and no small radius of curvature
+        let radius_bound = 1.5 * l * d_j / g;
+        let mut largest = curvature(&after, 0.01, false).max(curvature(&after, 0.01, true));
+        for i in 0..=1000 {
+            let t = f64::from(i) / 1000.0;
+            let (CurveKind::BSpline(c0), CurveKind::BSpline(c1)) = (before.kind(), after.kind())
+            else {
+                panic!("UV trim curve is not a B-spline");
+            };
+            let moved = c0
+                .evaluate_point(t)
+                .unwrap()
+                .distance(c1.evaluate_point(t).unwrap());
+            assert!(moved <= g, "t {t}: moved {moved}");
+            largest = largest.max(curvature(&after, t, i == 1000));
+        }
+        assert!(
+            1.0 / largest >= radius_bound * (1.0 - 1e-9) && 1.0 / largest <= radius_bound * 1.001,
+            "radius {} vs {radius_bound}",
+            1.0 / largest
+        );
+    }
+
+    /// #14257: an end move of a 20th of the end leg or less, or of nothing, is upstream's:
+    /// the end control point alone, the others bit for bit as they were.
+    #[test]
+    fn issue_14257_an_end_move_small_against_the_end_leg_is_upstream_s() {
+        let s = 4e-5;
+        for g in [s / 32.0, 0.0] {
+            let before = two_piece_trim(s, 0.0156, None, false);
+            let mut after = before.clone();
+            edit_end_point(&mut after, Point3::new(0.0, g, 0.0), true, None).unwrap();
+            let (p0, p1) = (polygon(&before), polygon(&after));
+            assert_eq!(p1[0], Point3::new(0.0, g, 0.0));
+            assert_eq!(p0[1..], p1[1..], "gap {g}");
+        }
+    }
+
+    /// #14257: a move whose reach (20 gaps: 2.5 short legs) ends at the triple knot's
+    /// control point does not stop there, where the knots allow a tangent break, but at
+    /// the next control point: the legs either side of the knot stay parallel.
+    #[test]
+    fn issue_14257_an_end_move_does_not_stop_at_a_knot_of_full_multiplicity() {
+        let (s, l) = (4e-5, 0.0156);
+        let g = s / 8.0;
+        let before = two_piece_trim(s, l, None, false);
+        let mut after = before.clone();
+        edit_end_point(&mut after, Point3::new(0.0, g, 0.0), true, None).unwrap();
+        let (p0, p1) = (polygon(&before), polygon(&after));
+        let want = g * (1.0 - 3.0 * s / (3.0 * s + l));
+        assert!((p1[3].y - want).abs() < 1e-15, "{} vs {want}", p1[3].y);
+        assert!(turn(p1[3] - p1[2], p1[4] - p1[3]) < 1e-12);
+        assert_eq!(p0[4..], p1[4..]);
+    }
+
+    /// #14257: the end of a trim (not its start) takes the same shares, a rational trim
+    /// the same Euclidean control points with its weights kept, and closing the gap at
+    /// one end leaves the other end where an earlier move put it.
+    #[test]
+    fn issue_14257_an_end_move_is_the_same_at_either_end_and_for_a_rational_trim() {
+        use crate::nurbs::math::CPoint;
+        let (s, l, g) = (4e-5, 0.0156, 1e-4);
+        let mut plain = two_piece_trim(s, l, None, false);
+        edit_end_point(&mut plain, Point3::new(0.0, g, 0.0), true, None).unwrap();
+        let plain = polygon(&plain);
+
+        // the end: the control points of the mirrored trim, in the opposite order
+        let mut at_end = two_piece_trim(s, l, None, true);
+        let end = *polygon(&at_end).last().unwrap();
+        edit_end_point(&mut at_end, end + Vec3::new(0.0, g, 0.0), false, None).unwrap();
+        let mirrored: Vec<Point3> = polygon(&at_end).into_iter().rev().collect();
+        for (a, b) in plain.iter().zip(&mirrored) {
+            assert!(a.distance(*b) < 1e-15, "{a:?} vs {b:?}");
+        }
+        // then the start, 1e-3 off at a leg of 0.0156: the second control point takes half
+        // (0.0312 along the polygon is the first 20 gaps away), the end stays
+        let first = polygon(&at_end);
+        edit_end_point(
+            &mut at_end,
+            first[0] + Vec3::new(0.0, 1e-3, 0.0),
+            true,
+            None,
+        )
+        .unwrap();
+        let both = polygon(&at_end);
+        assert!((both[1].y - 5e-4).abs() < 1e-15, "{}", both[1].y);
+        assert_eq!(both[2..], first[2..]);
+
+        // rational: the same Euclidean control points, the weights as they were
+        let w = [2.0, 0.5, 1.5, 1.0, 3.0, 0.25, 1.0];
+        let mut rational = two_piece_trim(s, l, Some(w), false);
+        edit_end_point(&mut rational, Point3::new(0.0, g, 0.0), true, Some(w[0])).unwrap();
+        for (a, b) in plain.iter().zip(&polygon(&rational)) {
+            assert!(a.distance(*b) < 1e-15, "{a:?} vs {b:?}");
+        }
+        let CurveKind::BSpline(c) = rational.kind() else {
+            panic!("UV trim curve is not a B-spline");
+        };
+        let weights: Vec<f64> = c
+            .control_points()
+            .unwrap()
+            .iter()
+            .map(|p: &CPoint| p.w)
+            .collect();
+        assert_eq!(weights, w);
+    }
+
+    /// #14257 through `fix_uv_trim_curves`, on default flags and with the WR-255 fix: a box
+    /// face's trim replaced by a straight two-piece cubic (as `two_piece_trim`: legs 0.1,
+    /// then about 3.23) that ends 0.3 beside its vertex. Upstream's move turns the end leg
+    /// by 72 degrees. Spread, it stops at the sixth control point (`d_j` about 6.77, the
+    /// first over 20 gaps where the knots keep the trim tangent-continuous): the end is on
+    /// the vertex and the radius of curvature is `1.5 L d_j / g` at its smallest (within
+    /// 1%: the gap is square to the trim within 0.03 rad, and on default flags the trim is
+    /// first cut 0.009 shorter at the vertex's drop point).
+    #[test]
+    fn issue_14257_closing_a_gap_longer_than_the_end_leg_leaves_no_hook() {
+        use crate::nurbs::math::{CPoint, NOW};
+        for end_points_only in [false, true] {
+            let k = &mut Kernel::default();
+            k.fixes.uv_trim_corner_end_points_only = end_points_only;
+            let mut b =
+                crate::primitive::api_primitives::create_box(k, Point3::ZERO, 10.0, 10.0, 10.0)
+                    .unwrap();
+            let eu = b
+                .edgeuses()
+                .ids()
+                .find(|&e| matches!(eu1::uv_trim_curve(&b, e), Ok((Some(_), Some(h))) if h == e))
+                .unwrap();
+            let prev = eu1::cw_edgeuse(&b, eu).unwrap().unwrap();
+            let vu = eu1::vertexuse(&b, eu).unwrap().unwrap();
+            let v = b.vertexuse(vu).unwrap().vertex.unwrap();
+            let f = eu1::face(&b, eu).unwrap().unwrap();
+            let dom = uv_domain(&b, f).unwrap();
+
+            let ivl = held_curve(&b, eu).unwrap().natural_interval();
+            let (t0, t1) = (ivl.min(), ivl.max());
+            let same = eu1::orientation(&b, eu).unwrap() == OrientType::Same;
+            let (tv, tf) = if same { (t0, t1) } else { (t1, t0) };
+            let at_vertex = held_curve(&b, eu).unwrap().evaluate_point(k, tv).unwrap();
+            let far = held_curve(&b, eu).unwrap().evaluate_point(k, tf).unwrap();
+            let (g, s) = (0.3, 0.1);
+            let dir = (far - at_vertex) * (1.0 / at_vertex.distance(far));
+            let beside = at_vertex + Vec3::new(-dir.y, dir.x, 0.0) * g;
+            let len = beside.distance(far);
+            let l = (len - 3.0 * s) / 3.0;
+            let along = (far - beside) * (1.0 / len);
+            let mut pw: Vec<CPoint> = [
+                0.0,
+                s,
+                2.0 * s,
+                3.0 * s,
+                3.0 * s + l,
+                3.0 * s + 2.0 * l,
+                len,
+            ]
+            .iter()
+            .map(|&d| {
+                let p = beside + along * d;
+                CPoint::new(p.x, p.y, 0.0, NOW)
+            })
+            .collect();
+            let dt = t1 - t0;
+            let mut tk = t0 + 0.01 * dt;
+            if !same {
+                pw.reverse();
+                tk = t1 - 0.01 * dt;
+            }
+            let u = [t0, t0, t0, t0, tk, tk, tk, t1, t1, t1, t1];
+            *held_curve_mut(&mut b, eu).unwrap() =
+                Curve::from(BSplineCurve::from_data(2, 6, 10, 3, &pw, &u).unwrap());
+
+            let before = held_curve(&b, eu).unwrap().clone();
+            assert!(fix_uv_trim_curves(k, &mut b, eu, prev, v, 1e-5, g, &dom).unwrap());
+            let after = held_curve(&b, eu).unwrap().clone();
+
+            let end = after.evaluate_point(k, tv).unwrap();
+            assert!(end.distance(at_vertex) < 1e-12, "{end:?} vs {at_vertex:?}");
+            let radius_bound = 1.5 * l * (3.0 * s + 2.0 * l) / g;
+            let mut largest: f64 = 0.0;
+            for i in 0..=1000 {
+                let t = t0 + dt * f64::from(i) / 1000.0;
+                largest = largest
+                    .max(curvature(&after, t, false))
+                    .max(curvature(&after, t, true));
+                if end_points_only {
+                    let moved = before
+                        .evaluate_point(k, t)
+                        .unwrap()
+                        .distance(after.evaluate_point(k, t).unwrap());
+                    assert!(moved <= g, "t {t}: moved {moved}");
+                }
+            }
+            assert!(
+                (1.0 / largest - radius_bound).abs() < 0.01 * radius_bound,
+                "end points only {end_points_only}: radius {} vs {radius_bound}",
+                1.0 / largest
+            );
+        }
+    }
+
+    /// #14257: a trim of degree 1 has a corner at every control point. An end move within
+    /// a 20th of its end leg moves the end alone, as upstream (the end leg turns at its
+    /// corner); a larger one is spread to
+    /// the far end, the only control point where stopping adds no corner.
+    #[test]
+    fn issue_14257_an_end_move_of_a_polyline_trim() {
+        use crate::nurbs::math::{CPoint, NOW};
+        let pw: Vec<CPoint> = [0.0, 1.0, 2.0, 4.0]
+            .iter()
+            .map(|&x| CPoint::new(x, 0.0, 0.0, NOW))
+            .collect();
+        let u = [0.0, 0.0, 1.0, 2.0, 3.0, 3.0];
+        let before = Curve::from(BSplineCurve::from_data(2, 3, 5, 1, &pw, &u).unwrap());
+
+        let mut small = before.clone();
+        edit_end_point(&mut small, Point3::new(0.0, 0.04, 0.0), true, None).unwrap();
+        assert_eq!(polygon(&before)[1..], polygon(&small)[1..]);
+
+        let mut large = before.clone();
+        edit_end_point(&mut large, Point3::new(0.0, 0.1, 0.0), true, None).unwrap();
+        let p = polygon(&large);
+        for (i, want) in [0.1, 0.075, 0.05, 0.0].into_iter().enumerate() {
+            assert!((p[i].y - want).abs() < 1e-15, "{i}: {}", p[i].y);
+        }
     }
 
     #[test]
