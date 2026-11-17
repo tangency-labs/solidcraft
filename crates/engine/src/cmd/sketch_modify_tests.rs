@@ -4356,26 +4356,25 @@ fn trim_hover_made_once_and_extend_previews_per_end_answer_as_afresh() {
     assert!(trimmed >= 15 && extended >= 40, "{trimmed} trims, {extended} extensions");
 }
 
-/// An offset's ends follow its source curves, so trimming a piece off it or extending it is
-/// refused (the trim used to report success and leave the curve whole). Trimming away a whole
-/// offset curve still works, and once the association is broken the trim cuts it.
+/// An offset's ends follow its source curves, so extending it or breaking it is refused (a trim
+/// used to report success and leave the curve whole; since #8074 a trim releases the copy first).
+/// Once the association is broken the trim cuts it as an ordinary line.
 #[test]
-fn trim_extend_and_break_refuse_an_offsets_ends_until_its_association_is_broken() {
+fn extend_and_break_refuse_an_offsets_ends_until_its_association_is_broken() {
     let mut s = new_sketch();
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
     let out = ids(&run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}))["curves"]);
     assert_eq!(out, ["l5", "l6", "l7", "l8"]);
     run(&mut s, "sketch.line", json!({"points": [[20, -10], [20, 10]]}));
     let before = serde_json::to_value(sketch(&s)).unwrap();
-    let e = s.execute("sketch.trim", &json!({"curve": "l5", "at": [30, -2]})).unwrap_err().to_string();
-    assert!(e.contains("offset") && e.contains("break the offset association"), "{e}");
+    // Trim releases the copy instead (#8074): see `trim_cuts_a_piece_of_an_offset_copy_made_from_several_curves`.
     let e = s.execute("sketch.extend", &json!({"curve": "l5", "at": [42, -2]})).unwrap_err().to_string();
     assert!(e.contains("offset"), "{e}");
     for params in [json!({"curve": "l5", "at": [30, -2]}), json!({"curve": "l5", "points": [[20, -2]]})] {
         let e = s.execute("sketch.break", &params).unwrap_err().to_string();
         assert!(e.contains("offset") && e.contains("break the offset association"), "{params}: {e}");
     }
-    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused trim changes nothing");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused extend or break changes nothing");
 
     run(&mut s, "sketch.offset.break", json!({"curve": "l5"}));
     run(&mut s, "sketch.trim", json!({"curve": "l5", "at": [30, -2]}));
@@ -5868,6 +5867,101 @@ fn trim_cuts_a_circle_or_arc_with_an_offset_and_keeps_the_gap_driving() {
             assert!((radius(&s, &copy) - radius(&s, &src) - 3.0).abs() < 1e-7, "{source}: the parameter still drives the gap");
         }
     }
+}
+
+/// #8074: trimming a piece of an offset's copy was refused ("`l3` is an offset, and its ends
+/// follow its source curves") whenever the copy came from more than one curve, which is the usual
+/// case: Offset takes the connected outline. The trim now releases the whole copy first, as a
+/// fillet at its corner does: each piece keeps following its source at the offset's distance,
+/// still driven by the offset's parameter, and one undo puts the association back. Trim Along
+/// Path does the same. A copy mixing lines with an arc is released too.
+#[test]
+fn trim_cuts_a_piece_of_an_offset_copy_made_from_several_curves() {
+    let line = |s: &Session, id: &str| {
+        let sk = sketch(s);
+        match sk.shape(sk.curve_index(id).unwrap()).unwrap() {
+            solidcraft_sketch::Shape::Line { a, b } => (a, b),
+            other => panic!("{id}: {other:?}"),
+        }
+    };
+    let near = |p: Vec2, x: f64, y: f64| p.dist(Vec2::new(x, y)) < 1e-7;
+    // A line's two ends, the one with the smaller x (then y) first.
+    let ends = |a: Vec2, b: Vec2| if (a.x, a.y) <= (b.x, b.y) { (a, b) } else { (b, a) };
+    for path in [false, true] {
+        // An L of two lines, offset 3 mm inside: l3 runs along y = 3 and l4 along x = 17, meeting
+        // at (17, 3). A line at x = 10 crosses l3, and the piece left of it is trimmed away.
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [20, 20]], "ids": ["l1", "l2"]}));
+        // Fixed, so the released copy has one place for each distance (free sources could turn).
+        run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1", "l2"]}));
+        let offset = run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2"], "distance": "3 mm", "side": [10, 10]}));
+        let out = ids(&offset["curves"]);
+        assert_eq!(out, ["l3", "l4"], "{offset}");
+        let parameter = offset["param"].as_str().unwrap().to_string();
+        run(&mut s, "sketch.line", json!({"points": [[10, -10], [10, 10]], "connect": false, "infer": false}));
+        let sources = (line(&s, "l1"), line(&s, "l2"));
+        let before = s.doc.to_json();
+        let released = if path {
+            let r = run(&mut s, "sketch.trim.path", json!({"points": [[5, 2], [5, 4]]}));
+            assert!(r["skipped"].as_array().unwrap().is_empty(), "{r}");
+            ids(&r["trimmed"][0]["offset_released"])
+        } else {
+            let r = run(&mut s, "sketch.trim", json!({"curve": "l3", "at": [5, 3]}));
+            assert_eq!(r["sketch"]["solved"], json!(true), "{r}");
+            ids(&r["result"]["offset_released"])
+        };
+        let mut released = released;
+        released.sort();
+        assert_eq!(released, out, "path {path}: the whole copy is released");
+        assert!(sketch(&s).offsets.is_empty(), "path {path}");
+        let (a, b) = ends(line(&s, "l3").0, line(&s, "l3").1);
+        assert!(near(a, 10.0, 3.0) && near(b, 17.0, 3.0), "path {path}: l3 runs from the cut to the corner: {a:?} {b:?}");
+        let (a, b) = ends(line(&s, "l4").0, line(&s, "l4").1);
+        assert!(near(a, 17.0, 3.0) && near(b, 17.0, 20.0), "path {path}: l4 stays: {a:?} {b:?}");
+        assert_eq!((line(&s, "l1"), line(&s, "l2")), sources, "path {path}: the sources stay");
+        // The offset's parameter still sets how far the copy stands from the L.
+        run(&mut s, "parameters.change", json!({"name": parameter, "expression": "4 mm"}));
+        let (a, b) = line(&s, "l3");
+        assert!((a.y - 4.0).abs() < 1e-7 && (b.y - 4.0).abs() < 1e-7, "path {path}: {a:?} {b:?}");
+        let (a, b) = line(&s, "l4");
+        assert!((a.x - 16.0).abs() < 1e-7 && (b.x - 16.0).abs() < 1e-7, "path {path}: {a:?} {b:?}");
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.to_json(), before, "path {path}: one undo per step puts the offset back");
+    }
+
+    // A rectangle with a rounded corner, offset 2 mm outside: lines and an arc. Trimming the
+    // bottom line of the copy releases all of it, and the arc keeps its 2 mm gap.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let rounded = run(&mut s, "sketch.fillet", json!({"point": "l2.end", "radius": "5 mm"}));
+    let source_arc = ids(&rounded["curves"])[0].clone();
+    let chain: Vec<String> = sketch(&s).curves.iter().map(|c| c.id.clone()).collect();
+    let offset = run(&mut s, "sketch.offset", json!({"curves": chain, "distance": "2 mm", "side": [-5, -5]}));
+    let out = ids(&offset["curves"]);
+    let parameter = offset["param"].as_str().unwrap().to_string();
+    let sk = sketch(&s);
+    let output_arc = out.iter().find(|id| matches!(sk.curves[sk.curve_index(id).unwrap()].kind, CurveKind::Arc { .. })).unwrap().clone();
+    let bottom = out
+        .iter()
+        .find(|id| matches!(sk.shape(sk.curve_index(id).unwrap()).unwrap(), solidcraft_sketch::Shape::Line { a, b } if (a.y + 2.0).abs() < 1e-7 && (b.y + 2.0).abs() < 1e-7))
+        .unwrap()
+        .clone();
+    run(&mut s, "sketch.line", json!({"points": [[20, -10], [20, -1]], "connect": false, "infer": false}));
+    let r = run(&mut s, "sketch.trim", json!({"curve": bottom, "at": [30, -2]}));
+    assert_eq!(r["sketch"]["solved"], json!(true), "{r}");
+    assert_eq!(ids(&r["result"]["offset_released"]).len(), out.len(), "{r}");
+    assert!(sketch(&s).offsets.is_empty());
+    let (a, b) = line(&s, &bottom);
+    let (a, b) = ends(a, b);
+    assert!(near(a, -2.0, -2.0) && near(b, 20.0, -2.0), "{a:?} {b:?}");
+    let gap = |s: &Session| {
+        let sk = sketch(s);
+        sk.radius(sk.curve_index(&output_arc).unwrap()).unwrap() - sk.radius(sk.curve_index(&source_arc).unwrap()).unwrap()
+    };
+    assert!((gap(&s) - 2.0).abs() < 1e-7, "{}", gap(&s));
+    run(&mut s, "parameters.change", json!({"name": parameter, "expression": "3 mm"}));
+    assert!((gap(&s) - 3.0).abs() < 1e-7, "{}", gap(&s));
 }
 
 /// All pick orders retain driving distances through repeated trims, dragging, parameter edits and native reload.
