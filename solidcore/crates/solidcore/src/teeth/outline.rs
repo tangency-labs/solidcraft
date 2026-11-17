@@ -137,7 +137,8 @@ impl Piece {
     }
 
     /// The piece as points, all but its last (the next piece starts there): an arc or a spline cut
-    /// into chords proved within `tolerance` of it, a line its start, a curve its own points.
+    /// into chords proved within `tolerance` of it, a line its start, a curve its own points (whose
+    /// chords the outline cannot prove again: see [`curve_tolerance`]).
     pub(super) fn chain(&self, tolerance: f64) -> Result<Vec<Point>, TeethFailure> {
         const TOO_FINE: TeethFailure = TeethFailure::Invalid(Why::CurveTooFine);
         match self {
@@ -397,6 +398,34 @@ pub(super) fn less_gap(tolerance: f64, gap: f64) -> Result<f64, TeethFailure> {
         Ok(left)
     } else {
         Err(not_proved(tolerance, gap))
+    }
+}
+
+/// The tolerance the chords of a curve are proved to when it is to stand in an outline of
+/// `tolerance` as points ([`Piece::Curve`]): sixty-three sixty-fourths of it, rounded down.
+///
+/// An outline cannot prove the chords of a curve piece again: the points are all it has of the
+/// curve. And the chord that closes a curve piece does not end on the piece's own last point but
+/// on the next piece's start, which may lie a gap away. So the tooth modules prove their curves'
+/// chords to this much, which leaves a sixty-fourth of the tolerance for that gap, and an outline
+/// refuses a curve piece whose gap is wider than what is left ([`curve_gap_fits`]): the closing
+/// chord then stays within the whole tolerance of the curve, as every other chord does.
+pub(super) fn curve_tolerance(tolerance: f64) -> f64 {
+    (bound::exact(tolerance) * bound::exact(63.0 / 64.0)).lo
+}
+
+/// Whether the gap that a curve piece's closing chord bridges fits in what the curve's own chords
+/// leave of the tolerance ([`curve_tolerance`]): the two together, rounded up in `Ivl`, must not be
+/// above the tolerance. Refused with `NotProved` naming what they come to.
+fn curve_gap_fits(tolerance: f64, gap: f64) -> Result<(), TeethFailure> {
+    if gap == 0.0 {
+        return Ok(());
+    }
+    let used = (bound::exact(curve_tolerance(tolerance)) + bound::exact(gap)).hi;
+    if gap > 0.0 && used <= tolerance {
+        Ok(())
+    } else {
+        Err(not_proved(tolerance, used))
     }
 }
 
@@ -1051,7 +1080,11 @@ impl Outline {
                     return Err(NOT_FINITE);
                 }
             }
-            let of_piece = piece.chain(less_gap(tolerance, *gap)?)?;
+            let within = less_gap(tolerance, *gap)?;
+            if matches!(piece, Piece::Curve { .. }) {
+                curve_gap_fits(tolerance, *gap)?;
+            }
+            let of_piece = piece.chain(within)?;
             let (low, high) = piece.radii(&of_piece);
             radii = (radii.0.min(low), radii.1.max(high));
             chain.extend(of_piece);
@@ -1176,7 +1209,11 @@ pub(crate) fn points_of_typed(
     // As in `Outline::new`: the gap a piece's closing chord bridges is counted in its tolerance.
     let gaps = closing_gaps(teeth, tooth);
     for (piece, gap) in tooth.iter().zip(&gaps) {
-        chain.extend(piece.chain(less_gap(tolerance, *gap)?)?);
+        let within = less_gap(tolerance, *gap)?;
+        if matches!(piece, Piece::Curve { .. }) {
+            curve_gap_fits(tolerance, *gap)?;
+        }
+        chain.extend(piece.chain(within)?);
         if chain.len().saturating_mul(teeth as usize) > MAX_OUTLINE_POINTS {
             return Err(TOO_FINE);
         }

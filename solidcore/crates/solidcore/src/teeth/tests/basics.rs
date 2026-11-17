@@ -18,7 +18,8 @@ use crate::teeth::fit::fitted;
 use crate::teeth::involute::{hub_for, spline_pair, External, Fit};
 use crate::teeth::mesh::{gap, Body};
 use crate::teeth::outline::{
-    arc_steps, break_rounding, distance, less_gap, on_circle, points_of, sampled, stretch_bends,
+    arc_steps, break_rounding, curve_tolerance, distance, less_gap, on_circle, points_of, sampled,
+    stretch_bends,
 };
 use crate::teeth::pair::{MAX_STEPS, MOST_TURNING_WORK};
 use crate::teeth::{
@@ -1692,5 +1693,64 @@ fn ends_gaps_and_what_is_not_a_number_are_counted() -> crate::Result<()> {
     assert_eq!(not_proved(&refused), Some(CHORD), "{refused:?}");
     let refused = points_of(4, &side(), 1e-10, 0.0);
     assert_eq!(not_proved(&refused), Some(CHORD), "{refused:?}");
+    Ok(())
+}
+
+/// A curve given as points keeps a share of the tolerance for the gap its closing chord bridges,
+/// and an outline holds it to that. A sampled arc that stops a little short of where the next
+/// tooth starts is accepted while the gap fits in what the curve's own chords leave of the
+/// tolerance (a sixty-fourth), and refused, as not proved, for a gap that is below the tolerance
+/// but above that share: its closing chord could lie farther from the curve than the tolerance.
+/// The same for the outline's points; and the accepted outline's closing chord is measured against
+/// the arc.
+#[test]
+fn a_curve_keeps_room_for_the_gap_its_closing_chord_bridges() -> crate::Result<()> {
+    let (radius, teeth, tolerance) = (0.1_f64, 64_u32, 4e-9_f64);
+    let pitch = TAU / f64::from(teeth);
+    let (at, off, bend) = (circle_at(radius), circle_off(radius), circle_bend(radius));
+    // One tooth: the arc of a pitch, stopping `gap` short of the next tooth's first point, its
+    // chords proved to the share of the tolerance a curve given as points has.
+    let tooth = |gap: f64| -> crate::Result<(Vec<Piece>, f64)> {
+        let to = pitch - gap / radius;
+        let points = lift(sampled(
+            &at,
+            &off,
+            &bend,
+            0.0,
+            to,
+            curve_tolerance(tolerance),
+        ))?;
+        let piece = Piece::Curve {
+            points,
+            role: Role::Tip,
+        };
+        Ok((vec![piece], to))
+    };
+    // Both gaps are of pieces that join (the join allowance here is 1e-9 (1 + 0.1)), and both are
+    // below the tolerance; one fits in the sixty-fourth the curve leaves, the other does not.
+    let share = tolerance / 64.0;
+    let (fits, too_wide) = (0.5 * share, 8.0 * share);
+    assert!(too_wide < tolerance && too_wide < 1e-9, "{too_wide:e}");
+    let (pieces, to) = tooth(fits)?;
+    assert!(points_of(teeth, &pieces, tolerance, 0.0).is_ok());
+    let outline = Outline::new(teeth, pieces, tolerance)?;
+    let (pieces, _) = tooth(too_wide)?;
+    let refused = points_of(teeth, &pieces, tolerance, 0.0);
+    assert_eq!(not_proved(&refused), Some(CHORD), "{refused:?}");
+    let refused = Outline::new(teeth, pieces, tolerance);
+    assert_eq!(not_proved(&refused), Some(CHORD), "{refused:?}");
+    // The accepted outline's closing chord runs from the arc's last point but one to the next
+    // tooth's first point: every point of it is within the tolerance of the arc, whose nearest
+    // point is at the same angle, or its end for a point past the end.
+    let points = outline.points();
+    let per_tooth = points.len() / teeth as usize;
+    let (a, b) = (points[per_tooth - 1], points[per_tooth]);
+    for k in 0..=200 {
+        let s = f64::from(k) / 200.0;
+        let c = [a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])];
+        let angle = c[1].atan2(c[0]).min(to);
+        let far = distance(c, at(angle));
+        assert!(far <= tolerance, "{far:e} at {s} of the closing chord");
+    }
     Ok(())
 }

@@ -31,7 +31,9 @@ use crate::teeth::bound::{
     taylor_from_end, Bend,
 };
 use crate::teeth::mesh::Material;
-use crate::teeth::outline::{checked_tolerance, on_circle, sampled, Outline, Piece, Point, Role};
+use crate::teeth::outline::{
+    checked_tolerance, curve_tolerance, on_circle, sampled, Outline, Piece, Point, Role,
+};
 use crate::teeth::pair::{Motion, Pair, Part};
 use crate::teeth::{in_range, zero_up_to, MAX_LENGTH, MAX_TEETH};
 use crate::SolidError;
@@ -802,7 +804,10 @@ impl External {
     pub(crate) fn outline_typed(&self, tolerance: f64) -> Result<Outline, TeethFailure> {
         let tolerance = checked_tolerance(tolerance)?;
         let cut = self.cut()?;
-        // The upper side, each from the lower end upward, each chord proved within the tolerance.
+        // The upper side, each from the lower end upward, each chord proved within the share of
+        // the tolerance a curve given as points has: the rest is for the gap where it joins the
+        // next piece, which the outline checks.
+        let within = curve_tolerance(tolerance);
         let upper_fillet = cut.upper_fillet();
         let upper_flank = cut.upper_flank();
         let fillet = sampled(
@@ -811,7 +816,7 @@ impl External {
             &|lo, hi| upper_fillet.bend(lo, hi),
             upper_fillet.phi_root,
             upper_fillet.phi_join,
-            tolerance,
+            within,
         )?;
         let flank = sampled(
             &|v| upper_flank.point(v),
@@ -819,7 +824,7 @@ impl External {
             &|lo, hi| upper_flank.bend(lo, hi),
             upper_flank.from,
             upper_flank.to,
-            tolerance,
+            within,
         )?;
         let mirrored =
             |points: &[Point]| points.iter().map(|&[x, y]| [x, -y]).collect::<Vec<Point>>();
@@ -1096,7 +1101,8 @@ impl Internal {
     pub(crate) fn outline_typed(&self, tolerance: f64) -> Result<Outline, TeethFailure> {
         let tolerance = checked_tolerance(tolerance)?;
         let f = self.formed()?;
-        // From the tip outward, each chord proved within the tolerance.
+        // From the tip outward, each chord proved within the share of the tolerance a curve given
+        // as points has: the rest is for the gap where it joins the next piece.
         let flank = f.upper_flank();
         let upper = sampled(
             &|roll| flank.point(roll),
@@ -1104,7 +1110,7 @@ impl Internal {
             &|lo, hi| flank.bend(lo, hi),
             flank.from,
             flank.to,
-            tolerance,
+            curve_tolerance(tolerance),
         )?;
         let lower: Vec<Point> = upper.iter().map(|&[x, y]| [x, -y]).collect();
         let centre = on_circle([0.0, 0.0], f.centre_radius, f.centre_angle);
