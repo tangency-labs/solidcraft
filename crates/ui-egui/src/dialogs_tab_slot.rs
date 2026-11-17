@@ -56,7 +56,9 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [S
     if let Some(reply) = &app.preview.report {
         let l = solidcraft_ui_text::locale();
         for (id, args) in summary_args(reply) {
-            ui.label(l.format(id, &args.iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>()));
+            // The skipped line names every pair: it wraps instead of running past the dialog.
+            let text = l.format(id, &args.iter().map(|(k, v)| (*k, v.as_str())).collect::<Vec<_>>());
+            ui.add(egui::Label::new(text).wrap());
         }
     }
     enter
@@ -67,7 +69,10 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, t: &mut TabSlot, _inputs: &mut [S
 fn summary_args(reply: &Value) -> Vec<(&'static str, Vec<(&'static str, String)>)> {
     let joints = reply["plate_joints"].as_array().map_or(0, Vec::len);
     let tabs = reply["tabs"].as_u64().unwrap_or(0);
-    let mut lines = vec![("ui.tab_slot.summary", vec![("plate_joints", joints.to_string()), ("tabs", tabs.to_string())])];
+    let count = |n: u64, one: &str, many: &str| solidcraft_ui_text::format(if n == 1 { one } else { many }, &[("count", &n.to_string())]);
+    let joints = count(joints as u64, "ui.tab_slot.plate_joints_one", "ui.tab_slot.plate_joints");
+    let tabs = count(tabs, "ui.tab_slot.tabs_one", "ui.tab_slot.tabs");
+    let mut lines = vec![("ui.tab_slot.summary", vec![("plate_joints", joints), ("tabs", tabs)])];
     let skipped: Vec<String> = reply["skipped"]
         .as_array()
         .into_iter()
@@ -227,13 +232,14 @@ mod edit_tests {
         let p = json!({"tab_plates": ["Wall"], "slot_plates": ["Bottom"], "count": "2", "tab_width": "12 mm"});
         let reply = s.execute("solid.tab_slot", &p).unwrap();
         let lines = summary_args(&reply);
-        assert_eq!(lines, [("ui.tab_slot.summary", vec![("plate_joints", "1".to_string()), ("tabs", "2".to_string())])], "{reply}");
+        assert_eq!(lines, [("ui.tab_slot.summary", vec![("plate_joints", "1 plate joint".to_string()), ("tabs", "2 tabs".to_string())])], "{reply}");
         let reply = json!({"plate_joints": [], "tabs": 0, "skipped": [
             {"tab_plate": "Back", "slot_plate": "Bottom", "reason": "swapped", "detail": "is the other way round"},
             {"tab_plate": "Side", "slot_plate": "Bottom", "reason": "sheet_metal", "detail": ""}]});
         let lines = summary_args(&reply);
         assert_eq!(lines[1].0, "ui.tab_slot.summary_skipped");
         assert_eq!(lines[1].1, [("count", "2".to_string()), ("list", "Back → Bottom is the other way round, Side → Bottom".to_string())]);
+        assert_eq!(lines[0].1, [("plate_joints", "0 plate joints".to_string()), ("tabs", "0 tabs".to_string())]);
         assert_eq!(summary_args(&json!({})).len(), 1, "an empty reply still has the counts line");
     }
 }

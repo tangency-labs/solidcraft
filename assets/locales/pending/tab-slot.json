@@ -23,7 +23,11 @@
     "ui.tab_slot.end_distance_tip": "From the end of a stretch to the nearest tab. Empty: the tab width",
     "ui.tab_slot.clearance_tip": "Gap on every side of a tab in its slot, so the parts fit together",
     "ui.tab_slot.protrusion_tip": "How far a tab stands out past the far face of the slot plate. 0 keeps it flush",
-    "ui.tab_slot.summary": "{plate_joints} plate joints, {tabs} tabs",
+    "ui.tab_slot.summary": "{plate_joints}, {tabs}",
+    "ui.tab_slot.plate_joints": "{count} plate joints",
+    "ui.tab_slot.plate_joints_one": "1 plate joint",
+    "ui.tab_slot.tabs": "{count} tabs",
+    "ui.tab_slot.tabs_one": "1 tab",
     "ui.tab_slot.summary_skipped": "Skipped {count}: {list}"
   },
   "ar": {
@@ -50,7 +54,11 @@
     "ui.tab_slot.end_distance_tip": "من نهاية الامتداد إلى أقرب لسان. فارغ: عرض اللسان",
     "ui.tab_slot.clearance_tip": "الفراغ على كل جانب من اللسان داخل شقه حتى تتركب الأجزاء معًا",
     "ui.tab_slot.protrusion_tip": "مقدار بروز اللسان خلف الوجه البعيد للوح الشق. 0 يبقيه مستويًا",
-    "ui.tab_slot.summary": "{plate_joints} وصلات ألواح، {tabs} ألسنة",
+    "ui.tab_slot.summary": "{plate_joints}، {tabs}",
+    "ui.tab_slot.plate_joints": "{count} وصلات ألواح",
+    "ui.tab_slot.plate_joints_one": "وصلة ألواح واحدة",
+    "ui.tab_slot.tabs": "{count} ألسنة",
+    "ui.tab_slot.tabs_one": "لسان واحد",
     "ui.tab_slot.summary_skipped": "تم تخطي {count}: {list}"
   },
   "de": {
@@ -77,7 +85,11 @@
     "ui.tab_slot.end_distance_tip": "Vom Ende eines Abschnitts bis zur nächsten Lasche. Leer: die Laschenbreite",
     "ui.tab_slot.clearance_tip": "Spalt auf jeder Seite einer Lasche im Schlitz, damit die Teile zusammenpassen",
     "ui.tab_slot.protrusion_tip": "Wie weit eine Lasche über die Rückseite der Schlitzplatte hinausragt. 0 lässt sie bündig",
-    "ui.tab_slot.summary": "{plate_joints} Plattenverbindungen, {tabs} Laschen",
+    "ui.tab_slot.summary": "{plate_joints}, {tabs}",
+    "ui.tab_slot.plate_joints": "{count} Plattenverbindungen",
+    "ui.tab_slot.plate_joints_one": "1 Plattenverbindung",
+    "ui.tab_slot.tabs": "{count} Laschen",
+    "ui.tab_slot.tabs_one": "1 Lasche",
     "ui.tab_slot.summary_skipped": "Übersprungen {count}: {list}"
   },
   "he": {
@@ -104,7 +116,11 @@
     "ui.tab_slot.end_distance_tip": "מקצה הקטע ועד הלשונית הקרובה. ריק: רוחב הלשונית",
     "ui.tab_slot.clearance_tip": "מרווח בכל צד של לשונית בתוך החריץ, כדי שהחלקים יתאימו",
     "ui.tab_slot.protrusion_tip": "כמה הלשונית בולטת מעבר לפאה הרחוקה של לוח החריץ. 0 משאיר אותה בקו אחד",
-    "ui.tab_slot.summary": "{plate_joints} חיבורי לוחות, {tabs} לשוניות",
+    "ui.tab_slot.summary": "{plate_joints}, {tabs}",
+    "ui.tab_slot.plate_joints": "{count} חיבורי לוחות",
+    "ui.tab_slot.plate_joints_one": "חיבור לוחות אחד",
+    "ui.tab_slot.tabs": "{count} לשוניות",
+    "ui.tab_slot.tabs_one": "לשונית אחת",
     "ui.tab_slot.summary_skipped": "דולגו {count}: {list}"
   },
   "ja": {
@@ -131,7 +147,11 @@
     "ui.tab_slot.end_distance_tip": "区間の端から最も近いタブまでの距離。空欄: タブ幅",
     "ui.tab_slot.clearance_tip": "スロット内のタブの各辺の隙間。部品がはまるように",
     "ui.tab_slot.protrusion_tip": "タブがスロットプレートの奥の面から突き出す量。0で面一",
-    "ui.tab_slot.summary": "板の接合 {plate_joints} 件、タブ {tabs} 個",
+    "ui.tab_slot.summary": "{plate_joints}、{tabs}",
+    "ui.tab_slot.plate_joints": "板の接合 {count} 件",
+    "ui.tab_slot.plate_joints_one": "板の接合 1 件",
+    "ui.tab_slot.tabs": "タブ {count} 個",
+    "ui.tab_slot.tabs_one": "タブ 1 個",
     "ui.tab_slot.summary_skipped": "スキップ {count} 件: {list}"
   },
   "ko": {
@@ -158,7 +178,11 @@
     "ui.tab_slot.end_distance_tip": "구간 끝에서 가장 가까운 탭까지. 비우면: 탭 폭",
     "ui.tab_slot.clearance_tip": "슬롯 안 탭의 각 면 틈새로 부품이 맞물리게 합니다",
     "ui.tab_slot.protrusion_tip": "탭이 슬롯 판의 먼 면 밖으로 튀어나오는 길이. 0이면 평평",
-    "ui.tab_slot.summary": "판 접합 {plate_joints}개, 탭 {tabs}개",
+    "ui.tab_slot.summary": "{plate_joints}, {tabs}",
+    "ui.tab_slot.plate_joints": "판 접합 {count}개",
+    "ui.tab_slot.plate_joints_one": "판 접합 1개",
+    "ui.tab_slot.tabs": "탭 {count}개",
+    "ui.tab_slot.tabs_one": "탭 1개",
     "ui.tab_slot.summary_skipped": "건너뜀 {count}개: {list}"
   },
   "nb": {
@@ -185,7 +209,11 @@
     "ui.tab_slot.end_distance_tip": "Fra enden av en strekning til nærmeste tapp. Tomt: tappbredden",
     "ui.tab_slot.clearance_tip": "Klaring på alle sider av en tapp i sporet, så delene passer sammen",
     "ui.tab_slot.protrusion_tip": "Hvor langt en tapp stikker ut forbi baksiden av sporplaten. 0 gir den i flukt",
-    "ui.tab_slot.summary": "{plate_joints} plateskjøter, {tabs} tapper",
+    "ui.tab_slot.summary": "{plate_joints}, {tabs}",
+    "ui.tab_slot.plate_joints": "{count} plateskjøter",
+    "ui.tab_slot.plate_joints_one": "1 plateskjøt",
+    "ui.tab_slot.tabs": "{count} tapper",
+    "ui.tab_slot.tabs_one": "1 tapp",
     "ui.tab_slot.summary_skipped": "Hoppet over {count}: {list}"
   },
   "vi": {
@@ -212,7 +240,11 @@
     "ui.tab_slot.end_distance_tip": "Từ đầu đoạn đến mộng gần nhất. Để trống: chiều rộng mộng",
     "ui.tab_slot.clearance_tip": "Khe hở mỗi bên của mộng trong rãnh để các chi tiết lắp vừa",
     "ui.tab_slot.protrusion_tip": "Mộng nhô ra bao xa qua mặt sau của tấm có rãnh. 0 giữ phẳng",
-    "ui.tab_slot.summary": "{plate_joints} mối ghép tấm, {tabs} mộng",
+    "ui.tab_slot.summary": "{plate_joints}, {tabs}",
+    "ui.tab_slot.plate_joints": "{count} mối ghép tấm",
+    "ui.tab_slot.plate_joints_one": "1 mối ghép tấm",
+    "ui.tab_slot.tabs": "{count} mộng",
+    "ui.tab_slot.tabs_one": "1 mộng",
     "ui.tab_slot.summary_skipped": "Đã bỏ qua {count}: {list}"
   },
   "zh": {
@@ -239,7 +271,11 @@
     "ui.tab_slot.end_distance_tip": "从段的端部到最近凸榫的距离。留空：凸榫宽度",
     "ui.tab_slot.clearance_tip": "凸榫在槽中每侧的间隙，使零件能装配在一起",
     "ui.tab_slot.protrusion_tip": "凸榫伸出槽板远侧面的距离。0 表示齐平",
-    "ui.tab_slot.summary": "{plate_joints} 处板材接合，{tabs} 个凸舌",
+    "ui.tab_slot.summary": "{plate_joints}，{tabs}",
+    "ui.tab_slot.plate_joints": "{count} 处板材接合",
+    "ui.tab_slot.plate_joints_one": "1 处板材接合",
+    "ui.tab_slot.tabs": "{count} 个凸舌",
+    "ui.tab_slot.tabs_one": "1 个凸舌",
     "ui.tab_slot.summary_skipped": "已跳过 {count} 处：{list}"
   }
 }
