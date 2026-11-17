@@ -173,10 +173,6 @@ pub struct CanvasEditParams {
     /// and Delete until it is unlocked; its opacity, visibility and name can still change.
     #[serde(default)]
     pub locked: Option<bool>,
-    /// Make it a decal, part of the model's look that a URDF export writes as a textured visual
-    /// of its component's link, or a reference canvas, which is not exported.
-    #[serde(default)]
-    pub decal: Option<bool>,
     /// The sketch points the image's corners follow, or `null` to let its own centre, width and
     /// angle place it again. An anchored canvas refuses a new centre, width or angle, Calibrate
     /// and Straighten.

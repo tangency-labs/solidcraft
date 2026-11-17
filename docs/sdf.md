@@ -3,8 +3,8 @@
 A design exports as a Gazebo model: a folder holding `model.config`, `model.sdf` (SDFormat) and
 the files they name. Put the folder in a folder on `GZ_SIM_RESOURCE_PATH` (or a ROS package's
 `models` folder) and Gazebo Sim lists it, or include it in a world with
-`<include><uri>model://<name></uri></include>`. Decals (**Insert → Decal**) are written as
-textured visuals, so an ArUco marker, a label or a logo shows in the simulation where SolidCraft
+`<include><uri>model://<name></uri></include>`. Images on the model (**Insert → Canvas** or
+**Insert → Decal**, PNG, JPEG or SVG) are written as textured visuals, so an ArUco marker, a label or a logo shows in the simulation where SolidCraft
 shows it.
 
 - **Desktop:** **File → Export SDF Model…**, then a name and a place for the model's folder
@@ -58,7 +58,7 @@ the error names the files already written and the one that failed.
 
 ## Decals
 
-Each shown decal becomes one more `<visual>` of the link:
+Each shown image, canvas or decal, becomes one more `<visual>` of the link:
 
 ```xml
 <visual name="Aruco13_visual">
@@ -89,10 +89,11 @@ Each shown decal becomes one more `<visual>` of the link:
 - The albedo map is the image, as Gazebo Sim's PBR material takes it; the COLLADA file names
   the image as its own texture too, for readers without PBR materials. Gazebo Sim cuts out the
   image's clear pixels; the COLLADA material is opaque.
-- Only decals are written. A reference canvas (**Insert → Canvas**) is not; `canvas.edit
-  {decal: true}` makes a canvas a decal. A hidden decal is left out; one whose image is damaged,
-  or neither PNG nor JPEG, is left out with a warning. A decal made partly transparent in
-  SolidCraft (`opacity` below 1) is written opaque, with a warning.
+- Every shown image is written, whether it was placed with **Insert → Canvas** or **Insert →
+  Decal**: hide an image you traced from (`canvas.edit {visible: false}`, or Show/Hide on it)
+  to keep it out. One whose image is damaged, or neither PNG nor JPEG, is left out with a
+  warning. An image made partly transparent in SolidCraft (`opacity` below 1) is written
+  opaque, with a warning.
 
 ## Not covered
 

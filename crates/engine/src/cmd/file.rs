@@ -2469,8 +2469,8 @@ fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: so
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{:?}", Format::Glb)}))
 }
 
-/// A decal the design shows: its corners in the world (following its sketch when anchored), its
-/// component and its image.
+/// An image the design shows on the model: its corners in the world (following its sketch when
+/// anchored), its component and its image.
 struct ShownDecal {
     name: String,
     component: u64,
@@ -2478,13 +2478,13 @@ struct ShownDecal {
     image: Vec<u8>,
 }
 
-/// The design's shown decals for an export. A decal that can't be placed or whose image is
-/// damaged is left out with a warning; one whose sketch can't place it is written where its own
-/// centre, width and angle do, with a warning.
+/// The images the design shows, canvases and decals alike, for an export. A hidden image is left
+/// out; one that can't be placed or whose image is damaged is left out with a warning; one whose
+/// sketch can't place it is written where its own centre, width and angle do, with a warning.
 fn shown_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<ShownDecal> {
     let (vals, _) = doc.param_values();
     let mut decals = Vec::new();
-    for c in doc.canvases.iter().filter(|c| c.decal && c.visible) {
+    for c in doc.canvases.iter().filter(|c| c.visible) {
         let Some(image) = c.bytes() else {
             warnings.push(format!("decal `{}`: its image is damaged: left out", c.name));
             continue;

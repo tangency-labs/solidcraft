@@ -45,7 +45,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("canvas")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<CanvasEdited>)
-        .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?, locked? (a locked canvas refuses center, width, angle, flip, Calibrate and Delete); decal?: bool (exported to URDF); anchor?: {sketch: id, bottom_left, bottom_right: point ids, top_left?: point id} | null (the sketch points the image's corners follow; without top_left the height follows the image; an anchored canvas refuses center, width, angle, Calibrate and Straighten)"),
+        .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?, locked? (a locked canvas refuses center, width, angle, flip, Calibrate and Delete); anchor?: {sketch: id, bottom_left, bottom_right: point ids, top_left?: point id} | null (the sketch points the image's corners follow; without top_left the height follows the image; an anchored canvas refuses center, width, angle, Calibrate and Straighten)"),
     CommandSpec::new("canvas.frame_sketch", "Frame Sketch", crate::checked!("canvas.frame_sketch", frame_sketch))
         .icon("canvas")
         .contract(&FRAME_SKETCH_CONTRACT)
@@ -137,7 +137,6 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         visible: true,
         locked: false,
         component,
-        decal,
         anchor: None,
     });
     // A frame that cannot be drawn fails the command, and the engine puts the design back as it
@@ -252,9 +251,6 @@ fn edit_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(a) = anchor {
         c.anchor = a;
-    }
-    if let Some(d) = bool_(p, "decal") {
-        c.decal = d;
     }
     if let Some(v) = p.get("center").and_then(vec2) {
         c.center = v;
@@ -819,7 +815,7 @@ mod tests {
             s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "width": 10, "name": "Pic"})).unwrap()["canvas"].as_u64().unwrap();
         let anchor =
             json!({"sketch": sketch, "bottom_left": corner("bottom_left"), "bottom_right": corner("bottom_right"), "top_left": corner("top_left")});
-        s.execute("canvas.edit", &json!({"canvas": id, "anchor": anchor, "decal": true})).unwrap();
+        s.execute("canvas.edit", &json!({"canvas": id, "anchor": anchor})).unwrap();
         let near = |a: Vec3, b: [f64; 3]| (a - Vec3::new(b[0], b[1], b[2])).len() < 1e-6;
         let k = world_corners(&s, id);
         assert!(
@@ -829,7 +825,6 @@ mod tests {
         s.execute("parameters.change", &json!({"name": "w", "expression": "60 mm"})).unwrap();
         let k = world_corners(&s, id);
         assert!(near(k[1], [60.0, 0.0, 0.0]) && near(k[2], [60.0, 20.0, 0.0]), "the image stretches with the sketch: {k:?}");
-        assert!(s.doc.canvases.iter().any(|c| c.id == id && c.decal));
         for (cmd, p) in [
             ("canvas.edit", json!({"canvas": id, "center": [1, 1]})),
             ("canvas.calibrate", json!({"canvas": id, "a": [0, 0], "b": [1, 0], "distance": 2})),
@@ -954,7 +949,7 @@ mod tests {
         assert_eq!(r["pixels"], json!([300, 100]));
         let c = s.doc.canvases.last().unwrap();
         assert_eq!(c.format, "png");
-        assert!(c.decal && c.bytes().unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(c.bytes().unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
         for resolution in [json!(0), json!(5000), json!("big")] {
             assert!(s.execute("canvas.decal", &json!({"data": svg, "face": [20, 15, 10], "resolution": resolution})).is_err(), "{resolution}");
         }

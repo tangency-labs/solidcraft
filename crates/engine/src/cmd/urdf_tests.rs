@@ -122,7 +122,8 @@ fn stl_volume(bytes: &[u8]) -> Option<f64> {
 }
 
 /// A decal on a part goes to the part's link as a textured COLLADA visual, with its image beside
-/// it and its corners in the part's frame, lifted off the face; a reference canvas is not exported.
+/// it and its corners in the part's frame, lifted off the face. A shown canvas is written the same
+/// way; a hidden one is not.
 #[test]
 fn urdf_writes_decals_as_textured_visuals() {
     use image::ImageEncoder;
@@ -132,13 +133,15 @@ fn urdf_writes_decals_as_textured_visuals() {
     image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
     let png = solidcraft_doc::canvas::base64_encode(&png);
     run(&mut s, "canvas.decal", json!({"data": png, "face": [25, 5, 10], "width": 8, "name": "Logo"}));
-    run(&mut s, "canvas.insert", json!({"data": png, "plane": "XY", "width": 8, "name": "Reference"}));
+    run(&mut s, "canvas.insert", json!({"data": png, "plane": "XY", "width": 8, "name": "Tag"}));
+    run(&mut s, "canvas.insert", json!({"data": png, "plane": "XY", "width": 8, "name": "Hidden"}));
+    run(&mut s, "canvas.edit", json!({"canvas": "Hidden", "visible": false}));
     let d = temp("decal");
     let path = d.join("t.urdf");
     let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy()}));
     let mut files: Vec<String> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
     files.sort();
-    assert_eq!(files, ["t-A.stl", "t-B-Logo.dae", "t-B-Logo.png", "t-B.stl", "t.urdf"], "{r}");
+    assert_eq!(files, ["t-A.stl", "t-B-Logo.dae", "t-B-Logo.png", "t-B-Tag.dae", "t-B-Tag.png", "t-B.stl", "t.urdf"], "{r}");
     let xml = std::fs::read_to_string(&path).unwrap();
     let link_b = xml.split(r#"<link name="B">"#).nth(1).and_then(|x| x.split("</link>").next()).unwrap_or_default();
     assert!(link_b.contains(r#"<mesh filename="t-B-Logo.dae"/>"#) && link_b.contains(r#"<mesh filename="t-B.stl"/>"#), "{xml}");

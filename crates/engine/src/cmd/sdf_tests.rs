@@ -48,7 +48,8 @@ fn stl_bounds(bytes: &[u8]) -> ([f32; 3], [f32; 3]) {
 
 /// A 40 x 30 x 10 mm box with an 8 x 4 mm decal centred on its top face: the folder holds the
 /// box's STL in metres, the decal's image and its quad 0.2 mm above and below the face, and
-/// `model.config` and `model.sdf` naming them; a reference canvas is not exported.
+/// `model.config` and `model.sdf` naming them. An image placed as a canvas is written the same
+/// way; a hidden one is not.
 #[test]
 fn a_model_folder_holds_the_body_the_decal_and_the_files_naming_them() {
     use image::ImageEncoder;
@@ -58,7 +59,10 @@ fn a_model_folder_holds_the_body_the_decal_and_the_files_naming_them() {
     image::codecs::png::PngEncoder::new(&mut png).write_image(&[200u8; 4 * 8], 4, 2, image::ExtendedColorType::Rgba8).unwrap();
     let data = solidcraft_doc::canvas::base64_encode(&png);
     run(&mut s, "canvas.decal", json!({"data": data, "face": [20, 15, 10], "width": 8, "name": "Aruco"}));
-    run(&mut s, "canvas.insert", json!({"data": data, "plane": "XY", "width": 8, "name": "Reference"}));
+    // An image placed as a canvas is a texture of the model too; a hidden one is not.
+    run(&mut s, "canvas.insert", json!({"data": data, "plane": "XY", "width": 8, "opacity": 1, "name": "Tag"}));
+    run(&mut s, "canvas.insert", json!({"data": data, "plane": "XY", "width": 8, "name": "Hidden"}));
+    run(&mut s, "canvas.edit", json!({"canvas": "Hidden", "visible": false}));
     let body = s.model.state().bodies[0].name.clone();
     let d = temp("box");
     // The save picker's `.sdf` is dropped: the model is the folder `Panel`.
@@ -66,14 +70,16 @@ fn a_model_folder_holds_the_body_the_decal_and_the_files_naming_them() {
     let folder = d.join("Panel");
     assert_eq!(files_in(&d), ["Panel"], "{r}");
     let stl = format!("{}.stl", body.replace(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-', "_"));
-    let mut want = vec!["Aruco.dae".to_string(), "Aruco.png".into(), stl.clone(), "model.config".into(), "model.sdf".into()];
+    let mut want =
+        vec!["Aruco.dae".to_string(), "Aruco.png".into(), "Tag.dae".into(), "Tag.png".into(), stl.clone(), "model.config".into(), "model.sdf".into()];
     want.sort();
     assert_eq!(files_in(&folder), want, "{r}");
     assert_eq!(
         (r["format"].as_str(), r["name"].as_str(), r["bodies"].as_u64(), r["decals"].as_u64()),
-        (Some("Sdf"), Some("Panel"), Some(1), Some(1)),
+        (Some("Sdf"), Some("Panel"), Some(1), Some(2)),
         "{r}"
     );
+    assert!(std::fs::read_to_string(folder.join("model.sdf")).unwrap().contains("<albedo_map>Tag.png</albedo_map>"), "the canvas's texture");
     assert!(r["files"].as_array().unwrap().last().unwrap().as_str().unwrap().ends_with("model.sdf"), "model.sdf last: {r}");
     assert_eq!(std::fs::read(folder.join("Aruco.png")).unwrap(), png, "the image as it is");
 
