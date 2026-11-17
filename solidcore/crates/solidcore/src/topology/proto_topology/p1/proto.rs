@@ -1869,8 +1869,8 @@ impl ProtoVertex {
 
     /// Not upstream (#16637): the computed points (positions and object points) of the
     /// vertex definitions combined away at this proto vertex, the attached curve ends
-    /// evaluated when it combined them, and the points of the definitions that remained
-    /// when it moved.
+    /// evaluated when it combined them, and, when it moved, the points of the definitions
+    /// that remained and the attached curve ends that trace to them.
     #[must_use]
     pub fn absorbed_points(&self) -> &[Point3] {
         &self.absorbed_points

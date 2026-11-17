@@ -33,11 +33,12 @@
 //! their value for the rest of the process; those that change results live on the
 //! [`Kernel`] as latches (e.g. [`Kernel::fillet_point_step`]), so each kernel starts
 //! unlatched and a difftest runner can seed the latch with the value the C++ process
-//! already holds.
+//! already holds. Kernels that stand in for one process together share its value
+//! ([`Kernel::process_fillet_point_step`]).
 
 use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::error::SolidError;
 use crate::geom::context::Context;
@@ -177,6 +178,7 @@ pub struct WorkCounters {
     orient_boxes: Cell<u64>,
     ball_certified_roots: Cell<u64>,
     blends_recertified: Cell<u64>,
+    vertex_drops: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -339,6 +341,14 @@ impl WorkCounters {
         self.blends_recertified.get()
     }
 
+    /// Face vertices a curve being classified on a face is solved against (the drops of
+    /// `CurveClassification::intersect_vertices_in`): each vertex not passed over as out of
+    /// the curve's reach. Not the fork's.
+    #[must_use]
+    pub fn vertex_drops(&self) -> u64 {
+        self.vertex_drops.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -359,6 +369,13 @@ impl WorkCounters {
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
         self.blends_recertified.set(0);
+        self.vertex_drops.set(0);
+    }
+
+    /// Counts one vertex a classified curve is solved against.
+    pub(crate) fn add_vertex_drop(&self) {
+        self.vertex_drops
+            .set(self.vertex_drops.get().saturating_add(1));
     }
 
     /// Counts one face pair examined for intersection.
@@ -551,7 +568,7 @@ pub struct UpstreamFixes {
     pub curve_loop_normal_from_area: bool,
     /// `create_fillet_brep` refuses blends that take the whole of a face they roll on (`FacesOutlastTheirBlends`, no room) (WR-320, #879).
     pub fillet_refuse_face_consuming_blends: bool,
-    /// `create_fillet_brep` refuses blends whose bands on a face they share overlap away from any corner that trims them (a rail of one inside the band between the other's filleted edge and its rail: both vertical edges of a box end rounded past half its width), with `FilletErrorType::NoRoom`, where upstream builds a body that is not closed (WR-542; the fork's tangency-labs/smlib@c0d74ee, `BandsClearOtherRails`). A rail is sampled only between its end vertices, where the corners have placed them: the rails are not trimmed yet and run on past their corners' mitres, so a run-on crossing another blend's band refused a valid round (WR-649, #1984; the fork's tangency-labs/smlib@d548305).
+    /// `create_fillet_brep` refuses blends whose bands on a face they share overlap away from any corner that trims them (a rail of one inside the band between the other's filleted edge and its rail: both vertical edges of a box end rounded past half its width), with `FilletErrorType::NoRoom`, where upstream builds a body that is not closed (WR-542; the fork's tangency-labs/smlib@c0d74ee, `BandsClearOtherRails`). A rail is sampled only between its end vertices, where the corners have placed them: the rails are not trimmed yet and run on past their corners' mitres, so a run-on crossing another blend's band refused a valid round (WR-649, #1984; the fork's tangency-labs/smlib@d548305). Not the fork's (#18178): where two kept rails on the face they share cross (their curves' intersection within the solvers' tolerance), the pieces the crossings cut the rail into are each judged at their middle by the same band test, so a short overlap the samples step over is refused too (a ring's outer chamfer and its hole's chamfers, whose corner mitres reach a few hundredths past the outer chamfer's rail at the ring's narrowest places), and rails that only touch are not.
     pub fillet_refuse_overlapping_bands: bool,
     /// `CalcTorusFilletGeom` revolves a linear section into a cone (WR-421, #420), stored as the `SmCone` it is: the revolution's NURBS form is copied (`SmBSplineSurface::Copy`) and passed through `CopyAndAddAnalytics`, and when that gives a cone it is the fillet surface and the rails are made on it (as a straight edge's round is stored as its cylinder); anything else stays the surface of revolution (WR-572, #1503; the fork's tangency-labs/smlib@b5743ec).
     pub fillet_chamfer_cone_on_arc: bool,
@@ -696,14 +713,10 @@ pub struct UpstreamFixes {
     pub fillet_cleanup_keeps_target_faces: bool,
     /// `SmFilletNx2Corner::MakeCornerTopology` mitres two blends meeting at a vertex of three edges where the common face's corner between them is concave (mixed convexity: a pocket's rim at its sharp corner, a boss's root at its sharp corner, the side edge not filleted), as at a corner of uniform convexity: the rails meet in the common face (`SM_FV_RAIL_X_RAIL`) and on the side edge, the blends' surfaces meet along their intersection, and the corner is a bevel (where the rails meet the side edge at two places, `AdjustTopology` joins them along the side face). Upstream sweeps a 3-sided face round the side edge between ribs straight across from where the rails meet it. Edges meeting at 5 degrees or less still blend (WR-642; the fork's tangency-labs/smlib@4f06e72, the owner's ruling of 2026-10-30).
     pub fillet_mitre_concave_face_corners: bool,
-    /// `SmCone::CreateCanonical` (`Cone::create_canonical_with_semi_angle` and `Cone::create_canonical`) passes `inside_out` as the bounded cone constructor's `bInsideOut` and `false` as `bMakeNurbGenCurve` when `height` is `Some` (where upstream passes `FALSE` for `bInsideOut` and the caller's `bInsideOut` for `bMakeNurbGenCurve`, dropping an inside-out request), and rejects `height <= 0.0` in the two-radius overload with `SolidError::InvalidInput` (`SM_ERR_INVALID_INPUT`) instead of forwarding `top_radius` as the semi-angle in degrees of an unbounded cone (WR-63, #2207; see `plan/upstream-issues/WR-63--addendum-2026-11-01-cone-create-canonical-args.md`).
-    pub cone_create_canonical_preserves_inside_out_and_checks_height: bool,
     /// `MateEdges` also intersects analytic copies of the two faces' surfaces (plane, cylinder, cone, sphere, torus; extended only along a plane or a cylinder's or cone's rulings, where the tangent (G1R) extensions still are the surface) and replaces each marched piece that lies on an exact line or conic between the same ends, and drops to one UV curve on each extended surface within the body's tolerance, by that exact curve, so a shelled cylinder's floor circle, seam line and rim stay exact (WR-495, #1453/#1130; the fork's tangency-labs/smlib@fddc366 and @98ab1b0).
     pub offset_analytic_mate_edges: bool,
     /// `ShellBrep` ends with `MakeEdgesOnAnalyticsExact` on its result (not on the non-manifold offset it returns early): each edge whose curve is a marched intersection between two faces on analytic surfaces (planes, cylinders, cones, spheres, tori) takes the exact line or conic those surfaces meet on through its ends and middle, unless that conic fails its own validity check, and its faces' UV trims are made again, so a shelled rounded box's rim is arcs, not cubics 2.4e-6 off them (WR-545; the fork's tangency-labs/smlib@cd85d34).
     pub shell_edges_on_analytics_exact: bool,
-    /// `SmCurve::GlobalCurveIntersect` moves a point solution to an end of either curve when that end lies within tolerance of the other curve and the curves stay within tolerance of each other over the whole stretch between (`sm_MoveContactsToCurveEnds`), so a tangential contact is not placed inside the curve (WR-455, #855; the fork's tangency-labs/smlib@51eefa5 (was 601d804)).
-    pub curve_contacts_at_curve_ends: bool,
     /// `CreateFilletBrep` sets each solver's trace reach before the corners (`sm_ExtendTraceToItsRails`): where the base surfaces' domains extended by the solver's factor (half their size) do not reach as far as a rail can lie from the edge (`r / tan(t/2)`, `t` the smallest angle between the faces' planes along it, `r` the largest radius over the trace, a variable round's law included), they reach twice that and `r` more, in the parameter directions that run across the edge (`GetDomainExtension`), so a blend wider than its faces is traced to its rails instead of being clamped at the extended domain's border; and `RailEdgeuseIntersect` runs a straight side edge on a plane on along its line as far, so a rail meeting the side edge's line past the edge's end is found (WR-609, WR-610, #960; the fork's tangency-labs/smlib@a9277fd and @6e77631). It runs such an edge on along its line on a cylinder or cone too, a ruling of it, so a disc's rim rounded past its wall meets the seam's line below the wall at its closed corner (the fork's @779cb9b).
     pub fillet_trace_reaches_rails: bool,
     /// `SmFilletGeom::TrimRailCurves` trims a rail at its own knot next to the parameter its end vertex drops to, inside the trim, when the rail between the two is no longer than the target B-rep's zone tolerance (`sm_SnapRailEndToKnot`): a trim there left an end span shorter than the tolerance with coincident control points, an internal point singularity of the rail and of the face curves trimmed with it, which the body check refuses. It happens where the rail stands still at a face's boundary past its end and where the section's other rail crosses its side edge there (WR-664; the fork's tangency-labs/smlib@7d79866).
@@ -984,6 +997,16 @@ pub struct Kernel {
     /// (the kernel stays `Send`). Difftest runners seed it with the value the C++
     /// process has latched; see [`Kernel::latch_fillet_point_step`].
     pub fillet_point_step: Cell<Option<f64>>,
+    /// The step of the process this kernel stands in for, when it is one of several that do
+    /// (a pool of kernels, each running calls side by side): `None` for a kernel of its own,
+    /// whose latch is its alone. Every kernel of the pool is handed the one cell, so the
+    /// first latch on any of them settles the step under the cell's lock, and every latch
+    /// after it, on any of them and whenever that kernel was made or taken, gets that step
+    /// ([`Kernel::latch_fillet_point_step`]), as upstream's one function static does. The
+    /// cell is `'static` because the step lives as long as the process, as upstream's does;
+    /// the kernel only borrows it, so it never learns who owns it, and a kernel copy (one
+    /// made for caches) shares it by copying the reference.
+    pub process_fillet_point_step: Option<&'static OnceLock<f64>>,
     /// The upstream undefined-behaviour conditions (their `plan/upstream-issues.md`
     /// ids, e.g. `"UB-175"`) that operations on this kernel met and went past with the
     /// port's defined semantics, each listed once in the order first met. Upstream's
@@ -1098,6 +1121,7 @@ impl Kernel {
             caches: Caches::default(),
             context: Context::default(),
             fillet_point_step: Cell::new(None),
+            process_fillet_point_step: None,
             upstream_ub_passed: Vec::new(),
             memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
             fixes: UpstreamFixes::default(),
@@ -1184,14 +1208,29 @@ impl Kernel {
     }
 
     /// `static double sdStaticStep = first;`: the latched value of
-    /// [`Kernel::fillet_point_step`], latching `first` when nothing is latched yet.
+    /// [`Kernel::fillet_point_step`], latching `first` when nothing is latched yet: the
+    /// process's step when the kernel shares one ([`Kernel::process_fillet_point_step`]),
+    /// settled to `first` if this is the first latch of the process.
     #[must_use]
     pub fn latch_fillet_point_step(&self, first: f64) -> f64 {
         if let Some(step) = self.fillet_point_step.get() {
             return step;
         }
-        self.fillet_point_step.set(Some(first));
-        first
+        let step = self
+            .process_fillet_point_step
+            .map_or(first, |process| *process.get_or_init(|| first));
+        self.fillet_point_step.set(Some(step));
+        step
+    }
+
+    /// The step a fillet point evaluation on this kernel takes, once one is latched: the
+    /// kernel's own latch, else the process's ([`Kernel::process_fillet_point_step`]).
+    #[must_use]
+    pub fn latched_fillet_point_step(&self) -> Option<f64> {
+        self.fillet_point_step.get().or_else(|| {
+            self.process_fillet_point_step
+                .and_then(|process| process.get().copied())
+        })
     }
 }
 
@@ -1337,6 +1376,22 @@ mod tests {
         assert_eq!(k.latch_fillet_point_step(1.0e-3), 1.0e-5);
         k.fillet_point_step.set(Some(1.0e-3));
         assert_eq!(k.latch_fillet_point_step(1.0e-5), 1.0e-3);
+    }
+
+    /// Kernels sharing a process step settle one: the first latch on either is the step of
+    /// both, read before the other latches and kept when it does. A kernel of its own
+    /// latches its own.
+    #[test]
+    fn kernels_sharing_a_process_step_settle_one() {
+        static PROCESS: OnceLock<f64> = OnceLock::new();
+        let (mut a, mut b) = (Kernel::default(), Kernel::default());
+        a.process_fillet_point_step = Some(&PROCESS);
+        b.process_fillet_point_step = Some(&PROCESS);
+        assert_eq!(b.latched_fillet_point_step(), None);
+        assert_eq!(a.latch_fillet_point_step(1.0e-5), 1.0e-5);
+        assert_eq!(b.latched_fillet_point_step(), Some(1.0e-5));
+        assert_eq!(b.latch_fillet_point_step(1.0e-3), 1.0e-5);
+        assert_eq!(Kernel::default().latch_fillet_point_step(1.0e-3), 1.0e-3);
     }
 
     #[test]

@@ -164,8 +164,9 @@ fn extrude_to_a_slanted_face_in_another_moved_component() {
     assert!(rel(v, 36.0 * 18.0) < 1e-6, "{v}");
 }
 
-/// From Object on a slanted face in another, moved component: the extrude starts where the
-/// pad's middle meets the face as shown (z -22.5), not where it is in the component's frame.
+/// From Object on a slanted face in another, moved component: the extrude starts on the face as
+/// shown, z = -20 + (y - 5)/2, so from z -21 at y 3 to -24 at y -3 and 4 mm on, down to -28; not
+/// on the face in the component's frame, which would start it at z -18.5 (#17639).
 #[test]
 fn extrude_from_a_slanted_face_in_another_moved_component() {
     let mut s = Session::default();
@@ -176,7 +177,9 @@ fn extrude_from_a_slanted_face_in_another_moved_component() {
         json!({"sketch": "Pad", "from": [0, 5, -20], "distance": 4, "direction": "negative", "operation": "new", "body_name": "Leg"}),
     );
     let b = s.world_state().unwrap().body("Leg").unwrap().mesh().bounds();
-    assert!((b.max.z + 22.5).abs() < 1e-6 && (b.min.z + 26.5).abs() < 1e-6, "{b:?}");
+    assert!((b.max.z + 21.0).abs() < 1e-6 && (b.min.z + 28.0).abs() < 1e-6, "{b:?}");
+    let v = leg_volume(&mut s);
+    assert!(rel(v, 36.0 * 4.0) < 1e-6, "{v}");
 }
 
 /// The To face in another component is kept by name, as one in the same component is: when that
