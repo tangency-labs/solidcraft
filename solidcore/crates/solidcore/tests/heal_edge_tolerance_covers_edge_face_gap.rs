@@ -54,13 +54,26 @@ fn assert_gaps_covered(name: &str) {
     let mut b = read(&mut k, name);
     let eus: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
     for eu in eus {
-        let Some(e) = b.edgeuse(eu).unwrap().edge else { continue };
-        let Some(gap) = max_edge_face_gap(&k, &mut b, eu, false).unwrap() else { continue };
+        let Some(e) = b.edgeuse(eu).unwrap().edge else {
+            continue;
+        };
+        let Some(gap) = max_edge_face_gap(&k, &mut b, eu, false).unwrap() else {
+            continue;
+        };
         let tol = b.edge(e).unwrap().tolerance;
-        assert!(gap.gap_3d <= tol, "{name}: {eu:?} of {e:?}: gap {:e} over tolerance {tol:e}", gap.gap_3d);
+        assert!(
+            gap.gap_3d <= tol,
+            "{name}: {eu:?} of {e:?}: gap {:e} over tolerance {tol:e}",
+            gap.gap_3d
+        );
     }
-    let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
-    let lines: Vec<_> = report.lines().filter(|l| l.contains("Edge/Surface gap")).collect();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    let lines: Vec<_> = lines
+        .iter()
+        .filter(|l| l.contains("Edge/Surface gap"))
+        .collect();
     assert!(lines.is_empty(), "{name}: {lines:?}");
 }
 
