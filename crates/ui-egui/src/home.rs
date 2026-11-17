@@ -1267,9 +1267,25 @@ mod tests {
         std::fs::write(&path, b"old").unwrap();
         let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
         let before = cache_path(path.to_str().unwrap()).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        std::fs::write(&path, b"new").unwrap();
-        std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        // The replacement has the same length and the old mtime, so only ctime tells the files apart.
+        // A filesystem's ctime ticks in coarse steps (several ms on some runners), so rewrite until
+        // the clock has moved instead of trusting a fixed sleep.
+        use std::os::unix::fs::MetadataExt;
+        let ctime = |p: &std::path::Path| {
+            let m = std::fs::metadata(p).unwrap();
+            (m.ctime(), m.ctime_nsec())
+        };
+        let before_ctime = ctime(&path);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::fs::write(&path, b"new").unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+            if ctime(&path) != before_ctime {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "ctime never advanced");
+        }
         assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
     }
 
