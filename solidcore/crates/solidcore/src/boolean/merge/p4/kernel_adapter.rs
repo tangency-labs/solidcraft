@@ -1243,7 +1243,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
             )
         };
         let mut status = check(&self.merge.intersector, primary, other)?;
-        // Not upstream (#18401): edges of the two faces that join the same related vertices
+        // Not upstream (coincident_edges): edges of the two faces that join the same related vertices
         // within a certified tolerance of each other are one edge; related first, the imprint
         // below does not copy each onto the other face as a second edge between the two
         // vertices (coincident_edges).

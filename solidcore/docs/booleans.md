@@ -207,6 +207,34 @@ sector that finds a coincident face use hands the pair to `fix_face_coincidence`
 face is merged into both until the two faces' edges are all mated, at most
 `MAX_COINCIDENT_SURFACE_PASSES` passes. If that changed the topology, the classify step starts again.
 
+**Coincident edges between related vertices.** Before that imprint, `relate_coincident_edges`
+(`merge/coincident_edges.rs`, called from `fix_face_coincidence` once the check asks for a merge)
+relates an unrelated edge of one face to the one unrelated edge of the other that joins the vertices
+related to its two ends, when `certified_line_gap` proves the two curves within the larger of their
+two edge tolerances of each other over both intervals (a Hausdorff bound with every rounding
+counted; one of the two must be a line, the other is taken through its certain hull points).
+Otherwise the imprint copies each onto the other face as a second edge between the same two
+vertices, and the two zero-area faces between the copies keep the result from closing (an arc that
+grazes a coplanar box face, `boolean_api.rs` `an_arc_grazing_a_coplanar_box_face_joins`). Shared
+ends alone relate nothing: two arcs that join the same vertices may bow apart, and a line and an
+arc that bow apart by more than the tolerance stay two edges and are imprinted. An edge with more
+than one such partner is left to the imprint.
+
+**Vertex placed by its best certified edge crossing.** An intersection curve that ends on an edge
+places the boolean vertex there; several curves can end on one edge near one point, and the first
+one found placed it upstream. A later crossing with a smaller misplacement bound along the edge
+(the points' gap over the sine of the curve's angle to the edge) moves the vertex definition only
+when two certificates hold over the stretch of the edge between the first placement and the new
+one, each a bound over the whole piece in outward-rounded interval arithmetic
+(`curve_piece_gap_bound`, `query/curve_surface_gap.rs`): the edge stays within the definition's
+tolerance of the other object (face, edge or vertex), and of the curve whose crossing placed it
+first. A grazing first crossing runs along the edge and certifies the stretch it covers; a steep one
+leaves the edge at once and certifies only a stretch within the tolerance. Every candidate is
+certified from the first placement, so the result does not depend on the order the crossings arrive
+in. A surface without a NURBS net (an offset surface) or a curve kind without NURBS data gives no
+certificate, and the vertex keeps its first placement (`VertexDefinition::place_by_crossing`,
+`topology/proto_topology/p1/proto.rs`).
+
 **How coincidence is decided.** `Surface::coincidence_check` (`surface/surface/p8.rs`) is exact only
 for the plane: a plane is parallel within the angle that moves its far end by the tolerance and
 passes through the other's origin (`surface/plane/p1.rs`). For other surfaces the base check is
@@ -644,7 +672,8 @@ A reviewer can check each of these on a change to the boolean.
   returns 8 faces, 18 edges and 12 vertices instead of 10, 24 and 16; #15669).
 - Opt-in fix for the cases in §5, §6 and §8: `keep_operand_uv_trims`
   (`solidcore/src/kernel.rs`). Always on: the union's solid-leak refusal (WR-619), a boolean
-  vertex placed by its steepest edge crossing (WR-410), the outer shell first, the clean-up of slits and the split of a coincident
+  vertex placed again by a later edge crossing with a smaller misplacement bound (gap over sine) only
+  where a certificate proves the move stays one point (WR-410, §5), the outer shell first, the clean-up of slits and the split of a coincident
   definition across a split point (WR-533). Every boolean, 3D included, skips the face pairs
   whose boxes lie apart, and a new planar face leaves in place the inner loops whose boxes lie
   outside its outer loop's box (WR-527), always.

@@ -2,7 +2,7 @@
 //! related vertices and whose curves are certified to lie within the edges' tolerance of each
 //! other over their whole length.
 //!
-//! Upstream: none (solidcore-native; tangency-labs/solidcraft#18401).
+//! Upstream: none (solidcore-native).
 //!
 //! | Rust                        | Upstream |
 //! |-----------------------------|----------|
@@ -24,7 +24,10 @@
 //! relation is made only when [`certified_line_gap`] bounds the Hausdorff distance of the two
 //! curves over the edges' intervals, every rounding included, by the larger edge tolerance.
 //! The bound needs one of the two curves to be a line; a pair of other kinds is left to the
-//! imprint, as before.
+//! imprint, as before. The bound is a certificate in code ([`certified_line_gap`]); its
+//! proof is in that function's doc comment. A pair whose curves bow apart by more than the
+//! tolerance is refused and imprinted as before (the `boolean_api` test
+//! `an_arc_bowing_past_a_coplanar_box_face_keeps_its_segment`).
 //!
 //! #16640's guard (`proto_topology::p2`, an edge-to-edge definition whose ends lie farther
 //! apart than every tolerance makes no relation of its own) is about a stretch that ends on
@@ -67,10 +70,16 @@ pub fn relate_coincident_edges(
     relations: &mut Relations,
 ) -> Result<usize> {
     let mut related = 0;
+    // (each edge once, in id order: a loop walk lists an edge twice when both its uses
+    // bound the face, not always next to each other)
     let mut edges = face_edges(primary, face)?;
+    edges.sort_unstable();
     edges.dedup();
     let mut other_edges = face_edges(other, other_face)?;
+    other_edges.sort_unstable();
     other_edges.dedup();
+    // An other edge related here is skipped by every later primary edge, so of two primary
+    // edges with the same unique partner, the first in this order is related.
     for pe in edges {
         if relations.edges.other(pe).is_some() {
             continue;

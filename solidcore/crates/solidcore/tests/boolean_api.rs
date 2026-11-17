@@ -1169,11 +1169,39 @@ fn an_arc_grazing_a_coplanar_box_face_joins() {
     // The arc passes angle 0, so it reaches x = cx + r: past x = 10 by `bulge` (0.26 micron),
     // over less than 0.01 in y (it is back on x = 10 at the vertex y = 10.00321). The sliver
     // past the box is at most 10 bulge 0.01 in volume; the volume's own accuracy is the
-    // control's 1e-6 relative (#18401: the arc piece and the box edge piece between the two
+    // control's 1e-6 relative (the arc piece and the box edge piece between the two
     // vertices are related as one edge, no zero-area faces are left).
     let bulge = centre.0 + r - 10.0;
     let want = 10.0 * (5.0 * py + 125.0);
     assert_closed_with_volume(&mut k, brep, want, 10.0 * bulge * 0.01 + 1e-6 * want);
+}
+
+/// The real-defect side of relating coincident edges: an arc of radius 5 that starts on the
+/// box face `x = 10` at `(10, 10)`, bows `b` past it and comes back to it at `y = 10 + 2 r
+/// sin α` (`cos α = 1 - b / r`). The arc piece and the box's line piece between those two
+/// points join the same related vertices but lie `b` apart, past the tolerance (1e-5), so
+/// they are not one edge: the imprint keeps both and the circular segment between them is
+/// part of the union. The volume is the box, the profile left of it and that segment,
+/// `10 (5 py + 125 + r^2 / 2 (2 α - sin 2 α))`, in closed form.
+#[test]
+fn an_arc_bowing_past_a_coplanar_box_face_keeps_its_segment() {
+    for b in [4e-5, 1e-3] {
+        let mut k = Kernel::default();
+        let r = 5.0_f64;
+        let alpha = (1.0 - b / r).acos();
+        let centre = (10.0 - r + b, 10.0 + r * alpha.sin());
+        let end_deg = 36.0_f64;
+        let top = (
+            centre.0 + r * end_deg.to_radians().cos(),
+            centre.1 + r * end_deg.to_radians().sin(),
+        );
+        let brep = arc_graze_union(&mut k, centre, r, -alpha.to_degrees(), end_deg, top).unwrap();
+        let segment = 0.5 * r * r * (2.0 * alpha - (2.0 * alpha).sin());
+        let want = 10.0 * (5.0 * top.1 + 125.0 + segment);
+        // (the segment adds 1.07e-5 at b = 4e-5 and 1.33e-3 at 1e-3; the slack, 1.9e-6, is
+        // below both)
+        assert_closed_with_volume(&mut k, brep, want, 1e-9 * want);
+    }
 }
 
 /// The control of #16640: the same profile with the arc exactly tangent to the face's plane
