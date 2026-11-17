@@ -53,7 +53,7 @@ pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
-pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_reach, head_counterbore, shown_scope};
+pub use features::{auto_operation, clearance_diameter, clearance_sizes, extrude_reach, head_counterbore, large_thread_size, shown_scope};
 pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
 pub(crate) use file::import::realign_imports;
@@ -81,6 +81,8 @@ pub use component_link::resolve_design_links;
 mod config;
 mod design_link;
 mod file;
+mod file_library;
+pub(crate) use file_library::uses_file as file_library_uses_file;
 mod frame;
 mod frame_end_cap;
 pub(crate) mod inspect;
@@ -163,6 +165,7 @@ mod surface_match;
 mod tab_views;
 mod view_dxf;
 mod view_navigation;
+mod view_pick;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -403,6 +406,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(file_library::COMMANDS.iter());
     v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
@@ -416,6 +420,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(tab_views::COMMANDS.iter());
+    v.extend(view_pick::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
@@ -471,12 +476,16 @@ pub(crate) fn did_you_mean(id: &str) -> String {
     }
 }
 
+/// The longest name the "did you mean" search compares, in bytes: a body name of 128 characters
+/// (up to 512 bytes) still gets its suggestion, and a longer text costs no edit-distance work.
+const MAX_SUGGESTED_NAME_BYTES: usize = 512;
+
 /// "no body `name`", and the closest of `bodies` when it is near enough to be a typo or another
 /// case of the same name (`b` for `B`): `no body `Bdy`; did you mean `Body`?` (#9740).
 pub(crate) fn no_body<'a>(name: &str, bodies: impl IntoIterator<Item = &'a str>) -> String {
     let want = name.to_lowercase();
     let near = (want.chars().count() / 3).max(1);
-    let closest = (want.len() <= 256)
+    let closest = (want.len() <= MAX_SUGGESTED_NAME_BYTES)
         .then(|| bodies.into_iter().map(|b| (edit_distance(&want, &b.to_lowercase()), b)).filter(|(d, _)| *d <= near).min_by_key(|(d, _)| *d))
         .flatten();
     match closest {

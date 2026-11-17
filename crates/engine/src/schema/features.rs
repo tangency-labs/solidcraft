@@ -16,8 +16,8 @@ use super::motion::require;
 use super::types::{
     AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam,
     FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
-    OperationParam, PatternAxis, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam,
-    ToPoint, TouchingParam, feature_common, present,
+    OperationParam, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList,
+    ThinSideParam, ToPoint, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -144,7 +144,8 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
-    /// Start at this face or point (From Object).
+    /// Start at this face or point (From Object). On a flat face at a slant the start follows the
+    /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FromPoint")]
     pub from: Option<FromPoint>,
@@ -780,6 +781,35 @@ pub struct PlaneAtAngleParams {
     pub common: PlaneCommon,
 }
 
+/// Copy features or bodies across a plane: the features replayed mirrored, or the bodies copied
+/// mirrored, each copy a body of its own unless `combine` joins it to its original. Give
+/// `features` or `bodies`: a call with neither is the handler's to refuse, with its message.
+/// Whether each name exists is the handler's to check.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MirrorParams {
+    /// The features to mirror, by name. Read when `bodies` lists none.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to mirror, by name as the viewport shows them: a further instance's copy goes
+    /// where that instance is.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The plane to mirror across. The mirror follows a construction plane, and an explicit
+    /// plane's origin given as length expressions.
+    pub plane: PlaneParam,
+    /// Join each copy to its original. Default: false.
+    #[serde(default)]
+    pub combine: Option<bool>,
+    /// What a replayed join makes of pieces that share no face: the copies of a join among
+    /// `features` are joined with this setting, not their source's. Mirrored bodies don't use it.
+    /// Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
 /// Round edges of a body: a constant radius by default, or a chord, a curvature-continuous
 /// section or a radius varying along each edge (`type`).
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1075,6 +1105,12 @@ pub struct MoveParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "Point3")]
     pub axis: Option<Point3>,
+    /// The edge or round face of the model the turn was picked on, `{edge|face: [x,y,z], body?}`:
+    /// the move keeps turning about it where it is, when an earlier step moves the body
+    /// (#17974). `axis` and `origin` give the line where it is now and the turn's sense.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "GeoRefParam")]
+    pub about: Option<GeoRefParam>,
     /// Angle expression; default zero.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "AngleExpr")]

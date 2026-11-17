@@ -51,7 +51,7 @@ pub(super) fn failed(k: &Kernel, call: &str, why: &str, inputs: Inputs<'_>) {
     let stem = format!("{n:06}-{}", safe(call));
     let mut text = format!("{call} -> {why}\nnumeric arguments are not recorded\n");
     for &(what, body) in inputs {
-        let bytes = serialise(k, &body.0.lock().unwrap_or_else(PoisonError::into_inner));
+        let bytes = serialise(k, &body.kernel());
         match bytes {
             Ok(b) => {
                 let name = format!("{stem}-{what}.smb");

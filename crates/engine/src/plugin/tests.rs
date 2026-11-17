@@ -65,6 +65,34 @@ fn capability_refusals_are_plain_and_name_solidcraft() {
     assert!(old.contains("was built for solidcraft:plugin@1.0.0") && old.contains("update the plugin"), "{old}");
 }
 #[test]
+fn an_importer_checks_its_own_design_apart_from_the_open_one() {
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        evaluation: None,
+    };
+    let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
+    made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+    host.evaluate_open(&solidcraft_io::write_design(&made.doc)).unwrap();
+    let measured = host.evaluate_run("inspect.measure", &json!({})).unwrap();
+    assert_eq!(measured["bodies"].as_array().map(Vec::len), Some(1), "{measured}");
+    assert!(host.evaluate_run("document.inspect", &json!({})).unwrap()["timeline"].is_array());
+    // A command that fails is an answer; a command outside the list is refused.
+    let missing = host.evaluate_run("model.edges", &json!({"body":"No such body"})).unwrap();
+    assert!(missing["error"].is_string(), "{missing}");
+    for refused in ["solid.box", "file.export_stl", "doc.open", "plugin.install"] {
+        assert!(matches!(host.evaluate_run(refused, &json!({})), Err(HostError::PermissionDenied { .. })), "{refused}");
+    }
+    assert!(host.session.doc.features.is_empty(), "the open design is untouched");
+    host.evaluate_close();
+    assert!(host.evaluate_run("inspect.measure", &json!({})).is_err(), "nothing stays open");
+    assert!(matches!(host.evaluate_open(b"not a design"), Err(HostError::InvalidInput { .. })));
+}
+
+#[test]
 fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     let host = SolidCraftHost {
         session: Session::default(),
@@ -72,6 +100,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         sketch_exits: Vec::new(),
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        evaluation: None,
     };
     let catalog = host.command_catalog();
     let built = crate::command_specs().into_iter().filter(|c| c.planned.is_none()).count();
@@ -119,6 +148,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         sketch_exits: Vec::new(),
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        evaluation: None,
     };
     host.begin_transaction().unwrap();
     s_box(&mut host);
@@ -615,6 +645,7 @@ mod native {
                         command_groups: BTreeSet::new(),
                         folders: s.plugin_state.file_grants.clone(),
                         memory_mib: None,
+                        input_folder: false,
                     },
                 );
                 let scope = solidcraft_io::vfs::PathScope::default().with_design_folder(&f.0);
@@ -626,8 +657,14 @@ mod native {
                     });
                     assert_eq!(std::fs::read(&target).unwrap(), b"private contents");
                 }
-                let host =
-                    SolidCraftHost { session: s, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+                let host = SolidCraftHost {
+                    session: s,
+                    transaction: None,
+                    sketch_exits: Vec::new(),
+                    groups: BTreeSet::new(),
+                    file_folders: Vec::new(),
+                    evaluation: None,
+                };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
                     assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
                 });
@@ -907,6 +944,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         sketch_exits: Vec::new(),
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        evaluation: None,
     };
     let catalog = host.command_catalog();
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
@@ -932,7 +970,8 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true },
         FileGrant { name: "hidden".into(), folder: root.join(".hidden"), read: true, write: false },
     ];
-    let host = SolidCraftHost { session, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+    let host =
+        SolidCraftHost { session, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new(), evaluation: None };
     solidcraft_io::vfs::scoped(None, || {
         for write in [false, true] {
             assert!(host.authorize_file_path(&root.join("public.txt"), write).is_ok());
@@ -943,6 +982,112 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), false).is_ok());
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), true).is_err());
     });
+}
+
+/// Importer plugins: an installed importer opens the files it claims as new, unsaved designs.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+mod importers {
+    use super::*;
+
+    fn importer_manifest(id: &str, extensions: &[&str], input_folder: bool) -> Value {
+        json!({"id":id,"name":"Sample Importer","version":"1","capabilities":["formats@0.1"],"runtime":{
+            "module":"importer.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":extensions}],
+            "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000,"stack_kib":16384},"permissions":{"input_folder":input_folder}}})
+    }
+    /// A session whose plugins folder holds the original importer fixture as `id`, and a folder of
+    /// files to open. The fixture copies the start of the file it imports into the design.
+    fn installed(name: &str, plugins: &[(&str, &[&str], bool)]) -> (Session, std::path::PathBuf) {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-importer-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (package, version) = API.split_once('@').unwrap();
+        let component = wat::parse_str(include_str!("importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        for (id, extensions, input_folder) in plugins {
+            let dir = root.join("plugins").join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("plugin.json"), importer_manifest(id, extensions, *input_folder).to_string()).unwrap();
+            std::fs::write(dir.join("importer.wasm"), &component).unwrap();
+        }
+        std::fs::create_dir_all(root.join("files")).unwrap();
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        (s, root)
+    }
+    /// A small design's file bytes: what the fixture hands back as the imported design.
+    fn design() -> Vec<u8> {
+        let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
+        made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+        solidcraft_io::write_design(&made.doc)
+    }
+    fn put(root: &Path, name: &str, bytes: &[u8]) -> String {
+        let path = root.join("files").join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_claimed_file_opens_as_a_new_unsaved_design_with_its_loss_report() {
+        let (mut s, root) = installed("open", &[("smp", &["smp", "stl"], false)]);
+        let listed = s.execute("plugin.list", &json!({})).unwrap();
+        assert_eq!(listed["importers"][0]["id"], "smp.convert");
+        assert_eq!(listed["plugins"][0]["commands"], json!([]), "an importer is not a command");
+        let opened = s.execute("doc.open", &json!({"path": put(&root, "bracket.smp", &design())})).unwrap();
+        assert_eq!(
+            (opened["format"].as_str(), opened["plugin"].as_str(), opened["bodies"].as_u64()),
+            (Some("smp.convert"), Some("Sample Importer"), Some(1))
+        );
+        assert_eq!(opened["loss_report"]["summary"], "Copied the file");
+        assert_eq!(opened["loss_report"]["items"][0]["severity"], "dropped");
+        assert_eq!(s.doc.name, "Bracket");
+        assert!(s.path.is_none() && s.is_dirty() && s.undo.is_empty(), "a new design, not saved anywhere yet");
+        // SolidCraft reads .stl itself: doc.open keeps its own reader, file.import uses the plugin.
+        let stl = put(&root, "part.stl", &design());
+        assert!(s.execute("doc.open", &json!({"path": stl})).map_or(true, |r| r.get("loss_report").is_none()));
+        assert_eq!(s.execute("file.import", &json!({"path": stl})).unwrap()["format"], "smp.convert");
+        assert_eq!(s.execute("doc.open", &json!({"path": stl, "format": "smp.convert"})).unwrap()["bodies"], 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_trap_fails_that_one_import_and_a_disabled_or_ambiguous_importer_opens_nothing() {
+        let (mut s, root) = installed("trap", &[("smp", &["smp"], false)]);
+        s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        let before = s.doc.to_json();
+        let failure = s.execute("doc.open", &json!({"path": put(&root, "broken.smp", b"T")})).unwrap_err().to_string();
+        assert!(failure.contains("Sample Importer failed on broken.smp") && failure.contains("UnreachableCodeReached"), "{failure}");
+        assert_eq!(s.doc.to_json(), before, "the open design is untouched");
+        assert_eq!(s.execute("doc.open", &json!({"path": put(&root, "good.smp", &design())})).unwrap()["bodies"], 1);
+        s.disabled_plugins.insert("smp".into());
+        assert!(s.execute("file.import", &json!({"path": put(&root, "off.smp", &design())})).is_err());
+        let (mut two, root2) = installed("two", &[("smp", &["smp"], false), ("other", &["smp"], false)]);
+        let ambiguous = two.execute("doc.open", &json!({"path": put(&root2, "x.smp", &design())})).unwrap_err().to_string();
+        assert!(ambiguous.contains("other.convert, smp.convert"), "{ambiguous}");
+        assert!(two.execute("doc.open", &json!({"path": put(&root2, "x.smp", &design()), "format": "other.convert"})).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(root2).unwrap();
+    }
+
+    #[test]
+    fn an_assembly_reads_the_files_beside_it_only_when_asked_and_granted_at_install() {
+        for (asked, granted) in [(false, false), (true, false), (true, true)] {
+            let (mut s, root) = installed(&format!("folder-{asked}-{granted}"), &[("smp", &["smp"], asked)]);
+            let package = read_package(&root.join("plugins/smp").to_string_lossy()).unwrap();
+            if granted {
+                s.plugin_state
+                    .grants
+                    .insert("smp".into(), Grants { package_hash: Some(package.approval.clone()), input_folder: true, ..Default::default() });
+            }
+            put(&root, "part.bin", &design());
+            let reply = s.execute("doc.open", &json!({"path": put(&root, "assembly.smp", b"S")}));
+            match granted {
+                false => assert!(reply.unwrap_err().to_string().contains("input_folder"), "asked {asked}"),
+                true => assert_eq!(reply.unwrap()["bodies"], 1),
+            }
+            // Approving the folder for an importer that doesn't ask for it is refused.
+            let approval = Grants { input_folder: true, ..Default::default() };
+            assert_eq!(validate_grants(&package.manifest, &approval).is_ok(), asked);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
 }
 
 mod install_zip {
@@ -1236,14 +1381,18 @@ mod install_zip {
         assert!(matches!(slip, InstallError::Archive(safe_zip::Error::UnsafeEntry { .. })), "{slip}");
         let absolute = unpack(&zip(&[("/plugin.json", good)])).unwrap_err();
         assert!(matches!(absolute, InstallError::Archive(safe_zip::Error::UnsafeEntry { .. })), "{absolute}");
-        let huge = vec![0u8; MAX_COMPONENT_BYTES + 1];
+        let huge = vec![0u8; craft_plugin::MAX_IMPORTER_COMPONENT_BYTES + 1];
         let bomb = unpack(&zip(&[("plugin.json", good), ("plugin.wasm", &huge[..])])).unwrap_err();
         assert!(matches!(bomb, InstallError::Archive(safe_zip::Error::EntryTooLarge { .. })), "{bomb}");
+        // A command plugin's component stays within 16 MiB; only an importer's may be larger.
+        let big = vec![0u8; MAX_COMPONENT_BYTES + 1];
+        let command = unpack(&zip(&[("plugin.json", good), ("plugin.wasm", &big[..])])).unwrap_err();
+        assert!(matches!(command, InstallError::Manifest(HostError::LimitExceeded { .. })), "{command}");
         let chunk = vec![0u8; 15 << 20];
-        let many: Vec<String> = (0..5).map(|i| format!("data/{i}.bin")).collect();
+        let many: Vec<String> = (0..6).map(|i| format!("data/{i}.bin")).collect();
         let mut files: Vec<(&str, &[u8])> = vec![("plugin.json", good), ("plugin.wasm", b"x")];
         files.extend(many.iter().map(|n| (n.as_str(), chunk.as_slice())));
-        assert_eq!(unpack(&zip(&files)).unwrap_err(), InstallError::Archive(safe_zip::Error::TooLarge { limit: 64 << 20 }));
+        assert_eq!(unpack(&zip(&files)).unwrap_err(), InstallError::Archive(safe_zip::Error::TooLarge { limit: 80 << 20 }));
         assert_eq!(unpack(&zip(&[("plugin.wasm", b"x")])).unwrap_err(), InstallError::MissingManifest);
         assert_eq!(unpack(&zip(&[("plugin.json", good)])).unwrap_err(), InstallError::MissingModule("plugin.wasm".into()));
         // GitHub's "Source code" archive of a release: one folder with the manifest and the
