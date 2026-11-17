@@ -3,13 +3,13 @@
     "ui.sheet_flange_rule_values": "Thickness, bend radius and K factor come from the rule: change them in Sheet Metal Rules"
   },
   "ar": {
-    "ui.sheet_flange_rule_values": "تأتي السماكة ونصف قطر الثني ومعامل K من القاعدة: غيّرها في قواعد الصفائح المعدنية"
+    "ui.sheet_flange_rule_values": "تأتي السماكة ونصف قطر\nالثني ومعامل K من القاعدة:\nغيّرها في قواعد\nالصفائح المعدنية"
   },
   "de": {
     "ui.sheet_flange_rule_values": "Dicke, Biegeradius und K-Faktor kommen aus der Regel: Ändern Sie sie in Blechregeln"
   },
   "he": {
-    "ui.sheet_flange_rule_values": "העובי, רדיוס כיפוף ומקדם K מגיעים מהכלל: שנו אותם בכללי פח"
+    "ui.sheet_flange_rule_values": "העובי, רדיוס כיפוף ומקדם K\nמגיעים מהכלל:\nשנו אותם בכללי פח"
   },
   "ja": {
     "ui.sheet_flange_rule_values": "板厚、曲げ半径、K係数はルールから取られます。板金ルールで変更してください"

@@ -113,6 +113,40 @@ fn flange_window_says_where_the_rule_values_are_changed() {
     assert!(text.contains(solidcraft_ui_text::tr("cmd.sheet_manage_rules")), "{text}");
 }
 
+/// egui wraps a right-to-left note as one string, so the lines of a wrapped Arabic or Hebrew
+/// sentence would come out in reverse order: those notes are split with `\n` at a clause, and
+/// each line fits the control column unwrapped, so every line is reordered on its own.
+#[test]
+fn flange_rule_note_in_arabic_and_hebrew_keeps_its_lines_unwrapped() {
+    for language in ["ar", "he"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = language.into();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sk = h.app.session.doc.features[0].id;
+        h.app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+        h.app.start("sheet.flange");
+        h.frames(4);
+        let lines = {
+            let _language = solidcraft_ui_text::scope(language);
+            solidcraft_ui_text::tr("ui.sheet_flange_rule_values").lines().count()
+        };
+        assert!(lines > 1, "{language}: the note is split at a clause");
+        let rows = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if solidcraft_ui_text::bidi::has_rtl(&text.galley.job.text) && text.galley.job.text.contains('K') => {
+                    Some(text.galley.rows.len())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{language}: the note is drawn"));
+        assert_eq!(rows, lines, "{language}: each line of the note fits without wrapping");
+    }
+}
+
 /// Hem takes edges and an optional gap; rules make and pick a rule with its expressions.
 #[test]
 fn hem_and_rules() {
