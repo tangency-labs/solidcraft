@@ -515,6 +515,19 @@ pub fn tab_slot_joints(
     spec: TabSlotSpec,
     tol: f64,
 ) -> Result<Vec<Option<JointSkip>>> {
+    Ok(plan_joints(plates, joints, spec, tol)?
+        .into_iter()
+        .map(|(skip, _)| skip)
+        .collect())
+}
+
+/// [`tab_slot_joints`] with each made joint's plan (empty for a skipped joint).
+fn plan_joints(
+    plates: &[Body],
+    joints: &[(usize, usize, Plane)],
+    spec: TabSlotSpec,
+    tol: f64,
+) -> Result<Vec<(Option<JointSkip>, Vec<StretchPlan>)>> {
     // (joint, slot plate, P, slot outline) of every made joint's slots.
     let mut cuts: Vec<(usize, usize, Plane, Region2)> = Vec::new();
     // The direction each plate takes and the joint that gave it.
@@ -527,7 +540,7 @@ pub fn tab_slot_joints(
         let joint = match tab.plate_pair(slot, p, tol)? {
             Ok(joint) => joint,
             Err(skip) => {
-                out.push(Some(JointSkip::Pair(skip)));
+                out.push((Some(JointSkip::Pair(skip)), Vec::new()));
                 continue;
             }
         };
@@ -546,7 +559,7 @@ pub fn tab_slot_joints(
             }
         }
         if let Some(by) = other_direction {
-            out.push(Some(JointSkip::OtherDirection(by)));
+            out.push((Some(JointSkip::OtherDirection(by)), Vec::new()));
             continue;
         }
         let mine: Vec<Region2> = plan
@@ -580,7 +593,7 @@ pub fn tab_slot_joints(
             }
         }
         if let Some(other) = meets {
-            out.push(Some(JointSkip::MeetsOtherJoint(other)));
+            out.push((Some(JointSkip::MeetsOtherJoint(other)), Vec::new()));
             continue;
         }
         cuts.extend(mine.into_iter().map(|o| (j, s, p, o)));
@@ -589,9 +602,93 @@ pub fn tab_slot_joints(
                 *d = Some((dir, j));
             }
         }
-        out.push(None);
+        out.push((None, plan));
     }
     Ok(out)
+}
+
+/// The most tool faces one plate's boolean takes (design v2 6.4): past it a feature is refused
+/// `too_many_tool_faces`. A starting value, measured outside the repository.
+pub const MAX_TOOL_FACES: usize = 2_000;
+
+/// Past this many tool faces on one plate the feature warns `slow` (design v2 6.4). A starting
+/// value, measured outside the repository.
+pub const SLOW_TOOL_FACES: usize = 800;
+
+/// [`tab_slot_joints`] and the tool faces each plate's boolean takes over the feature's made
+/// joints ([`tool_faces`]: a joint's tab faces go to its tab plate, its slot faces to its slot
+/// plate), one count per entry of `plates`.
+///
+/// # Errors
+/// Those of [`tab_slot_joints`].
+pub fn tab_slot_tool_faces(
+    plates: &[Body],
+    joints: &[(usize, usize, Plane)],
+    spec: TabSlotSpec,
+    tol: f64,
+) -> Result<(Vec<Option<JointSkip>>, Vec<usize>)> {
+    let planned = plan_joints(plates, joints, spec, tol)?;
+    let mut faces = vec![0_usize; plates.len()];
+    for (&(t, s, _), (_, plan)) in joints.iter().zip(&planned) {
+        let (on_t, on_s) = tool_faces(plan);
+        for (plate, n) in [(t, on_t), (s, on_s)] {
+            if let Some(f) = faces.get_mut(plate) {
+                *f = f.saturating_add(n);
+            }
+        }
+    }
+    Ok((planned.into_iter().map(|(skip, _)| skip).collect(), faces))
+}
+
+/// A plate whose boolean takes too many tool faces (design v2 6.4), from [`check_tool_faces`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolFaceCap {
+    /// More than the most: the feature is refused.
+    TooMany {
+        /// The plate's index.
+        plate: usize,
+        /// Its tool faces.
+        faces: usize,
+    },
+    /// More than the slow count: the feature is made, with a warning.
+    Slow {
+        /// The plate's index.
+        plate: usize,
+        /// Its tool faces.
+        faces: usize,
+    },
+}
+
+impl ToolFaceCap {
+    /// The reason id of design v2 11: `too_many_tool_faces` or `slow`.
+    #[must_use]
+    pub const fn reason_id(&self) -> &'static str {
+        match self {
+            Self::TooMany { .. } => "too_many_tool_faces",
+            Self::Slow { .. } => "slow",
+        }
+    }
+}
+
+/// The plate with the most tool faces (the first of equals) checked against `max` (refused past
+/// it) and `slow` (a warning past it), the caller's ([`MAX_TOOL_FACES`], [`SLOW_TOOL_FACES`]):
+/// `None` when no plate passes `slow`.
+#[must_use]
+pub fn check_tool_faces(per_plate: &[usize], max: usize, slow: usize) -> Option<ToolFaceCap> {
+    let (plate, faces) = per_plate.iter().copied().enumerate().fold(
+        None,
+        |best: Option<(usize, usize)>, (i, n)| match best {
+            Some((_, m)) if m >= n => best,
+            _ => Some((i, n)),
+        },
+    )?;
+    if faces > max {
+        Some(ToolFaceCap::TooMany { plate, faces })
+    } else if faces > slow {
+        Some(ToolFaceCap::Slow { plate, faces })
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -1142,5 +1239,56 @@ mod tests {
         ];
         assert_eq!(tool_faces(&plan), (12, 12));
         assert_eq!(tool_faces(&[]), (0, 0));
+    }
+
+    /// Design v2 6.4 per plate: two walls apart on Bottom, 2 laser tabs each, bring 6 faces a tab
+    /// to each wall and 6 a slot to Bottom (24); a skipped joint brings none. The caps: past
+    /// `max` is `too_many_tool_faces`, past `slow` is `slow`, at either is not; the plate with the
+    /// most faces (the first of equals) is named.
+    #[test]
+    fn tool_faces_sum_per_plate_and_cap() {
+        let (s, p) = bottom();
+        let a = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let b = make_box([20.0, 60.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let cross = make_box([27.0, 20.0, 6.0], [6.0, 80.0, 60.0]).unwrap();
+        let plates = [s, a, b, cross];
+        let (skips, faces) =
+            tab_slot_tool_faces(&plates, &[(1, 0, p), (2, 0, p)], spec2(), TOL).unwrap();
+        assert_eq!(skips, vec![None, None]);
+        assert_eq!(faces, vec![24, 12, 12, 0]);
+        let (skips, faces) =
+            tab_slot_tool_faces(&plates, &[(1, 0, p), (3, 0, p)], spec2(), TOL).unwrap();
+        assert_eq!(skips, vec![None, Some(JointSkip::MeetsOtherJoint(0))]);
+        assert_eq!(faces, vec![12, 12, 0, 0]);
+        assert_eq!(
+            tab_slot_tool_faces(&plates, &[(9, 0, p)], spec2(), TOL),
+            Err(Error::Argument)
+        );
+        assert_eq!(check_tool_faces(&[24, 12, 12], 2_000, 800), None);
+        assert_eq!(check_tool_faces(&[], MAX_TOOL_FACES, SLOW_TOOL_FACES), None);
+        assert_eq!(
+            check_tool_faces(&[800, 2_000], 2_000, 800).map(|c| c.reason_id()),
+            Some("slow")
+        );
+        assert_eq!(
+            check_tool_faces(&[801, 900, 900], 2_000, 800),
+            Some(ToolFaceCap::Slow {
+                plate: 1,
+                faces: 900
+            })
+        );
+        let over = check_tool_faces(&[12, 2_150], MAX_TOOL_FACES, SLOW_TOOL_FACES).unwrap();
+        assert_eq!(
+            over,
+            ToolFaceCap::TooMany {
+                plate: 1,
+                faces: 2_150
+            }
+        );
+        assert_eq!(over.reason_id(), "too_many_tool_faces");
+        assert_eq!(
+            check_tool_faces(&[24], 20, 10).map(|c| c.reason_id()),
+            Some("too_many_tool_faces")
+        );
     }
 }
