@@ -11284,6 +11284,55 @@ mod tests {
         }
     }
 
+    /// Several parts, each placed many times, drawn by indirect draws (one arena, one instance
+    /// buffer, a call per look and pipeline) look as each placement's own triangles do: flat
+    /// (a box) and smooth (a cylinder) meshes, in their own colours.
+    #[test]
+    fn many_placements_of_several_parts_draw_indirectly_as_their_own_triangles() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.ground_shadow = false;
+        app.set_origin_shown(false);
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        for (name, (command, params), colour, y) in [("Box", PARTS[0], "#cc3333", 0), ("Can", PARTS[1], "#3366cc", 40)] {
+            app.run("component.create", json!({"name": name})).unwrap();
+            app.run(command, serde_json::from_str(params).unwrap()).unwrap();
+            app.run("component.activate", json!({"component": "root"})).unwrap();
+            app.run("appearance.assign", json!({"components": [name], "color": colour})).unwrap();
+            for k in 1..6 {
+                app.run("occurrence.copy", json!({"component": name, "translate": [30 * k, y, 0]})).unwrap();
+            }
+        }
+        let scene = build_scene(&app);
+        assert!(scene.instanced.len() >= 2 && scene.instanced.iter().map(|m| m.count()).sum::<usize>() >= 10, "both parts instanced");
+        app.fit_view();
+        const SIZE: u32 = 256;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
+        let proj = projection(&app, rect);
+        let e = proj.cam.eye().to_f32();
+        let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
+        let render = |scene: GpuScene| {
+            crate::gpu::render_offscreen(
+                scene,
+                None,
+                proj.vp.to_f32(),
+                proj.cam.back().to_f32(),
+                eye,
+                SIZE,
+                None,
+                [0.0; 8],
+                crate::gpu::analysis_colors(&Tokens::get().analysis),
+            )
+        };
+        let (Some(instanced), Some(own)) = (render(scene.clone()), render(scene.merged())) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let drawn = own.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count();
+        assert!(drawn > 1000, "drawn {drawn}");
+        let differ = instanced.chunks(4).zip(own.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24)).count();
+        assert!(differ * 50 < drawn, "{differ} of {drawn} pixels differ");
+    }
+
     /// Each placement of a part is picked where it stands, the turned one too, from the part's
     /// shared mesh: the face under the cursor names that placement's body, at the point the
     /// cursor is over, and no placement makes a moved copy of the mesh to be picked.
