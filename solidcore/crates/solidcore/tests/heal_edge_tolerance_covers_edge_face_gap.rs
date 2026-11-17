@@ -850,9 +850,17 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   tolerances (`CalculateBoundingBox`, `bExpandByZoneTol3d`), and the volume does not
 ///   depend on that origin (the #16735 closure), so the two are one integral rounded at
 ///   two origins, within `gamma_2 * |V|`.
+///
+/// Stacked on the WR-493 retirement, the two files here with a sphere or torus found in a
+/// NURBS (`Fillet/sphere_plane.smb`, `Solids/revolution_mold.smb`) also keep the file's
+/// NURB and trims on those faces (`wr493_class_proofs`'
+/// `found_spheres_and_tori_keep_the_file_nurb_and_trims`), so their reads, areas and
+/// volumes differ from main by that too: their comparisons with main are collected apart,
+/// and asserted to be those two files only.
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
     let mut failures = Vec::new();
+    let mut wr493 = Vec::new();
     let mut raised = 0;
     let mut moved = 0;
     let mut moved_volumes = Vec::new();
@@ -872,6 +880,7 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             false,
             &mut failures,
         );
+        let before = failures.len();
         for (what, now, main) in [
             ("read", read_digest, read_main),
             ("lazy trims", lazy_digest, lazy_main),
@@ -896,6 +905,17 @@ fn corpus_reads_change_only_the_covered_tolerances() {
                 volume0.to_bits()
             ));
         }
+        if WR493_READS.contains(&name) {
+            if volume.to_bits() != volume_main {
+                failures.push(format!("{name}: volume moved"));
+            }
+            // (the replays' own checks, before `before`, still hold on these files)
+            if failures.len() > before {
+                failures.truncate(before);
+                wr493.push(name);
+            }
+            continue;
+        }
         if volume.to_bits() != volume_main {
             let main = f64::from_bits(volume_main);
             // gamma_2 = 2u / (1 - 2u), u = 2^-53
@@ -914,7 +934,12 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         "{failures:#?}"
     );
     assert!(failures.is_empty(), "{failures:#?}");
+    assert_eq!(wr493, WR493_READS);
 }
+
+/// The files of [`MAIN`] with a sphere or torus found in a NURBS, whose reads the WR-493
+/// retirement changes too.
+const WR493_READS: [&str; 2] = ["Fillet/sphere_plane.smb", "Solids/revolution_mold.smb"];
 
 /// Edges whose tolerance the read raises: per file, (edge index, main's tolerance bits).
 const RAISED_EDGES: &[(&str, &[(u32, u64)])] = &[
