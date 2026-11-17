@@ -861,6 +861,47 @@ fn body_hidden(h: &Harness, name: &str) -> bool {
     h.app.session.visibility.hidden_bodies.iter().any(|b| b == name)
 }
 
+/// Ctrl-clicking a body eye isolates it, while plain clicks retain their normal toggle.
+/// Each gesture is undoable as one visibility change (#17864).
+#[test]
+fn ctrl_click_body_eye_isolates_while_plain_click_toggles() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click":{"handle":"eye:Two"},"ctrl":true})).unwrap();
+    h.settle();
+    assert!(!body_hidden(&h, "Two"));
+    assert!(body_hidden(&h, "One") && body_hidden(&h, "Three"), "only Two remains visible");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "isolation is one undo step");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert!(!body_hidden(&h, "One") && !body_hidden(&h, "Two") && !body_hidden(&h, "Three"));
+    h.step(&json!({"click":{"handle":"eye:Two"}})).unwrap();
+    h.settle();
+    assert!(body_hidden(&h, "Two") && !body_hidden(&h, "One") && !body_hidden(&h, "Three"), "plain click toggles only Two");
+}
+
+/// Ctrl-clicking a placement eye isolates that occurrence without hiding its own bodies.
+#[test]
+fn ctrl_click_placement_eye_isolates_the_selected_copy() {
+    let mut h = Harness::new();
+    h.app.preferences.browser_components_open = true;
+    let a = h.app.run("component.create", json!({"name":"First"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"First body"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    let b = h.app.run("component.create", json!({"name":"Second"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Second body"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.settle();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click":{"handle":format!("eye:occurrence:{a}")},"ctrl":true})).unwrap();
+    assert!(!h.app.session.occurrence_hidden(&[a]));
+    assert!(h.app.session.occurrence_hidden(&[b]), "other placement is hidden");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(!h.app.session.occurrence_hidden(&[a]) && !h.app.session.occurrence_hidden(&[b]));
+}
+
 /// #9680: a press on an eye that drags over other eyes sets each eye it passes to the first eye's
 /// new state, and the whole drag is one undo step.
 #[test]

@@ -1847,7 +1847,11 @@ fn occurrence_rows_inner(
         toggle(app, key, true);
     }
     if r.eye {
-        let _ = app.run("browser.visibility", json!({"visible": app.session.occurrence_hidden(path), "paths": [path]}));
+        let isolate = rows.ui().input(|i| i.modifiers.ctrl || i.modifiers.command);
+        let _ = app.run(
+            "browser.visibility",
+            json!({"visible": if isolate { true } else { app.session.occurrence_hidden(path) }, "paths": [path], "isolate": isolate}),
+        );
     }
     let takes_components = app.dialog.as_ref().is_some_and(|d| d.takes_components());
     let params = json!({"component": placement.component, "occurrence": placement.occurrence, "path": path});
@@ -3289,7 +3293,14 @@ fn entry_row(
         app.tree.reveal = None;
     }
     if r.eye {
-        set_visible(app, folder, &[e], !visible);
+        // Ctrl-click (Command on macOS) isolates this body. The engine's isolate
+        // command keeps this body and hides other bodies in one undo step (#17864).
+        let isolate = folder == "bodies" && rows.ui().input(|i| i.modifiers.ctrl || i.modifiers.command);
+        if isolate && !e.bodies.is_empty() {
+            let _ = app.run("browser.visibility", json!({"items": e.bodies, "visible": true, "isolate": true}));
+        } else {
+            set_visible(app, folder, &[e], !visible);
+        }
     }
     if r.double
         && folder == "sketches"
