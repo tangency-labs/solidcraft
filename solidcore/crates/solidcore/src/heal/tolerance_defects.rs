@@ -482,12 +482,14 @@ fn certified_neighbours(
         match face_gaps(k, b, n, &c)? {
             Ok(gaps) => {
                 // the new point is within `near` of the curve's end, so within `g + near` of
-                // each face the curve is within `g` of
+                // each face the curve is within `g` of (the sum rounded up, never below the
+                // exact one)
+                let off = |g: f64| crate::geom::certified::next_up(g + near);
                 if let Some(&(f, g)) = gaps
                     .iter()
-                    .find(|(_, g)| !within(*g + near, GAP_SHARE * vertex_tol))
+                    .find(|(_, g)| !within(off(*g), GAP_SHARE * vertex_tol))
                 {
-                    return Ok(Err(Refusal::VertexOffFace(f, g + near)));
+                    return Ok(Err(Refusal::VertexOffFace(f, off(g))));
                 }
                 out.push((n, c, gaps));
             }
