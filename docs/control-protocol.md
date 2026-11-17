@@ -683,17 +683,25 @@ belong to the active design. The main window has id `0`.
 
 | Command | Parameters | Result |
 | --- | --- | --- |
-| `tab.view.move_to_window` | `view` (required, from `tab.view.list`), `window?` (`"new"`), `display?` (name or zero-based index), `x?`, `y?`, `w?`, `h?` (logical points), `level?` (`"views_only"`) | `{view, window, created, from, closed_source, placement}` |
+| `tab.view.move_to_window` | `view` (required, from `tab.view.list`), `window?` (a window id or `"new"`, default `"new"`); new windows also accept `display?` (name or zero-based index), `x?`, `y?`, `w?`, `h?` (logical points), and `level?` (`"views_only"`) | `{view, window, created, from, closed_source, placement}` |
 | `tab.window.list` | `{}` | `{windows: [{id, level, views, active, layout, display, placement, tool_window}]}` |
 | `tab.window.focus` | `{window}` | `{window}` |
 | `tab.window.close` | `{window}` (a pop-out id) | `{returned}`, the ids returned to the main strip in order |
 | `tab.view.activate` | `id` or zero-based `index`, and optional `window` | The active view id and the supplied window id |
+| `tab.view.open` | `kind?`, `subject?`, `reuse?`, `window?` | The view id and the checked request |
+| `tab.view.layout` | `layout` (`single\|side_by_side\|stacked\|large_and_two\|grid`), `window?` | The layout and the number of visible views |
+| `tab.view.beside` | `id?`, `edge?` or `placement?`, `window?` | The view id, position, and number of visible views |
+
+View commands with an omitted window target use the last focused window of the active design.
+They use the main window when no window has focus. An explicit window id targets that window.
 
 A placement is `{x, y, w, h, maximised, fullscreen}` or `null`. Positions are relative to the
-requested display. A pop-out opens as Views only. Closing it returns the live views to the main
-window. It does not close the design or create a design undo step. A request for a second
-pop-out returns `too_many_windows`. Trying to move the last main-window view returns
-`last_view_of_main_window`. Closing window `0` returns `cannot_close_main_window`. Invalid ids
+requested display. A pop-out opens as Views only. A move to the window that already holds the view
+returns its current placement without moving it. Moving the last view out of a pop-out closes that
+window and sets `closed_source`. Closing a pop-out directly returns its live views to the main
+window. Window changes leave the design and its undo history untouched. A design can have eight
+pop-outs. Opening a ninth returns `too_many_windows`. Trying to move the last main-window view
+returns `last_view_of_main_window`. Closing window `0` returns `cannot_close_main_window`. Invalid ids
 return `no_such_view` or `no_such_window`, and invalid geometry returns `bad_geometry`.
 A browser host returns `windows_unavailable` when asked to open a native window.
 A headless tab host reports its virtual windows with `display: null`.

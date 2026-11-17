@@ -1468,7 +1468,15 @@ pub(crate) fn view_picture_window_owners(app: &SolveApp) -> std::collections::Ha
 
 /// Carry out a checked `tab.view.*` command (`v`: the engine's echo of its parameters) on the
 /// shown design, and return the reply with what was done filled in: the engine holds no views.
-pub(crate) fn view_command(app: &mut SolveApp, command: &str, mut v: Value) -> Result<Value, String> {
+pub(crate) fn view_command(app: &mut SolveApp, command: &str, v: Value) -> Result<Value, String> {
+    if matches!(command, "tab.view.layout" | "tab.view.beside" | "tab.view.open") {
+        let requested = v.get("window").and_then(Value::as_u64).and_then(|id| u32::try_from(id).ok());
+        return crate::view_windows::with_strip(app, requested, |app| view_command_local(app, command, v));
+    }
+    view_command_local(app, command, v)
+}
+
+fn view_command_local(app: &mut SolveApp, command: &str, mut v: Value) -> Result<Value, String> {
     let active = app.docs.views.active().id;
     let asked = v.get("id").and_then(Value::as_u64).unwrap_or(active);
     let place = |key: &str| v.get(key).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
@@ -2614,11 +2622,14 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .collect();
     let more_text = solidcraft_ui_text::tr("tab_strip.more");
     let plus_menu = crate::design_view_ui::plus_menu(solidcraft_theme::is_dark());
-    let view_menu = crate::design_view_ui::view_menu_rows(app);
+    let window_entries = crate::design_view_ui::window_menu_entries(app);
+    let window_rows = crate::design_view_ui::window_menu_rows(app, &window_entries);
+    let view_menu = crate::design_view_ui::view_menu_rows(app, &window_rows);
     let switcher_menu: Vec<_> = SWITCHER_MENU
         .iter()
         .copied()
         .filter(|row| row.id != crate::design_view_ui::MOVE_TO_WINDOW_MENU.id || crate::view_windows::supports_pop_out(app))
+        .map(|row| if row.id == crate::design_view_ui::MOVE_TO_WINDOW_MENU.id { row.with_children(&window_rows) } else { row })
         .collect();
     let layout_menu = crate::design_view_ui::layout_menu();
     let layout_current = if app.docs.views.is_tiled() {
@@ -2632,7 +2643,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     } else {
         "layout.single"
     };
-    let actions = {
+    let (actions, drop_zones) = {
         let mut strip = crate::app_bar::TabStrip {
             tabs: info
                 .iter()
@@ -2690,8 +2701,19 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             switcher_menu: &switcher_menu,
             tear_off_below: TEAR_OFF_BELOW,
         };
-        crate::app_bar::tabs(ui, &mut strip, r, x0, x1)
+        crate::app_bar::tabs_with_view_drop_zones(ui, &mut strip, r, x0, x1)
     };
+    let drop_zones = drop_zones
+        .into_iter()
+        .filter_map(|zone| {
+            let tab = if child || zone.document == selected { app.docs.current_tab() } else { app.docs.slots.get(zone.document)?.as_ref()?.tab };
+            let count = design_views.get(zone.document)?.iter().filter(|(_, _, window)| window.is_none()).count();
+            Some((tab, count, zone))
+        })
+        .collect();
+    let drag_continues =
+        !app.file_load_holds() && actions.iter().any(|action| matches!(action, crate::app_bar::TabAction::DockView { released: false, .. }));
+    crate::view_window_drag::record(app, ui.ctx(), drop_zones, drag_continues);
     // The name typed into the selected tab: kept when it changed and isn't blank, given up on
     // Escape, still being edited otherwise.
     let mut kept = None;
@@ -2738,6 +2760,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load_holds();
     let (mut shut, mut pick, mut many, mut dropped) = (None, None, None, None);
+    let mut window_drop = false;
     for action in actions {
         match action {
             crate::app_bar::TabAction::Select(i) => pick = Some(i),
@@ -2764,6 +2787,15 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             | crate::app_bar::TabAction::RenameCancelled
             | crate::app_bar::TabAction::ViewRenameDone { .. }
             | crate::app_bar::TabAction::ViewRenameCancelled => {}
+            crate::app_bar::TabAction::DockView { view, pointer, released } if idle => {
+                if let Some(id) = strip_view_id(app, view) {
+                    window_drop = crate::view_window_drag::route(app, ui.ctx(), id, pointer, released, r.bottom() + 6.0);
+                    if !window_drop && pointer.y > r.bottom() + 6.0 {
+                        crate::view_tiles::tab_drag(app, ui.ctx(), id, pointer, released);
+                    }
+                }
+            }
+            crate::app_bar::TabAction::ReorderView { .. } if window_drop => {}
             view_action => {
                 if idle {
                     crate::design_view_ui::handle(app, ui.ctx(), view_action);
@@ -3083,7 +3115,7 @@ pub(crate) fn uses_file(app: &SolveApp, path: &str) -> bool {
 }
 
 /// Where SolidCraft's document tab strip keeps its state.
-fn tab_strip_id(viewport: egui::ViewportId) -> egui::Id {
+pub(crate) fn tab_strip_id(viewport: egui::ViewportId) -> egui::Id {
     egui::Id::unique(("sc_doc_tabs", viewport))
 }
 
@@ -3183,6 +3215,75 @@ mod tests {
         assert!(app.session.path.is_none());
         assert_eq!(app.docs.views.views().iter().map(|view| view.id).collect::<Vec<_>>(), [first, second]);
         assert!(app.docs.views.check());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn layouts_and_commands_target_the_requested_design_window() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let main = app.docs.views.active().id;
+        let first = view_duplicate(&mut app, main).unwrap();
+        let second = view_duplicate(&mut app, main).unwrap();
+        let first_window = app.run("tab.view.move_to_window", json!({"view":first})).unwrap()["window"].clone();
+        let second_window = app.run("tab.view.move_to_window", json!({"view":second})).unwrap()["window"].clone();
+        assert_ne!(first_window, second_window);
+
+        let opened = app.run("tab.view.open", json!({"window":first_window,"kind":"model"})).unwrap()["id"].clone();
+        assert_eq!(app.run("tab.view.layout", json!({"window":first_window,"layout":"stacked"})).unwrap()["shown"], 2);
+        assert_eq!(app.run("tab.view.beside", json!({})).unwrap()["shown"], 2);
+        assert_eq!(app.run("tab.view.layout", json!({"window":900,"layout":"single"})).unwrap_err(), "no_such_window");
+
+        let listed = app.run("tab.window.list", json!({})).unwrap();
+        assert_eq!(listed["windows"][0]["views"], json!([main]));
+        assert_eq!(listed["windows"][0]["layout"], "single");
+        assert_ne!(listed["windows"][1]["layout"], "single");
+        assert_ne!(listed["windows"][2]["layout"], "single");
+        assert!(listed["windows"][1]["views"].as_array().unwrap().contains(&opened));
+
+        let moved = app.run("tab.view.move_to_window", json!({"view":second,"window":first_window})).unwrap();
+        assert_eq!(moved["from"], second_window);
+        assert_eq!(moved["window"], first_window);
+        assert_eq!(moved["closed_source"], false);
+        let moved = app.run("tab.view.move_to_window", json!({"view":second,"window":0})).unwrap();
+        assert_eq!(moved["window"], 0);
+        assert_eq!(app.docs.views.active().id, second);
+        assert!(app.docs.views.check());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn drag_placement_uses_the_release_display_and_menu_placement_cascades() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        crate::view_windows::prepare(&mut app, &ctx);
+        crate::view_windows::refresh_displays(&mut app, || {
+            vec![
+                crate::panel_runtime::NativeMonitor {
+                    name: Some("primary".into()),
+                    bounds: egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1920.0, 1080.0)),
+                    scale: 1.0,
+                    primary: true,
+                },
+                crate::panel_runtime::NativeMonitor {
+                    name: Some("second".into()),
+                    bounds: egui::Rect::from_min_max(egui::pos2(-1200.0, 0.0), egui::pos2(0.0, 1000.0)),
+                    scale: 1.25,
+                    primary: false,
+                },
+            ]
+        });
+        let main = app.docs.views.active().id;
+        let first = view_duplicate(&mut app, main).unwrap();
+        crate::view_windows::drag_drop(&mut app, first, None, Some(egui::pos2(-600.0, 650.0))).unwrap();
+        let second = view_duplicate(&mut app, main).unwrap();
+        app.run("tab.view.move_to_window", json!({"view":second})).unwrap();
+        let windows = app.run("tab.window.list", json!({})).unwrap();
+        assert_eq!(windows["windows"][1]["display"], "second");
+        assert_eq!(windows["windows"][1]["placement"], json!({"x":80.0,"y":240.0,"w":800.0,"h":560.0,"maximised":false,"fullscreen":false}));
+        assert_eq!(windows["windows"][2]["display"], "primary");
+        assert_eq!(windows["windows"][2]["placement"]["x"], 592.0);
+        assert_eq!(windows["windows"][2]["placement"]["y"], 292.0);
     }
 
     #[test]

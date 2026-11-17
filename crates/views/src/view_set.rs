@@ -81,8 +81,8 @@ pub struct DesignView {
     pub spec: Option<ViewSpec>,
 }
 
-// This slice shows one pop-out. The collection and ids are ready for more windows.
-const MAX_POPOUTS: usize = 1;
+/// The maximum number of pop-outs per design, in addition to the main window.
+pub const MAX_POPOUTS: usize = 8;
 
 /// A design's window id. Zero names its main window.
 pub type WindowId = u32;
@@ -157,7 +157,14 @@ pub struct PopOut {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum WindowTarget {
-    New { placement: Option<WindowPlacement> },
+    New {
+        placement: Option<WindowPlacement>,
+    },
+    /// Insert at the given strip index after removing the view, or append to another strip.
+    Existing {
+        window: WindowId,
+        index: Option<usize>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -173,6 +180,7 @@ pub struct Moved {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MoveError {
     NoSuchView,
+    NoSuchWindow,
     TooManyWindows,
     LastViewOfMainWindow,
     BadGeometry,
@@ -182,6 +190,7 @@ impl MoveError {
     pub fn code(self) -> &'static str {
         match self {
             Self::NoSuchView => "no_such_view",
+            Self::NoSuchWindow => "no_such_window",
             Self::TooManyWindows => "too_many_windows",
             Self::LastViewOfMainWindow => "last_view_of_main_window",
             Self::BadGeometry => "bad_geometry",
@@ -250,21 +259,88 @@ impl ViewSet {
         self.windows.iter().find(|window| window.views.get(view).is_some()).map(|window| window.id)
     }
 
-    /// Move an open view into a new window without changing its camera or active source layout.
+    /// Move an open view intact without changing its camera or the other windows' layouts.
     pub fn move_to_window(&mut self, view: u64, target: WindowTarget) -> Result<Moved, MoveError> {
-        let WindowTarget::New { placement } = target;
-        let at = self.index_of(view).ok_or(MoveError::NoSuchView)?;
-        if self.window_id == 0 && self.len() == 1 {
-            return Err(MoveError::LastViewOfMainWindow);
+        let from = self.window_of(view).ok_or(MoveError::NoSuchView)?;
+        if self.window_id != 0 {
+            return Err(MoveError::NoSuchWindow);
         }
-        if self.window_id != 0 || self.windows.len() >= MAX_POPOUTS {
-            return Err(MoveError::TooManyWindows);
+        let (window, index, created, placement) = match target {
+            WindowTarget::New { placement } => {
+                if from == 0 && self.len() == 1 {
+                    return Err(MoveError::LastViewOfMainWindow);
+                }
+                if self.windows.len() >= MAX_POPOUTS {
+                    return Err(MoveError::TooManyWindows);
+                }
+                if placement.as_ref().is_some_and(|placement| !placement.is_valid()) {
+                    return Err(MoveError::BadGeometry);
+                }
+                (self.allocate_window_id(), None, true, placement)
+            }
+            WindowTarget::Existing { window, index } => {
+                if self.views_of(window).is_none() {
+                    return Err(MoveError::NoSuchWindow);
+                }
+                if from == 0 && window != 0 && self.len() == 1 {
+                    return Err(MoveError::LastViewOfMainWindow);
+                }
+                (window, index, false, self.window(window).and_then(|child| child.placement.clone()))
+            }
+        };
+        let mut result = Moved { view, window, created, from, closed_source: false, placement };
+        if from == window {
+            let strip = self.strip_mut(window).ok_or(MoveError::NoSuchWindow)?;
+            if let Some(index) = index
+                && let Some(at) = strip.index_of(view)
+            {
+                strip.move_view(at, index.min(strip.len() - 1));
+            }
+            return Ok(result);
         }
-        if placement.as_ref().is_some_and(|placement| !placement.is_valid()) {
-            return Err(MoveError::BadGeometry);
+
+        let moved = if from == 0 {
+            self.remove_moved(view).ok_or(MoveError::NoSuchView)?
+        } else {
+            let mut source = self.take_window(from).ok_or(MoveError::NoSuchWindow)?;
+            let moved = source.views.remove_moved(view);
+            if source.views.views.is_empty() {
+                self.reattach(source.views);
+                result.closed_source = true;
+            } else {
+                self.put_window(source);
+            }
+            moved.ok_or(MoveError::NoSuchView)?
+        };
+        if created {
+            let views = Self::strip(vec![moved], view, self.next_id, window);
+            self.put_window(PopOut { id: window, level: WindowLevel::ViewsOnly, placement: result.placement.clone(), views });
+        } else {
+            let strip = self.strip_mut(window).ok_or(MoveError::NoSuchWindow)?;
+            let at = index.unwrap_or(strip.len()).min(strip.len());
+            strip.views.insert(at, moved);
+            strip.fill_empty(0, view);
+            strip.active = view;
         }
-        let id = self.next_window;
-        self.next_window = self.next_window.checked_add(1).unwrap_or(1);
+        Ok(result)
+    }
+
+    fn strip_mut(&mut self, id: WindowId) -> Option<&mut Self> {
+        if id == self.window_id { Some(self) } else { self.window_mut(id).map(|window| &mut window.views) }
+    }
+
+    fn allocate_window_id(&mut self) -> WindowId {
+        let advance = |id: WindowId| id.checked_add(1).unwrap_or(1);
+        let mut id = self.next_window.max(1);
+        while self.window(id).is_some() {
+            id = advance(id);
+        }
+        self.next_window = advance(id);
+        id
+    }
+
+    fn remove_moved(&mut self, view: u64) -> Option<DesignView> {
+        let at = self.index_of(view)?;
         let moved = self.views.remove(at);
         if self.active == view
             && let Some(neighbour) = self.views.get(at.saturating_sub(1))
@@ -272,9 +348,7 @@ impl ViewSet {
             self.active = neighbour.id;
         }
         self.prune_tiles();
-        let views = Self::strip(vec![moved], view, self.next_id, id);
-        self.windows.push(PopOut { id, level: WindowLevel::ViewsOnly, placement: placement.clone(), views });
-        Ok(Moved { view, window: id, created: true, from: 0, closed_source: false, placement })
+        Some(moved)
     }
 
     /// Record usable logical geometry for a pop-out.
@@ -299,8 +373,8 @@ impl ViewSet {
     /// Return the window strip after its UI frame.
     pub fn put_window(&mut self, window: PopOut) {
         self.next_id = self.next_id.max(window.views.next_id);
-        self.next_window = self.next_window.max(window.id.saturating_add(1));
-        self.windows.push(window);
+        let at = self.windows.partition_point(|other| other.id < window.id);
+        self.windows.insert(at, window);
     }
 
     /// Close a pop-out and append its open views to the main strip in their existing order.
@@ -1121,7 +1195,87 @@ mod tests {
         assert!(set.get(3).is_none());
         assert_eq!(set.window_of(3), Some(moved.window));
         assert!(!set.tiles().unwrap().contains(3));
-        assert_eq!(set.move_to_window(2, new_window()), Err(MoveError::TooManyWindows));
+    }
+
+    fn existing_window(window: WindowId, index: Option<usize>) -> WindowTarget {
+        WindowTarget::Existing { window, index }
+    }
+
+    #[test]
+    fn moving_between_strips_inserts_at_the_drop_position_and_closes_an_empty_popout() {
+        let mut set = models(6);
+        let first = set.move_to_window(2, new_window()).unwrap().window;
+        let second = set.move_to_window(4, new_window()).unwrap().window;
+        let view = set.get(3).unwrap().clone();
+        set.move_to_window(5, existing_window(second, None)).unwrap();
+        set.move_to_window(view.id, existing_window(second, Some(1))).unwrap();
+        let strip_ids = |set: &ViewSet, window| set.views_of(window).unwrap().views().iter().map(|view| view.id).collect::<Vec<_>>();
+        assert_eq!(strip_ids(&set, second), [4, 3, 5]);
+        assert_eq!(set.views_of(second).unwrap().active(), &view);
+        set.move_to_window(4, existing_window(second, Some(usize::MAX))).unwrap();
+        assert_eq!(strip_ids(&set, second), [3, 5, 4]);
+        let before = set.clone();
+        set.move_to_window(5, existing_window(second, None)).unwrap();
+        assert_eq!(set, before);
+
+        let returned = set.move_to_window(2, existing_window(0, Some(1))).unwrap();
+        assert_eq!((returned.from, returned.window, returned.created, returned.closed_source), (first, 0, false, true));
+        assert_eq!(strip_ids(&set, 0), [1, 2, 6]);
+        assert!(set.window(first).is_none());
+        assert_eq!(strip_ids(&set, second), [3, 5, 4]);
+        assert!(set.check());
+    }
+
+    #[test]
+    fn moving_between_popouts_keeps_each_layout_and_closed_view_history() {
+        let mut set = models(6);
+        let first = set.move_to_window(2, new_window()).unwrap().window;
+        let second = set.move_to_window(3, new_window()).unwrap().window;
+        set.move_to_window(4, existing_window(first, None)).unwrap();
+        set.move_to_window(5, existing_window(second, None)).unwrap();
+        set.set_layout_padded(Preset::SideBySide);
+        let main_layout = set.tiles().cloned();
+        let mut target = set.take_window(second).unwrap();
+        target.views.set_layout_padded(Preset::LargeAndTwo);
+        set.put_window(target);
+
+        assert!(set.close_in_window(first, 2));
+        let moved = set.move_to_window(4, existing_window(second, None)).unwrap();
+        assert!(moved.closed_source);
+        assert_eq!(set.tiles(), main_layout.as_ref());
+        assert_eq!(set.views_of(second).unwrap().tiles().unwrap().views(), [3, 5, 4]);
+        assert_eq!(set.reopen(), Some(2));
+        assert_eq!(set.window_of(2), Some(0));
+        assert!(set.check());
+    }
+
+    #[test]
+    fn extent_and_window_id_repair_keep_all_views_and_refuse_a_ninth_popout() {
+        let mut set = models(MAX_POPOUTS + 2);
+        for view in 2..=MAX_POPOUTS as u64 + 1 {
+            set.move_to_window(view, new_window()).unwrap();
+        }
+        let before = set.to_json();
+        let last = MAX_POPOUTS as u64 + 2;
+        assert_eq!(set.move_to_window(last, new_window()), Err(MoveError::TooManyWindows));
+        assert_eq!(set.move_to_window(last, existing_window(9000, None)), Err(MoveError::NoSuchWindow));
+        assert_eq!(set.to_json(), before);
+
+        let mut saved = before.clone();
+        saved["views"].as_array_mut().unwrap().iter_mut().find(|view| view["id"] == last).unwrap()["window"] = json!(9000);
+        saved["windows"].as_array_mut().unwrap().push(json!({"id": 9000}));
+        let repaired = ViewSet::from_json(&saved).unwrap();
+        assert_eq!(repaired.to_json(), before);
+        assert!(repaired.check());
+
+        let mut saved = before;
+        saved["next_window"] = json!(WindowId::MAX);
+        let mut set = ViewSet::from_json(&saved).unwrap();
+        set.close_window(1).unwrap();
+        assert_eq!(set.move_to_window(2, new_window()).unwrap().window, WindowId::MAX);
+        set.close_window(2).unwrap();
+        assert_eq!(set.move_to_window(3, new_window()).unwrap().window, 1);
+        assert!(set.check());
     }
 
     #[test]
@@ -1187,7 +1341,7 @@ mod tests {
             step = step.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             let window = set.windows().first().map(|window| window.id);
             let active = set.active().id;
-            match (step >> 16) % 8 {
+            match (step >> 16) % 10 {
                 0 => {
                     set.open(ViewKind::Model, None, false);
                 }
@@ -1211,6 +1365,13 @@ mod tests {
                     let mut child = set.take_window(window).unwrap();
                     child.views.open(ViewKind::Model, None, false);
                     set.put_window(child);
+                }
+                7 if let Some(window) = window => {
+                    let _ = set.move_to_window(active, existing_window(window, Some(0)));
+                }
+                8 if let Some(window) = window => {
+                    let view = set.views_of(window).unwrap().active().id;
+                    let _ = set.move_to_window(view, existing_window(0, Some(0)));
                 }
                 _ => {
                     set.set_layout_padded(Preset::SideBySide);

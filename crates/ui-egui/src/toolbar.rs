@@ -2749,7 +2749,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::N | Key::O | Key::S | Key::W | Key::Comma if app.embed_editor => {}
                 Key::N => crate::documents::new_design(app),
                 Key::Comma => crate::prefs::open_at(app, 0),
-                Key::O => {
+                Key::O if !mods.alt => {
                     app.pick_open(|app, path| {
                         if let Some(path) = path {
                             app.open_chosen_file(&path);
