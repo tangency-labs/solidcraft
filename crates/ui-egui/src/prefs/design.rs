@@ -121,6 +121,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(ui, app.tr("prefs.validation_note"), ui_kit::Text::Hint("validation"));
         });
         ui_kit::settings_section(ui, "drawings", app.tr("prefs.drawings"), |ui| {
+            let response = setting::drawings_preview(app, ui);
+            crate::scenario::publish_target("prefs:drawings_preview", response.rect);
+            if response.changed() && !app.preferences.drawings_preview {
+                let _ = crate::drawing_workspace::enter(app, false);
+            }
+            if !app.preferences.drawings_preview {
+                return;
+            }
             ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
                 ui_kit::row(ui, app.tr("ui.projection_of_new_drawings"), |ui| {
                     let projections = [Projection::First, Projection::Third];
@@ -325,5 +333,7 @@ fn origin_plane_names(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
         crate::scenario::publish_target("dialog:Hide origin by default", response.rect);
         let response = setting::origin_axes_across_view(app, ui).backing_on_hover_text(app.tr("prefs.origin_axes_across_view_help"));
         crate::scenario::publish_target("prefs:origin_axes_across_view", response.rect);
+        let response = setting::browser_hover_shows_origin(app, ui).backing_on_hover_text(app.tr("prefs.browser_hover_shows_origin_help"));
+        crate::scenario::publish_target("prefs:browser_hover_shows_origin", response.rect);
     });
 }

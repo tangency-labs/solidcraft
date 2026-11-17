@@ -162,8 +162,13 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let mut bodies: Vec<String> = Vec::new();
     let mut faces: Vec<(String, Vec<Vec3>)> = Vec::new();
     let mut selected_occurrences = Vec::new();
+    // A click on a mesh picks one of its faces, but a mesh face can't be deleted on its own:
+    // the person meant the mesh, so the face stands for its body (#18464).
+    let mesh_names: Vec<String> =
+        s.world_state().map(|w| w.bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect()).unwrap_or_default();
     for x in &items {
         match x {
+            Sel::Face { body, .. } if mesh_names.contains(body) => bodies.push(body.clone()),
             Sel::Occurrence { path } => {
                 selected_occurrences.push(s.occurrence_placement(path)?.occurrence.to_string());
             }
@@ -1022,6 +1027,35 @@ mod tests {
         assert!(curves(&s, sk).len() > 4, "the text has outlines");
         run(&mut s, "selection.delete", json!({"items": [{"type": "profile", "sketch": sk, "index": index}]}));
         assert_eq!(curves(&s, sk), rect, "the whole text goes, the rectangle stays");
+    }
+
+    /// #18464: a click on an imported mesh picks one of its faces; Delete then removes the mesh
+    /// body instead of refusing with "Delete Face needs a solid body". A solid's face still
+    /// becomes a Delete Face feature.
+    #[test]
+    fn delete_on_a_mesh_face_removes_the_mesh_body() {
+        let mut s = Session::default();
+        let dir = std::env::temp_dir().join(format!("solidcraft-delete-mesh-face-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let stl = dir.join("cube.stl");
+        let mut cube = Session::default();
+        run(&mut cube, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Cube"}));
+        run(&mut cube, "file.export", json!({"path": stl.to_string_lossy()}));
+        for _ in 0..2 {
+            run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let meshes: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect();
+        assert_eq!(meshes.len(), 2, "{meshes:?}");
+        let face = json!({"type": "face", "body": meshes[0], "index": 0, "point": [10.0, 10.0, 20.0]});
+        let r = run(&mut s, "selection.delete", json!({"items": [face]}));
+        assert_eq!(r["bodies"], json!([meshes[0]]), "{r}");
+        let left: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+        assert_eq!(left, vec![meshes[1].clone()], "only the other mesh is left");
+        run(&mut s, "edit.undo", json!({}));
+        let back: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect();
+        assert_eq!(back, meshes, "undo brings the deleted mesh back");
     }
 
     fn curves(s: &Session, sk: u64) -> Vec<String> {

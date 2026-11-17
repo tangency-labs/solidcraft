@@ -126,6 +126,44 @@ fn rotate_handle_updates_the_angle_without_moving_the_camera() {
     assert_eq!(serde_json::to_value(&*h.app.session.doc).unwrap(), before);
 }
 
+/// Rotate about a picked body edge keeps the edge (#17974): the command gets it as `about`, the
+/// Move saves it, and a move dragged before the turn takes the turn with the edge.
+#[test]
+fn rotate_about_a_picked_edge_keeps_the_edge() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+    let Some(edge @ Sel::Edge { .. }) = crate::dialogs::edge_sel(&h.app.session, Vec3::new(40.0, 15.0, 10.0)) else { panic!("the top right edge") };
+    h.app.start("solid.move");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.kind = kind(ROTATE, &h.app.session.doc);
+        d.inputs = inputs(ROTATE);
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+        d.inputs[1].items = vec![edge];
+        if let Kind::Move { angle, .. } = &mut d.kind {
+            *angle = "10 deg".into();
+        }
+    }
+    let p = params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(p["about"]["body"], "Body1", "{p}");
+    h.frames(5);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let saved = serde_json::to_value(&h.app.session.doc.features.last().unwrap().kind).unwrap();
+    assert_eq!(saved["rotate_about"]["type"], "edge", "{saved}");
+    let turned = h.app.session.model.state().body("Body1").unwrap().mesh().bounds();
+    // A move along X dragged before the turn: the turn follows the edge, so the box is the
+    // turned box moved along X, not one swung about where the edge was.
+    h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": [20, 0, 0]})).unwrap();
+    let last = h.app.session.doc.features.last().unwrap().name.clone();
+    h.app.run("timeline.reorder", json!({"feature": last, "position": 1})).unwrap();
+    h.settle();
+    let b = h.app.session.model.state().body("Body1").unwrap().mesh().bounds();
+    assert!((b.min - (turned.min + Vec3::new(20.0, 0.0, 0.0))).len() < 1e-6, "{b:?} vs {turned:?}");
+    assert!((b.max - (turned.max + Vec3::new(20.0, 0.0, 0.0))).len() < 1e-6, "{b:?} vs {turned:?}");
+}
+
 #[test]
 fn rotate_handle_follows_an_offset_axis_and_preserves_full_turns() {
     for (direction, initial, expected, free) in [(Vec3::new(1.0, 1.0, 1.0), "720 deg", 755.0, false), (-Vec3::Z, "", 37.3, true)] {
@@ -574,6 +612,127 @@ fn triad_drag_ends_where_the_button_was_released() {
     assert_eq!(value(&h), "20 mm", "the drag ends where the button was released");
 }
 
+/// On a GPU a Move's bodies are a layer: a step of the triad's drag changes its motion alone, and
+/// the scenes go to the renderer once. Building and uploading every moved triangle again at each
+/// step, with the ghost of where the bodies were, took a large assembly to ten frames a second.
+/// A view that draws no layer (isocurves shown) builds them where they land again.
+#[test]
+fn a_triad_drag_on_a_gpu_moves_its_layer_and_uploads_nothing() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    h.app.start("solid.move");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    }
+    h.frames(3);
+    let pos = |p: [f64; 2]| egui::pos2(p[0] as f32, p[1] as f32);
+    let grip = h.at(&json!({"gizmo": "x"})).unwrap();
+    let first = h.at(&json!({"gizmo": "x", "by": [10.0, 0.0, 0.0]})).unwrap();
+    let second = h.at(&json!({"gizmo": "x", "by": [20.0, 0.0, 0.0]})).unwrap();
+    h.frame_with(vec![egui::Event::PointerMoved(pos(grip))]);
+    h.frame_with(vec![egui::Event::PointerButton {
+        pos: pos(grip),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Default::default(),
+    }]);
+    h.frame_with(vec![egui::Event::PointerMoved(pos(first))]);
+    h.frames(1);
+    let layer = h.app.preview.moving_layer().expect("the moved body is a layer");
+    let still = h.app.preview.key;
+    assert!((layer.transform[3][0] - 10.0).abs() < 1e-4, "{:?}", layer.transform);
+    assert_eq!(h.app.preview.replaced, ["Body1"]);
+    assert!((h.app.preview.bounds.min.x - 10.0).abs() < 1e-6 && (h.app.preview.bounds.max.x - 30.0).abs() < 1e-6, "{:?}", h.app.preview.bounds);
+    h.frame_with(vec![egui::Event::PointerMoved(pos(second))]);
+    h.frames(1);
+    let moved = h.app.preview.moving_layer().expect("still a layer");
+    assert!((moved.transform[3][0] - 20.0).abs() < 1e-4, "{:?}", moved.transform);
+    assert_eq!((h.app.preview.key, moved.key), (still, layer.key), "a step of the drag hands the renderer no scene");
+    assert!((h.app.preview.bounds.min.x - 20.0).abs() < 1e-6, "{:?}", h.app.preview.bounds);
+    // Isocurves follow the bodies' places, which a layer moves on the GPU alone: built whole.
+    h.app.session.isocurves.push(solidcraft_engine::IsoPick { body: "Body1".into(), at: solidcore_record::Vec3::new(10.0, 15.0, 10.0), count: 3 });
+    h.frames(2);
+    assert!(h.app.preview.moving_layer().is_none() && h.app.preview.active, "drawn where it lands, in the preview's own scene");
+    assert_ne!(h.app.preview.key, still);
+    h.app.session.isocurves.clear();
+    h.frames(2);
+    assert!(h.app.preview.moving_layer().is_some(), "a layer again");
+}
+
+/// A frame that draws no layer makes the renderer let the moved bodies' scene go: Primary held
+/// to pick through the preview hides it. The preview is then computed again and hands its scenes
+/// over under a new key. Left with the old key and no scene, the renderer drew nothing, and the
+/// body stayed away until something else rebuilt the scenes. A scene the renderer has not taken
+/// yet is kept instead.
+#[test]
+fn a_move_layer_hidden_for_a_pick_is_handed_over_again() {
+    let mut h = translated_box();
+    h.app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.frames(3);
+    let layer = h.app.preview.moving_layer().expect("the moved body is a layer");
+    let still = h.app.preview.key;
+    // What a frame with Primary held asks of the preview, before the renderer took the scene.
+    let hidden_frame = |h: &mut crate::scenario::Harness| {
+        h.app.preview.rolled_back = true;
+        assert!(h.app.preview.moving_layer().is_none(), "hidden for the pick");
+        h.app.preview.rolled_back = false;
+    };
+    hidden_frame(&mut h);
+    h.frames(2);
+    let kept = h.app.preview.moving_layer().expect("still a layer");
+    assert_eq!((kept.key, h.app.preview.key), (layer.key, still), "nothing was taken, so nothing is built again");
+    // The renderer draws a frame of it, then one without it.
+    assert!(h.app.preview.renderer_takes_layer_for_tests());
+    h.frames(2);
+    assert_eq!(h.app.preview.moving_layer().expect("drawn at every frame").key, layer.key, "handed over once while it is drawn");
+    hidden_frame(&mut h);
+    h.frames(2);
+    let again = h.app.preview.moving_layer().expect("a layer again");
+    assert_ne!(again.key, layer.key, "under a new key, which the renderer takes a scene for");
+    assert!((again.transform[3][0] - 10.0).abs() < 1e-4, "{:?}", again.transform);
+    assert_eq!(h.app.preview.replaced, ["Body1"]);
+    assert!(h.app.preview.renderer_takes_layer_for_tests(), "the moved body's scene waits for the renderer");
+}
+
+/// #17804: a change of a Move drawn as a layer builds no triangles. The layer draws the moved
+/// bodies in their own look, outlined as picked, so the highlight does not copy and light their
+/// every triangle again at each keystroke, which froze the browser for seconds a change on a
+/// large assembly. With or without a layer the highlight only outlines a body Move/Copy moves.
+#[test]
+fn a_typed_move_drawn_as_a_layer_lights_no_moved_triangles() {
+    let mut h = translated_box();
+    let lit = |h: &crate::scenario::Harness| crate::viewport::build_highlight(&h.app).merged().tris.len();
+    h.frames(3);
+    assert_eq!(lit(&h), 0, "without a layer the moved body is outlined, not lit whole");
+    h.app.viewport.gpu =
+        Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+    h.frames(3);
+    let layer = h.app.preview.moving_layer().expect("the moved body is a layer").key;
+    assert!(drawn_as_layer(&h.app));
+    assert_eq!(lit(&h), 0, "the layer draws the moved body");
+    let moving = h.app.preview.waiting_layer_for_tests().expect("the layer's moving scene");
+    let own = crate::viewport::c4(solidcraft_theme::Tokens::get().body);
+    let fills: Vec<[u8; 4]> = moving
+        .tris
+        .chunks(crate::gpu::TRI_SIZE)
+        .filter_map(|v| moving.palette.entries().get(u32::from_le_bytes(v.get(24..28)?.try_into().ok()?) as usize).copied())
+        .collect();
+    assert!(!fills.is_empty() && fills.iter().all(|c| *c == own), "in the body's own look: {:?}", fills.first());
+    for x in ["25 mm", "40 mm"] {
+        if let Some(Kind::Move { x: field, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *field = x.into();
+        }
+        h.frames(2);
+        let moved = h.app.preview.moving_layer().expect("still a layer");
+        assert_eq!(moved.key, layer, "{x}: the motion alone changes");
+        assert_eq!(lit(&h), 0, "{x}: nothing is lit whole");
+    }
+}
+
 /// A Move dialog on the 20 × 30 × 10 box, translated 10 mm along X.
 fn translated_box() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
@@ -795,13 +954,14 @@ fn part_harness() -> (crate::scenario::Harness, u64) {
 }
 
 /// Opens Move/Copy with the viewport in component (`components`) or body pick mode, Create Copy
-/// ticked or not, then clicks the top of the cube.
+/// ticked or not, then clicks the top of the cube. The pick mode is set first: Move/Copy's Object
+/// starts from it, and then decides what a click picks.
 fn click_cube_in_move(components: bool, copy: bool) -> (crate::scenario::Harness, u64) {
     let (mut h, occurrence) = part_harness();
-    h.app.start("solid.move");
-    h.settle();
     h.app.ui.pick_components = components;
     h.app.ui.pick_bodies = !components;
+    h.app.start("solid.move");
+    h.settle();
     if copy {
         h.app.dialog.as_mut().unwrap().extra.insert("copy".into(), json!(true));
     }
@@ -831,15 +991,382 @@ fn a_body_picked_with_create_copy_is_still_a_body_copy() {
     assert_eq!(p["copy"], json!(true));
 }
 
+/// Types `x` into the open Move/Copy dialog's X distance.
+fn type_x(h: &mut crate::scenario::Harness, value: &str) {
+    if let Some(Kind::Move { x, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *x = value.into();
+    }
+}
+
+/// Clicks OK and waits for the move to be made.
+fn press_ok(h: &mut crate::scenario::Harness) {
+    // The form is drawn, so its OK is on screen.
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+}
+
+/// Where the placement of `occurrence` is along X: the pending one while it is not captured.
+fn placement_x(h: &crate::scenario::Harness, occurrence: u64) -> f64 {
+    let captured = h.app.session.doc.occurrences.iter().find(|o| o.id == occurrence).map(|o| o.transform).unwrap();
+    h.app.session.pending_moves.get(&occurrence).copied().unwrap_or(captured)[3][0]
+}
+
+fn command_ids(h: &crate::scenario::Harness) -> Vec<String> {
+    commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().into_iter().map(|(id, _)| id).collect()
+}
+
 #[test]
-fn a_component_picked_without_create_copy_moves_its_bodies_as_before() {
-    let (h, occurrence) = click_cube_in_move(true, false);
+fn a_component_picked_without_create_copy_moves_its_placement() {
+    let (mut h, occurrence) = click_cube_in_move(true, false);
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items, vec![Sel::Occurrence { path: vec![occurrence] }]);
-    let p = crate::dialogs_move::params(&h.app, d).unwrap();
-    assert_eq!(p["bodies"].as_array().map(Vec::len), Some(1), "the component's body moves");
-    assert!(p.get("occurrences").is_none());
-    assert!(p.get("copy").is_none());
+    assert_eq!(placements(d), vec![vec![occurrence]]);
+    let p = params(&h.app, d).unwrap();
+    assert_eq!(p["bodies"], json!([]), "its bodies don't move by a Move feature");
+    assert!(p.get("occurrences").is_none() && p.get("copy").is_none());
+    type_x(&mut h, "15 mm");
+    let cmds = commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(command_ids(&h), ["occurrence.move"], "nothing else is pending to capture");
+    assert_eq!(cmds[0].1["capture"], json!(true), "Capture All Positions is ticked at first: the move captures");
+    let features = h.app.session.doc.features.len();
+    press_ok(&mut h);
+    assert!(h.app.dialog.is_none());
+    assert!(h.app.session.pending_moves.is_empty(), "captured");
+    assert!((placement_x(&h, occurrence) - 15.0).abs() < 1e-6, "{}", placement_x(&h, occurrence));
+    assert_eq!(h.app.session.doc.features.len(), features, "no Move feature on the timeline");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(h.app.session.pending_moves.is_empty(), "one Undo takes the move back, not to a pending move");
+    assert!(placement_x(&h, occurrence).abs() < 1e-9, "back where it was: {}", placement_x(&h, occurrence));
+}
+
+#[test]
+fn unticking_capture_all_positions_leaves_the_component_move_pending() {
+    let (mut h, occurrence) = click_cube_in_move(true, false);
+    h.app.dialog.as_mut().unwrap().extra.insert("capture".into(), json!(false));
+    type_x(&mut h, "15 mm");
+    assert_eq!(command_ids(&h), ["occurrence.move"]);
+    assert_eq!(commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["capture"], json!(false));
+    press_ok(&mut h);
+    assert!(h.app.dialog.is_none());
+    assert!(h.app.session.pending_moves.contains_key(&occurrence), "pending until Capture Position");
+    assert!((placement_x(&h, occurrence) - 15.0).abs() < 1e-6);
+    let captured = h.app.session.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform;
+    assert!(captured[3][0].abs() < 1e-9, "the design keeps its placement until captured");
+}
+
+#[test]
+fn a_component_neither_moved_nor_captured_just_closes() {
+    let (mut h, occurrence) = click_cube_in_move(true, false);
+    h.app.dialog.as_mut().unwrap().extra.insert("capture".into(), json!(false));
+    assert!(nothing_to_run(&h.app, h.app.dialog.as_ref().unwrap()));
+    press_ok(&mut h);
+    assert!(h.app.dialog.is_none(), "OK closes");
+    assert!(h.app.session.pending_moves.is_empty() && placement_x(&h, occurrence).abs() < 1e-9);
+}
+
+#[test]
+fn cancel_leaves_a_moved_component_where_it_was() {
+    let (mut h, occurrence) = click_cube_in_move(true, false);
+    type_x(&mut h, "15 mm");
+    h.frames(2);
+    assert!(h.app.session.pending_moves.is_empty(), "nothing moves until OK: the preview draws it");
+    crate::dialogs::cancel(&mut h.app);
+    h.frames(2);
+    assert!(h.app.dialog.is_none());
+    assert!(h.app.session.pending_moves.is_empty() && placement_x(&h, occurrence).abs() < 1e-9);
+}
+
+#[test]
+fn the_preview_draws_a_moved_component_as_its_bodies_moved() {
+    let (mut h, occurrence) = click_cube_in_move(true, false);
+    type_x(&mut h, "15 mm");
+    let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let [(id, p)] = cmds.as_slice() else { panic!("one solid.move: {cmds:?}") };
+    assert_eq!(id, "solid.move", "the fast move preview draws it");
+    let owned = h.app.session.occurrence_bodies(&[occurrence], true).unwrap();
+    assert_eq!(p["bodies"], json!(owned));
+    assert_eq!(p["translate"], json!(["15 mm", "0 mm", "0 mm"]));
+}
+
+/// [`part_harness`] with a second component `Other` (body `Pin`) and a body `Plate` at the root:
+/// the harness, the part's placement and the other's.
+fn two_parts_and_a_root_body() -> (crate::scenario::Harness, u64, u64) {
+    let (mut h, part) = part_harness();
+    let other = h.app.run("component.create", json!({"name": "Other", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "body_name": "Pin"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Plate"})).unwrap();
+    (h, part, other)
+}
+
+/// A pick into the open Move/Copy dialog, as a click in the view or the Browser makes it, then
+/// a frame or two for the form.
+fn pick(h: &mut crate::scenario::Harness, sel: Sel) {
+    let mut d = h.app.dialog.take().unwrap();
+    d.pick(&h.app.session, sel);
+    h.app.dialog = Some(d);
+    h.frames(2);
+}
+
+fn picks(h: &crate::scenario::Harness) -> Vec<Sel> {
+    h.app.dialog.as_ref().unwrap().inputs[0].items.clone()
+}
+
+fn object_of(h: &crate::scenario::Harness) -> usize {
+    object(h.app.dialog.as_ref().unwrap())
+}
+
+fn occurrence(path: &[u64]) -> Sel {
+    Sel::Occurrence { path: path.to_vec() }
+}
+
+fn body(name: &str) -> Sel {
+    Sel::Body { name: name.into() }
+}
+
+#[test]
+fn opened_on_components_and_bodies_together_the_components_win() {
+    let (mut h, part, other) = two_parts_and_a_root_body();
+    // A component, a body inside the other component, and a body at the root.
+    h.app.session.selection = vec![occurrence(&[part]), body("Pin"), body("Plate")];
+    h.app.start("solid.move");
+    h.frames(2);
+    assert_eq!(object_of(&h), OBJECT_COMPONENTS);
+    assert_eq!(picks(&h), vec![occurrence(&[part]), occurrence(&[other])], "Pin stands for its component; the root body drops out");
+    type_x(&mut h, "10 mm");
+    assert_eq!(command_ids(&h), ["occurrence.move", "occurrence.move"], "no Move feature for a body");
+    let features = h.app.session.doc.features.len();
+    press_ok(&mut h);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert!((placement_x(&h, part) - 10.0).abs() < 1e-6 && (placement_x(&h, other) - 10.0).abs() < 1e-6);
+    assert_eq!(h.app.session.doc.features.len(), features, "the root body stays where it is");
+}
+
+#[test]
+fn the_first_input_is_selection_and_object_follows_what_is_picked() {
+    let (mut h, part, _) = two_parts_and_a_root_body();
+    h.app.start("solid.move");
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].label, "Selection");
+    pick(&mut h, body("Plate"));
+    assert_eq!(object_of(&h), OBJECT_BODIES);
+    pick(&mut h, body("Plate"));
+    assert!(picks(&h).is_empty(), "a second click takes it out");
+    pick(&mut h, occurrence(&[part]));
+    assert_eq!(object_of(&h), OBJECT_COMPONENTS, "with nothing picked, a component switches Object to Components");
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].label, "Selection", "the label stays");
+}
+
+#[test]
+fn with_bodies_picked_another_component_is_refused() {
+    let (mut h, part, other) = two_parts_and_a_root_body();
+    h.app.start("solid.move");
+    h.frames(2);
+    pick(&mut h, body("Plate"));
+    pick(&mut h, occurrence(&[part]));
+    assert_eq!(picks(&h), vec![body("Plate")], "a component never joins a root body");
+    assert_eq!(object_of(&h), OBJECT_BODIES);
+    // Any body may join, a body inside a component too; the component that holds none of them
+    // is still refused.
+    pick(&mut h, body("Pin"));
+    assert_eq!(picks(&h), vec![body("Plate"), body("Pin")]);
+    pick(&mut h, occurrence(&[part]));
+    assert_eq!(picks(&h), vec![body("Plate"), body("Pin")], "Part holds neither body");
+    assert!(picks(&h).iter().all(|s| *s != occurrence(&[other])));
+}
+
+#[test]
+fn picking_the_component_that_holds_a_picked_body_picks_the_whole_component() {
+    let (mut h, part, _) = two_parts_and_a_root_body();
+    h.app.start("solid.move");
+    h.frames(2);
+    pick(&mut h, body("Peg"));
+    assert_eq!(object_of(&h), OBJECT_BODIES);
+    pick(&mut h, occurrence(&[part]));
+    assert_eq!(picks(&h), vec![occurrence(&[part])], "the body gives way to its whole component");
+    assert_eq!(object_of(&h), OBJECT_COMPONENTS);
+}
+
+#[test]
+fn picking_a_nested_component_that_holds_a_picked_body_picks_it() {
+    // A body two components deep: the click on its own component, not only the outer one, takes
+    // the whole component.
+    let mut h = crate::scenario::Harness::new();
+    let outer = h.app.run("component.create", json!({"name": "Frame", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Peg"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.start("solid.move");
+    h.frames(2);
+    pick(&mut h, body("Peg"));
+    pick(&mut h, occurrence(&[outer, inner]));
+    assert_eq!(picks(&h), vec![occurrence(&[outer, inner])]);
+    assert_eq!(object_of(&h), OBJECT_COMPONENTS);
+}
+
+#[test]
+fn a_shared_child_picked_through_two_copies_of_its_parent_moves_once() {
+    // One occurrence (9) placed by two copies (1 and 2) of its parent: one placement move.
+    let picked = [occurrence(&[1, 9]), occurrence(&[2, 9]), occurrence(&[3])];
+    assert_eq!(placement_paths(&picked, false, false), vec![vec![1, 9], vec![3]]);
+}
+
+#[test]
+fn with_components_picked_a_body_stands_for_its_component_and_a_root_body_is_refused() {
+    let (mut h, part, other) = two_parts_and_a_root_body();
+    h.app.start("solid.move");
+    h.frames(2);
+    pick(&mut h, occurrence(&[part]));
+    pick(&mut h, body("Plate"));
+    assert_eq!(picks(&h), vec![occurrence(&[part])], "a root body never joins a component");
+    pick(&mut h, body("Pin"));
+    assert_eq!(picks(&h), vec![occurrence(&[part]), occurrence(&[other])], "Pin picks the component it is in");
+    pick(&mut h, body("Pin"));
+    assert_eq!(picks(&h), vec![occurrence(&[part])], "a click on a picked component's body takes the component out");
+}
+
+#[test]
+fn choosing_the_object_turns_the_picks_into_that_kind() {
+    let (mut h, part, _) = two_parts_and_a_root_body();
+    h.app.start("solid.move");
+    h.frames(2);
+    pick(&mut h, occurrence(&[part]));
+    let mut d = h.app.dialog.take().unwrap();
+    switch_object(&h.app, &mut d, OBJECT_BODIES);
+    assert_eq!(d.inputs[0].items, vec![body("Peg")], "a component becomes the bodies it places");
+    assert_eq!(object(&d), OBJECT_BODIES);
+    switch_object(&h.app, &mut d, OBJECT_COMPONENTS);
+    assert_eq!(d.inputs[0].items, vec![occurrence(&[part])], "and back to the component");
+    d.inputs[0].items.push(body("Plate"));
+    switch_object(&h.app, &mut d, OBJECT_COMPONENTS);
+    assert_eq!(d.inputs[0].items, vec![occurrence(&[part])], "a root body has no component to become");
+}
+
+#[test]
+fn move_copy_opens_on_selection() {
+    let (mut h, part, _) = two_parts_and_a_root_body();
+    h.app.session.selection = vec![body("Plate")];
+    h.app.start("solid.move");
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0, "a preselection keeps Selection active");
+    crate::dialogs::cancel(&mut h.app);
+    open_on_occurrence(&mut h.app, vec![part], false);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!((d.active, object(d)), (0, OBJECT_COMPONENTS), "opened on a component: Selection, Components");
+}
+
+#[test]
+fn a_pasted_component_is_placed_not_copied() {
+    let (mut h, part, _) = two_parts_and_a_root_body();
+    open_on_occurrence(&mut h.app, vec![part], true);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert!(pasted(d));
+    d.extra.insert("copy".into(), json!(true));
+    assert!(!copies(d), "Create Copy has no say over a pasted component");
+    assert_eq!(placements(d), vec![vec![part]], "it moves by its placement");
+}
+
+#[test]
+fn revert_position_offers_and_puts_back_only_the_picked_components() {
+    let (mut h, part, other) = two_parts_and_a_root_body();
+    for id in [part, other] {
+        h.app.run("occurrence.move", json!({"occurrence": id, "translate": [5, 0, 0], "capture": false})).unwrap();
+    }
+    open_on_occurrence(&mut h.app, vec![part], false);
+    assert_eq!(revertible(&h.app, h.app.dialog.as_ref().unwrap()), vec![part]);
+    h.app.run("component.revert_position", json!({"occurrences": revertible(&h.app, h.app.dialog.as_ref().unwrap())})).unwrap();
+    assert!(
+        !h.app.session.pending_moves.contains_key(&part) && h.app.session.pending_moves.contains_key(&other),
+        "the other component stays pending"
+    );
+    assert!(revertible(&h.app, h.app.dialog.as_ref().unwrap()).is_empty(), "nothing left to revert hides the button");
+    open_on_occurrence(&mut h.app, vec![other], false);
+    assert_eq!(revertible(&h.app, h.app.dialog.as_ref().unwrap()), vec![other]);
+    let mut d = h.app.dialog.take().unwrap();
+    switch_object(&h.app, &mut d, OBJECT_BODIES);
+    assert!(revertible(&h.app, &d).is_empty(), "bodies have no position to revert");
+}
+
+#[test]
+fn capture_all_positions_also_captures_the_components_moved_before() {
+    let (mut h, part, other) = two_parts_and_a_root_body();
+    h.app.run("occurrence.move", json!({"occurrence": other, "translate": [5, 0, 0], "capture": false})).unwrap();
+    open_on_occurrence(&mut h.app, vec![part], false);
+    type_x(&mut h, "10 mm");
+    assert_eq!(command_ids(&h), ["occurrence.move", "component.capture_position"]);
+    press_ok(&mut h);
+    assert!(h.app.session.pending_moves.is_empty(), "both captured");
+    assert!((placement_x(&h, part) - 10.0).abs() < 1e-6 && (placement_x(&h, other) - 5.0).abs() < 1e-6);
+    // Ticked with nothing typed, OK still captures what is pending; with nothing pending it just
+    // closes.
+    h.app.run("occurrence.move", json!({"occurrence": other, "translate": [5, 0, 0], "capture": false})).unwrap();
+    open_on_occurrence(&mut h.app, vec![part], false);
+    assert_eq!(command_ids(&h), ["component.capture_position"]);
+    press_ok(&mut h);
+    assert!(h.app.session.pending_moves.is_empty());
+    open_on_occurrence(&mut h.app, vec![part], false);
+    assert!(nothing_to_run(&h.app, h.app.dialog.as_ref().unwrap()));
+}
+
+#[test]
+fn a_body_hidden_while_it_moves_leaves_the_preview_but_still_moves() {
+    let (mut h, part, _) = two_parts_and_a_root_body();
+    open_on_occurrence(&mut h.app, vec![part], false);
+    type_x(&mut h, "15 mm");
+    let drawn = |h: &crate::scenario::Harness| crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(drawn(&h)[0].1["bodies"], json!(["Peg"]));
+    h.app.run("browser.visibility", json!({"visible": false, "items": ["Peg"]})).unwrap();
+    assert!(drawn(&h).is_empty(), "nothing shown is left to preview");
+    assert_eq!(command_ids(&h), ["occurrence.move"], "OK still moves it");
+}
+
+#[test]
+fn the_browser_shows_what_moves_as_selected_and_a_click_takes_it_out() {
+    let (mut h, part, _) = two_parts_and_a_root_body();
+    h.app.ui.show_browser = true;
+    open_on_occurrence(&mut h.app, vec![part], false);
+    h.frames(3);
+    assert!(picked(&h.app, &occurrence(&[part])), "its Browser row shows selected");
+    assert!(h.app.session.selection.is_empty(), "the move holds the pick, not the selection");
+    h.step(&json!({"click": {"handle": format!("row:occurrence:{part}")}})).unwrap();
+    h.frames(2);
+    assert!(picks(&h).is_empty(), "a click on the selected row takes it out of the move");
+    assert!(!picked(&h.app, &occurrence(&[part])));
+}
+
+#[test]
+fn a_child_in_a_turned_component_moves_along_the_worlds_axes() {
+    let mut h = crate::scenario::Harness::new();
+    let outer = h.app.run("component.create", json!({"name": "Frame", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Peg"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": outer, "axis": [0, 0, 1], "angle": "90 deg"})).unwrap();
+    let path = vec![outer, inner];
+    let centre = |h: &crate::scenario::Harness| {
+        let world = crate::open_meshing::session_world(&h.app.session);
+        let names = h.app.session.occurrence_bodies(&path, true).unwrap();
+        names.iter().filter_map(|n| world.body(n)).fold(solidcraft_engine::geom::Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds())).center()
+    };
+    let before = centre(&h);
+    open_on_occurrence(&mut h.app, path.clone(), false);
+    assert_eq!(placements(h.app.dialog.as_ref().unwrap()), vec![path.clone()]);
+    type_x(&mut h, "10 mm");
+    press_ok(&mut h);
+    let moved = centre(&h) - before;
+    assert!((moved.x - 10.0).abs() < 1e-6 && moved.y.abs() < 1e-6 && moved.z.abs() < 1e-6, "moved by {moved:?}, not along world X");
+}
+
+#[test]
+fn the_browser_move_opens_move_copy_on_the_component() {
+    let (mut h, occurrence) = part_harness();
+    let target = crate::context_menu::Target::Occurrence { path: vec![occurrence] };
+    let item = crate::context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.moveOccurrence").expect("the Browser offers Move/Copy");
+    crate::context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    let d = h.app.dialog.as_ref().expect("Move/Copy opens");
+    assert!(matches!(d.kind, Kind::Move { mode: FREE, .. }));
+    assert_eq!(placements(d), vec![vec![occurrence]]);
 }
 
 #[test]
@@ -871,7 +1398,7 @@ fn editing_a_move_never_takes_a_component_pick() {
 
 #[test]
 fn selected_components_are_copied_when_create_copy_is_ticked_after_them() {
-    // One selected placement starts the Browser's own component move, so two are selected here.
+    // One selected placement opens Move/Copy on it (`open_on_occurrence`), so two are selected here.
     let (mut h, first) = part_harness();
     let second = h.app.run("occurrence.copy", json!({"occurrence": first, "translate": [50, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
     h.app.session.selection = vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }];
@@ -879,8 +1406,9 @@ fn selected_components_are_copied_when_create_copy_is_ticked_after_them() {
     let picked = vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }];
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, picked);
     let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(p["bodies"].as_array().map(Vec::len), Some(2), "without a copy the components' bodies move");
+    assert_eq!(p["bodies"], json!([]), "without a copy the components move by their placements");
     assert!(p.get("occurrences").is_none());
+    assert_eq!(placements(h.app.dialog.as_ref().unwrap()), vec![vec![first], vec![second]]);
     h.app.dialog.as_mut().unwrap().extra.insert("copy".into(), json!(true));
     let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(p["occurrences"], json!([[first], [second]]));
@@ -1444,6 +1972,34 @@ fn editing_a_placed_body_move_preserves_its_world_transform() {
     }
     let after = app.session.world_state().unwrap().body("B").unwrap().mesh().bounds();
     assert!(before.min.dist(after.min) < 1e-6 && before.max.dist(after.max) < 1e-6, "{before:?} -> {after:?}");
+}
+
+#[test]
+fn editing_a_copy_of_a_turned_instance_keeps_its_captured_frame() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 8, "body_name": "B"})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let occurrence = s.execute("occurrence.copy", &json!({"component": "Part", "translate": [100, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    s.execute("occurrence.move", &json!({"occurrence": occurrence, "axis": [0, 0, 1], "angle": "90 deg"})).unwrap();
+    let name = s.occurrence_bodies(&[occurrence], true).unwrap().remove(0);
+    let reply = s.execute("solid.move", &json!({"bodies": [name], "copy": true, "translate": [5, 0, 0]})).unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    let copy = reply["created_bodies"][0].as_str().unwrap();
+    let before = s.world_state().unwrap().body(copy).unwrap().body.exact_bounds().unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    let d = crate::dialogs::for_feature(&app, id, None).unwrap();
+    let Kind::Move { x, y, z, .. } = &d.kind else { panic!("not a move") };
+    let shown = Vec3::new(len(&app, x).unwrap(), len(&app, y).unwrap(), len(&app, z).unwrap());
+    assert!(shown.dist(Vec3::new(5.0, 0.0, 0.0)) < 1e-7, "{shown:?}");
+    let commands = crate::dialogs::preview_commands(&app, &d).unwrap();
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+    assert!(crate::move_preview::MovePreview::default().compute(&app, &commands, colors).is_none(), "captured copies use the evaluated preview");
+    for (command, params) in crate::dialogs::apply_commands(&app, &d).unwrap() {
+        app.run(&command, params).unwrap();
+    }
+    let after = app.session.world_state().unwrap().body(copy).unwrap().body.exact_bounds().unwrap();
+    assert!(before.min.dist(after.min) < 1e-7 && before.max.dist(after.max) < 1e-7, "{before:?} -> {after:?}");
 }
 
 /// The rings stay on the world axes, so a turn dragged on one goes about the axis it shows, on

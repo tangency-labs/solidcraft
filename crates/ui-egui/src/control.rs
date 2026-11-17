@@ -285,11 +285,21 @@ fn switches_design(step: &Value) -> Option<&'static str> {
     SWITCHES_DESIGN.into_iter().find(|id| is_command(command(step), id))
 }
 
+/// Package I/O runs through the dedicated worker, so it cannot share a synchronous batch.
+fn has_plugin_management_steps(steps: &[Value]) -> bool {
+    steps
+        .iter()
+        .any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.install") || id.eq_ignore_ascii_case("plugin.remove")))
+}
+
 /// Why `engine.batch` refuses these steps before running any: a step loads a file or switches
 /// to another design (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
     if steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"))) {
         return Some(solidcraft_ui_text::tr("ui.plugin_standalone").into());
+    }
+    if has_plugin_management_steps(steps) {
+        return Some(solidcraft_ui_text::tr("ui.plugin_management_standalone").into());
     }
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
@@ -417,6 +427,9 @@ fn script(app: &mut SolveApp, p: &Value) -> Outcome {
     if steps.is_some_and(|steps| steps.iter().any(|step| batch_step_command(step).is_some_and(|id| id.eq_ignore_ascii_case("plugin.run")))) {
         return err(solidcraft_ui_text::tr("ui.plugin_standalone"));
     }
+    if steps.is_some_and(|steps| has_plugin_management_steps(steps)) {
+        return err(solidcraft_ui_text::tr("ui.plugin_management_standalone"));
+    }
     let steps = match solidcraft_engine::script_steps(p) {
         Ok(steps) => steps,
         Err(e) => return err(e),
@@ -491,7 +504,7 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
     let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,
         &app.cam,
-        crate::viewport::section_plane(app),
+        &crate::viewport::section_planes(app),
         solidcraft_engine::view::world_curve_parts,
         &palette,
         guides,
@@ -746,12 +759,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.help" => with(p, |q| ui_help(app, ctx, q)),
         "ui.selectOther" => wrap(crate::select_other::control(app, p)),
         "ui.menuPick" => with(p, |q: params::MenuPick| wrap(crate::context_menu::pick(app, &q.item))),
-        "ui.rename" => with(p, |q: params::Rename| {
-            if crate::context_menu::finish_rename(app, q.text.as_deref(), q.commit) {
-                ok(json!({"done": true}))
-            } else {
-                err("no rename in progress")
-            }
+        "ui.rename" => with(p, |q: params::Rename| match crate::context_menu::finish_rename(app, q.text.as_deref(), q.commit) {
+            Ok(()) => ok(json!({"done": true})),
+            Err(e) => err(e),
         }),
         "ui.window" => with(p, |q: params::Action| match crate::titlebar::window_action(app, ctx, q.action.as_deref().unwrap_or("")) {
             Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),
@@ -2610,7 +2620,7 @@ mod tests {
         app.start("inspect.section");
         let Some(crate::dialogs::Kind::Section { offset, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("no section dialog") };
         *offset = "15 mm".into();
-        assert!(app.session.section.is_none() && crate::viewport::section_plane(&app).is_some());
+        assert!(app.session.section.is_empty() && !crate::viewport::section_planes(&app).is_empty());
         let preview = render(&mut app, &dir.join("preview.png"));
         assert!(whole != preview, "the model render ignores the section the window shows");
         // Committed, it renders the same.

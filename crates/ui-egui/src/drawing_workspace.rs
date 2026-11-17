@@ -36,8 +36,25 @@ pub fn active(app: &SolveApp) -> bool {
     matches!(app.ui.tab.as_str(), "DRAWING LAYOUT" | "DRAWING ANNOTATE" | "DRAWING PARTS" | "DRAWING REVIEW")
 }
 
+/// Whether drawings are turned on (Preferences > Design > Drawings, off by default). Off, the app
+/// shows no Drawing workspace; a design's drawings are still read and saved as they are.
+pub fn enabled(app: &SolveApp) -> bool {
+    app.preferences.drawings_preview
+}
+
+/// Leave the Drawing workspace once drawings are turned off (or a saved layout put the app there
+/// while they are off).
+pub fn reconcile(app: &mut SolveApp) {
+    if !enabled(app) && active(app) {
+        let _ = enter(app, false);
+    }
+}
+
 pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     if drawing {
+        if !enabled(app) {
+            return Err(solidcraft_ui_text::tr("ui.drawings_preview_off").to_string());
+        }
         if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
             return Err("Finish the current operation before entering Drawing".into());
         }
@@ -692,11 +709,37 @@ mod tests {
     use super::*;
     use crate::scenario::Harness;
 
+    /// Drawings are off until Preferences > Design turns them on: Drawing stays "coming later" in
+    /// the workspace menu and the workspace refuses to open; turned off again, the app leaves it.
+    #[test]
+    fn drawings_stay_off_until_turned_on() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        assert!(!h.app.preferences.drawings_preview, "off by default");
+        let drawing_row = |app: &SolveApp| {
+            crate::context_menu::items(app, &crate::context_menu::Target::Workspace).into_iter().find(|item| item.label == "Drawing").unwrap()
+        };
+        let off = drawing_row(&h.app);
+        assert!(!off.enabled && off.id == "ui.workspace", "{:?}", off.id);
+        assert!(crate::workspace::enter(&mut h.app, "drawing").is_err());
+        assert!(!active(&h.app));
+        h.app.preferences.drawings_preview = true;
+        let on = drawing_row(&h.app);
+        assert!(on.enabled && on.id == "ui.workspace.drawing");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert!(active(&h.app));
+        h.app.preferences.drawings_preview = false;
+        h.frames(2);
+        assert!(!active(&h.app), "turning drawings off leaves the Drawing workspace");
+        assert_eq!(h.app.ui.tab, "MODEL");
+    }
+
     #[test]
     fn a_smaller_sheet_warns_about_views_without_moving_them() {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         let view = h.app.run("drawing.view.base", serde_json::json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[310,180]})).unwrap();
@@ -716,6 +759,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.frames(4);
         assert!(h.app.session.open_drawing.is_none());
@@ -735,6 +779,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", serde_json::json!({"length":100,"width":60,"height":12})).unwrap();
+        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.frames(4);
         h.step(&serde_json::json!({"click":{"handle":"drawing:first:standard"}})).unwrap();
@@ -751,6 +796,7 @@ mod tests {
         h.app.home.open = false;
         h.app.ui.show_browser = true;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         h.app.run("drawing.create", serde_json::json!({})).unwrap();
         h.app.run("drawing.sheet.add", serde_json::json!({"name":"Inspection sheet"})).unwrap();
@@ -772,6 +818,7 @@ mod tests {
         h.app.home.open = false;
         h.app.ui.show_browser = true;
         h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         let first = h.app.run("drawing.create", serde_json::json!({})).unwrap()["sheets"][0]["id"].as_str().unwrap().to_string();
         h.frames(4);
@@ -810,6 +857,7 @@ mod tests {
         let revision = h.app.session.revision;
         let undo = h.app.session.undo.len();
         let cam = h.app.cam;
+        h.app.preferences.drawings_preview = true;
         enter(&mut h.app, true).unwrap();
         assert!(start(&mut h.app, "drawing.view.base.planned"));
         h.frames(2);
@@ -837,6 +885,7 @@ mod tests {
             h.app.ui.layout = layout;
             h.call("ui.resize", serde_json::json!({"width":1400,"height":1000}));
             h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+            h.app.preferences.drawings_preview = true;
             enter(&mut h.app, true).unwrap();
             h.app.run("drawing.create", serde_json::json!({})).unwrap();
             let revision = h.app.session.revision;
@@ -913,6 +962,7 @@ mod tests {
             h.call("ui.resize", serde_json::json!({"width":960,"height":600}));
             h.app.preferences.drawing_panel_width = 560.0;
             h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+            h.app.preferences.drawings_preview = true;
             enter(&mut h.app, true).unwrap();
             h.app.run("drawing.create", serde_json::json!({})).unwrap();
             h.app.drawing_workspace.settings_open = true;

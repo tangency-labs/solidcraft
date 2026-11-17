@@ -426,6 +426,100 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 #[test]
+fn version_tool_is_read_only_and_takes_no_arguments() {
+    let def = tool_definitions().into_iter().find(|d| d["name"] == "version").expect("version tool");
+    assert_eq!(def["annotations"]["readOnlyHint"], true);
+    assert_eq!(def["annotations"]["destructiveHint"], false);
+    assert_eq!(def["inputSchema"]["additionalProperties"], false);
+    assert_eq!(def["inputSchema"]["properties"], json!({}));
+}
+
+fn version_reply(backend: &mut dyn crate::Backend, args: Value) -> Value {
+    let reply = crate::tools::call_tool(backend, "version", &args);
+    assert_ne!(reply["isError"], true, "{reply}");
+    serde_json::from_str(reply["content"][0]["text"].as_str().unwrap()).unwrap()
+}
+
+#[test]
+fn version_identifies_the_headless_build_without_changing_the_design() {
+    use crate::Backend;
+    let mut backend = Headless::default();
+    let before = (backend.session.revision, backend.session.undo.len(), backend.session.is_dirty());
+    assert_eq!(
+        version_reply(&mut backend, json!({})),
+        json!({"version": env!("CARGO_PKG_VERSION"), "commit": solidcraft_engine::io::SOURCE_COMMIT, "mode": "headless"})
+    );
+    assert_eq!((backend.session.revision, backend.session.undo.len(), backend.session.is_dirty()), before);
+    assert!(backend.call("ui.help", json!({"item": "about"})).is_err());
+    assert!(solidcraft_engine::control_pending::reads_only("ui.help", &json!({})));
+    assert!(!solidcraft_engine::control_pending::reads_only("ui.help", &json!({"item": "about"})));
+}
+
+#[test]
+fn version_reports_the_apps_build_without_diagnostics_or_help_actions() {
+    let mut backend = Answers {
+        calls: Vec::new(),
+        answer: Box::new(|_, _| Ok(json!({"version": "0.12.3", "commit": "abc1234", "diagnostics": "private app details", "built": "2026-01-01"}))),
+    };
+    assert_eq!(version_reply(&mut backend, json!({"item": "about"})), json!({"version": "0.12.3", "commit": "abc1234", "mode": "app"}));
+    assert_eq!(backend.calls, [("ui.help".into(), json!({}))]);
+}
+
+#[test]
+fn version_reports_unavailable_metadata_without_substituting_the_servers_build() {
+    for (answer, message) in [
+        (Err("app unavailable".to_string()), "app unavailable"),
+        (Ok(json!({})), "version"),
+        (Ok(json!({"version": 42, "commit": "abc1234"})), "version"),
+        (Ok(json!({"version": "0.12.3", "commit": 42})), "commit"),
+    ] {
+        let mut backend = Answers { calls: Vec::new(), answer: Box::new(move |_, _| answer.clone()) };
+        let reply = crate::tools::call_tool(&mut backend, "version", &json!({}));
+        assert_eq!(reply["isError"], true, "{reply}");
+        assert!(reply["content"][0]["text"].as_str().unwrap().contains(message), "{reply}");
+    }
+    for answer in [json!({"version": "0.12.3"}), json!({"version": "0.12.3", "commit": null})] {
+        let mut backend = Answers { calls: Vec::new(), answer: Box::new(move |_, _| Ok(answer.clone())) };
+        assert_eq!(version_reply(&mut backend, json!({})), json!({"version": "0.12.3", "commit": "unknown", "mode": "app"}));
+    }
+}
+
+#[test]
+fn version_uses_the_backend_found_during_automatic_discovery() {
+    use crate::Backend;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let (addr, seen) = scripted_app(|req| {
+        assert_eq!(req["method"], "ui.help");
+        json!({"ok": true, "result": {"version": "0.12.3", "commit": "abc1234"}})
+    });
+    let port = Rc::new(Cell::new(None));
+    let discover = port.clone();
+    let mut auto = crate::Auto::new(Headless::default(), Box::new(move || discover.get()), Some("0123456789abcdef0123456789abcdef"));
+    assert_eq!(version_reply(&mut auto, json!({}))["mode"], "headless");
+    port.set(Some(addr.parse::<std::net::SocketAddr>().unwrap().port()));
+    assert!(!auto.has_ui());
+    assert_eq!(version_reply(&mut auto, json!({})), json!({"version": "0.12.3", "commit": "abc1234", "mode": "app"}));
+    assert!(auto.has_ui());
+
+    let mut headless = Headless::default();
+    headless.session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let mut kept = crate::Auto::new(headless, Box::new(move || port.get()), None);
+    assert_eq!(version_reply(&mut kept, json!({}))["mode"], "headless");
+    assert!(!kept.has_ui());
+    assert_eq!(seen.lock().unwrap().1, ["ui.help"]);
+}
+
+#[test]
+fn version_is_refused_in_batches_including_execute_wrappers() {
+    for step in [json!({"command": "version"}), json!({"command": "execute", "params": {"command": "version"}})] {
+        let (backend, reply, error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "solid.box"}, step]}));
+        assert!(error && backend.calls.is_empty(), "{reply}");
+        assert!(reply["failed"]["error"].as_str().unwrap().contains("version"), "{reply}");
+    }
+}
+
+#[test]
 fn handshake_and_tools_list() {
     let mut s = server();
     let init =
@@ -441,6 +535,7 @@ fn handshake_and_tools_list() {
     let tools = call(&mut s, 4, "tools/list", json!({}));
     let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
     for want in [
+        "version",
         "list_commands",
         "describe_command",
         "execute",
@@ -805,7 +900,6 @@ fn save_selects_container_or_json_and_reopens_by_contents() {
     for (name, format, is_json) in [
         ("default.solidcraft", None, false),
         ("explicit.solidcraft", Some("json"), true),
-        ("legacy.solvecraft", None, false),
         ("inferred.json", None, true),
         ("container.json", Some("container"), false),
     ] {
@@ -1756,6 +1850,34 @@ fn tool_unknown_command_errors_suggest_close_ids() {
 }
 
 #[test]
+fn tool_unknown_commands_suggest_equivalent_verbs() {
+    let mut s = server();
+    for (id, wanted) in [
+        ("note.create", "note.add"),
+        ("NOTE.CREATE", "note.add"),
+        ("note.new", "note.add"),
+        ("note.remove", "note.delete"),
+        ("parameters.create", "parameters.add"),
+        ("render.lights.create", "render.lights.add"),
+        ("render.lights.delete", "render.lights.remove"),
+    ] {
+        for name in ["describe_command", "execute", "batch"] {
+            let step = json!({"command": id, "params": {}});
+            let args = match name {
+                "describe_command" => json!({"id": id}),
+                "batch" => json!({"commands": [step]}),
+                _ => step,
+            };
+            let r = raw_tool(&mut s, name, args);
+            assert_eq!(r["result"]["isError"], true, "{r}");
+            let text = r["result"]["content"][0]["text"].as_str().unwrap();
+            let prefix = if name == "describe_command" { "did you mean" } else { "closest:" };
+            assert!(text.contains(&format!("{prefix} `{wanted}`")), "{name}: {text}");
+        }
+    }
+}
+
+#[test]
 fn tool_unknown_command_errors_explain_packed_params() {
     let mut s = server();
     for id in ["solid.cube {side: 20}", "solid.box(20)"] {
@@ -1994,10 +2116,10 @@ fn list_commands_narrows_by_prefix_panel_fields_and_page() {
     }
 }
 
-/// Compatibility shims (docs/compatibility.md): a design saved before the rename (legacy
-/// extension and format tag) opens through MCP, and the legacy resource URIs still read.
+/// Compatibility shim (docs/compatibility.md): a design saved before the rename (old extension
+/// and format tag) still opens through MCP, by its contents.
 #[test]
-fn legacy_design_files_and_resource_uris() {
+fn legacy_design_files_open_by_contents() {
     let mut s = server();
     let saved = String::from_utf8(solidcraft_engine::io::write_design(&solidcraft_engine::doc::Document::default())).unwrap();
     assert!(saved.contains("\"solidcraft/"), "{saved}");
@@ -2006,7 +2128,7 @@ fn legacy_design_files_and_resource_uris() {
     std::fs::write(&path, legacy).unwrap();
     tool(&mut s, "open", json!({"path": path.to_string_lossy()}));
     let _ = std::fs::remove_file(&path);
-    let d = call(&mut s, 1, "resources/read", json!({"uri": "solvecraft://design"}));
+    let d = call(&mut s, 1, "resources/read", json!({"uri": "solidcraft://design"}));
     assert!(d["result"]["contents"][0]["text"].as_str().unwrap().contains("timeline"));
 
     // `.sc` is what new designs are saved as; a `.solidcraft` file opens and `save {}` writes it
@@ -2772,6 +2894,22 @@ fn compact_move_points_reply_lists_only_missed_moves() {
     assert!(missed[0]["at"].is_array() && missed[0].get("reached").is_none(), "{compact}");
 }
 
+/// The headless server answers `view.pick` with world rays (#16240): the bar of radius 20 along
+/// X, hit straight down at y = 10, at z = √300 on its exact surface. Pixels still need the app.
+#[test]
+fn headless_view_pick_answers_rays_on_the_exact_surface() {
+    let mut s = server();
+    let bar = json!({"radius": 20, "height": 60, "base": [-30, 0, 0], "axis": "X", "name": "Bar", "body_name": "Bar"});
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": bar}));
+    let r = tool(&mut s, "execute", json!({"command": "view.pick", "params": {"rays": [{"origin": [0, 10, 50], "dir": [0, 0, -1]}]}}));
+    let hit = &r["hits"][0];
+    assert_eq!(hit["body"], "Bar", "{r}");
+    let z = hit["point"][2].as_f64().unwrap_or(f64::NAN);
+    assert!((z - 300f64.sqrt()).abs() < 1e-9, "{r}");
+    let refused = raw_tool(&mut s, "execute", json!({"command": "view.pick", "params": {"pixels": [[1, 1]]}}));
+    assert!(refused.to_string().contains("running SolidCraft app"), "{refused}");
+}
+
 /// A connected app sees exactly one engine call; no inventory inspection is needed.
 #[test]
 fn compact_execute_uses_one_backend_call_and_keeps_removed_bodies() {
@@ -3473,6 +3611,42 @@ fn an_app_that_quits_during_a_call_may_have_run_it() {
     assert!(!e.starts_with(crate::backend::NOT_RUNNING) && e.contains("may have quit") && e.contains("Inspect the design"), "{e}");
 }
 
+/// #10967: an app whose connections are all taken refuses the call unrun and closes the
+/// connection. The error says so (not that the app may have quit), and the next call connects
+/// again.
+#[test]
+fn an_app_with_every_connection_taken_refuses_the_call_unrun() {
+    use std::io::{BufRead, BufReader, Write};
+
+    use crate::backend::Backend;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        for (method, refused) in [("engine.batch", true), ("engine.execute", true), ("engine.execute", false)] {
+            let (stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap()).read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(req["method"], method);
+            let reply =
+                if refused { json!({"ok": false, "error": "too many connections"}) } else { json!({"id": req["id"], "ok": true, "result": "ran"}) };
+            writeln!(&stream, "{reply}").unwrap();
+        }
+    });
+    // Connected on the first call: a batch goes on a fresh connection of its own (#743), so one
+    // opened up front would reach the stub unused.
+    let mut remote = crate::Remote::new(&addr, Some("0123456789abcdef0123456789abcdef"));
+    // A refused batch ran nothing either: not "it may have run".
+    let batch = crate::call_tool(&mut remote, "batch", &json!({"commands": [{"command": "solid.box"}]}));
+    let text = batch["content"][0]["text"].as_str().unwrap_or_default();
+    assert_eq!(batch["isError"], true);
+    assert!(text.contains("refused this call without running it") && !text.contains("may have run"), "{text}");
+    let e = remote.call("engine.execute", json!({"command": "solid.box"})).unwrap_err();
+    assert!(e.contains("refused this call without running it") && !e.contains("may have quit"), "{e}");
+    assert_eq!(remote.call("engine.execute", json!({"command": "solid.box"})).unwrap(), "ran");
+    app.join().unwrap();
+}
+
 /// Tool annotations never understate what a tool may do (#205): `screenshot` writes a file when
 /// given a `path`, and `execute`, `batch`, `save`, `export` and `open` can overwrite or delete
 /// files, so none of them is read-only and all are destructive and reach the file system.
@@ -3487,9 +3661,18 @@ fn tool_annotations_tell_the_whole_truth() {
     for name in ["execute", "batch", "save", "export", "open", "screenshot"] {
         assert_eq!(hints(name), (false, true, true), "{name}");
     }
-    for name in
-        ["list_commands", "describe_command", "inspect_design", "measure", "body_topology", "crash_reports", "skill_reference", "running", "pending"]
-    {
+    for name in [
+        "version",
+        "list_commands",
+        "describe_command",
+        "inspect_design",
+        "measure",
+        "body_topology",
+        "crash_reports",
+        "skill_reference",
+        "running",
+        "pending",
+    ] {
         assert_eq!(hints(name), (true, false, false), "{name}");
     }
     assert_eq!(hints("new_design"), (false, true, false));
@@ -4298,15 +4481,16 @@ fn inspect_text(s: &mut Server, args: Value) -> (bool, String) {
     (r["result"]["isError"] == json!(true), r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string())
 }
 
-/// No tool argument has a list of types and an `enum` together: some OpenAI-compatible
-/// endpoints (Moonshot) refuse every tool when one does, so the agent chat could not start
-/// a turn (#15306). The tool itself checks the words such an argument takes.
+/// No tool schema has a list of types, and no argument of several types has an `enum`. Gemini
+/// refuses a list of types (#16257); some OpenAI-compatible endpoints (Moonshot) refuse every
+/// tool when an argument of several types has an `enum` (#15306), so the agent chat could not
+/// start a turn. Several types are an `anyOf`; the tool itself checks the words it takes.
 #[test]
-fn no_tool_argument_has_a_list_of_types_with_an_enum() {
+fn no_tool_schema_has_a_list_of_types() {
     fn mixed(path: &str, schema: &Value, found: &mut Vec<String>) {
         match schema {
             Value::Object(o) => {
-                if o.get("type").is_some_and(Value::is_array) && o.contains_key("enum") {
+                if o.get("type").is_some_and(Value::is_array) || (o.contains_key("anyOf") && o.contains_key("enum")) {
                     found.push(path.to_string());
                 }
                 for (k, v) in o {
@@ -4338,7 +4522,7 @@ fn inspect_design_is_unchanged_without_compact_output() {
     let defs = tool_definitions();
     let def = defs.iter().find(|d| d["name"] == "inspect_design").unwrap();
     assert_eq!(def["inputSchema"]["properties"]["sketches"]["type"], "boolean", "{def}");
-    assert_eq!(def["inputSchema"]["properties"]["bodies"]["type"], json!(["boolean", "string"]), "no list of names: {def}");
+    assert_eq!(def["inputSchema"]["properties"]["bodies"]["anyOf"], json!([{"type": "boolean"}, {"type": "string"}]), "no list of names: {def}");
     let listed = call(&mut s, 1, "tools/list", json!({}));
     assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t == def), "tools/list serves the default definition");
 
@@ -4433,7 +4617,7 @@ impl crate::Backend for AppWithPrefs {
 fn inspect_design_is_compact(s: &mut Server) -> bool {
     let listed = call(s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().and_then(|t| t.iter().find(|d| d["name"] == "inspect_design")).cloned().unwrap_or_default();
-    def["inputSchema"]["properties"]["bodies"]["type"].as_array().is_some_and(|t| t.contains(&json!("array")))
+    def["inputSchema"]["properties"]["bodies"]["anyOf"].as_array().is_some_and(|t| t.iter().any(|alt| alt["type"] == "array"))
 }
 
 /// The app's Preferences turn compact output on for a bridged server; it asks until the app

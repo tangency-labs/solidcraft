@@ -534,33 +534,10 @@ pub struct ArcCenterPointParams {
     pub connect: Option<bool>,
 }
 
-/// A slot's `width`, as `slot_c2c` and `slot_overall` read it: a number above 1e-9 and below 1e9.
-/// A value that is missing, not a number or too small is the handler's one message.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SlotWidth(pub f64);
-
-impl<'de> Deserialize<'de> for SlotWidth {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Value::deserialize(d)?
-            .as_f64()
-            .and_then(params::finite)
-            .filter(|w| *w > 1e-9)
-            .map(SlotWidth)
-            .ok_or_else(|| D::Error::custom(whole("`width` must be positive")))
-    }
-}
-
-impl JsonSchema for SlotWidth {
-    fn schema_name() -> Cow<'static, str> {
-        "SlotWidth".into()
-    }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "description": "The slot's width in mm: the distance between its two straight sides, and the diameter of its round ends. Positive.",
-            "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1e9
-        })
-    }
-}
+// A slot's `width`, as `slot_width` reads it for every slot command: a number, or text that is an
+// expression over the design's parameters (a diameter dimension on a round end, driven by them),
+// as a circle's radius is (#15857). Whether it is positive is the handler's to check.
+circle_size!(SlotWidth, "width", "A slot's `width`: a number or an expression.");
 
 /// Marks `p0`, `p1` and `width` required in a slot's schema. The types hold them as optional
 /// (`#[schemars(required)]` doesn't do this for a key with `serde(default)`), so that a call
@@ -585,7 +562,8 @@ pub struct SlotCenterToCenterParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PlainPoint")]
     pub p1: Option<PlainPoint>,
-    /// The width of the slot, in mm.
+    /// The width of the slot, in mm: a number, or an expression over the design's parameters,
+    /// which makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,
@@ -611,7 +589,8 @@ pub struct SlotOverallParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PlainPoint")]
     pub p1: Option<PlainPoint>,
-    /// The width of the slot, in mm.
+    /// The width of the slot, in mm: a number, or an expression over the design's parameters,
+    /// which makes the width a dimension driven by them. Positive.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SlotWidth")]
     pub width: Option<SlotWidth>,

@@ -173,6 +173,19 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
             if Some(f.id) == s.active_sketch {
                 return Err(bad(cmd, "a sketch cannot project its own geometry"));
             }
+            if let Some(target) = sketch_store::active(s)
+                && let (Some(source_index), Some(target_index)) = (s.doc.feature_index(f.id), s.doc.feature_index(target))
+                && source_index > target_index
+            {
+                return Err(bad(
+                    cmd,
+                    format!(
+                        "sketch `{}` comes after this sketch in the timeline, so its geometry cannot be used here. \
+                         Move the source sketch earlier if its dependencies allow, or use a sketch after it.",
+                        f.name
+                    ),
+                ));
+            }
             if let Some(c) = curve {
                 return Ok(LinkSource::SketchCurve { sketch: f.id, curve: c.to_string() });
             }
@@ -482,6 +495,10 @@ fn add_link_unless_present(
     // The link is the edge or vertex that was picked, not whichever is nearest the picked point later.
     let edge_name = solidcraft_doc::project::resolved_edge_name(&st, &r);
     let vertex_name = solidcraft_doc::project::resolved_vertex_name(&st, &r);
+    let sketch_placements = match frame {
+        Some((author, frame)) => solidcraft_doc::project::capture_link_sketch_placements(&doc, author, &frame, &r.source)?,
+        None => Vec::new(),
+    };
     let link = sk.add_link_with_wires(kind, r.source, &r.geom, &r.wires)?;
     // The wires' exact curves, as a refresh of the link gives them (an included edge's record
     // curve): a link made now is the one its sketch would resolve.
@@ -490,6 +507,7 @@ fn add_link_unless_present(
         l.face_name = name;
         l.edge_name = edge_name;
         l.vertex_name = vertex_name;
+        l.sketch_placements = sketch_placements;
     }
     Ok(Some(link))
 }
@@ -605,9 +623,12 @@ fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// `{vertex: [x,y,z], body?}` under one of `keys` is projected into the sketch first, as
 /// Project does, and stands for the projected curve (or point) in the parameters returned.
 /// Any body's edges work, a mirrored or patterned copy's too; the link keeps the edge's
-/// persistent name, so the constraint follows the edge through rebuilds.
+/// persistent name, so the constraint follows the edge through rebuilds. An edge's middle,
+/// `{midpoint: {edge: [x,y,z], body?}}`, projects the edge and becomes `{midpoint: <its curve>}`,
+/// the middle of the projected line (#17920).
 pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&str]) -> Result<Value> {
-    if !keys.iter().any(|k| p.get(*k).is_some_and(model_ref)) {
+    let middle_of = |v: &Value| v.get("midpoint").filter(|m| m.get("edge").is_some() && model_ref(m)).cloned();
+    if !keys.iter().any(|k| p.get(*k).is_some_and(|v| model_ref(v) || middle_of(v).is_some())) {
         return Ok(p.clone());
     }
     if s.open_drawing.is_some() {
@@ -619,8 +640,12 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     refresh(s, &doc, id, &mut sk);
     let mut out = p.clone();
     for key in keys {
-        let Some(v) = p.get(*key).filter(|v| model_ref(v)) else { continue };
-        out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
+        let Some(v) = p.get(*key) else { continue };
+        if let Some(m) = middle_of(v) {
+            out[*key] = json!({"midpoint": project_ref(s, &doc, id, &mut sk, &m, cmd)?});
+        } else if model_ref(v) {
+            out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
+        }
     }
     sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;

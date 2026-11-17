@@ -45,10 +45,22 @@
 //! [`MAX_SPANS`] spans per direction for the offset; at most [`MAX_REGULARITY_PATCHES`]
 //! subdivided patches for the regularity test (a loop over an explicit stack, no
 //! recursion; the kernel's cancel token is polled per round, per row of patches and per
-//! patch examined). A face is refused when a point with `Q < 0` is found (it folds) or
-//! when the budget runs out uncertified (D5: not certified regular), which includes a
-//! base whose normal vanishes on the face (a pole), where no regular sheet is certified.
+//! patch examined). A face is refused when a point with `Q < 0` is proved (it folds) or
+//! when the budget runs out uncertified (D5: not certified regular, never a fold), which
+//! includes a base whose normal vanishes on the face (a pole), where no regular sheet is
+//! certified. A patch's middle where `Q` evaluates below 0 is a fold only once proved: the
+//! face's own point and partials there are enclosed in interval arithmetic from its net
+//! (`nurbs_partials_over_box`), not from the Bernstein forms, whose coefficients carry
+//! the rounding of their construction, and `det(I - d W) |N|^4 = |N|^4 - d |N| H + d^2 K`
+//! (`N = S_u x S_v`, `H = E n + G l - 2 F m`, `K = l n - m^2`, `l = S_uu . N`, ...) must
+//! be proved negative with `|N|^2` proved positive; otherwise the patch is subdivided as
+//! any other (#13685: a cylinder inset by exactly its radius, `Q = 0` everywhere, has
+//! middles where `Q` rounds to `-1e-13`).
 
+use crate::blend::fillet_section::certificate::nurbs_partials_over_box;
+use crate::blend::fillet_section::interval::Ivl;
+use crate::blend::fillet_section::series::V3;
+use crate::blend::fillet_section::station::Nurbs;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -973,16 +985,17 @@ impl RegularityForms {
 pub enum Regularity {
     /// The offset is regular on the whole region (`(1 - k1 d)(1 - k2 d) > 0`).
     Regular,
-    /// The offset folds (a point with `(1 - k1 d)(1 - k2 d) < 0` was found) or is not
-    /// certified regular within the budget; `largest` is the largest distance on that
-    /// side that works (the smallest radius of curvature on the displaced side), finite.
+    /// The offset folds: a point with `(1 - k1 d)(1 - k2 d) < 0` was proved; `largest` is
+    /// the largest distance on that side that works (the smallest radius of curvature on
+    /// the displaced side), finite.
     Folds {
         /// The largest offset distance (magnitude) whose offset does not fold.
         largest: f64,
     },
-    /// Not certified, and the sizing found no curvature towards that side, so no distance
-    /// is named: `Q` stays non-negative but will not separate from zero, where the
-    /// reduced normal vanishes, or the budget ran out.
+    /// Not certified regular and no fold proved: the budget ran out (`Q` will not separate
+    /// from zero, where the reduced normal vanishes or the offset collapses, or a fold
+    /// point is not proved), or a fold was proved but the sizing found no curvature
+    /// towards that side, so no distance is named.
     NotCertified,
 }
 
@@ -1024,28 +1037,38 @@ pub fn certify_regular(
 ) -> Result<Regularity> {
     let b = Binomials::new();
     let region = patches_in(s, uv_box)?;
-    let mut stack: Vec<RegularityForms> = Vec::new();
+    // the face's net, for the fold witness (none: no fold is proved)
+    let net = witness_net(s).ok();
+    let mut stack: Vec<(RegularityForms, [f64; 4])> = Vec::new();
     for patch in &region {
-        stack.push(RegularityForms::new(patch, d, &b)?);
+        stack.push((RegularityForms::new(patch, d, &b)?, patch.range));
     }
     let mut examined = 0usize;
     let mut folds = false;
-    while let Some(forms) = stack.pop() {
+    while let Some((forms, range)) = stack.pop() {
         k.check_cancelled(OP)?;
         examined += 1;
         if forms.certified() {
             continue;
         }
-        if forms.middle() < 0.0 {
-            // a point where the offset folds
+        let [u0, u1, v0, v1] = range;
+        let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
+        if forms.middle() < 0.0 && net.as_ref().is_some_and(|n| proved_fold(n, d, um, vm)) {
+            // a point where the offset folds, proved
             folds = true;
             break;
         }
         if examined > MAX_REGULARITY_PATCHES {
-            folds = true;
-            break;
+            // the budget spent: not certified, and no fold proved
+            return Ok(Regularity::NotCertified);
         }
-        stack.extend(forms.quarters());
+        let ranges = [
+            [u0, um, v0, vm],
+            [um, u1, v0, vm],
+            [u0, um, vm, v1],
+            [um, u1, vm, v1],
+        ];
+        stack.extend(forms.quarters().into_iter().zip(ranges));
     }
     if !folds {
         return Ok(Regularity::Regular);
@@ -1067,6 +1090,76 @@ pub struct Singular {
     /// Whether the offset collapses there (the radius is the distance, within the
     /// resolution) rather than folds (the distance is the larger by more).
     pub collapses: bool,
+}
+
+/// The face's net in the form its interval partials take ([`nurbs_partials_over_box`]):
+/// degrees, full knot vectors and homogeneous control points `(x w, y w, z w, w)`, u-major.
+pub(crate) fn witness_net(s: &Nurb) -> Result<Nurbs> {
+    let (p, q) = s.degrees();
+    let (n, m) = (s.n(), s.m());
+    let u = s.u_knots().to_vec();
+    let v = s.v_knots().to_vec();
+    let (nu, nv) = (n + 1, m + 1);
+    if u.len() != nu + p + 1 || v.len() != nv + q + 1 {
+        return Err(invalid("a net whose knots do not match it"));
+    }
+    let rational = s.is_rational();
+    let mut pw = Vec::new();
+    for i in 0..=n {
+        for j in 0..=m {
+            let (h, w) = coordinates(s.cpt(i, j)?, rational)?;
+            if !positive(w) {
+                return Err(invalid("a weight that is not positive"));
+            }
+            pw.extend_from_slice(&[h.x, h.y, h.z, w]);
+        }
+    }
+    Ok(Nurbs {
+        p,
+        q,
+        nu,
+        nv,
+        u,
+        v,
+        pw,
+    })
+}
+
+fn ivl_dot(a: V3<Ivl>, b: V3<Ivl>) -> Ivl {
+    a.x * b.x + a.y * b.y + a.z * b.z
+}
+
+fn ivl_cross(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
+    V3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+/// Whether the offset of the face `net` by `d` is proved to fold at `(u, v)`: its point and
+/// partials there enclosed from the net, `|N|^2` proved positive and
+/// `det(I - d W) |N|^4 = |N|^4 - d |N| H + d^2 K` proved negative (module docs). An
+/// enclosure that fails proves nothing.
+fn proved_fold(net: &Nurbs, d: f64, u: f64, v: f64) -> bool {
+    let Ok(p) = nurbs_partials_over_box(net, u, u, v, v, 2, 0) else {
+        return false;
+    };
+    let (su, sv) = (p.at(1, 0), p.at(0, 1));
+    let n = ivl_cross(su, sv);
+    let x2 = ivl_dot(n, n);
+    if !x2.is_positive() {
+        return false;
+    }
+    let (e, f, g) = (ivl_dot(su, su), ivl_dot(su, sv), ivl_dot(sv, sv));
+    let l = ivl_dot(p.at(2, 0), n);
+    let m = ivl_dot(p.at(1, 1), n);
+    let nn = ivl_dot(p.at(0, 2), n);
+    let h = e * nn + g * l - Ivl::from(2.0) * f * m;
+    let k = l * nn - m * m;
+    let di = Ivl::from(d);
+    let q = x2 * x2 - di * x2.sqrt() * h + di * di * k;
+    q.hi < 0.0
 }
 
 /// A proof that the offset of `s` by `d` (along its NURB normal) over the parameter box
@@ -1489,6 +1582,34 @@ mod tests {
             panic!("an inset past the radius folds");
         };
         assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+    }
+
+    /// #13685: inset by exactly its radius the cylinder's offset collapses onto its axis,
+    /// `Q = 0` everywhere, and its patches' middles evaluate `Q` a few ulps either side of 0.
+    /// A middle below 0 by rounding is no fold: no fold is proved, the budget runs out, and
+    /// the answer is not certified, never a fold naming a size (goldens
+    /// `member_cylinder_extend_inset_at_radius` measured `Q = -1.1e-13` there).
+    #[test]
+    fn a_cylinder_inset_by_its_radius_is_not_certified_never_a_fold() {
+        let s = quarter_cylinder();
+        assert_eq!(
+            certify_regular(&Kernel::default(), &s, -10.0, None).unwrap(),
+            Regularity::NotCertified
+        );
+    }
+
+    /// The fold witness: on the quarter cylinder (radius 10, its NURB normal outward), an
+    /// inset past the radius is proved to fold at any point, one by exactly the radius
+    /// (`det(I - d W) = 0`) is not, nor is one short of it.
+    #[test]
+    fn a_fold_is_proved_only_past_the_radius() {
+        let net = witness_net(&quarter_cylinder()).unwrap();
+        for (u, v) in [(0.5, 0.5), (0.1, 0.9), (0.9, 0.2)] {
+            assert!(proved_fold(&net, -10.5, u, v), "{u} {v}");
+            assert!(!proved_fold(&net, -10.0, u, v), "{u} {v}");
+            assert!(!proved_fold(&net, -9.5, u, v), "{u} {v}");
+            assert!(!proved_fold(&net, 10.5, u, v), "{u} {v}");
+        }
     }
 
     /// The quarter cylinder's homogeneous net degree-elevated to (`p`, `q`) (each step

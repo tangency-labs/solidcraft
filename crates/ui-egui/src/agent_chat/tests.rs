@@ -185,6 +185,8 @@ fn select_all_in_the_transcript_takes_the_whole_conversation() {
         [(crate::ui_kit::LayoutMode::Docked, false), (crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true)];
     for (dark, (layout, popped)) in [true, false].into_iter().flat_map(|dark| layouts.map(|l| (dark, l))) {
         let mut h = transcript_clipboard_harness(layout);
+        // The thought is shown open, so the test sees that it is drawn but not highlighted.
+        h.app.preferences.agent_thinking_folded = false;
         h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
         h.app.ui.dark = dark;
         if popped {
@@ -587,22 +589,84 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         pending_moves: Default::default(),
         part: None,
         visibility: Default::default(),
+        section: None,
     };
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
+    let start = UndoMark { depth: 3, top: Some(Box::new(snap(&docs[2]))) };
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &docs[3], 3, "Agent"), 3);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 3);
     assert_eq!(undo.len(), 3);
     assert!(Arc::ptr_eq(&undo[2].doc, &docs[3]) && undo[2].label == "Agent");
+    // The step on top at the start is gone too: the first step is found by its design.
+    let mut undo: Vec<_> = docs[3..6].iter().map(snap).collect();
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 3);
+    // A section step in the turn: the merged step brings back the section before it.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    let before = solidcraft_engine::SectionState { hatch: true, ..Default::default() };
+    undo[3].section = Some(before.clone());
+    merge_undo(&mut undo, &docs[3], &start, "Agent");
+    assert_eq!(undo[2].section, Some(before.clone()));
     // A start that is no longer in the history: nothing is merged.
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
-    assert_eq!(merge_undo(&mut undo, &doc(9), 3, "Agent"), 0);
+    let gone = UndoMark { depth: 3, top: Some(Box::new(snap(&doc(8)))) };
+    assert_eq!(merge_undo(&mut undo, &doc(9), &gone, "Agent"), 0);
     assert_eq!(undo.len(), 5);
     // A drawing's step among the model's: each part keeps its own steps.
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
     undo[3].part = Some(7);
-    assert_eq!(merge_undo(&mut undo, &docs[3], 3, "Agent"), 0);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 0);
     assert_eq!(undo.len(), 5);
+    // A turn that made no step leaves the user's own last step alone, though a section step
+    // keeps the design it began with.
+    let mut undo: Vec<_> = docs[1..4].iter().map(snap).collect();
+    undo[2].section = Some(before.clone());
+    undo[2].doc = docs[3].clone();
+    let start = UndoMark::of(&undo);
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 0);
+    assert_eq!((undo.len(), undo[2].label.as_str()), (3, ""));
+    // A full history of steps that all kept one design (section steps): the turn's steps follow
+    // the step on top at its start.
+    let step = |i: usize| solidcraft_engine::Snapshot { label: i.to_string(), ..snap(&docs[3]) };
+    let start = UndoMark::of(&[step(1), step(2), step(3)]);
+    let mut undo = vec![step(3), step(4), step(5)];
+    assert_eq!(merge_undo(&mut undo, &docs[3], &start, "Agent"), 2);
+}
+
+/// The user's own section step is theirs: a message that changed nothing does not take it over,
+/// and the chat's Undo of an agent's changes stops once the user has sectioned since.
+#[test]
+fn section_steps_stay_the_users() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    app.run("inspect.section", json!({"plane": "XY", "at": 5})).unwrap();
+    let (_tx, rx) = channel::<ControlRequest>();
+    app.agent_chat.tools_rx = Some(rx);
+    app.agent_chat.state = Some(State::Busy);
+    start_turn(&mut app, "look".into(), false, None, Vec::new());
+    end_turn(&mut app);
+    assert_eq!(app.session.undo.len(), 2);
+    assert_eq!(app.session.undo.last().map(|s| s.label.as_str()), Some("Section Analysis"));
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Changes { .. })));
+
+    let (mut app, tx) = app_in_a_turn();
+    let reply = ask(&tx, "engine.execute", boxed(0.0));
+    frame(&mut app);
+    assert_eq!(reply.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    end_turn(&mut app);
+    let n = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { .. })).expect("the changes are listed");
+    let offered = |app: &SolveApp| UndoMark::current(&app.agent_chat.items, &app.session.undo).is_some();
+    assert!(offered(&app), "the chat offers Undo of the agent's changes");
+    app.run("inspect.section", json!({"plane": "XY", "at": 5})).unwrap();
+    assert!(!offered(&app), "but not once the user has sectioned since");
+    undo_changes(&mut app, n);
+    assert_eq!(app.session.section.len(), 1, "the user's section stays");
+    assert_eq!(app.session.doc.features.len(), 1, "and so does the agent's box");
+    assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: false, .. }));
+    app.run("edit.undo", json!({})).unwrap();
+    assert!(offered(&app), "but again once the user's section is undone");
+    undo_changes(&mut app, n);
+    assert!(app.session.doc.features.is_empty() && matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
 }
 
 /// People who don't want AI never see it: with "Show AI features" off there is no button, the
@@ -3706,9 +3770,36 @@ fn an_agents_markdown_is_drawn_as_blocks() {
     h.frames(3);
     assert!(h.widget("Copy").is_some(), "the code block has its Copy button");
     assert!(h.widget("↗ example.com").is_some(), "the link is a button that names where it goes");
+    // A table is drawn as a table: its cells show, not the `|---|` line.
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "| Part | Mass |\n|---|---|\n| Gearbox | 12 kg |".into() });
+    h.frames(3);
+    assert!(h.widget("Gearbox").is_some(), "a cell of the table is drawn");
+    assert!(h.widget("|---|---|").is_none(), "the line under the header is not shown");
     // A hostile reply draws too (no panic, bounded work).
     h.app.agent_chat.items.push(Item::Agent { thought: false, text: "*".repeat(50_000) + &"[".repeat(5_000) + &"`a".repeat(5_000) });
     h.frames(3);
+    // So does a table with 16 columns and as many rows as the input allows (#16256): it stays
+    // preformatted text instead of becoming a couple of million labels.
+    h.app
+        .agent_chat
+        .items
+        .push(Item::Agent { thought: false, text: format!("{}\n{}\n{}", "| a ".repeat(16) + "|", "|---".repeat(16) + "|", "|\n".repeat(100_000)) });
+    h.frames(3);
+}
+
+/// A cell with a link is still one cell of the grid (#16256): the link button sits in the cell, not
+/// in a column of its own that would push the next cell under no header.
+#[test]
+fn a_table_cell_with_a_link_stays_in_its_column() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "| Part | Mass |\n|---|---|\n| [Gear](https://example.com) | Steel |".into() });
+    h.frames(3);
+    let mass = h.widget("Mass").expect("the header of the second column");
+    let steel = h.widget("Steel").expect("the cell of the second column");
+    assert!((steel[0] - mass[0]).abs() < 20.0, "Steel ({steel:?}) is under Mass ({mass:?}), not in a third column");
+    assert!(h.widget("↗ example.com").is_some(), "the link keeps its button");
 }
 
 // ---- Attach selection (#2286) ----
@@ -5532,6 +5623,27 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     assert!(solidcraft_ui_registry::handle_at("agent_chat:copy:0").is_none(), "a picture-only prompt hides the text-copy action");
     assert!(solidcraft_ui_registry::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
     assert!(h.widget("Copy message").is_none(), "nothing to click");
+}
+
+/// #17072: a reply's thinking starts folded under a Thinking header, and its arrow opens it;
+/// with `agent_thinking_folded` off it is shown open, as before.
+#[test]
+fn a_thought_starts_folded_and_its_arrow_opens_it() {
+    for folded in [true, false] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.preferences.agent_thinking_folded = folded;
+        h.call("ui.agent_chat", json!({"open": true}));
+        h.frames(3);
+        h.app.agent_chat.items.push(Item::Agent { thought: true, text: "pondering the plate".into() });
+        h.frames(3);
+        assert!(h.widget("Thinking").is_some(), "the header, folded = {folded}");
+        assert_eq!(h.widget("pondering the plate").is_some(), !folded, "the thinking shows only when open");
+        let arrow = solidcraft_ui_registry::handle_at("agent_chat:thought:0").expect("the thought's arrow");
+        h.call("ui.click", json!({"x": arrow.x, "y": arrow.y}));
+        h.frames(3);
+        assert_eq!(h.widget("pondering the plate").is_some(), folded, "the arrow turns it over");
+    }
 }
 
 fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {

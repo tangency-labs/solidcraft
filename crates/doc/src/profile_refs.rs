@@ -25,8 +25,10 @@ pub(crate) fn validate_whole(profiles: &[WholeProfileBoundary]) -> Result<()> {
         if profile.holes.len() > WHOLE_MAX_HOLES || !identities.insert((&profile.outer, &profile.holes)) {
             return Err(DocError::Invalid("invalid whole-source profile holes or duplicate identity".into()));
         }
-        let mut all = BTreeSet::new();
-        for boundary in std::iter::once(&profile.outer).chain(&profile.holes) {
+        // Holes may share a curve: a curve that splits an island bounds two of its regions, and
+        // both are holes of the profile around the island (#17613). No hole shares the outer's.
+        let mut outer = BTreeSet::new();
+        for (hole, boundary) in std::iter::once(&profile.outer).chain(&profile.holes).enumerate() {
             total += boundary.len();
             if boundary.is_empty() || boundary.len() > WHOLE_MAX_BOUNDARY_CURVES || total > WHOLE_MAX_TOTAL_CURVES {
                 return Err(DocError::Invalid("whole-source boundary exceeds its identity budget".into()));
@@ -37,7 +39,7 @@ pub(crate) fn validate_whole(profiles: &[WholeProfileBoundary]) -> Result<()> {
                     || curve.len() > WHOLE_MAX_ID_BYTES
                     || curve.chars().any(char::is_control)
                     || previous.is_some_and(|previous| previous >= curve)
-                    || !all.insert(curve)
+                    || if hole == 0 { !outer.insert(curve) } else { outer.contains(curve) }
                 {
                     return Err(DocError::Invalid("whole-source boundary needs canonical disjoint curve identities".into()));
                 }
@@ -507,6 +509,8 @@ mod tests {
                         to_offset: None,
                         from: None,
                         to_body_apart: false,
+                        from_level: false,
+                        picked_placements: Vec::new(),
                     },
                     operation: crate::Operation::NewBody,
                     targets: vec![],
@@ -701,6 +705,8 @@ mod tests {
                         to_offset: None,
                         from: None,
                         to_body_apart: false,
+                        from_level: false,
+                        picked_placements: Vec::new(),
                     },
                     operation: crate::Operation::NewBody,
                     targets: vec![],

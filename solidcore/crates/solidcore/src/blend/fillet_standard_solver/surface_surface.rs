@@ -224,6 +224,10 @@ impl SurfaceSurfaceFs {
 }
 
 impl FilletSolverOps for SurfaceSurfaceFs {
+    fn uses_constant_offset_equations(&self) -> bool {
+        true
+    }
+
     fn solver(&self) -> &FilletSolver {
         &self.base.solver
     }

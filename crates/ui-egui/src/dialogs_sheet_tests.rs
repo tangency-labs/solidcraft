@@ -1392,6 +1392,7 @@ fn source_flat_pattern_remains_visible_and_refittable_in_drawing() {
         let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
         let doc = app.session.doc.clone();
         let design = app.cam;
+        app.preferences.drawings_preview = true;
         crate::workspace::enter(&mut app, "drawing").unwrap();
         app.start("sheet.flat_pattern");
         let Some(Kind::Sheet(Sm::FlatPattern { data, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("source flat inspector") };
