@@ -248,8 +248,8 @@ fn revolve_partial_and_full() {
 }
 
 /// Loops given clockwise, a hole that is a full circle of three arcs: extrude and revolve
-/// number every face by the segments as given. Extruded, the circle's arcs sweep one wall,
-/// made from all three; the rectangle's sides one face each.
+/// number every face by the segments as given. The circle's arcs sweep one wall, made from
+/// all three; the rectangle's sides one face each.
 #[test]
 fn clockwise_loops_and_a_circle_of_arcs_keep_their_numbers() {
     let (c, rad) = (Vec2::new(20.0, 10.0), 4.0);
@@ -265,14 +265,20 @@ fn clockwise_loops_and_a_circle_of_arcs_keep_their_numbers() {
     }
     assert_eq!(got.iter().filter(|o| **o == [P(4), P(5), P(6)]).count(), 1, "the circle's one wall");
     assert_eq!(got.len(), 7, "four sides, the wall, two caps");
-    // Revolved, each arc turns into a face of its own, as the rectangle's sides do.
+    // Revolved, the circle's arcs make one torus wall with all three source numbers.
     for angle in [FRAC_PI_2, TAU] {
         let b = crate::revolve(&SIDE, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, angle).unwrap().pop().unwrap();
         let got = origins(&b);
         assert_eq!(got, expected_revolution(&b, &r), "angle {angle}");
-        for k in 0..7 {
+        for k in 0..4 {
             assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), 1, "segment {k} at angle {angle}");
         }
+        assert_eq!(got.iter().filter(|o| **o == [P(4), P(5), P(6)]).count(), 1, "the circle's one wall at angle {angle}");
+        let caps = usize::from(angle < TAU);
+        for cap in [START, END] {
+            assert_eq!(got.iter().filter(|o| **o == [cap]).count(), caps, "cap {cap:?} at angle {angle}");
+        }
+        assert_eq!(got.len(), 5 + 2 * caps, "four sides, the wall, and any caps at angle {angle}");
     }
 }
 
