@@ -11,8 +11,8 @@
   },
   "ar": {
     "parameters.grid_name_required": "يحتاج المعامل إلى اسم",
-    "parameters.grid_new_needs": "يحتاج الصف الملصق إلى اسم وتعبير ليصبح معاملاً",
-    "parameters.grid_unknown_unit": "\"{unit}\" ليست إحدى الوحدات"
+    "parameters.grid_new_needs": "يحتاج الصف الملصق إلى اسم وتعبير ليصبح معاملًا",
+    "parameters.grid_unknown_unit": "«{unit}» ليست إحدى الوحدات"
   },
   "he": {
     "parameters.grid_name_required": "פרמטר חייב שם",

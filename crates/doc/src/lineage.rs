@@ -223,6 +223,9 @@ pub(crate) struct ProfileRoles<'a> {
     pub region: Option<&'a Region2>,
     /// The start and end caps' roles (`None`: not known).
     pub caps: [Option<String>; 2],
+    /// A second name each cap answers to (`None`: none), so a reference picked under the name the
+    /// cap had before the extrude's direction changed still finds it.
+    pub cap_synonyms: [Option<String>; 2],
     /// A thin wall: its sides lie off the sketch curves, and are named by the curve they run
     /// beside.
     pub thin: Option<&'a ThinWallRoles>,
@@ -268,7 +271,12 @@ impl<'a> ProfileRoles<'a> {
                 for origin in &face.origins {
                     let found = match *origin {
                         FaceOrigin::Profile { segment } => curve(segment),
-                        FaceOrigin::Cap { end } => self.caps.get(usize::from(end)).cloned().flatten().into_iter().collect(),
+                        FaceOrigin::Cap { end } => {
+                            let k = usize::from(end);
+                            let name = self.caps.get(k).cloned().flatten();
+                            // A cap with no name stays unknown; one with a name also answers to its synonym.
+                            name.into_iter().chain(self.cap_synonyms.get(k).cloned().flatten()).collect()
+                        }
                         _ => Vec::new(),
                     };
                     // One unknown origin leaves the face unknown: never a partial guess.
@@ -290,7 +298,7 @@ impl<'a> ProfileRoles<'a> {
     /// A body swept from a profile (revolve, sweep, loft): its sides named by the sketch curves,
     /// its caps `start` and `end`.
     pub fn swept(sketch: Option<&'a SolvedSketch>, region: Option<&'a Region2>) -> ProfileRoles<'a> {
-        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())], thin: None }
+        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())], cap_synonyms: [None, None], thin: None }
     }
 
     /// A tool built from the profile (and then moved, from `built`, when given), its faces named
