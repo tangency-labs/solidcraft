@@ -518,12 +518,23 @@ pub(crate) fn numbered_tool(body: Body) -> Traced {
 /// there ([`link_role`]), so a reference to it follows that name, not the face's place in the
 /// file, when the design changes; it still answers to `face:<k>`.
 pub(crate) fn linked_tool(body: Body, fid: u64, carried: &[String]) -> Traced {
+    linked_tool_from(body, fid, carried, None)
+}
+
+/// [`linked_tool`] for a body whose face `k` was face `source[k]` of the body the roles and
+/// carried names are of (an import's part healed: `solidcraft_kernel::HealedBody::face_source`):
+/// each face keeps the roles of the face it was, so a reference to a face of the body as read
+/// finds the same face, and one to a face the heal removed finds nothing.
+pub(crate) fn linked_tool_from(body: Body, fid: u64, carried: &[String], source: Option<&[usize]>) -> Traced {
     let roles = (0..body.face_count())
-        .map(|k| {
-            let numbered = format!("face:{k}");
-            match carried.get(k).filter(|n| !n.is_empty()) {
-                Some(name) => vec![link_role(fid, name, 0), numbered],
-                None => vec![numbered],
+        .map(|k| match source.map_or(Some(k), |s| s.get(k).copied()) {
+            None => Vec::new(),
+            Some(k) => {
+                let numbered = format!("face:{k}");
+                match carried.get(k).filter(|n| !n.is_empty()) {
+                    Some(name) => vec![link_role(fid, name, 0), numbered],
+                    None => vec![numbered],
+                }
             }
         })
         .collect();

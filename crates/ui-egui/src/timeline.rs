@@ -737,9 +737,7 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
 /// looks again a few times a second.
 pub(crate) fn tick_import_checks(app: &mut SolveApp, ctx: &egui::Context) {
     // Parts the checks healed: the import is its healed bodies from now on.
-    if app.session.model.settle_import_checks() {
-        app.session.refresh();
-    }
+    app.session.settle_import_checks();
     for id in app.session.model.take_import_notices() {
         if let Some(summary) = app.session.model.result(id).and_then(|r| r.import_report.as_deref()).map(import_summary) {
             app.set_status(summary, false);

@@ -1135,7 +1135,16 @@ impl Reader {
                         } else if part.refused.is_none() && !body.is_mesh() {
                             self.check_of.insert(class, self.check_jobs.len());
                             let (part_name, label) = (self.part_name(item), self.label(item));
-                            self.check_jobs.push(checks::Job { item, part: part_name, what, body: body.clone(), times: 1, label, m, source: part.clone() });
+                            self.check_jobs.push(checks::Job {
+                                item,
+                                part: part_name,
+                                what,
+                                body: body.clone(),
+                                times: 1,
+                                label,
+                                m,
+                                source: part.clone(),
+                            });
                         }
                     }
                     self.instances.push((item, m));

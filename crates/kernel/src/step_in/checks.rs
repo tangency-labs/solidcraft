@@ -72,6 +72,9 @@ pub struct HealedBody {
     pub body: Body,
     /// The file face of each of its faces.
     pub face_origin: Vec<u64>,
+    /// For each of its faces, the face of the body as read it was (the heal only removes
+    /// faces): what a reference to a face of the body as read finds in it.
+    pub face_source: Vec<usize>,
 }
 
 /// The bodies of an import whose parts the checks healed, in the order of the import's bodies
@@ -115,7 +118,7 @@ impl ImportHeals {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         "import heals".hash(&mut h);
         for b in &bodies {
-            (b.index, b.body.face_count(), &b.face_origin).hash(&mut h);
+            (b.index, b.body.face_count(), &b.face_origin, &b.face_source).hash(&mut h);
         }
         // Never 0, which says "no heals" to a digest that folds this in.
         ImportHeals { digest: h.finish() | 1, bodies }
@@ -172,12 +175,8 @@ struct ItemHeal {
 /// read order.
 fn to_heal(jobs: &[Job], outcomes: &[Outcome]) -> Vec<(u64, Vec<usize>)> {
     // A file whose checks all pass (most) costs one pass over the outcomes.
-    let failing: std::collections::HashSet<u64> = jobs
-        .iter()
-        .zip(outcomes)
-        .filter(|(_, o)| matches!(o, Outcome::NeedsRepair(_) | Outcome::CouldNotRun(_)))
-        .map(|(j, _)| j.item)
-        .collect();
+    let failing: std::collections::HashSet<u64> =
+        jobs.iter().zip(outcomes).filter(|(_, o)| matches!(o, Outcome::NeedsRepair(_) | Outcome::CouldNotRun(_))).map(|(j, _)| j.item).collect();
     let mut items: Vec<(u64, Vec<usize>)> = Vec::new();
     let mut at: HashMap<u64, usize> = HashMap::new();
     for (k, job) in jobs.iter().enumerate().filter(|(_, j)| failing.contains(&j.item)) {
@@ -210,8 +209,8 @@ fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals:
         Outcome::Stopped => return ItemHeal { stopped: true, ..ItemHeal::default() },
         Outcome::Passes | Outcome::CouldNotRun(_) => return ItemHeal::default(),
     }
-    let (healed, note, kept) = match parallel::heal(part, item) {
-        parallel::Healed::Kept(healed, note, kept) => (healed, note, kept),
+    let (healed, note, kept, face_source) = match parallel::heal(part, item) {
+        parallel::Healed::Kept(healed, note, kept, face_source) => (healed, note, kept, face_source),
         parallel::Healed::NotKept => return ItemHeal::default(),
         parallel::Healed::Stopped => return ItemHeal { stopped: true, ..ItemHeal::default() },
         parallel::Healed::CouldNotRun(e) => {
@@ -245,7 +244,7 @@ fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals:
             }
             None => body,
         };
-        bodies.push(HealedBody { index, body, face_origin: healed.face_origin.clone() });
+        bodies.push(HealedBody { index, body, face_origin: healed.face_origin.clone(), face_source: face_source.clone() });
     }
     let mut rechecked = Vec::new();
     for &k in of {
@@ -264,6 +263,12 @@ fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals:
         if matches!(outcome, Outcome::Stopped) {
             return ItemHeal { stopped: true, ..ItemHeal::default() };
         }
+        // The heal is the part every instance shares: a placement whose check passed on the
+        // part as read and fails on the healed part keeps the part as read, for all of them.
+        if matches!(outcomes.get(k), Some(Outcome::Passes)) && !matches!(outcome, Outcome::Passes) {
+            log::debug!(target: "step", "the heal of item #{item} not kept: a placement that passed fails healed");
+            return ItemHeal::default();
+        }
         rechecked.push((k, outcome));
     }
     ItemHeal { bodies, rechecked, note: Some((IssueKind::Repaired, format!("{}: {note}", first.label))), stopped: false }
@@ -272,7 +277,12 @@ fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals:
 /// Heal the parts `outcomes` fail on ([`heal_item`]), on up to `workers` threads: the outcomes
 /// checked again on the healed parts, the notes to say before each item's issues, the heals,
 /// and whether a token stopped it.
-fn heal_parts(jobs: &[Job], outcomes: &mut [Outcome], heals: &Heals, workers: usize) -> (HashMap<u64, (IssueKind, String)>, Option<Arc<ImportHeals>>, bool) {
+fn heal_parts(
+    jobs: &[Job],
+    outcomes: &mut [Outcome],
+    heals: &Heals,
+    workers: usize,
+) -> (HashMap<u64, (IssueKind, String)>, Option<Arc<ImportHeals>>, bool) {
     let items = to_heal(jobs, outcomes);
     if items.is_empty() {
         return (HashMap::new(), None, false);
@@ -285,14 +295,18 @@ fn heal_parts(jobs: &[Job], outcomes: &mut [Outcome], heals: &Heals, workers: us
             .map(|(done, (item, _))| {
                 done.unwrap_or_else(|| {
                     let label = jobs.iter().find(|j| j.item == *item).map(|j| j.label.clone()).unwrap_or_default();
-                    ItemHeal { note: Some((IssueKind::NeedsRepair, format!("{label}: the tolerance heal failed: it failed in the kernel"))), ..ItemHeal::default() }
+                    ItemHeal {
+                        note: Some((IssueKind::NeedsRepair, format!("{label}: the tolerance heal failed: it failed in the kernel"))),
+                        ..ItemHeal::default()
+                    }
                 })
             })
             .collect()
     };
     let mut notes = HashMap::new();
     let mut bodies = Vec::new();
-    let mut stopped = false;
+    // A heal the token stopped may have ended as no heal: the run is stopped, whatever finished.
+    let mut stopped = solidcraft_smlib::stop::current().is_some_and(|s| s.is_stopped());
     for (done, (item, _)) in done.into_iter().zip(&items) {
         stopped |= done.stopped;
         for (k, outcome) in done.rechecked {
@@ -323,8 +337,11 @@ struct Settled {
 /// Heal what the checks of `jobs` fail ([`heal_parts`]) and say what they found: the issues of
 /// `jobs` given their outcomes (in the same order), each healed item's note before its first.
 fn settle(jobs: &[Job], mut outcomes: Vec<Outcome>, heals: &Heals, workers: usize) -> Settled {
-    let (mut notes, healed, mut stopped) =
-        if outcomes.iter().any(|o| matches!(o, Outcome::Stopped)) { (HashMap::new(), None, true) } else { heal_parts(jobs, &mut outcomes, heals, workers) };
+    let (mut notes, healed, mut stopped) = if outcomes.iter().any(|o| matches!(o, Outcome::Stopped)) {
+        (HashMap::new(), None, true)
+    } else {
+        heal_parts(jobs, &mut outcomes, heals, workers)
+    };
     let mut issues = Vec::new();
     for (job, outcome) in jobs.iter().zip(&outcomes) {
         if let Some((kind, detail)) = notes.remove(&job.item) {
@@ -353,7 +370,14 @@ fn settle(jobs: &[Job], mut outcomes: Vec<Outcome>, heals: &Heals, workers: usiz
 
 /// Check `jobs` on up to `workers` threads, under the validation mode `scope`, under `over` too
 /// when given, and under the run's own token; then say what they found.
-fn run(shared: &Shared, jobs: &[Job], heals: &Heals, workers: usize, scope: Option<Arc<crate::validation::Scope>>, over: Option<solidcraft_smlib::stop::Stop>) {
+fn run(
+    shared: &Shared,
+    jobs: &[Job],
+    heals: &Heals,
+    workers: usize,
+    scope: Option<Arc<crate::validation::Scope>>,
+    over: Option<solidcraft_smlib::stop::Stop>,
+) {
     let own = shared.stop.clone();
     // Whatever happens here, a waiter is woken: a panic outside the per-check guard ends the run
     // as stopped (its list incomplete) instead of leaving `wait` blocked.

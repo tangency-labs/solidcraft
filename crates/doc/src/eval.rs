@@ -1542,6 +1542,11 @@ pub struct Model {
     import_notices: Vec<u64>,
     /// The import check runs this model has put in `import_notices`, by feature.
     told_imports: Vec<(u64, kernel::ImportChecks)>,
+    /// Import heals were settled into the model that no evaluation has brought in yet.
+    import_heals_owed: bool,
+    /// The imports read by evaluations whose checks have not been settled yet, by feature: held
+    /// until they are, so that checks that heal parts keep the read their heals apply to.
+    import_reads: Vec<(u64, Arc<kernel::StepImport>)>,
     pub param_errors: BTreeMap<String, String>,
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
@@ -1649,8 +1654,10 @@ struct ImportDigests {
     /// The parts SMLib's checks of an import healed once they ended (after the import was
     /// first shown: [`Model::settle_import_checks`]), by import feature, with the digest of the
     /// text they were read from: the import is then its healed bodies, and its fingerprint (and
-    /// so every fingerprint after it) says so. Kept while the feature's text is the same.
-    heals: std::collections::HashMap<u64, (u64, Arc<kernel::ImportHeals>)>,
+    /// so every fingerprint after it) says so. Kept while the feature's text is the same, with
+    /// the import read (when the model holds it), so the evaluation that brings the heals in
+    /// reuses that read ([`kernel::step_import_shared`]) instead of reading a large file again.
+    heals: std::collections::HashMap<u64, (u64, Arc<kernel::ImportHeals>, Option<Arc<kernel::StepImport>>)>,
 }
 
 #[derive(Clone, Debug)]
@@ -1677,7 +1684,7 @@ impl ImportDigests {
                 FeatureKind::Import { step, .. } => {
                     let digest = known.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
                     out.steps.insert(f.id, (step.clone(), digest));
-                    if let Some(heals) = known.heals.get(&f.id).filter(|(of, _)| *of == digest) {
+                    if let Some(heals) = known.heals.get(&f.id).filter(|(of, _, _)| *of == digest) {
                         out.heals.insert(f.id, heals.clone());
                     }
                 }
@@ -1705,7 +1712,7 @@ impl ImportDigests {
 
     /// The heals the import `id` is evaluated with, if its checks healed its parts.
     fn heals(&self, id: u64) -> Option<&Arc<kernel::ImportHeals>> {
-        self.heals.get(&id).map(|(_, heals)| heals)
+        self.heals.get(&id).map(|(_, heals, _)| heals)
     }
 
     fn get(&self, id: u64, step: &Arc<str>) -> Option<u64> {
@@ -3257,10 +3264,12 @@ impl Model {
     /// make the import its healed bodies from then on: the heals join the import's fingerprint,
     /// and the import and every result after it are marked stale, keeping their geometry until
     /// the next [`Model::evaluate`] brings them up to date ([`Model::is_stale`]). Returns
-    /// whether that happened.
+    /// whether an evaluation is owed to such heals: settled now or by an earlier call, and not
+    /// evaluated since (a caller that could not evaluate then is asked again).
     pub fn settle_import_checks(&mut self) -> bool {
         let (found, told) = (&mut self.import_notices, &mut self.told_imports);
         let digests = &mut self.import_digests;
+        let reads = &mut self.import_reads;
         let mut stale_from: Option<usize> = None;
         for (i, r) in self.results.iter_mut().enumerate() {
             let Some(report) = r.import_report.as_ref() else { continue };
@@ -3268,11 +3277,12 @@ impl Model {
                 continue;
             }
             let run = &report.checks;
+            let read = reads.iter().position(|(id, _)| *id == r.id).map(|k| reads.remove(k).1);
             if let Some(heals) = run.heals()
                 && let Some((_, text)) = digests.steps.get(&r.id)
                 && digests.heals(r.id).is_none_or(|known| known.digest() != heals.digest())
             {
-                digests.heals.insert(r.id, (*text, heals));
+                digests.heals.insert(r.id, (*text, heals, read));
                 stale_from = Some(stale_from.map_or(i, |s| s.min(i)));
             }
             let fresh = run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
@@ -3286,6 +3296,9 @@ impl Model {
                 found.push(r.id);
             }
         }
+        // A read whose import is gone, or whose checks ended with it, is not held any longer.
+        let results = &self.results;
+        self.import_reads.retain(|(id, _)| results.iter().any(|r| r.id == *id && r.import_report.as_ref().is_some_and(|i| i.checking())));
         if let Some(from) = stale_from {
             for r in self.results.iter_mut().skip(from) {
                 r.stale = true;
@@ -3293,8 +3306,9 @@ impl Model {
             // The fingerprints from the import on are no longer the results'.
             self.fingerprinted = None;
             self.placement_inputs = None;
+            self.import_heals_owed = true;
         }
-        stale_from.is_some()
+        self.import_heals_owed
     }
 
     /// Some import is its bodies as its checks healed them ([`Self::settle_import_checks`]).
@@ -3543,6 +3557,8 @@ impl Model {
         // sketch and every feature after it fail, the results end in the state they ended in
         // before, which would keep showing the sketch as it was before the edit.
         self.held = None;
+        self.import_heals_owed = false;
+        IMPORT_READS.with(|r| *r.borrow_mut() = Some(Vec::new()));
         let _span = solidcraft_profile::span("doc", "evaluate");
         self.placement_inputs = None;
         self.fingerprinted = None;
@@ -3864,13 +3880,12 @@ impl Model {
                     }
                     None => kernel::guard(&f.name, || {
                         let _val_guard = EvalValidationGuard::new(validation);
-                        let (r, deferred) =
-                            kernel::validating(validation, || {
-                                IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
-                                let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair);
-                                IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
-                                r
-                            });
+                        let (r, deferred) = kernel::validating(validation, || {
+                            IMPORT_HEALS.with(|h| *h.borrow_mut() = self.import_digests.heals(f.id).cloned());
+                            let r = eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair);
+                            IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
+                            r
+                        });
                         r.map_err(|e| match e {
                             // A panic the kernel caught stays one.
                             crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
@@ -4052,6 +4067,10 @@ impl Model {
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
         self.poses = poses;
         self.results = out;
+        for (id, read) in IMPORT_READS.with(|r| r.borrow_mut().take()).unwrap_or_default() {
+            self.import_reads.retain(|(of, _)| *of != id);
+            self.import_reads.push((id, read));
+        }
         // A cached import's result is as its check left it, not as the import first showed.
         self.settle_import_checks();
         self.last_recomputed = recomputed;
@@ -4909,6 +4928,9 @@ thread_local! {
     /// The heals of the import being evaluated, as its fingerprint has them
     /// ([`ImportDigests::heals`]); set by [`Model::evaluate`] for that one feature.
     static IMPORT_HEALS: std::cell::RefCell<Option<Arc<kernel::ImportHeals>>> = const { std::cell::RefCell::new(None) };
+    /// The imports [`Model::evaluate`] read whose checks it may yet settle, by feature (`None`
+    /// outside an evaluation: nothing is collected).
+    static IMPORT_READS: std::cell::RefCell<Option<Vec<(u64, Arc<kernel::StepImport>)>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The body that the target `name`, gone from the model, is part of now: a Combine before `f`
@@ -11615,6 +11637,13 @@ fn eval_feature_kind(
         }
         FeatureKind::Import { step, skip, .. } => {
             let imp = kernel::step_import_shared(step)?;
+            if !imp.report.checks.is_empty() {
+                IMPORT_READS.with(|r| {
+                    if let Some(reads) = r.borrow_mut().as_mut() {
+                        reads.push((f.id, imp.clone()));
+                    }
+                });
+            }
             let digest = crate::config::payload_digest(step);
             let names = import_body_names(st, &f.body_names, &imp, skip);
             // The parts the import's checks healed, when the model has them ([`ImportDigests::heals`]).
@@ -11622,8 +11651,10 @@ fn eval_feature_kind(
             for (k, (b, name)) in imp.bodies.iter().zip(names).enumerate() {
                 let Some(name) = name else { continue };
                 let carried = f.link_faces.get(k).map_or(&[][..], Vec::as_slice);
-                let body = heals.as_ref().and_then(|h| h.body(k)).map_or(&b.body, |h| &h.body);
-                let b = crate::lineage::linked_tool(body.clone().with_import_certificate(&digest, f.id)?, f.id, carried);
+                let healed = heals.as_ref().and_then(|h| h.body(k));
+                let body = healed.map_or(&b.body, |h| &h.body);
+                let source = healed.map(|h| h.face_source.as_slice());
+                let b = crate::lineage::linked_tool_from(body.clone().with_import_certificate(&digest, f.id)?, f.id, carried, source);
                 for record in f.link_threads.get(k).into_iter().flatten() {
                     if !record.axis_point.is_finite()
                         || !record.start.is_finite()

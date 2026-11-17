@@ -2954,14 +2954,32 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
     };
     let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
     let face_origin = vec![0; healed.face_count()];
-    let checks = kernel::ImportChecks::ended_for_tests(vec![issue], vec![kernel::HealedBody { index: 0, body: healed, face_origin }]);
+    // Each healed face says which face of the body as read it was: here in reverse order.
+    let face_source: Vec<usize> = (0..healed.face_count()).rev().collect();
+    let body_of = |m: &Model, volume: f64| {
+        let st = m.state();
+        let b = st.bodies.iter().find(|b| b.body.volume_at(1e-6).unwrap().round() == volume).unwrap().clone();
+        crate::naming::face_names(&b)
+    };
+    let names_before = body_of(&model, 1000.0);
+    let checks = kernel::ImportChecks::ended_for_tests(
+        vec![issue],
+        vec![kernel::HealedBody { index: 0, body: healed, face_origin, face_source: face_source.clone() }],
+    );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
     r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), checks: checks.clone() }));
 
     assert!(model.settle_import_checks(), "a heal changes the import");
+    assert!(model.settle_import_checks(), "until an evaluation brings it in, it is still owed");
     assert!(model.results.iter().all(|r| r.stale), "the import and what follows it are stale");
     model.evaluate(&doc);
     assert_eq!(volumes(&model), [27.0, 125.0], "the healed part replaces the file's");
+    // A reference to a face of the body as read finds the face it became.
+    let names_after = body_of(&model, 27.0);
+    assert_eq!(names_after.len(), face_source.len());
+    for (k, &from) in face_source.iter().enumerate() {
+        assert_eq!(names_after[k], names_before[from], "healed face {k} is read face {from}");
+    }
     let after = fingerprints(&model);
     assert!(after.iter().zip(&before).all(|(a, b)| a != b), "no result keeps an unhealed fingerprint");
     assert!(model.result(later).unwrap().error.is_none());

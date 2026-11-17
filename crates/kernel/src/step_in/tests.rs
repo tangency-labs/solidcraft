@@ -954,7 +954,16 @@ fn a_placement_that_scales_a_part_is_checked_as_placed() {
 fn check_job(body: &Body, name: &str, times: usize) -> checks::Job {
     let n = body.face_count();
     let source = Arc::new(parallel::Part { body: body.clone(), closed: true, file_faces: n, face_origin: (0..n as u64).collect(), refused: None });
-    checks::Job { item: 101, part: name.into(), what: format!("solid '{name}'"), body: body.clone(), times, label: format!("solid '{name}'"), m: IDENTITY, source }
+    checks::Job {
+        item: 101,
+        part: name.into(),
+        what: format!("solid '{name}'"),
+        body: body.clone(),
+        times,
+        label: format!("solid '{name}'"),
+        m: IDENTITY,
+        source,
+    }
 }
 
 /// The check jobs and heal input the reader makes of one part (item 7, `Hair`, its faces file
@@ -974,7 +983,16 @@ fn part_jobs(body: &Body, placements: &[M4]) -> (Vec<checks::Job>, checks::Heals
         of.insert(class, jobs.len());
         let body = parallel::placed(&part.body, m).expect("placed");
         let what = if class.is_some() { "solid 'Hair' as its placement scales, shears or mirrors it" } else { "solid 'Hair'" };
-        jobs.push(checks::Job { item: 7, part: "Hair".into(), what: what.into(), body, times: 1, label: "solid 'Hair'".into(), m: *m, source: part.clone() });
+        jobs.push(checks::Job {
+            item: 7,
+            part: "Hair".into(),
+            what: what.into(),
+            body,
+            times: 1,
+            label: "solid 'Hair'".into(),
+            m: *m,
+            source: part.clone(),
+        });
     }
     let heals = checks::Heals {
         instances: placements.iter().map(|m| (7, *m)).collect(),
@@ -4426,8 +4444,11 @@ fn an_imported_part_whose_check_fails_is_healed_where_it_is_read() {
     let part = Part { body, closed: true, file_faces: faces, face_origin: origin.clone(), refused: None };
     let read = heal(&part, 7);
     assert_eq!(part.body.record(), &source, "the part read stays as it was");
-    let Healed::Kept(part, note, check) = read else { panic!("kept") };
+    let Healed::Kept(part, note, check, face_source) = read else { panic!("kept") };
     assert_eq!(part.body.face_count(), 7);
+    // each face says which face of the part as read it was, as its file face does
+    assert_eq!(face_source.iter().map(|&f| origin[f]).collect::<Vec<_>>(), part.face_origin);
+    assert!(!face_source.contains(&2), "the riser is gone");
     assert_eq!(crate::validation::failing_check(&part.body).unwrap(), None);
     // the riser (the record's third face, file face 102) is the one face gone
     let mut kept = part.face_origin.clone();
@@ -4528,7 +4549,12 @@ fn a_scaled_instance_that_fails_as_placed_heals_nothing() {
         let stretched = parallel::placed(&part, &stretch).unwrap();
         let failure = crate::validation::failing_check(&stretched).unwrap().expect("the stretched body fails as placed");
         let details: Vec<&str> = issues.iter().map(|i| i.detail.as_str()).collect();
-        assert_eq!(details, [format!("solid 'Hair' as its placement scales, shears or mirrors it: needs repair before it can be modelled: SMLib's check fails it: {failure}")]);
+        assert_eq!(
+            details,
+            [format!(
+                "solid 'Hair' as its placement scales, shears or mirrors it: needs repair before it can be modelled: SMLib's check fails it: {failure}"
+            )]
+        );
     }
 
     // A part whose own check fails is healed even when its only instance is stretched: the
@@ -4546,7 +4572,10 @@ fn a_scaled_instance_that_fails_as_placed_heals_nothing() {
     assert_eq!(healed.face_count(), 7);
     assert!((z_extent(healed) - 100.0 * z_extent(&hair)).abs() < 1e-6, "the healed part, placed");
     let recheck = crate::validation::failing_check(healed).unwrap();
-    assert!(matches!(&issues[0], ImportIssue { kind: IssueKind::Repaired, detail, .. } if detail.contains("healed SMLib's check failures")), "{issues:?}");
+    assert!(
+        matches!(&issues[0], ImportIssue { kind: IssueKind::Repaired, detail, .. } if detail.contains("healed SMLib's check failures")),
+        "{issues:?}"
+    );
     assert_eq!(issues.len(), 1 + usize::from(recheck.is_some()), "the warning is the healed body's check as placed: {issues:?}");
 }
 

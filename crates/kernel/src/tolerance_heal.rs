@@ -9,7 +9,9 @@
 //! that body's record brought into SMLib ([`Body::from_record`]), which is not the same body
 //! bit for bit. So the body kept is checked again as it is kept, by SMLib
 //! ([`crate::validation::failing_check`]), and stands only when SMLib takes it, and its check
-//! fails fewer tests than the check that decided the heal and no kind of test more often.
+//! fails fewer tests than the check that decided the heal and no kind of test more often, and
+//! the same against SMLib's own check of the body as it was (when the healed body still fails
+//! some test: one that passes is better than any).
 
 use std::collections::BTreeMap;
 
@@ -128,6 +130,19 @@ pub fn heal_tolerance_defects(body: &Body) -> Result<Option<(Body, ToleranceHeal
         log::debug!(target: "repair", "tolerance heal not kept: {why}");
         return Ok(None);
     }
+    // The deciding check above is solidcore-ops' of the body it converted. SMLib's own check of
+    // the body as it is must be bettered as well: a heal is kept only when both say so.
+    if check.is_some() {
+        let own = crate::validation::failing_check(body).map_err(|e| match e {
+            e @ KernelError::Internal(_) => e,
+            _ if stopped() => KernelError::Heal(HealFailure::Stopped),
+            e => KernelError::Heal(HealFailure::CouldNotRun(format!("SMLib's check of the body: {e}"))),
+        })?;
+        if let Some(why) = own.as_ref().map_or(Some("SMLib's check passes the body".to_string()), |own| worse_than(own, check.as_ref())) {
+            log::debug!(target: "repair", "tolerance heal not kept: {why}");
+            return Ok(None);
+        }
+    }
     let heal = ToleranceHeal {
         squeezed_edges: report.squeezed_edges,
         re_ended_edges: report.re_ended_edges,
@@ -150,13 +165,31 @@ fn stopped() -> bool {
 /// check that decided the heal (`before`), or `None` when it is: it fails fewer tests, and no
 /// kind of test (its owner's class and number, `SmEdge::Test #7`) more often.
 fn worse(before: &solidcore_ops::check::CheckReport, after: Option<&CheckFailure>) -> Option<String> {
-    let after = after?;
     let mut was: BTreeMap<String, usize> = BTreeMap::new();
     for line in before.text.lines() {
         if let Some(k) = kind(line) {
             *was.entry(k).or_insert(0) += 1;
         }
     }
+    worse_by_kind(&was, before.failures, after)
+}
+
+/// [`worse`], against SMLib's own check of the body (`before`).
+fn worse_than(before: &CheckFailure, after: Option<&CheckFailure>) -> Option<String> {
+    let mut was: BTreeMap<String, usize> = BTreeMap::new();
+    for t in &before.tests {
+        if let Some(k) = kind(&t.name) {
+            *was.entry(k).or_insert(0) += t.times;
+        }
+    }
+    worse_by_kind(&was, before.failures, after)
+}
+
+/// Whether `after` fails a kind of test more often than `was` counts, or as many tests as
+/// `failures` or more.
+fn worse_by_kind(was: &BTreeMap<String, usize>, failures: usize, after: Option<&CheckFailure>) -> Option<String> {
+    let after = after?;
+    let before_failures = failures;
     let mut now: BTreeMap<String, usize> = BTreeMap::new();
     for t in &after.tests {
         if let Some(k) = kind(&t.name) {
@@ -167,8 +200,8 @@ fn worse(before: &solidcore_ops::check::CheckReport, after: Option<&CheckFailure
     if !more.is_empty() {
         return Some(format!("SMLib's check of the healed body fails more tests of a kind than the body's: {}", more.join(", ")));
     }
-    (after.failures >= before.failures)
-        .then(|| format!("SMLib's check of the healed body fails {} tests, the body's {}", after.failures, before.failures))
+    (after.failures >= before_failures)
+        .then(|| format!("SMLib's check of the healed body fails {} tests, the body's {}", after.failures, before_failures))
 }
 
 /// A failed test's kind, `SmEdge::Test #7`, from its line or its name.
@@ -209,5 +242,17 @@ mod tests {
         assert!(more.is_some_and(|w| w.contains("SmFace::Test #34")), "a kind failed more often");
         let as_many = worse(&before, Some(&failed(&[("SmEdge::Test #7 Bad Edge Length", 2), ("SmFace::Test #34 Face has", 1)])));
         assert!(as_many.is_some_and(|w| w.contains("fails 3 tests, the body's 3")), "as many failed tests");
+    }
+
+    /// #17708 review: the healed body is also compared with SMLib's own check of the body as
+    /// it was, by the same rule.
+    #[test]
+    fn a_healed_body_is_kept_only_when_better_than_smlibs_own_check() {
+        let own = failed(&[("SmEdge::Test #7 Bad Edge Length", 2), ("SmFace::Test #34 Face has", 1)]);
+        assert_eq!(worse_than(&own, None), None);
+        assert_eq!(worse_than(&own, Some(&failed(&[("SmEdge::Test #7 Bad Edge Length", 1)]))), None);
+        assert!(worse_than(&own, Some(&failed(&[("SmLoop::Test #2 Bad Loop Orient", 1)]))).is_some_and(|w| w.contains("SmLoop::Test #2")));
+        assert!(worse_than(&own, Some(&failed(&[("SmFace::Test #34 Face has", 2)]))).is_some_and(|w| w.contains("SmFace::Test #34")));
+        assert!(worse_than(&own, Some(&failed(&[("SmEdge::Test #7 Bad Edge Length", 3)]))).is_some_and(|w| w.contains("SmEdge::Test #7")));
     }
 }
