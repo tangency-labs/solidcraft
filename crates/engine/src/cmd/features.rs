@@ -3926,19 +3926,36 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
         }
     }
     // A construction rectangle's centre sits at the midpoint of its construction diagonal: it is
-    // the rectangle's reference geometry, not a hole site. It counts as that when every line through
-    // the diagonal's ends (the rectangle's edges and both diagonals) is construction.
-    let line_ends = |c: &solidcraft_sketch::Curve| match &c.kind {
-        solidcraft_sketch::CurveKind::Line { a, b } => Some([*a, *b]),
-        _ => None,
+    // the rectangle's reference geometry, not a hole site. It counts as that only when the diagonal
+    // closes a rectangle: each of its ends has exactly two other lines, the four reach the same two
+    // corners, and every line at any of the four corners (the edges and both diagonals) is
+    // construction.
+    let lines: Vec<(&solidcraft_sketch::Curve, [usize; 2])> = ss
+        .sketch
+        .curves
+        .iter()
+        .filter_map(|c| match &c.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } => Some((c, [*a, *b])),
+            _ => None,
+        })
+        .collect();
+    let at = |v: usize| lines.iter().filter(move |(_, e)| e.contains(&v));
+    let construction_rectangle_centre = |l: usize| -> bool {
+        let Some(diag) = ss.sketch.curves.get(l) else { return false };
+        let solidcraft_sketch::CurveKind::Line { a, b } = &diag.kind else { return false };
+        let (a, b) = (*a, *b);
+        let far = |v: usize| -> Vec<usize> {
+            let mut f: Vec<usize> = at(v).filter(|(_, e)| *e != [a, b] && *e != [b, a]).map(|(_, e)| if e[0] == v { e[1] } else { e[0] }).collect();
+            f.sort_unstable();
+            f
+        };
+        let (fa, fb) = (far(a), far(b));
+        fa.len() == 2 && fa == fb && !fa.contains(&a) && !fa.contains(&b) && [a, b, fa[0], fa[1]].iter().all(|&v| at(v).all(|(c, _)| c.construction))
     };
     for con in &ss.sketch.constraints {
-        let solidcraft_sketch::ConstraintKind::Midpoint { p, l } = &con.kind else { continue };
-        let Some(diag) = ss.sketch.curves.get(*l) else { continue };
-        let Some(diag_ends) = line_ends(diag) else { continue };
-        let all_construction =
-            ss.sketch.curves.iter().filter(|c| line_ends(c).is_some_and(|e| e.iter().any(|v| diag_ends.contains(v)))).all(|c| c.construction);
-        if all_construction {
+        if let solidcraft_sketch::ConstraintKind::Midpoint { p, l } = &con.kind
+            && construction_rectangle_centre(*l)
+        {
             ends.push(*p);
         }
     }
