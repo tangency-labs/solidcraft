@@ -982,8 +982,8 @@ fn a_pcurve_along_a_rational_net_past_its_range_is_bounded_in_parts() {
     {
         let s = corner.surface();
         let a = corner.u[0];
-        let one = rational_partial_bound(&s, 1, [-past, 1.0], [a, a], f64::INFINITY).unwrap();
-        let parts = rational_partial_bound(&s, 1, [-past, 1.0], [a, a], 0.0).unwrap();
+        let (one, _) = rational_partial_bound(&s, 1, [-past, 1.0], [a, a], f64::INFINITY).unwrap();
+        let (parts, _) = rational_partial_bound(&s, 1, [-past, 1.0], [a, a], 0.0).unwrap();
         assert!(past * one > 0.02 && parts < one, "{one} {parts}");
         let pc = Curve2::Spline {
             knots: vec![0.0, 0.0, 1.0, 1.0],
@@ -1019,5 +1019,240 @@ fn a_pcurve_past_both_ranges_of_a_rational_net_is_refused() {
     assert!(matches!(
         pcurve_onto_knots(&s, &pc, 0.02),
         Err(EvalError::Unevaluable(_))
+    ));
+}
+
+/// The rational spline of degree `deg` on `knots` whose net is `rows[i][j]` (i along u,
+/// Euclidean points with weights), at `uv`, each direction's end spans continued past its
+/// range: de Boor on the span the parameter is in, or the end span.
+fn continued_at(
+    deg: [usize; 2],
+    knots: &[Vec<f64>; 2],
+    rows: &[Vec<([f64; 3], f64)>],
+    uv: [f64; 2],
+) -> Vec3 {
+    let curve = |p: usize, k: &[f64], pts: &[[f64; 4]], t: f64| -> [f64; 4] {
+        let n = pts.len();
+        let mut s = p;
+        while s + 1 < n && k[s + 1] <= t {
+            s += 1;
+        }
+        let mut d = pts[s - p..=s].to_vec();
+        for r in 1..=p {
+            for j in (r..=p).rev() {
+                let i = s - p + j;
+                let a = (t - k[i]) / (k[i + p + 1 - r] - k[i]);
+                let prev = d[j - 1];
+                for (x, y) in d[j].iter_mut().zip(prev) {
+                    *x = (1.0 - a) * y + a * *x;
+                }
+            }
+        }
+        d[p]
+    };
+    let columns: Vec<[f64; 4]> = (0..rows[0].len())
+        .map(|j| {
+            let pts: Vec<[f64; 4]> = rows
+                .iter()
+                .map(|r| {
+                    let ([x, y, z], w) = r[j];
+                    [w * x, w * y, w * z, w]
+                })
+                .collect();
+            curve(deg[0], &knots[0], &pts, uv[0])
+        })
+        .collect();
+    let h = curve(deg[1], &knots[1], &columns, uv[1]);
+    Vec3::new(h[0], h[1], h[2]) * (1.0 / h[3])
+}
+
+/// The spline of `deg` on `knots` whose net is `rows[i][j]` (i along u).
+fn net(deg: [usize; 2], knots: &[Vec<f64>; 2], rows: &[Vec<([f64; 3], f64)>]) -> EvalSurface {
+    let (nu, nv) = (rows.len(), rows[0].len());
+    let mut ctrl = Vec::new();
+    for j in 0..nv {
+        for row in rows {
+            let ([x, y, z], w) = row[j];
+            ctrl.push([w * x, w * y, w * z, w]);
+        }
+    }
+    EvalSurface::nurbs(deg, knots.clone(), [nu, nv], ctrl)
+}
+
+/// The bound against `|∂S/∂x_d|` sampled on a grid over the whole strip, along u and along v,
+/// on a net of two spans along `d` with weights from 0.2 to 4.5 that the strip runs past at
+/// both ends: at the first level and at the finest, never below what is sampled.
+#[test]
+fn a_rational_partial_bound_holds_over_its_strip() {
+    let pts = [[0.0, 0.0], [1.0, 2.0], [3.0, 2.5], [4.0, 0.0]];
+    let weights = [1.0, 0.2, 3.0, 1.0];
+    let rows: Vec<Vec<([f64; 3], f64)>> = (0..4)
+        .map(|i| {
+            let [x, y] = pts[i];
+            (0..2)
+                .map(|j| {
+                    let j = f64::from(j);
+                    (
+                        [x, y + 0.3 * j, 2.0 * j + 0.5 * x],
+                        weights[i] * (1.0 + 0.5 * j),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    let two = vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0];
+    let one = vec![0.0, 0.0, 1.0, 1.0];
+    let along = [-0.04, 1.04];
+    let across = [0.1, 0.9];
+    let transposed: Vec<Vec<([f64; 3], f64)>> = (0..2)
+        .map(|j| rows.iter().map(|r| r[j]).collect())
+        .collect();
+    for d in 0..2 {
+        let (deg, knots, net_rows) = if d == 0 {
+            ([2, 1], [two.clone(), one.clone()], &rows)
+        } else {
+            ([1, 2], [one.clone(), two.clone()], &transposed)
+        };
+        let s = net(deg, &knots, net_rows);
+        let at = |x: f64, y: f64| {
+            let uv = if d == 0 { [x, y] } else { [y, x] };
+            continued_at(deg, &knots, net_rows, uv)
+        };
+        let h = 1e-6;
+        let mut sampled = 0.0f64;
+        for a in 0..=400 {
+            let x = along[0] + (along[1] - along[0]) * f64::from(a) / 400.0;
+            for b in 0..=40 {
+                let y = across[0] + (across[1] - across[0]) * f64::from(b) / 40.0;
+                sampled = sampled.max((at(x + h, y) - at(x - h, y)).len() / (2.0 * h));
+            }
+        }
+        for target in [f64::INFINITY, 0.0] {
+            let (bound, eps) = rational_partial_bound(&s, d, along, across, target).unwrap();
+            assert!(
+                bound >= sampled * (1.0 - 1e-6),
+                "d {d}: {bound} < {sampled}"
+            );
+            assert!(eps < 1e-12, "{eps}");
+        }
+    }
+}
+
+/// A rational pcurve past a rational patch is put on it as a polynomial one is, its weights
+/// kept: the moved trim's points within the bound of where they were.
+#[test]
+fn a_rational_pcurve_past_a_rational_net_is_put_on_it() {
+    let corner = &corners()[0];
+    let s = corner.surface();
+    let [a, _, c] = corner.u;
+    let past = 0.007903823091784556;
+    let (m, w) = (0.5 * (a + c), 0.5);
+    let before = vec![[a, -past, 1.0], [m * w, 0.0, w], [c, 0.0, 1.0]];
+    let pc = Curve2::RationalSpline {
+        knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        homogeneous: before.clone(),
+    };
+    let onto = pcurve_onto_knots(&s, &pc, 0.02).unwrap().unwrap();
+    let Curve2::RationalSpline { homogeneous, .. } = &onto.pcurve else {
+        panic!("{:?}", onto.pcurve);
+    };
+    assert_eq!(
+        homogeneous,
+        &vec![[a, 0.0, 1.0], [m * w, 0.0, w], [c, 0.0, 1.0]]
+    );
+    let point = |h: &[[f64; 3]], t: f64| {
+        let b = [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t];
+        let mut q = [0.0; 3];
+        for (bk, hk) in b.iter().zip(h) {
+            for (x, y) in q.iter_mut().zip(hk) {
+                *x += bk * y;
+            }
+        }
+        [q[0] / q[2], q[1] / q[2]]
+    };
+    let moved = (0..=200)
+        .map(|k| {
+            let t = f64::from(k) / 200.0;
+            let ([u0, v0], [u1, v1]) = (point(&before, t), point(homogeneous, t));
+            (corner.continued(u0, v0) - corner.continued(u1, v1)).len()
+        })
+        .fold(0.0, f64::max);
+    assert!(
+        moved > 0.008 && moved <= onto.displacement && onto.displacement <= 0.02,
+        "{moved} {}",
+        onto.displacement
+    );
+}
+
+/// The corner moved 1e5 mm from the origin is put on its patch as at home: the bound's rounding
+/// follows the net's size, not its distance from the origin.
+#[test]
+fn a_pcurve_past_a_rational_net_far_from_the_origin_is_put_on_it() {
+    let [mut corner, _] = corners();
+    for row in &mut corner.rows {
+        for p in row.iter_mut() {
+            p[0] += 100.0;
+        }
+    }
+    let [a, _, c] = corner.u;
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[a, -0.007903823091784556], [c, 0.0]],
+    };
+    let far = pcurve_onto_knots(&corner.surface(), &pc, 0.02)
+        .unwrap()
+        .unwrap();
+    let home = pcurve_onto_knots(&corners()[0].surface(), &pc, 0.02)
+        .unwrap()
+        .unwrap();
+    assert!(far.displacement <= 0.02);
+    assert!(
+        (far.displacement - home.displacement).abs() < 1e-6 * home.displacement,
+        "{} {}",
+        far.displacement,
+        home.displacement
+    );
+}
+
+/// What a rational net cannot be bounded on is refused: a weight that turns negative past the
+/// range, a move past the tolerance, and a pcurve whose knots do not fit its points.
+#[test]
+fn what_a_rational_net_cannot_bound_is_refused() {
+    // Weights 1, 10, 1 along v: continued 0.1 past v = 0 the weight is about −0.98.
+    let at = |u: f64, v: f64, w: f64| ([u, v, u * v], w);
+    let s = net(
+        [1, 2],
+        &[vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]],
+        &[
+            vec![at(0.0, 0.0, 1.0), at(0.0, 0.5, 10.0), at(0.0, 1.0, 1.0)],
+            vec![at(1.0, 0.0, 1.0), at(1.0, 0.5, 10.0), at(1.0, 1.0, 1.0)],
+        ],
+    );
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[0.5, -0.1], [0.5, 0.5]],
+    };
+    assert!(matches!(
+        pcurve_onto_knots(&s, &pc, 1.0),
+        Err(EvalError::Unevaluable(m)) if m.contains("certified positive")
+    ));
+    let corner = &corners()[0];
+    let s = corner.surface();
+    let [a, _, c] = corner.u;
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[a, -0.007903823091784556], [c, 0.0]],
+    };
+    assert!(matches!(
+        pcurve_onto_knots(&s, &pc, 1e-4),
+        Err(EvalError::Unevaluable(m)) if m.contains("past the tolerance")
+    ));
+    let pc = Curve2::Spline {
+        knots: vec![0.0, 1.0],
+        points: vec![[a, -0.007903823091784556], [c, 0.0]],
+    };
+    assert!(matches!(
+        pcurve_onto_knots(&s, &pc, 0.02),
+        Err(EvalError::Invalid(_))
     ));
 }

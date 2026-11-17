@@ -1229,9 +1229,14 @@ fn bezier_piece(
 /// span is refined to at most level 6 (`docs/definitions-and-certificates.md` §4.5).
 const RATIONAL_BOUND_LEVELS: u32 = 6;
 
-/// A certified bound on `|∂S/∂x_d|` of a rational spline (positive weights) over the points
-/// whose `d` parameter lies in `along` (on the knot range, or past an end of it, where the end
-/// span's polynomials continue) and whose other parameter lies in `across`, on its knot range.
+/// A certified bound `B` on `|∂S'/∂x_d|` of a rational spline (positive weights) moved by minus
+/// the middle `c0` of its points' box, over the points whose `d` parameter lies in `along` (on
+/// the knot range, or past an end of it, where the end span's polynomials continue) and whose
+/// other parameter lies in `across`, on its knot range; and a certified bound `ε` on
+/// `|S − c0 − S'|` there, `S'` the surface of the moved net as rounded. So `S` moves by at most
+/// `B |Δx_d| + 2ε` along `d` within the strip, and the rounding in `B` follows the net's size,
+/// not its distance from the origin (as a round is certified in its own frame,
+/// `docs/definitions-and-certificates.md` §4.4).
 ///
 /// Along `d`, `along` is cut at the knots; on each piece every row of the net (its control
 /// points along `d` at one index across) is put in Bézier form over the piece
@@ -1264,8 +1269,9 @@ const RATIONAL_BOUND_LEVELS: u32 = 6;
 /// The hulls are those of the piece's points, so a shorter piece gives a tighter bound: each
 /// piece is cut into 2^L equal parts at level `L = 0, 1, …` up to [`RATIONAL_BOUND_LEVELS`],
 /// until the bound is at most `target`, as a blend's span is refined level by level
-/// (`docs/definitions-and-certificates.md` §4.5). Every level's bound holds; the least found is
-/// returned.
+/// (`docs/definitions-and-certificates.md` §4.5); a part of no length is skipped (a point of its
+/// neighbours), and a level stops once it cannot improve on the last. Every level's bound
+/// holds; the least found is returned.
 ///
 /// Refused where a weight of a piece is not certified positive (past the range a continued
 /// weight can reach zero), where `across` is off its knot range or `along` is empty, and for
@@ -1276,7 +1282,7 @@ fn rational_partial_bound(
     along: [f64; 2],
     across: [f64; 2],
     target: f64,
-) -> Result<f64, EvalError> {
+) -> Result<(f64, f64), EvalError> {
     let EvalSurface::Nurbs(n) = s else {
         return Err(refused("a partial bound of a surface that is not a spline"));
     };
@@ -1302,10 +1308,46 @@ fn rational_partial_bound(
     if !(f_lo <= across[0] && across[1] <= f_hi) {
         return Err(refused("a strip off the knot range across"));
     }
-    // The net's homogeneous point `i` along d, `j` across.
+    // The net moved by minus the middle `c0` of its points' box, rounded, and taken as exact
+    // (`moved`): the bound below is that of its surface S', every rounding in it of the size of
+    // the net, not of its distance from the origin. Each point's move is off by at most `δ`
+    // (the product `w c0` and the difference, over the weight), so `S − c0 − S'`, the rational
+    // spline of those errors with the same weights, is at most `δ` times the sum of its basis'
+    // sizes (`eps` below).
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    for c in ctrl.iter().filter(|c| c[3] > 0.0) {
+        for (e, (l, h)) in lo.iter_mut().zip(hi.iter_mut()).enumerate() {
+            let x = c.get(e).copied().unwrap_or(0.0) / c[3];
+            *l = l.min(x);
+            *h = h.max(x);
+        }
+    }
+    let c0 = [0, 1, 2].map(|e| {
+        let (l, h) = (lo.get(e).copied(), hi.get(e).copied());
+        match (l, h) {
+            (Some(l), Some(h)) if l <= h => 0.5 * (l + h),
+            _ => 0.0,
+        }
+    });
+    let mut delta = 0.0f64;
+    let mut heaviest = 0.0f64;
+    let moved: Vec<[f64; 4]> = ctrl
+        .iter()
+        .map(|c| {
+            let w = c[3];
+            let h = [c[0] - w * c0[0], c[1] - w * c0[1], c[2] - w * c0[2], w];
+            let size = c0.iter().map(|x| x.abs()).fold(0.0, f64::max) * w.abs()
+                + h.iter().take(3).map(|x| x.abs()).fold(0.0, f64::max);
+            delta = delta.max(3f64.sqrt() * gamma(2) * size / w.abs());
+            heaviest = heaviest.max(w.abs());
+            h
+        })
+        .collect();
+    // The net's homogeneous point `i` along d, `j` across, moved.
     let point = |i: usize, j: usize| -> Option<Hom> {
         let (iu, iv) = if d == 0 { (i, j) } else { (j, i) };
-        ctrl.get(iv.checked_mul(nu)?.checked_add(iu)?)
+        moved
+            .get(iv.checked_mul(nu)?.checked_add(iu)?)
             .copied()
             .map(Hom::exact)
     };
@@ -1334,9 +1376,10 @@ fn rational_partial_bound(
     };
     let windows = spans(kf, q, mf, across)?;
     // The bound over one piece `[x0, x1]` of knot span `sd` along d, every span across.
-    let on_piece = |sd: usize, piece: [f64; 2]| -> Result<f64, EvalError> {
+    // With it, the least weight there (a lower bound of the weight over the piece).
+    let on_piece = |sd: usize, piece: [f64; 2]| -> Result<(f64, f64), EvalError> {
         let length = piece[1] - piece[0];
-        let mut bound = 0.0f64;
+        let (mut bound, mut least) = (0.0f64, f64::INFINITY);
         for &(sf, _) in &windows {
             // The rows not zero on this span across, each in Bézier form over the piece:
             // `rows[j][k]` the Euclidean point, its error, its weight and the weight's error.
@@ -1368,6 +1411,7 @@ fn rational_partial_bound(
             if !(low > 0.0 && high.is_finite()) {
                 return Err(refused("a weight of a rational net that is not positive"));
             }
+            least = least.min(low);
             let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
             for r in all() {
                 for ((l, h), x) in lo.iter_mut().zip(hi.iter_mut()).zip(r.0.to_array()) {
@@ -1429,17 +1473,14 @@ fn rational_partial_bound(
             }
             bound = bound.max(b);
         }
-        Ok(bound)
+        Ok((bound, least))
     };
     let pieces = spans(k, p, m, along)?;
-    let mut bound = f64::INFINITY;
-    for level in 0..=RATIONAL_BOUND_LEVELS {
+    let (mut bound, mut least) = (f64::INFINITY, f64::INFINITY);
+    'levels: for level in 0..=RATIONAL_BOUND_LEVELS {
         let cuts = 1usize << level;
         let mut at_level = 0.0f64;
         for &(sd, [x0, x1]) in &pieces {
-            if !(x1 > x0) {
-                continue;
-            }
             let cut = |c: usize| {
                 if c == cuts {
                     x1
@@ -1448,7 +1489,19 @@ fn rational_partial_bound(
                 }
             };
             for c in 0..cuts {
-                at_level = at_level.max(on_piece(sd, [cut(c), cut(c + 1)])?);
+                let (a, b) = (cut(c), cut(c + 1));
+                // A part of no length is a point of its neighbours' closed parts.
+                if !(b > a) {
+                    continue;
+                }
+                let (here, low) = on_piece(sd, [a, b])?;
+                at_level = at_level.max(here);
+                if level == 0 {
+                    least = least.min(low);
+                } else if at_level >= bound {
+                    // This level cannot improve on the last.
+                    continue 'levels;
+                }
             }
         }
         bound = bound.min(at_level);
@@ -1456,12 +1509,31 @@ fn rational_partial_bound(
             break;
         }
     }
-    if !bound.is_finite() {
+    // The moved net's error: `δ` times `w⁺ Σ |N_i| / W` over the strip, the B-splines' sizes
+    // summing to 1 on the range and to at most `(1 + 2 o / h)^p` where the strip runs past it
+    // by `o` (`h` the shorter end span, as [`partial_bound`] continues them).
+    let (&lo_d, &hi_d) = (k.get(p).ok_or_else(bad)?, k.get(m).ok_or_else(bad)?);
+    let (&lo1, &hi0) = (
+        k.get(p + 1).ok_or_else(bad)?,
+        k.get(m.checked_sub(1).ok_or_else(bad)?).ok_or_else(bad)?,
+    );
+    let beyond = (lo_d - along[0]).max(along[1] - hi_d).max(0.0) * (1.0 + UNIT);
+    let end = (lo1 - lo_d).min(hi_d - hi0);
+    let grow = if beyond > 0.0 {
+        if !(end > 0.0) {
+            return Err(bad());
+        }
+        (0..p).fold(1.0, |acc, _| acc * (1.0 + 2.0 * beyond / end))
+    } else {
+        1.0
+    };
+    let eps = delta * heaviest * grow / least * (1.0 + gamma(2 * p + 8));
+    if !(bound.is_finite() && eps.is_finite()) {
         return Err(refused(
             "a partial bound of a rational net that is not finite",
         ));
     }
-    Ok(bound)
+    Ok((bound, eps))
 }
 
 /// A pcurve put on a spline's knot range ([`pcurve_onto_knots`]).
@@ -1488,14 +1560,15 @@ pub struct OntoKnots {
 /// direction one term remains. On a rational net the pcurve may run past one range only, say
 /// v's: a point moves only where a control point past it counts, so `(u, v)` and `(u, v')` lie
 /// in the strip of the control points within the pcurve's degree of one past the range (their
-/// v and their v put on the range, by their u), and the surface moves by at most `o_v` times
+/// v and their v put on the range, by their u), and the surface moves by at most `o_v B + 2ε`,
 /// [`rational_partial_bound`] over that strip. The sum, rounded up, is the displacement.
 ///
 /// Refused ([`EvalError::Unevaluable`]) where the displacement is above `tolerance`, where no
 /// bound is decided (a surface that is not a spline, a rational net past both of its ranges or
 /// whose weights are not certified positive on the strip, one closed on itself along a
 /// direction, a rational pcurve with a weight that is not positive), and
-/// ([`EvalError::Invalid`]) for control points or a tolerance that are not finite.
+/// ([`EvalError::Invalid`]) for control points or a tolerance that are not finite, and for
+/// knots that do not fit their control points.
 pub fn pcurve_onto_knots(
     s: &EvalSurface,
     pc: &Curve2,
@@ -1596,7 +1669,9 @@ pub fn pcurve_onto_knots(
                 across = [across[0].min(y0), across[1].max(y0)];
             }
         }
-        o * rational_partial_bound(s, d, along, across, tolerance / o)?
+        // The moved net's surface S' moves by at most `o B`; S by that and twice their gap.
+        let (bound, eps) = rational_partial_bound(s, d, along, across, tolerance / o)?;
+        o * bound + 2.0 * eps
     };
     let displacement = shift * (1.0 + gamma(4));
     if !(displacement <= tolerance) {
