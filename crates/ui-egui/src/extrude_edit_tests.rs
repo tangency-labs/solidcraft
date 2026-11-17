@@ -1028,6 +1028,19 @@ fn surface_extrude_dialog_has_the_drag_arrow_on_every_side() {
     }
 }
 
+#[test]
+fn taper_angle_steps_by_one_degree() {
+    let mut h = make(json!({}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+    let taper = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        crate::dialogs::Kind::Extrude { taper, .. } => taper.clone(),
+        other => panic!("extrude: {other:?}"),
+    };
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle up"}})).unwrap();
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle down"}})).unwrap();
+    assert_eq!(taper(&h), "0 deg");
 /// Double-clicking the distance arrow in the view reverses the direction, as Reverse Direction
 /// does, and keeps the distance (#17402); Symmetric has no direction to reverse.
 #[test]
