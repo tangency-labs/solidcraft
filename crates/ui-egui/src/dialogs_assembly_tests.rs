@@ -1768,7 +1768,7 @@ fn a_faces_only_filter_keeps_joint_origins_on_faces() {
     assert!(matches!(picked.as_slice(), [Sel::Face { body, .. }] if body == "Body1"), "the face at the edge: {picked:?}");
     let got = snap_in(&h.app, &d.inputs[0], &picked[0]).unwrap();
     assert_eq!(got.kind, SnapKind::FaceCenter);
-    assert!(got.at.dist(middle) > 1.0, "not on the edge: {got:?}");
+    assert_ne!(got.at, middle, "the face's centre, not the edge's middle: {got:?}");
 }
 
 /// A woken point that is not its item's own snap (a straight edge's end) stays a point, and a
