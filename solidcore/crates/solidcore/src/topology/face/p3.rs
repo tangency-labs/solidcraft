@@ -2797,6 +2797,26 @@ pub fn face_intersect_breps_cached(
             ii += 1;
         }
     }
+    #[allow(clippy::print_stderr, clippy::disallowed_methods)]
+    if true {
+        let kinds = (
+            format!("{:?}", core::mem::discriminant(surface_of(b, f)?.kind())),
+            format!("{:?}", core::mem::discriminant(surface_of(ob, other)?.kind())),
+        );
+        let is_cone = |s: &crate::surface::surface::Surface| {
+            matches!(s.kind(), crate::surface::surface::p2::SurfaceKind::Cone(_))
+        };
+        if is_cone(surface_of(b, f)?) && is_cone(surface_of(ob, other)?) {
+            eprintln!("DIAGFF approx {approx_tol_3d} zones {this_zone_tol} {other_zone_tol} edges={curves_are_edges} n={} {kinds:?}", curves_3d.len());
+            for (ii, c) in curves_3d.iter().enumerate() {
+                let iv = c.natural_interval();
+                let a = c.evaluate_point(k, iv.min())?;
+                let z = c.evaluate_point(k, iv.max())?;
+                let m = c.evaluate_point(k, 0.5 * (iv.min() + iv.max()))?;
+                eprintln!("DIAGFF  {ii} {:?} {a:?} -> {z:?} mid {m:?} uv1 {} uv2 {}", curve_types.get(ii), uv_curves1.get(ii).is_some_and(Option::is_some), uv_curves2.get(ii).is_some_and(Option::is_some));
+            }
+        }
+    }
     for (ii, curve) in curves_3d.iter().enumerate() {
         let curve_type = curve_types
             .get(ii)
