@@ -2131,29 +2131,68 @@ pub(super) mod round_definition_rows {
         ]
     }
 
-    /// Every moved row of the full real-solid form, in three groups: its blend faces are
-    /// definitions whose nets re-certify, its counts are the golden's (unchanged but for
-    /// the bottle's rail, split at the shoulder face's C1 knot), and a closed result's
-    /// converged volume lies in its certified band.
-    #[test]
-    fn moved_law_rows_are_certified_definitions() {
-        check(|name| name.starts_with("law-"));
+    /// One test per moved row of the full real-solid form, so the test runner spreads the
+    /// rows over its threads (each row's certificates take minutes; the rows in sequence
+    /// outran the CI job's time limit). Each checks its row as [`check`] says.
+    macro_rules! row_tests {
+        ($($test:ident => $name:literal,)*) => {
+            $(
+                #[test]
+                fn $test() {
+                    check($name);
+                }
+            )*
+
+            /// The rows the generated tests take, in [`ROWS`]'s order.
+            const ROW_TESTS: &[&str] = &[$($name),*];
+        };
     }
 
-    #[test]
-    fn moved_source_file_rows_are_certified_definitions() {
-        check(|name| name.starts_with("source-file-") || name.starts_with("sweep5-"));
+    row_tests! {
+        law_box10x20x30_e0_deg1_edge_map_degenerate => "law-box10x20x30-e0-deg1-edge-map-degenerate",
+        law_cube20_e0_deg1_4_2_4_c0_corner => "law-cube20-e0-deg1-4-2-4-c0-corner",
+        law_cube20_e0_deg1_linear_2_4 => "law-cube20-e0-deg1-linear-2-4",
+        law_cube20_e0_deg1_two_corners => "law-cube20-e0-deg1-two-corners",
+        law_cube20_e0_deg2_c0_knot => "law-cube20-e0-deg2-c0-knot",
+        law_cube20_e3_deg1_4_2_4_c0_corner => "law-cube20-e3-deg1-4-2-4-c0-corner",
+        source_file_corner_box_all_edges => "source-file-corner_box-all-edges",
+        source_file_corner_box_edge13 => "source-file-corner_box-edge13",
+        source_file_nurb_box_all_edges => "source-file-nurb_box-all-edges",
+        source_file_nurb_box_edge0 => "source-file-nurb_box-edge0",
+        source_file_nurb_box_edge5 => "source-file-nurb_box-edge5",
+        stubs4_heart_all_edges_r0_1 => "stubs4-Heart-all-edges-r0.1",
+        stubs4_coons_01_03_29_e0_r0_5 => "stubs4-coons_01_03_29-e0-r0.5",
+        stubs4_coons_01_03_29_e3_r0_5 => "stubs4-coons_01_03_29-e3-r0.5",
+        stubs4_coons_01_03_29_e6_r0_5 => "stubs4-coons_01_03_29-e6-r0.5",
+        stubs4_delete_edge_bottle_e8_r0_1 => "stubs4-delete-edge-bottle-e8-r0.1",
+        stubs4_delete_edge_sphere_diff_3cylinders_e1_r0_1 => "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+        stubs4_delete_edge_sphere_diff_3cylinders_e1_r0_5 => "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+        stubs4_delete_edge_sphere_diff_3cylinders_e4_r0_1 => "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+        stubs4_delete_edge_sphere_diff_3cylinders_e4_r0_5 => "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+        stubs4_sphere_plane_e3_r0_5 => "stubs4-sphere_plane-e3-r0.5",
+        stubs4_test8_e3_r0_5 => "stubs4-test8-e3-r0.5",
+        stubs4_torii_unioned_e2_r0_5 => "stubs4-torii_unioned-e2-r0.5",
+        sweep5_ext_w_hole_e15_r1_0 => "sweep5-ext_w_hole-e15-r1.0",
+        sweep5_letter_g_e1_r1_0 => "sweep5-letter_g-e1-r1.0",
+        sweep5_letter_g_e10_r1_0 => "sweep5-letter_g-e10-r1.0",
+        sweep5_nurb_box1_all_r0_5 => "sweep5-nurb_box1-all-r0.5",
     }
 
+    /// Every row of [`ROWS`] has exactly one test.
     #[test]
-    fn moved_stub_rows_are_certified_definitions() {
-        check(|name| name.starts_with("stubs4-"));
+    fn every_moved_row_has_its_own_test() {
+        let rows: Vec<&str> = ROWS.iter().map(|row| row.0).collect();
+        assert_eq!(rows, ROW_TESTS);
     }
 
-    /// [`ROWS`] whose name `pick` takes, checked as their doc says (each row is taken by
-    /// exactly one of the tests).
-    fn check(pick: impl Fn(&str) -> bool) {
-        for &(name, old_volume, before, after) in ROWS.iter().filter(|row| pick(row.0)) {
+    /// The [`ROWS`] row named `row`: its blend faces are definitions whose nets
+    /// re-certify, its counts are the golden's (unchanged but for the bottle's rail, split
+    /// at the shoulder face's C1 knot), and a closed result's converged volume and mass
+    /// values lie in their certified bands.
+    fn check(row: &str) {
+        let picked: Vec<&Row> = ROWS.iter().filter(|r| r.0 == row).collect();
+        assert_eq!(picked.len(), 1, "{row}: one row of that name");
+        for &&(name, old_volume, before, after) in &picked {
             let input = inputs(name).real_solid.expect("a real solid");
             assert_eq!(input.checkpoint, Checkpoint::Full, "{name}");
             let mut k = Kernel::default();
