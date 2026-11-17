@@ -16,6 +16,9 @@
 //!   area as a line integral, here converged to 1e-12. The old value was 2.8e-3 off.
 //! - `sphere_plane_area_is_closed_form`: the band, cap and disk of
 //!   `Fillet/sphere_plane.smb` in closed form; the area is closer to it than before.
+//! - `box_w_slot_sphere_corners_are_the_area_their_trims_bound`: each sphere corner of
+//!   `Fillet/box_w_slot.smb` now measures the area its own trims bound (Gauss-Bonnet and
+//!   Green in UV agree to 1e-11), to 2e-9; the old areas were 5.5e-9 to 2.9e-8 off.
 //! - `point_just_outside_the_sphere_pole_is_in_the_infinite_region`: the
 //!   `query.brep` `sphere_vertex3_off_region` point lies outside the sphere exactly.
 #![allow(
@@ -427,4 +430,252 @@ fn point_just_outside_the_sphere_pole_is_in_the_infinite_region() {
         panic!("{pc:?}")
     };
     assert_eq!(b.infinite_region(), Some(r));
+}
+
+/// The cuts of `[a, b]` where the UV curve `t` crosses one of the knot lines `uk` (in u)
+/// or `vk` (in v): the surface is a different polynomial patch on each side, so a Gauss
+/// rule only converges on pieces between them. Sign changes are found on 512 steps and
+/// bisected to the last bit.
+fn knot_cuts(
+    k: &Kernel,
+    t: &solidcore::curve::curve::Curve,
+    a: f64,
+    b: f64,
+    uk: &[f64],
+    vk: &[f64],
+) -> Vec<f64> {
+    let mut cuts = vec![a, b];
+    let m = 512_u32;
+    for (knots, in_u) in [(uk, true), (vk, false)] {
+        for &kn in knots {
+            let f = |x: f64| {
+                let p = t.evaluate_point(k, x).unwrap();
+                if in_u {
+                    p.x - kn
+                } else {
+                    p.y - kn
+                }
+            };
+            for i in 0..m {
+                let x0 = a + (b - a) * f64::from(i) / f64::from(m);
+                let x1 = a + (b - a) * f64::from(i + 1) / f64::from(m);
+                if f(x0) * f(x1) < 0.0 {
+                    let (mut lo, mut hi) = (x0, x1);
+                    for _ in 0..80 {
+                        let mid = 0.5 * (lo + hi);
+                        if f(lo) * f(mid) <= 0.0 {
+                            hi = mid;
+                        } else {
+                            lo = mid;
+                        }
+                    }
+                    cuts.push(0.5 * (lo + hi));
+                }
+            }
+        }
+    }
+    cuts.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    cuts.dedup();
+    cuts
+}
+
+/// The area of the sphere face `f` bounded by its own UV trims, two ways, with `n` Gauss
+/// points on every piece between trim knots and surface knot crossings:
+/// - Gauss-Bonnet along the trims' images, `r^2 * |sum of (1 - cos theta) d phi|` about the
+///   direction of the face's middle;
+/// - Green in UV, `|sum of G(u, v) dv|` with `G(u, v)` the integral of `|S_u x S_v|` from
+///   the domain's `u0` to `u` (itself split at the u knots).
+///
+/// Returns `(gauss_bonnet, green)`.
+fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize) -> (f64, f64) {
+    use solidcore::math::Point2;
+    let face = b.face(f).unwrap();
+    let s = face.surface.as_ref().unwrap();
+    let SurfaceKind::Sphere(sp) = s.kind() else {
+        panic!("{f:?} is not a sphere")
+    };
+    let (centre, radius) = (sp.base().position().origin(), sp.radius());
+    let nurb = sp.base().base().gw_nurb().unwrap();
+    let (uk, vk) = (nurb.u_knots().to_vec(), nurb.v_knots().to_vec());
+    // the trims of the face, each over its edge's interval
+    let mut pieces = Vec::new();
+    for (_, eu) in b.edgeuses().iter() {
+        if face_of(b, eu) != Some(f) {
+            continue;
+        }
+        let Some(t) = eu.uv_trim_curve.as_ref() else {
+            continue;
+        };
+        pieces.push((t, b.edge(eu.edge.unwrap()).unwrap().interval));
+    }
+    assert!(pieces.len() >= 3, "{f:?}: {} trims", pieces.len());
+    let img = |t: &solidcore::curve::curve::Curve, x: f64| {
+        let uv = t.evaluate_point(k, x).unwrap();
+        s.evaluate_point(k, Point2::new(uv.x, uv.y)).unwrap()
+    };
+    // the pole of the spherical coordinates: the direction of the face's middle
+    let mid = s
+        .evaluate_point(k, face.uv_domain.evaluate(0.5, 0.5))
+        .unwrap();
+    let e3 = (mid - centre) * (1.0 / (mid - centre).length());
+    let seed = if e3.x.abs() < 0.9 {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        Vec3::new(0.0, 1.0, 0.0)
+    };
+    let e1 = seed.cross(e3);
+    let e1 = e1 * (1.0 / e1.length());
+    let e2 = e3.cross(e1);
+    // one closed chain, each piece with its sense along it
+    let mut chain = vec![(pieces.remove(0), 1.0)];
+    while !pieces.is_empty() {
+        let ((lt, liv), sense) = *chain.last().unwrap();
+        let end = img(lt, if sense > 0.0 { liv.max() } else { liv.min() });
+        let gap = |(t, iv): &(
+            &solidcore::curve::curve::Curve,
+            solidcore::geom::extent1d::Extent1d,
+        ),
+                   at_min: bool| {
+            (img(t, if at_min { iv.min() } else { iv.max() }) - end).length()
+        };
+        let i = pieces
+            .iter()
+            .position(|p| gap(p, true) < 1e-4 || gap(p, false) < 1e-4)
+            .expect("closed chain");
+        let p = pieces.remove(i);
+        let sense = if gap(&p, true) < gap(&p, false) {
+            1.0
+        } else {
+            -1.0
+        };
+        chain.push((p, sense));
+    }
+    let g = gauss(n);
+    let u0 = face.uv_domain.min().x;
+    let (mut gb, mut green) = (0.0, 0.0);
+    for ((t, iv), sense) in &chain {
+        let (knots, _) = t.knots(k, Some(iv)).unwrap();
+        for w in knots.windows(2) {
+            for c in knot_cuts(k, t, w[0], w[1], &uk, &vk).windows(2) {
+                let h = (c[1] - c[0]) / 2.0;
+                for &(x, wt) in &g {
+                    let d = t
+                        .evaluate(k, c[0] + h * (x + 1.0), 1, false, false)
+                        .unwrap();
+                    let (u, v) = (d[0].x, d[0].y);
+                    let (p, su, sv) = s
+                        .evaluate_1st_derivatives(k, Point2::new(u, v), false, false)
+                        .unwrap();
+                    let dp = su * d[1].x + sv * d[1].y;
+                    let q = p - centre;
+                    let (qx, qy, qz) = (q.dot(e1), q.dot(e2), q.dot(e3));
+                    let dphi = (qx * dp.dot(e2) - qy * dp.dot(e1)) / (qx * qx + qy * qy);
+                    gb += sense * wt * h * (1.0 - qz / q.length()) * dphi;
+                    // G(u, v): u0 to u along v, split at the u knots between them
+                    let mut br = vec![u0, u];
+                    br.extend(uk.iter().filter(|&&kn| kn > u0.min(u) && kn < u0.max(u)));
+                    br.sort_by(|x, y| x.partial_cmp(y).unwrap());
+                    let mut gu = 0.0;
+                    for s2 in br.windows(2) {
+                        let h2 = (s2[1] - s2[0]) / 2.0;
+                        for &(x2, wt2) in &g {
+                            let (_, a1, a2) = s
+                                .evaluate_1st_derivatives(
+                                    k,
+                                    Point2::new(s2[0] + h2 * (x2 + 1.0), v),
+                                    false,
+                                    false,
+                                )
+                                .unwrap();
+                            gu += wt2 * h2 * a1.cross(a2).length();
+                        }
+                    }
+                    if u < u0 {
+                        gu = -gu;
+                    }
+                    green += sense * wt * h * gu * d[1].y;
+                }
+            }
+        }
+    }
+    (radius * radius * gb.abs(), green.abs())
+}
+
+/// `corpus.parity` `Fillet__box_w_slot.smb` area (5.914389913639413 to 5.914390008545681)
+/// and the `blend.fillet_executive_p3` `source-file-box_w_slot-all-edges` area (the
+/// fillet is refused, so the body is the file as read). Only the eight sphere corner faces
+/// (radius 0.06) move: they now keep the file's NURB and trims. Each face's area bounded by
+/// its own trims, by Gauss-Bonnet and by Green in UV (two independent line integrals,
+/// converged at n = 24 against n = 32), is matched by the integrator to 2e-9 relative; the
+/// old per-face areas, taken on a refit sphere with rebuilt trims, were 5.5e-9 to 2.9e-8
+/// off. On the sum the new area is 2e-11 off the trims' area, the old one 9.5e-8.
+#[test]
+fn box_w_slot_sphere_corners_are_the_area_their_trims_bound() {
+    // the old per-face areas (refit sphere, rebuilt trims), faces 18..=25
+    let old = [
+        4.539_699_685_693_518e-3,
+        4.539_699_673_323_199e-3,
+        4.539_699_674_678_868e-3,
+        5.552_842_101_372_212e-3,
+        5.552_842_101_462_258e-3,
+        5.552_842_101_694_424e-3,
+        4.539_699_683_930_832e-3,
+        5.552_842_101_449_415e-3,
+    ];
+    let name = "Fillet/box_w_slot.smb";
+    let mut k = Kernel::default();
+    let b = read(&mut k, name);
+    // measured on a second read: making the missing trims of other faces may touch the body
+    let mut m = read(&mut k, name);
+    let faces = bl::faces(&b, None).unwrap();
+    let (mut total, mut reference, mut old_total) = (0.0, 0.0, 0.0);
+    let mut spheres = 0;
+    for &f in &faces {
+        let area = face_area(&k, &mut m, f);
+        total += area;
+        if !matches!(
+            b.face(f).unwrap().surface.as_ref().unwrap().kind(),
+            SurfaceKind::Sphere(_)
+        ) {
+            reference += area;
+            old_total += area;
+            continue;
+        }
+        let (gb24, green24) = sphere_face_trim_area(&k, &b, f, 24);
+        let (gb32, green32) = sphere_face_trim_area(&k, &b, f, 32);
+        assert!((gb24 - gb32).abs() <= 1e-12 * gb32, "{f:?}: {gb24} {gb32}");
+        assert!(
+            (green24 - green32).abs() <= 1e-12 * green32,
+            "{f:?}: {green24} {green32}"
+        );
+        assert!(
+            (gb32 - green32).abs() <= 1e-11 * gb32,
+            "{f:?}: Gauss-Bonnet {gb32}, Green {green32}"
+        );
+        assert!(
+            (area - gb32).abs() <= 2e-9 * gb32,
+            "{f:?}: area {area}, trims bound {gb32}"
+        );
+        let was = old[spheres];
+        assert!(
+            (was - gb32).abs() > 100.0 * (area - gb32).abs(),
+            "{f:?}: old {was}, new {area}, trims bound {gb32}"
+        );
+        reference += gb32;
+        old_total += was;
+        spheres += 1;
+    }
+    assert_eq!(spheres, 8);
+    // the corpus row, replayed
+    assert!(
+        (total - 5.914_390_008_545_681).abs() <= 1e-15 * total,
+        "{total}"
+    );
+    assert!((total - reference).abs() <= 5e-11, "{total} {reference}");
+    let old_row = 5.914_389_913_639_413;
+    assert!((old_total - old_row).abs() <= 1e-9 * old_row, "{old_total}");
+    assert!(
+        (old_row - reference).abs() > 1e3 * (total - reference).abs(),
+        "old {old_row}, new {total}, trims bound {reference}"
+    );
 }
