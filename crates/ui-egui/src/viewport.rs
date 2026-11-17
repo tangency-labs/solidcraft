@@ -5587,6 +5587,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.preferences.show_selected_hidden_edges.hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
+    crate::select_other::hovered_body(app).hash(&mut h);
     app.viewport.hover_plane.hash(&mut h);
     app.viewport.hover_origin.hash(&mut h);
     app.preferences.browser_hover_shows_origin.hash(&mut h);
@@ -6496,6 +6497,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // Timeline modifiers light only their resulting faces; browser rows light whole bodies.
     let mut hovered = app.viewport.hover_feature.map(|id| feature_geometry(app, id)).unwrap_or_default();
     hovered.extend(app.viewport.hover_bodies.iter().map(|name| Sel::Body { name: name.clone() }));
+    hovered.extend(crate::select_other::hovered_body(app).map(|name| Sel::Body { name: name.to_owned() }));
     hovered.extend(component_hover.into_iter().flatten());
     let body_hover = hovered_body(app);
     hovered.extend(body_hover.iter().map(|name| Sel::Body { name: name.clone() }));
@@ -7908,8 +7910,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::sketch_line_arc::paint_mode(app, ui, &painter, &proj);
     crate::design_properties::overlay(app, &painter, &proj);
     crate::sketch_dims::show(app, ui, &proj);
-    crate::select_other::show(app, ui.ctx());
     if !card {
+        crate::select_other::show(app, ui.ctx());
         crate::viewport_status::show(app, ui.ctx(), notice);
         crate::viewport_status_fixture::show(app, ui.ctx(), notice);
     }
