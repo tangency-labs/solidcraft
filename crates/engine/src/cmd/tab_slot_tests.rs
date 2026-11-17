@@ -155,3 +155,23 @@ fn a_sheet_convert_of_a_plate_before_the_tab_slot_skips_its_pairs() {
     let error = s.model.result(id).and_then(|r| r.error.clone()).unwrap_or_default();
     assert!(error.contains("Bottom is sheet metal") && error.contains("no_plate_joint"), "{error}");
 }
+
+/// Edit Feature redefines the feature with each plate's stored key and `next_plate_key`: the keys
+/// stay, a new plate gets a fresh one, and a key given twice is refused.
+#[test]
+fn a_tab_slot_redefined_with_its_keys_keeps_them() {
+    let mut s = fixture_f();
+    run(&mut s, "solid.box", json!({"corner": [20, 70, 6], "length": 120, "width": 6, "height": 60, "body_name": "Wall2", "operation": "new"}));
+    tab_slot(&mut s, json!({})).unwrap();
+    let keys = |s: &Session| {
+        let f = s.doc.features.last().unwrap();
+        let solidcraft_doc::FeatureKind::TabSlot { tab_plates, slot_plates, next_plate_key, .. } = &f.kind else { panic!("{:?}", f.kind) };
+        (tab_plates.iter().chain(slot_plates).map(|p| p.key).collect::<Vec<_>>(), *next_plate_key)
+    };
+    let id = s.doc.features.last().unwrap().id;
+    let params = json!({"tab_plates": [{"key": 2, "body": "Wall"}, "Wall2"], "slot_plates": [{"key": 1, "body": "Bottom"}], "next_plate_key": 7});
+    run(&mut s, "timeline.redefine", json!({"feature": id, "command": "solid.tab_slot", "params": params}));
+    assert_eq!(keys(&s), (vec![Some(2), Some(7), Some(1)], 8));
+    let twice = json!({"tab_plates": [{"key": 1, "body": "Wall"}], "slot_plates": [{"key": 1, "body": "Bottom"}]});
+    assert!(s.execute("solid.tab_slot", &twice).is_err());
+}

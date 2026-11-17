@@ -8,6 +8,7 @@ use crate::{
     ui_kit::{choice_row, expr_row},
 };
 use serde_json::{Map, Value, json};
+use solidcraft_engine::{Sel, doc::FeatureKind};
 
 const CMD: &str = "solid.tab_slot";
 
@@ -58,9 +59,18 @@ pub fn commands(app: &SolveApp, t: &TabSlot, inputs: &[SelInput], extra: &Map<St
     if tabs.is_empty() || slots.is_empty() {
         return Err(app.tr("error.tab_slot_plates").into());
     }
+    // Edit Feature keeps each stored pick (its key and near point) in `extra`: a plate still
+    // picked is sent back as it was, so its tools keep their names; a new one is a plain name.
+    let picks = |list: &str, names: Vec<String>| -> Value {
+        let stored = extra.get(list).and_then(Value::as_array);
+        names
+            .into_iter()
+            .map(|name| stored.and_then(|s| s.iter().find(|p| p["body"].as_str() == Some(name.as_str()))).cloned().unwrap_or_else(|| json!(name)))
+            .collect()
+    };
     let mut args = Map::new();
-    args.insert("tab_plates".into(), json!(tabs));
-    args.insert("slot_plates".into(), json!(slots));
+    args.insert("tab_plates".into(), picks("tab_plates", tabs));
+    args.insert("slot_plates".into(), picks("slot_plates", slots));
     let (count, spacing) = if t.layout == 0 { (t.count.as_str(), "") } else { ("", t.spacing.as_str()) };
     for (k, v) in [
         ("count", count),
@@ -80,11 +90,40 @@ pub fn commands(app: &SolveApp, t: &TabSlot, inputs: &[SelInput], extra: &Map<St
     Ok(vec![(CMD.into(), Value::Object(args))])
 }
 
+/// Edit Feature: the dialog of a stored Tab and Slot, its plates picked and its rows as typed.
+/// The stored picks and `next_plate_key` ride in `extra`, so OK sends the keys back.
+pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
+    let FeatureKind::TabSlot { tab_plates, slot_plates, next_plate_key, count, spacing, tab_width, end_distance, clearance, protrusion } = kind
+    else {
+        return None;
+    };
+    let (_, mut inputs) = start(app, CMD)?;
+    let text = |e: &Option<solidcraft_engine::doc::Expr>| e.as_ref().map_or_else(String::new, |e| e.as_str().to_string());
+    let t = TabSlot {
+        layout: usize::from(count.is_none() && spacing.is_some()),
+        count: text(count),
+        spacing: text(spacing),
+        tab_width: text(tab_width),
+        end_distance: text(end_distance),
+        clearance: clearance.as_str().to_string(),
+        protrusion: text(protrusion),
+    };
+    let mut extra = Map::new();
+    for (i, (list, picks)) in [("tab_plates", tab_plates), ("slot_plates", slot_plates)].into_iter().enumerate() {
+        if let Some(input) = inputs.get_mut(i) {
+            input.items = picks.iter().map(|p| Sel::Body { name: p.body.0.clone() }).collect();
+        }
+        extra.insert(list.into(), serde_json::to_value(picks).unwrap_or_default());
+    }
+    extra.insert("next_plate_key".into(), json!(next_plate_key));
+    Some((Kind::TabSlot(t), inputs, extra))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Services;
-    use solidcraft_engine::{Sel, Session};
+    use solidcraft_engine::Session;
 
     /// The plate picks and the filled rows become the command's arguments; empty rows are left
     /// out (auto), and only the layout's own row is sent.
@@ -106,5 +145,36 @@ mod tests {
         t.layout = 1;
         let args = &commands(&app, &t, &inputs, &Map::new()).unwrap()[0].1;
         assert_eq!((args.get("count"), args["spacing"].as_str()), (None, Some("30 mm")), "{args}");
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+    use crate::Services;
+    use solidcraft_engine::Session;
+
+    /// Edit Feature refills the picks and rows; OK sends each kept plate back with its stored
+    /// key and near point, a new plate as a plain name, and `next_plate_key`.
+    #[test]
+    fn tab_slot_for_feature_sends_the_stored_keys_back() {
+        let mut s = Session::default();
+        for (corner, size, name) in [([0, 0, 0], [160, 100, 6], "Bottom"), ([20, 30, 6], [120, 6, 60], "Wall")] {
+            let p = json!({"corner": corner, "length": size[0], "width": size[1], "height": size[2], "body_name": name, "operation": "new"});
+            s.execute("solid.box", &p).unwrap();
+        }
+        let p = json!({"tab_plates": [{"body": "Wall", "near": [80, 33, 6]}], "slot_plates": ["Bottom"], "spacing": "40 mm", "tab_width": "12 mm"});
+        s.execute("solid.tab_slot", &p).unwrap();
+        let app = SolveApp::new(s, Services::default());
+        let kind = app.session.doc.features.last().unwrap().kind.clone();
+        let (Kind::TabSlot(t), mut inputs, extra) = for_feature(&app, &kind).unwrap() else { panic!("not a tab and slot") };
+        assert_eq!((t.layout, t.spacing.as_str(), t.tab_width.as_str(), t.count.as_str()), (1, "40 mm", "12 mm", ""));
+        assert_eq!(inputs[0].items, vec![Sel::Body { name: "Wall".into() }]);
+        let args = &commands(&app, &t, &inputs, &extra).unwrap()[0].1;
+        assert_eq!(args["tab_plates"], json!([{"key": 1, "body": "Wall", "near": [80.0, 33.0, 6.0]}]), "{args}");
+        assert_eq!((&args["slot_plates"], &args["next_plate_key"]), (&json!([{"key": 2, "body": "Bottom"}]), &json!(3)), "{args}");
+        inputs[1].items.push(Sel::Body { name: "Side".into() });
+        let args = &commands(&app, &t, &inputs, &extra).unwrap()[0].1;
+        assert_eq!(args["slot_plates"][1], json!("Side"), "{args}");
     }
 }

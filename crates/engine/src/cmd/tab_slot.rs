@@ -36,15 +36,26 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.tab_slot", "Tab 
 /// The expression keys of the feature, in the order the command reads them.
 const EXPR_KEYS: [&str; 6] = ["count", "spacing", "tab_width", "end_distance", "clearance", "protrusion"];
 
-/// One plate of `key` as the stored pick (`{key, body, near?}`).
-fn plate(cmd: &str, list: &str, v: &Value, key: u32) -> Result<Value> {
+/// One plate as the stored pick (`{key?, body, near?}`). A `key` is the stored key Edit Feature
+/// sends back, so the plate keeps its names; a plate without one gets a new key later.
+fn plate(cmd: &str, list: &str, v: &Value) -> Result<Value> {
     let want = || bad(cmd, format!("`{list}`: a plate is a body name or {{body, near}}"));
+    let mut key = None;
     let (body, near) = match v {
         Value::String(b) => (b.clone(), None),
         Value::Object(o) => {
-            if let Some(k) = o.keys().find(|k| *k != "body" && *k != "near") {
+            if let Some(k) = o.keys().find(|k| !["key", "body", "near"].contains(&k.as_str())) {
                 return Err(bad(cmd, format!("`{list}`: a plate takes `body` and `near`, not `{k}`")));
             }
+            key = match o.get("key").filter(|k| !k.is_null()) {
+                None => None,
+                Some(k) => Some(
+                    k.as_u64()
+                        .and_then(|k| u32::try_from(k).ok())
+                        .filter(|k| *k > 0)
+                        .ok_or_else(|| bad(cmd, format!("`{list}`: a plate's `key` must be a whole number from 1")))?,
+                ),
+            };
             let body = o.get("body").and_then(Value::as_str).ok_or_else(want)?.to_string();
             let near = match o.get("near").filter(|n| !n.is_null()) {
                 None => None,
@@ -57,15 +68,18 @@ fn plate(cmd: &str, list: &str, v: &Value, key: u32) -> Result<Value> {
     if body.trim().is_empty() {
         return Err(want());
     }
-    let mut out = json!({"key": key, "body": body});
+    let mut out = json!({"body": body});
+    if let Some(k) = key {
+        out["key"] = json!(k);
+    }
     if let Some(n) = near {
         out["near"] = json!([n.x, n.y, n.z]);
     }
     Ok(out)
 }
 
-/// The plates of `list`, keyed from `next`.
-fn plates(cmd: &str, p: &Value, list: &str, next: &mut u32) -> Result<Vec<Value>> {
+/// The plates of `list`, with the keys they were given (none for a new plate).
+fn plates(cmd: &str, p: &Value, list: &str) -> Result<Vec<Value>> {
     let a = match p.get(list) {
         None | Some(Value::Null) => return Err(bad(cmd, "Pick the plates that get tabs and the plates that get slots")),
         Some(Value::Array(a)) => a,
@@ -74,21 +88,33 @@ fn plates(cmd: &str, p: &Value, list: &str, next: &mut u32) -> Result<Vec<Value>
     if a.len() > MAX_PLATES {
         return Err(bad(cmd, format!("at most {MAX_PLATES} {}", list.replace('_', " "))));
     }
-    a.iter()
-        .map(|v| {
-            let out = plate(cmd, list, v, *next)?;
-            *next += 1;
-            Ok(out)
-        })
-        .collect()
+    a.iter().map(|v| plate(cmd, list, v)).collect()
+}
+
+/// Gives every plate without a key one: from past the largest key given and `next_plate_key`
+/// (which Edit Feature sends back, so a key is never handed out twice). Returns the next key.
+fn key_plates(cmd: &str, p: &Value, lists: [&mut Vec<Value>; 2]) -> Result<u32> {
+    let [tabs, slots] = lists;
+    let given: Vec<u64> = tabs.iter().chain(slots.iter()).filter_map(|v| v.get("key").and_then(Value::as_u64)).collect();
+    if let Some(k) = given.iter().enumerate().find_map(|(i, k)| given[..i].contains(k).then_some(*k)) {
+        return Err(bad(cmd, format!("two plates have the key {k}")));
+    }
+    let floor = p.get("next_plate_key").and_then(Value::as_u64).and_then(|k| u32::try_from(k).ok()).unwrap_or(1);
+    let largest = given.iter().max().map_or(0, |k| *k as u32);
+    let mut next = largest.saturating_add(1).max(floor).max(1);
+    for v in tabs.iter_mut().chain(slots.iter_mut()).filter(|v| v.get("key").is_none()) {
+        v["key"] = json!(next);
+        next = next.checked_add(1).ok_or_else(|| bad(cmd, "the plate key space of this tab and slot is exhausted"))?;
+    }
+    Ok(next)
 }
 
 /// The feature the parameters `p` ask for. Lengths are stored as given (a bare number is the
 /// design's unit); the clearance is written out when none is given.
 fn feature_kind(cmd: &str, p: &Value) -> Result<FeatureKind> {
-    let mut next = 1;
-    let tab_plates = plates(cmd, p, "tab_plates", &mut next)?;
-    let slot_plates = plates(cmd, p, "slot_plates", &mut next)?;
+    let mut tab_plates = plates(cmd, p, "tab_plates")?;
+    let mut slot_plates = plates(cmd, p, "slot_plates")?;
+    let next = key_plates(cmd, p, [&mut tab_plates, &mut slot_plates])?;
     let mut o = Map::new();
     o.insert("type".into(), "tab_slot".into());
     o.insert("tab_plates".into(), tab_plates.into());
