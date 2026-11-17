@@ -16,7 +16,6 @@ pub type Pair = core::result::Result<PairJoint, PairSkip>;
 
 impl Answer for Pair {}
 impl Answer for Vec<Region2> {}
-impl Answer for Option<Region2> {}
 
 impl Body {
     /// This body as the tab plate T against `slot` (S) on `p`, a plane of one of S's outward

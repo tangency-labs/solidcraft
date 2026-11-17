@@ -734,21 +734,21 @@ fn the_strip_runs_square_to_the_plate_face() {
     let wall = box_solid(&mut k, [10.0, 30.0, 6.0], [150.0, 36.0, 66.0]);
     let p = plane(0.0, 0.0, 6.0, 0.0, 0.0, 1.0);
     let a = plane(0.0, 30.0, 0.0, 0.0, -1.0, 0.0);
-    let d = crate::plate_contact::strip_direction(p, a).expect("d");
+    let d = strip_direction(p, a).expect("d");
     assert!((d.x - 1.0).abs() < 1e-12 && d.y.abs() < 1e-12, "{d:?}");
     let sigma = crate::plate_contact::strip(&mut k, &wall, &bottom, p, TOL)
         .expect("strip")
         .expect("a strip");
-    let (band, defects) = crate::plate_contact::strip_defects(&sigma, d, TOL).expect("defects");
+    let (band, defects) = strip_defects(&sigma, d, TOL).expect("defects");
     assert!(
         (band.0 - 10.0).abs() < 1e-6 && (band.1 - 150.0).abs() < 1e-6,
         "{band:?}"
     );
     assert!(defects.is_empty(), "{defects:?}");
     let across = plane(10.0, 0.0, 0.0, -1.0, 0.0, 0.0);
-    let d = crate::plate_contact::strip_direction(p, across).expect("d");
+    let d = strip_direction(p, across).expect("d");
     assert!(d.x.abs() < 1e-12 && (d.y + 1.0).abs() < 1e-12, "{d:?}");
-    assert!(crate::plate_contact::strip_direction(p, p).is_err());
+    assert!(strip_direction(p, p).is_err());
 }
 
 #[test]
