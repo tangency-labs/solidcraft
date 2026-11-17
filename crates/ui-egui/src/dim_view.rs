@@ -1540,15 +1540,23 @@ mod tests {
         let mut inch = solidcraft_engine::doc::Document::new("Inch");
         inch.units = "in".into();
         let length = inch.new_model_param("30", "mm");
-        assert_eq!(dimension_value_or_definition(&inch, &inch, &length, "height", None), "height = 30 mm",
-            "a legacy bare model length remains millimetres in an inch design");
+        assert_eq!(
+            dimension_value_or_definition(&inch, &inch, &length, "height", None),
+            "height = 30 mm",
+            "a legacy bare model length remains millimetres in an inch design"
+        );
         let angle = inch.new_model_param("45", "deg");
-        assert_eq!(dimension_value_or_definition(&inch, &inch, &angle, "sweep", None), "sweep = 45",
-            "non-length expressions are unchanged");
-        assert_eq!(dimension_value_or_definition(&inch, &inch, "missing", "driven", Some("20 mm")), "driven = 20 mm",
-            "driven dimensions use the measured expression when the source has no parameter");
-        assert_eq!(dimension_value_or_definition(&inch, &inch, "missing", "driven = 25 mm", Some("20 mm")), "driven = 25 mm",
-            "an explicit definition is never replaced");
+        assert_eq!(dimension_value_or_definition(&inch, &inch, &angle, "sweep", None), "sweep = 45", "non-length expressions are unchanged");
+        assert_eq!(
+            dimension_value_or_definition(&inch, &inch, "missing", "driven", Some("20 mm")),
+            "driven = 20 mm",
+            "driven dimensions use the measured expression when the source has no parameter"
+        );
+        assert_eq!(
+            dimension_value_or_definition(&inch, &inch, "missing", "driven = 25 mm", Some("20 mm")),
+            "driven = 25 mm",
+            "an explicit definition is never replaced"
+        );
     }
 
     /// #11057: a value typed before its target keeps a 30 px gap from the pointer, and near the
