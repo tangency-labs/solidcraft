@@ -989,6 +989,128 @@ fn a_tiny_sphere_and_a_box_whose_edge_crosses_it_twice_give_exact_volumes() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
+/// `ub175` of the golden unit `boolean.api_brep`: a sphere of radius 6.8e-4 and a box whose
+/// edge along y runs 1.5e-4 inside it, 4.2e-6 deep, across the sphere's seam. Three points
+/// lie on the seam there: where the box edge meets it, where the circle of the box's
+/// bottom face crosses it 4.2e-6 beside that, and where the circle of the box's side face
+/// crosses it 2.17e-5 above. They are one point (not proved apart, docs/booleans.md, "One
+/// point or two"), and its vertex, at the lowest of them, kept a tolerance of 1.2e-5 with
+/// the side circle's two halves ending 2.17e-5 from it; a box corner 9.8e-6 outside the
+/// sphere, taken for a point of the sphere 9.97e-6 away, kept 1.95e-5 (Level2 "Edge/Vertex
+/// gap" on both). In the intersection and the difference the two halves of the side circle
+/// were second edges beside the two halves of the box edge, with two slivers of the box's
+/// side face (5.5e-10 each) between them ("Face has Coincident Edges").
+///
+/// A vertex stands for every point merged into it (docs/booleans.md, "What a vertex stands
+/// for"): each edge ends within half its vertex's tolerance (asserted on every edge), the
+/// halves of the circle are the halves of the box edge, and the three results integrate to
+/// the exact volumes within the integrator's tolerance and the lens between the circle and
+/// the edge (at most the slivers' 1.1e-9 times the edge's 4.2e-6 in the sphere, 2.7e-5 of
+/// the intersection). Level2 reports nothing but the circles' own STEP-to-NURB test at
+/// this size (`SmEllipse` test 1, on the sphere before the boolean as on the results).
+#[test]
+fn a_tiny_sphere_and_a_box_edge_grazing_it_across_its_seam_give_valid_solids() {
+    use solidcore::topology::{edge, vertex};
+    let c = [
+        0.000_620_018_136_026_583_4,
+        -0.000_460_304_429_701_722_37,
+        0.000_076_983_630_377_661_13,
+    ];
+    let r = 0.000_681_902_795_490_716_8_f64;
+    let o = [
+        0.000_510_378_840_547_897,
+        -0.000_598_367_716_621_174,
+        0.000_197_124_463_185_099_34,
+    ];
+    let d = [
+        0.000_776_710_634_559_774_7,
+        0.000_535_188_654_593_634_2,
+        0.000_719_601_710_449_030_5,
+    ];
+    let sphere = 4.0 / 3.0 * PI * r.powi(3);
+    let block = d[0] * d[1] * d[2];
+    let common = sphere_box_volume(c, r, o, d);
+    // the lens between the side face's circle and the box edge
+    let lens = 1.1e-9 * 4.2e-6;
+    let own_circle_test = |l: &String| l.contains("SmEllipse::Test #1");
+    let mut failures = Vec::new();
+    for (op, name, want, want_counts) in [
+        // measured; the intersection and the difference without the two slivers
+        (Op::Union, "union", sphere + block - common, [7, 20, 15]),
+        (Op::Intersection, "intersection", common, [5, 15, 12]),
+        (Op::Difference, "difference", sphere - common, [5, 15, 12]),
+    ] {
+        let mut k = Kernel::default();
+        let mut a = api::create_sphere(&mut k, Point3::new(c[0], c[1], c[2]), r).unwrap();
+        let before = check_brep(&mut k, &mut a, CheckLevel::Level2).unwrap();
+        assert!(
+            before.lines().iter().all(own_circle_test),
+            "the sphere's own check: {:?}",
+            before.lines()
+        );
+        let b = api::create_box(&mut k, Point3::new(o[0], o[1], o[2]), d[0], d[1], d[2]).unwrap();
+        let result = match op {
+            Op::Union => boolean_union(&mut k, a, b),
+            Op::Intersection => boolean_intersection(&mut k, a, b),
+            Op::Difference => boolean_difference(&mut k, a, b),
+        };
+        let mut brep = match result {
+            Ok(b) => b,
+            Err(e) => {
+                failures.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        let store = AttributeStore::new();
+        let key_of = |_| ObjectKey(0);
+        let attrs = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let v = brep_volume(&k, &mut brep, 1e-9, &attrs).unwrap();
+        let off = (v - want).abs();
+        // Written to accept: a NaN volume fails.
+        if off.is_nan() || off > VOLUME_REL_TOL * want + lens {
+            failures.push(format!(
+                "{name}: volume {v:e} vs {want:e} (rel {:.2e})",
+                off / want
+            ));
+        }
+        let got = counts(&brep);
+        if got != want_counts {
+            failures.push(format!(
+                "{name}: faces/edges/vertices {got:?} vs {want_counts:?}"
+            ));
+        }
+        // every edge ends within half its vertices' tolerance
+        for e in solidcore::topology::brep::p1::edges(&brep, None).unwrap() {
+            let curve = edge::curve(&brep, e).unwrap().unwrap();
+            let interval = edge::interval(&brep, e).unwrap();
+            let (start, end) = edge::start_end_vertices(&brep, e).unwrap();
+            for (at, t) in [(start, interval.min()), (end, interval.max())] {
+                let at = at.unwrap();
+                let gap = curve
+                    .evaluate_point(&k, t)
+                    .unwrap()
+                    .distance(vertex::point(&brep, at).unwrap());
+                let half = 0.5 * vertex::tolerance(&brep, at).unwrap();
+                if gap.is_nan() || gap > half {
+                    failures.push(format!(
+                        "{name}: an edge ends {gap:e} from its vertex, past half its tolerance {half:e}"
+                    ));
+                }
+            }
+        }
+        let check = check_brep(&mut k, &mut brep, CheckLevel::Level2).unwrap();
+        let lines = check.lines();
+        let others: Vec<_> = lines.iter().filter(|l| !own_circle_test(l)).collect();
+        if !others.is_empty() {
+            failures.push(format!("{name}: Level2 {others:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
 /// A closed ellipse of semi-axes `b` (along x) and `a` (along y) about `(0, a)`, as the one
 /// rational B-spline of its four quarters (nine control points, knots 0..4), starting at the
 /// end of the major axis on +y and running counter-clockwise.

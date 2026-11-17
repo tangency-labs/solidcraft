@@ -236,6 +236,66 @@ fn a_cylinder_sunk_a_hair_into_a_flat_face_joins_it() {
     }
 }
 
+/// A 0.68 mm sphere and a box whose edge runs 1.5e-4 inside it, 4.2e-6 deep, across the
+/// sphere's seam, with a corner 9.8e-6 outside the sphere (`ub175` of the kernel's golden unit
+/// `boolean.api_brep`). The vertex on the seam stands for three points up to 2.17e-5 apart and
+/// the corner's for two 9.97e-6 apart, and each kept a tolerance short of them, so the union,
+/// the intersection and the difference failed their checks. Each is now one valid solid, with
+/// or without the fixes, and their volumes add up: union + common = sphere + box and
+/// difference + common = sphere, within 1e-6 of the sphere (measured 2e-7; the lens the edge
+/// cuts off is 3e-6 of it at most).
+#[test]
+fn a_box_edge_grazing_a_tiny_sphere_across_its_seam_gives_valid_solids() {
+    let c = [
+        0.000_620_018_136_026_583_4,
+        -0.000_460_304_429_701_722_37,
+        0.000_076_983_630_377_661_13,
+    ];
+    let r = 0.000_681_902_795_490_716_8_f64;
+    let o = [
+        0.000_510_378_840_547_897,
+        -0.000_598_367_716_621_174,
+        0.000_197_124_463_185_099_34,
+    ];
+    let d = [
+        0.000_776_710_634_559_774_7,
+        0.000_535_188_654_593_634_2,
+        0.000_719_601_710_449_030_5,
+    ];
+    let sphere = 4.0 / 3.0 * PI * r * r * r;
+    let block = d[0] * d[1] * d[2];
+    for fixes in [false, true] {
+        if fixes {
+            all_fixes();
+        }
+        let run = |op: BooleanOp| {
+            let a = make_sphere(c, r).unwrap();
+            let b = make_box(o, d).unwrap();
+            let body = boolean(a, b, op)
+                .unwrap_or_else(|e| panic!("{op:?} fixes {fixes}: {e:?}"))
+                .unwrap();
+            assert!(
+                body.is_manifold_solid().unwrap(),
+                "{op:?} fixes {fixes}: not a manifold solid"
+            );
+            assert_eq!(body.solid_count().unwrap(), 1, "{op:?} fixes {fixes}");
+            body.volume(1e-9).unwrap()
+        };
+        let union = run(BooleanOp::Union);
+        let common = run(BooleanOp::Intersect);
+        let difference = run(BooleanOp::Subtract);
+        let off = [
+            union + common - sphere - block,
+            difference + common - sphere,
+        ];
+        // Written to accept: a NaN volume fails.
+        assert!(
+            off.iter().all(|v| v.abs() <= 1e-6 * sphere),
+            "fixes {fixes}: union {union:e} common {common:e} difference {difference:e} against sphere {sphere:e} and box {block:e}"
+        );
+    }
+}
+
 /// Two equal cylinders side by side, touching along a line. Their faces leave the line
 /// together and part as the square of the distance over the radius, so the fixed steps off
 /// the line took two large ones for one surface, and the union failed (100 times the size)
