@@ -190,7 +190,7 @@ impl Walk<'_, '_> {
                         }
                         let at = self.bodies.len();
                         node.bodies.push(at);
-                        let placement = mat_mul(&world, &u.record.placement.unwrap_or(IDENTITY));
+                        let placement = solidcraft_doc::mat_mul(&world, &u.record.placement.unwrap_or(IDENTITY));
                         let placed = RecordBody {
                             name: if u.record.name.is_empty() { name.clone() } else { u.record.name.clone() },
                             path: path.clone(),
@@ -250,19 +250,6 @@ fn column_major(t: &Transform) -> M4 {
     for (c, col) in m.iter_mut().enumerate() {
         for (row, v) in col.iter_mut().enumerate() {
             *v = r.get(row).and_then(|x| x.get(c)).copied().unwrap_or(0.0);
-        }
-    }
-    m
-}
-
-/// `a · b`, both column-major.
-fn mat_mul(a: &M4, b: &M4) -> M4 {
-    let mut m = [[0.0; 4]; 4];
-    for (c, col) in m.iter_mut().enumerate() {
-        for (r, v) in col.iter_mut().enumerate() {
-            *v = (0..4)
-                .map(|k| a.get(k).and_then(|x| x.get(r)).copied().unwrap_or(0.0) * b.get(c).and_then(|x| x.get(k)).copied().unwrap_or(0.0))
-                .sum();
         }
     }
     m
