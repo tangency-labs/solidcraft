@@ -4507,7 +4507,7 @@ pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         let snap = d.face_snap(&app.session, hits);
         let snaps = crate::dialogs_assembly::takes_snaps(d);
-        return hits.iter().find_map(|h| {
+        return hits.iter().filter(|h| snap_allowed(app, snaps, h)).find_map(|h| {
             d.candidate_on(&app.session, h, snap.as_ref())
                 .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
         });
@@ -4524,6 +4524,7 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
         let snaps = crate::dialogs_assembly::takes_snaps(d);
         return hits
             .iter()
+            .filter(|h| snap_allowed(app, snaps, h))
             .filter_map(|h| {
                 d.candidate_on(&app.session, h, snap.as_ref())
                     .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
@@ -4531,6 +4532,21 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
             .collect();
     }
     hits.iter().filter(|h| pick_allowed(app, h)).filter_map(|h| hit_candidate(app, h)).collect()
+}
+
+/// What the selection filter lets a joint origin or trace point take (`snaps`: the dialog's active
+/// input takes joint snaps). With Edges or Vertices unchecked, an edge, a corner or a woken point
+/// (a face's corner or edge middle) is not taken and the face under it is, so Faces alone picks
+/// faces only (#18255). Other dialog inputs say for themselves what they take.
+pub(crate) fn snap_allowed(app: &SolveApp, snaps: bool, h: &Hit) -> bool {
+    let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
+    match h {
+        _ if !snaps => true,
+        Hit::Edge { .. } => !off("edges"),
+        Hit::Vertex { .. } => !off("vertices"),
+        Hit::Face { .. } => !off("faces"),
+        _ => true,
+    }
 }
 
 /// What the selection filter lets a click pick with no dialog.
