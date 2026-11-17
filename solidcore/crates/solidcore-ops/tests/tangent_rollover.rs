@@ -2455,10 +2455,10 @@ fn four_rounds_on_a_seamed_disc_build_across_its_seam() {
     );
 }
 
-/// SolidCraft #18411's part: a block 56.5 x 10 x 27.5 with a pocket 28.2 wide, 4 deep and 11.8
-/// long cut into its top y = 10, the pocket's two long floor edges (x = 12.8 and x = 41, y = 6)
-/// rounded R3. Each long wall keeps a 1 wide flat (y = 9 to 10) above its floor round, which
-/// runs on into it tangentially.
+/// SolidCraft #18411's part: a block 56.5 x 10 x 27.5 with a pocket 28.2 by 11.8 and 4 deep cut
+/// into its top y = 10, the pocket's two floor edges along z (x = 12.8 and x = 41, y = 6, 11.8
+/// long) rounded R3. Each of those walls keeps a 1 wide flat (y = 9 to 10) above its floor
+/// round, which runs on into it tangentially.
 fn pocket_with_floor_rounds() -> Body {
     let block = make_box([1.5, 0.0, 0.0], [56.5, 10.0, 27.5]).unwrap();
     let pocket = make_box([12.8, 6.0, 7.4], [28.2, 5.0, 11.8]).unwrap();
@@ -2495,7 +2495,7 @@ fn pocket_rim_area(r: f64) -> f64 {
     total.abs()
 }
 
-/// The rims of [`pocket_with_floor_rounds`]'s long walls at `xs` rounded R2.5 in one blend:
+/// The rims along z of [`pocket_with_floor_rounds`]'s walls at `xs` rounded R2.5 in one blend:
 /// built, valid at the full check, the input's faces, edges, vertices and shells (each rim's
 /// round takes its wall's flat and adds one face), each round its exact class, the cylinder of
 /// radius 2.5 along z about (41 + c, 7.5) or (12.8 - c, 7.5), and the volume the input's less
@@ -2568,7 +2568,7 @@ fn assert_pocket_rims_round(xs: &[f64]) {
     );
 }
 
-/// SolidCraft #18411: R2.5 on both long rims of the pocket in one fillet. The 1 wide flat under
+/// SolidCraft #18411: R2.5 on both rims along z of the pocket in one fillet. The 1 wide flat under
 /// each rim is narrower than the ball reaches, so each round rolls over the flat's smooth lower
 /// edge onto the floor round, the whole length. Each rim alone builds (a lone round, its rollover
 /// decided in closed form); both in one blend were refused as having no room (SolidCraft: "the
@@ -2579,4 +2579,78 @@ fn both_pocket_rims_roll_onto_their_floor_rounds_in_one_fillet() {
     assert_pocket_rims_round(&[41.0]);
     assert_pocket_rims_round(&[12.8]);
     assert_pocket_rims_round(&[41.0, 12.8]);
+}
+
+#[test]
+fn the_pocket_rim_area_oracle_agrees_with_a_polygon() {
+    // the closed form against a fine polygon of the same boundary, in the wall's frame
+    for r in [1.5_f64, 2.0, 2.5, 3.0] {
+        let c = ((3.0 + r).powi(2) - (r - 1.0).powi(2)).sqrt() - 3.0;
+        let ball = (c, -r);
+        let to_floor = (ball.1 + 1.0).atan2(ball.0 + 3.0);
+        let contact = (-3.0 + 3.0 * to_floor.cos(), -1.0 + 3.0 * to_floor.sin());
+        let (from, to) = (
+            PI / 2.0,
+            (contact.1 - ball.1)
+                .atan2(contact.0 - ball.0)
+                .rem_euclid(2.0 * PI),
+        );
+        let mut pts = vec![(0.0, -1.0), (0.0, 0.0)];
+        let n = 20000;
+        for i in 0..=n {
+            let t = from + (to - from) * f64::from(i) / f64::from(n);
+            pts.push((ball.0 + r * t.cos(), ball.1 + r * t.sin()));
+        }
+        for i in 1..n {
+            let t = to_floor + (0.0 - to_floor) * f64::from(i) / f64::from(n);
+            pts.push((-3.0 + 3.0 * t.cos(), -1.0 + 3.0 * t.sin()));
+        }
+        let mut twice = 0.0;
+        for (i, p) in pts.iter().enumerate() {
+            let q = pts[(i + 1) % pts.len()];
+            twice += p.0 * q.1 - q.0 * p.1;
+        }
+        let polygon = twice.abs() / 2.0;
+        let closed = pocket_rim_area(r);
+        assert!(
+            (polygon - closed).abs() < 1e-6,
+            "r {r}: {polygon} vs {closed}"
+        );
+    }
+}
+
+/// Controls for #18411: a rim along z of [`pocket_with_floor_rounds`] rounded R2.5 together with
+/// a round that meets it, at its edge (a rim along x, R2.5 or R1) or on a face it may roll off
+/// or onto (the floor round's end arc at z = 7.4, R1), is not apart from it: its rollover is
+/// proposed from the ball's sections and proved after the trace, as on main. Each is refused
+/// today (the three rims as running into the material, naming 0.99 mm; the others as having no
+/// room); the check here is that none builds an invalid body.
+#[test]
+fn pocket_rim_rounds_meeting_another_round_build_valid_or_are_refused() {
+    fixes();
+    let arc = [
+        38.0 + 3.0 * std::f64::consts::FRAC_1_SQRT_2,
+        9.0 - 3.0 * std::f64::consts::FRAC_1_SQRT_2,
+        7.4,
+    ];
+    let cases: [(&[[f64; 3]], &[f64]); 4] = [
+        (
+            &[[41.0, 10.0, 13.3], [12.8, 10.0, 13.3], [26.9, 10.0, 7.4]],
+            &[2.5; 3],
+        ),
+        (&[[41.0, 10.0, 13.3], [26.9, 10.0, 19.2]], &[2.5, 1.0]),
+        (&[[41.0, 10.0, 13.3], arc], &[2.5, 1.0]),
+        (
+            &[[41.0, 10.0, 13.3], [12.8, 10.0, 13.3], arc],
+            &[2.5, 2.5, 1.0],
+        ),
+    ];
+    for (points, radii) in cases {
+        let b = pocket_with_floor_rounds();
+        let edges: Vec<usize> = points.iter().map(|&p| edge_at(&b, p)).collect();
+        if blend(&b, Blend::Round, &edges, radii, &[], Corners::Filled).is_ok() {
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{points:?}: {report}");
+        }
+    }
 }

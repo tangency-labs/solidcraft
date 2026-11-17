@@ -18,9 +18,11 @@
 //! start, as [`crate::blend::fillet_outline`] gives the solver its rim supports. The same
 //! section decides a lone round along a straight edge between faces each a plane or a circular
 //! cylinder parallel to the edge (#15767: two joined cylinders, the ball rolling over one's
-//! seam), whose section is the same all along the edge (`cylinder_rollover_supports`). A round
-//! that is not a lone one (one of a chain, #15767) is decided from its ball's sections along its
-//! edge (the session's `roll_over_tangent_edges`).
+//! seam), whose section is the same all along the edge (`cylinder_rollover_supports`). It decides
+//! a round of several the same way where no other round's edge meets the round's edge or a face
+//! it may roll off or onto (#18411: both rims of a pocket). Any other round (one of a chain,
+//! #15767) is decided from its ball's sections along its edge (the session's
+//! `roll_over_tangent_edges`).
 //!
 //! | Rust | Upstream |
 //! |------|----------|
@@ -78,8 +80,9 @@ pub struct Rollover {
 /// `tangency_tol_rad`) and the contact lies past it, by more than the body's tolerance. A
 /// straight edge where a face is a circular cylinder whose axis is parallel to the edge (the
 /// other a plane or such a cylinder) is decided in the same section by
-/// `cylinder_rollover_supports`. Any other round, and a round with no such side, gives
-/// `[None, None]`.
+/// `cylinder_rollover_supports`. A round with no such side gives `[None, None]`; any other
+/// round, outside these sections, `None` (#18411: the session tells a round the closed form
+/// decides from one it does not).
 ///
 /// # Errors
 ///
@@ -93,7 +96,7 @@ pub fn tangent_rollover_supports(
     faces: [FaceId; 2],
     offsets: [f64; 2],
     tangency_tol_rad: f64,
-) -> Result<[Option<Rollover>; 2]> {
+) -> Result<Option<[Option<Rollover>; 2]>> {
     let none = [None, None];
     let tol = target.tolerance();
     let Some(PlanarSection {
@@ -176,7 +179,7 @@ pub fn tangent_rollover_supports(
             break;
         }
     }
-    Ok(out)
+    Ok(Some(out))
 }
 
 /// A constant round's section across the middle of a straight edge between two planes, in
@@ -679,7 +682,8 @@ fn cylinder_section(
 /// the contact lies past it by more than the body's tolerance, and the face beyond is a plane
 /// or a circular cylinder parallel to the edge too whose offset by the ball (signed by the
 /// normals across the edge) does not fold across the edge there, which then holds all along
-/// it. Any other round, and a round with no such side, gives `[None, None]`.
+/// it. A round with no such side gives `[None, None]`; a round outside the section
+/// ([`cylinder_section`]), `None`.
 ///
 /// # Errors
 ///
@@ -692,7 +696,7 @@ fn cylinder_rollover_supports(
     faces: [FaceId; 2],
     offsets: [f64; 2],
     tangency_tol_rad: f64,
-) -> Result<[Option<Rollover>; 2]> {
+) -> Result<Option<[Option<Rollover>; 2]>> {
     let none = [None, None];
     let tol = target.tolerance();
     let Some(CylinderSection {
@@ -705,10 +709,10 @@ fn cylinder_rollover_supports(
         profiles,
     }) = cylinder_section(k, target, filleted, faces, tol)?
     else {
-        return Ok(none);
+        return Ok(None);
     };
     let Some((centre, sine)) = offset_meet(profiles, offsets, tol) else {
-        return Ok(none);
+        return Ok(Some(none));
     };
     let to2 = |p: Point3| {
         let v = p - m;
@@ -797,7 +801,7 @@ fn cylinder_rollover_supports(
             opposite_normals,
         });
     }
-    Ok(out)
+    Ok(Some(out))
 }
 
 /// The unit binormal of `face`'s edge use of `filleted` at the edge's parameter `t` (the face
