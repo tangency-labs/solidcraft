@@ -1232,8 +1232,6 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
         h.app.preferences.drawings_preview = true;
-        // Sheet Settings' button is on the sheet strip, which shows in the legacy layout.
-        h.app.preferences.drawing_sheets_visibility = "legacy".into();
         h.call("ui.workspace", json!({"workspace":"drawing"}));
         h.app.run("drawing.create", json!({})).unwrap();
         h.app.run("drawing.sheet.add", json!({"name":"Second sheet"})).unwrap();
@@ -1252,7 +1250,11 @@ mod tests {
             h.frames(2);
             assert!(!drawing_inspector_visible(&h), "Escape closes options for {query}");
         }
-        h.step(&json!({"click":{"handle":"drawing:sheets:settings"}})).unwrap();
+        // The Sheets panel has no settings button since it moved into the shared panels (#18238):
+        // Sheet Settings opens from the same search.
+        h.step(&json!({"key":"S"})).unwrap();
+        h.step(&json!({"text":"Sheet Settings"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(2);
         assert!(drawing_inspector_visible(&h));
         h.step(&json!({"key":"Escape"})).unwrap();
