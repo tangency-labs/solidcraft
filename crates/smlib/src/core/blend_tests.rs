@@ -577,6 +577,34 @@ fn a_cliff_overflow_the_fork_refuses_has_no_room() {
     });
 }
 
+/// Two chamfers that overlap (#18178): a 40 high disc of radius 14.5 with a hole of radius 10 off
+/// centre by 2, so its top ring is 2.5 wide at the narrowest place. A 1.5 chamfer on the outer
+/// circle and on the hole's rim alone each builds, and together their contact lines on the top
+/// cross there (1.5 + 1.5 > 2.5): refused as too large for the faces, not as "not a closed solid".
+#[test]
+fn chamfers_that_overlap_are_too_large_not_a_non_solid() {
+    let ring = || {
+        let disc = make_cylinder([0.0; 3], 14.5, 40.0).unwrap();
+        let hole = make_cylinder([2.0, 0.0, -1.0], 10.0, 42.0).unwrap();
+        boolean(&disc, &hole, BooleanOp::Subtract).unwrap().unwrap()
+    };
+    let (outer, rim) = ([-14.5, 0.0, 40.0], [2.0, 10.0, 40.0]);
+    timed("overlap_alone", move || {
+        blend(&ring(), Blend::Chamfer, &[outer], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+        blend(&ring(), Blend::Chamfer, &[rim], &[1.5], TOL, &[], &[], Corners::Filled).unwrap();
+    });
+    let both = timed("overlap_both", move || {
+        blend(&ring(), Blend::Chamfer, &[outer, rim], &[1.5; 2], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err()
+    });
+    assert!(overlap_refusal(&both), "{both:?}");
+}
+
+/// The refusal of blends whose contact lines on a face they share cross: unsized, or sized with
+/// the bands' reason.
+fn overlap_refusal(e: &Error) -> bool {
+    matches!(e, Error::NoRoom | Error::TooLarge { why: Some(crate::RoomReason::BandsOverlap), .. })
+}
+
 /// The capi's `overflow_goes_first` (fork 241f7ba): R21 on a 20 cube's edge takes all of both faces
 /// that edge lies on, and rounds with it on other edges go after it. With R5 on the corner's other
 /// two edges those edges are gone (the two R5 points flagged) and the result is the R21's alone,
@@ -679,7 +707,7 @@ fn rounds_turning_round_a_boss_edge_mitred_or_swept() {
         rec.validate().unwrap();
         let mut tori = Vec::new();
         {
-            let g = b.0.lock().unwrap();
+            let g = b.kernel();
             for f in solidcore::query::api_queries::get_faces(&g).unwrap() {
                 if let Some(s) = solidcore::topology::face::p2::surface(&g, f).unwrap()
                     && let SurfaceKind::Torus(t) = s.kind()
@@ -800,7 +828,7 @@ fn pocket_chamfer_on_a_boolean_body() {
     assert!(r.is_ok(), "{} {}", s.error_info().code, s.error_info().comment);
     drop(s);
     b.refresh_cached_topology();
-    let v = volume(&Body::new(b), 1e-8).unwrap();
+    let v = volume(&Body::from_kernel(b), 1e-8).unwrap();
     let d: f64 = 5.5;
     assert!(rel(v, 21000.0 - (50.0 * d * d + 4.0 / 3.0 * d * d * d)) < 1e-8, "{v}");
 }

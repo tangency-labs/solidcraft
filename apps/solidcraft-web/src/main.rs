@@ -1298,10 +1298,18 @@ mod web {
             // The window's pass (egui's) has no depth buffer: the scene has its own
             // (`install_viewport`).
             let mut options = eframe::WebOptions { depth_buffer: 0, ..Default::default() };
-            if webgl()
-                && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
-            {
-                create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+            if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
+                if webgl() {
+                    create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
+                }
+                // Indirect draws that start at an instance, where the browser has them: instanced
+                // meshes are drawn a call per pipeline (`solidcraft_viewport_gpu::INDIRECT_DRAWS`).
+                let base = create.device_descriptor.clone();
+                create.device_descriptor = std::sync::Arc::new(move |adapter| {
+                    let mut d = base(adapter);
+                    d.required_features |= adapter.features() & eframe::wgpu::Features::INDIRECT_FIRST_INSTANCE;
+                    d
+                });
             }
             let mouse_canvas = canvas.clone();
             let runner = eframe::WebRunner::new();
@@ -1385,8 +1393,10 @@ mod web {
                             // The empty design takes Units of new designs (#1205). The sample
                             // part is built in millimetres and is left that way.
                             solidcraft_ui_egui::prefs::apply_new_design(&mut app);
-                            let rev = app.session.revision;
-                            app.home.show(rev);
+                            if app.preferences.home_on_launch(false, false, false) {
+                                let rev = app.session.revision;
+                                app.home.show(rev);
+                            }
                         }
                         let mouse_buttons = crate::mouse_buttons::install(&window, &mouse_canvas, &cc.egui_ctx);
                         let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;

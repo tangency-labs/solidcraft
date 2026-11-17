@@ -5795,17 +5795,16 @@ mod tests {
     /// until the cut-off rims of that crossing are welded, and the shell is no solid.
     /// The kernel's stitch at the body's tolerance (WR-455) leaves a solid whose volume is
     /// the inner box less the hole's offset disk (cut by x = 1.5), over the height 8.5,
-    /// valid at every `check_brep` level. `contacts_at_ends` adds the other opt-in of #855
-    /// (a tangential contact is found at a curve's end), which must not change this shell.
+    /// valid at every `check_brep` level; the tangential contact found at a curve's end (the
+    /// other fix of #855, WR-455) is always on and does not change this shell.
     /// The one pass closes the inner region here but leaves the rims open, so this is the
     /// trial's refusal: widened, the stitch makes upstream's weld and the shell is refused
     /// with 1001 (as with the widening run unconditionally).
     #[test]
     fn issue_855_offset_stitch_keeps_the_bodys_tolerance() {
-        let shell = |contacts_at_ends: bool| -> Result<Option<f64>> {
+        let shell = || -> Result<Option<f64>> {
             use crate::primitive::api_primitives::{create_box, create_cylinder};
             let mut kernel = Kernel::default();
-            kernel.fixes.curve_contacts_at_curve_ends = contacts_at_ends;
             let plate =
                 create_box(&mut kernel, Vec3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
             let hole =
@@ -5856,13 +5855,11 @@ mod tests {
         // inner box (37 x 37) less the hole's offset disk (r 3.5, centre 3.49 from x = 1.5)
         // cut by x = 1.5
         let expected = 4564.924657;
-        for contacts_at_ends in [false, true] {
-            let volume = shell(contacts_at_ends).unwrap().unwrap();
-            assert!(
-                (volume - expected).abs() < 1e-6 * expected,
-                "volume {volume}"
-            );
-        }
+        let volume = shell().unwrap().unwrap();
+        assert!(
+            (volume - expected).abs() < 1e-6 * expected,
+            "volume {volume}"
+        );
     }
 
     /// tangency-labs/solidcore#380: a closed inward shell of a box whose wall is as thick

@@ -8,7 +8,9 @@ use solidcore_ops::face_surface::FaceSurface;
 use solidcore_ops::session;
 use solidcore_ops::surface::ruled;
 use solidcore_ops::sweep::{planar_faces, Curve as SweepCurve};
-use solidcore_ops::{make_box, make_sphere, make_torus, Body, Order, PointClass};
+use solidcore_ops::{
+    make_box, make_cylinder, make_sphere, make_torus, Body, Error, Order, PointClass,
+};
 use solidcore_record::brep::{Brep, Curve};
 
 fn all_fixes() {
@@ -216,7 +218,7 @@ fn a_ray_beside_a_box_is_nearest_the_edge_it_passes() {
     assert!(close(nearest.on_ray, [5.0, -3.0, 0.0]), "{nearest:?}");
     assert_eq!(
         b.edge_closest_to_ray(&order, order.edges.len(), [0.0; 3], [0.0, 0.0, 1.0]),
-        Err(solidcore_ops::Error::Argument)
+        Err(Error::Argument)
     );
 }
 
@@ -299,7 +301,7 @@ fn a_ray_through_a_tube_hits_its_nearer_side_with_the_face_and_uv() {
     ] {
         assert_eq!(
             b.face_hit_by_ray(&order, origin, direction),
-            Err(solidcore_ops::Error::Argument),
+            Err(Error::Argument),
             "{origin:?} {direction:?}"
         );
     }
@@ -535,6 +537,225 @@ fn a_box_face_holds_the_points_on_it_and_no_others() {
         .is_err());
 }
 
+/// The record face of `b` that holds `p`.
+fn face_holding(b: &Body, order: &Order, p: [f64; 3]) -> usize {
+    (0..order.faces.len())
+        .find(|&f| b.point_on_face(order, f, p, 1e-6).unwrap().is_some())
+        .unwrap()
+}
+
+/// A cut across a sheet's edge runs past it: points 3 mm above the square sheet [0, 20]^2 at
+/// z = 0, from over its middle to 200 mm past its edge at x = 20, are 3 mm off the sheet's
+/// plane all along, where the trimmed face reads the overshoot past the edge, hypot(d, 3) at
+/// d past it (compared squared, d^2 + 9).
+#[test]
+fn points_above_a_sheet_and_past_its_edge_read_their_height_off_its_surface() {
+    all_fixes();
+    let corners = [
+        [0.0, 0.0, 0.0],
+        [20.0, 0.0, 0.0],
+        [20.0, 20.0, 0.0],
+        [0.0, 20.0, 0.0],
+    ];
+    let sides: Vec<SweepCurve> = (0..4)
+        .map(|i| SweepCurve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    let b = planar_faces(&sides).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    let points: Vec<[f64; 3]> = (0..=21)
+        .map(|i| [10.0 + 10.0 * f64::from(i), 10.0, 3.0])
+        .collect();
+    let gaps = b.face_surface_gaps(&order, 0, &points).unwrap();
+    let trimmed = b.face_distances(&order, 0, &points).unwrap();
+    for ((p, gap), trimmed) in points.iter().zip(&gaps).zip(&trimmed) {
+        assert!(gap.is_some_and(|g| near(g, 3.0, 1e-9)), "{p:?}: {gap:?}");
+        let past = (p[0] - 20.0).max(0.0);
+        assert!(
+            trimmed.is_some_and(|t| near(t * t, past * past + 9.0, 1e-6)),
+            "{p:?}: {trimmed:?}"
+        );
+    }
+}
+
+/// The unit directions in the plane whose coordinates are rational, from the Pythagorean
+/// triples 3-4-5, 5-12-13, 8-15-17 and 20-99-101, both ways round and in all four quadrants,
+/// with the axes: 36 directions round the turn, two of them (99/101, ±20/101) about 0.2 rad
+/// either side of +x.
+fn rational_directions() -> Vec<[f64; 2]> {
+    let mut d = vec![[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]];
+    for (a, b, c) in [
+        (3.0, 4.0, 5.0),
+        (5.0, 12.0, 13.0),
+        (8.0, 15.0, 17.0),
+        (20.0, 99.0, 101.0),
+    ] {
+        for (x, y) in [(a / c, b / c), (b / c, a / c)] {
+            for (sx, sy) in [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
+                d.push([sx * x, sy * y]);
+            }
+        }
+    }
+    d
+}
+
+/// Points round a closed surface, across its seam wherever it lies, read their true distance
+/// off it: on the side of a cylinder of radius 5 and height 10 about +z, points at radius 8 and
+/// at radius 2 in 36 directions round the axis ([`rational_directions`]) read 3, and a point of
+/// its axis reads 5 (a whole circle of the side nearest it); on a sphere of radius 2, points at
+/// radius 7 read 5: its poles and the axes' points, and the 48 points (±2, ±3, ±6) with their
+/// coordinates in every order (2^2 + 3^2 + 6^2 = 7^2).
+#[test]
+fn points_round_a_closed_surface_read_their_distance_across_its_seam() {
+    all_fixes();
+    let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+    let (_, order) = c.to_record().unwrap();
+    let side = face_holding(&c, &order, [5.0, 0.0, 5.0]);
+    let ring = |r: f64, z: f64| -> Vec<[f64; 3]> {
+        rational_directions()
+            .iter()
+            .map(|[x, y]| [r * x, r * y, z])
+            .collect()
+    };
+    for (r, z) in [(8.0, 5.0), (2.0, 5.0), (8.0, 0.5), (8.0, 9.5)] {
+        let gaps = c.face_surface_gaps(&order, side, &ring(r, z)).unwrap();
+        for (i, gap) in gaps.iter().enumerate() {
+            assert!(
+                gap.is_some_and(|g| near(g, 3.0, 1e-9)),
+                "radius {r} height {z} step {i}: {gap:?}"
+            );
+        }
+    }
+    let axis = c
+        .face_surface_gaps(&order, side, &[[0.0, 0.0, 5.0]])
+        .unwrap();
+    assert!(axis[0].is_some_and(|g| near(g, 5.0, 1e-9)), "{axis:?}");
+
+    let s = make_sphere([0.0; 3], 2.0).unwrap();
+    let (_, order) = s.to_record().unwrap();
+    let mut points = vec![
+        [0.0, 0.0, 7.0],
+        [0.0, 0.0, -7.0],
+        [7.0, 0.0, 0.0],
+        [-7.0, 0.0, 0.0],
+        [0.0, 7.0, 0.0],
+        [0.0, -7.0, 0.0],
+    ];
+    for [a, b, c] in [
+        [2.0, 3.0, 6.0],
+        [2.0, 6.0, 3.0],
+        [3.0, 2.0, 6.0],
+        [3.0, 6.0, 2.0],
+        [6.0, 2.0, 3.0],
+        [6.0, 3.0, 2.0],
+    ] {
+        for [sx, sy, sz] in [
+            [1.0, 1.0, 1.0],
+            [-1.0, 1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [-1.0, -1.0, 1.0],
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, -1.0, -1.0],
+        ] {
+            points.push([sx * a, sy * b, sz * c]);
+        }
+    }
+    let gaps = s.face_surface_gaps(&order, 0, &points).unwrap();
+    for (p, gap) in points.iter().zip(&gaps) {
+        assert!(gap.is_some_and(|g| near(g, 5.0, 1e-9)), "{p:?}: {gap:?}");
+    }
+}
+
+/// Points beside a surface read `None`. The ruled sheet between the lines (0, 0, 0)-(10, 0, 0)
+/// and (0, 10, 0)-(10, 10, 5) is the bilinear patch S(s, t) = (10 s, 10 t, 5 s t), no analytic
+/// surface, bounded by its domain [0, 1]^2. Off its sides the nearest point of it is on a side,
+/// held there and not square to the patch: (20, 5, 0) past s = 1, (5, -8, 3) past t = 0 (its
+/// nearest point (5, 0, 0), where `(0, -8, 3) . S_t = -72.5`), (-6, 5, -2) past s = 0. Over its
+/// middle (5, 5, 1.25), 3 along the unit normal `(-1, -1, 4) / sqrt(18)`, that is
+/// `(-1, -1, 4) / sqrt(2)`, the point reads 3.
+///
+/// The tube of radius 5 from z = 0 to z = 10 ([`tube`]) reads 3 at points 3 off it across its
+/// seam at (5, 0) (1e-9 either side, and at (99/101, ±20/101) times 8) and square over its end
+/// circle; the analytic cylinder of the same size is its definition, unbounded along its axis,
+/// so the points off its ends, 8 or 2 from its axis, read 3.
+#[test]
+fn points_beside_a_surface_read_none() {
+    all_fixes();
+    let rule = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+    let sheet = ruled(
+        &rule([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]),
+        &rule([0.0, 10.0, 0.0], [10.0, 10.0, 5.0]),
+        false,
+    )
+    .unwrap();
+    let (patch, _) = Body::from_record(&sheet, false).unwrap();
+    let (_, order) = patch.to_record().unwrap();
+    let beside = [[20.0, 5.0, 0.0], [5.0, -8.0, 3.0], [-6.0, 5.0, -2.0]];
+    let gaps = patch.face_surface_gaps(&order, 0, &beside).unwrap();
+    assert_eq!(gaps, vec![None; beside.len()]);
+    let unit = std::f64::consts::FRAC_1_SQRT_2;
+    let over = [5.0 - unit, 5.0 - unit, 1.25 + 4.0 * unit];
+    let gap = patch.face_surface_gaps(&order, 0, &[over]).unwrap();
+    assert!(gap[0].is_some_and(|g| near(g, 3.0, 1e-9)), "{gap:?}");
+
+    let (t, _, order) = tube();
+    let seam = [
+        [8.0, 0.0, 10.0],
+        [8.0, 1e-9, 5.0],
+        [8.0, -1e-9, 5.0],
+        [8.0 * 99.0 / 101.0, 8.0 * 20.0 / 101.0, 2.0],
+        [8.0 * 99.0 / 101.0, -8.0 * 20.0 / 101.0, 2.0],
+    ];
+    let over = t.face_surface_gaps(&order, 0, &seam).unwrap();
+    for (p, gap) in seam.iter().zip(&over) {
+        assert!(gap.is_some_and(|g| near(g, 3.0, 1e-9)), "{p:?}: {gap:?}");
+    }
+
+    let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+    let (_, order) = c.to_record().unwrap();
+    let side = face_holding(&c, &order, [5.0, 0.0, 5.0]);
+    let off_the_ends = [
+        [8.0, 0.0, 13.0],
+        [0.0, 8.0, 10.5],
+        [-2.0, 0.0, 12.0],
+        [0.0, -8.0, -4.0],
+    ];
+    let gaps = c.face_surface_gaps(&order, side, &off_the_ends).unwrap();
+    for (p, gap) in off_the_ends.iter().zip(&gaps) {
+        assert!(gap.is_some_and(|g| near(g, 3.0, 1e-9)), "{p:?}: {gap:?}");
+    }
+}
+
+/// A point that is not finite, or a face past the faces, is refused.
+#[test]
+fn face_surface_gaps_refuse_hostile_input() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let (_, order) = b.to_record().unwrap();
+    for p in [
+        [f64::NAN, 0.0, 0.0],
+        [0.0, f64::INFINITY, 0.0],
+        [0.0, 0.0, f64::NEG_INFINITY],
+    ] {
+        assert_eq!(
+            b.face_surface_gaps(&order, 0, &[[1.0; 3], p]),
+            Err(Error::Argument)
+        );
+    }
+    assert_eq!(
+        b.face_surface_gaps(&order, order.faces.len(), &[[1.0; 3]]),
+        Err(Error::Argument)
+    );
+    assert_eq!(
+        b.face_surface_gaps(&order, 0, &[]).unwrap(),
+        Vec::<Option<f64>>::new()
+    );
+}
+
 /// A ray fired at a body meets its exact faces: straight down onto a 10 mm box, the top face at
 /// distance 10; down beside a sphere of radius 2 about (1, 2, 3) at 1 from its axis, the sphere
 /// at z = 3 + √3, a point of the surface, not of a facet; through an edge of the box, that edge;
@@ -575,11 +796,11 @@ fn a_fired_ray_meets_the_exact_face_edge_or_nothing() {
     );
     assert_eq!(
         b.fire_ray(&order, [f64::NAN, 4.0, 20.0], [0.0, 0.0, -1.0]),
-        Err(solidcore_ops::Error::Argument)
+        Err(Error::Argument)
     );
     assert_eq!(
         b.fire_ray(&order, [3.0, 4.0, 20.0], [0.0; 3]),
-        Err(solidcore_ops::Error::Argument)
+        Err(Error::Argument)
     );
 
     let s = make_sphere([1.0, 2.0, 3.0], 2.0).unwrap();

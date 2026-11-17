@@ -742,14 +742,17 @@ fn strip_mark(c: char) -> char {
 
 fn english_hit(query: &str, shown: &str) -> bool {
     use std::cell::RefCell;
+    type Map = HashMap<String, Vec<String>>;
     thread_local! {
-        static MAP: RefCell<(String, HashMap<String, Vec<String>>)> = RefCell::new((String::new(), HashMap::new()));
+        // (language, shown text -> English sources, English text -> shown text in the language)
+        static MAP: RefCell<(String, Map, Map)> = RefCell::new((String::new(), Map::new(), Map::new()));
     }
     MAP.with(|slot| {
         let lang = solidcraft_ui_text::language().to_string();
         let mut slot = slot.borrow_mut();
         if slot.0 != lang {
-            let mut map: HashMap<String, Vec<String>> = HashMap::new();
+            let mut map = Map::new();
+            let mut translated = Map::new();
             let locale = solidcraft_ui_text::Locale::for_language(&lang);
             solidcraft_ui_text::each_english_message(|id, english| {
                 if english.contains('{') {
@@ -758,12 +761,21 @@ fn english_hit(query: &str, shown: &str) -> bool {
                 let shown = locale.text(id);
                 if shown != english {
                     map.entry(shown.to_string()).or_default().push(english.to_string());
+                    translated.entry(english.to_lowercase()).or_default().push(shown.to_string());
                 }
             });
-            *slot = (lang, map);
+            *slot = (lang, map, translated);
         }
+        let translated = &slot.2;
         slot.1.get(shown).is_some_and(|lines| {
-            lines.iter().any(|english| setting_score(query, english) > 0 || keywords(english).iter().any(|word| setting_score(query, word) > 0))
+            lines.iter().any(|english| {
+                setting_score(query, english) > 0
+                    || keywords(english).iter().any(|word| {
+                        setting_score(query, word) > 0
+                            // The old label of a renamed setting, as the language wrote it.
+                            || translated.get(&word.to_lowercase()).is_some_and(|legacy| legacy.iter().any(|text| setting_score(query, text) > 0))
+                    })
+            })
         })
     })
 }
@@ -902,6 +914,17 @@ mod tests {
     /// Two pages of a host's settings window.
     const PAGE_LAYOUT: usize = 2;
     const PAGE_GRAPHICS: usize = 3;
+
+    /// A renamed setting is still found by its old label in the user's language, not only in English.
+    #[test]
+    fn search_finds_a_renamed_setting_by_its_old_localized_label() {
+        // The kit's own test catalog holds the setting's current and former labels.
+        crate::test_support::install_catalog();
+        let _language = solidcraft_ui_text::scope("de");
+        let label = solidcraft_ui_text::tr("prefs.sketch.state_icons");
+        assert!(matches_text("Skizzensymbole", &[label]), "{label} is the former Skizzensymbole in der Farbe ihres Zustands");
+        assert!(!matches_text("Qqqq", &[label]));
+    }
 
     /// The search field and its empty result name the window they search (#8318): "Search
     /// settings" under a "Preferences" title read as two names for one window.
