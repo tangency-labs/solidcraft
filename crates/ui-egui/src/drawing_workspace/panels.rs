@@ -619,8 +619,9 @@ pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     };
     let t = Tokens::get();
-    ui.scope(|ui| {
+    egui::Frame::NONE.inner_margin(t.space_12).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = t.space_2;
+        super::sheet_settings_actions(app, ui);
         ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
             sheet_notice(app, ui, &drawing, sheet);
             sheet_fields(app, ui, sheet);

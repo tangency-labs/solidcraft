@@ -682,11 +682,8 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         if panels::footer(ui, tool) {
             close_panel(app);
         }
-    } else {
-        sheet_settings_actions(app, ui);
-        if app.drawing_workspace.settings_open {
-            panels::sheet_settings(app, ui);
-        }
+    } else if app.drawing_workspace.settings_open {
+        panels::sheet_settings(app, ui);
     }
 }
 
