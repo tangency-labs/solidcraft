@@ -298,28 +298,33 @@ fn a_placement_scaling_unevenly_is_refused() {
 }
 
 /// A shell's wire edges and free vertices, which a record of faces cannot hold yet, are noted on
-/// the region, and its faces still come in: the cube's six faces, and one free vertex noted.
+/// the region, and its faces still come in: the cube's six faces, and its shell's wire edge (a
+/// copy of a cube edge, used by no face) and free vertex noted together, as two.
 #[test]
-fn a_shells_free_vertex_is_noted_and_its_faces_kept() {
+fn a_shells_wire_edge_and_free_vertex_are_noted_and_its_faces_kept() {
     let mut ir = cube();
     let shell = ir.model.shells.first().unwrap().clone();
     let vertex = ir.model.vertices.first().unwrap().id.clone();
-    let with_vertex = cadmpeg_ir::topology::Shell::new(
+    let mut wire = ir.model.edges.first().unwrap().clone();
+    wire.id = tid("edge", 0);
+    ir.model.edges.push(wire.clone());
+    let with_members = cadmpeg_ir::topology::Shell::new(
         shell.id.clone(),
         shell.region.clone(),
         shell.faces().to_vec(),
-        Vec::new(),
+        vec![wire.id],
         vec![vertex],
     )
     .unwrap();
-    *ir.model.shells.first_mut().unwrap() = with_vertex;
+    *ir.model.shells.first_mut().unwrap() = with_members;
     let s = one(&ir);
     assert_eq!(s.brep.faces.len(), 6);
+    assert_eq!(s.brep.edges.len(), 12);
     assert!((volume(&s) - 1000.0).abs() < 1e-6);
     assert!(
         s.notes
             .iter()
-            .any(|n| n == "1 wire edges and free vertices of its shells left out"),
+            .any(|n| n == "2 wire edges and free vertices of its shells left out"),
         "{:?}",
         s.notes
     );
