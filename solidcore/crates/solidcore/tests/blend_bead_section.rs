@@ -1733,8 +1733,10 @@ fn a_bead_face_keeps_the_foot_blend_and_rebuilds_from_its_record() {
             let blend = s.procedural_blend().unwrap();
             assert_eq!(blend.order(), 0, "{what}");
             assert_eq!(blend.bound(), WELD_FIT_TOLERANCE, "{what}");
-            assert!(blend.support(0).is_some() && blend.support(1).is_some());
+            // (the face names no support: a foot blend's stay where the bead was made)
+            assert!(blend.support(0).is_none() && blend.support(1).is_none());
             let def = blend.foot_blend().unwrap();
+            assert!(def.support(0).is_some() && def.support(1).is_some());
             assert_eq!(def.legs(), legs, "{what}");
             assert_eq!(def.sagitta(), h, "{what}");
             assert_eq!(def.spans().len(), 1, "{what}");
@@ -2153,6 +2155,40 @@ fn shaped_ends_are_built_round_a_tube_and_short_spans_are_refused() {
     }
 }
 
+/// A moved bead keeps its motion: each section face's surface turned, moved and scaled by 2
+/// still re-checks against its definition (the motion replayed on the rebuilt net), and names
+/// no support (its supports stay where the bead was made, as a section blend's has none). A
+/// scale that is not uniform is refused: the legs would no longer be the net's.
+#[test]
+fn a_moved_bead_keeps_its_motion_and_a_scale_not_uniform_is_refused() {
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let body = weld_bead_body(&mut k, &mut b, &[edge], &[size], 1.0, &[], &[], SQUARE).unwrap();
+    let mut turn = Axis2Placement::IDENTITY;
+    turn.rotate_about_axis(0.7, Vec3::new(1.0, 2.0, 2.0) * (1.0 / 3.0));
+    turn.translate(Vec3::new(5.0, -3.0, 7.0));
+    let found = foot_faces(&body);
+    assert!(!found.is_empty());
+    for (_, made) in found {
+        let mut moved = made.clone();
+        moved
+            .transform(&k, &turn, Some(Vec3::new(2.0, 2.0, 2.0)))
+            .unwrap();
+        let def = moved.procedural_blend().unwrap();
+        assert!(def.support(0).is_none() && def.support(1).is_none());
+        assert!(def.foot_blend().is_some_and(|d| d.support(0).is_some()));
+        assert!(
+            def.recertify(&k).is_ok(),
+            "a moved face is no longer its definition's"
+        );
+        let mut stretched = made.clone();
+        let r = stretched.transform(&k, &turn, Some(Vec3::new(1.0, 2.0, 1.0)));
+        assert!(r.is_err(), "a scale that is not uniform moved a weld bead");
+    }
+}
+
 /// For the format decision (#16913, to bherbruck): an `ExactRoundRecord` of a convex bead
 /// apart (the planar sweep) carries its sagitta in `chamfer.sagitta`. A reader that does not
 /// know that field (serde ignores it) reads the record as the chord: `exact_from_record`
@@ -2285,4 +2321,52 @@ fn a_foot_on_the_other_branch_is_not_proved() {
         ),
         "{err:?}"
     );
+}
+
+/// An L of walls standing on a floor plate, joined by booleans: the floor [-40, 40]^2 x
+/// [-10, 0], walls x in [0, 40], y in [0, 10] and x in [0, 10], y in [0, 40], 40 high. The
+/// booleans leave some of its edge uses without their uv curves (saved as none), which the
+/// kernel makes on demand when a point is classified on a face.
+fn walls_on_a_floor(k: &mut Kernel) -> Brep {
+    use solidcore::boolean::api_brep::boolean_union;
+    use solidcore::primitive::api_primitives::create_box;
+    let floor = create_box(k, Point3::new(-40.0, -40.0, -10.0), 80.0, 80.0, 10.0).unwrap();
+    let a = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 10.0, 40.0).unwrap();
+    let b = create_box(k, Point3::new(0.0, 0.0, 0.0), 10.0, 40.0, 40.0).unwrap();
+    let walls = boolean_union(k, a, b).unwrap();
+    boolean_union(k, floor, walls).unwrap()
+}
+
+/// The toes are checked on their faces by reading the part only: a part saved without some
+/// edge uses' uv curves (the walls on a floor: the classification would make them in the
+/// part) keeps its file byte for byte, whether its bead is built or refused for a toe past
+/// its face (each face runs 40 mm from the joint here, so the refusal names 40 mm).
+#[test]
+fn a_part_without_some_uv_curves_is_only_read() {
+    use solidcore::error::{ErrorKind, FitMeasure};
+    let mut k = kernel();
+    let mut part = walls_on_a_floor(&mut k);
+    let before = smb(&k, &part);
+    let without = String::from_utf8_lossy(&before).contains(" 9999999 ");
+    assert!(
+        without,
+        "every edge use of the walls has its uv curve: the test checks nothing"
+    );
+    let edge = pick(&k, &part, [20.0, 0.0, 0.0]);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    for h in [0.0, 1.0] {
+        let mut body =
+            weld_bead_body(&mut k, &mut part, &[edge], &[size], h, &[], &[], SQUARE).unwrap();
+        assert_sound(&mut k, &mut body, &format!("the bead on the walls, h {h}"));
+        assert!(smb(&k, &part) == before, "h {h}: the walls changed");
+    }
+    let size = ChamferSize::Distances([45.0; 2]);
+    let err = weld_bead_body(&mut k, &mut part, &[edge], &[size], 0.0, &[], &[], SQUARE)
+        .err()
+        .unwrap();
+    assert!(smb(&k, &part) == before, "the walls changed");
+    assert_eq!(err.kind(), ErrorKind::FilletTooLarge, "{err}");
+    let fit = err.fit().unwrap();
+    assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
+    assert!(fit.size > 39.0 && fit.size <= 40.0 + 1e-6, "{err}");
 }

@@ -1171,7 +1171,8 @@ pub struct FootBlendRecord {
     pub legs: [f64; 2],
     /// The arc's height over the chord: `> 0` convex, `< 0` concave, 0 the chord.
     pub sagitta: f64,
-    /// The weld's spans along the leader, as its parameters, ascending and apart; the face's
+    /// The weld's spans along the leader, as its parameters, ascending and not overlapping
+    /// (they may touch, as [`crate::surface::procedural_blend::bead::BeadSpan::along`] allows); the face's
     /// piece lies in one of them.
     pub spans: Vec<[f64; 2]>,
     /// The end shape at each span's start and end.
@@ -1191,9 +1192,9 @@ impl FootBlendRecord {
     /// The structural check: the supports NURBS forms (a foot blend runs on faces), the leader
     /// and the net as their own checks, the sides `+1` or `-1`, the legs and the tolerance
     /// finite and positive, the sagitta finite, the piece and the spans finite, each `a < b`,
-    /// the spans ascending and apart and the piece inside one of them, a leg law's ends the
-    /// piece's (its tip one of them) and its shape tapered or rounded, and the motions'
-    /// numbers finite. The rebuild checks what the numbers mean (the piece on the leader, the feet, the
+    /// the spans ascending and not overlapping (they may touch) and the piece inside one of
+    /// them, a leg law's ends the piece's (its tip one of them) and its shape tapered or
+    /// rounded, and the motions' numbers finite. The rebuild checks what the numbers mean (the piece on the leader, the feet, the
     /// net against its rebuild).
     ///
     /// # Errors
@@ -1234,7 +1235,7 @@ impl FootBlendRecord {
         {
             return Err(refuse(
                 "spans",
-                "spans are finite, a < b, ascending and apart",
+                "spans are finite, a < b, ascending and not overlapping (they may touch)",
             ));
         }
         let [a, b] = self.interval;

@@ -250,7 +250,8 @@ rolling-ball blend, which it leaves unchanged.
   at the middle of the edge, and kept; no station reads the part. Newton starts from e(t) + zᵢbᵢ
   dropped onto the support. Where that start ends on the other branch, finds no foot or does not
   converge, it starts again from the previous station's foot before the station is refused. A
-  Newton that stops on the rim of the support's domain means the support ends within the leg.
+  Newton that stops on the rim of the support's domain means the support ends within the leg (a
+  periodic direction has no rim: its seam is not where the face ends).
 - **Section.** The chord between the feet, or the circular arc over it at the sagitta h in the
   station's plane (§2.2), its bounds read at each station from the angles βᵢ at which the chord
   leaves the faces there.
@@ -319,7 +320,10 @@ two ends' zones is refused.
 stored supports and sides, the same refinement, then the motions. A record's net is accepted when
 the rebuilt net is it in some orientation of the parameter square, the same degrees and knots and
 its control points within 10⁻⁸ (1 + the net's size); a record whose legs, sagitta, sides, piece or
-leg law were changed is refused. Not bit for bit: the feet are solved again to rounding, and the arc's
+leg law were changed is refused. A moved bead keeps its motions, replayed on the rebuilt net; its supports
+and leader stay where it was made, so the definition names no support of the moved face
+(`BlendRef::support` is none, as a section blend's), and a scale that is not uniform is refused
+(the legs would no longer be the net's). Not bit for bit: the feet are solved again to rounding, and the arc's
 weights come from trigonometric functions that round differently between platforms' math libraries.
 The foot blend is a record kind of its own, not a field added to an older record, so no reader
 that predates it can take a bead for a chamfer (as one that predates `ChamferRecord::sagitta` can,
@@ -329,7 +333,7 @@ that predates it can take a bead for a chamfer (as one that predates `ChamferRec
 
 | cause | reason | class | fit |
 |---|---|---|---|
-| a toe on its face's surface but off the face (classified on the face, at least 32 stations) | `NoRoomReason::LegPastFace` | `FilletTooLarge` | the largest leg on that side whose toes stay on the face, halved down |
+| a toe on its face's surface but off the face (classified on the face, at least 32 stations; a foot past a periodic support's seam moved into its domain first) | `NoRoomReason::LegPastFace` | `FilletTooLarge` | the largest leg on that side whose toes stay on the face, halved down |
 | no point of the face at the leg on its side (the face turns away or ends within the leg) | `NoRoomReason::NoToeAtLeg` | `FilletTooLarge` | the largest leg on that side that finds its toes, halved down |
 | the arc would cut into a face at a station | `NoRoomReason::BeadCutsFace` | `FilletTooLarge` | the least of the stations' bounds, (c/2) tan(min βᵢ/2) concave, a hair below it |
 | Newton does not converge from either start | `StationDidNotConverge` | a defect | none |
