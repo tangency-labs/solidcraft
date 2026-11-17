@@ -496,7 +496,11 @@ pub(super) fn textured_bodies(s: &Session, cmd: &str) -> Result<std::collections
 /// two setups give different Glass is refused, naming both: the file holds one. Only the bodies
 /// in `bodies` are read (all when it is empty), so leaving one out clears its refusal. A binding
 /// whose body is gone binds nothing.
-pub(super) fn glass_bodies(s: &Session, cmd: &str, bodies: &[String]) -> Result<std::collections::BTreeMap<String, solidcraft_doc::render_optics::OpticalMaterial>> {
+pub(super) fn glass_bodies(
+    s: &Session,
+    cmd: &str,
+    bodies: &[String],
+) -> Result<std::collections::BTreeMap<String, solidcraft_doc::render_optics::OpticalMaterial>> {
     let mut out: std::collections::BTreeMap<String, (String, solidcraft_doc::render_optics::OpticalMaterial)> = std::collections::BTreeMap::new();
     let setups = &s.doc.render.setups;
     if setups.values().all(|x| x.optics.is_empty()) {
