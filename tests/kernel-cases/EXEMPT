@@ -470,10 +470,14 @@ tab.view.duplicate                copies a view of the design: no geometry, test
 tab.view.layout                   sets how the design's views are tiled: no geometry, tested in the views crate and the UI's documents tests
 tab.view.list                     a listing of the design's views: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.move                     reorders the design's views: no geometry, tested in the engine's tab_views tests and the UI's documents tests
+tab.view.move_to_window           moves a view to a design window; no geometry, tested in the engine's tab_views tests and the UI's window tests
 tab.view.open                     opens a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.pop_out                  moves a presentation of the same design to another window; no geometry
 tab.view.rename                   renames a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.reopen                   brings back the view closed last: no geometry, tested in the engine's tab_views tests and the UI's documents tests
+tab.window.close                  returns views to the main window; no geometry, tested in the engine and UI
+tab.window.focus                  focuses a window of the active design; no geometry, tested in the engine and UI
+tab.window.list                   lists the active design windows; no geometry, tested in the engine and UI
 timeline.dependents               a listing of dependents
 timeline.export_script            writes the history as a script
 timeline.inspect                  a listing of the timeline

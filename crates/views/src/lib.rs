@@ -9,4 +9,6 @@ mod tiles;
 mod view_set;
 
 pub use tiles::{Axis, EMPTY, Edge, MAX_TILES, Placement, Preset, Rect, Splitter, Tiles};
-pub use view_set::{DesignView, MAX_NAME, MAX_VIEWS, ViewKind, ViewSet};
+pub use view_set::{
+    DesignView, MAX_NAME, MAX_VIEWS, MoveError, Moved, PopOut, ViewKind, ViewSet, WindowId, WindowLevel, WindowPlacement, WindowTarget,
+};

@@ -1,34 +1,60 @@
-//! Native windows of the same design. Only their view strips and presentation state move.
-//! The same live session executes commands and keeps the undo history in every window.
+//! Views-only hosts for the same live design. View ownership stays in the design's ViewSet.
 
-use egui::{Context, Ui, ViewportBuilder, ViewportClass, ViewportId};
-use solidcraft_views::ViewSet;
+use egui::{Context, Ui, ViewportClass, ViewportCommand, ViewportId};
+use serde_json::{Value, json};
+use solidcraft_views::{DesignView, PopOut, ViewSet, WindowId, WindowPlacement, WindowTarget};
 
+use crate::ui_kit::{BackingTooltipExt as _, Container, Edge, Menu, Surface};
 use crate::{SolveApp, documents};
 
 #[derive(Default)]
 pub(crate) struct Windows {
-    available: bool,
-    next_window: u64,
-    painting: Option<ViewportId>,
-    closing: Option<ViewportId>,
+    native: bool,
+    render_open: bool,
+    embedded: bool,
+    painting: Option<WindowId>,
+    closing: Option<Option<u64>>,
     parked: Option<(u64, Vec<u64>)>,
-    windows: Vec<Window>,
+    focus: Option<(u64, WindowId)>,
+    root_rect: Option<egui::Rect>,
+    monitor_size: Option<egui::Vec2>,
+    root_scale: Option<f32>,
+    displays: Vec<Display>,
+    #[cfg(not(target_arch = "wasm32"))]
+    displays_updated: Option<std::time::Instant>,
+    hosts: Vec<Host>,
+    returned: Option<Returned>,
 }
 
-struct Window {
-    id: ViewportId,
+struct Host {
     tab: u64,
-    views: ViewSet,
+    id: WindowId,
     viewport: crate::viewport::ViewportState,
     shell: crate::shell::State,
     title: documents::WindowTitle,
-    home: bool,
-    ribbon_tab: String,
     view_rename: Option<documents::ViewRename>,
     view_placement: Option<(u64, u64)>,
     menu: crate::context_menu::MenuState,
     preview: crate::preview::PreviewState,
+    ready: bool,
+}
+
+struct Display {
+    name: String,
+    bounds: egui::Rect,
+    scale: f32,
+    primary: bool,
+}
+
+struct Returned {
+    tab: u64,
+    design: String,
+    window: PopOut,
+    expires: f64,
+}
+
+fn viewport_id(tab: u64, id: WindowId) -> ViewportId {
+    ViewportId::from_hash_of(("solidcraft-view-window", tab, id))
 }
 
 impl Windows {
@@ -37,202 +63,511 @@ impl Windows {
     }
 
     pub(crate) fn close_current(&mut self) -> bool {
-        self.closing = self.painting;
-        self.closing.is_some()
+        if !self.is_child() {
+            return false;
+        }
+        self.closing = Some(None);
+        true
     }
 
     pub(crate) fn keeps_view(&self, tab: u64, id: u64) -> bool {
         self.parked.as_ref().is_some_and(|(key, ids)| *key == tab && ids.contains(&id))
-            || self.windows.iter().any(|window| window.tab == tab && window.views.has_open_or_closed(id))
     }
 
     pub(crate) fn has_render(&self) -> bool {
-        self.windows.iter().any(|window| {
-            let views = &window.views;
-            views.active().kind == solidcraft_views::ViewKind::Render
-                || (views.is_tiled()
-                    && views
-                        .views()
-                        .iter()
-                        .any(|view| view.kind == solidcraft_views::ViewKind::Render && views.tiles().is_some_and(|tiles| tiles.contains(view.id))))
-        })
-    }
-
-    fn sync_limits(&self, tab: u64, views: &mut ViewSet, other: Option<&ViewSet>) {
-        let mut count = other.map_or(0, ViewSet::len);
-        let mut next = other.map_or(0, ViewSet::next_id);
-        for window in self.windows.iter().filter(|window| window.tab == tab) {
-            count += window.views.len();
-            next = next.max(window.views.next_id());
-        }
-        views.share_window_limits(next, count);
+        self.render_open
     }
 }
 
-/// Move a view from its current strip into a native window. The browser keeps it in its strip.
-pub(crate) fn detach(app: &mut SolveApp, id: u64) -> Result<(), String> {
-    if !app.view_windows.available {
-        return Err(app.tr("ui.new_window.unsupported").to_string());
+pub(crate) fn supports_pop_out(app: &SolveApp) -> bool {
+    !cfg!(target_arch = "wasm32") && !app.view_windows.embedded && !app.view_windows.is_child()
+}
+
+pub(crate) fn detached_views(app: &SolveApp) -> impl Iterator<Item = (WindowId, &DesignView)> {
+    app.docs.views.windows().iter().flat_map(|window| window.views.views().iter().map(|view| (window.id, view)))
+}
+
+pub(crate) fn focus_view(app: &mut SolveApp, view: u64, window: Option<WindowId>) -> Result<(), String> {
+    if let Some(child) = app.view_windows.painting
+        && window.is_none_or(|window| window == child)
+    {
+        return documents::activate_local_view(app, view).then_some(()).ok_or_else(|| "no_such_view".into());
     }
-    let tab = app.docs.active_tab();
-    // A child already counts the root window while it is being painted.
-    if !app.view_windows.is_child() {
-        app.view_windows.sync_limits(tab, &mut app.docs.views, None);
+    let owner = app.docs.views.window_of(view).ok_or("no_such_view")?;
+    if let Some(window) = window.filter(|window| *window != owner) {
+        return Err(if app.docs.views.views_of(window).is_some() { "no_such_view" } else { "no_such_window" }.into());
     }
-    let views = documents::detach_view(app, id).ok_or("there is no such view or the design has too many views")?;
-    let ribbon_tab = match views.active().kind {
-        solidcraft_views::ViewKind::Render => "RENDER",
-        solidcraft_views::ViewKind::Sketch => "SKETCH",
-        _ => "MODEL",
+    if owner == 0 {
+        return documents::activate_local_view(app, view).then_some(()).ok_or_else(|| "no_such_view".into());
     }
-    .into();
-    let mut viewport = crate::viewport::ViewportState::default();
-    viewport.isolate_window_scenes();
-    viewport.gpu = app.viewport.gpu;
-    viewport.gpu_unavailable = app.viewport.gpu_unavailable;
-    app.view_windows.next_window = app.view_windows.next_window.saturating_add(1);
-    let id = ViewportId::from_hash_of(("design_view_window", app.view_windows.next_window));
-    app.view_windows.windows.push(Window {
-        id,
-        tab,
-        views,
-        viewport,
-        shell: Default::default(),
-        title: Default::default(),
-        home: false,
-        ribbon_tab,
-        view_rename: None,
-        view_placement: None,
-        menu: Default::default(),
-        preview: Default::default(),
-    });
+    let child = app.docs.views.window_mut(owner).ok_or("no_such_window")?;
+    if !child.views.activate(view) {
+        return Err("no_such_view".into());
+    }
+    focus(app, owner)
+}
+
+fn focus(app: &mut SolveApp, id: WindowId) -> Result<(), String> {
+    if app.view_windows.painting != Some(id) && app.docs.views.views_of(id).is_none() {
+        return Err("no_such_window".into());
+    }
+    app.view_windows.focus = Some((app.docs.active_tab(), id));
     Ok(())
 }
 
-/// Only the desktop shell can make real OS windows. Call before drawing the root app bar so
-/// the same view action can report that a native window is unavailable in an embedded host.
-pub fn prepare(app: &mut SolveApp, ctx: &Context) {
-    app.view_windows.available = !ctx.embed_viewports();
-    let tab = app.docs.active_tab();
-    app.view_windows.sync_limits(tab, &mut app.docs.views, None);
+fn placement(app: &SolveApp, view: u64, request: &Value) -> Option<WindowPlacement> {
+    let number = |key: &str| request.get(key).and_then(Value::as_f64).map(|value| value as f32);
+    let rect = app.view_windows.root_rect;
+    if !app.view_windows.native && ["x", "y", "w", "h"].iter().all(|key| number(key).is_none()) {
+        return None;
+    }
+    let source = app
+        .viewport
+        .cards
+        .iter()
+        .find(|(id, _)| *id == view)
+        .map(|(_, rect)| *rect)
+        .or(app.viewport.rect)
+        .map_or(egui::vec2(800.0, 560.0), |rect| rect.size());
+    let displays = &app.view_windows.displays;
+    let selected = request.get("display").and_then(|display| {
+        if let Some(name) = display.as_str() {
+            displays.iter().find(|entry| entry.name == name)
+        } else {
+            display.as_u64().and_then(|index| usize::try_from(index).ok()).and_then(|index| displays.get(index))
+        }
+    });
+    let source_display = rect.zip(app.view_windows.root_scale).and_then(|(rect, scale)| {
+        let center = (rect.center().to_vec2() * scale).to_pos2();
+        displays.iter().find(|display| display.bounds.contains(center))
+    });
+    let display = selected.or(source_display).or_else(|| displays.iter().find(|display| display.primary)).or(displays.first());
+    let size = display
+        .map(|display| display.bounds.size() / display.scale)
+        .or(app.view_windows.monitor_size)
+        .filter(|size| size.is_finite() && size.x > 0.0 && size.y > 0.0)
+        .unwrap_or(egui::vec2(1920.0, 1080.0));
+    let max = size * 0.9;
+    let w = number("w").unwrap_or(source.x).clamp(640.0_f32.min(max.x), max.x);
+    let h = number("h").unwrap_or(source.y).clamp(420.0_f32.min(max.y), max.y);
+    Some(WindowPlacement {
+        display: display.map(|display| display.name.clone()),
+        x: number("x").unwrap_or((size.x - w) / 2.0).clamp(0.0, size.x - w),
+        y: number("y").unwrap_or((size.y - h) / 2.0).clamp(0.0, size.y - h),
+        w,
+        h,
+        maximised: false,
+        fullscreen: false,
+    })
 }
 
-/// Run the same app UI for each native window, borrowing the design for the duration of its
-/// frame. Views never round-trip through a file, and the document never needs to be cloned.
-pub fn show(app: &mut SolveApp, ctx: &Context, draw: fn(&mut SolveApp, &mut Ui), render_state: Option<&egui_wgpu::RenderState>) {
-    if !app.view_windows.available || app.view_windows.is_child() || app.quit_requested {
+fn placement_json(placement: Option<&WindowPlacement>) -> Value {
+    placement.map_or(Value::Null, |p| json!({"x":p.x,"y":p.y,"w":p.w,"h":p.h,"maximised":p.maximised,"fullscreen":p.fullscreen}))
+}
+
+pub(crate) fn detach(app: &mut SolveApp, view: u64, request: &Value) -> Result<Value, String> {
+    if !supports_pop_out(app) {
+        return Err("windows_unavailable".into());
+    }
+    let tab = app.docs.active_tab();
+    let placement = placement(app, view, request);
+    let moved = documents::move_view_to_window(app, view, WindowTarget::New { placement }).map_err(|error| error.code().to_owned())?;
+    app.view_windows.focus = Some((tab, moved.window));
+    Ok(json!({"view":moved.view,"window":moved.window,"created":moved.created,"from":moved.from,
+        "closed_source":moved.closed_source,"placement":placement_json(moved.placement.as_ref())}))
+}
+
+pub(crate) fn close_view(app: &mut SolveApp, view: u64) -> Option<bool> {
+    if app.view_windows.is_child() {
+        if app.docs.views.len() == 1 && app.docs.views.active().id == view {
+            app.view_windows.closing = Some(Some(view));
+            return Some(true);
+        }
+        return None;
+    }
+    let owner = app.docs.views.window_of(view)?;
+    (owner != 0).then(|| app.docs.views.close_in_window(owner, view))
+}
+
+fn close(app: &mut SolveApp, id: WindowId, toast: bool) -> Result<Vec<u64>, String> {
+    if id == 0 {
+        return Err("cannot_close_main_window".into());
+    }
+    let window = app.docs.views.window(id).cloned().ok_or("no_such_window")?;
+    let ids = app.docs.views.close_window(id).ok_or("no_such_window")?;
+    if toast {
+        let tab = app.docs.active_tab();
+        app.view_windows.returned = Some(Returned { tab, design: app.session.doc.name.clone(), window, expires: app.now + 8.0 });
+    }
+    Ok(ids)
+}
+
+fn window_row(id: WindowId, views: &ViewSet, placement: Option<&WindowPlacement>) -> Value {
+    let layout = views
+        .tiles()
+        .and_then(solidcraft_views::Tiles::preset_kind)
+        .map_or(if views.is_tiled() { "custom" } else { "single" }, solidcraft_views::Preset::key);
+    json!({"id":id,"level":if id==0 {"full"} else {"views_only"},"views":views.views().iter().map(|view|view.id).collect::<Vec<_>>(),
+        "active":views.active().id,"layout":layout,"display":placement.and_then(|p|p.display.as_deref()),
+        "placement":placement_json(placement),"tool_window":id==0})
+}
+
+pub(crate) fn command(app: &mut SolveApp, command: &str, request: Value) -> Result<Value, String> {
+    let id = request.get("window").and_then(Value::as_u64).and_then(|id| WindowId::try_from(id).ok()).unwrap_or_default();
+    match command {
+        "tab.window.list" => {
+            let rows = std::iter::once(window_row(0, &app.docs.views, None))
+                .chain(app.docs.views.windows().iter().map(|w| window_row(w.id, &w.views, w.placement.as_ref())))
+                .collect::<Vec<_>>();
+            Ok(json!({"windows":rows}))
+        }
+        "tab.window.focus" => {
+            focus(app, id)?;
+            Ok(json!({"window":id}))
+        }
+        "tab.window.close" => {
+            if app.view_windows.painting == Some(id) {
+                app.view_windows.closing = Some(None);
+                return Ok(json!({"returned":app.docs.views.views().iter().map(|v|v.id).collect::<Vec<_>>()}));
+            }
+            Ok(json!({"returned":close(app,id,app.view_windows.native)?}))
+        }
+        _ => Err("no_such_window".into()),
+    }
+}
+
+pub fn prepare(app: &mut SolveApp, ctx: &Context) {
+    app.view_windows.native = !ctx.embed_viewports();
+    app.view_windows.embedded = ctx.embed_viewports();
+    let render_open = detached_views(app).any(|(_, view)| view.kind == solidcraft_views::ViewKind::Render);
+    app.view_windows.render_open = render_open;
+    (app.view_windows.root_rect, app.view_windows.monitor_size, app.view_windows.root_scale) = ctx
+        .input(|i| (i.viewport().outer_rect, i.viewport().monitor_size, i.viewport().native_pixels_per_point.map(|scale| scale * ctx.zoom_factor())));
+    if app.view_windows.focus == Some((app.docs.current_tab(), 0)) {
+        ctx.send_viewport_cmd(ViewportCommand::Focus);
+        app.view_windows.focus = None;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn refresh_displays(app: &mut SolveApp, monitors: impl FnOnce() -> Vec<crate::panel_runtime::NativeMonitor>) {
+    let now = std::time::Instant::now();
+    if app.view_windows.displays_updated.is_some_and(|last| now.duration_since(last).as_secs() < 1) {
         return;
     }
-    let ids: Vec<_> = app.view_windows.windows.iter().map(|window| window.id).collect();
-    let mut retired_scenes = Vec::new();
-    for id in ids {
-        let Some(index) = app.view_windows.windows.iter().position(|window| window.id == id) else {
-            continue;
-        };
-        let mut window = app.view_windows.windows.remove(index);
-        if !app.docs.tab_open(window.tab) {
-            ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Close);
-            retired_scenes.extend(window.viewport.window_scene_slots());
+    app.view_windows.displays_updated = Some(now);
+    let monitors = monitors();
+    app.view_windows.displays = monitors
+        .iter()
+        .enumerate()
+        .filter(|(_, monitor)| monitor.bounds.is_positive() && monitor.bounds.is_finite() && (0.1..=16.0).contains(&monitor.scale))
+        .map(|(index, monitor)| Display {
+            name: monitor.name.clone().unwrap_or_else(|| (index + 1).to_string()),
+            bounds: monitor.bounds,
+            scale: monitor.scale,
+            primary: monitor.primary,
+        })
+        .collect();
+}
+
+fn toast(app: &mut SolveApp, ctx: &Context) {
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    let Some(returned) = app.view_windows.returned.as_ref() else { return };
+    if app.now >= returned.expires || !app.docs.tab_open(returned.tab) {
+        app.view_windows.returned = None;
+        return;
+    }
+    let count = returned.window.views.len().to_string();
+    let label = solidcraft_ui_text::format(
+        if count == "1" { "multi_window.returned.one" } else { "multi_window.returned.other" },
+        &[("n", &count), ("design", &returned.design)],
+    );
+    let edge = Container::new(ctx, Surface::ViewportStatus)
+        .area(egui::Id::unique("returned_design_views"))
+        .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -64.0));
+    let undo = edge
+        .show(ctx, |ui| {
+            Menu::show(ui, 280.0, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(label);
+                    crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Undo"), crate::ui_kit::Button::Normal).clicked()
+                })
+                .inner
+            })
+        })
+        .inner;
+    if undo && let Some(returned) = app.view_windows.returned.take() {
+        let root = app.docs.current_tab();
+        if documents::select_tab(app, returned.tab) {
+            let id = returned.window.id;
+            documents::park_active_look(app);
+            if app.docs.views.restore_window(returned.window) {
+                app.view_windows.focus = Some((returned.tab, id));
+            }
+            documents::show_active_look(app);
+            documents::select_tab(app, root);
+        }
+    }
+    if let Some(returned) = &app.view_windows.returned {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64((returned.expires - app.now).max(0.0)));
+    }
+}
+
+fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId) {
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
+    let tokens = solidcraft_theme::Tokens::get();
+    let edge = Container::new(ui.ctx(), Surface::ApplicationBar).edge("sc_view_window_bar", Edge::Top);
+    let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(tokens.app_bar);
+    Container::new(ui.ctx(), Surface::ApplicationBar).show_edge(
+        ui,
+        edge.exact_size(crate::app_bar::HEIGHT).show_separator_line(false),
+        frame,
+        |ui| {
+            let rect = ui.max_rect();
+            let titlebar = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
+            let action = titlebar.show(ui, rect, |ui, content| {
+                let left = content.left() + 12.0;
+                ui.painter().text(
+                    egui::pos2(left, content.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    "SolidCraft",
+                    egui::FontId::proportional(tokens.font_body),
+                    tokens.app_bar_text,
+                );
+                let right = content.right() - 30.0;
+                let mut menu = ui.new_child(
+                    egui::UiBuilder::new().max_rect(egui::Rect::from_min_max(egui::pos2(right + 2.0, content.top() + 3.0), content.right_bottom())),
+                );
+                let out = Menu::button(&mut menu, "⋯", |ui| {
+                    let selected = app.tr("multi_window.views_only");
+                    ui.label(selected);
+                    if crate::ui_kit::menu::button(ui, app.tr("multi_window.return_views"), "").clicked() {
+                        let _ = app.run("tab.window.close", json!({"window":id}));
+                        ui.close();
+                    }
+                });
+                out.response.backing_on_hover_text(app.tr("multi_window.window_menu"));
+                if right > left + 72.0 {
+                    documents::tabs(app, ui, rect, left + 72.0, right);
+                }
+            });
+            if let Some(action) = action {
+                if action == crate::window_chrome::WindowAction::Close {
+                    app.view_windows.close_current();
+                } else {
+                    action.send(ui.ctx());
+                }
+            }
+        },
+    );
+    let rect = ui.available_rect_before_wrap();
+    let mut canvas = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    app.show_workspace(&mut canvas);
+    if let Some(rect) = app.viewport.rect.filter(|r| r.is_positive() && r.is_finite()) {
+        if crate::view_tiles::shown(app) {
+            crate::view_tiles::card_controls(app, &mut canvas);
+        }
+        let mut controls = crate::view_tiles::controls_ui(&mut canvas, app.session.uid, app.docs.views.active().id, rect);
+        crate::render_workspace::host_result_overlays(app, &mut controls);
+        crate::viewport::show_host_controls(app, &mut controls, rect);
+    }
+    crate::view_tiles::focus_pressed(app);
+    app.resolve_fit(ui.ctx());
+    crate::shortcut_box::show(app, ui.ctx());
+    crate::context_menu::show(app, ui.ctx());
+    documents::sync_window_title(app, ui.ctx());
+    if app.custom_titlebar {
+        crate::titlebar::resize_zones(ui);
+    }
+}
+
+impl Host {
+    fn new(tab: u64, id: WindowId) -> Self {
+        let mut viewport = crate::viewport::ViewportState::default();
+        viewport.isolate_window_scenes();
+        Self {
+            tab,
+            id,
+            viewport,
+            shell: Default::default(),
+            title: Default::default(),
+            view_rename: None,
+            view_placement: None,
+            menu: Default::default(),
+            preview: Default::default(),
+            ready: false,
+        }
+    }
+
+    fn swap(&mut self, app: &mut SolveApp) {
+        self.viewport.gpu = app.viewport.gpu;
+        self.viewport.gpu_unavailable = app.viewport.gpu_unavailable;
+        std::mem::swap(&mut app.viewport, &mut self.viewport);
+        std::mem::swap(&mut app.shell, &mut self.shell);
+        std::mem::swap(&mut app.window_title, &mut self.title);
+        std::mem::swap(&mut app.docs.view_rename, &mut self.view_rename);
+        std::mem::swap(&mut app.docs.view_placement, &mut self.view_placement);
+        std::mem::swap(&mut app.menu, &mut self.menu);
+        std::mem::swap(&mut app.preview, &mut self.preview);
+    }
+}
+
+/// Called only after every child has restored its temporary root app state.
+/// Hidden hosts retain their pictures; removed ownership releases the old mapping.
+pub(crate) fn retain_picture_slots(app: &mut SolveApp) -> Vec<u64> {
+    let owners = documents::view_picture_window_owners(app);
+    let mut slots = Vec::new();
+    for host in &mut app.view_windows.hosts {
+        let owned = owners.get(&(host.tab, host.id)).map(Vec::as_slice);
+        slots.extend(host.viewport.retain_window_scene_slots(owned));
+    }
+    slots
+}
+
+pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::RenderState>) {
+    if !app.view_windows.native || app.view_windows.is_child() || app.quit_requested {
+        return;
+    }
+    toast(app, ctx);
+    let root = app.docs.active_tab();
+    let root_home = app.home.open;
+    let mut old = std::mem::take(&mut app.view_windows.hosts);
+    let mut retired = Vec::new();
+    let mut tool_tab = None;
+    for (tab, id) in documents::view_window_ids(app) {
+        let mut host = old.iter().position(|host| (host.tab, host.id) == (tab, id)).map_or_else(|| Host::new(tab, id), |index| old.remove(index));
+        if !documents::select_tab(app, tab) {
             continue;
         }
-        let builder = ViewportBuilder::default().with_title("SolidCraft").with_inner_size([1000.0, 700.0]).with_min_inner_size([480.0, 320.0]);
-        let mut return_views = true;
-        let closed = ctx.show_viewport_immediate(id, builder, |ui, class| {
-            if class == ViewportClass::EmbeddedWindow || ui.input(|input| input.viewport().close_requested()) {
-                return true;
+        let Some(mut window) = app.docs.views.take_window(id) else { continue };
+        let os_id = viewport_id(tab, id);
+        let custom = !cfg!(target_os = "macos");
+        let mut builder = crate::window_chrome::viewport("SolidCraft", solidcraft_engine::io::APP_ID, custom).with_min_inner_size([640.0, 420.0]);
+        if !host.ready {
+            builder = builder.with_visible(false);
+            if let Some(p) = &window.placement {
+                let origin = app
+                    .view_windows
+                    .displays
+                    .iter()
+                    .find(|display| p.display.as_deref() == Some(display.name.as_str()))
+                    .map_or(egui::Vec2::ZERO, |display| display.bounds.min.to_vec2() / display.scale);
+                builder = builder
+                    .with_inner_size([p.w, p.h])
+                    .with_position((origin + egui::vec2(p.x, p.y)).to_pos2())
+                    .with_maximized(p.maximised)
+                    .with_fullscreen(p.fullscreen);
             }
-            let root = app.docs.active_tab();
-            let root_home = app.home.open;
-            if !documents::select_tab(app, window.tab) {
-                return false;
+        }
+        let mut refused = false;
+        let mut close_request = None;
+        ctx.show_viewport_immediate(os_id, builder, |ui, class| {
+            if class == ViewportClass::EmbeddedWindow {
+                refused = true;
+                return;
             }
-
+            if let Some(p) = window.placement.as_mut() {
+                ui.input(|i| {
+                    let viewport = i.viewport();
+                    if let Some(rect) = viewport.outer_rect.filter(|r| r.is_positive() && r.is_finite()) {
+                        let scale = viewport.native_pixels_per_point.unwrap_or(1.0) * ui.ctx().zoom_factor();
+                        let physical = (rect.center().to_vec2() * scale).to_pos2();
+                        let display = app.view_windows.displays.iter().find(|display| display.bounds.contains(physical));
+                        let origin = display.map_or(egui::Vec2::ZERO, |display| display.bounds.min.to_vec2() / display.scale);
+                        (p.x, p.y) = (rect.left() - origin.x, rect.top() - origin.y);
+                        p.display = display.map(|display| display.name.clone());
+                    }
+                    if let Some(rect) = viewport.inner_rect.filter(|r| r.is_positive() && r.is_finite()) {
+                        (p.w, p.h) = (rect.width(), rect.height());
+                    }
+                    p.maximised = viewport.maximized.unwrap_or_default();
+                    p.fullscreen = viewport.fullscreen.unwrap_or_default();
+                });
+            }
+            if ui.input(|i| i.viewport().close_requested()) {
+                close_request = Some(None);
+                return;
+            }
+            if !host.ready {
+                host.ready = true;
+                ui.ctx().send_viewport_cmd(ViewportCommand::Visible(true));
+            }
+            if app.view_windows.focus == Some((tab, id)) {
+                ui.ctx().send_viewport_cmd(ViewportCommand::Focus);
+                app.view_windows.focus = None;
+            }
             documents::park_active_look(app);
-            app.view_windows.parked = Some((window.tab, app.docs.views.ids().collect()));
+            app.view_windows.parked = Some((tab, app.docs.views.ids().collect()));
             std::mem::swap(&mut app.docs.views, &mut window.views);
-            app.view_windows.sync_limits(window.tab, &mut app.docs.views, Some(&window.views));
-            window.viewport.gpu = app.viewport.gpu;
-            window.viewport.gpu_unavailable = app.viewport.gpu_unavailable;
-            std::mem::swap(&mut app.viewport, &mut window.viewport);
-            std::mem::swap(&mut app.shell, &mut window.shell);
-            std::mem::swap(&mut app.window_title, &mut window.title);
-            std::mem::swap(&mut app.docs.view_rename, &mut window.view_rename);
-            std::mem::swap(&mut app.docs.view_placement, &mut window.view_placement);
-            std::mem::swap(&mut app.menu, &mut window.menu);
-            std::mem::swap(&mut app.preview, &mut window.preview);
+            host.swap(app);
             let decorations = (app.custom_titlebar, app.integrated_titlebar);
-            (app.custom_titlebar, app.integrated_titlebar) = (false, false);
-            app.home.open = window.home;
-            std::mem::swap(&mut app.ui.tab, &mut window.ribbon_tab);
+            (app.custom_titlebar, app.integrated_titlebar) = (custom, !custom);
+            let home = std::mem::replace(&mut app.home.open, false);
+            let ribbon = std::mem::replace(&mut app.ui.tab, documents::view_workspace(app.docs.views.active().kind).into());
             documents::show_active_look(app);
             app.view_windows.painting = Some(id);
-
-            let entering_revision = app.session.revision;
+            let revision = app.session.revision;
+            let had_dialog = app.dialog.is_some();
             app.view_window_logic(ui.ctx());
-            draw(app, ui);
+            window_content(app, ui, id);
+            if !had_dialog && app.dialog.is_some() {
+                tool_tab = Some(tab);
+                ctx.send_viewport_cmd_to(ViewportId::ROOT, ViewportCommand::Focus);
+            }
             if crate::render_workspace::active(app) || crate::render_workspace::tiled(app) {
                 crate::render_workspace::tick_live(app, ui.ctx());
             }
-            let changed = app.session.revision != entering_revision;
-            let closing = app.view_windows.closing.take() == Some(id);
-            if app.docs.current_tab() == window.tab {
+            close_request = app.view_windows.closing.take();
+            let on_child_design = app.docs.current_tab() == tab;
+            if on_child_design {
                 documents::park_active_look(app);
+                app.ui.tab = ribbon;
             }
-            std::mem::swap(&mut app.ui.tab, &mut window.ribbon_tab);
+            app.home.open = home;
+            (app.custom_titlebar, app.integrated_titlebar) = decorations;
             app.view_windows.painting = None;
             app.view_windows.parked = None;
-            window.home = app.home.open;
-            (app.custom_titlebar, app.integrated_titlebar) = decorations;
-            std::mem::swap(&mut app.docs.view_rename, &mut window.view_rename);
-            std::mem::swap(&mut app.docs.view_placement, &mut window.view_placement);
-            std::mem::swap(&mut app.menu, &mut window.menu);
-            std::mem::swap(&mut app.preview, &mut window.preview);
-            std::mem::swap(&mut app.window_title, &mut window.title);
-            std::mem::swap(&mut app.shell, &mut window.shell);
-            std::mem::swap(&mut app.viewport, &mut window.viewport);
-
-            documents::exchange_window_views(app, window.tab, &mut window.views);
-            if app.docs.current_tab() == window.tab {
+            host.swap(app);
+            documents::exchange_window_views(app, tab, &mut window.views);
+            if on_child_design {
                 documents::show_active_look(app);
-            } else if app.docs.tab_open(window.tab) {
-                let primary_ribbon = std::mem::replace(&mut app.ui.tab, window.ribbon_tab.clone());
-                documents::restore_primary_ribbon(app, window.tab, primary_ribbon);
-                let old_views = std::mem::take(&mut window.views);
-                documents::reattach_window_views(app, window.tab, old_views);
-                let new_tab = app.docs.active_tab();
-                app.view_windows.sync_limits(new_tab, &mut app.docs.views, None);
-                let view = app.docs.views.active().id;
-                if !closing && let Some(views) = documents::detach_view(app, view) {
-                    window.tab = new_tab;
-                    window.views = views;
-                } else {
-                    return_views = false;
-                }
             }
-            documents::select_tab(app, root);
-            app.home.open = root_home;
-            if changed {
+            if revision != app.session.revision {
                 ctx.request_repaint_of(ViewportId::ROOT);
             }
-            closing || !return_views || !app.docs.tab_open(window.tab)
         });
-        if closed {
-            ctx.send_viewport_cmd_to(id, egui::ViewportCommand::Close);
-            retired_scenes.extend(window.viewport.window_scene_slots());
-            if return_views {
-                documents::reattach_window_views(app, window.tab, window.views);
+        if !app.docs.tab_open(tab) {
+            ctx.send_viewport_cmd_to(os_id, ViewportCommand::Close);
+            retired.extend(host.viewport.window_scene_slots());
+            continue;
+        }
+        documents::put_view_window(app, tab, window);
+        if refused || close_request.is_some() {
+            documents::select_tab(app, tab);
+            if let Some(Some(view)) = close_request {
+                app.docs.views.close_in_window(id, view);
+            } else {
+                let _ = close(app, id, !refused);
             }
-            ctx.request_repaint();
+            if refused {
+                app.set_status(solidcraft_ui_text::format("multi_window.open_failed", &[("design", &app.session.doc.name)]), true);
+            }
+            ctx.send_viewport_cmd_to(os_id, ViewportCommand::Close);
+            retired.extend(host.viewport.window_scene_slots());
         } else {
-            app.view_windows.windows.insert(index.min(app.view_windows.windows.len()), window);
+            app.view_windows.hosts.push(host);
         }
     }
-    let tab = app.docs.active_tab();
-    app.view_windows.sync_limits(tab, &mut app.docs.views, None);
-    if !retired_scenes.is_empty()
+    documents::select_tab(app, tool_tab.unwrap_or(root));
+    app.home.open = tool_tab.is_none() && root_home;
+    for host in old {
+        ctx.send_viewport_cmd_to(viewport_id(host.tab, host.id), ViewportCommand::Close);
+        retired.extend(host.viewport.window_scene_slots());
+    }
+    if !retired.is_empty()
         && let Some(state) = render_state
         && let Some(renderer) = state.renderer.write().callback_resources.get_mut::<solidcraft_viewport_gpu::view::Renderer>()
     {
-        renderer.discard_views(&retired_scenes);
+        renderer.discard_views(&retired);
     }
 }
