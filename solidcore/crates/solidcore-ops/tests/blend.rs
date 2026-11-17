@@ -33,10 +33,11 @@ use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner, SweepFrame};
+use solidcore_ops::boolean::boolean;
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
     make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
-    Error, FitKind, Order, SetBack, Turn, Unblendable,
+    BooleanOp, Error, FitKind, Order, SetBack, Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
@@ -229,6 +230,70 @@ fn blends_turn_round_a_shallow_sharp_corner() {
             }
         }
     }
+}
+
+/// A plate `t` thick whose top face, through the origin, is tilted `tilt` degrees about y,
+/// bounded outside by two upright walls that meet in a shallow concave crease: the plane
+/// y = -46 for x < 0, and that plane turned `crease` degrees about the upright line through
+/// (0, -46) for x > 0. Inside it is bounded by y = -38, and it ends at x = +-30. The top meets the
+/// walls at 90 degrees and at 90 - atan(sin(tilt) tan(crease)) degrees. Made as solidcraft-cli
+/// makes it: boxes, turned and combined.
+fn crease_plate(t: f64, tilt: f64, crease: f64) -> (Body, [usize; 2]) {
+    let (d, c, l) = (46.0, 38.0, 30.0);
+    let (a, k) = (tilt.to_radians(), crease.to_radians());
+    // p' = p A + t: rows the images of x, y, z, then the translation
+    let about_z = |th: f64, at: [f64; 3]| {
+        let (cs, sn) = (th.cos(), th.sin());
+        let m = [[cs, sn, 0.0], [-sn, cs, 0.0], [0.0, 0.0, 1.0]];
+        let tr = [0, 1, 2].map(|j| at[j] - (0..3).map(|i| at[i] * m[i][j]).sum::<f64>());
+        [[m[0][0], m[0][1], m[0][2], 0.0], [m[1][0], m[1][1], m[1][2], 0.0], [m[2][0], m[2][1], m[2][2], 0.0], [tr[0], tr[1], tr[2], 1.0]]
+    };
+    let outer = make_box([-l, -d, -200.0], [2.0 * l, d - c, 400.0]).unwrap();
+    let turned = make_box([0.0, -d, -200.0], [2.0 * l, d - c + 10.0, 400.0]).unwrap();
+    turned.transform(&about_z(-k, [0.0, -d, 0.0])).unwrap();
+    let outer = boolean(outer, turned, BooleanOp::Union).unwrap().unwrap();
+    let keep = make_box([-l, -d - 40.0, -200.0], [2.0 * l, d + 40.0 - c, 400.0]).unwrap();
+    let outer = boolean(outer, keep, BooleanOp::Intersect).unwrap().unwrap();
+    let slab = make_box([-271.5, -271.5, -t], [543.0, 543.0, t]).unwrap();
+    slab.transform(&[[a.cos(), 0.0, -a.sin(), 0.0], [0.0, 1.0, 0.0, 0.0], [a.sin(), 0.0, a.cos(), 0.0], [0.0, 0.0, 0.0, 1.0]]).unwrap();
+    let b = boolean(slab, outer, BooleanOp::Intersect).unwrap().unwrap();
+    let top = |x: f64| -x * a.tan();
+    let (xl, xr) = (-l / 2.0, l / 2.0 * k.cos());
+    let edges = [edge_at(&b, [xl, -d, top(xl)]), edge_at(&b, [xr, -d - l / 2.0 * k.sin(), top(xr)])];
+    (b, edges)
+}
+
+/// The removed volume of [`crease_plate`]'s two top edges rounded `r`, as the prisms of their
+/// sections mitred at the crease (each section the wedge of the top and its wall, less the ball's
+/// disc, cut off at the plate's bottom; each prism measured along its centroid line between its
+/// end plane and the crease's bisector plane), less the corner's departure from the mitre,
+/// about 0.02 r^3, measured on rounds that stay on their walls (r 2.5 here, and a plate 7 thick
+/// at r 3.5): the case's derivation, by hand. Values for the radii the test uses.
+const CREASE_PLATE_REMOVED: [(f64, f64); 3] = [(3.0, 148.0900), (3.5, 200.2216), (4.0, 257.4169)];
+
+/// A round wider than the plate's walls are tall (it overflows them, runs on past the plate's
+/// bottom and is trimmed there), on two edges meeting at a shallow concave crease between the
+/// walls. At the crease's corner the round's piece along the crease line ran past the crease
+/// edge's lower end; the piece was the crease edge trimmed to its points' drops, both clamped
+/// to that end, so it had no length and the corner's loop did not close ("Corner Geometry
+/// Computation Failure"). With `fillet_on_edge_continues_line` the piece is the crease line
+/// continued: the rounds build, within 0.2 of the mitred prisms less the corner term.
+#[test]
+fn rounds_overflowing_a_shallow_concave_crease_build() {
+    for (r, want) in CREASE_PLATE_REMOVED {
+        all_fixes();
+        let (b, edges) = crease_plate(3.0, 25.0, 15.0);
+        let before = volume(&b);
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        let off = before - volume(&b);
+        assert!((off - want).abs() < 0.2, "r {r}: {off} off, want {want}");
+    }
+    // without the fix the corner's loop does not close
+    solidcore_ops::session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied().filter(|n| *n != "fillet_on_edge_continues_line")).unwrap();
+    let (b, edges) = crease_plate(3.0, 25.0, 15.0);
+    assert!(blend(&b, Blend::Round, &edges, &[3.5], &[], Corners::Filled).is_err());
+    all_fixes();
 }
 
 /// Asserts that the faces of [`shallow_corner_plate`]`(kink, convex)` rounded r 1 that are not
