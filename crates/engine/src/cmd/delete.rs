@@ -676,6 +676,9 @@ mod tests {
         assert_eq!(r["bodies"], json!([meshes[0]]), "{r}");
         let left: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
         assert_eq!(left, vec![meshes[1].clone()], "only the other mesh is left");
+        run(&mut s, "edit.undo", json!({}));
+        let back: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect();
+        assert_eq!(back, meshes, "undo brings the deleted mesh back");
     }
 
     fn curves(s: &Session, sk: u64) -> Vec<String> {
