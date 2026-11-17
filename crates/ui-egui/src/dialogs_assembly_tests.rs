@@ -874,6 +874,75 @@ fn picks_on_one_component_say_why_and_offer_components() {
     assert!(text_at(&out, &why).is_none(), "nothing left to say");
 }
 
+/// #12867: a joint between two grounded parts moves neither. The Joint dialog says so under the
+/// picks and offers to unground the second part; after that the note is gone. A joint made
+/// between them anyway says the same in Messages, as an error.
+#[test]
+fn picks_on_two_grounded_parts_say_the_joint_moves_neither_and_offer_to_unground_one() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("component.create", &json!({"name": name})).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    for name in ["A", "B"] {
+        let o = occ(&app, name);
+        app.run("occurrence.ground", json!({"occurrence": o, "grounded": true})).unwrap();
+    }
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid1"), ("a", "A:1"), ("b", "B:1")]);
+
+    // Made anyway (as a script or the dialog's OK would): Messages says why, as an error.
+    app.messages.clear();
+    let r = app
+        .run(
+            "joint.create",
+            json!({"type": "rigid", "name": "Rigid1", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+        )
+        .unwrap();
+    assert!(r["conflicts"].as_array().is_some_and(|c| c.len() == 1), "{r}");
+    assert!(app.messages.iter().any(|m| m.text == why && m.error), "{:?}", app.messages.iter().map(|m| &m.text).collect::<Vec<_>>());
+    app.run("edit.undo", json!({})).unwrap();
+
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(5.0, 5.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(25.0, 5.0, 10.0)).unwrap());
+    let Kind::Assembly(Asm::Joint(f)) = &d.kind else { panic!("{:?}", d.kind) };
+    // The dialog names the joint it would make (its default name).
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", "Rigid Joint1"), ("a", "A:1"), ("b", "B:1")]);
+    let held = grounded_sides(&app, f, &d.inputs).expect("both picks are grounded");
+    assert_eq!((held.why.as_str(), held.occurrence, held.name.as_str()), (why.as_str(), occ(&app, "B"), "B:1"));
+    app.dialog = Some(d);
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+        // Nothing is painted: drop the texture changes (an unapplied delta panics on drop).
+        out.textures_delta.clear();
+        out
+    };
+    // The auto-sized dialog takes a few frames to settle its width.
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_some(), "the dialog says why");
+    let label = solidcraft_ui_text::format("joint.unground_part", &[("occurrence", "B:1")]);
+    let at = text_at(&out, &label).expect("and offers to unground the second part");
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+    frame(&mut app, vec![button(true)]);
+    frame(&mut app, vec![button(false)]);
+    let b = occ(&app, "B");
+    assert!(app.session.doc.occurrences.iter().any(|o| o.id == b && !o.grounded), "B is ungrounded");
+    assert!(app.dialog.is_some(), "the dialog stays open");
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_none(), "nothing left to say");
+}
+
 #[test]
 fn rigid_group_bodies_in_one_component_explain_how_to_separate_them() {
     for component in [None, Some("Part")] {

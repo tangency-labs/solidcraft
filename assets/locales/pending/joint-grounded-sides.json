@@ -1,0 +1,7 @@
+{
+  "en": {
+    "joint.moves_neither": "{joint} moves neither part: both are grounded ({a}, {b}). Unground one to let the joint place it.",
+    "joint.unground_part": "Unground {occurrence}",
+    "joint.does_not_hold": "{joint} doesn't hold: {reason}"
+  }
+}

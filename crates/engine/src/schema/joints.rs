@@ -980,7 +980,8 @@ pub struct JointAddedResult {
     /// Its name.
     pub name: String,
     /// A value that starts inside its limits, not where it was given: the part moved there as it
-    /// was joined. Left out when there is none.
+    /// was joined; or a joint between two grounded parts that don't meet where it puts them, which
+    /// moves neither (#12867). Left out when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

@@ -1263,6 +1263,19 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         let _ = app.run("component.from_bodies", json!({ "bodies": bodies }));
                     }
                 });
+            } else if let Some(held) = grounded_sides(app, f, inputs) {
+                // Both picked parts are grounded: the joint would move neither (#12867). Say so,
+                // and offer to unground the second, so the preview shows the joint placing it.
+                ui.vertical(|ui| {
+                    crate::ui_kit::status_line(ui, &held.why, crate::ui_kit::StatusTone::Warning);
+                    let label = solidcraft_ui_text::format("joint.unground_part", &[("occurrence", &held.name)]);
+                    let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal);
+                    crate::scenario::publish_handle("joint:unground", r.rect.center());
+                    if r.clicked() {
+                        // A refusal shows on the status line; the picks stay either way.
+                        let _ = app.run("occurrence.ground", json!({ "occurrence": held.occurrence, "grounded": false }));
+                    }
+                });
             }
             form_row(ui, "Motion", |ui| {
                 ui.label("");
@@ -1914,6 +1927,41 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
         });
     }
     commands(app, k, inputs).err().map(|e| (e, Vec::new()))
+}
+
+/// Both of a new joint's picked parts are grounded: what the dialog says, and the part its
+/// Unground button frees (the second pick).
+#[derive(Debug, PartialEq)]
+pub(crate) struct GroundedSides {
+    pub why: String,
+    pub occurrence: u64,
+    pub name: String,
+}
+
+/// The Joint dialog's note when both picks are on grounded parts (#12867): a joint between them
+/// moves neither. `None` while editing, before both sides are picked, or when either side is on
+/// a part that can move (the root's bodies can't be ungrounded, so they get no note here; the
+/// joint's reply still says why).
+pub(crate) fn grounded_sides(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Option<GroundedSides> {
+    if f.editing.is_some() {
+        return None;
+    }
+    let picks: Vec<&Sel> =
+        if f.as_built { sel_items(inputs, 0).iter().collect() } else { (0..2).filter_map(|i| sel_items(inputs, i).first()).collect() };
+    let doc = &app.session.doc;
+    let mut occs: Vec<u64> = Vec::new();
+    for body in picks.iter().map(|p| body_of(p)) {
+        let occ = placement_of_body(&app.session, body?).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)?;
+        if !occs.contains(&occ) {
+            occs.push(occ);
+        }
+    }
+    let [a, b] = occs.as_slice() else { return None };
+    let grounded = |o: u64| doc.occurrences.iter().find(|x| x.id == o && x.grounded);
+    let (oa, ob) = (grounded(*a)?, grounded(*b)?);
+    let joint = if f.name.trim().is_empty() { default_joint_name(doc, f.joint_kind()) } else { f.name.trim().to_string() };
+    let why = solidcraft_ui_text::format("joint.moves_neither", &[("joint", &joint), ("a", &oa.name), ("b", &ob.name)]);
+    Some(GroundedSides { why, occurrence: ob.id, name: ob.name.clone() })
 }
 
 /// The occurrences of picked bodies (deduplicated, in pick order).
