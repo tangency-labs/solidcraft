@@ -168,7 +168,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         notes: super::drawing_scene::note_results(built.notes),
         balloons: super::drawing_scene::balloon_results(built.balloons),
         tables: super::drawing_scene::table_results(built.tables),
-        out_of_date: built.out_of_date.iter().map(|id| ids::encode(*id)).collect(),
+        out_of_date: built.out_of_date.iter().map(|(id, _)| ids::encode(*id)).collect(),
         sketches: built.sketches.into_iter().map(Into::into).collect(),
         fills: built.fills.into_iter().map(Into::into).collect(),
         param_warnings: Vec::new(),
