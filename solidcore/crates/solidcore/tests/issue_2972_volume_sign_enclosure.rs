@@ -211,7 +211,11 @@ fn a_sphere_is_enclosed_across_its_seam_and_poles() {
 /// `1e-5` of its scale wide; the sphere's area spends its cell budget near the poles
 /// (MEASURED, asked `1e-6`: 1.8e-3 wide, 3.7e-5 of the area), so its bands are asked to hold
 /// the closed forms at most `1e-4` of their scales wide, and its enclosures are refined to
-/// that `1e-4` (a tighter ask only spends the area's budget past what is asserted).
+/// `1e-4 / (1 + 1e-4)` (a tighter ask only spends the area's budget past what is asserted).
+/// That is the most an ask can be and still bound the area's band by `1e-4` of the true area:
+/// an enclosure asked `rel` is at most `rel` of its upper end `hi` wide, and `hi` is at most
+/// the true value plus that width, so the width is at most `rel / (1 - rel)` of the true
+/// value (asked `1e-4` itself, MEASURED, the area's band ends 1.00006e-4 of `16 pi` wide).
 #[test]
 fn mass_properties_are_enclosed_around_their_closed_forms() {
     let check = |b: &mut Brep,
@@ -264,7 +268,15 @@ fn mass_properties_are_enclosed_around_their_closed_forms() {
     );
     let mut s = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 2.0).unwrap();
     let i = 0.4 * (4.0 / 3.0 * PI * 8.0) * 4.0;
-    check(&mut s, 1e-4, 1e-4, 16.0 * PI, [0.0; 3], [i; 3], [0.0; 3]);
+    check(
+        &mut s,
+        1e-4 / (1.0 + 1e-4),
+        1e-4,
+        16.0 * PI,
+        [0.0; 3],
+        [i; 3],
+        [0.0; 3],
+    );
 }
 
 /// `enclose_face_area` on some of a box's faces: each face's enclosure holds its exact area

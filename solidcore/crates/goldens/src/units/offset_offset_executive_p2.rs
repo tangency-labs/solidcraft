@@ -3011,10 +3011,13 @@ mod tests {
                 });
             assert!(closed_form.is_some() != half_pipe.is_some(), "{name}");
 
-            // the enclosure is asked for the relative width accepted below: a tighter ask only
-            // refines past it, to the cell budget (the half pipes, and the 2e-6 slab at 1e-9)
+            // the enclosure is asked for half the relative width accepted below: a tighter ask
+            // only refines past it, to the cell budget (the half pipes, and the 2e-6 slab at
+            // 1e-9). Not the width itself: the ask is relative to the sign's enclosure's upper
+            // end, the acceptance to the final one's, which is lower (MEASURED: asked 2e-4,
+            // the R 12 inner half pipe ends 2.01e-4 of its upper end wide)
             let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
-            crate::soundness::start_enclosing(width);
+            crate::soundness::start_enclosing(width / 2.0);
             let output = Runner.run_rust(case).unwrap();
             let found = crate::soundness::take();
             assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
