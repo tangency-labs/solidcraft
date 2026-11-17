@@ -126,6 +126,8 @@ const ANSWERED_ON_A_COPY: &[&str] =
 const READ_ON_A_COPY: &[&str] = &[
     "model.mesh",
     "plugin.inspect",
+    // Compiles the package's component to check it: tens of seconds for a large importer.
+    "plugin.check",
     "inspect.measure",
     "document.inspect",
     "inspect.clearance",
