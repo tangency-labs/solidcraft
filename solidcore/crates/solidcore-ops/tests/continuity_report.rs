@@ -3,7 +3,7 @@
 //! each tangentially (G1), its curvature jumping by 1 / r; a cylinder's circles have teeth of
 //! length 1 / R pointing at the axis. Separate sheets: where their boundary edges meet, each
 //! seam measured as the same pair sewn into one body measures it; sheets apart have none; a seam
-//! over part of an edge runs over that part only.
+//! over part of an edge runs over that part only; a seam along a whole closed curve is one seam.
 
 #![allow(
     clippy::unwrap_used,
@@ -17,7 +17,7 @@ mod common;
 use common::edge_at;
 use solidcore_ops::continuity::{sheet_seams, ContinuityTolerances, G1AllAlong, SeamReport};
 use solidcore_ops::stitch::sew;
-use solidcore_ops::sweep::{loft, Curve};
+use solidcore_ops::sweep::{loft, planar_faces, Curve};
 use solidcore_ops::{blend, make_box, make_cylinder, Blend, Body, Corners, Error, Order};
 
 /// SolidCraft's tolerances, the caller's: a micron, a degree, 1/100 mm and a tenth of that
@@ -245,6 +245,96 @@ fn sheets_sharing_half_an_edge_meet_over_that_half() {
         Some(4),
         "one plane: {seam:?}"
     );
+}
+
+/// A circle of radius 5 about the z axis at height `z`, angle 0 (its seam) along `reference`.
+fn circle(z: f64, reference: [f64; 3]) -> Curve {
+    Curve::Arc {
+        center: [0.0, 0.0, z],
+        axis: [0.0, 0.0, 1.0],
+        reference,
+        radius: 5.0,
+        start: 0.0,
+        end: std::f64::consts::TAU,
+    }
+}
+
+/// A disc of radius 5 in z = 0 capping a tube of radius 5 from z = 0 to 10 (#18163): they meet
+/// along the whole circle, the disc's only edge and the tube's lower one, whether the tube's
+/// seam falls on the disc's (both along x) or a quarter turn round (along y). One seam over the
+/// whole of both edges, its stations on the circle, the faces square across it (G0, 90
+/// degrees), measured as the same pair sewn into one body measures it (along both of its edges
+/// where sewing keeps two vertices on the circle).
+#[test]
+fn a_disc_capping_a_tube_meets_it_in_one_seam_round_the_whole_circle() {
+    let disc = planar_faces(&[circle(0.0, [1.0, 0.0, 0.0])]).unwrap();
+    let (_, disc_order) = disc.to_record().unwrap();
+    for reference in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+        let tube = loft(
+            &[vec![circle(0.0, reference)], vec![circle(10.0, reference)]],
+            1,
+            false,
+        )
+        .unwrap();
+        let (_, tube_order) = tube.to_record().unwrap();
+        let r = sheet_seams(
+            &[(&disc, &disc_order), (&tube, &tube_order)],
+            ZONE,
+            9,
+            tolerances(),
+        )
+        .unwrap();
+        assert_eq!(r.seams.len(), 1, "{reference:?}: {r:?}");
+        assert!(
+            r.unproved.is_empty() && r.unmeasured.is_empty(),
+            "{reference:?}: {r:?}"
+        );
+        let seam = &r.seams[0];
+        assert_eq!(seam.sheets, [0, 1]);
+        assert_eq!(seam.along, [[0.0, 1.0]; 2], "the whole of both edges");
+        assert_eq!(seam.report.stations.len(), 9);
+        for st in &seam.report.stations {
+            let [x, y, z] = st.point;
+            assert!(
+                (x * x + y * y - 25.0).abs() <= 1e-9 && z.abs() <= 1e-12,
+                "{st:?}"
+            );
+            assert!(st.gap_mm <= 1e-9, "{st:?}");
+            assert!((st.normal_angle_deg - 90.0).abs() <= 1e-6, "{st:?}");
+        }
+        assert_eq!(seam.report.order_at_stations, Some(0), "G0: {seam:?}");
+
+        let sewn = sew(&[&disc, &tube], ZONE).unwrap();
+        let (_, order) = sewn.body.to_record().unwrap();
+        let whole = sewn
+            .body
+            .continuity_report(&order, &[], 9, tolerances())
+            .unwrap();
+        // the circle the two were sewn along (the tube's own seam rises from it): sewing keeps
+        // both sheets' vertices on it, so it is one edge where the seams fall together and two
+        // where they do not
+        let joined: Vec<_> = whole
+            .seams
+            .iter()
+            .filter(|s| s.stations.iter().all(|st| st.point[2].abs() <= 1e-9))
+            .collect();
+        let edges = if reference == [1.0, 0.0, 0.0] { 1 } else { 2 };
+        assert_eq!(joined.len(), edges, "{reference:?}: {whole:?}");
+        let mut j = [0.0_f64; 3];
+        for s in &joined {
+            assert_eq!(seam.report.order_at_stations, s.order_at_stations);
+            for (m, e) in j.iter_mut().zip(worst(s)) {
+                *m = m.max(e);
+            }
+        }
+        let w = worst(&seam.report);
+        for o in 0..3 {
+            assert!(
+                (w[o] - j[o]).abs() <= 1e-9,
+                "{reference:?} G{o}: {w:?} apart, {j:?} sewn"
+            );
+        }
+    }
 }
 
 /// Hostile input is refused: a zone or a tolerance not finite and positive, a station count
