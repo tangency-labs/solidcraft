@@ -114,3 +114,17 @@ fn a_living_hinge_warns_when_its_slots_are_no_longer_than_its_bridges() {
     let reply = hinge(&mut s, json!({})).unwrap();
     assert!(!reply["warning"].as_str().is_some_and(|w| w.contains("no longer than the bridges")), "{reply}");
 }
+
+/// The agent run of design 3.6, exactly.
+#[test]
+fn the_agent_example_cuts_what_the_design_says() {
+    let mut s = wall();
+    let reply = hinge(&mut s, json!({})).unwrap();
+    assert_eq!(reply["bodies"], json!(["Wall"]), "{reply}");
+    for (k, v) in [("slots", 95), ("rows", 27), ("whole", 67), ("shortened", 0), ("run_out", 28), ("left_out", 26)] {
+        assert_eq!(reply[k].as_u64(), Some(v), "{k}: {reply}");
+    }
+    assert!((reply["band_width_mm"].as_f64().unwrap() - 40.0).abs() < 1e-9, "{reply}");
+    assert!((reply["open_area_mm2"].as_f64().unwrap() - 354.104690).abs() < 1e-5, "{reply}");
+    assert!((volume(&s) - 27737.685930).abs() < 1e-5, "{}", volume(&s));
+}
