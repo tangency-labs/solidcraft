@@ -16,6 +16,13 @@ versions. Two preferences opt into holding the model:
   the pivot is the middle of the bodies in view. The navigation bridge uses the same preference,
   but picks the point each frame because device apps do not report rest.
 
+Preferences › Navigation › 3D mouse › **Motion model** says what the cap moves. **Object** (the
+default, as in earlier versions) moves the model the way you push, tilt or twist the cap. **Target
+camera** (`space_mouse_motion: "target_camera"`) moves the camera that way instead, around the
+point the view turns about, so the model moves the other way along every axis. Each axis's
+**Invert** still reverses that axis in either model. The navigation bridge is not affected: a
+device app sends view motion, not cap motion.
+
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
 adjust the view with the view navigator, the cap can rotate it too. Turn on **Turn sketches with
 the 3D mouse** (`space_mouse_sketch_orbit: true`) to let the cap rotate a sketch seen square on as

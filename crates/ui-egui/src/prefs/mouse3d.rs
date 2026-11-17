@@ -160,8 +160,12 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
         let orbits = [app.tr("ui.3d_mouse_orbit_traced").to_owned(), app.tr("ui.3d_mouse_orbit_classic").to_owned()];
         let label = app.tr("ui.3d_mouse_orbit");
         let help = app.tr("ui.3d_mouse_orbit_tip");
-        let width = ui_kit::ContentWidth::label(ui, label) + Tokens::get().space_16 + Tokens::get().space_4;
+        let motion_label = app.tr("ui.3d_mouse_motion_model").to_owned();
+        let width = [label, motion_label.as_str()].into_iter().map(|l| ui_kit::ContentWidth::label(ui, l)).fold(0.0, f32::max)
+            + Tokens::get().space_16
+            + Tokens::get().space_4;
         ui_kit::settings_form(ui, width, |ui| {
+            motion(app, ui, &motion_label);
             ui_kit::settings_row_help(ui, label, help, |ui| {
                 crate::ui_kit::settings_search::note_choices(ui, &orbits.each_ref().map(String::as_str));
                 let mut selected = usize::from(!app.preferences.space_mouse_model_pivot);
@@ -193,6 +197,40 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
             setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("ui.3d_mouse_sketch_orbit_tip"));
         });
+    });
+}
+
+/// The Motion model row: what the cap moves, the model (Object) or the camera (Target camera).
+fn motion(app: &mut SolveApp, ui: &mut egui::Ui, label: &str) {
+    use crate::prefs::SpaceMouseMotion;
+    let models = [app.tr("ui.3d_mouse_motion_model_object").to_owned(), app.tr("ui.3d_mouse_motion_model_target_camera").to_owned()];
+    let help = app.tr("ui.3d_mouse_motion_model_tip").to_owned();
+    ui_kit::settings_row_help(ui, label, &help, |ui| {
+        crate::ui_kit::settings_search::note_choices(ui, &models.each_ref().map(String::as_str));
+        let mut selected = SpaceMouseMotion::ALL.iter().position(|m| *m == app.preferences.space_mouse_motion).unwrap_or(0);
+        let response = ui.scope(|ui| {
+            ui_kit::segmented(
+                ui,
+                &mut selected,
+                &models.each_ref().map(String::as_str),
+                ui_kit::Segments {
+                    intrinsic: true,
+                    targets: &["prefs:3d_mouse_motion_model_object", "prefs:3d_mouse_motion_model_target_camera"],
+                    ..Default::default()
+                },
+            )
+        });
+        if response.inner {
+            app.preferences.space_mouse_motion = SpaceMouseMotion::ALL.get(selected).copied().unwrap_or_default();
+        }
+        if !crate::ui_kit::settings_search::texts_hit(ui, &[label]) {
+            for option in &models {
+                if let Some(rect) = crate::scenario::rect_of(&format!("dialog:{label}:{option}")) {
+                    crate::ui_kit::settings_search::remember(ui, option, rect);
+                    crate::ui_kit::settings_search::follow(ui, option, rect);
+                }
+            }
+        }
     });
 }
 
