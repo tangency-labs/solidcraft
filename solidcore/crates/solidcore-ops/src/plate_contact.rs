@@ -398,6 +398,58 @@ pub fn slot_prism(p: Plane, outline: &Region2, t_s: f64, over: f64) -> Result<Bo
     .map(Body::new)
 }
 
+/// `r` with every y turned (`y -> -y`), loops reversed to keep the outer counter-clockwise: a
+/// region in the frame of a plane read in the frame of the plane with the opposite normal
+/// (whose x is the same and whose y is turned).
+#[allow(
+    clippy::float_arithmetic,
+    reason = "a reflection: negation only, exact"
+)]
+fn flip_y(r: &Region2) -> Region2 {
+    use solidcore::prism::profile::{Loop2, Seg2};
+    let pt = |q: solidcore::math::Point2| solidcore::math::Point2::new(q.x, -q.y);
+    let flip = |l: &Loop2| {
+        Loop2 {
+            segs: l
+                .segs
+                .iter()
+                .map(|g| match *g {
+                    Seg2::Line { a, b } => Seg2::Line { a: pt(a), b: pt(b) },
+                    Seg2::Arc {
+                        center,
+                        radius,
+                        start,
+                        sweep,
+                    } => Seg2::Arc {
+                        center: pt(center),
+                        radius,
+                        start: -start,
+                        sweep: -sweep,
+                    },
+                    Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic {
+                        p0: pt(p0),
+                        p1: pt(p1),
+                        p2: pt(p2),
+                        p3: pt(p3),
+                    },
+                    Seg2::Conic { a, apex, b, w } => Seg2::Conic {
+                        a: pt(a),
+                        apex: pt(apex),
+                        b: pt(b),
+                        w,
+                    },
+                    Seg2::Bezier { n, p } => Seg2::Bezier { n, p: p.map(pt) },
+                })
+                .collect(),
+        }
+        .reversed()
+    };
+    Region2 {
+        outer: flip(&r.outer),
+        holes: r.holes.iter().map(flip).collect(),
+    }
+}
+
 /// Why a joint of one feature ([`tab_slot_joints`]) is not made.
 #[derive(Clone, Debug, PartialEq)]
 pub enum JointSkip {
@@ -418,7 +470,8 @@ pub enum JointSkip {
 /// and P is skipped, naming that joint; before that, a joint asking a plate for another
 /// direction (up to sign, [`solidcore::plate_contact::bearing`]) than an earlier made joint
 /// gave it is skipped `other_direction`, naming that joint. The answer has one entry per joint, `None` for a joint
-/// that is made. No plate changes. Only slots on one plane of S are compared so far.
+/// that is made. No plate changes. Slots on S's planes of one direction (both faces of S) are
+/// compared in one frame; tab-plate cuts are not compared (a laser joint has none).
 ///
 /// # Errors
 /// [`crate::Error::Argument`] for a plate index out of range; those of
@@ -471,7 +524,18 @@ pub fn tab_slot_joints(
             .map(|tp| tp.slot.clone())
             .collect();
         let mut meets = None;
-        'earlier: for (other, _, _, cut) in cuts.iter().filter(|c| c.1 == s && c.2 == p) {
+        'earlier: for (other, _, q, cut) in cuts.iter().filter(|c| c.1 == s) {
+            // A cut on the other face of S (opposite normal, same frame x) is read in p's frame
+            // with its y turned; a cut on a face in another direction is not compared.
+            let cut = if *q == p {
+                cut.clone()
+            } else {
+                match pc::bearing(q.normal, p.normal).map_err(status)? {
+                    pc::Bearing::Same => cut.clone(),
+                    pc::Bearing::Opposite => flip_y(cut),
+                    _ => continue,
+                }
+            };
             for o in &mine {
                 if ts::apart(&[cut.clone(), o.clone()], spec.min_land, tol)
                     .map_err(status)?
@@ -959,5 +1023,34 @@ mod tests {
             run(&[(2, 0, side), (1, 0, p)]),
             vec![None, Some(JointSkip::OtherDirection(0))]
         );
+    }
+
+    /// 16.2 walls on both faces of a shelf (design 5.7 `meets_other_joint`): a wall hanging
+    /// under Bottom (P' z = 0, normal -Z) right under the wall on P cuts the same slots, so it
+    /// is skipped naming joint 0; one hanging under y 60..66 is apart.
+    #[test]
+    fn walls_on_both_faces_of_a_shelf() {
+        let (s, p) = bottom();
+        let under = Plane {
+            normal: -Vec3::Z,
+            offset: 0.0,
+        };
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let below = make_box([20.0, 30.0, -60.0], [120.0, 6.0, 60.0]).unwrap();
+        let apart = make_box([20.0, 60.0, -60.0], [120.0, 6.0, 60.0]).unwrap();
+        assert!(below.plate_pair(&s, under, TOL).unwrap().is_ok());
+        let plates = [s, wall, below, apart];
+        let run = |joints: &[(usize, usize, Plane)]| {
+            tab_slot_joints(&plates, joints, spec2(), TOL).unwrap()
+        };
+        assert_eq!(
+            run(&[(1, 0, p), (2, 0, under)]),
+            vec![None, Some(JointSkip::MeetsOtherJoint(0))]
+        );
+        assert_eq!(
+            run(&[(2, 0, under), (1, 0, p)]),
+            vec![None, Some(JointSkip::MeetsOtherJoint(0))]
+        );
+        assert_eq!(run(&[(1, 0, p), (3, 0, under)]), vec![None, None]);
     }
 }
