@@ -1,0 +1,36 @@
+[package]
+name = "solidcore-cadir"
+description = "CADIR, cadmpeg's neutral CAD model, read into B-rep records: each body's faces, edges and vertices on their curves and surfaces, assembled as the STEP reader assembles its solids"
+edition = "2024"
+license.workspace = true
+version.workspace = true
+publish = false
+
+# solidcore's hard rules (no unsafe, no unwrap/expect/panic, no unchecked indexing), as
+# solidcore-step has them.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+neg_cmp_op_on_partial_ord = "allow"
+
+[dependencies]
+# The model read (Apache-2.0); pinned to the release SolidCraft links, whose wire form and
+# conventions this reader was written against.
+cadmpeg-ir = "=0.6.7"
+solidcore = { path = "../solidcore" }
+solidcore-ops = { path = "../solidcore-ops" }
+solidcore-record = { path = "../solidcore-record" }
+solidcore-step = { path = "../solidcore-step" }
+
+# cadmpeg's own example models (a unit cube) as test input.
+[dev-dependencies]
+cadmpeg-ir = { version = "=0.6.7", features = ["examples"] }
+serde_json = "1"
