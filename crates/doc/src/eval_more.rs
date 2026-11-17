@@ -189,7 +189,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 if let Some(mb) = st.bodies.get_mut(i) {
                     let nb = kernel::transform_matrix(&mb.body, m)?;
+                    let grain = crate::wood::GrainFrame::moved(mb, &m, false);
                     *mb = ModelBody::new(mb.name.clone(), nb, mb.feature);
+                    mb.grain_frame = Some(grain.into());
                 }
             }
             Ok(())

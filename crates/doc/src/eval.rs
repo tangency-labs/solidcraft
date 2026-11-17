@@ -46,6 +46,8 @@ pub struct ModelBody {
     pub source_name: Option<String>,
     /// Definition geometry coordinates to this computed body's frame.
     pub source_transform: crate::Mat,
+    /// Construction coordinates and copy ancestry of manufacturing grain.
+    pub grain_frame: Option<Arc<crate::wood::GrainFrame>>,
     pub body: Body,
     /// Feature that created it.
     pub feature: u64,
@@ -160,6 +162,7 @@ impl ModelBody {
             name,
             source_name: None,
             source_transform: crate::IDENTITY,
+            grain_frame: None,
             body,
             feature,
             mesh: Arc::new(OnceLock::new()),
@@ -1099,6 +1102,9 @@ impl ModelState {
         }
         for b in &mut self.bodies {
             let olds: &[&ModelBody] = by_name.get(b.name.as_str()).map(Vec::as_slice).unwrap_or_default();
+            if b.grain_frame.is_none() {
+                b.grain_frame = olds.first().and_then(|old| old.grain_frame.clone());
+            }
             if !matches!(f.kind, FeatureKind::BodyTransfer { .. })
                 && let Some(old) = olds.iter().find(|old| old.transferred)
             {
@@ -4116,9 +4122,20 @@ impl Model {
                 .entry(Arc::as_ptr(&r.state))
                 .or_insert_with(|| {
                     let mut st = (*r.state).clone();
-                    for b in st.bodies.iter_mut().filter(|b| b.name == old) {
-                        b.name = new.to_string();
-                        b.names = b.names.renamed();
+                    for b in &mut st.bodies {
+                        if b.name == old {
+                            b.name = new.to_string();
+                            b.names = b.names.renamed();
+                        }
+                        if let Some(frame) = b.grain_frame.as_mut()
+                            && frame.sources.iter().any(|source| source == old)
+                        {
+                            for source in &mut Arc::make_mut(frame).sources {
+                                if source == old {
+                                    *source = new.to_string();
+                                }
+                            }
+                        }
                     }
                     // The names the design must not use again travel with the state (#4957).
                     st.reserved_body_names = doc.reserved_body_names.clone();
@@ -8951,6 +8968,7 @@ fn pattern_body(doc: &Document, f: &Feature, st: &mut ModelState, mats: &[Mat], 
     for (name, copy, local) in made {
         copy_sheet(st, &mb.name, &name, &local);
         let mut body = ModelBody::traced_new(name, copy, f.id);
+        body.grain_frame = Some(crate::wood::GrainFrame::moved(&mb, &local, true).into());
         // A copy is its source moved: it is drawn from the source's triangles and display plans,
         // moved, rather than meshed and planned again for every copy.
         body.mesh_placement = placed_mesh::PlacedMesh::new(&mb, &local).map(Arc::new);
@@ -9743,7 +9761,9 @@ fn replay(
                 for mb in &made {
                     let moved = moved_copy(mb, kernel::transform_matrix(&mb.body, *m)?, first + k + 1);
                     let name = copy_body_name(st, f, output, &mb.name);
-                    st.bodies.push(ModelBody::traced_new(name, moved, f.id));
+                    let mut body = ModelBody::traced_new(name, moved, f.id);
+                    body.grain_frame = Some(crate::wood::GrainFrame::moved(mb, m, true).into());
+                    st.bodies.push(body);
                     output += 1;
                 }
             }
@@ -9942,6 +9962,8 @@ fn replay(
             }
         }
         // New bodies from a pattern join their source when they touch it (as one feature would).
+        let grain_sources: Vec<_> = st.bodies.iter().filter(|body| body.feature == src.id).cloned().collect();
+        let first_body = st.bodies.len();
         if f.body_names.is_empty() {
             apply_traced(doc, st, f, copies, op, &targets)?;
         } else {
@@ -9949,6 +9971,18 @@ fn replay(
             let mut named = f.clone();
             named.body_names = f.body_names.iter().skip(start).cloned().collect();
             apply_traced(doc, st, &named, copies, op, &targets)?;
+        }
+        // Only separate, one-for-one feature copies inherit grain. A boolean that merges
+        // copies into an existing body keeps that body's manufacturing direction.
+        if op == Operation::NewBody && mats.len().checked_mul(grain_sources.len()) == Some(st.bodies.len().saturating_sub(first_body)) {
+            for (body, (matrix, source)) in
+                st.bodies.iter_mut().skip(first_body).zip(mats.iter().flat_map(|m| grain_sources.iter().map(move |b| (m, b))))
+            {
+                let mut frame = crate::wood::GrainFrame::moved(source, matrix, true);
+                // Replaying a feature copies its constructor, before later Move features.
+                frame.matrix = *matrix;
+                body.grain_frame = Some(frame.into());
+            }
         }
     }
     if missed > 0 {
@@ -11453,6 +11487,7 @@ fn eval_feature_kind(
                     let name = copy_body_name(st, f, output, &mb.name);
                     copy_sheet(st, &mb.name, &name, &copy);
                     let mut body = ModelBody::traced_new(name, mirrored, f.id);
+                    body.grain_frame = Some(crate::wood::GrainFrame::moved(&mb, &copy, true).into());
                     if !placements.is_empty() {
                         body.mirrored_mesh = placed_mesh::PlacedMesh::mirrored(&mb, &body.body, &copy).map(Arc::new);
                     }
@@ -11686,7 +11721,9 @@ fn eval_feature_kind(
                 let i = st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
                 if let Some(mb) = st.bodies.get_mut(i) {
                     let nb = Traced::step(kernel::transform_matrix(&mb.body, m)?, &[&mb.traced()]);
+                    let grain = crate::wood::GrainFrame::moved(mb, &m, false);
                     *mb = mb.remade(nb);
+                    mb.grain_frame = Some(grain.into());
                 }
             }
             Ok(())
@@ -11779,10 +11816,13 @@ fn eval_feature_kind(
                     let traced = moved_copy(&mb, nb, 1);
                     let name = copy_body_name(st, f, output, &mb.name);
                     copy_sheet(st, &mb.name, &name, &motion);
-                    st.bodies.push(ModelBody::traced_new(name, traced, f.id));
+                    let mut body = ModelBody::traced_new(name, traced, f.id);
+                    body.grain_frame = Some(crate::wood::GrainFrame::moved(&mb, &motion, true).into());
+                    st.bodies.push(body);
                     output += 1;
                 } else if let Some(slot) = st.bodies.get_mut(i) {
                     *slot = mb.remade(Traced::step(nb, &[&mb.traced()]));
+                    slot.grain_frame = Some(crate::wood::GrainFrame::moved(&mb, &crate::rigid(t, origin, axis, ang), false).into());
                 }
             }
             if !*copy {
@@ -12673,6 +12713,7 @@ fn in_frame(b: &ModelBody, m: &crate::Mat, placed: &ModelBody) -> ModelBody {
     moved.transferred = b.transferred;
     moved.source_name = b.source_name.clone();
     moved.source_transform = crate::mat_mul(m, &b.source_transform);
+    moved.grain_frame = Some(crate::wood::GrainFrame::moved(b, m, false).into());
     moved.imported = b.imported.clone();
     // Moving a body keeps its faces (and their order): it keeps their names.
     moved.names = crate::naming::NameCell::same(b);
@@ -12788,6 +12829,7 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
             placed.source_key = b.geometry_key().unwrap_or(0);
             placed.source_name = Some(b.definition_name().to_string());
             placed.source_transform = crate::mat_mul(&bm, &b.source_transform);
+            placed.grain_frame = Some(crate::wood::GrainFrame::moved(b, &bm, false).into());
             placed.component = comp;
             placed.transferred = b.transferred;
             placed.imported = b.imported.clone();

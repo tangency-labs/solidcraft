@@ -154,6 +154,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         next_component_color_index,
         materials,
         print_faces,
+        wood_grain,
         user_materials,
         appearances,
         body_components,
@@ -193,6 +194,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         && *next_component_color_index == b.next_component_color_index
         && *materials == b.materials
         && *print_faces == b.print_faces
+        && *wood_grain == b.wood_grain
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components
