@@ -211,7 +211,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("split_body")
         .contract(&SPLIT_BODY_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
+        .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended), tool_plane?: bool (default false; true uses only that face's infinite plane and follows the face) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
     CommandSpec::new("solid.press_pull", "Press Pull", crate::checked!("solid.press_pull", press_pull))
         .contract(&PRESS_PULL_CONTRACT)
         .output(output_schema_for::<PressPullResult>)
@@ -222,7 +222,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
-        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
+        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); about?: {edge|face: [x,y,z], body?} (the edge or round face the turn is about, kept as a reference so the turn follows it when an earlier step moves the body; axis and origin give the turn's sense and where it is now); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -852,7 +852,12 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
         FeatureKind::Extrude { operation: Operation::Join | Operation::Cut | Operation::Intersect, targets, .. }
             if participants.is_empty() && targets.is_empty() =>
         {
-            shown_scope(s).unwrap_or_default()
+            let shown = shown_scope(s).unwrap_or_default();
+            if shown.is_empty() && shown_scope(s).is_some() {
+                // An empty list would mean every body, hidden ones included.
+                return Err(EngineError::Other("no shown solid body to change: show one, or name the bodies".into()));
+            }
+            shown
         }
         _ => participants,
     };
@@ -1259,14 +1264,15 @@ fn face_join_targets(s: &Session, p: &Value, operation: Operation, sketches: &[u
 /// The bodies a Join, Cut or Intersect that names none may change, less the hidden ones, when
 /// some of them are hidden: stored as the feature's `targets`, so a hidden body is left alone
 /// (#3961, #6901) and showing it again later doesn't change the model. None when every one is
-/// shown; empty when none is.
+/// shown; empty when none is. A shown surface body is left out: naming one as a target is
+/// refused ("a cut needs a solid"), while an operation that names none skips it (#18083).
 pub fn shown_scope(s: &Session) -> Option<Vec<String>> {
     let st = s.model.state();
     let scope = active_scope(s, &st);
     if scope.iter().all(|b| s.body_visible(&b.name)) {
         return None;
     }
-    Some(scope.into_iter().filter(|b| s.body_visible(&b.name)).map(|b| b.name.clone()).collect())
+    Some(scope.into_iter().filter(|b| s.body_visible(&b.name) && !b.is_surface()).map(|b| b.name.clone()).collect())
 }
 
 /// The bodies a feature of the active component works on when it names none: the component's
@@ -2372,8 +2378,8 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
 pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
     let Some(matrix) = p.get("matrix") else { return Ok(None) };
     let cmd = "solid.move";
-    if ["translate", "axis", "angle", "origin"].iter().any(|k| p.get(k).is_some()) {
-        return Err(bad(cmd, "matrix cannot be combined with translate, axis, angle or origin"));
+    if ["translate", "axis", "angle", "origin", "about"].iter().any(|k| p.get(k).is_some()) {
+        return Err(bad(cmd, "matrix cannot be combined with translate, axis, angle, origin or about"));
     }
     let m = super::component::matrix::rigid(matrix, super::component::matrix::tolerance(p, cmd)?, cmd)?;
     let (axis, angle) = super::component::matrix::axis_angle(&m);
@@ -2581,6 +2587,23 @@ fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMov
     Ok(out)
 }
 
+/// The edge or round face of the model a move's turn is about (`about`, #17974), kept so the turn
+/// follows it. It needs `axis`, along it, and `angle`; `axis` gives the turn's sense, and with
+/// `origin` the line the move turns about when the edge is no longer found.
+fn move_turn_about(s: &Session, p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
+    let Some(v) = p.get("about") else { return Ok(None) };
+    let Some((geo, _, d)) = super::construct::model_axis_param(s, Some(v), cmd)? else {
+        return Err(bad(cmd, "`about` must be {edge: [x,y,z], body?} or {face: [x,y,z], body?}"));
+    };
+    let (Some(axis), Some(_)) = (p.get("axis").and_then(vec3).and_then(|a| a.normalized()), p.get("angle")) else {
+        return Err(bad(cmd, "`about` needs `axis` and `angle`"));
+    };
+    if axis.cross(d).len() > 1e-6 {
+        return Err(bad(cmd, "`about` does not lie along `axis`"));
+    }
+    Ok(Some(geo))
+}
+
 fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.move";
     let bodies = string_list(cmd, p, "bodies")?;
@@ -2589,6 +2612,7 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let translate = point_param(s, p, "translate", cmd)?.unwrap_or_else(|| point_expr(Vec3::ZERO));
     let origin = point_param(s, p, "origin", cmd)?;
+    let rotate_about = move_turn_about(s, p, cmd)?;
     let copy = bool_(p, "copy").unwrap_or(false);
     // The command boundary captures these before instance names become definition names.
     let copy_frames: Vec<solidcraft_doc::Mat> = if copy {
@@ -2612,6 +2636,7 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
             translate,
             origin,
             rotate_axis: p.get("axis").and_then(vec3).map(Dir),
+            rotate_about,
             angle: expr(p, "angle"),
             copy,
             copy_frames,
@@ -3286,6 +3311,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 body: BodyName(body),
                 plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
                 tool: None,
+                tool_plane: false,
                 sketch: Some(solidcraft_doc::SketchId(sketch)),
                 line: Some(line),
             },
@@ -3307,13 +3333,14 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
                 body: BodyName(body),
                 plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
                 tool: Some(solidcraft_doc::FaceAt { body: BodyName(tb), point: Position(point) }),
+                tool_plane: bool_(p, "tool_plane").unwrap_or(false),
                 sketch: None,
                 line: None,
             },
         );
     }
     let plane = plane_param(s, p.get("plane"), cmd)?;
-    add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, sketch: None, line: None })
+    add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, tool_plane: false, sketch: None, line: None })
 }
 
 /// The fits [`clearance_diameter`] knows (close, normal, loose, and their older names).

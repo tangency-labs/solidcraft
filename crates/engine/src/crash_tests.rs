@@ -495,7 +495,8 @@ fn a_journal_left_behind_by_a_second_install_is_not_reported_as_an_unclean_exit(
 
 /// An idle session of another version that ended without a clean exit was most likely closed by
 /// an update or an installer: it is not reported (#17890). The same version idle, or another
-/// version in a command, while starting up or in a native crash, still is.
+/// version in a command, while starting up, before its first startup step or with a journal
+/// that stopped recording, still is.
 #[test]
 fn an_idle_unclean_exit_of_another_version_is_not_reported() {
     let d = fresh_dir("update-exit");
@@ -523,6 +524,22 @@ fn an_idle_unclean_exit_of_another_version_is_not_reported() {
     assert!(messages.iter().any(|m| m.starts_with("SolidCraft 9.9.8") && m.contains("during startup (device creation")), "{messages:?}");
     assert!(messages.iter().any(|m| m.starts_with("SolidCraft 9.9.9") && m.contains("between commands")), "{messages:?}");
     let _ = fs::remove_dir_all(&d);
+    // Each on its own, as they would share the report above (the signature leaves out numbers):
+    // a run with no startup step recorded never got up, so it did not end idle; and a journal
+    // that stopped recording may have missed the command the app was in.
+    let full = [running.as_str(), r#"{"full":true}"#];
+    for (name, more) in [("older-no-phase", &[][..]), ("older-full", &full[..])] {
+        let d = fresh_dir(name);
+        fs::create_dir_all(&d).unwrap();
+        let p = d.join(format!("{name}.jsonl"));
+        let mut lines = vec![r#"{"start":"2026-11-15T16:01:58Z","version":"9.9.8"}"#.to_string(), r#"{"base":"new"}"#.to_string()];
+        lines.extend(more.iter().map(|l| l.to_string()));
+        fs::write(&p, lines.join("\n")).unwrap();
+        unclean_exit(&d, &build(), &p);
+        let messages: Vec<String> = list(&d).into_iter().map(|s| s.message).collect();
+        assert!(messages.len() == 1 && messages[0].starts_with("SolidCraft 9.9.8"), "{name}: {messages:?}");
+        let _ = fs::remove_dir_all(&d);
+    }
 }
 
 #[test]

@@ -1248,8 +1248,8 @@ impl Dialog {
                     continue;
                 }
             }
-            // Move/Copy keeps a selected component as the component, so Create Copy can still be
-            // ticked after it (the bodies are what a move without a copy moves).
+            // Move/Copy keeps a selected component as the component: without Create Copy its
+            // placement moves, with it the component is copied.
             if matches!(d.kind, Kind::Move { .. })
                 && let Sel::Occurrence { path } = sel
                 && !path.is_empty()
@@ -1381,6 +1381,10 @@ impl Dialog {
         d.sync_thread(s);
         d.sync_material(s);
         d.advance();
+        // Move/Copy opens on Selection, picked or not: more objects are picked first.
+        if matches!(d.kind, Kind::Move { .. }) {
+            d.active = 0;
+        }
         // Preselected items are already the dialog's inputs: the control reply and the first
         // viewport paint must see the same measurement, without waiting for the panel to draw.
         update_measure(app, &mut d);
@@ -1915,6 +1919,8 @@ impl Dialog {
         if self.active_input().is_some_and(|i| i.rejects(&sel)) {
             return;
         }
+        // Move/Copy moves one kind at a time (`dialogs_move::admit`).
+        let Some(sel) = crate::dialogs_move::admit(s, &mut *self, sel) else { return };
         // Plane, Axis and Point: the pick is the tool's, which chooses the method again.
         if let Some(a) = &mut self.auto {
             a.toggle(sel);
@@ -3123,7 +3129,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
         return;
     }
     if matches!(d.kind, Kind::Move { .. }) {
-        crate::dialogs_move::type_row(app, d, ui);
+        crate::dialogs_move::object_row(app, d, ui);
         return;
     }
     let current = match d.kind {
@@ -3201,6 +3207,16 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
 /// active a part inside a subassembly picks the subassembly; with the subassembly (or the part)
 /// active it picks the part. A body outside the active component picks its top-level placement.
 pub(crate) fn occurrence_path_of_body(s: &Session, body: &str) -> Option<Vec<u64>> {
+    let path = body_placement_path(s, body)?;
+    let depth = pick_depth(s, &path);
+    let path: Vec<u64> = path.into_iter().take(depth).collect();
+    (!path.is_empty()).then_some(path)
+}
+
+/// The full placement path of the component a body is in, to its innermost component: `None`
+/// for a body at the design's root. A component pick keeps only part of it
+/// ([`occurrence_path_of_body`]).
+pub(crate) fn body_placement_path(s: &Session, body: &str) -> Option<Vec<u64>> {
     let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
@@ -3208,8 +3224,6 @@ pub(crate) fn occurrence_path_of_body(s: &Session, body: &str) -> Option<Vec<u64
     }
     let model = s.model.state();
     let (_, _, _, path, _) = s.placed_document().body_frames_with_source(&model).into_iter().find(|(world, ..)| world == body)?;
-    let depth = pick_depth(s, &path);
-    let path: Vec<u64> = path.into_iter().take(depth).collect();
     (!path.is_empty()).then_some(path)
 }
 
@@ -3350,6 +3364,9 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved planes/vectors/axes are real inputs even when they have no selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
+    if matches!(d.kind, Kind::Split) && index == 1 {
+        return Some("split_tool_mode");
+    }
     if matches!(d.kind, Kind::OffsetPlane { .. }) {
         return match index {
             0 => Some("base"),
@@ -4492,10 +4509,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let ok = crate::op_auto::hold_ok(&mut d, ok, &mut apply_again, cancel);
     if ok && !cancel && app.applying.is_none() {
         d.repeat_after_apply = apply_again;
+        // Only components picked, not moved, and Capture All Positions unticked: nothing to do.
+        let nothing_to_run = crate::dialogs_move::nothing_to_run(app, &d);
         // Edit Text applies its own way: its live changes and OK are one undo step.
         let run = match &mut d.kind {
             Kind::Text(k) => Some(crate::sketch_text::apply(app, k)),
             Kind::ChatContext => Some(crate::agent_chat::pick_done(app, &d)),
+            Kind::Move { .. } if nothing_to_run => Some(Ok(())),
             _ => match begin_applying(app, &d) {
                 // Computing: the dialog stays, saying so, until it is in.
                 Some(job) => {
@@ -5730,11 +5750,15 @@ fn exact_regions(d: &Dialog, cmds: &mut [(String, Value)]) {
     }
 }
 
-/// The commands the live preview runs: OK's, with a joint's motion while it animates.
+/// The commands the live preview runs: OK's, with a joint's motion while it animates, and a
+/// component Move/Copy moves by its placement drawn as its bodies moved.
 pub fn preview_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
     let mut cmds = apply_commands(app, d)?;
     if let Kind::Assembly(k) = &d.kind {
         crate::dialogs_assembly::animate(app, k, &mut cmds);
+    }
+    if matches!(d.kind, Kind::Move { .. }) {
+        crate::dialogs_move::preview(app, d, &mut cmds);
     }
     Ok(cmds)
 }
@@ -6409,10 +6433,22 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // A plane, a planar face's plane, or any other face (its surface extended).
             let p = match sels(d, 1).first() {
                 Some(Sel::Plane { name }) => json!({"body": body, "plane": name}),
-                Some(Sel::Face { body: b, index, point }) => match planar_face(s, b, *index) {
-                    Some((_, n)) => json!({"body": body, "plane": {"origin": pt(*point), "normal": pt(n)}}),
-                    None => json!({"body": body, "tool": {"body": b, "point": pt(*point)}}),
-                },
+                Some(Sel::Face { body: b, index, point }) => {
+                    let planar = planar_face(s, b, *index);
+                    let kept = d.extra.get("split_tool_mode").filter(|v| v["body"] == *b && v["index"] == *index);
+                    let exact = crate::open_meshing::session_world(s).body(b).is_some_and(|body| body.body.planar_face(*index).is_some());
+                    // A saved explicit plane stays fixed until the tool is picked again.
+                    if let Some(plane) = kept.and_then(|v| v.get("fixed_plane")) {
+                        json!({"body": body, "plane": plane})
+                    // Existing display-only planar fallbacks keep their fixed plane.
+                    } else if let Some((_, n)) = planar.filter(|_| kept.is_none() && !exact) {
+                        json!({"body": body, "plane": {"origin": pt(*point), "normal": pt(n)}})
+                    } else {
+                        // An unchanged saved surface tool keeps its mode even when it is planar.
+                        let tool_plane = kept.and_then(|v| v["plane"].as_bool()).unwrap_or(planar.is_some());
+                        json!({"body": body, "tool": {"body": b, "point": pt(*point)}, "tool_plane": tool_plane})
+                    }
+                }
                 // A straight sketch line, in the sketch it was picked in (#1552).
                 Some(Sel::SketchCurve { id, sketch: named }) => {
                     let picked = named.or_else(|| d.extra.get("tool_sketch").and_then(Value::as_u64));
@@ -6504,7 +6540,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             ("inspect.section", json!({"plane": plane, "offset": offset, "flip": flip, "hatch": hatch}))
         }
-        Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
+        Kind::Move { .. } => return crate::dialogs_move::commands(app, d),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
             let folder = crate::hole_folder::active(d);
             if !folder {
@@ -6773,6 +6809,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
         for (k, v) in &d.extra {
+            // Saved selection mode is editor state, not a command parameter.
+            if matches!(d.kind, Kind::Split) && k == "split_tool_mode" {
+                continue;
+            }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
                 continue;
             }
@@ -7249,7 +7289,7 @@ pub(crate) fn named_refill(s: &Session, body: Option<&str>, name: &str, point: V
     named_refill_in(s, body, name, point, edge, false)
 }
 
-/// A saved grouped Thread names each target body independently; never fall back to another body.
+/// A saved face pick names its body independently; never fall back to another body.
 pub(crate) fn named_refill_on_body(s: &Session, body: &str, name: &str, point: Vec3) -> Option<Sel> {
     named_refill_in(s, Some(body), name, point, false, true)
 }
@@ -8525,7 +8565,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Split { body, plane, tool, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, sketch, line } => {
             let mut d = start("solid.split_body")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
@@ -8537,9 +8577,35 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
             } else if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = match tool {
-                    Some(t) => face_sel(s, t.point.0).into_iter().collect(),
+                    Some(t) => {
+                        let pick = match f.face_names.first().filter(|name| !name.is_empty()) {
+                            Some(name) => named_refill_on_body(s, t.body.as_ref(), name, t.point.0),
+                            None => face_sel_on(s, Some(t.body.as_ref()), t.point.0),
+                        };
+                        if let Some(Sel::Face { body, index, .. }) = &pick {
+                            d.extra.insert("split_tool_mode".into(), json!({"body": body, "index": index, "plane": tool_plane}));
+                        }
+                        pick.into_iter().collect()
+                    }
                     None => plane_sel(s, plane).into_iter().collect(),
                 };
+                if tool.is_none()
+                    && let PlaneRef::Custom { plane } = plane
+                    && let Some(Sel::Face { body, index, .. }) = inp.items.first()
+                {
+                    let frame = feature_frame(s, f.component);
+                    d.extra.insert(
+                        "split_tool_mode".into(),
+                        json!({
+                            "body": body, "index": index,
+                            "fixed_plane": {
+                                "origin": pt(solidcraft_engine::doc::apply_point(&frame, plane.origin)),
+                                "x_dir": pt(solidcraft_engine::doc::apply_vector(&frame, plane.x)),
+                                "y_dir": pt(solidcraft_engine::doc::apply_vector(&frame, plane.y))
+                            }
+                        }),
+                    );
+                }
             }
             d
         }
