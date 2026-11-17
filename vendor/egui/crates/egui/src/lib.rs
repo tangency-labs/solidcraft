@@ -489,6 +489,8 @@ pub use self::{
         modal, panel, scroll_area,
     },
     context::{Context, RepaintCause, RequestRepaintInfo},
+    // SolidCraft: the result of `Context::widget_hits_at`.
+    hit_test::WidgetHits,
     data::{
         Key, ScreenshotCallback,
         input::{

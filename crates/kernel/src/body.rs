@@ -673,10 +673,10 @@ impl Body {
         }
     }
 
-    /// This body with `result`, the SMLib result of the step `what` it was decoded from, whose
-    /// check that step left to the end of its feature ([`crate::validation::check_kept`]).
-    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep) -> Body {
-        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, how, result);
+    /// This body with `result`, the SMLib result of the step `what` (of `operands`) it was decoded
+    /// from, whose check that step left to the end of its feature ([`crate::validation::check_kept`]).
+    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Body {
+        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, how, result, operands);
         Body { unchecked: Some(std::sync::Arc::new(unchecked)), ..self }
     }
 
