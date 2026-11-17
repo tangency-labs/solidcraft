@@ -483,6 +483,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         drawing.app.home.open = false;
         // This scene audits the retained legacy management and docking controls.
         drawing.app.preferences.drawing_sheets_visibility = "legacy".into();
+        drawing.app.preferences.drawings_preview = true;
         workspace::enter(&mut drawing.app, "drawing").unwrap();
         drawing.frames(3);
         collect(&mut drawing, "Drawing sheet strip and browser", &mut requested);
