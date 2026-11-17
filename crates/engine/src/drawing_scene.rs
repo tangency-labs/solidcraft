@@ -473,6 +473,15 @@ pub fn sheet_id(drawing: &Drawing, named: &str, cmd: &str) -> Result<u64> {
     drawing.sheets.get(at).map(|sheet| sheet.id).ok_or_else(|| bad(cmd, format!("no sheet `{named}`")))
 }
 
+/// The last drawn boundary relative to the view centre, when available for a thumbnail.
+pub fn cached_view_boundary(s: &Session, drawing: u64, view: u64) -> Option<Aabb2> {
+    let cache = &s.drawing_scenes;
+    if cache.drawing != Some(drawing) {
+        return None;
+    }
+    cache.views.get(&view)?.drawn.boundary
+}
+
 /// Sheet `sheet` of `drawing`, one of `s`'s design's drawings, drawn at once: its border, then each
 /// of its views by id. A view with nothing to measure, or one that can't be drawn, is left out and
 /// says why; the sheet is refused only when it can't be drawn at all.

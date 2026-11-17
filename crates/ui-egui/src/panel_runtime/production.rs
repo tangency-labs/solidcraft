@@ -222,7 +222,7 @@ impl Product {
                 ("references", "render.stage_panels.surfaces_references", "library"),
             ],
             Self::RenderInspector => vec![("remove", "render.inspector_remove", "delete")],
-            Self::DrawingSheets => vec![("add-sheet", "ui.drawing_sheets.add", "plus"), ("sheet-settings", "cmd.drawing_sheet_set", "settings")],
+            Self::DrawingSheets => vec![("add-sheet", "ui.drawing_sheets.add", "plus")],
             Self::Browser | Self::RenderShots | Self::SketchOptions | Self::Bom | Self::DrawingInspector => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
@@ -589,12 +589,9 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
             }
             Product::RenderInspector => crate::render_workspace::inspector_panel::shared_remove(app),
             Product::DrawingSheets => {
-                let command = match action.action.0.as_str() {
-                    "add-sheet" => "drawing.sheet.add",
-                    "sheet-settings" => "drawing.sheet.set",
-                    _ => continue,
-                };
-                crate::drawing_workspace::start(app, command);
+                if action.action.0 == "add-sheet" {
+                    crate::drawing_workspace::start(app, "drawing.sheet.add");
+                }
             }
             Product::Browser | Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
         }
