@@ -20,7 +20,7 @@ use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
-use solidcore::primitive::api_primitives::create_box;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
 use solidcore::surface::surface::SurfaceKind;
@@ -1409,6 +1409,48 @@ fn a_round_larger_than_its_faces_is_refused_with_the_size_that_fits() {
     }
     // refused: the body as it came in
     assert!(rel(volume(&b), 600.0) < 1e-12);
+}
+
+/// #18190: an r 1.85 rod notched by an r 0.5 disc centred on the rod's surface, at
+/// (0, -1.85), from z = 5 to 15; the notch's floor and roof edges are arcs that end on the
+/// rod's side. Rounded at the notch's own radius, the ball's centre stays on the notch's axis
+/// and it touches the floor (roof) at the one point below it, which lies on the rod's side:
+/// the round's ends in the side run down to that point, so it would take the whole floor.
+/// Refused as a collapsed offset, naming a radius below 0.5 (open), at which it builds, not
+/// failed while intersecting the round with the side.
+#[test]
+fn a_round_at_a_notch_s_radius_ending_on_a_side_through_its_axis_names_the_size_below() {
+    all_fixes();
+    let b = built(|k| {
+        let rod = create_cylinder(k, Vec3::new(0.0, 0.0, 0.0), 1.85, 20.0)?;
+        let disc = create_cylinder(k, Vec3::new(0.0, -1.85, 5.0), 0.5, 10.0)?;
+        boolean_difference(k, rod, disc)
+    });
+    let before = volume(&b);
+    let edges = [
+        edge_at(&b, [0.0, -1.35, 5.0]),
+        edge_at(&b, [0.0, -1.35, 15.0]),
+    ];
+    let size = match blend(&b, Blend::Round, &edges, &[0.5], &[], Corners::Filled) {
+        Err(Error::TooLarge {
+            size, kind, why, ..
+        }) => {
+            let got = format!("{size} {kind:?} {why:?}");
+            assert_eq!(kind, FitKind::Radius, "{got}");
+            assert_eq!(
+                why,
+                Some(solidcore_ops::RoomReason::OffsetCollapses),
+                "{got}"
+            );
+            assert!((0.49..0.5).contains(&size), "{got}");
+            size
+        }
+        other => panic!("{other:?}"),
+    };
+    assert!(rel(volume(&b), before) < 1e-12);
+    blend(&b, Blend::Round, &edges, &[size], &[], Corners::Filled).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert!(volume(&b) > before);
 }
 
 /// A body the kernel sweeps along +z, `height` high, from a closed profile in z = 0.

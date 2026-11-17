@@ -1774,6 +1774,10 @@ preference_settings! {
     sketch_state_icons: bool = true, PAGE_SKETCH;
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
     sketch_construction_lines: bool = true, PAGE_SKETCH;
+    /// The construction line tools as before #15066: the Construction/Normal switch under the
+    /// Length box, and the Sketch Palette's Line Type icons leave these tools alone. Off (the
+    /// default): those icons set the tools' line type.
+    construction_line_classic: bool = false, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.
     sketch_mirror_auto_line: bool = true, PAGE_SKETCH;
     /// Pressing an active tool or dialog's shortcut again closes it, as Esc does. Off: the key
@@ -8597,6 +8601,7 @@ mod tests {
                 ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
                 ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
                 ("sketch_construction_lines", "prefs.sketch_construction_lines"),
+                ("construction_line_classic", "prefs.construction_line_classic"),
                 ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
                 ("sketch_auto_locate", "prefs.sketch.auto_locate"),
                 ("shortcut_again_ends_tool", "prefs.sketch.shortcut_again_ends_tool"),

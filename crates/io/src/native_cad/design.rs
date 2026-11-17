@@ -374,6 +374,7 @@ impl Builder {
                 second_follows_first: false,
                 corner: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
             },
             operation,

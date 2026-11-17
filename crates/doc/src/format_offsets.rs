@@ -477,6 +477,7 @@ mod tests {
                             to_offset: None,
                             from: None,
                             to_body_apart: false,
+                            from_level: false,
                             picked_placements: Vec::new(),
                         },
                         operation: crate::Operation::NewBody,
