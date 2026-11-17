@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.duplicate_design_tab": "Duplicate"
+  },
+  "ar": {
+    "ui.duplicate_design_tab": "تكرار"
+  },
+  "de": {
+    "ui.duplicate_design_tab": "Duplizieren"
+  },
+  "he": {
+    "ui.duplicate_design_tab": "שכפול"
+  },
+  "ja": {
+    "ui.duplicate_design_tab": "複製"
+  },
+  "ko": {
+    "ui.duplicate_design_tab": "복제"
+  },
+  "vi": {
+    "ui.duplicate_design_tab": "Nhân bản"
+  },
+  "zh": {
+    "ui.duplicate_design_tab": "创建副本"
+  }
+}

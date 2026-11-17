@@ -17,7 +17,9 @@ view.
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
   unsaved changes). Double-click a design's tab to rename the design: type the name, then press
   Enter or click elsewhere to keep it, or Esc to leave the old one (Preferences › Interface turns
-  this off, for a double-click that maximizes the window instead). On the right: Report a bug,
+  this off, for a double-click that maximizes the window instead). **Duplicate** in a design
+  tab's right-click menu opens a copy of the design in a new tab next to it, named "… copy" and
+  not saved yet. On the right: Report a bug,
   Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
   desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
