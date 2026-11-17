@@ -2341,7 +2341,7 @@ mod tests {
     /// `gap = 16 eps m` in space for the largest coordinate `m` (closed, no curve
     /// repeated or overlapping another: the corners close to rounding), the loops
     /// walked end to end without revisiting, and their total area `want` within
-    /// `1e-9` relative plus `2 gap` times the perimeter. A corner is one point
+    /// `2 gap` times the perimeter. A corner is one point
     /// computed twice (a copy's end and a directrix's end: a plane evaluation and a
     /// translation, a few roundings of `m` each), and every boundary point is off its
     /// exact place by as much (the generator's points are plane evaluations), which
@@ -2421,7 +2421,7 @@ mod tests {
                 .sum::<f64>();
         }
         assert!(
-            (total - want).abs() <= 1e-9 * want + 2.0 * gap * perimeter,
+            (total - want).abs() <= 2.0 * gap * perimeter,
             "area {total:e}, want {want:e}"
         );
     }
@@ -2485,6 +2485,92 @@ mod tests {
                             ],
                         );
                     }
+                }
+            }
+        }
+    }
+
+    /// Review r4 M1: a quadratic generator in the plane over `[0, 1]` that leaves it
+    /// tangentially over `[1, 2]` (control values `0, 0, h`: a fillet's foot), swept
+    /// along `Y`. Its distance off the plane grows as `t^2` past the range end, so
+    /// the departure's Bernstein bound takes the power 2; with power 1 the end point
+    /// would pass as within the tolerance of the point where the generator certainly
+    /// leaves, and the region would be cut short by about `sqrt(B / h)`. The
+    /// generator stays within the in-plane bound past the end for longer than the
+    /// tolerance: the general intersection.
+    #[test]
+    fn tangential_departure_declines() {
+        let k = k();
+        let plane = xy_plane(Extent2d::from_bounds(-50.0, -50.0, 50.0, 50.0));
+        for h in [1e-3, 1.0, 1e3] {
+            let pw: Vec<CPoint> = [
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.5, 0.0, 0.0),
+                (2.0, 0.0, h),
+            ]
+            .iter()
+            .map(|&(x, y, z)| CPoint::new(x, y, z, NOW))
+            .collect();
+            let cur = NurbCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0]).unwrap();
+            let s = SurfOfExtrusion::create_canonical(
+                &k,
+                Curve::from(BSplineCurve::from_nurb(cur, 3, false)),
+                Vec3::Y,
+            )
+            .unwrap();
+            let dom = Extent2d::from_bounds(0.0, -1.0, 2.0, 1.0);
+            for tol in [None, Some(1e-6)] {
+                let r = s
+                    .intersect_with_plane(&k, &dom, &plane, &plane.natural_uv_domain(), tol)
+                    .unwrap();
+                assert!(
+                    r.needs_more_intersections,
+                    "h {h:e} tol {tol:?}: {:?}",
+                    r.curve_types
+                );
+                assert!(r.curves_3d.is_empty());
+            }
+        }
+    }
+
+    /// Review r4 M2: a generator in the plane over `[0, 1]` that leaves it by `h`
+    /// (below the tolerance) over the next span, `dx` along `X`, and then crosses it
+    /// steeply. The departure is certified (it leaves the in-plane bound within the
+    /// tolerance of the range end) but never gets farther than the tolerance over
+    /// that span, so its zone runs on past it. The solver reports point solutions in
+    /// the zone (touches along the span, then the crossing) whose directrices lie off
+    /// the region, at `x` from about `1 + dx / 4` to just past `1 + dx`: without the zone's
+    /// decline they would be answered next to the region, with the tolerance-close
+    /// stretch between them given only as tangent lines. The general intersection.
+    #[test]
+    fn point_solutions_in_a_departure_zone_decline() {
+        let k = k();
+        let plane = xy_plane(Extent2d::from_bounds(-50.0, -50.0, 50.0, 50.0));
+        for h in [1e-7, 5e-7, 9e-7] {
+            for dx in [1e-3, 1e-2] {
+                let s = swept(
+                    &k,
+                    &[
+                        (0.0, 0.0, 0.0),
+                        (1.0, 0.0, 0.0),
+                        (1.0 + dx, 0.0, h),
+                        (5.0, 0.0, -1.0),
+                    ],
+                    None,
+                    Vec3::Y,
+                );
+                let dom = Extent2d::from_bounds(0.0, -1.0, 3.0, 1.0);
+                for tol in [None, Some(1e-6)] {
+                    let r = s
+                        .intersect_with_plane(&k, &dom, &plane, &plane.natural_uv_domain(), tol)
+                        .unwrap();
+                    assert!(
+                        r.needs_more_intersections,
+                        "h {h:e} dx {dx:e} tol {tol:?}: {:?}",
+                        r.curve_types
+                    );
+                    assert!(r.curves_3d.is_empty());
                 }
             }
         }
