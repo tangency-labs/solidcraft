@@ -168,7 +168,7 @@ impl TextureMap {
     pub fn dimensions(&self) -> [u32; 2] {
         [self.source.info().width, self.source.info().height]
     }
-    #[cfg(any(test, feature = "raytrace-cpu"))]
+    #[cfg(feature = "raytrace-cpu")]
     pub(crate) fn source(&self) -> &TextureSource {
         &self.source
     }
