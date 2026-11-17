@@ -63,8 +63,8 @@ defaults are written and a warning says so. A value that is not a positive numbe
 ## Decals
 
 A decal is an image on a face of a part, such as a label, a logo or an ArUco marker. Each shown
-decal becomes one more `<visual>` of every link its component gives, at the same origin as the
-link's own mesh. Its mesh is a COLLADA file (`.dae`) that names the image as its material's
+image, placed with **Insert → Decal** or **Insert → Canvas**, becomes one more `<visual>` of
+every link its component gives, at the same origin as the link's own mesh. Its mesh is a COLLADA file (`.dae`) that names the image as its material's
 texture, so Gazebo (Classic and Sim), RViz and other COLLADA readers draw the image where
 SolidCraft shows it.
 
@@ -79,10 +79,9 @@ SolidCraft shows it.
   with a warning.
 - The image file is written as it is: a PNG stays a PNG, a JPEG becomes `.jpg`. An SVG decal is
   already a PNG in the design.
-- Only decals are written. A reference canvas (**Insert → Canvas**) is not; `canvas.edit
-  {decal: true}` makes a canvas a decal, and `{decal: false}` keeps a decal out of the export.
-- A hidden decal is left out. A decal whose image is damaged, or whose component is placed
-  nowhere, is left out with a warning.
+- Every shown image is written, canvas or decal: hide an image you traced from (`canvas.edit
+  {visible: false}`, or Show/Hide on it) to keep it out. An image whose data is damaged, or
+  whose component is placed nowhere, is left out with a warning.
 
 ## Joints
 

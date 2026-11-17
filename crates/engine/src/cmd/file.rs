@@ -2454,13 +2454,14 @@ fn export_glb(s: &Session, cmd: &str, path: &str, bodies: &[String], quality: so
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{:?}", Format::Glb)}))
 }
 
-/// The design's shown decals for a URDF export: each one's corners where it is shown (following
-/// its sketch when anchored), in its component's frame, and its image. A decal that can't be
-/// placed or whose image is damaged is left out with a warning.
+/// The images the design shows (canvases and decals alike) for a URDF export: each one's corners
+/// where it is shown (following its sketch when anchored), in its component's frame, and its
+/// image. A hidden image is left out; one that can't be placed or whose image is damaged is left
+/// out with a warning.
 fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, warnings: &mut Vec<String>) -> Vec<solidcraft_io::urdf::UrdfDecal> {
     let (vals, _) = doc.param_values();
     let mut decals = Vec::new();
-    for c in doc.canvases.iter().filter(|c| c.decal && c.visible) {
+    for c in doc.canvases.iter().filter(|c| c.visible) {
         let Some(image) = c.bytes() else {
             warnings.push(format!("decal `{}`: its image is damaged: left out", c.name));
             continue;
