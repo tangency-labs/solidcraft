@@ -147,6 +147,7 @@ pub fn import_file(session: &mut Session, importer: &Importer, path: &str, optio
             session: Session::default(),
             transaction: None,
             sketch_exits: Vec::new(),
+            view: None,
             groups: BTreeSet::new(),
             file_folders: Vec::new(),
             evaluation: None,
