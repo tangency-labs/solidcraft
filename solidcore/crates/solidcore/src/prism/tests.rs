@@ -2410,7 +2410,8 @@ mod path_export_regressions {
         // An explicit coarse scalar encoding makes this a geometry refusal test,
         // independent of any file format's decimal spelling.
         let encoding = ScalarEncoding {
-            round_trip: |v| Some(if v.abs() < 1e-12 { 0.0 } else { v }),
+            length: |v| Some(if v.abs() < 1e-12 { 0.0 } else { v }),
+            dimensionless: |v| Some(if v.abs() < 1e-12 { 0.0 } else { v }),
             min_ellipse_ratio: 1e-12,
             turn_snap_radians: 1e-12,
         };
@@ -2503,7 +2504,8 @@ mod path_export_regressions {
 
     fn scalar_encoding(round_trip: fn(f64) -> Option<f64>) -> ScalarEncoding {
         ScalarEncoding {
-            round_trip,
+            length: round_trip,
+            dimensionless: round_trip,
             min_ellipse_ratio: 1e-12,
             turn_snap_radians: 1e-12,
         }
@@ -2532,6 +2534,69 @@ mod path_export_regressions {
     }
 
     #[test]
+    fn polylines_and_centres_are_admitted_only_as_the_encoding_writes_them() {
+        // A caller whose lengths stop at 10, on a 1e-3 grid, with three decimals elsewhere.
+        fn grid(v: f64) -> Option<f64> {
+            (v.abs() <= 10.0).then_some((v * 1e3).round() / 1e3)
+        }
+        let encoding = ScalarEncoding {
+            length: grid,
+            dimensionless: |v| Some((v * 1e3).round() / 1e3),
+            min_ellipse_ratio: 1e-12,
+            turn_snap_radians: 1e-12,
+        };
+        let far = Seg2::Line {
+            a: Vec2::ZERO,
+            b: Vec2::new(11.0, 0.0),
+        };
+        let error =
+            path_shapes(DxfPath::Open(&[far]), DxfPathStyle::Polyline, encoding).unwrap_err();
+        assert_eq!(error.reason, "line endpoint cannot be encoded");
+        let off_grid = Seg2::Arc {
+            center: Vec2::new(11.0, 0.0),
+            radius: 2.0,
+            start: 0.0,
+            sweep: 0.5,
+        };
+        for style in [DxfPathStyle::Exact, DxfPathStyle::Polyline] {
+            let error = path_shapes(DxfPath::Open(&[off_grid]), style, encoding).unwrap_err();
+            assert_eq!(error.reason, "arc centre cannot be encoded");
+        }
+        // A bulge of 0.00025 is written as 0, and two ends 0.0002 apart as one point: neither arc
+        // is packed into a polyline, and each is written exactly instead.
+        let flat = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 1.0,
+            start: 0.0,
+            sweep: 0.001,
+        };
+        let short = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 0.0002,
+            start: 0.0,
+            sweep: 1.0,
+        };
+        let packed = Seg2::Arc {
+            center: Vec2::ZERO,
+            radius: 1.0,
+            start: 0.0,
+            sweep: 1.0,
+        };
+        assert!(matches!(
+            path_shapes(DxfPath::Open(&[flat]), DxfPathStyle::Polyline, encoding).unwrap()[..],
+            [PathShape::Arc { .. }]
+        ));
+        assert!(matches!(
+            path_shapes(DxfPath::Open(&[packed]), DxfPathStyle::Polyline, encoding).unwrap()[..],
+            [PathShape::BulgedPolyline { .. }]
+        ));
+        assert!(
+            path_shapes(DxfPath::Open(&[short]), DxfPathStyle::Polyline, encoding)
+                .map_or(true, |shapes| matches!(shapes[..], [PathShape::Arc { .. }]))
+        );
+    }
+
+    #[test]
     fn refused_arc_angle_never_certifies_a_one_sided_encoding() {
         let arc = Seg2::Arc {
             center: Vec2::ZERO,
@@ -2539,10 +2604,15 @@ mod path_export_regressions {
             start: 0.0,
             sweep: std::f64::consts::FRAC_PI_2,
         };
-        for encoding in [
-            scalar_encoding(|v| (v != 90.0).then_some(v)),
-            scalar_encoding(|v| (v != 0.0).then_some(v)),
+        // Angles are dimensionless: only that callback refuses them.
+        for dimensionless in [
+            (|v| (v != 90.0).then_some(v)) as fn(f64) -> Option<f64>,
+            |v| (v != 0.0).then_some(v),
         ] {
+            let encoding = ScalarEncoding {
+                dimensionless,
+                ..scalar_encoding(Some)
+            };
             let error = exact_piece(&arc, 2, 4, encoding).unwrap_err();
             assert_eq!(error.piece, Some((2, 4)));
             assert_eq!(error.reason, "arc angle cannot be encoded");
