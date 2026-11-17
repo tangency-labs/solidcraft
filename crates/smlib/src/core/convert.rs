@@ -2533,7 +2533,7 @@ pub(crate) fn from_arrays(a: &Arrays) -> Result<Body> {
     let f = In(a);
     let s = validate(&f).ok_or(Error::Record(crate::import::Unsupported::Invalid("flat arrays")))?;
     let b = run("BrepFromFlat", |k| Ok(brep_from_flat(k, &f, &s)))??;
-    Ok(Body::new(b))
+    Ok(Body::from_kernel(b))
 }
 
 fn brep_from_flat(k: &mut Kernel, f: &In<'_>, s: &Shape) -> Result<Brep> {

@@ -1988,6 +1988,39 @@ mod tests {
         }
     }
 
+    /// With a body hidden, the shown scope an automatic cut names leaves out a shown surface, so
+    /// the cut runs instead of being refused for a named surface (#18083).
+    #[test]
+    fn shown_scope_skips_surface_bodies() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        sheet(&mut s, "XY", "Sheet", [0.0, 0.0], [10.0, 10.0]);
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0], "operation": "new", "body_name": "Small"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Small"], "visible": false}));
+        assert_eq!(crate::shown_scope(&s), Some(vec!["Block".to_string()]));
+        let shown = crate::shown_scope(&s).unwrap();
+        run(&mut s, "solid.cylinder", json!({"radius": 2, "height": 12, "base": [5, 5, -1], "operation": "cut", "targets": shown}));
+        assert!((volume(&s, "Block") - (1000.0 - 40.0 * std::f64::consts::PI)).abs() < 1e-6);
+    }
+
+    /// A hidden solid with only a surface shown: an automatic cut is refused, never reaching the
+    /// hidden body (an empty participant list would mean every body).
+    #[test]
+    fn automatic_cut_with_only_a_surface_shown_leaves_hidden_solid_alone() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+        sheet(&mut s, "XY", "Sheet", [20.0, 0.0], [30.0, 10.0]);
+        run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [5, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = s.doc.clone();
+        let error = s.execute("solid.extrude", &json!({"sketch": "Hole", "distance": 3, "operation": "cut"})).unwrap_err().to_string();
+        assert!(error.contains("no shown solid body"), "{error}");
+        assert_eq!(s.doc, before);
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
     /// Sheet-metal machining preserves separate surfaces before cutting any ordinary solids.
     #[test]
     fn automatic_solid_cuts_preserve_surfaces_beside_sheet_metal() {

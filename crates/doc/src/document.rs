@@ -6,7 +6,7 @@ use solidcraft_sketch::Sketch;
 
 use crate::construct::{AxisDef, GeoRef, PointDef};
 use crate::expr::{self, Expr, Kind};
-use crate::names::{BodyName, FeatureId, FeatureName, SketchId};
+use crate::names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
 use crate::points::{Dir, FacePick, Position};
 use crate::{DocError, Result};
 
@@ -399,6 +399,12 @@ pub struct Extent {
     /// `start_offset`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<FacePick>,
+    /// From Object on a face at a slant to the extrusion starts on a plane parallel to the
+    /// sketch, at the level where the face meets the middle of the profiles, instead of on the
+    /// face. Designs saved before From Object followed a slanted face open with it set, so they
+    /// keep the bodies they were built with.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_level: bool,
     /// A Join To Object leaves the body it runs to as its own body, joining only its targets.
     /// Designs saved before a Join also took that body (format 39 and older, #8151) open with
     /// it set, so they keep the bodies they were built with.
@@ -1237,6 +1243,10 @@ pub enum FeatureKind {
         #[walk(picks_faces)]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tool: Option<FaceAt>,
+        /// Use only the tool face's infinite plane, preserving the plane split's side order
+        /// and section names. Otherwise use the face's extended surface and its sheet.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        tool_plane: bool,
         /// A straight line of this sketch as the tool (#1552): the plane through it along the
         /// sketch's normal, which follows the sketch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4414,7 +4424,29 @@ impl Document {
         {
             return Some(f);
         }
-        self.features.iter().find(|f| f.name.eq_ignore_ascii_case(r))
+        self.features.iter().find(|f| same_feature_name(&f.name, r))
+    }
+
+    /// Whether a new feature of `kind` called `name` would be ambiguous. Plane references share
+    /// the feature namespace, and sketches are also referenced by name (`extrude` by sketch name
+    /// takes the first match), so a duplicate would silently select the first feature. Other
+    /// shared names (a sketch and its extrude) remain supported. Two sketches clash the way
+    /// lookup matches them (ASCII case does not matter); a plane clashes on the exact name, as
+    /// it always has.
+    pub fn name_clash(&self, kind: &FeatureKind, name: &str) -> bool {
+        let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
+        let is_sketch = matches!(kind, FeatureKind::Sketch { .. });
+        self.features.iter().any(|f| {
+            let other_sketch = matches!(f.kind, FeatureKind::Sketch { .. });
+            let other_plane = matches!(f.kind, FeatureKind::ConstructionPlane { .. });
+            (is_sketch && other_sketch && same_feature_name(&f.name, name)) || ((is_plane || other_plane) && f.name == name)
+        })
+    }
+
+    /// `name` if no other sketch has it, else the first free `name (2)`, `name (3)` ...
+    pub fn free_sketch_name(&self, name: &str) -> String {
+        let taken = |n: &str| self.features.iter().any(|f| matches!(f.kind, FeatureKind::Sketch { .. }) && same_feature_name(&f.name, n));
+        if taken(name) { copy_name(name, taken) } else { name.to_string() }
     }
 
     /// Resolve a textual timeline reference. An exact name wins even when it looks like an id.
@@ -4428,7 +4460,7 @@ impl Document {
         {
             return Ok(feature);
         }
-        let mut matches = self.features.iter().filter(|f| f.name.eq_ignore_ascii_case(name));
+        let mut matches = self.features.iter().filter(|f| same_feature_name(&f.name, name));
         let feature = matches.next().ok_or_else(|| DocError::Invalid(format!("no feature `{name}`")))?;
         if matches.next().is_some() {
             return Err(DocError::Invalid(format!("ambiguous feature `{name}`. Use its exact name or numeric id")));
@@ -4505,10 +4537,7 @@ impl Document {
             Some(n) if !n.trim().is_empty() => n.trim().to_string(),
             _ => self.unique_name(kind.base_name()),
         };
-        // Plane references share the feature namespace. A duplicate would silently select
-        // the first feature. Other shared names (a sketch and its extrude) remain supported.
-        let is_plane = matches!(kind, FeatureKind::ConstructionPlane { .. });
-        if self.features.iter().any(|f| f.name == name && (is_plane || matches!(f.kind, FeatureKind::ConstructionPlane { .. }))) {
+        if self.name_clash(&kind, &name) {
             return Err(DocError::Invalid(format!("another feature is called `{name}`")));
         }
         let id = self.next_id.max(1);
@@ -5304,4 +5333,9 @@ pub fn valid_density(d: f64) -> bool {
 /// Density of a built-in physical material (g/cm³).
 pub fn material_density(name: &str) -> Option<f64> {
     MATERIALS.iter().find(|(n, _)| n.eq_ignore_ascii_case(name.trim())).map(|(_, d)| *d)
+}
+
+/// How a textual reference matches a feature name: ASCII case does not matter.
+pub fn same_feature_name(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
 }
