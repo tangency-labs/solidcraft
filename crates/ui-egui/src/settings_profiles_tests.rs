@@ -75,6 +75,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "dark_parts_shading",
         "msaa",
         "window_system",
+        "vr_headset",
         "default_units",
         "extrude_view_isometric",
         "extrude_view_return",

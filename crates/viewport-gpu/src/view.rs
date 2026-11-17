@@ -26,8 +26,10 @@ pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, G
 mod msaa_check;
 mod oit;
 mod product_highlights;
+mod second_view;
 #[cfg(not(target_arch = "wasm32"))]
 pub use msaa_check::MsaaCheck;
+pub use second_view::ViewTarget;
 
 /// Triangle vertex: position (3 × f32), normal (3 × f32), palette index (u32) at
 /// [`TRI_COLOR_AT`], and a value at [`TRI_VALUE_AT`] (an `f32`'s bits, or [`NO_VALUE`]) that
@@ -1178,6 +1180,7 @@ pub const AO_SAMPLES: u32 = 32;
 pub const AO_SAMPLES_MOVING: u32 = 8;
 
 /// Per-frame parameters.
+#[derive(Clone)]
 pub struct Frame {
     /// Bounded unshadowed product-light preview. None retains the fixed studio.
     pub product_lights: Option<Vec<[f32; 16]>>,
@@ -2625,6 +2628,9 @@ pub struct Renderer {
     moving_uniform: wgpu::Buffer,
     moving_bind: wgpu::BindGroup,
     moving_on: bool,
+    /// The ground grid and the ground shadow are left out of what is drawn: set by
+    /// [`Renderer::draw_second_view`] for a view that has a ground of its own (a headset's room).
+    ground_hidden: bool,
     product: Batches,
     empty: Batches,
     sketch: Batches,
@@ -3703,6 +3709,7 @@ impl Renderer {
                 moving_uniform,
                 moving_bind,
                 moving_on: false,
+                ground_hidden: false,
                 product: Batches::default(),
                 empty: Batches::default(),
                 sketch: Batches::default(),
@@ -4079,6 +4086,8 @@ impl Renderer {
     /// content is the same as the picture drawn last is not drawn again: that picture is blitted
     /// instead, so pointer moves and UI animations over a still view cost no scene work.
     pub fn prepare(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
+        // The window's own pictures always have the ground (a second view leaves it out for itself).
+        self.ground_hidden = false;
         let res = self;
         let cb = frame;
         if res.product_highlights {
@@ -4376,11 +4385,13 @@ impl Renderer {
             Self::draw_over(res, pass, sk, h, pv, m, moving, &tris, &lines);
             return;
         }
-        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
-        lines(pass, &res.overlay, &m.under);
-        in_moving(pass, &|pass, mv| lines(pass, &res.overlay, &mv.under));
-        pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
-        lines(pass, &res.overlay, &sk.under);
+        if !self.ground_hidden {
+            pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+            lines(pass, &res.overlay, &m.under);
+            in_moving(pass, &|pass, mv| lines(pass, &res.overlay, &mv.under));
+            pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
+            lines(pass, &res.overlay, &sk.under);
+        }
         pass.set_bind_group(1, &res.access_bind, &[]);
         pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
@@ -4608,10 +4619,12 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         tris(pass, &res.ghost, &m.ghost);
         // The ground shadow is never cut by a section, like the reference planes (#10708).
-        tris(pass, &res.guide_trans, &m.shadow);
-        pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
-        tris(pass, &res.guide_trans, &sk.shadow);
-        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        if !self.ground_hidden {
+            tris(pass, &res.guide_trans, &m.shadow);
+            pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
+            tris(pass, &res.guide_trans, &sk.shadow);
+            pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        }
         if phase == Phase::BeforeSeeThrough {
             return;
         }
@@ -6577,6 +6590,171 @@ mod glass_tests {
         assert!(split.ss_ready, "the split frame is drawn offscreen");
         let max = drawn.iter().zip(&shown).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
         assert!(max <= 1, "the blitted picture matches the direct one (max difference {max})");
+    }
+
+    /// A second view's picture copied into a readable `size` texture, as straight RGBA bytes.
+    fn read_second_view(r: &Renderer, device: &wgpu::Device, queue: &wgpu::Queue, view: &ViewTarget) -> Vec<u8> {
+        let [w, h] = view.size();
+        let out = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let out_view = out.create_view(&Default::default());
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &out_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&r.copy_blit);
+            pass.set_bind_group(0, view.bind(), &[]);
+            pass.draw(0..3, 0..1);
+        }
+        let stride = (w * 4).div_ceil(256) * 256;
+        let read = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: u64::from(stride * h),
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            out.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read,
+                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(h) },
+            },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        queue.submit([encoder.finish()]);
+        read.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::PollType::wait_indefinitely()).ok();
+        let padded = read.slice(..).get_mapped_range().map(|b| b.to_vec()).unwrap_or_default();
+        padded.chunks(stride as usize).flat_map(|row| row.iter().take((w * 4) as usize).copied()).collect()
+    }
+
+    /// A headset's eye is a second view of the scene the window uploaded: drawn from its own
+    /// camera into its own picture, only within its scissor, and transparent elsewhere. The
+    /// window's picture, and the key it is kept under, stay as they were. A product frame and an
+    /// empty scissor draw no model.
+    #[test]
+    fn a_second_view_draws_the_uploaded_scene_and_leaves_the_windows_picture() {
+        let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let window_target = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+        let mut r = Renderer::with_window_target(&device, scene_target, window_target, None);
+        let frame = test_frame(test_scene(), 1.0);
+        let window_before = render_frame(&mut r, &device, &queue, &frame, false);
+        let key = r.ss_key;
+        assert!(key.is_some(), "the window's picture is kept");
+
+        // The eye: the window's camera half a picture to the left, so the triangle shows in the
+        // right half: corners at (64, 72), (128, 72) and (96, 24) of a 128 by 96 picture.
+        let (w, h) = (128_u32, 96_u32);
+        let mut eye = frame.clone();
+        eye.view_proj[3][0] += 0.5;
+        eye.size_px = [w as f32, h as f32];
+        let red = |pixels: &[u8], x: u32, y: u32| {
+            let at = ((y * w + x) * 4) as usize;
+            pixels.get(at..at + 4).is_some_and(|p| p[0] > 200 && p[1] < 60 && p[2] < 60 && p[3] > 200)
+        };
+        let clear = |pixels: &[u8], x: u32, y: u32| {
+            let at = ((y * w + x) * 4) as usize;
+            pixels.get(at..at + 4) == Some(&[0, 0, 0, 0])
+        };
+        let mut target = None;
+        assert!(r.draw_second_view(&device, &queue, &eye, [w, h], [0, 0, w, h], true, &mut target));
+        let view = target.as_ref().unwrap();
+        assert_eq!(view.size(), [w, h]);
+        let whole = read_second_view(&r, &device, &queue, view);
+        assert!(red(&whole, 80, 60) && red(&whole, 112, 60), "the triangle, where this camera sees it");
+        assert!(clear(&whole, 32, 60) && clear(&whole, 4, 4), "nothing where the model is not");
+
+        // Within a scissor: the model only inside it.
+        assert!(r.draw_second_view(&device, &queue, &eye, [w, h], [0, 0, 96, h], true, &mut target));
+        let cut = read_second_view(&r, &device, &queue, target.as_ref().unwrap());
+        assert!(red(&cut, 80, 60), "inside the scissor");
+        assert!(clear(&cut, 112, 60), "outside the scissor");
+
+        // An empty scissor, and one past the picture: a clear picture, no error.
+        for scissor in [[0, 0, 0, 0], [500, 500, 10, 10], [10, 10, 0, 40], [u32::MAX, 0, u32::MAX, u32::MAX]] {
+            assert!(r.draw_second_view(&device, &queue, &eye, [w, h], scissor, true, &mut target), "{scissor:?}");
+            let empty = read_second_view(&r, &device, &queue, target.as_ref().unwrap());
+            assert!(clear(&empty, 80, 60) && clear(&empty, 112, 60), "{scissor:?}");
+        }
+
+        // A size past the device's largest texture is drawn within it; no size is one pixel.
+        let limit = device.limits().max_texture_dimension_2d;
+        let mut small = None;
+        assert!(r.draw_second_view(&device, &queue, &eye, [0, 0], [0, 0, 1, 1], true, &mut small));
+        assert_eq!(small.as_ref().map(ViewTarget::size), Some([1, 1]));
+        r.max_texture = 256;
+        assert!(r.draw_second_view(&device, &queue, &eye, [u32::MAX, 300], [0, 0, 1, 1], true, &mut small));
+        assert_eq!(small.as_ref().map(ViewTarget::size), Some([256, 256]));
+        r.max_texture = limit;
+
+        // The product preview is not a scene a second view shows.
+        let mut product = eye.clone();
+        product.product = true;
+        assert!(!r.draw_second_view(&device, &queue, &product, [w, h], [0, 0, w, h], true, &mut target));
+
+        // The window's still picture was not drawn over, and is shown again as it was.
+        assert_eq!(r.ss_key, key, "the window's picture is still the one kept");
+        let window_after = render_frame(&mut r, &device, &queue, &frame, false);
+        let max = window_before.iter().zip(&window_after).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
+        assert!(max <= 1, "the window shows the same picture (max difference {max})");
+        // And a moved window camera draws the scene again with its own uniform, not the eye's.
+        let mut moved = frame.clone();
+        moved.view_proj[3][0] -= 0.5;
+        let shown = render_frame(&mut r, &device, &queue, &moved, false);
+        let at = |x: usize, y: usize| shown.get((y * 64 + x) * 4..(y * 64 + x) * 4 + 3).is_some_and(|p| p[0] > 200 && p[1] < 60 && p[2] < 60);
+        assert!(at(16, 40) && !at(48, 40), "the window's own camera: the triangle in its left half");
+    }
+
+    /// A headset's room has a floor of its own: a second view drawn without the ground leaves
+    /// the grid under everything and the ground shadow out, and one drawn with it shows them.
+    #[test]
+    fn a_second_view_without_the_ground_leaves_grid_and_shadow_out() {
+        let Some((_, device, queue)) = crate::open_headless(crate::test_env::policy()).ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let window_target = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+        let mut r = Renderer::with_window_target(&device, scene_target, window_target, None);
+        let mut scene = GpuScene::default();
+        let blue = scene.color([0, 0, 255, 255]);
+        let green = scene.color([0, 255, 0, 255]);
+        for p in [[-5.0, -5.0, 0.0], [5.0, -5.0, 0.0], [0.0, 5.0, 0.0]] {
+            scene.shadow_tri(p, blue);
+        }
+        scene.under_line([-5.0, 4.0, 0.0], [5.0, 4.0, 0.0], green, 3.0);
+        let frame = test_frame(scene, 1.0);
+        render_frame(&mut r, &device, &queue, &frame, false);
+        let (w, h) = (64_u32, 64_u32);
+        let mut eye = frame.clone();
+        eye.size_px = [w as f32, h as f32];
+        let mut drawn = |ground: bool| {
+            let mut target = None;
+            assert!(r.draw_second_view(&device, &queue, &eye, [w, h], [0, 0, w, h], ground, &mut target));
+            read_second_view(&r, &device, &queue, target.as_ref().unwrap())
+        };
+        let shown = |pixels: &[u8]| pixels.chunks(4).any(|p| p[3] > 0);
+        assert!(shown(&drawn(true)), "an ordinary second view shows the ground");
+        assert!(!shown(&drawn(false)), "one without the ground shows neither grid nor shadow");
+        assert!(shown(&drawn(true)), "and the next view with the ground shows it again");
     }
 
     /// A GT 740 had no video memory left for the viewport's frame, and the app closed with "wgpu

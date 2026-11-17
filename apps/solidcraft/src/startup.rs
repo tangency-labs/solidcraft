@@ -583,9 +583,13 @@ pub const FLOAT_DEPTH_STENCIL: eframe::wgpu::Features = eframe::wgpu::Features::
 
 /// Whether every adapter `options` could start offers a float depth buffer with a stencil. eframe
 /// makes the window's depth buffer from the depth bits before it picks the adapter, so the window
-/// asks for a float one only when whichever it picks has it.
+/// asks for a float one only when whichever it picks has it. A device that is there already (the
+/// VR session's, `vr::open`) is the one the window gets: it says for itself.
 pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) -> bool {
-    let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { return false };
+    let setup = match &options.wgpu_setup {
+        eframe::egui_wgpu::WgpuSetup::CreateNew(setup) => setup,
+        eframe::egui_wgpu::WgpuSetup::Existing(existing) => return existing.device.features().contains(FLOAT_DEPTH_STENCIL),
+    };
     let mut desc = solidcraft_viewport_gpu::instance_descriptor_from_env();
     desc.backends = setup.instance_descriptor.backends;
     let instance = eframe::wgpu::Instance::new(desc);

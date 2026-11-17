@@ -33,6 +33,7 @@ mod security;
 mod sketch;
 mod theme_picker;
 mod tools;
+mod vr;
 
 use crate::SolveApp;
 use crate::prefs_window;
@@ -374,6 +375,7 @@ pub const PAGES: &[&str] = &[
     "Tools",
     "Navigation",
     "3D mouse",
+    "VR headset",
     "Shortcuts",
     "Assistant",
     "Plugins",
@@ -388,9 +390,10 @@ pub const PAGE_SKETCH: usize = 6;
 pub const PAGE_TOOLS: usize = 7;
 pub const PAGE_NAVIGATION: usize = 8;
 pub const PAGE_MOUSE3D: usize = 9;
-pub const PAGE_SHORTCUTS: usize = 10;
-pub const PAGE_ASSISTANT: usize = 11;
-pub const PAGE_PLUGINS: usize = 12;
+pub const PAGE_VR: usize = 10;
+pub const PAGE_SHORTCUTS: usize = 11;
+pub const PAGE_ASSISTANT: usize = 12;
+pub const PAGE_PLUGINS: usize = 13;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
@@ -484,6 +487,16 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         draw: page_draw::<PAGE_MOUSE3D>,
         defaults: page_defaults::<PAGE_MOUSE3D>,
     }),
+    // VR keeps its settings on a page of its own: few people have a headset.
+    prefs_window::Page::Host(prefs_window::HostPage {
+        icon: ui_kit::Icon::Kit("prefs_vr"),
+        label: "prefs.structure.vr",
+        group: None,
+        handle: "prefs:page:VR headset",
+        scroll: true,
+        draw: page_draw::<PAGE_VR>,
+        defaults: page_defaults::<PAGE_VR>,
+    }),
     prefs_window::Page::Host(prefs_window::HostPage {
         icon: ui_kit::Icon::Kit("prefs_shortcuts"),
         label: "prefs.shortcuts",
@@ -523,6 +536,15 @@ const PAGE_ALIASES: &[(&str, usize)] = &[
     ("Sketch & selection", PAGE_SKETCH),
     ("Sketch and selection", PAGE_SKETCH),
 ];
+
+/// Whether `at` is on a row of the page list, also one scrolled out of view (scenarios scroll the
+/// list to reach it; the actions and the profiles below the list are not rows).
+pub(crate) fn page_row_at(at: egui::Pos2) -> bool {
+    WINDOW_PAGES.iter().any(|page| {
+        let prefs_window::Page::Host(page) = page;
+        crate::scenario::rect_of(page.handle).is_some_and(|rect| rect.contains(at))
+    })
+}
 
 /// A page as the window draws it.
 fn page_draw<const PAGE: usize>(ui: &mut egui::Ui, app: &mut SolveApp) {
@@ -1189,6 +1211,9 @@ preference_settings! {
     graphics_backend: String = "auto".into(), PAGE_GRAPHICS;
     /// Exact graphics adapter name; empty selects automatically on the next start.
     graphics_adapter: String = String::new(), PAGE_GRAPHICS;
+    /// Start in VR from the next start (#2172, docs/vr.md). Off by default: the app starts
+    /// as it always has, with no VR software touched.
+    vr_headset: bool = false, PAGE_VR => check_id("prefs.vr_headset");
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
     /// Restore the shadow plane at the lowest visible body, including above the origin (#9838).
@@ -2156,7 +2181,7 @@ impl Snapshot {
         if self.prefs.graphics_backend != app.preferences.graphics_backend && app.services.graphics_path.is_some() {
             save_graphics_backend(app, &self.prefs.graphics_backend)?;
         }
-        let graphics = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
+        let graphics = StartupGraphics::of(&app.preferences);
         let units_changed = app.preferences.default_units != self.prefs.default_units;
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
         let update = std::mem::take(&mut app.preferences.update);
@@ -2191,7 +2216,7 @@ impl Snapshot {
         app.toolbar_custom.load(&self.toolbar);
         app.sbox.pinned = self.favourites;
         app.settings_profiles.active = self.profile.filter(|name| app.settings_profiles.names().contains(name));
-        if (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone()) != graphics {
+        if StartupGraphics::of(&app.preferences) != graphics {
             save_graphics(app);
         }
         Ok(())
@@ -2454,7 +2479,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         app.set_status(error, true);
         return;
     }
-    let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
+    let graphics = StartupGraphics::of(&app.preferences);
     let units = app.preferences.default_units.clone();
     let check_updates = app.preferences.check_updates;
     reset_preferences(&mut app.preferences, page);
@@ -2496,7 +2521,12 @@ fn defaults(app: &mut SolveApp, page: usize) {
             app.ui.show_grid = true;
             app.ui.ground_shadow = true;
             app.ui.perspective = false;
-            if app.preferences.msaa != msaa || app.preferences.window_system != window_system || app.preferences.graphics_adapter != adapter {
+            if StartupGraphics::of(&app.preferences) != graphics {
+                save_graphics(app);
+            }
+        }
+        PAGE_VR => {
+            if StartupGraphics::of(&app.preferences) != graphics {
                 save_graphics(app);
             }
         }
@@ -2965,9 +2995,31 @@ fn refuse_unavailable_preferences(p: &serde_json::Value, available: bool) -> Res
     Ok(())
 }
 
+/// VR (`vr_headset`, Preferences › VR headset) exists where the desktop app has it: Windows and
+/// Linux. Elsewhere `ui.prefs` neither lists nor sets it.
+pub const VR_AVAILABLE: bool = cfg!(any(target_os = "windows", target_os = "linux"));
+
+const VR_UNAVAILABLE: &str = "`vr_headset` is available on Windows and Linux only: elsewhere there is no VR";
+
+/// `ui.prefs` refuses `vr_headset` where there is no VR (`available`: [`VR_AVAILABLE`]).
+fn refuse_unavailable_vr(p: &serde_json::Value, available: bool) -> Result<(), String> {
+    if !available && p.get("vr_headset").is_some() {
+        return Err(VR_UNAVAILABLE.into());
+    }
+    Ok(())
+}
+
+/// `reply` without `vr_headset` where there is no VR (`available`: [`VR_AVAILABLE`]).
+fn without_unavailable_vr(mut reply: serde_json::Value, available: bool) -> serde_json::Value {
+    if !available && let Some(o) = reply.as_object_mut() {
+        o.remove("vr_headset");
+    }
+    reply
+}
+
 /// A reply listing the preferences, without the ones this system doesn't have.
 fn preferences_reply(p: &Prefs) -> Result<serde_json::Value, String> {
-    preferences_reply_where(p, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE)
+    Ok(without_unavailable_vr(preferences_reply_where(p, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE)?, VR_AVAILABLE))
 }
 
 /// [`preferences_reply`], with `windows_smooth_window_drag` listed only where it is `available`.
@@ -2979,6 +3031,23 @@ fn preferences_reply_where(p: &Prefs, available: bool) -> Result<serde_json::Val
     Ok(out)
 }
 
+/// The settings `graphics.json` keeps for the next start, beside the graphics API: a change to
+/// any of them writes the file ([`save_graphics`]).
+#[derive(Clone, PartialEq, Debug)]
+struct StartupGraphics {
+    msaa: u32,
+    window_system: String,
+    adapter: String,
+    vr: bool,
+}
+
+impl StartupGraphics {
+    /// What `p` asks of the next start.
+    fn of(p: &Prefs) -> StartupGraphics {
+        StartupGraphics { msaa: p.msaa, window_system: p.window_system.clone(), adapter: p.graphics_adapter.clone(), vr: p.vr_headset }
+    }
+}
+
 /// Write ordinary startup settings without changing a backend choice or its recovery record.
 fn save_graphics(app: &SolveApp) {
     if let Some(path) = &app.services.graphics_path {
@@ -2988,6 +3057,11 @@ fn save_graphics(app: &SolveApp) {
             graphics["msaa"] = json!(app.preferences.msaa);
             graphics["window_system"] = json!(app.preferences.window_system);
             graphics["adapter"] = json!(app.preferences.graphics_adapter);
+            // The VR choice is written once it has been made: a file that never had it keeps the
+            // keys it had, so saving another setting leaves it as older versions wrote it.
+            if app.preferences.vr_headset || graphics.get("vr").is_some() {
+                graphics["vr"] = json!(app.preferences.vr_headset);
+            }
             solidcraft_engine::io::safe_write::write_atomic(path, graphics.to_string().as_bytes(), false).map_err(|error| error.to_string())
         })();
         if let Err(error) = result {
@@ -3124,10 +3198,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         }
         crate::space_mouse_calibration::show(app, ctx);
-        if app.preferences.msaa != before.msaa
-            || app.preferences.window_system != before.window_system
-            || app.preferences.graphics_adapter != before.graphics_adapter
-        {
+        if StartupGraphics::of(&app.preferences) != StartupGraphics::of(&before) {
             save_graphics(app);
         }
         if app.preferences.up_axis != before.up_axis {
@@ -3283,6 +3354,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
         PAGE_SKETCH => sketch::show(app, ui),
+        PAGE_VR => vr::show(app, ui),
         _ => {}
     }
 }
@@ -4476,6 +4548,7 @@ fn prepare_preferences(
         }
     }
     refuse_unavailable_preferences(p, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE)?;
+    refuse_unavailable_vr(p, VR_AVAILABLE)?;
     let mut cur = serde_json::to_value(base).map_err(|e| e.to_string())?;
     if let (Some(o), Some(src)) = (cur.as_object_mut(), p.as_object()) {
         for (k, v) in src {
@@ -4699,9 +4772,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     }
     let units_changed = new.default_units != app.preferences.default_units;
     let up_changed = new.up_axis != app.preferences.up_axis;
-    let graphics_changed = new.msaa != app.preferences.msaa
-        || new.window_system != app.preferences.window_system
-        || new.graphics_adapter != app.preferences.graphics_adapter;
+    let graphics_changed = StartupGraphics::of(&new) != StartupGraphics::of(&app.preferences);
     if p.get("layout").is_some() {
         app.ui.layout = new.layout;
     }
@@ -7219,6 +7290,7 @@ mod tests {
                 "Tools",
                 "Navigation",
                 "3D mouse",
+                "VR headset",
                 "Shortcuts",
                 "Assistant",
                 "Plugins"
@@ -9777,6 +9849,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Preferences › VR headset › Start in VR (#2172): off by default and in settings saved
+    /// before it existed; `ui.prefs` saves the choice in `graphics.json` beside the other settings
+    /// for the next start, refuses what is not a yes or no, and Cancel and the page's Restore
+    /// Defaults take it back, in the file too. The row shows only where the host has VR, with
+    /// what the host says this run is doing, and no other page has it.
+    #[test]
+    fn starting_in_vr_is_off_by_default_and_saved_for_the_next_start() {
+        use serde_json::json;
+        let dir = std::env::temp_dir().join(format!("sc_vr_headset_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"msaa":4,"backend":"vulkan","adapter":"Named GPU"}"#).unwrap();
+        let saved = || -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default()).unwrap_or_default() };
+        assert!(!Prefs::default().vr_headset && !lenient(&json!({"msaa": 4})).vr_headset);
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.graphics_path = Some(path.to_string_lossy().to_string());
+        h.app.preferences.graphics_adapter = "Named GPU".into();
+        assert!(!h.app.preferences.vr_headset);
+        assert!(saved().get("vr").is_none(), "nothing is written until it changes");
+        // Saving another setting for the next start leaves a file that never had the choice
+        // without it: the file stays as versions before this setting wrote it.
+        h.call("ui.prefs", json!({"msaa": 2}));
+        assert_eq!(saved()["msaa"], 2);
+        assert!(saved().get("vr").is_none(), "another setting saved: still no VR key");
+
+        for bad in [json!({"vr_headset": "yes"}), json!({"vr_headset": 1}), json!({"vr_headset": null}), json!({"vr_headset": [true]})] {
+            assert!(h.call("ui.prefs", bad.clone())["error"].as_str().is_some(), "{bad}");
+            assert!(!h.app.preferences.vr_headset && saved().get("vr").is_none(), "{bad}: a refused value changes nothing");
+        }
+        let out = h.call("ui.prefs", json!({"vr_headset": true}));
+        assert_eq!(out["result"]["vr_headset"], true, "{out}");
+        assert_eq!(saved()["vr"], true);
+        assert_eq!(
+            (saved()["backend"].as_str(), saved()["adapter"].as_str(), saved()["msaa"].as_u64()),
+            (Some("vulkan"), Some("Named GPU"), Some(2))
+        );
+
+        // The page: the row only where the host has VR, with the host's words under it.
+        h.call("ui.prefs", json!({"open": "VR headset"}));
+        h.frames(2);
+        assert!(crate::scenario::handle_at("prefs:vr_headset").is_none(), "no VR on this host: no row");
+        h.app.services.vr_status = Some("Showing in the headset: Test headset on Test runtime.".into());
+        super::reveal_preference(&mut h, "prefs:vr_headset");
+        assert!(crate::scenario::handle_at("prefs:vr_headset").is_some());
+        // It lives on the VR page only.
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        h.frames(2);
+        assert!(crate::scenario::handle_at("prefs:vr_headset").is_none(), "not on Graphics");
+
+        // Cancel takes changes made in the window back, in the file too.
+        h.call("ui.prefs", json!({"vr_headset": false}));
+        assert_eq!(saved()["vr"], false);
+        let out = h.call("ui.prefs", json!({"button": "cancel"}));
+        assert_eq!(out["result"]["vr_headset"], true, "Cancel takes the change back");
+        assert_eq!(saved()["vr"], true, "and the file with it");
+
+        // The page's Restore Defaults turns it off again; another page's leaves it.
+        super::defaults(&mut h.app, super::PAGE_GRAPHICS);
+        assert!(h.app.preferences.vr_headset, "Graphics' Restore Defaults leaves it");
+        super::defaults(&mut h.app, super::PAGE_VR);
+        assert!(!h.app.preferences.vr_headset);
+        assert_eq!(saved()["vr"], false);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Preferences › General › Largest file to open (#4086): the defaults are the limits there always
     /// were; `ui.prefs` raises both, up to 16 GB and never below the defaults; a saved value out of
     /// range reads back in range, and General's Restore Defaults puts them back.
@@ -11337,6 +11474,22 @@ mod tests {
             assert!(reset["result"].get("windows_smooth_window_drag").is_none(), "{reset}");
             h.call("ui.prefs", json!({"button": "cancel"}));
         }
+    }
+
+    /// Where there is no VR (macOS, the browser), `ui.prefs` refuses `vr_headset` with a message
+    /// that says so and does not list it; where there is, both work and nothing else changes.
+    #[test]
+    fn vr_headset_exists_where_vr_does() {
+        let set = json!({"vr_headset": true});
+        assert_eq!(refuse_unavailable_vr(&set, true), Ok(()));
+        let refused = refuse_unavailable_vr(&set, false).unwrap_err();
+        assert!(refused.contains("vr_headset") && refused.contains("Windows and Linux only"), "{refused}");
+        assert_eq!(refuse_unavailable_vr(&json!({"msaa": 4}), false), Ok(()), "other keys are not refused");
+        let listed = serde_json::to_value(Prefs::default()).unwrap();
+        assert_eq!(without_unavailable_vr(listed.clone(), true), listed);
+        let stripped = without_unavailable_vr(listed.clone(), false);
+        assert!(stripped.get("vr_headset").is_none() && listed.get("vr_headset").is_some());
+        assert_eq!(stripped.as_object().map(|o| o.len() + 1), listed.as_object().map(serde_json::Map::len), "only it goes");
     }
 
     /// Where `windows_smooth_window_drag` exists and where it doesn't, decided from an explicit input

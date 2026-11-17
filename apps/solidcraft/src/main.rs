@@ -46,6 +46,8 @@ mod single_instance;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+mod vr;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
 
@@ -131,6 +133,14 @@ struct App {
     /// Preferences › Layout's `windows_smooth_window_drag`, as winit was given it.
     #[cfg(target_os = "windows")]
     window_move: native_frame::WindowMove,
+    /// VR (docs/vr.md): the design in the room, worked with the controllers, when this
+    /// run was asked for it (`vr::wanted`). `None`: nothing of it runs.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    vr: Option<vr::Vr>,
+    /// The window drew its UI since the headset's last frame (`vr`): the design view to show is
+    /// that UI's. Hidden, the window draws none, and the headset keeps the last one.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    vr_ui_ran: bool,
 }
 
 /// Settings written to the settings file soon after they change (#8275). eframe saves them
@@ -215,6 +225,14 @@ impl eframe::App for App {
     /// A frame's logic. The first frames show the starting page while the setup runs behind it, a
     /// step a frame (#1210); then the app's own.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // The headset's frame, also while the window is hidden and draws no UI (eframe then still
+        // runs the logic): the headset must get its frames, or the VR software says the app hangs.
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        if let Some(vr) = &mut self.vr
+            && let Some(rs) = _frame.wgpu_render_state()
+        {
+            vr.frame(&mut self.solve, ctx, rs, std::mem::take(&mut self.vr_ui_ran));
+        }
         if self.window_frames < 2 {
             self.window_frames += 1;
             // Before the window is shown: its title bar must be within reach (window_fit.rs).
@@ -400,6 +418,11 @@ impl eframe::App for App {
             });
         }
         content_ui(&mut self.solve, ui);
+        // The headset draws from the window's logic, with the design view this UI drew.
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        {
+            self.vr_ui_ran = true;
+        }
         // After the frame's UI, so a setting changed in it (Preferences' OK) is written now.
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
@@ -423,6 +446,11 @@ impl eframe::App for App {
     }
     /// The app is closing: work still running beside the window ends first, then the session.
     fn on_exit(&mut self) {
+        // The headset's session ends while the device it was opened on is whole.
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        if let Some(vr) = &mut self.vr {
+            vr.shut_down();
+        }
         // Closed from the start page before the 3D view was ready: as a close from the starting
         // page, a close the user asked for is no failed start (#1210).
         if let Some(dir) = self.starting.take() {
@@ -828,6 +856,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         )
         .map(|program| (program, graphics_restart_args(std::env::args().skip(1)))),
         graphics_path: graphics_path().map(|p| p.to_string_lossy().to_string()),
+        // Windows and Linux have the VR view; a run that tries it fills in what happened.
+        vr_status: cfg!(any(target_os = "windows", target_os = "linux")).then(String::new),
         window_system: window_system_now(),
         // Linux: the desktop's dark or light setting, which the window is not told on every
         // desktop (#7944). Windows and macOS: the window's own theme.
@@ -1139,6 +1169,9 @@ fn restore_graphics_preferences(app: &mut SolveApp, saved: Option<&serde_json::V
         .unwrap_or("auto")
         .to_string();
     app.preferences.graphics_adapter = saved.and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str)).unwrap_or_default().to_string();
+    // Off unless graphics.json says yes: a file from before the setting, or a value that is not
+    // a yes or no, starts as ever.
+    app.preferences.vr_headset = saved.and_then(|v| v.get("vr").and_then(serde_json::Value::as_bool)).unwrap_or(false);
     // graphics.json chooses the window before app.ron is loaded. Reflect that saved choice,
     // not the current session's window system (which an environment override may change).
     app.preferences.window_system = saved
@@ -1264,12 +1297,15 @@ fn main() -> eframe::Result {
     let mut max_file_size = None;
     // `--new-instance`: open this launch as its own app even when SolidCraft already runs.
     let mut new_instance = false;
+    // `--vr`: start in VR for this run (docs/vr.md).
+    let mut vr_flag = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
             "--new-instance" => new_instance = true,
+            "--vr" => vr_flag = true,
             "--theme-file" => theme_file = args.next(),
             "--max-file-size" => max_file_size = Some(args.next()),
             s if s.starts_with("--max-file-size=") => max_file_size = Some(s.strip_prefix("--max-file-size=").map(str::to_string)),
@@ -1294,7 +1330,7 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--vr] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
                 );
                 return Ok(());
             }
@@ -1404,7 +1440,8 @@ fn main() -> eframe::Result {
         notes.push(note.clone());
     }
     let saved_samples = if safe_mode { None } else { msaa() };
-    let wgpu_options =
+    #[cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(unused_mut))]
+    let mut wgpu_options =
         if safe { safe_wgpu_options(cpu_renderer, failed_backend.as_deref()) } else { wgpu_options(cpu_renderer, backend_launch.backend.as_deref()) };
     // A tracked full launch notes the API it starts, for the safe launch after a failure.
     if !safe
@@ -1418,7 +1455,6 @@ fn main() -> eframe::Result {
             log::warn!("graphics: safe graphics record not saved: {reason}");
         }
     }
-    let depth_bits = if !safe && startup::float_depth_everywhere(&wgpu_options) { FLOAT_DEPTH_BITS } else { DEPTH_BITS };
     // Crashes leave a report in the crash folder (solidcraft_engine::crash, docs/crash-reports.md).
     let crashed = solidcraft_engine::crash::default_dir()
         .map(|dir| {
@@ -1438,6 +1474,13 @@ fn main() -> eframe::Result {
     native_crash::install();
     #[cfg(target_os = "macos")]
     native_crash_macos::install();
+    // The VR view, when asked for: the window then opens on the device the VR runtime makes.
+    // After the crash capture is in place: this loads the VR runtime's own libraries.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let vr = vr_start(vr_flag, cpu_renderer || safe || retry_backend.is_some(), &mut wgpu_options);
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    let _ = vr_flag;
+    let depth_bits = if !safe && startup::float_depth_everywhere(&wgpu_options) { FLOAT_DEPTH_BITS } else { DEPTH_BITS };
     // Windows with only OpenGL to start: the system title bar instead of ours (#2063).
     let started = match &wgpu_options.wgpu_setup {
         eframe::egui_wgpu::WgpuSetup::CreateNew(setup) => setup.instance_descriptor.backends,
@@ -1750,6 +1793,10 @@ fn main() -> eframe::Result {
                 dialog_folder,
                 #[cfg(target_os = "windows")]
                 window_move,
+                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                vr,
+                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                vr_ui_ran: false,
             }))
         }),
     );
@@ -1761,6 +1808,35 @@ fn main() -> eframe::Result {
         }
         r => r,
     }
+}
+
+/// VR for this run (docs/vr.md). Not asked for (`vr::wanted`), it only says whether OpenXR is
+/// installed, found from files and settings, so a run that did not ask touches no VR software. Asked for, the session is opened and `options`
+/// changed so the window opens on its device; a start that cannot (`software`: safe mode, the
+/// software renderer or a start recovering from a failed one; no VR software; no headset) leaves
+/// `options` alone, and VR only says why.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn vr_start(flag: bool, software: bool, options: &mut eframe::egui_wgpu::WgpuConfiguration) -> Option<vr::Vr> {
+    if !vr::wanted(flag, std::env::var(vr::VR_ENV).ok().as_deref(), graphics().as_ref()) {
+        // Files and settings only: a run without VR starts no VR software.
+        return Some(vr::Vr::off(solidcraft_xr::installed()));
+    }
+    if software {
+        solidcraft_engine::note!("SolidCraft VR: not started (safe mode, software renderer or a recovery start)");
+        return Some(vr::Vr::failed(vr::Reason::Software));
+    }
+    solidcraft_engine::crash::phase("VR session");
+    Some(match vr::open(options) {
+        Ok(vr) => {
+            solidcraft_engine::note!("SolidCraft VR: session open; the window draws on the headset's Vulkan device");
+            vr
+        }
+        Err(error) => {
+            log::warn!("VR: not started: {error}");
+            solidcraft_engine::note!("SolidCraft VR: not started: {error}");
+            vr::Vr::failed(vr::Reason::of(&error))
+        }
+    })
 }
 
 /// What the 3D view's setup step needs from the window's graphics device.
@@ -1786,9 +1862,20 @@ fn view_step(a: &mut App, ctx: &egui::Context, gpu: &GpuSetup) -> bool {
     use solidcraft_ui_egui::starting::{Poll, Worker};
     let gpu_meshing = !a.solve.cpu_meshing;
     let (scene_samples, depth_bits) = (gpu.scene_samples, gpu.depth_bits);
+    // With VR, pictures drawn off the window's thread (thumbnails, previews) are drawn by the CPU
+    // from the start: the VR runtime uses the device's queue during a frame, and Vulkan lets one
+    // thread at a time use a queue.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let cpu_pictures = a.vr.as_ref().is_some_and(vr::Vr::has_session);
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    let cpu_pictures = false;
     let build = move |rs: &eframe::egui_wgpu::RenderState| {
         let built = SolveApp::build_wgpu_split(rs, depth_bits, STENCIL_BITS, scene_samples, gpu_meshing);
-        solidcraft_ui_egui::gpu::install_picture_renderer(rs);
+        if cpu_pictures {
+            solidcraft_ui_egui::gpu::install_cpu_picture_renderer();
+        } else {
+            solidcraft_ui_egui::gpu::install_picture_renderer(rs);
+        }
         built
     };
     let Some(job) = &a.gpu_job else {
