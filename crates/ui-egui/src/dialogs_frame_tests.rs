@@ -713,6 +713,19 @@ fn editing_a_trim_resolves_a_renamed_construction_plane_by_id() {
     assert_eq!(d.inputs[1].items, [Sel::Plane { name: "Renamed cut".into() }]);
     let c = apply_commands(&app, &d).unwrap();
     run_all(&mut app, c);
+
+    // A placed construction plane cannot be reduced to its name: keep its saved placement.
+    let cut = app.session.doc.find_feature("Renamed cut").unwrap().id;
+    let mut placement = solidcraft_engine::doc::IDENTITY;
+    placement[3][0] = 10.0;
+    let plane = json!({"type": "construction", "feature": cut, "placement": placement});
+    app.run("timeline.redefine", json!({"feature": trim, "command": "frame.trim", "params": {"members": ["Rail"], "to": {"plane_ref": plane}}}))
+        .unwrap();
+    let d = edit_dialog(&app, trim.as_u64().unwrap(), None).unwrap();
+    assert!(d.inputs[1].items.is_empty(), "the placement is kept as an exact reference");
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["params"]["to"][0]["plane_ref"], plane);
+    run_all(&mut app, c);
 }
 
 #[test]

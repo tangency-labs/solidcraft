@@ -341,7 +341,7 @@ pub fn trim_for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec
         match target {
             TrimTarget::Member { member, side: None } if let Some(name) = body_of(app, member) => picks.push(Sel::Body { name }),
             TrimTarget::Plane { plane: PlaneRef::Origin { name } } => picks.push(Sel::Plane { name: name.clone() }),
-            TrimTarget::Plane { plane: PlaneRef::Construction { feature } } if let Some(f) = app.session.doc.feature(feature.0) => {
+            TrimTarget::Plane { plane: PlaneRef::Construction { feature, placement: None } } if let Some(f) = app.session.doc.feature(feature.0) => {
                 picks.push(Sel::Plane { name: f.name.clone() })
             }
             TrimTarget::Member { member, side } => {
