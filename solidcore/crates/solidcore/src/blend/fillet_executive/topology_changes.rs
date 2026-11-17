@@ -33,13 +33,6 @@ pub trait TopologyChangesAccess<O> {
     fn change_corner(&mut self, k: &Kernel, corner: O, old: O, new: O) -> Result<()>;
 }
 
-fn ignored(status: Result<()>) -> Result<()> {
-    match status {
-        Err(error) if error.is_unported_or_cancelled() => Err(error),
-        _ => Ok(()),
-    }
-}
-
 /// The shared native loop, using the actual executive's retained lists.
 /// Per-object statuses are ignored upstream; genuine missing capabilities propagate.
 /// # Errors

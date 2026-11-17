@@ -70,7 +70,7 @@ use crate::blend::fillet_geom::p1::{
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -1214,10 +1214,6 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
     let rail_face = fillets.fillet_edge(rail)?.orig_face;
     let num_small_ivls = small_intervals.len();
     let num_ivls = classification.size();
-    // s3DPntMin / s3DPntMax live across iterations: a failed (ignored) evaluation
-    // keeps the previous value
-    let mut pnt_min = Point3::UNDEF;
-    let mut pnt_max = Point3::UNDEF;
     // sTsectPntMin / sTsectPntMax too (RailEdgeuseIntersect writes them in place)
     let mut tsect_min = TsectPnt::default();
     let mut tsect_max = TsectPnt::default();
@@ -1247,13 +1243,13 @@ pub fn refine_rail_curve_classification_scoped_with_ops(
             continue;
         };
 
-        // the RailCurve local end points (statuses ignored)
+        // the RailCurve local end points (statuses ignored upstream)
         let rail_curve =
             edge::curve(fillets.brep(), rail)?.ok_or_else(|| invalid("rail without a curve"))?;
         // fork 66b02de passes this on (SER)
-        pnt_min = rail_curve.evaluate_point(k, ivl.min())?;
+        let mut pnt_min = rail_curve.evaluate_point(k, ivl.min())?;
         // fork 66b02de passes this on (SER)
-        pnt_max = rail_curve.evaluate_point(k, ivl.max())?;
+        let mut pnt_max = rail_curve.evaluate_point(k, ivl.max())?;
 
         let edge_ivl = edge::interval(target, edge)?;
         // a copy: the solver below may give the side edge use a UV trim curve

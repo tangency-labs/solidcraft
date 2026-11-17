@@ -141,7 +141,7 @@ use crate::blend::fillet_solver::p1::{
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p5::is_arc_base;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;

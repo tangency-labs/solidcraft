@@ -89,8 +89,8 @@ use crate::blend::fillet_corner::p1::{
     create_planar_surface, create_srf_of_revolution, fillet_radius,
 };
 use crate::blend::fillet_corner::p3::{
-    move_vertexuse, primary_eu, set_vertex_point, unchecked_point, CornerEnv, CornerPatchEnv,
-    FilletCorner, FilletExecutiveData,
+    move_vertexuse, primary_eu, set_vertex_point, CornerEnv, CornerPatchEnv, FilletCorner,
+    FilletExecutiveData,
 };
 use crate::blend::fillet_custom_solver::SurfaceId;
 use crate::blend::fillet_executive::p3::{ErrorInfo, FilletExecutive};

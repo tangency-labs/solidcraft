@@ -2490,17 +2490,6 @@ impl FilletCorner {
     }
 }
 
-/// An evaluation whose status upstream ignores (`EvaluatePoint` without `SER`): a
-/// failure leaves the default-constructed point ([`Point3::UNDEF`]); an unported
-/// evaluator still propagates.
-pub(super) fn unchecked_point(r: Result<Point3>) -> Result<Point3> {
-    match r {
-        Ok(p) => Ok(p),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Ok(Point3::UNDEF),
-    }
-}
-
 /// `SmBSplineCurve::JoinWith` (virtual) on an edge's curve: the `SmLine` and `SmEllipse`
 /// overrides for those kinds, the B-spline join on the `SmBSplineCurve` part otherwise
 /// (shared with unit `blend.fillet_removal`).

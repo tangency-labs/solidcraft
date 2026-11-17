@@ -3246,7 +3246,6 @@ fn c5_split_rail(
     split_at_param: f64,
 ) -> Result<f64> {
     use crate::blend::fillet_geom::p1::{FilStatus, FilletEdgeType};
-    use crate::error::ignore_status;
     use crate::intersect::surface_intersector::p1::SrfIndex;
     use crate::nurbs::b_spline_curve_n_lib::TrimMode;
     use crate::topology::{edge as edge_unit, vertex as vertex_unit, vertexuse as vu_unit};
@@ -3911,7 +3910,6 @@ fn c6_compute_point_values(
     previous: Option<&TsectPnt>,
 ) -> Result<()> {
     use super::p1::compute_uv_vectors;
-    use crate::error::ignore_status;
     use crate::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex};
     use crate::math::EFF_ZERO_SQ;
 
