@@ -1733,8 +1733,10 @@ fn a_bead_face_keeps_the_foot_blend_and_rebuilds_from_its_record() {
             let blend = s.procedural_blend().unwrap();
             assert_eq!(blend.order(), 0, "{what}");
             assert_eq!(blend.bound(), WELD_FIT_TOLERANCE, "{what}");
-            assert!(blend.support(0).is_some() && blend.support(1).is_some());
+            // (the face names no support: a foot blend's stay where the bead was made)
+            assert!(blend.support(0).is_none() && blend.support(1).is_none());
             let def = blend.foot_blend().unwrap();
+            assert!(def.support(0).is_some() && def.support(1).is_some());
             assert_eq!(def.legs(), legs, "{what}");
             assert_eq!(def.sagitta(), h, "{what}");
             assert_eq!(def.spans().len(), 1, "{what}");
@@ -1920,7 +1922,8 @@ fn spans_round_a_tube_joint_are_one_body_of_lumps() {
 
 /// Tapered and rounded ends: between planes with a sagitta the bead is the planar sweep cut at
 /// its ends, one body of a lump per span (here a taper at each start and a round at each
-/// end); on the T-joint they are not built yet, a typed refusal naming the edge. Neither part
+/// end); a flat bead's (sagitta 0) between the same planes, and those on the T-joint, are not
+/// built yet: typed refusals naming the edge, each saying what is missing. Neither part
 /// changes.
 #[test]
 fn shaped_ends_are_built_between_planes_and_refused_round_a_tube() {
@@ -1950,6 +1953,13 @@ fn shaped_ends_are_built_between_planes_and_refused_round_a_tube() {
     let square: f64 = pieces.into_iter().map(|mut p| volume(&k, &mut p)).sum();
     let got = volume(&k, &mut body);
     assert!(got < square && got > 0.8 * square, "{got} against {square}");
+    let err = weld_bead_body(&mut k, &mut b, &[edge], &[size], 0.0, &[], &spans, ends)
+        .err()
+        .unwrap();
+    assert_eq!(err.kind(), ErrorKind::Unsupported, "{err}");
+    assert!(err.to_string().contains("flat bead"), "{err}");
+    assert!(err.site().is_some_and(|s| s.edge.is_some()), "{err:?}");
+    assert!(smb(&k, &b) == before, "the corner changed");
 
     let (mut part, joints) = tubes(&mut k, &branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0)));
     let before = smb(&k, &part);
@@ -1958,8 +1968,43 @@ fn shaped_ends_are_built_between_planes_and_refused_round_a_tube() {
         .err()
         .unwrap();
     assert_eq!(err.kind(), ErrorKind::Unsupported, "{err}");
+    assert!(err.to_string().contains("between two planes"), "{err}");
     assert!(err.site().is_some_and(|s| s.edge.is_some()), "{err:?}");
     assert!(smb(&k, &part) == before, "the tubes changed");
+}
+
+/// A moved bead keeps its motion: each section face's surface turned, moved and scaled by 2
+/// still re-checks against its definition (the motion replayed on the rebuilt net), and names
+/// no support (its supports stay where the bead was made, as a section blend's has none). A
+/// scale that is not uniform is refused: the legs would no longer be the net's.
+#[test]
+fn a_moved_bead_keeps_its_motion_and_a_scale_not_uniform_is_refused() {
+    let mut k = kernel();
+    let (mut b, at) = corner(&mut k, FRAC_PI_2);
+    let edge = pick(&k, &b, at);
+    let size = ChamferSize::Distances([SETBACK; 2]);
+    let body = weld_bead_body(&mut k, &mut b, &[edge], &[size], 1.0, &[], &[], SQUARE).unwrap();
+    let mut turn = Axis2Placement::IDENTITY;
+    turn.rotate_about_axis(0.7, Vec3::new(1.0, 2.0, 2.0) * (1.0 / 3.0));
+    turn.translate(Vec3::new(5.0, -3.0, 7.0));
+    let found = foot_faces(&body);
+    assert!(!found.is_empty());
+    for (_, made) in found {
+        let mut moved = made.clone();
+        moved
+            .transform(&k, &turn, Some(Vec3::new(2.0, 2.0, 2.0)))
+            .unwrap();
+        let def = moved.procedural_blend().unwrap();
+        assert!(def.support(0).is_none() && def.support(1).is_none());
+        assert!(def.foot_blend().is_some_and(|d| d.support(0).is_some()));
+        assert!(
+            def.recertify(&k).is_ok(),
+            "a moved face is no longer its definition's"
+        );
+        let mut stretched = made.clone();
+        let r = stretched.transform(&k, &turn, Some(Vec3::new(1.0, 2.0, 1.0)));
+        assert!(r.is_err(), "a scale that is not uniform moved a weld bead");
+    }
 }
 
 /// For the format decision (#16913, to bherbruck): an `ExactRoundRecord` of a convex bead

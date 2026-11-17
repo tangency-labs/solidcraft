@@ -581,13 +581,17 @@ pub fn bead_body(
         blend.toes_on_faces(k, target, legs)?;
         if shaped {
             // the shaped ends: the planar sweep's, cut at its ends
-            if sagitta == 0.0 || !between_planes(target, e)? {
-                return Err(Failure::new(
-                    OP,
-                    BlendFailure::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint),
-                )
-                .or_at(Site::edge(TargetEdge::of_target(e)))
-                .into_error());
+            let gap = if !between_planes(target, e)? {
+                Some(WeldGap::EndShapeOnCurvedJoint)
+            } else if sagitta == 0.0 {
+                Some(WeldGap::EndShapeOfFlatBead)
+            } else {
+                None
+            };
+            if let Some(gap) = gap {
+                return Err(Failure::new(OP, BlendFailure::WeldNotBuilt(gap))
+                    .or_at(Site::edge(TargetEdge::of_target(e)))
+                    .into_error());
             }
             let f = frame(k, target, e, *size, sagitta, along)?;
             for s in &spans {

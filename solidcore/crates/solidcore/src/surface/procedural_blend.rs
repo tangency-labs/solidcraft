@@ -1643,7 +1643,8 @@ impl KeptDefinition {
     /// under a uniform one ([`crate::surface::procedural_sweep::ProceduralSweep::follows`]);
     /// a round's, a corner's and a drafted face's always (their own transforms refuse what
     /// they cannot follow: a draft, a scale that is not uniform); a section blend's always (it
-    /// keeps the motion).
+    /// keeps the motion); a foot blend's always (it keeps the motion, and its transform
+    /// refuses a scale that is not uniform, as a draft's).
     #[must_use]
     pub fn follows(&self, scale: Option<Vec3>) -> bool {
         match self {
@@ -1681,10 +1682,7 @@ impl KeptDefinition {
                 b.transform(rotate_n_move, scale);
                 Ok(())
             }
-            Self::FootBlend(b) => {
-                b.transform(rotate_n_move, scale);
-                Ok(())
-            }
+            Self::FootBlend(b) => b.transform(rotate_n_move, scale),
         }
     }
 
@@ -1778,9 +1776,10 @@ impl<'a> BlendRef<'a> {
             Self::Exact { round, .. } => round.support(i),
             Self::Corner { corner, .. } => corner.support(i),
             Self::Draft { draft, .. } => (i == 0).then(|| draft.source()),
-            // (a section blend runs through its sections; it rolls on no surface)
-            Self::SectionBlend { .. } => None,
-            Self::FootBlend { blend, .. } => blend.support(i),
+            // (a section blend runs through its sections; it rolls on no surface. A foot
+            // blend's supports stay where the bead was made, before its motions: not the moved
+            // face's)
+            Self::SectionBlend { .. } | Self::FootBlend { .. } => None,
         }
     }
 

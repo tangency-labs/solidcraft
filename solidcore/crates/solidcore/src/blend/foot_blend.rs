@@ -413,7 +413,9 @@ impl FootBlend {
                 Newton::Found(p, w) => return Ok(Ok((p, w, root_uv))),
                 Newton::WrongSide | Newton::Singular => miss = Some(MissKind::NoToe),
                 // stopped on the edge of the support's domain: the support ends within the leg
-                Newton::NotConverged { uv, .. } if on_rim(&domain, uv) => {
+                Newton::NotConverged { uv, .. }
+                    if on_rim(&domain, periods_of(k, surface, &domain)?, uv) =>
+                {
                     miss = Some(MissKind::NoToe);
                 }
                 Newton::NotConverged { residual, step, .. } => {
@@ -675,14 +677,27 @@ impl FootBlend {
         check_legs(legs)?;
         let breaks = self.breaks()?;
         // at least 32 stations, and 4 between each two knots
-        let per = (32 / breaks.len().saturating_sub(1).max(1)).max(4);
+        let per = 32_usize
+            .div_ceil(breaks.len().saturating_sub(1).max(1))
+            .max(4);
         let mut ts = Vec::with_capacity(per * breaks.len());
         for pair in breaks.windows(2) {
             let &[lo, hi] = pair else { continue };
             ts.extend((0..per).map(|i| lo + (hi - lo) * i as f64 / per as f64));
         }
         ts.extend(breaks.last().copied());
-        let on_face = |target: &mut Brep, face: FaceId, uv: Point2| -> Result<bool> {
+        // each support's domain and periods: a foot past a periodic support's seam is moved
+        // into the domain by whole periods before it is classified
+        let mut frames = Vec::with_capacity(self.sides.len());
+        for side in &self.sides {
+            let domain = side.surface.natural_uv_domain_with_nurb(k)?;
+            let periods = periods_of(k, &side.surface, &domain)?;
+            frames.push((domain, periods));
+        }
+        let on_face = |target: &mut Brep, i: usize, face: FaceId, uv: Point2| -> Result<bool> {
+            let uv = frames
+                .get(i)
+                .map_or(uv, |(domain, periods)| wrapped(domain, *periods, uv));
             Ok(matches!(
                 crate::query::api_queries::face_classify_uv(k, target, face, uv)?,
                 C::Face | C::Edge | C::Vertex | C::Edgeuse
@@ -700,7 +715,7 @@ impl FootBlend {
                 else {
                     continue;
                 };
-                if !on_face(target, face, uv)? {
+                if !on_face(target, i, face, uv)? {
                     off = Some((i, foot));
                     break 'stations;
                 }
@@ -723,7 +738,7 @@ impl FootBlend {
                 let Ok((p, uv, r)) = self.foot(k, i, root, tangent, leg, near.as_ref())? else {
                     return Ok(false);
                 };
-                if !on_face(target, face, uv)? {
+                if !on_face(target, i, face, uv)? {
                     return Ok(false);
                 }
                 let mut s = near.unwrap_or(FootStation {
@@ -773,17 +788,48 @@ impl FootBlend {
 
 /// Whether `uv` lies on the rim of `domain` (to a millionth of its size): where a Newton the
 /// surface's evaluation holds inside its domain stops when the point it seeks is past it.
-fn on_rim(domain: &Extent2d, uv: Point2) -> bool {
+fn on_rim(domain: &Extent2d, periods: [Option<f64>; 2], uv: Point2) -> bool {
     let (lo, hi) = (domain.min(), domain.max());
-    let (du, dv) = (1e-6 * (hi.x - lo.x), 1e-6 * (hi.y - lo.y));
-    (uv.x - lo.x).abs() <= du
-        || (uv.x - hi.x).abs() <= du
-        || (uv.y - lo.y).abs() <= dv
-        || (uv.y - hi.y).abs() <= dv
-        || uv.x < lo.x
-        || uv.x > hi.x
-        || uv.y < lo.y
-        || uv.y > hi.y
+    let rim = |x: f64, lo: f64, hi: f64, period: Option<f64>| {
+        // a periodic direction has no rim: its seam is not where the face ends
+        if period.is_some() {
+            return false;
+        }
+        let d = 1e-6 * (hi - lo);
+        (x - lo).abs() <= d || (x - hi).abs() <= d || x < lo || x > hi
+    };
+    let [pu, pv] = periods;
+    rim(uv.x, lo.x, hi.x, pu) || rim(uv.y, lo.y, hi.y, pv)
+}
+
+/// The period of `surface` in u and in v over its natural domain `domain`, where it is
+/// periodic.
+///
+/// # Errors
+///
+/// Those of the periodicity test.
+fn periods_of(k: &Kernel, surface: &Surface, domain: &Extent2d) -> Result<[Option<f64>; 2]> {
+    use crate::nurbs::b_spline_surface::SurfParamType;
+    let (lo, hi) = (domain.min(), domain.max());
+    Ok([
+        surface
+            .is_periodic(k, domain, SurfParamType::U)?
+            .then_some(hi.x - lo.x),
+        surface
+            .is_periodic(k, domain, SurfParamType::V)?
+            .then_some(hi.y - lo.y),
+    ])
+}
+
+/// `uv` with each periodic direction's parameter moved by whole periods into `domain`.
+fn wrapped(domain: &Extent2d, periods: [Option<f64>; 2], uv: Point2) -> Point2 {
+    let (lo, _) = (domain.min(), domain.max());
+    let wrap = |x: f64, from: f64, period: Option<f64>| match period {
+        Some(p) if p > 0.0 && p.is_finite() => from + (x - from).rem_euclid(p),
+        _ => x,
+    };
+    let [pu, pv] = periods;
+    Point2::new(wrap(uv.x, lo.x, pu), wrap(uv.y, lo.y, pv))
 }
 
 /// Legs finite and positive.
@@ -1721,7 +1767,8 @@ impl FootBlendDefinition {
         }
     }
 
-    /// Support `i`'s surface (0 or 1).
+    /// Support `i`'s surface (0 or 1), where the bead was made: before its motions
+    /// ([`Self::transform`]).
     #[must_use]
     pub fn support(&self, i: usize) -> Option<&Surface> {
         self.supports.get(i)
@@ -1843,15 +1890,57 @@ impl FootBlendDefinition {
 
     /// Moves the definition with its net (`Transform`): the motion is kept, to be replayed on
     /// the rebuilt net, as a section blend's is
-    /// ([`crate::sweep::section_blend::SectionBlendDefinition::transform`]).
+    /// ([`crate::sweep::section_blend::SectionBlendDefinition::transform`]). The supports and
+    /// the leader stay where the bead was made (the rebuild makes the net there, then moves
+    /// it), so [`Self::support`] is not the moved face's support.
+    ///
+    /// # Errors
+    ///
+    /// Native invalid input for a scale that is not uniform (as a draft's): the legs, measured
+    /// straight from the root, would no longer be the net's.
     pub fn transform(
         &mut self,
         rotate_n_move: &crate::geom::axis2_placement::Axis2Placement,
         scale: Option<Vec3>,
-    ) {
+    ) -> Result<()> {
+        if let Some(sc) = scale {
+            if !(sc.x == sc.y && sc.x == sc.z && sc.x > 0.0 && sc.x.is_finite()) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a weld bead moves rigidly or by a uniform scale",
+                ));
+            }
+        }
         self.motions.push(Motion {
             rotate_n_move: *rotate_n_move,
             scale,
         });
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{on_rim, wrapped};
+    use crate::geom::extent2d::Extent2d;
+    use crate::geom::vector2d::Point2;
+
+    /// A Newton that stops past a periodic direction's seam has not met the face's end; past
+    /// a bounded direction's end (or on it) it has. A foot past the seam is moved into the
+    /// domain by whole periods; a bounded direction is left as it is.
+    #[test]
+    fn a_periodic_seam_is_no_rim_and_a_foot_past_it_is_wrapped() {
+        let tau = core::f64::consts::TAU;
+        let domain = Extent2d::from_bounds(0.0, -1.0, tau, 1.0);
+        let periodic_u = [Some(tau), None];
+        assert!(!on_rim(&domain, periodic_u, Point2::new(tau + 0.3, 0.0)));
+        assert!(!on_rim(&domain, periodic_u, Point2::new(0.0, 0.0)));
+        assert!(on_rim(&domain, periodic_u, Point2::new(1.0, 1.0)));
+        assert!(on_rim(&domain, periodic_u, Point2::new(1.0, -1.5)));
+        assert!(on_rim(&domain, [None, None], Point2::new(tau + 0.3, 0.0)));
+        let w = wrapped(&domain, periodic_u, Point2::new(tau + 0.3, 1.5));
+        assert!((w.x - 0.3).abs() <= 1e-12 && w.y == 1.5, "{w:?}");
+        let w = wrapped(&domain, periodic_u, Point2::new(-0.5, 0.2));
+        assert!((w.x - (tau - 0.5)).abs() <= 1e-12, "{w:?}");
     }
 }

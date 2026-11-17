@@ -233,6 +233,9 @@ pub enum WeldGap {
     /// A tapered or rounded end of a bead on a joint that is not straight between two planes:
     /// only the planar sweep cuts those ends so far; the foot blend ends square.
     EndShapeOnCurvedJoint,
+    /// A tapered or rounded end of a flat bead (sagitta 0): the planar sweep that cuts those
+    /// ends takes only a bead with a sagitta so far, even straight between two planes.
+    EndShapeOfFlatBead,
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
@@ -582,6 +585,11 @@ impl core::fmt::Display for BlendFailure {
             Self::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint) => write!(
                 f,
                 "{}: a tapered or rounded bead end is built only straight between two planes so far",
+                self.class()
+            ),
+            Self::WeldNotBuilt(WeldGap::EndShapeOfFlatBead) => write!(
+                f,
+                "{}: a tapered or rounded end of a flat bead (sagitta 0) is not built yet; give the bead a sagitta",
                 self.class()
             ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
@@ -953,6 +961,10 @@ mod tests {
             ),
             (
                 BlendFailure::WeldNotBuilt(WeldGap::EndShapeOnCurvedJoint),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::EndShapeOfFlatBead),
                 ErrorKind::Unsupported,
             ),
             (
