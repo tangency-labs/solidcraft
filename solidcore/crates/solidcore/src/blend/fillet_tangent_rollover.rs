@@ -65,6 +65,11 @@ pub struct Rollover {
     /// Whether that face's surface normal is opposite the rolled-off face's across the edge
     /// (`sm_TestManifoldTangentRollover`'s second answer): the offset changes sign.
     pub opposite_normals: bool,
+    /// Whether the face beyond is a plane or a circular cylinder parallel to the filleted
+    /// straight edge, so that the closed form's one section ([`tangent_rollover_supports`])
+    /// is the round's section all along the edge on it too (#18411). `false` for a rollover
+    /// proposed from the ball's sections.
+    pub prismatic_beyond: bool,
 }
 
 /// The faces a constant round's ball rolls onto across a smooth far edge of the face on each
@@ -171,10 +176,14 @@ pub fn tangent_rollover_supports(
             if offset_folds(k, target, beyond, far_point, d, offset_beyond)? {
                 continue;
             }
+            let frame = [d, x, y];
+            let prismatic_beyond =
+                prismatic_profile(k, target, beyond, far_point, m, frame, tol)?.is_some();
             *slot = Some(Rollover {
                 edge: e,
                 face: beyond,
                 opposite_normals,
+                prismatic_beyond,
             });
             break;
         }
@@ -799,6 +808,7 @@ fn cylinder_rollover_supports(
             edge: e,
             face: beyond,
             opposite_normals,
+            prismatic_beyond: true,
         });
     }
     Ok(Some(out))

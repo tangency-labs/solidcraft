@@ -1955,7 +1955,8 @@ pub enum RolloverProof {
     /// Decided in closed form
     /// ([`crate::blend::fillet_tangent_rollover::tangent_rollover_supports`]) for the blend's
     /// only round, or for a round no other round's edge meets, at its edge or on a face it may
-    /// roll off or onto: not proved again.
+    /// roll off or onto, rolling onto planes or cylinders parallel to its edge only: not proved
+    /// again.
     ClosedForm,
 }
 

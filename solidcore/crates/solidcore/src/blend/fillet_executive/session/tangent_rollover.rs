@@ -94,7 +94,8 @@ impl FilletSession<'_> {
     /// a plane or a circular cylinder parallel to it only ([`tangent_rollover_supports`]). So is
     /// a round of several along such an edge that no other round meets ([`Self::round_apart`];
     /// #18411: both rims of a pocket), its rollover not proved again after the trace
-    /// ([`RolloverProof::ClosedForm`]); any other round of several, such as one of a chain, from
+    /// ([`RolloverProof::ClosedForm`]) where each face it rolls onto is a plane or a cylinder
+    /// parallel to the edge ([`Rollover::prismatic_beyond`]); any other round of several, such as one of a chain, from
     /// its ball's sections ([`rails_wholly_past`]). A rail that lies past the edge only partway
     /// is left to the rollover recovery after the trace (`ProcessRollOver`).
     ///
@@ -133,8 +134,14 @@ impl FilletSession<'_> {
             };
             let rollovers = match closed {
                 Some(rollovers) => {
-                    self.objects.solver_mut(id)?.base_mut().rollover_proof =
-                        RolloverProof::ClosedForm;
+                    // the section is every section only on a face beyond that is prismatic
+                    // along the edge too; elsewhere the rolled rails are proved after the trace
+                    // (a lone round's as on main)
+                    let exact = rollovers.iter().flatten().all(|r| r.prismatic_beyond);
+                    if lone || exact {
+                        self.objects.solver_mut(id)?.base_mut().rollover_proof =
+                            RolloverProof::ClosedForm;
+                    }
                     rollovers
                 }
                 None if lone => [None, None],
@@ -632,6 +639,7 @@ fn sides_wholly_off(
                 edge: e,
                 face: beyond,
                 opposite_normals,
+                prismatic_beyond: false,
             });
         }
     }
