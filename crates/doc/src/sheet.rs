@@ -1750,7 +1750,7 @@ fn hull_corners(pts: &[Vec2]) -> Vec<usize> {
 fn notches_across(outline: &Loop2, n: Vec2, s0: f64, ba: f64) -> Option<(Loop2, Vec<Loop2>)> {
     const ON_LINE: f64 = 1e-6;
     let m = outline.segs.len();
-    if m < 3 || m > MAX_FLAT_POINTS || !s0.is_finite() || !(ba > 0.0) {
+    if !(3..=MAX_FLAT_POINTS).contains(&m) || !s0.is_finite() || !(ba > 0.0) {
         return None;
     }
     let outline = outline.ccw();
