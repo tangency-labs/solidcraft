@@ -3222,4 +3222,23 @@ mod tests {
             );
         }
     }
+
+    /// #18212: all of e24 against itself is one range that maps each point to itself
+    /// and runs to the far end. Before, a split piece next to the hook that lies within
+    /// the tolerance of the next piece was also returned as a range onto that piece
+    /// (e.g. [1.35e-3, 2.24e-3] onto [2.24e-3, 3.57e-3] at 1.4e-3).
+    #[test]
+    fn issue_18212_a_curve_against_itself_is_one_range() {
+        let k = Kernel::default();
+        let (_, e24) = issue_18212_edges();
+        let end = e24.1.max();
+        let sweep = (0..40).map(|i| 1e-5 * 2000.0_f64.powf(f64::from(i) / 39.0));
+        for tol in [1.4e-3, 1.4897e-3, 2.889e-3, 4e-3, 1e-2].into_iter().chain(sweep) {
+            let ranges = issue_18212_ranges(&k, &e24, &e24, tol);
+            assert_eq!(ranges.len(), 1, "tol {tol:e}: {ranges:?}");
+            let [s0, e0, s1, e1] = ranges[0];
+            assert!(s0 == s1 && e0 == e1, "tol {tol:e}: {ranges:?}");
+            assert!((e0 - end).abs() < 1e-12, "tol {tol:e}: {ranges:?}");
+        }
+    }
 }
