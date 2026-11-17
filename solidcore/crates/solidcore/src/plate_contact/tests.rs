@@ -724,6 +724,33 @@ fn the_strip_read_from_the_bodies() {
     assert!(crate::plate_contact::strip(&mut k, &wall, &bottom, p, 0.0).is_err());
 }
 
+/// The strip's run from the plate face `a`: the Wall's `a` faces −y, so on Bottom's top (frame x
+/// = X, y = Y) the strip runs along +u, and its band is [10, 150] with no defects. A wall across
+/// (a facing −x) runs along −w; a face parallel to P is refused.
+#[test]
+fn the_strip_runs_square_to_the_plate_face() {
+    let mut k = crate::kernel::Kernel::default();
+    let bottom = box_solid(&mut k, [0.0, 0.0, 0.0], [160.0, 100.0, 6.0]);
+    let wall = box_solid(&mut k, [10.0, 30.0, 6.0], [150.0, 36.0, 66.0]);
+    let p = plane(0.0, 0.0, 6.0, 0.0, 0.0, 1.0);
+    let a = plane(0.0, 30.0, 0.0, 0.0, -1.0, 0.0);
+    let d = crate::plate_contact::strip_direction(p, a).expect("d");
+    assert!((d.x - 1.0).abs() < 1e-12 && d.y.abs() < 1e-12, "{d:?}");
+    let sigma = crate::plate_contact::strip(&mut k, &wall, &bottom, p, TOL)
+        .expect("strip")
+        .expect("a strip");
+    let (band, defects) = crate::plate_contact::strip_defects(&sigma, d, TOL).expect("defects");
+    assert!(
+        (band.0 - 10.0).abs() < 1e-6 && (band.1 - 150.0).abs() < 1e-6,
+        "{band:?}"
+    );
+    assert!(defects.is_empty(), "{defects:?}");
+    let across = plane(10.0, 0.0, 0.0, -1.0, 0.0, 0.0);
+    let d = crate::plate_contact::strip_direction(p, across).expect("d");
+    assert!(d.x.abs() < 1e-12 && (d.y + 1.0).abs() < 1e-12, "{d:?}");
+    assert!(crate::plate_contact::strip_direction(p, p).is_err());
+}
+
 #[test]
 fn the_defects_of_a_notched_strip() {
     use crate::math::Vec2;

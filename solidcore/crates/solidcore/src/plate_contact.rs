@@ -998,6 +998,29 @@ pub fn strip(
     Ok(sigma_of(k, t, s, p, &frame, touch, tol)?.0)
 }
 
+/// The direction the strip of a joint runs in, in the frame of `p` ([`slot_face`]'s `(u, w)`
+/// plane), for [`strip_defects`]: the plate face `a`'s outward normal projected into that frame
+/// and turned a quarter left, so the strip runs along the plate, square to its thickness. A
+/// unit vector.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a bad `p`, or an `a` whose normal has no part in `p`'s
+/// plane (a face parallel to `p` is no plate face of a joint at `p`).
+pub fn strip_direction(p: Plane, a: Plane) -> Result<crate::math::Vec2> {
+    check_plane(p)?;
+    let frame = frame_of(p)?;
+    let [xx, xy, xz] = frame.x_axis;
+    let [yx, yy, yz] = frame.y_axis;
+    let m = a.normal;
+    let (mu, mw) = (m.dot(Vec3::new(xx, xy, xz)), m.dot(Vec3::new(yx, yy, yz)));
+    let len = mu.hypot(mw);
+    if !(len.is_finite() && len > SQUARE_SLACK.sin()) {
+        return Err(invalid("the plate face's normal has no part in p's plane"));
+    }
+    Ok(crate::math::Vec2::new(-mw / len, mu / len))
+}
+
 /// The touch level of T's first planar face within `tol` of `p` ([`touch_offset`]).
 fn first_touch(t_faces: &[FaceRead], p: Plane, tol: f64) -> Result<Option<f64>> {
     for q in t_faces.iter().filter_map(|f| f.plane) {

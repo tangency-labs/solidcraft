@@ -16,6 +16,7 @@ pub type Pair = core::result::Result<PairJoint, PairSkip>;
 
 impl Answer for Pair {}
 impl Answer for Vec<Region2> {}
+impl Answer for Option<Region2> {}
 
 impl Body {
     /// This body as the tab plate T against `slot` (S) on `p`, a plane of one of S's outward
@@ -68,6 +69,23 @@ impl Body {
         run_on("plate_contact::slot_face", &[("s", self)], |k| {
             let s = copy_of(k, self)?;
             pc::slot_face(k, &s, p, tol)
+        })
+    }
+
+    /// This body as the tab plate T against `slot` (S) on `p`: the strip Σ, T's region meeting
+    /// S's face in `p` ([`solidcore::plate_contact::strip`], in [`Body::slot_face`]'s `(u, w)`
+    /// frame), what the tabs are laid out along. `None` when T meets no area of S's face there.
+    /// Neither body changes.
+    ///
+    /// # Errors
+    /// [`crate::Error::Refused`], in the kernel's words, for a `tol` not positive and finite, a
+    /// bad plane, or an overlap the kernel does not decide; those of the session.
+    pub fn strip(&self, slot: &Body, p: Plane, tol: f64) -> Result<Option<Region2>> {
+        poisoned(&[self, slot])?;
+        run_on("plate_contact::strip", &[("t", self), ("s", slot)], |k| {
+            let t = copy_of(k, self)?;
+            let s = copy_of(k, slot)?;
+            pc::strip(k, &t, &s, p, tol)
         })
     }
 }
@@ -129,5 +147,26 @@ mod tests {
             Some(SlotSkip::AtEdge)
         );
         assert!(s.slot_face(p, 0.0).is_err());
+    }
+
+    /// The strip through ops: Wall on P gives Σ, u [20, 140], w [30, 36]; with the run from the
+    /// joint's face a (`strip_direction`) its band is [20, 140], no defects. Lifted: none.
+    #[test]
+    fn the_strip_through_ops() {
+        let (s, p) = bottom();
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let joint = wall.plate_pair(&s, p, TOL).unwrap().expect("joint");
+        let sigma = wall.strip(&s, p, TOL).unwrap().expect("a strip");
+        let d = pc::strip_direction(p, joint.faces.a).unwrap();
+        let (band, defects) = pc::strip_defects(&sigma, d, TOL).unwrap();
+        let (lo, hi) = if d.x > 0.0 { band } else { (-band.1, -band.0) };
+        assert!(
+            (lo - 20.0).abs() < 1e-6 && (hi - 140.0).abs() < 1e-6,
+            "{band:?} {d:?}"
+        );
+        assert!(defects.is_empty(), "{defects:?}");
+        let lifted = make_box([20.0, 30.0, 10.0], [120.0, 6.0, 60.0]).unwrap();
+        assert!(lifted.strip(&s, p, TOL).unwrap().is_none());
+        assert!(wall.strip(&s, p, 0.0).is_err());
     }
 }
