@@ -2682,7 +2682,7 @@ impl SolveApp {
             && let Some(mut d) = dialogs::Dialog::for_command(self, id)
         {
             if let Some(sketch) = finished_sketch {
-                d.take_sketch_profile(&self.session, sketch);
+                d.take_sketch_profile(&self.session, sketch, self.preferences.coil_use_sketch_profile);
             }
             if d.wants_picks() && !self.session.selection.is_empty() {
                 let _ = self.session.execute("select.clear", &json!({}));
@@ -2765,7 +2765,7 @@ impl SolveApp {
         }
         if let Some(mut d) = dialogs::Dialog::for_command(self, id) {
             if let Some(sketch) = finished_sketch {
-                d.take_sketch_profile(&self.session, sketch);
+                d.take_sketch_profile(&self.session, sketch, self.preferences.coil_use_sketch_profile);
             }
             // The pre-selection now belongs to the dialog's inputs.
             if d.wants_picks() && !self.session.selection.is_empty() {

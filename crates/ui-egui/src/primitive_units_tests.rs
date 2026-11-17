@@ -447,6 +447,7 @@ fn editing_a_coil_keeps_an_explicit_axis_origin_expression() {
         .unwrap();
     let id = made["feature"].as_u64().unwrap();
     h.app.preferences.coil_preselect_axis = true;
+    h.app.preferences.coil_use_sketch_profile = true;
     h.app.session.selection = vec![solidcraft_engine::Sel::Feature { id: sketch }, solidcraft_engine::Sel::Axis { name: "Y".into() }];
     h.app.edit_feature(id);
     h.frames(3);

@@ -1545,9 +1545,14 @@ fn coil_picks_reference_axes_in_the_browser_and_viewport() {
 }
 
 #[test]
-fn coil_sketch_preselection_only_fills_the_coil_dialog() {
+fn coil_fills_profiles_from_whole_sketches_only_when_enabled() {
     let (mut h, sketch, _) = repeated_profile_fixture();
     h.app.session.selection = vec![Sel::Feature { id: sketch }];
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    assert!(d.inputs[0].items.is_empty());
+    assert!(!d.pick_sketch(&h.app.session, sketch, false));
+
+    h.app.preferences.coil_use_sketch_profile = true;
     for command in ["solid.extrude", "solid.revolve", "solid.emboss"] {
         let d = Dialog::for_command(&h.app, command).unwrap();
         assert!(d.inputs[0].items.is_empty(), "{command}");
@@ -1556,6 +1561,19 @@ fn coil_sketch_preselection_only_fills_the_coil_dialog() {
     let profiles = d.inputs[0].items.profiles();
     assert_eq!(profiles.len(), 2);
     assert!(profiles.iter().all(|(owner, _)| *owner == sketch));
+    h.app.session.selection.clear();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    assert!(d.pick_sketch(&h.app.session, sketch, true));
+    assert_eq!(d.inputs[0].items.profiles().len(), 2);
+
+    let single = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[2,2]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.take_sketch_profile(&h.app.session, single, false);
+    assert!(d.inputs[0].items.is_empty());
+    d.take_sketch_profile(&h.app.session, single, true);
+    assert_eq!(d.inputs[0].items.profiles(), vec![(single, 0)]);
 }
 
 #[test]

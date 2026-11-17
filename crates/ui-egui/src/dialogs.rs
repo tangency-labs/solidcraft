@@ -853,8 +853,9 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
 }
 
 /// Feature forms that take a whole sketch through their profile input in the Browser.
-fn accepts_sketch_profiles(kind: &Kind) -> bool {
-    matches!(kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. } | Kind::Primitive { cmd: "solid.coil", .. })
+fn accepts_sketch_profiles(kind: &Kind, coil_use_sketch_profile: bool) -> bool {
+    matches!(kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
+        || (coil_use_sketch_profile && matches!(kind, Kind::Primitive { cmd: "solid.coil", .. }))
 }
 
 impl Dialog {
@@ -1246,8 +1247,9 @@ impl Dialog {
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
         for sel in preselection {
             if id == "solid.coil"
+                && app.preferences.coil_use_sketch_profile
                 && let Sel::Feature { id: sketch } = sel
-                && d.pick_sketch(s, *sketch)
+                && d.pick_sketch(s, *sketch, true)
             {
                 continue;
             }
@@ -1463,10 +1465,11 @@ impl Dialog {
         Dialog::new(Kind::EditParam { name: name.into(), expr: s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default() }, vec![])
     }
 
-    /// An Extrude, Revolve or Coil started inside a sketch takes that sketch's profile, as it would
-    /// had the sketch stayed open, and keeps the sketch shown while it is open (#14128).
-    pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64) {
-        if !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Primitive { cmd: "solid.coil", .. }) {
+    /// Extrude and Revolve take the sketch they start from (#14128). Coil can opt in.
+    pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64, coil_use_sketch_profile: bool) {
+        let takes_sketch = matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. })
+            || (coil_use_sketch_profile && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. }));
+        if !takes_sketch {
             return;
         }
         self.started_from_sketch = Some(sketch);
@@ -1901,12 +1904,12 @@ impl Dialog {
     /// sketch is selected before the command starts. The island inside another profile's hole is
     /// left out, or it would fill the hole. False when the click is not one of those (the caller
     /// selects it as usual).
-    pub fn pick_sketch(&mut self, s: &Session, id: u64) -> bool {
+    pub fn pick_sketch(&mut self, s: &Session, id: u64, coil_use_sketch_profile: bool) -> bool {
         if self.refuse_sketch(s, id) {
             return true;
         }
         if self.active != 0
-            || !accepts_sketch_profiles(&self.kind)
+            || !accepts_sketch_profiles(&self.kind, coil_use_sketch_profile)
             || !self.inputs.first().is_some_and(|i| i.accept & PROFILES != 0)
             || !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         {
