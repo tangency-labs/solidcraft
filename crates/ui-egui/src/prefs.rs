@@ -1957,6 +1957,8 @@ preference_settings! {
     /// User ceilings, not automatic increases to a package's approved execution budget.
     plugin_max_fuel: u64 = solidcraft_engine::plugin::HostLimits::default().max_fuel, PAGE_PLUGINS;
     plugin_max_memory_mib: usize = solidcraft_engine::plugin::HostLimits::default().max_memory_mib, PAGE_PLUGINS;
+    /// How long a plugin's long job may run, in seconds (Preferences › Plugins).
+    plugin_max_job_seconds: u64 = solidcraft_engine::plugin::HostLimits::default().max_job_seconds, PAGE_PLUGINS;
 }
 
 /// What a middle-button double-click in the view does.
@@ -4454,6 +4456,9 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     if !(1..=solidcraft_engine::plugin::MAX_MEMORY_MIB).contains(&p.plugin_max_memory_mib) {
         p.plugin_max_memory_mib = defaults.max_memory_mib;
     }
+    if !(1..=solidcraft_engine::plugin::MAX_JOB_SECONDS).contains(&p.plugin_max_job_seconds) {
+        p.plugin_max_job_seconds = defaults.max_job_seconds;
+    }
     // The file size limits, likewise, are brought into range (#4086).
     let limits = file_limits(&p);
     let mb = solidcraft_engine::io::limits::MB;
@@ -4625,7 +4630,7 @@ fn prepare_preferences(
         return Err("`dimension_text_scale` must be 0.5…2.5".into());
     }
     let new = migrate(new);
-    crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib: {e}"))?;
+    crate::plugins::host_limits(&new).validate().map_err(|e| format!("plugin_max_fuel / plugin_max_memory_mib / plugin_max_job_seconds: {e}"))?;
     if !UNITS.contains(&new.default_units.as_str()) {
         return Err(format!("units must be one of {}", UNITS.join(", ")));
     }

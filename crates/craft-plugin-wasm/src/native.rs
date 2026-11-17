@@ -3,7 +3,7 @@ use crate::{ImportRequest, Imported, RuntimeOptions};
 use cap_std::fs::OpenOptionsExt;
 use cap_std::fs::{Dir, OpenOptions};
 use craft_plugin::{
-    CommandSchema, Effect, HostError, Limits, LossReport, MAX_IMPORT_CHUNK_BYTES, MAX_IMPORT_DESIGN_BYTES, MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES,
+    CommandSchema, Effect, HostError, Limits, LossReport, MAX_IMPORT_CHUNK_BYTES, MAX_JOB_CALLS, MAX_IMPORT_DESIGN_BYTES, MAX_IMPORT_INPUT_BYTES, MAX_JSON_BYTES,
     Manifest, PluginHost, Result,
 };
 use serde_json::Value;
@@ -627,7 +627,7 @@ pub(super) fn run<H: PluginHost + 'static>(
         Ok(prepared) => prepared,
         Err(error) => return (host, Err(error)),
     };
-    let (mut state, outcome) = execute(host, runtime, entry, params, engine, component, commands, folders);
+    let (mut state, outcome) = execute(host, runtime, entry, params, engine, component, commands, folders, options);
     let result = (|| match outcome {
         Ok(value) => match state.host.commit_transaction() {
             Ok(()) => state.publish_writes().map(|()| value),
@@ -655,8 +655,11 @@ fn execute<H: PluginHost + 'static>(
     component: Component,
     (commands, groups): (BTreeMap<String, CommandSchema>, BTreeSet<String>),
     folders: BTreeMap<String, Folder>,
+    options: RuntimeOptions,
 ) -> (State<H>, Result<Value>) {
     let limits = &runtime.limits;
+    // A long job runs for the user's job ceiling, and reports its progress as often as it likes.
+    let (deadline_ms, max_calls) = if entry.job { (options.job_deadline_ms, MAX_JOB_CALLS) } else { (limits.deadline_ms, MAX_CALLS) };
     let state = State {
         host,
         commands,
@@ -667,9 +670,9 @@ fn execute<H: PluginHost + 'static>(
         clock: runtime.permissions.clock,
         failed: None,
         calls: 0,
-        max_calls: MAX_CALLS,
+        max_calls,
         log_bytes: 0,
-        deadline: Instant::now() + Duration::from_millis(limits.deadline_ms),
+        deadline: Instant::now() + Duration::from_millis(deadline_ms),
         limits: store_limits(limits, 10_000),
         import: None,
     };

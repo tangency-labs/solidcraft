@@ -110,7 +110,7 @@ const USAGE_SAVE_STRESS: &str = "  solidcraft-cli save-stress <path> <rounds>\n"
 /// The flags every command takes, at the end of the top-level usage.
 const USAGE_DEBUG: &str = "  --debug, with any command: what SolidCraft logs (why a body has no display plan, why a save left its\n      model cache out), on stderr; RUST_LOG=error|warn|info|debug|trace sets one level for every crate\n  --max-file-size SIZE, with any command: read STEP and import files and design files up to SIZE for this run\n      (for example 2GB or 1500MB; at most 16GB; the defaults are 512 MB and 256 MB, and a smaller SIZE keeps them)\n";
 
-const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib}; defaults 100000000000 / 128, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
+const USAGE_PLUGIN_LIMITS: &str = "  --plugin-limits FILE.json, with local commands: user ceilings {max_fuel, max_memory_mib, max_job_seconds}; defaults 100000000000 / 128 / 600, invocation defaults remain 10000000 / 64 MiB. With mcp use --headless; connected desktops keep their own preferences.\n";
 
 /// The commands the CLI takes, in the order the top-level usage lists them.
 const COMMANDS: &[Command] = &[

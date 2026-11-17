@@ -684,3 +684,39 @@ fn an_importer_trap_or_runaway_loop_fails_that_one_call_and_the_next_call_works(
     assert_eq!(import(&manifest, root.join("fine.smp"), false).unwrap().design, b"fine");
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// A long job runs past the command limits: it may make more than 256 host calls (progress
+/// reports among them), and its deadline is the app's job ceiling, not the runtime's.
+#[test]
+fn a_long_job_runs_under_the_job_ceiling_instead_of_the_command_limits() {
+    let job = |job: bool| {
+        craft_plugin::parse_manifest(
+            json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{
+                "module":"plugin.wasm","entries":[{"name":"make","job":job}],
+                "commands":["app.write"],"limits":{"fuel":u64::MAX / 2,"memory_mib":1,"deadline_ms":5000}
+            }})
+            .to_string()
+            .as_bytes(),
+            "sample",
+        )
+        .unwrap()
+    };
+    // 300 commands: one past the other at address 4000.
+    let many = component(
+        "(loop $more call $box i32.const 4000 i32.const 4000 i32.load i32.const 1 i32.add i32.store \
+         i32.const 4000 i32.load i32.const 300 i32.lt_u br_if $more)",
+    );
+    let mut app = App::default();
+    assert!(run(&mut app, &job(false), &many, "make", &json!({})).unwrap_err().to_string().contains("host call count"));
+    assert_eq!(app.value, 0, "the command's calls are rolled back");
+    run(&mut app, &job(true), &many, "make", &json!({})).unwrap();
+    assert_eq!(app.value, 300);
+    // A job that never ends stops at the job ceiling and changes nothing.
+    let options = RuntimeOptions { job_deadline_ms: 200, ..Default::default() };
+    let started = std::time::Instant::now();
+    let (returned, result) = crate::run_with_options(std::mem::take(&mut app), &job(true), &component("call $box (loop br 0)"), "make", &json!({}), options);
+    app = returned;
+    assert_eq!(result.unwrap_err(), HostError::LimitExceeded { limit: "deadline".into() });
+    assert!(started.elapsed() < std::time::Duration::from_secs(4), "the job ceiling, not the 5 s command deadline");
+    assert_eq!(app.value, 300);
+}

@@ -257,6 +257,30 @@ The dialog has a **Preview** box, on when it opens; with it off, nothing runs un
   when one is). While a native tool is open, its own preview is the one shown. Read entries and
   importers are not previewed.
 
+## Long jobs
+
+A command entry that takes a while, such as computing a toolpath, declares `"job": true`:
+
+```json
+"entries": [{"name": "pocket", "job": true, "input_schema": {"type": "object", "properties": {}}}]
+```
+
+- **Time.** A job runs for up to the user's job ceiling, **Longest plugin job (minutes)** in
+  Preferences › Plugins: ten minutes unless the user changes it, at most an hour. The runtime's
+  `deadline_ms` (at most 30 seconds) still applies to the plugin's other entries. Fuel and memory
+  limits are the same as for any entry, and a job may report its progress as often as it likes.
+- **Where it shows.** Every plugin run started from its dialog or by an agent runs on a worker and
+  is a row in the operations panel at the bottom right of the view, named for the plugin and the
+  entry ("Gears: Pocket"). The step the plugin reports with `control.progress(fraction, message)`
+  is added to the name, and the fraction fills the row's bar. `ui.operations` lists it like any
+  other operation.
+- **Cancelling.** The row's red X (or `ui.operations` with `cancel`) stops it: the plugin's next
+  `control.cancelled()` returns true, and any host call or loop stops it within a few
+  milliseconds. Nothing of a cancelled run is kept: the design and the undo history are as they
+  were. A run whose design changed while it computed is not kept either.
+- An importer already runs this way (its deadline is up to ten minutes), so only a command is
+  declared a job.
+
 ## Versions
 
 The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:

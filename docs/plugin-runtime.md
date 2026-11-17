@@ -209,9 +209,9 @@ not a measured minimum or a guarantee that every plugin fits.
 
 ### Change the host ceilings without rebuilding
 
-The native GUI persists `plugin_max_fuel` and `plugin_max_memory_mib` in user preferences.
-**Preferences > Plugins** presents exact decimal text fields (**Max plugin fuel** and
-**Max plugin memory (MiB)**). Enter, Apply or OK validates and accepts both integers together;
+The native GUI persists `plugin_max_fuel`, `plugin_max_memory_mib` and `plugin_max_job_seconds` in
+user preferences. **Preferences > Plugins** presents exact decimal text fields (**Max plugin fuel**,
+**Max plugin memory (MiB)** and **Longest plugin job (minutes)**). Enter, Apply or OK validates and accepts the values together;
 an incomplete or invalid field cannot silently save a numeric prefix. Cancel restores the last
 Apply/open snapshot. Restore defaults resets this page to the original host ceilings. The
 `ui.prefs` control method uses the same strict validation. Agent chat cannot change preferences;
@@ -221,7 +221,7 @@ A standalone CLI or `mcp --headless` process can read the same two ceiling conce
 explicit startup file:
 
 ```json
-{"max_fuel": 200000000000, "max_memory_mib": 512}
+{"max_fuel": 200000000000, "max_memory_mib": 512, "max_job_seconds": 1800}
 ```
 
 ```text
@@ -230,7 +230,7 @@ solidcraft-cli --plugin-limits plugin-limits.json mcp --headless --allow-path /p
 ```
 
 This UTF-8 JSON file is at most 16 KiB; a UTF-8 BOM is accepted for Windows editors. Its keys are
-`max_fuel` and `max_memory_mib`; missing keys use the original host defaults, while unknown keys,
+`max_fuel`, `max_memory_mib` and `max_job_seconds` (1 to 3600, how long a long job may run); missing keys use the original host defaults, while unknown keys,
 zero, fractional and out-of-range values are refused. The CLI reads it once before creating
 local sessions. Omit the flag to use the original ceilings. `--connect` and non-headless `mcp`
 refuse this flag because the connected desktop owns its preferences. GUI preferences and CLI

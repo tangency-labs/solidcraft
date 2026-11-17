@@ -1,0 +1,16 @@
+{
+  "en": {
+    "operations.plugin_job": "{plugin}: {entry}",
+    "operations.plugin_job_step": "{plugin}: {entry}, {step}",
+    "prefs.plugin_job_invalid": "Enter the longest plugin job in minutes, more than 0 and at most 60.",
+    "prefs.plugin_job_note": "A plugin command marked as a long job runs for at most this long, shows its progress at the bottom right of the view, and stops when you press its red X. Other plugin commands keep their own limit of at most 30 seconds.",
+    "prefs.plugin_max_job": "Longest plugin job (minutes)"
+  },
+  "de": {
+    "operations.plugin_job": "{plugin}: {entry}",
+    "operations.plugin_job_step": "{plugin}: {entry}, {step}",
+    "prefs.plugin_job_invalid": "Geben Sie die längste Plugin-Aufgabe in Minuten ein, mehr als 0 und höchstens 60.",
+    "prefs.plugin_job_note": "Ein Plugin-Befehl, der als lange Aufgabe gekennzeichnet ist, läuft höchstens so lange, zeigt seinen Fortschritt unten rechts in der Ansicht und stoppt, wenn Sie auf sein rotes X klicken. Andere Plugin-Befehle behalten ihr eigenes Limit von höchstens 30 Sekunden.",
+    "prefs.plugin_max_job": "Längste Plugin-Aufgabe (Minuten)"
+  }
+}

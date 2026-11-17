@@ -12,10 +12,12 @@ mod native;
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeOptions {
     pub stack_bytes: usize,
+    /// How long a long job (an entry with `"job": true`) may run: the user's ceiling.
+    pub job_deadline_ms: u64,
 }
 impl Default for RuntimeOptions {
     fn default() -> Self {
-        Self { stack_bytes: 512 * 1024 }
+        Self { stack_bytes: 512 * 1024, job_deadline_ms: craft_plugin::DEFAULT_JOB_SECONDS * 1000 }
     }
 }
 

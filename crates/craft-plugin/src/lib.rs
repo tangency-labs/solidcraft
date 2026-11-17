@@ -26,6 +26,13 @@ pub const MAX_IMPORT_DESIGN_BYTES: usize = 256 * 1024 * 1024;
 /// A command entry finishes within 30 s; an importer converting a large assembly may take minutes.
 pub const MAX_COMMAND_DEADLINE_MS: u64 = 30_000;
 pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
+/// A long job (an entry with `"job": true`) runs for at most the user's ceiling, by default ten
+/// minutes, and the ceiling is at most an hour.
+pub const DEFAULT_JOB_SECONDS: u64 = 600;
+pub const MAX_JOB_SECONDS: u64 = 3600;
+/// The most host calls a long job makes (its progress reports among them); an ordinary command
+/// makes at most 256.
+pub const MAX_JOB_CALLS: usize = 1 << 20;
 /// The most extensions one importer entry claims.
 pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
@@ -200,16 +207,21 @@ pub trait PluginHost {
 pub struct HostLimits {
     pub max_fuel: u64,
     pub max_memory_mib: usize,
+    /// How long a long job (an entry with `"job": true`) may run, in seconds: 1 to 3600.
+    pub max_job_seconds: u64,
 }
 impl Default for HostLimits {
     fn default() -> Self {
-        Self { max_fuel: 100_000_000_000, max_memory_mib: 128 }
+        Self { max_fuel: 100_000_000_000, max_memory_mib: 128, max_job_seconds: DEFAULT_JOB_SECONDS }
     }
 }
 impl HostLimits {
     pub fn validate(&self) -> Result<()> {
         if self.max_fuel == 0 || !(1..=MAX_MEMORY_MIB).contains(&self.max_memory_mib) {
             return Err(invalid("host_limits", "requires positive max_fuel and max_memory_mib 1..4096 (Wasm32)"));
+        }
+        if !(1..=MAX_JOB_SECONDS).contains(&self.max_job_seconds) {
+            return Err(invalid("host_limits", "requires max_job_seconds 1..3600"));
         }
         Ok(())
     }
@@ -336,6 +348,9 @@ pub struct Entry {
     pub effect: Effect,
     pub input_schema: Value,
     pub slots: Vec<UiSlot>,
+    /// A long job: it runs for up to the user's job ceiling (Preferences, ten minutes by default)
+    /// instead of the runtime's `deadline_ms`, and shows its progress in the app's operations.
+    pub job: bool,
 }
 
 impl Entry {
@@ -366,6 +381,8 @@ struct DeclaredEntry {
     input_schema: Value,
     #[serde(default)]
     slots: Vec<UiSlot>,
+    #[serde(default)]
+    job: bool,
 }
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
@@ -377,6 +394,7 @@ impl From<EntryDeclaration> for Entry {
                 effect: Effect::Edit,
                 input_schema: empty_input_schema(),
                 slots: Vec::new(),
+                job: false,
             },
             EntryDeclaration::Declared(value) => Self {
                 name: value.name,
@@ -385,6 +403,7 @@ impl From<EntryDeclaration> for Entry {
                 effect: value.effect,
                 input_schema: value.input_schema,
                 slots: value.slots,
+                job: value.job,
             },
         }
     }
@@ -493,6 +512,7 @@ fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
     }
     match entry.kind {
         EntryKind::Command if !entry.extensions.is_empty() => Err(invalid(format!("{field}.extensions"), "only an importer claims file extensions")),
+        EntryKind::Importer if entry.job => Err(invalid(format!("{field}.job"), "an import already runs as a long job; only a command is declared one")),
         EntryKind::Command => Ok(()),
         EntryKind::Importer => {
             let mut seen = BTreeSet::new();

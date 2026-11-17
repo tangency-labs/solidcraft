@@ -3,7 +3,7 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
     API, Effect, Entry, EntryKind, FileGrant, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
-    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
+    MAX_JOB_SECONDS, MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
 };
 use craft_plugin::{CommandSchema, HostError, PluginHost};
 use serde_json::{Value, json};
@@ -210,7 +210,8 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
         .into());
     }
     let rt = package.manifest.runtime.as_ref().ok_or_else(|| error("no executable runtime"))?;
-    host_limits_for(session, &package.manifest.id, &package.approval).check(&rt.limits)?;
+    let host_limits = host_limits_for(session, &package.manifest.id, &package.approval);
+    host_limits.check(&rt.limits)?;
     if !rt.entries.iter().any(|e| e.name == entry) {
         return Err(error("unknown entry"));
     }
@@ -230,7 +231,10 @@ pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_
             .filter(|g| g.read && g.write && rt.permissions.files.iter().any(|r| r.name == g.name && r.read && r.write))
             .map(|g| g.folder)
             .collect();
-        let (host, result) = craft_plugin_wasm::run(SolidCraftHost { file_folders, ..host }, &package.manifest, &package.component, entry, params);
+        // A long job runs for the user's job ceiling (Preferences › Plugins).
+        let options = craft_plugin_wasm::RuntimeOptions { job_deadline_ms: host_limits.max_job_seconds.saturating_mul(1000), ..Default::default() };
+        let (host, result) =
+            craft_plugin_wasm::run_with_options(SolidCraftHost { file_folders, ..host }, &package.manifest, &package.component, entry, params, options);
         let value = result?;
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
