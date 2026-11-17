@@ -584,9 +584,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     /// per intersecting leaf pair, and traces a curve from each candidate whose
     /// normals are at least 5 degrees apart, whose local intersection succeeds with
     /// normals at least 2 degrees apart and which is not on a curve found already.
-    /// The curves are appended to `out`. A candidate below either angle (but at least `2 tol / modelSize` radians) is traced on probation and kept
-    /// only as a closed transversal loop larger than twice the tolerance (see the
-    /// module deviations).
+    /// The curves are appended to `out`. A candidate below either angle (but at least
+    /// `2 tol / modelSize` radians) is traced on probation and kept only as a closed
+    /// transversal loop larger than twice the tolerance (see the module deviations).
     ///
     /// # Errors
     ///

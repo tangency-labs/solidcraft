@@ -89,11 +89,13 @@
 //!   span shortened to that end (`SurfaceIntersector::reaches_found_curve_end`); the
 //!   SolidCraft fork's tangency-labs/smlib@0ce09f2. Upstream runs the test after a
 //!   regular step only and traces on over the found curve. Not in the fork: the
-//!   already-traced test needs the whole span (both ends and three Hermite samples)
-//!   within the tolerance of one found curve, where the fork's lets a span that only
-//!   starts beyond a curve's end through, and the shortened span's step gets secant
-//!   corrections until its end is within the tolerance of the curve end along the
-//!   span (the fork's first-order step can stop short of it by far more).
+//!   already-traced test needs each of the span's five points (both ends and three
+//!   Hermite samples) within the tolerance of a found curve (not necessarily the same
+//!   one), where the fork's lets a span that only starts beyond a curve's end through;
+//!   a trace stopped by it at its lone start point flushes no touching point there
+//!   (`SurfaceIntersector::lone_start_on_found_curve`); and the shortened span's step
+//!   gets secant corrections until its end is within the tolerance of the curve end
+//!   along the span (the fork's first-order step can stop short of it by far more).
 //! - **Empty trace (WR-80).** The trace-back of `FindInteriorCurves`,
 //!   `DoIntersection` (part 5) and `SmAdvSurfaceIntersector::FindInteriorCurves` is one
 //!   method, [`SurfaceIntersector::trace_back`], which traces a curve back the other way
@@ -647,12 +649,12 @@ impl SurfaceIntersector<'_> {
         Ok(false)
     }
 
-    /// The fraction `t` of the span `from -> to` of a near-tangent trace (normals
-    /// within 1 degree at both ends) at which it passes within `max(10 tol,
-    /// sqrt(tol (1 + size)))` of a free end of a non-degenerate found curve, an end
-    /// not at the trace's `start` point and with `t` in `[0, 0.95]`, and that end (the fork's
+    /// `(t, end)`: `end` a free end of a non-degenerate found curve, not at the trace's
+    /// `start` point, that the span `from -> to` of a near-tangent trace (normals within
+    /// 1 degree at both ends) passes within `max(10 tol, sqrt(tol (1 + size)))` of, and
+    /// `t` in `[0, 0.95]` the fraction of the span where it does (the fork's
     /// `bReachesFoundCurveEnd` of `TraceCurve`, fix WR-76, #392;
-    /// tangency-labs/smlib@0ce09f2).
+    /// tangency-labs/smlib@0ce09f2, which returns `t` only).
     ///
     /// # Errors
     ///
@@ -1322,6 +1324,8 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     // when there are no points on the curve: pick a walking direction from the
     // start point
     if v.intersector().curve_points.is_empty() {
+        // a new curve (fix WR-76)
+        v.intersector_mut().lone_start_on_found_curve = None;
         let sp = v.intersector().point(start)?.clone();
 
         // 1. a tangent or coincidence start point: a single point curve
@@ -1475,6 +1479,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 && v.intersector()
                     .span_on_found_curve(k, tsp, next, curves_3d)?
             {
+                note_lone_start_on_found_curve(v.intersector_mut());
                 break;
             }
             approach_certified(v, k, tsp, next, uv_tol)?;
@@ -1530,6 +1535,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                             && v.intersector()
                                 .span_on_found_curve(k, tsp, next, curves_3d)?
                         {
+                            note_lone_start_on_found_curve(v.intersector_mut());
                             return Ok(());
                         }
                         // an end condition: done tracing
@@ -1636,6 +1642,18 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         }
     }
     Ok(())
+}
+
+/// Fix WR-76: a trace stopped because its first span from `tsp`, the curve's last point,
+/// lies on a found curve ([`SurfaceIntersector::span_on_found_curve`], which requires
+/// `tsp` within the tolerance of one). When `tsp` is the curve's only point, it is marked
+/// so that [`SurfaceIntersector::flush_curve`] does not flush it as a touching point; a
+/// trace back from it that adds points makes it a curve's end again.
+fn note_lone_start_on_found_curve(si: &mut SurfaceIntersector<'_>) {
+    si.lone_start_on_found_curve = match si.curve_points.as_slice() {
+        [only] => Some(*only),
+        _ => None,
+    };
 }
 
 /// The secant corrections [`stop_at_found_curve_end`] makes to the step that ends a

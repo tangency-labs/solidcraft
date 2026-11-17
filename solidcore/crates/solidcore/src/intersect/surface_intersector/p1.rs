@@ -673,6 +673,13 @@ pub struct SurfaceIntersector<'s> {
     pub(crate) start_loop_trace_steps: u64,
     /// Not upstream: a `trace_step` call was refused because `trace_steps_left` ran out.
     pub trace_budget_refused: bool,
+    /// Not upstream (fix WR-76): the curve's only point, when `TraceCurve` stopped
+    /// because the first span from it lies on a found curve
+    /// ([`SurfaceIntersector::span_on_found_curve`], which requires that point within
+    /// `this_approx_tol_3d` of a found curve). [`SurfaceIntersector::flush_curve`]
+    /// flushes nothing for that point alone: it is a point of a curve already found,
+    /// not a touching point.
+    pub lone_start_on_found_curve: Option<TsectId>,
     /// `m_bCheckForInteriorCurves` (no longer used upstream).
     pub check_for_interior_curves: bool,
     /// `m_bDoingSelfIntersection`: both surfaces are the same object.
@@ -797,6 +804,7 @@ impl<'s> SurfaceIntersector<'s> {
             trace_steps_left: u64::MAX,
             start_loop_trace_steps: super::p4::MAX_START_LOOP_TRACE_STEPS,
             trace_budget_refused: false,
+            lone_start_on_found_curve: None,
             check_for_interior_curves: true,
             doing_self_intersection: core::ptr::eq(surface1, surface2),
             clipped_by_through_point: false,

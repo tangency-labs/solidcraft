@@ -903,7 +903,10 @@ impl SurfaceIntersector<'_> {
     ///
     /// A single point becomes degenerate curves (type touching) when it is a tangent
     /// point or unique ([`is_point_unique`] against the start points and the 3D
-    /// curves' ends). A curve whose consecutive points are all within
+    /// curves' ends), and never when it is
+    /// [`SurfaceIntersector::lone_start_on_found_curve`] (fix WR-76: a point of a curve
+    /// already found, where upstream's uniqueness test, which reads only the found
+    /// curves' ends, can call it a touching point). A curve whose consecutive points are all within
     /// `this_approx_tol_3d` is dropped. A last span shorter than a tenth of the one
     /// before is merged into it (only when the merged
     /// span passes `SurfaceIntersector::span_keeps_accuracy`). A crossing curve with
@@ -923,10 +926,20 @@ impl SurfaceIntersector<'_> {
             .map(|&id| self.point(id).cloned())
             .collect::<Result<Vec<_>>>()?;
 
+        let lone_start_on_found_curve = self.lone_start_on_found_curve.take();
+
         // check no points to flush.
         let Some(first) = pnts.first() else {
             return Ok(());
         };
+
+        // fix (WR-76): a trace that stopped at its start point because its first span lies
+        // on a found curve leaves a point of that curve, not a touching point
+        if let [only] = ids.as_slice() {
+            if lone_start_on_found_curve == Some(*only) {
+                return Ok(());
+            }
+        }
 
         // When intersection is single point, output a degenerate curve
         if pnts.len() == 1 {
