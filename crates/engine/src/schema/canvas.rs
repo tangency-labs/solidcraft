@@ -1,6 +1,6 @@
 //! Contracts and result types for the commands in `cmd/sketch_canvas.rs`: `canvas.insert`,
-//! `canvas.decal`, `canvas.edit`, `canvas.calibrate`, `canvas.straighten` and `canvas.delete`, and
-//! for `canvas.to_sketch` in `cmd/canvas_sketch.rs`.
+//! `canvas.decal`, `canvas.edit`, `canvas.calibrate`, `canvas.straighten`, `canvas.delete` and
+//! `canvas.frame_sketch`, and for `canvas.to_sketch` in `cmd/canvas_sketch.rs`.
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether an image can be read, a canvas exists
@@ -161,6 +161,43 @@ pub struct CanvasEditParams {
     /// and Delete until it is unlocked; its opacity, visibility and name can still change.
     #[serde(default)]
     pub locked: Option<bool>,
+    /// The sketch points the image's corners follow, or `null` to let its own centre, width and
+    /// angle place it again. An anchored canvas refuses a new centre, width or angle, Calibrate
+    /// and Straighten.
+    #[serde(default)]
+    pub anchor: Option<CanvasAnchorParam>,
+}
+
+/// The sketch points a canvas's corners follow, as `canvas.edit` reads them.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CanvasAnchorParam {
+    /// The sketch's feature id.
+    pub sketch: u64,
+    /// The point at the image's bottom-left corner (its id in that sketch, at most 256 bytes).
+    pub bottom_left: String,
+    /// The point at the image's bottom-right corner.
+    pub bottom_right: String,
+    /// The point at the image's top-left corner. Left out, the image's height follows its shape.
+    #[serde(default)]
+    pub top_left: Option<String>,
+}
+
+/// Draw a construction rectangle exactly around a canvas or decal image, in a new sketch on its
+/// plane, and anchor the image's corners to it, so the sketch's dimensions and constraints place,
+/// turn and size the image. The canvas must belong to the active component and follow no sketch
+/// yet. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = canvas_required)]
+pub struct CanvasFrameSketchParams {
+    /// The canvas, by id or name.
+    // Optional in the type and required in the schema, as `face` above.
+    #[serde(default, deserialize_with = "some", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "CanvasRef")]
+    pub canvas: Option<CanvasRef>,
+    /// The new sketch's name. Default: `<the canvas's name> frame`.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 /// Scale a canvas so that two points on it are a known distance apart: the image is scaled about
@@ -578,6 +615,25 @@ pub struct CanvasStraightened {
 pub struct CanvasDeleted {
     /// The id the canvas had.
     pub deleted: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `canvas.frame_sketch` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CanvasFramed {
+    /// The canvas, by id.
+    pub canvas: u64,
+    /// The new sketch's feature id.
+    pub sketch: u64,
+    /// Its name.
+    pub name: String,
+    /// The ids of the rectangle's points at the image's bottom-left, bottom-right and top-left
+    /// corners.
+    pub bottom_left: String,
+    pub bottom_right: String,
+    pub top_left: String,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

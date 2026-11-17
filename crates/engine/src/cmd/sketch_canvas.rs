@@ -2,14 +2,14 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
-use solidcraft_doc::canvas::{Canvas, MAX_CANVAS_BYTES, base64_decode, base64_encode, image_info};
+use solidcraft_doc::canvas::{Canvas, CanvasAnchor, MAX_CANVAS_BYTES, base64_decode, base64_encode, image_info};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec2};
 use crate::schema::canvas::{
     CanvasCalibrateParams, CanvasCalibrated, CanvasDecalParams, CanvasDeleteParams, CanvasDeleted, CanvasEditParams, CanvasEdited,
-    CanvasInsertParams, CanvasPlaced, CanvasStraightenParams, CanvasStraightened,
+    CanvasFrameSketchParams, CanvasFramed, CanvasInsertParams, CanvasPlaced, CanvasStraightenParams, CanvasStraightened,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -20,6 +20,7 @@ const EDIT_CONTRACT: TypedContract<CanvasEditParams> = TypedContract::new();
 const CALIBRATE_CONTRACT: TypedContract<CanvasCalibrateParams> = TypedContract::new();
 const STRAIGHTEN_CONTRACT: TypedContract<CanvasStraightenParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<CanvasDeleteParams> = TypedContract::new();
+const FRAME_SKETCH_CONTRACT: TypedContract<CanvasFrameSketchParams> = TypedContract::new();
 
 /// A canvas command's reply, built from its schema's type so the two can't drift apart.
 pub(super) fn canvas_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
@@ -44,7 +45,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("canvas")
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<CanvasEdited>)
-        .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?, locked? (a locked canvas refuses center, width, angle, flip, Calibrate and Delete)"),
+        .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?, locked? (a locked canvas refuses center, width, angle, flip, Calibrate and Delete); anchor?: {sketch: id, bottom_left, bottom_right: point ids, top_left?: point id} | null (the sketch points the image's corners follow; without top_left the height follows the image; an anchored canvas refuses center, width, angle, Calibrate and Straighten)"),
+    CommandSpec::new("canvas.frame_sketch", "Frame Sketch", crate::checked!("canvas.frame_sketch", frame_sketch))
+        .icon("canvas")
+        .contract(&FRAME_SKETCH_CONTRACT)
+        .output(output_schema_for::<CanvasFramed>)
+        .params("canvas: id or name; name?: the sketch's name. Draws a construction rectangle on the canvas's plane exactly around the image, in a new sketch, and anchors the image's corners to it: dimension and constrain that rectangle to place and size the image → sketch, bottom_left, bottom_right, top_left (point ids)"),
     CommandSpec::new("canvas.calibrate", "Calibrate Canvas", crate::checked!("canvas.calibrate", calibrate))
         .icon("measure")
         .contract(&CALIBRATE_CONTRACT)
@@ -127,6 +133,7 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         visible: true,
         locked: false,
         component,
+        anchor: None,
     });
     canvas_reply(cmd, CanvasPlaced { canvas: id, name, pixels, param_warnings: Vec::new() })
 }
@@ -169,6 +176,37 @@ pub(crate) fn locked_reason(c: &Canvas) -> String {
     format!("{} is locked; unlock it first", c.name)
 }
 
+/// An anchored canvas's sketch places and sizes it: the refusal of a change that would.
+fn refuse_anchored(s: &Session, i: usize, cmd: &str) -> Result<()> {
+    match s.doc.canvases.get(i) {
+        Some(c) if c.anchor.is_some() => Err(bad(cmd, format!("{} follows points of a sketch: change that sketch, or clear `anchor` first", c.name))),
+        _ => Ok(()),
+    }
+}
+
+/// `anchor` as `canvas.edit` takes it: left out (`None`), `null` to clear it, or the sketch and
+/// its point ids.
+fn anchor_param(p: &Value, cmd: &str) -> Result<Option<Option<CanvasAnchor>>> {
+    let v = match p.get("anchor") {
+        None => return Ok(None),
+        Some(Value::Null) => return Ok(Some(None)),
+        Some(v) => v,
+    };
+    let sketch = v.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "`anchor.sketch` must be a sketch's id"))?;
+    let id = |k: &str| {
+        v.get(k)
+            .and_then(Value::as_str)
+            .filter(|x| !x.is_empty() && x.len() <= 256)
+            .map(str::to_string)
+            .ok_or_else(|| bad(cmd, format!("`anchor.{k}` must be a point id in that sketch")))
+    };
+    let top_left = match v.get("top_left") {
+        None | Some(Value::Null) => None,
+        Some(_) => Some(id("top_left")?),
+    };
+    Ok(Some(Some(CanvasAnchor { sketch, bottom_left: id("bottom_left")?, bottom_right: id("bottom_right")?, top_left })))
+}
+
 fn edit_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "canvas.edit";
     let i = find(s, p, cmd)?;
@@ -176,14 +214,31 @@ fn edit_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     if width.is_some_and(|w| !(w > 1e-6 && w < 1e7)) {
         return Err(bad(cmd, "`width` must be positive"));
     }
+    let anchor = anchor_param(p, cmd)?;
     // Unlocking in the same call lets the other changes through.
     let moves = ["center", "width", "angle", "flip"].iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
-    if moves && bool_(p, "locked") != Some(false) {
+    if (moves || anchor.is_some()) && bool_(p, "locked") != Some(false) {
         refuse_locked(s, i, cmd)?;
+    }
+    // Clearing the anchor in the same call lets its own placement through.
+    let places = ["center", "width", "angle"].iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
+    if places && anchor != Some(None) {
+        if anchor.is_some() {
+            return Err(bad(cmd, "give either `anchor` or `center`, `width` and `angle`: the anchor's sketch places the image"));
+        }
+        refuse_anchored(s, i, cmd)?;
+    }
+    if let Some(Some(a)) = &anchor {
+        let c = s.doc.canvases.get(i).ok_or_else(|| bad(cmd, "canvas"))?;
+        let state = s.model.state();
+        s.doc.canvas_anchor_corners(c, a, &state).map_err(|e| bad(cmd, e.to_string()))?;
     }
     let c = s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?;
     if let Some(l) = bool_(p, "locked") {
         c.locked = l;
+    }
+    if let Some(a) = anchor {
+        c.anchor = a;
     }
     if let Some(v) = p.get("center").and_then(vec2) {
         c.center = v;
@@ -221,6 +276,7 @@ fn calibrate(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let k = d / now;
     refuse_locked(s, i, cmd)?;
+    refuse_anchored(s, i, cmd)?;
     let c = s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?;
     c.width *= k;
     c.center = a + (c.center - a) * k;
@@ -246,6 +302,7 @@ fn straighten(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "canvas.straighten";
     let i = find(s, p, cmd)?;
     refuse_locked(s, i, cmd)?;
+    refuse_anchored(s, i, cmd)?;
     let (a, b) = (p.get("a").and_then(vec2), p.get("b").and_then(vec2));
     let (Some(a), Some(b)) = (a, b) else { return Err(bad(cmd, "`a` and `b` must be points [x,y]")) };
     let target = match p.get("angle") {
@@ -272,6 +329,61 @@ fn delete_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     refuse_locked(s, i, cmd)?;
     let c = s.doc_mut().canvases.remove(i);
     canvas_reply(cmd, CanvasDeleted { deleted: c.id, param_warnings: Vec::new() })
+}
+
+/// A new sketch on the canvas's plane holding a construction rectangle exactly around the image,
+/// and the canvas anchored to its bottom-left, bottom-right and top-left corners: the sketch's
+/// dimensions and constraints then place, turn and size the image.
+fn frame_sketch(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "canvas.frame_sketch";
+    if s.active_sketch.is_some() {
+        return Err(bad(cmd, "finish the sketch being edited first"));
+    }
+    let i = find(s, p, cmd)?;
+    refuse_locked(s, i, cmd)?;
+    let c = s.doc.canvases.get(i).cloned().ok_or_else(|| bad(cmd, "canvas"))?;
+    if c.anchor.is_some() {
+        return Err(bad(cmd, format!("{} already follows a sketch; clear its `anchor` with canvas.edit first", c.name)));
+    }
+    // The sketch is made in the active component, on the canvas's plane in that frame.
+    if c.component != s.active_component {
+        return Err(bad(cmd, format!("{} belongs to another component: activate that component first", c.name)));
+    }
+    // The frame unmirrored: a mirrored image's bottom-left corner is the frame's bottom-right.
+    let k = c.corners();
+    let (bl, br, tl) = if c.flip { (k[1], k[0], k[2]) } else { (k[0], k[1], k[3]) };
+    let name =
+        str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or_else(|| s.doc.free_sketch_name(&format!("{} frame", c.name)));
+    let made = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), c.plane.clone(), None)?;
+    let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the canvas"))?;
+    let finish = super::find_command("sketch.finish").ok_or_else(|| bad(cmd, "sketch.finish"))?.run;
+    let rectangle = super::find_command("sketch.rectangle.three_point").ok_or_else(|| bad(cmd, "sketch.rectangle.three_point"))?.run;
+    let drawn = rectangle(s, &json!({"p0": [bl.x, bl.y], "p1": [br.x, br.y], "p2": [tl.x, tl.y], "construction": true}));
+    let drawn = match drawn {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = finish(s, &json!({}));
+            return Err(e);
+        }
+    };
+    finish(s, &json!({}))?;
+    // Its sides run bottom-left to bottom-right, …, top-left to bottom-left.
+    let side = |k: usize| drawn.get("curves").and_then(|c| c.get(k)).and_then(Value::as_str).map(str::to_string);
+    let corners = (|| {
+        let sk = s.doc.sketch(sketch).ok()?;
+        let line = |id: &str| match sk.curves.iter().find(|c| c.id == id).map(|c| &c.kind) {
+            Some(solidcraft_sketch::CurveKind::Line { a, b }) => Some((*a, *b)),
+            _ => None,
+        };
+        let ((b0, b1), (t0, _)) = (line(&side(0)?)?, line(&side(3)?)?);
+        let id = |i: usize| sk.points.get(i).map(|p| p.id.clone());
+        Some((id(b0)?, id(b1)?, id(t0)?))
+    })();
+    let (bottom_left, bottom_right, top_left) = corners.ok_or_else(|| bad(cmd, "could not read the corners of the frame drawn"))?;
+    let anchor = CanvasAnchor { sketch, bottom_left: bottom_left.clone(), bottom_right: bottom_right.clone(), top_left: Some(top_left.clone()) };
+    let canvas = s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?;
+    canvas.anchor = Some(anchor);
+    canvas_reply(cmd, CanvasFramed { canvas: canvas.id, sketch, name, bottom_left, bottom_right, top_left, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
@@ -598,6 +710,93 @@ mod tests {
             (1.0, 92.0, 91.0 - 180.0),
         ] {
             assert!((deg(now, target) - want).abs() < 1e-9, "{now} -> {target}: {}", deg(now, target));
+        }
+    }
+
+    /// A canvas's world corners as the viewport and URDF export take them.
+    fn world_corners(s: &Session, id: u64) -> [solidcore_record::Vec3; 4] {
+        let (vals, _) = s.doc.param_values();
+        let c = s.doc.canvases.iter().find(|c| c.id == id).unwrap();
+        s.doc.canvas_corners(&vals, c, &s.model.state()).unwrap()
+    }
+
+    /// An anchored canvas's corners are its sketch's points, so a parameter that moves a point
+    /// moves and stretches the image; without the top-left point its height follows the image.
+    /// While anchored, its own placement is refused; clearing the anchor gives it back.
+    #[test]
+    fn an_anchored_canvas_follows_its_sketch_points_and_their_parameters() {
+        use solidcore_record::{Vec2, Vec3};
+        use solidcraft_geom::prelude::*;
+        let mut s = Session::default();
+        s.execute("parameters.add", &json!({"name": "w", "expression": "40 mm"})).unwrap();
+        let sketch = s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        let rect = s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": ["w", 20]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let corner = |k: &str| rect["corners"][k].as_str().unwrap().to_string();
+        let id =
+            s.execute("canvas.insert", &json!({"data": png(40, 20), "plane": "XY", "width": 10, "name": "Pic"})).unwrap()["canvas"].as_u64().unwrap();
+        let anchor =
+            json!({"sketch": sketch, "bottom_left": corner("bottom_left"), "bottom_right": corner("bottom_right"), "top_left": corner("top_left")});
+        s.execute("canvas.edit", &json!({"canvas": id, "anchor": anchor})).unwrap();
+        let near = |a: Vec3, b: [f64; 3]| (a - Vec3::new(b[0], b[1], b[2])).len() < 1e-6;
+        let k = world_corners(&s, id);
+        assert!(
+            near(k[0], [0.0, 0.0, 0.0]) && near(k[1], [40.0, 0.0, 0.0]) && near(k[2], [40.0, 20.0, 0.0]) && near(k[3], [0.0, 20.0, 0.0]),
+            "{k:?}"
+        );
+        s.execute("parameters.change", &json!({"name": "w", "expression": "60 mm"})).unwrap();
+        let k = world_corners(&s, id);
+        assert!(near(k[1], [60.0, 0.0, 0.0]) && near(k[2], [60.0, 20.0, 0.0]), "the image stretches with the sketch: {k:?}");
+        for (cmd, p) in [
+            ("canvas.edit", json!({"canvas": id, "center": [1, 1]})),
+            ("canvas.calibrate", json!({"canvas": id, "a": [0, 0], "b": [1, 0], "distance": 2})),
+            ("canvas.straighten", json!({"canvas": id, "a": [0, 0], "b": [1, 1]})),
+        ] {
+            let e = s.execute(cmd, &p).err().map(|e| e.to_string()).unwrap_or_default();
+            assert!(e.contains("follows points of a sketch"), "{cmd}: {e}");
+        }
+        for bad in [
+            json!({"sketch": 999_999, "bottom_left": "a", "bottom_right": "b"}),
+            json!({"sketch": sketch, "bottom_left": corner("bottom_left"), "bottom_right": "nope"}),
+            json!({"sketch": sketch, "bottom_left": corner("bottom_left"), "bottom_right": corner("bottom_left")}),
+            json!({"sketch": "x"}),
+            json!(7),
+        ] {
+            assert!(s.execute("canvas.edit", &json!({"canvas": id, "anchor": bad})).is_err(), "{bad}");
+        }
+        // The image is 2:1, so 30 mm high for 60 mm wide.
+        s.execute(
+            "canvas.edit",
+            &json!({"canvas": id, "anchor": {"sketch": sketch, "bottom_left": corner("bottom_left"), "bottom_right": corner("bottom_right")}}),
+        )
+        .unwrap();
+        assert!(near(world_corners(&s, id)[3], [0.0, 30.0, 0.0]), "{:?}", world_corners(&s, id));
+        s.execute("canvas.edit", &json!({"canvas": id, "anchor": null, "center": [1, 1]})).unwrap();
+        let c = s.doc.canvases.iter().find(|c| c.id == id).unwrap();
+        assert!(c.anchor.is_none() && c.center == Vec2::new(1.0, 1.0));
+    }
+
+    /// Frame Sketch draws a construction rectangle exactly around the image and anchors the image
+    /// to it, so the image stays where it was, turned and mirrored or not.
+    #[test]
+    fn frame_sketch_anchors_an_image_where_it_lies() {
+        use solidcraft_geom::prelude::*;
+        for flip in [false, true] {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
+            let r = s.execute("canvas.decal", &json!({"data": png(40, 20), "face": [20, 15, 10], "width": 20, "angle": 30, "flip": flip})).unwrap();
+            let id = r["canvas"].as_u64().unwrap();
+            let before = world_corners(&s, id);
+            let framed = s.execute("canvas.frame_sketch", &json!({"canvas": id})).unwrap();
+            let c = s.doc.canvases.iter().find(|c| c.id == id).unwrap();
+            let anchor = c.anchor.clone().unwrap();
+            assert_eq!(Some(anchor.sketch), framed["sketch"].as_u64());
+            assert_eq!(anchor.top_left.as_deref(), framed["top_left"].as_str());
+            let after = world_corners(&s, id);
+            assert!(before.iter().zip(&after).all(|(a, b)| (*a - *b).len() < 1e-6), "flip {flip}: {before:?} vs {after:?}");
+            let sketch = s.doc.sketch(anchor.sketch).unwrap();
+            assert_eq!(sketch.curves.iter().filter(|c| c.construction).count(), 4, "four construction sides");
+            assert!(s.execute("canvas.frame_sketch", &json!({"canvas": id})).is_err(), "already anchored");
         }
     }
 
