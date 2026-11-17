@@ -30,8 +30,8 @@
 //! **The result.** Each runs under a [`Contract`], [`Contract::Closed`] unless asked: a
 //! result has faces, and a closed manifold body gives a closed manifold body, by the topology
 //! test alone. [`blend_with`] and [`blend_ordered`] take the contract in their options, and
-//! under [`Contract::Proved`] prove the body before and the result after. The chamfers by
-//! sides and the variable rounds run closed. The blend corner's Roll-over takes the proof
+//! under [`Contract::Proved`] prove the body before and the result after; the chamfers by
+//! sides and the variable rounds take it in their `_with` forms. The blend corner's Roll-over takes the proof
 //! under either contract, once its passes have built: there the proof chooses between two
 //! constructions.
 
@@ -2490,7 +2490,31 @@ pub fn chamfer_sides(
     distance: f64,
     second: ChamferSecond,
 ) -> Result<()> {
-    chamfer_sides_impl(body, None, edges, Along::Faces(along), distance, second)
+    chamfer_sides_with(body, edges, along, distance, second, Contract::Closed)
+}
+
+/// [`chamfer_sides`] under `contract`: [`Contract::Proved`] proves the body before and the result
+/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+///
+/// # Errors
+/// As [`chamfer_sides`].
+pub fn chamfer_sides_with(
+    body: &Body,
+    edges: &[usize],
+    along: &[usize],
+    distance: f64,
+    second: ChamferSecond,
+    contract: Contract,
+) -> Result<()> {
+    chamfer_sides_impl(
+        body,
+        None,
+        edges,
+        Along::Faces(along),
+        distance,
+        second,
+        contract,
+    )
 }
 
 /// [`chamfer_sides`] with edge and face indices taken through `order`.
@@ -2505,6 +2529,31 @@ pub fn chamfer_sides_ordered(
     distance: f64,
     second: ChamferSecond,
 ) -> Result<()> {
+    chamfer_sides_ordered_with(
+        body,
+        order,
+        edges,
+        along,
+        distance,
+        second,
+        Contract::Closed,
+    )
+}
+
+/// [`chamfer_sides_ordered`] under `contract`: [`Contract::Proved`] proves the body before and the result
+/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+///
+/// # Errors
+/// As [`chamfer_sides_ordered`].
+pub fn chamfer_sides_ordered_with(
+    body: &Body,
+    order: &crate::Order,
+    edges: &[usize],
+    along: &[usize],
+    distance: f64,
+    second: ChamferSecond,
+    contract: Contract,
+) -> Result<()> {
     chamfer_sides_impl(
         body,
         Some(order),
@@ -2512,6 +2561,7 @@ pub fn chamfer_sides_ordered(
         Along::Faces(along),
         distance,
         second,
+        contract,
     )
 }
 
@@ -2531,10 +2581,34 @@ pub fn chamfer_sides_facing(
     second: ChamferSecond,
     facing: [f64; 3],
 ) -> Result<()> {
+    chamfer_sides_facing_with(body, edges, distance, second, facing, Contract::Closed)
+}
+
+/// [`chamfer_sides_facing`] under `contract`: [`Contract::Proved`] proves the body before and the result
+/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+///
+/// # Errors
+/// As [`chamfer_sides_facing`].
+pub fn chamfer_sides_facing_with(
+    body: &Body,
+    edges: &[usize],
+    distance: f64,
+    second: ChamferSecond,
+    facing: [f64; 3],
+    contract: Contract,
+) -> Result<()> {
     if !facing.iter().all(|x| x.is_finite()) || facing.iter().all(|&x| x == 0.0) {
         return Err(Error::Argument);
     }
-    chamfer_sides_impl(body, None, edges, Along::Facing(facing), distance, second)
+    chamfer_sides_impl(
+        body,
+        None,
+        edges,
+        Along::Facing(facing),
+        distance,
+        second,
+        contract,
+    )
 }
 
 /// The face each edge's first distance is along.
@@ -2553,6 +2627,7 @@ fn chamfer_sides_impl(
     along: Along<'_>,
     distance: f64,
     second: ChamferSecond,
+    contract: Contract,
 ) -> Result<()> {
     let second_ok = match second {
         ChamferSecond::Angle(a) => a.is_finite() && a > 0.0 && a < std::f64::consts::PI,
@@ -2596,7 +2671,7 @@ fn chamfer_sides_impl(
                 }
             }
         }
-        let expect = Expect::under(k, b, Proof::default(), Contract::Closed)?;
+        let expect = Expect::under(k, b, Proof::default(), contract)?;
         let p = Pass {
             edges: &picked,
             section: Section::Chamfer {
@@ -2616,7 +2691,7 @@ fn chamfer_sides_impl(
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));
         }
-        done(k, b, expect, Contract::Closed)
+        done(k, b, expect, contract)
     })?
 }
 
@@ -2696,6 +2771,23 @@ pub fn fillet_variable(
     knots: &[f64],
     radii: &[f64],
 ) -> Result<()> {
+    fillet_variable_with(body, edge, start, degree, knots, radii, Contract::Closed)
+}
+
+/// [`fillet_variable`] under `contract`: [`Contract::Proved`] proves the body before and the result
+/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+///
+/// # Errors
+/// As [`fillet_variable`].
+pub fn fillet_variable_with(
+    body: &Body,
+    edge: usize,
+    start: usize,
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+    contract: Contract,
+) -> Result<()> {
     fillet_variable_impl(
         body,
         None,
@@ -2705,6 +2797,7 @@ pub fn fillet_variable(
         degree,
         knots,
         radii,
+        contract,
     )
 }
 
@@ -2728,6 +2821,34 @@ pub fn fillet_variable_ordered(
     knots: &[f64],
     radii: &[f64],
 ) -> Result<()> {
+    fillet_variable_ordered_with(
+        body,
+        order,
+        edge,
+        start,
+        degree,
+        knots,
+        radii,
+        Contract::Closed,
+    )
+}
+
+/// [`fillet_variable_ordered`] under `contract`: [`Contract::Proved`] proves the body before and the result
+/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+///
+/// # Errors
+/// As [`fillet_variable_ordered`].
+#[allow(clippy::too_many_arguments)] // the plain call's, and the contract
+pub fn fillet_variable_ordered_with(
+    body: &Body,
+    order: &crate::Order,
+    edge: usize,
+    start: [f64; 3],
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+    contract: Contract,
+) -> Result<()> {
     fillet_variable_impl(
         body,
         Some(order),
@@ -2737,6 +2858,7 @@ pub fn fillet_variable_ordered(
         degree,
         knots,
         radii,
+        contract,
     )
 }
 
@@ -2759,6 +2881,23 @@ pub fn fillet_variable_from(
     knots: &[f64],
     radii: &[f64],
 ) -> Result<()> {
+    fillet_variable_from_with(body, edge, start, degree, knots, radii, Contract::Closed)
+}
+
+/// [`fillet_variable_from`] under `contract`: [`Contract::Proved`] proves the body before and the result
+/// after, and refuses a result it cannot prove ([`Error::NotSolid`]).
+///
+/// # Errors
+/// As [`fillet_variable_from`].
+pub fn fillet_variable_from_with(
+    body: &Body,
+    edge: usize,
+    start: [f64; 3],
+    degree: usize,
+    knots: &[f64],
+    radii: &[f64],
+    contract: Contract,
+) -> Result<()> {
     fillet_variable_impl(
         body,
         None,
@@ -2768,6 +2907,7 @@ pub fn fillet_variable_from(
         degree,
         knots,
         radii,
+        contract,
     )
 }
 
@@ -2794,6 +2934,7 @@ fn fillet_variable_impl(
     degree: usize,
     knots: &[f64],
     radii: &[f64],
+    contract: Contract,
 ) -> Result<()> {
     if !law_ok(degree, knots, radii) {
         return Err(Error::Argument);
@@ -2853,7 +2994,7 @@ fn fillet_variable_impl(
                 Err(e) => return Err(e),
             }
         }
-        let expect = Expect::under(k, b, Proof::default(), Contract::Closed)?;
+        let expect = Expect::under(k, b, Proof::default(), contract)?;
         let (r0, r1) = (
             radii.first().copied().unwrap_or(0.0),
             radii.last().copied().unwrap_or(0.0),
@@ -2874,7 +3015,7 @@ fn fillet_variable_impl(
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));
         }
-        done(k, b, expect, Contract::Closed)
+        done(k, b, expect, contract)
     })?
 }
 

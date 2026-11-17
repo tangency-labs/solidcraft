@@ -797,6 +797,82 @@ fn chamfers_by_sides_take_the_face_facing_a_direction() {
     assert!(rel(volume(&b), ABC) < 1e-12);
 }
 
+/// The chamfers by sides and the variable rounds take the contract in their `_with` forms: on
+/// the block, whose results are valid solids facing out, [`Contract::Proved`] builds the body
+/// [`Contract::Closed`] does (the plain call's), each of the six calls.
+#[test]
+fn chamfers_by_sides_and_variable_rounds_build_alike_under_either_contract() {
+    use solidcore_ops::{
+        chamfer_sides_facing_with, chamfer_sides_ordered_with, chamfer_sides_with,
+        edge_faces_along_ordered, fillet_variable_from_with, fillet_variable_ordered_with,
+        fillet_variable_with, Contract,
+    };
+    all_fixes();
+    let (knots, radii) = ([0.0, 0.0, 1.0, 1.0], [1.0, 2.0]);
+    let second = ChamferSecond::Distance(3.0);
+    let up = [0.0, 0.0, 1.0];
+    let near = [0.0, 0.0, 10.0];
+    let record = |f: &dyn Fn(&Body, Contract)| {
+        [Contract::Closed, Contract::Proved].map(|c| {
+            let b = block();
+            f(&b, c);
+            b.to_record().unwrap().0
+        })
+    };
+    let top = |b: &Body, e: usize| {
+        let f = edge_faces_along(b, e, up).unwrap();
+        if f[1].1 > f[0].1 {
+            f[1].0
+        } else {
+            f[0].0
+        }
+    };
+    // the record's order and its index of the top front edge, between (0, 0, 10) and (30, 0, 10)
+    let record_top_front = |b: &Body| {
+        let (record, order) = b.to_record().unwrap();
+        let at = |i: u32, x: f64| {
+            let p = record.vertices[i as usize].point;
+            (p[0] - x).abs() + p[1].abs() + (p[2] - 10.0).abs() < 1e-9
+        };
+        let e = record
+            .edges
+            .iter()
+            .position(|e| {
+                let [s, t] = e.vertices;
+                (at(s, 0.0) && at(t, 30.0)) || (at(s, 30.0) && at(t, 0.0))
+            })
+            .unwrap();
+        (order, e)
+    };
+    type Call<'a> = &'a dyn Fn(&Body, Contract);
+    let cases: [Call<'_>; 6] = [
+        &|b, c| {
+            let e = top_front(b);
+            chamfer_sides_with(b, &[e], &[top(b, e)], 1.0, second, c).unwrap();
+        },
+        &|b, c| {
+            let (order, e) = record_top_front(b);
+            let f = edge_faces_along_ordered(b, &order, e, up).unwrap();
+            let first = if f[1].1 > f[0].1 { f[1].0 } else { f[0].0 };
+            chamfer_sides_ordered_with(b, &order, &[e], &[first], 1.0, second, c).unwrap();
+        },
+        &|b, c| chamfer_sides_facing_with(b, &[top_front(b)], 1.0, second, up, c).unwrap(),
+        &|b, c| {
+            let v = vertex_at(b, near);
+            fillet_variable_with(b, top_front(b), v, 1, &knots, &radii, c).unwrap();
+        },
+        &|b, c| {
+            let (order, e) = record_top_front(b);
+            fillet_variable_ordered_with(b, &order, e, near, 1, &knots, &radii, c).unwrap();
+        },
+        &|b, c| fillet_variable_from_with(b, top_front(b), near, 1, &knots, &radii, c).unwrap(),
+    ];
+    for (i, f) in cases.iter().enumerate() {
+        let [closed, proved] = record(*f);
+        assert_eq!(closed, proved, "call {i}");
+    }
+}
+
 /// [`fillet_variable_from`] runs the law from the end of the edge nearest a point, as
 /// [`fillet_variable`] does from that end's vertex: r from 1 to 2 along the block's top front
 /// edge from a point near (0, 0, 10) is the body that vertex gives, and from a point nearer
