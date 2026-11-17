@@ -78,6 +78,11 @@
 //! - **Recursion.** None: `EvaluateBinormal` calls `CreateUVTrimCurve` and
 //!   `CreateUVTrimCurve` calls `EvaluateBinormal` only with `bUse3DOnly = TRUE`, so
 //!   the depth is bounded by one level (as upstream comments).
+//! - **Trim fit tolerance** (not upstream): `CreateUVTrimCurve` fits at the edge
+//!   tolerance, except where that tolerance only covers the edge's edge/face gap (at
+//!   most the gap gain times it): there it fits at the healer's tolerance for that gap
+//!   without the edge/edge term, capped by the edge tolerance (`trim_fit_tolerance`).
+//!   A tolerance raised to cover a gap so never loosens a trim fitted later.
 //! - **Passed-on statuses (WR-663).** The statuses the fork passes on
 //!   (tangency-labs/smlib 666242b: `CreateUVTrimCurve`'s box, seam transforms, 2D
 //!   conversions, trims, end evaluations and drops, `NormalizedEvaluate`;
@@ -95,7 +100,10 @@ use crate::geom::geom_utility::p1::vec_lin_comb_two_vectors;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::ObjectRef;
 use crate::geom::solution_array::ObjectKind;
-use crate::geom::tol::{approx_tol_3d, are_same, xsect_tol_3d_from_zones, SmallTopoType};
+use crate::geom::tol::{
+    approx_tol_3d, are_same, brep_calc_edge_zone_tol_3d, gap_gain, xsect_tol_3d_from_zones,
+    zone_tol3d, SmallTopoType,
+};
 use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
@@ -353,6 +361,63 @@ fn seam_curves(k: &Kernel, uv_curve: &Curve, delta: Vec3) -> Result<Vec<Curve>> 
     Ok(vec![other, copy])
 }
 
+/// Not upstream: the tolerance [`create_uv_trim_curve`] fits the UV trim curve of an
+/// edge use of `e` at (upstream: the edge tolerance). The fit is the edge tolerance,
+/// except where that tolerance only covers the edge's gap: at most the gap gain times the
+/// largest edge/face gap `g` of the edge's uses, as the healer sets it to cover a gap
+/// (`Fix_TolSizes`). The fit is then the healer's own value for the edge without an
+/// edge/edge gap, `max(def, max face tolerance, gain * g - def)`
+/// ([`brep_calc_edge_zone_tol_3d`]), capped by the edge tolerance. A tolerance raised
+/// to cover a gap so never loosens the fit, and the fit is never above upstream's (the
+/// edge tolerance).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; the unported, cancelled and
+/// preparation errors of [`crate::topology::edgeuse::p1::calc_max_edge_face_gap`].
+fn trim_fit_tolerance(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<f64> {
+    use crate::topology::edgeuse::p1 as eu1;
+    let edge_tol = b.edge(e)?.tolerance;
+    // (the largest face tolerance of the edge, as `Fix_TolSizes` takes it)
+    let mut max_face_tol = zone_tol3d(k, 0.0);
+    for f in crate::topology::edge::faces(b, e, None)? {
+        let face_tol = crate::topology::face::p2::tolerance(b, f)?;
+        if face_tol > max_face_tol {
+            max_face_tol = face_tol;
+        }
+    }
+    // (no gap can lower the fit below the tolerance the edge has without gaps)
+    if edge_tol <= brep_calc_edge_zone_tol_3d(k, 0.0, 0.0, b, Some(max_face_tol)) {
+        return Ok(edge_tol);
+    }
+    // (the cached gap, else the gap calculated without caching it, so the fit leaves
+    // the edge uses' gap caches as it found them; a failed calculation, ignored as
+    // `GetMaxEdgeFaceGap` ignores it, adds no gap)
+    let mut gap = 0.0_f64;
+    for eu in b.edge(e)?.edgeuses.clone() {
+        let g = if !eu1::has_edge_face_gap(b, eu)? {
+            None
+        } else if eu1::is_max_edge_face_gap_init(b, eu)? {
+            eu1::cached_max_edge_face_gap(b, eu)?
+        } else {
+            ignored(eu1::calc_max_edge_face_gap(k, b, eu, false))?
+        };
+        if let Some(g) = g {
+            if g.gap_3d > gap {
+                gap = g.gap_3d;
+            }
+        }
+    }
+    // (NaN compares false: the edge tolerance stays the fit)
+    if edge_tol <= zone_tol3d(k, gap_gain(k) * gap) {
+        let healed = brep_calc_edge_zone_tol_3d(k, 0.0, gap, b, Some(max_face_tol));
+        if healed < edge_tol {
+            return Ok(healed);
+        }
+    }
+    Ok(edge_tol)
+}
+
 /// `CreateUVTrimCurve`: builds the UV trim curve of an edge use by dropping the edge's
 /// curve onto the face's surface. Tries, in order: the UV curve of an edge curve that
 /// is a curve on this surface (a copy; two copies for a seam); `DropCurve` and
@@ -395,6 +460,8 @@ pub fn create_uv_trim_curve(
     let fu = faceuse(b, eu)?
         .ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face use"))?;
     let f = faceuse_face(b, fu)?.ok_or_else(|| null("CreateUVTrimCurve: face use without face"))?;
+    // not upstream: the fit tolerance, the edge tolerance unless that only covers a gap
+    let fit_tol = trim_fit_tolerance(k, b, e)?;
     let face_rec = b.face(f)?;
     let face_surface = face_rec
         .surface
@@ -409,8 +476,9 @@ pub fn create_uv_trim_curve(
         .ok_or_else(|| null("CreateUVTrimCurve: edge without curve"))?
         .clone_for_evaluation()?;
     // the drops build the edge curve's cache at the edge's tolerance
-    // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the owner)
-    curve.set_owner_zone_tol_3d(Some(edge_rec.tolerance));
+    // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the owner;
+    // not upstream: at the fit tolerance, [`trim_fit_tolerance`])
+    curve.set_owner_zone_tol_3d(Some(fit_tol));
     let mut edge_domain = edge_rec.interval;
     let uv_trim_at_start = uv_trim_curve(b, eu)?.0.is_some();
     let surface_handle = handle(ObjectKind::Surface, f.index());
@@ -546,7 +614,8 @@ pub fn create_uv_trim_curve(
         let mut surface = face_surface;
         let _ = surface.set_owner(None::<ObjectRef>);
 
-        let mut zone_tol = b.edge(e)?.tolerance;
+        // (not upstream: the fit tolerance, [`trim_fit_tolerance`], for the edge tolerance)
+        let mut zone_tol = fit_tol;
 
         // iter 0 = DropCurve(), 1 = DropAndTrimCurve() only if DropCurve() fails
         // iters 2 and 3 = same with bigger tolerance.
@@ -1085,7 +1154,7 @@ fn trim_other_uv_curves(
 ) -> Result<()> {
     let mut tk = Kernel::new(&crate::kernel::KernelOptions {
         tolerances: crate::kernel::Tolerances {
-            zone_tol_3d: crate::geom::tol::zone_tol3d(k, crate::topology::edge::tolerance(b, e)?),
+            zone_tol_3d: zone_tol3d(k, crate::topology::edge::tolerance(b, e)?),
             ..k.tolerances
         },
         ..crate::kernel::KernelOptions::default()

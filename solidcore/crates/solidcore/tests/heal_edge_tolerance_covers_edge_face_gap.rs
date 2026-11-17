@@ -86,3 +86,66 @@ fn sphere_plane_circle_edge_covers_its_gap() {
 fn revolution_mold_edges_cover_their_gaps() {
     assert_gaps_covered("Solids/revolution_mold.smb");
 }
+
+/// The UV trim of the sphere's use of `Fillet/sphere_plane.smb`'s circle edge (edge 3),
+/// built after the read: the file's trim fails `sm_CheckUVTrimCurve` and is dropped, so
+/// `GetOrCreateUVTrimCurve` makes it. Returns the curve's interval ends and 65 points
+/// along it, and the edge's tolerance.
+fn sphere_plane_circle_trim(k: &Kernel, b: &mut Brep) -> (Vec<[u64; 2]>, f64) {
+    use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
+    use solidcore::topology::{EdgeId, FaceId};
+    let e = EdgeId::from_index(3);
+    let eus = b.edge(e).unwrap().edgeuses.clone();
+    let eu = eus
+        .into_iter()
+        .find(|&eu| eu1::face(b, eu).unwrap() == Some(FaceId::from_index(0)))
+        .expect("the sphere's use of the circle edge");
+    eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)
+        .unwrap()
+        .status
+        .unwrap();
+    let trim = b.edgeuse(eu).unwrap().uv_trim_curve.clone().unwrap();
+    let ivl = trim.natural_interval();
+    let mut bits = vec![[ivl.min().to_bits(), ivl.max().to_bits()]];
+    for i in 0..=64 {
+        let p = trim
+            .evaluate_point(k, ivl.evaluate(f64::from(i) / 64.0))
+            .unwrap();
+        bits.push([p.x.to_bits(), p.y.to_bits()]);
+    }
+    (bits, b.edge(e).unwrap().tolerance)
+}
+
+/// Raising an edge's tolerance to cover its gap does not loosen the UV trim fitted
+/// later. On `Fillet/sphere_plane.smb` the healer raises the circle edge from the
+/// default 1e-5 to 1.85e-5 (gain times its 1.69e-5 gap); the sphere's trim, made after
+/// the read, is the trim made at the healer's tolerance without that raise (1e-5,
+/// upstream's `CalcEdgeZoneTol3d` for the gap), bit for bit. A trim fitted at the raised
+/// tolerance bounded a cap 3.9e-7 from the one the edge bounds, against 4.7e-8.
+#[test]
+fn sphere_plane_trim_fit_does_not_grow_with_the_gap_cover() {
+    use solidcore::topology::edgeuse::p1 as eu1;
+    use solidcore::topology::{EdgeId, FaceId};
+    let mut k = Kernel::default();
+    let mut b = read(&mut k, "Fillet/sphere_plane.smb");
+    let e = EdgeId::from_index(3);
+    let raised = b.edge(e).unwrap().tolerance;
+    assert!(raised > 1.0e-5, "the circle edge is raised: {raised:e}");
+    let (healed, tol) = sphere_plane_circle_trim(&k, &mut b);
+
+    // the same read with the circle edge at the tolerance before the gap cover, and the
+    // sphere's trim made again there
+    let mut k0 = Kernel::default();
+    let mut b0 = read(&mut k0, "Fillet/sphere_plane.smb");
+    for eu in b0.edge(e).unwrap().edgeuses.clone() {
+        if eu1::face(&b0, eu).unwrap() == Some(FaceId::from_index(0)) {
+            eu1::set_uv_trim_curve(&mut b0, eu, eu1::UvTrimCurveArg::Null, 0.0, true, None)
+                .unwrap();
+        }
+    }
+    b0.edge_mut(e).unwrap().tolerance = 1.0e-5;
+    let (unraised, tol0) = sphere_plane_circle_trim(&k0, &mut b0);
+    // (both trims raise the edge to twice their distance to the sphere, the same)
+    assert_eq!(tol.to_bits(), tol0.to_bits(), "{tol:e} {tol0:e}");
+    assert_eq!(healed, unraised);
+}

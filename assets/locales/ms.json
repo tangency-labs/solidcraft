@@ -2721,7 +2721,7 @@
   "render.cpu_body_choose": "Pilih jasad",
   "render.cpu_body_filter": "Tapis jasad mengikut nama",
   "render.cpu_body_filter_more": "Perhalusi tapisan untuk melihat lebih banyak jasad.",
-  "render.cpu_body_missing": "Sasaran pantulan hilang, tersembunyi, taksa atau mempunyai nama yang lebih panjang daripada 128 bait. Pilih semula.",
+  "render.cpu_body_missing": "Sasaran pantulan hilang, tersembunyi, taksa atau mempunyai nama yang lebih panjang daripada 512 bait. Pilih semula.",
   "render.cpu_budget": "Profil sumber CPU",
   "render.cpu_budget_bodies": "Had atas jasad",
   "render.cpu_budget_compact": "Padat (had lama)",

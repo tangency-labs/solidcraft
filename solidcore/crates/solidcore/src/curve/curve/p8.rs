@@ -91,8 +91,9 @@ use crate::geom::global_solver::{
 use crate::geom::solution_array::{
     OperandObject, Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType,
 };
-use crate::geom::tol::{are_same, scaled_zero2, ScaledZero};
+use crate::geom::tol::{are_parallel, are_same, scaled_zero2, ScaledZero};
 use crate::geom::tree::Tree;
+use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, min4, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::{BSplineCurve, ProjectionType};
@@ -1264,6 +1265,14 @@ impl Curve {
             }
 
             if !needs_more_work {
+                self.drop_ranges_of_tangencies(
+                    k,
+                    &mut sols,
+                    other,
+                    interval,
+                    other_interval,
+                    dist_tol,
+                )?;
                 return Ok(sols);
             }
         }
@@ -1377,6 +1386,10 @@ impl Curve {
 
         // Refine Range solutions.
         refine(k, &mut sols, &named)?;
+        // Not upstream (#18064): a range with exact ends on the flank of a tangency is no
+        // coincidence. Dropped before the contacts move to the curve ends, as a range
+        // there would stop the flank's point solutions moving to the touch past it.
+        self.drop_ranges_of_tangencies(k, &mut sols, other, interval, other_interval, dist_tol)?;
         let self_intersect = core::ptr::eq(tree1, tree2);
         // Not for a self intersection: there the "other" curve is this curve, so the
         // stretch test compares the curve with itself and always passes, and the move
@@ -2113,6 +2126,176 @@ impl Curve {
                     done = false;
                     break;
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Not upstream (#18064): removes from `sols` each range solution that is the flank
+    /// of a tangency, not a stretch where the two curves coincide.
+    ///
+    /// Two curves in contact of high order (a curve ending on an arc it is tangent to,
+    /// apart as the fourth power of the distance from the touch) stay within the scaled
+    /// zero of each other for a while beside the touching point, so the solve can report
+    /// a range there whose two ends are both exact intersections; upstream keeps such a
+    /// range as a coincidence (`classify_ranges`), and the curves are then cut at its
+    /// far end, which is no event on either curve. Phase 2 (`cull_ranges_near_points`)
+    /// discards a range beside a point solution for the same reason, but only when it is
+    /// shorter than a thousandth of the domain.
+    ///
+    /// A range is such a flank when both its ends are exact to the scaled zero and a
+    /// touching point lies beyond one end on both curves (a point solution, or the
+    /// point where an end of each curve's interval meets the other's within the scaled
+    /// zero), where the two curves are tangent, and from which the gap grows faster
+    /// than linearly up to the range's far end: the gap at the touch is no larger than
+    /// at this curve's midpoint between it and the far end (dropped onto the other
+    /// curve), and the gap there is less than half the far end's. The gap of a tangency
+    /// grows at least as the square of the distance from the touch, so at the midpoint
+    /// it is at most a quarter of the far end's, and growth that is linear or slower is
+    /// no tangency.
+    ///
+    /// Three things tell such a flank from a coincidence, whose gap along the range is
+    /// only the rounding of the evaluations and says nothing of growth:
+    /// - the range stops short of the touch (its near end lies farther than the scaled
+    ///   zero from the touch on this curve): a coincidence through a point where the
+    ///   curves meet reaches that point, as the gap is zero all along it;
+    /// - its far end lies off the ends of both curves' intervals (farther than the scaled
+    ///   zero from each), so the range ends where the curves part, not where one of them
+    ///   stops (a seam edge along its surface's seam curve, a cone's edge along its
+    ///   ruling);
+    /// - the far end's two parameters give points within the scaled zero of each other,
+    ///   as an exact end does, and the gap at the midpoint is larger than at the touch.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluations.
+    fn drop_ranges_of_tangencies<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        sols: &mut SolutionArray<O>,
+        other: &Self,
+        interval: &Extent1d,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+    ) -> Result<()> {
+        let gap_at = |a: f64, b: f64| -> Result<f64> {
+            Ok(self
+                .evaluate_point(k, a)?
+                .distance(other.evaluate_point(k, b)?))
+        };
+        // where the ends of the two intervals meet: touching points the solve need not
+        // report
+        let mut touches: Vec<[f64; 2]> = Vec::new();
+        for a in [interval.min(), interval.max()] {
+            for b in [other_interval.min(), other_interval.max()] {
+                let p = self.evaluate_point(k, a)?;
+                if gap_at(a, b)? < EFF_ZERO * (1.0 + p.max_dimension()) {
+                    touches.push([a, b]);
+                }
+            }
+        }
+        // the ends of each curve's interval, where a coincidence of the two can stop
+        let self_ends = [
+            self.evaluate_point(k, interval.min())?,
+            self.evaluate_point(k, interval.max())?,
+        ];
+        let other_ends = [
+            other.evaluate_point(k, other_interval.min())?,
+            other.evaluate_point(k, other_interval.max())?,
+        ];
+        let tangent_at =
+            |c: &Self, t: f64| -> Result<Vec3> { Ok(at(&c.evaluate(k, t, 1, true, true)?, 1)) };
+        let mut ii = 0;
+        while ii < sols.len() {
+            let range = sol_at(sols, ii)?;
+            if range.solution_type != SolutionType::RangeOfValues {
+                ii += 1;
+                continue;
+            }
+            let pnt = self.evaluate_point(k, range.start.parameters[0])?;
+            let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
+            if range.start.solution_value >= scaled_zero || range.end.solution_value >= scaled_zero
+            {
+                ii += 1;
+                continue;
+            }
+            let ends = [
+                [range.start.parameters[0], range.start.parameters[1]],
+                [range.end.parameters[0], range.end.parameters[1]],
+            ];
+            let mut candidates = touches.clone();
+            for s in sols.as_slice() {
+                if s.solution_type == SolutionType::SingleValue {
+                    candidates.push([s.start.parameters[0], s.start.parameters[1]]);
+                }
+            }
+            let mut flank = false;
+            for touch in candidates {
+                for (near, far) in [(ends[0], ends[1]), (ends[1], ends[0])] {
+                    // the touch lies beyond the near end, away from the far end, on both
+                    let beyond = touch
+                        .iter()
+                        .zip(near.iter())
+                        .zip(far.iter())
+                        .all(|((t, n), f)| (t - n) * (f - n) <= 0.0 && (t - f).abs() > 0.0);
+                    if !beyond {
+                        continue;
+                    }
+                    // the curves part at the far end within both of them
+                    let far_self = self.evaluate_point(k, far[0])?;
+                    let far_other = other.evaluate_point(k, far[1])?;
+                    let parts_inside = self_ends
+                        .iter()
+                        .all(|e| e.distance(far_self) >= scaled_zero)
+                        && other_ends
+                            .iter()
+                            .all(|e| e.distance(far_other) >= scaled_zero);
+                    // the range stops short of the touch
+                    let short_of_touch = self
+                        .evaluate_point(k, touch[0])?
+                        .distance(self.evaluate_point(k, near[0])?)
+                        >= scaled_zero;
+                    // and they are tangent at the touch
+                    let tangent = are_parallel(
+                        tangent_at(self, touch[0])?,
+                        tangent_at(other, touch[1])?,
+                        None,
+                    );
+                    if !parts_inside || !short_of_touch || !tangent {
+                        continue;
+                    }
+                    let g_touch = gap_at(touch[0], touch[1])?;
+                    // this curve's midpoint between the touch and the far end, dropped onto
+                    // the other curve between them
+                    let mut span = Extent1d::from_value(touch[1]);
+                    span.add_value(far[1]);
+                    let mid = self.evaluate_point(k, (touch[0] + far[0]) / 2.0)?;
+                    let dropped = other.drop_point(
+                        k,
+                        &span,
+                        mid,
+                        None,
+                        dist_tol,
+                        Some(span.mid()),
+                        SolverOperation::Minimize,
+                    )?;
+                    if !dropped.success {
+                        continue;
+                    }
+                    let g_mid = mid.distance(other.evaluate_point(k, dropped.parameter)?);
+                    let g_far = gap_at(far[0], far[1])?;
+                    if g_far < scaled_zero && g_touch < g_mid && 2.0 * g_mid < g_far {
+                        flank = true;
+                    }
+                }
+                if flank {
+                    break;
+                }
+            }
+            if flank {
+                sols.remove_at(ii, 1);
+            } else {
+                ii += 1;
             }
         }
         Ok(())

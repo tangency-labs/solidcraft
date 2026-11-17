@@ -694,7 +694,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|name| !name.is_empty()) {
-        Some(name) if name.len() <= 128 => name.to_string(),
+        Some(name) if name.chars().count() <= 128 => name.to_string(),
         Some(_) => return Err(bad(cmd, "`name` must be 1…128 characters")),
         None => format!("Folder{}", s.doc.timeline_groups.len() + 1),
     };
