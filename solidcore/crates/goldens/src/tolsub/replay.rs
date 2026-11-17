@@ -13,7 +13,9 @@
 //!    bits first, except on `corpus.parity`'s read back of the body its round trip writes
 //!    from the substituted read, which must hold main's already; every read must
 //!    happen), the encoded row hashes to main's row;
-//! 2. as is, the encoded row equals the committed golden line.
+//! 2. as is, the encoded row equals the committed golden line, or, for a case listed in
+//!    `known_failing.json` (which has no golden line), hashes to this branch's row in
+//!    [`KNOWN_FAILING_ROWS`].
 //!
 //! So each committed row is this branch's output, and it differs from main's run only
 //! through the listed tolerances. `corpus.parity` runs its two sides in this process
@@ -28,7 +30,7 @@ use serde_json::Value;
 
 use super::state::{self, Mode, Sub};
 use crate::case::{repo_root, Case, CaseContext};
-use crate::golden::{default_dir, encode, read};
+use crate::golden::{default_dir, encode, known_failing, read};
 use crate::rng::fnv1a64;
 use crate::units::corpus_parity::run_in_process;
 use crate::UnitDiff;
@@ -48,6 +50,14 @@ pub(super) type Row = (
     u32,
     &'static [(u32, bool, u32, u64, u64)],
 );
+
+/// Moved rows of cases listed in `known_failing.json`, which have no golden line: unit,
+/// case and the FNV-1a hash of this branch's encoded row (from `record` on this branch).
+const KNOWN_FAILING_ROWS: &[(&str, &str, u64)] = &[(
+    "blend.fillet_executive_p3",
+    "stubs4-open_shell-e5-r0.5",
+    0xf9b11438e4882e56,
+)];
 
 fn unit(id: &str) -> Box<dyn UnitDiff> {
     crate::registry()
@@ -89,6 +99,7 @@ fn replay(unit_id: &str) -> usize {
     let u = unit(unit_id);
     let all = cases(u.as_ref());
     let golden = read(&default_dir(), unit_id).unwrap();
+    let known = known_failing(&default_dir(), unit_id).unwrap();
     let mut failures = Vec::new();
     let mut n = 0;
     for &(_, name, main_hash, reads, subs) in DATA.iter().filter(|r| r.0 == unit_id) {
@@ -143,7 +154,20 @@ fn replay(unit_id: &str) -> usize {
             failures.push(format!("{name}: substituted row is not main's row"));
         }
         let line = run(u.as_ref(), case);
-        if golden.get(name) != Some(&line) {
+        if let Some(&(_, _, now_hash)) = KNOWN_FAILING_ROWS
+            .iter()
+            .find(|r| r.0 == unit_id && r.1 == name)
+        {
+            // (a known-failing case has no golden line: its row is pinned by hash)
+            if !known.contains_key(name) || golden.contains_key(name) {
+                failures.push(format!(
+                    "{name}: not a known-failing case with no golden line"
+                ));
+            }
+            if hash(&line) != now_hash {
+                failures.push(format!("{name}: the row is not this branch's pinned row"));
+            }
+        } else if golden.get(name) != Some(&line) {
             failures.push(format!("{name}: the row is not the committed golden line"));
         }
     }
@@ -162,12 +186,12 @@ macro_rules! replay_tests {
 
 replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
-    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 29;
+    fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 30;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
     corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 26;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
-    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
+    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 39;
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
     face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 48;
 }

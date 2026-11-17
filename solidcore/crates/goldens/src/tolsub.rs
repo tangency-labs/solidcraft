@@ -2,7 +2,7 @@
 //! [`after_read`] lets this crate's tests record the edge and vertex tolerances or put
 //! other bits in their place. Outside `cfg(test)` it does nothing.
 //!
-//! The tolerance-substitution replay (`units::replay_tolerances`, #18230) uses it to show
+//! The tolerance-substitution replay (`tolsub::replay`, #18230) uses it to show
 //! that a golden row moved only through the tolerances a read set: with main's tolerance
 //! bits put back on the entities the read changed, the row is main's row bit for bit.
 //!

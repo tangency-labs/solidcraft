@@ -973,6 +973,19 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         ],
         "{volume_classes:?}"
     );
+    // (the enclosure widths the doc quotes, to the quoted two figures)
+    let widths: Vec<_> = volume_classes
+        .iter()
+        .map(|&(n, _, lo, hi)| (n, format!("{:.1e}", hi - lo)))
+        .collect();
+    assert_eq!(
+        widths,
+        [
+            ("Fillet/corner_box.smb", "3.1e-3".to_string()),
+            ("Fillet/test1.smb", "7.7e-7".to_string())
+        ],
+        "{volume_classes:?}"
+    );
     assert!(failures.is_empty(), "{failures:#?}");
     assert_eq!(wr493, WR493_READS);
 }
