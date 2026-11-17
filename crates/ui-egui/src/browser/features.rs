@@ -461,8 +461,9 @@ fn feature_row(
     // selected in the tree, as NX marks the feature of a picked face; the session's selection
     // stays the face or edge.
     let [_, picked] = acts.lit.features_from_view(app);
-    let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && picked == Some(id);
-    let selected = app.session.selection.contains(&Sel::Feature { id }) || by_geometry;
+    let chosen = app.session.selection.iter().any(|s| crate::timeline::feature_of_sel(&app.session.doc, s) == Some(id));
+    let by_geometry = !chosen && picked == Some(id);
+    let selected = chosen || by_geometry;
     let mut order_key = String::new();
     write_order_key(here, id, &mut order_key);
     app.tree.remember(&order_key);
@@ -1002,6 +1003,26 @@ mod tests {
         assert!(item.enabled);
         crate::context_menu::run_item(app, &item, pos2(0.0, 0.0));
         assert_eq!(app.session.selection, [Sel::Feature { id: feature }]);
+    }
+
+    #[test]
+    fn an_offset_plane_is_one_selection_in_the_features_the_history_and_the_view() {
+        let mut h = Harness::new();
+        let plane = h.app.run("construct.plane.offset", json!({"base":"XY","offset":31,"name":"Shelf"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(2);
+        let doc = h.app.session.doc.clone();
+        // A Features row or History icon picks the feature: the view lights the plane by name.
+        assert_eq!(crate::viewport::displayed_selection(&h.app, &Sel::Feature { id: plane }), [Sel::Plane { name: "Shelf".into() }]);
+        // The plane picked in the view (or the Construction row) is that same feature in the lists.
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &Sel::Plane { name: "Shelf".into() }), Some(plane));
+        h.app.session.selection = vec![Sel::Plane { name: "Shelf".into() }];
+        h.frames(2);
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &h.app.session.selection[0]), Some(plane));
+        // The plane picked in the view is also what a drag, Copy or Delete from its row acts on.
+        assert_eq!(crate::timeline::selected_feature_ids(&h.app), [plane]);
+        assert_eq!(crate::timeline_left::drag_features(&mut h.app, plane, true), [plane]);
+        // An origin plane is no feature, and an unknown name maps to nothing.
+        assert_eq!(crate::timeline::feature_of_sel(&doc, &Sel::Plane { name: "XY".into() }), None);
     }
 
     #[test]

@@ -782,7 +782,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | tests/kernel-cases/import/4561-convert-box-mesh-with-a-zero-area-triangle/box-degenerate.stl | SolidCraft contributors | synthetic ASCII STL written by hand: a box with one zero-area triangle, for the kernel regression case of tangency-labs/solidcraft#4561 | MIT OR Apache-2.0 |
 | assets/locales/pending/theme-blur-ui.json | SolidCraft contributors | Original blur controls, notices and translations | MIT OR Apache-2.0 |
 | crates/ui-egui/tests/fixtures/theme-blur.json | SolidCraft contributors | Original theme for blur option scenarios and manager review | MIT OR Apache-2.0 |
-| assets/locales/ka.json | David Machakhelidze (devius) | Original Georgian translation of SolidCraft's English catalog, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/ka.json | Davit Matchakhelidze (devius) | Original Georgian translation of SolidCraft's English catalog, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/branding/logo/solidcraft-mark.svg | SolidCraft contributors | static SolidCraft mark: the five faces and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg (the final frame of assets/styles/web/loading-logo.svg), cropped to the mark's bounds; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/branding/logo/solidcraft-mark-mono-black.svg | SolidCraft contributors | one-colour (black) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/branding/logo/solidcraft-mark-mono-white.svg | SolidCraft contributors | one-colour (white) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
@@ -891,6 +891,15 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | `assets/locales/pending/plugins-review-commands.json` | SolidCraft contributors | Original plugin removal command labels and translations | MIT OR Apache-2.0 |
 | `assets/locales/pending/plugins-review-ui.json` | SolidCraft contributors | Original plugin installation approval and manager messages and translations | MIT OR Apache-2.0 |
 | tests/step-regressions/thread_crest_band.step | SolidCraft contributors | written entity by entity from formulas (a cylinder face round a helical groove two turns long); import regression fixture | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/briefcase.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/refresh.svg | SolidCraft contributors | original monochrome reload icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/document_browser.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/insert_mesh.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/io/tests/fixtures/pcb/treasure_hunt_pth.drl | Kikomali (SolidCraft contributor) | Plated drill file of the contributor's own "Treasure hunt" printed circuit board, exported unchanged as Excellon; Excellon import test fixture | MIT OR Apache-2.0 |
+| assets/locales/pending/extrude-cut-targets.json | SolidCraft contributors | Original Extrude Cut target tooltip and translations | MIT OR Apache-2.0 |
+| crates/io/tests/fixtures/pcb/treasure_hunt_outline.gko | Kikomali (SolidCraft contributor) | Board outline layer of the contributor's own "Treasure hunt" printed circuit board, exported unchanged as Gerber; Gerber import test fixture | MIT OR Apache-2.0 |
+| solidcore/crates/solidcore-ops/tests/data/issue_17595_imported_corner.smb | HuggingAI4Engineering | a 3 mm cube cut by the kernel from the part of CADGenBench task 248 (https://huggingface.co/datasets/HuggingAI4Engineering/cadgenbench-data, revision f76f9655), written as a native body file; boolean regression fixture | ODC-By-1.0 |
+| solidcore/crates/solidcore-ops/tests/data/issue_17595_imported_edge_off_its_face.record.json | HuggingAI4Engineering | a second 3 mm cube cut by the kernel from the same part (CADGenBench task 248, revision f76f9655), as a body record with one edge at the tolerance the STEP import gave it; boolean regression fixture | ODC-By-1.0 |
 
 ## Code adapted from sibling projects
 

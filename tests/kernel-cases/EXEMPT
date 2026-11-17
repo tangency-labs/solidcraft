@@ -29,6 +29,8 @@ browser.group                     the browser tree: order, groups and folding
 browser.move                      the browser tree: order, groups and folding
 browser.order                     the browser tree: order, groups and folding
 browser.rename_group              the browser tree: order, groups and folding
+browser.toggle_planes             the browser: crates/engine/src/cmd/browser.rs tests
+browser.toggle_reference          the browser: crates/engine/src/cmd/browser.rs tests
 browser.ungroup                   the browser tree: order, groups and folding
 canvas.calibrate                  reference images, and sketches traced from them (sketch only)
 canvas.decal                      reference images, and sketches traced from them (sketch only)
@@ -258,6 +260,7 @@ select.filter                     the selection
 select.parallel_edges             the selection; crates/engine/src/cmd/edit_tests.rs
 select.same_look                  the selection
 select.set                        the selection
+select.sharp_edges                the selection; crates/engine/src/cmd/edit_tests.rs
 selection.delete                  deletes what is selected through the commands that own each kind
 selection.get                     reads the selection, read only; crates/engine/src/cmd/edit_tests.rs
 settings.profile.apply            settings profiles: preferences saved, applied and shared
