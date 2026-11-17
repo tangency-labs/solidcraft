@@ -129,6 +129,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_round_ends_on_outline = false;
     f.fillet_chamfer_corner = true;
     f.brep_ray_classifies_current_trims = true;
+    f.seam_vertex_stays_on_seam = true;
     f
 }
 
