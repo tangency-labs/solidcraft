@@ -394,6 +394,66 @@ which hid the question. A sliver between two such edges is no solid: two boxes o
 wedge 1e-4 across and 5e-6 thick intersect in nothing (kept as two edges, the wedge was a body of
 three faces that failed its check).
 
+**Seams and poles.** A tolerance band says where a boundary of material may lie. A seam (an edge
+with the same face on both sides: `face_on_both_sides`, `topology/edge.rs`) and a pole (a vertex
+all of whose edges are such seams: `inside_face`, `topology/vertex.rs`) bound no material: they
+are where the surface's parametrisation ends or degenerates, and the face goes on across them. So
+their tolerance adds nothing to a contact: a curve meets a seam edge or a pole only where the
+curve's own uncertainty region reaches it (`SourceReach` and `in_reach_region`,
+`intersect/curve_class/p1.rs`; `edge_solutions`, `p9.rs`; `intersect_vertices_in`, `p5.rs`).
+
+The region depends on what fixes the curve. An edge's curve is given: it is known to its
+tolerance. An intersection curve of two surfaces is known across itself only to
+tolerance / sin θ, θ the angle between the two surfaces along it: a surface moved by the tolerance
+moves the curve that far within the other (the bound of the near-coincident strips, and one
+dimension up from the crossing of two curves under "One point or two"). Along itself the curve is
+known to its tolerance: the angle of its own two surfaces says nothing about where it ends, so a
+curve that stops short of a seam is short of it by its own tolerance. A point is outside the region
+only where that is proved, each distance less the rounding of the difference it is read from.
+
+θ is enclosed over everywhere the exact curve can lie, not read at points (`intersection_reach`,
+`surface/normal_cone.rs`): the curve is cut into pieces, each inside a ball (its hull); for a
+ball, the normals of a plane, cylinder, cone, sphere or ring torus at its points inside lie in a
+cone given in closed form (a sphere's within `asin(ρ / |m - c|)` of the direction from its centre
+`c` to the ball's centre `m`, `ρ` the ball's radius), and θ is at least the angle between the two
+cones' axes less both half angles. The balls are widened by the reach they prove until that reach
+lies inside them. Where no angle is proved (the surfaces tangent or nearly so somewhere along the
+curve, a surface of another kind, a curve without a hull) the curve may lie anywhere across itself
+within the band of both tolerances, as at a boundary edge. That band is also the most a proved
+reach counts: the seam edge that then stands for the curve has to hold it within both tolerances.
+A classification reads the reach of its two surfaces (`SetIntersectData`) the first time it meets
+a seam or a pole (`source_reach_in`); the face intersection sets it for its curves
+(`intersection_curve_reach`, `topology/face/p3.rs`).
+
+A stretch of the curve along a seam is what the curve/edge intersector finds within the reach. It
+reports a stretch only where all of it lies within the distance it is given, and the seam's end is
+no pole where the seam ends on a boundary edge: that vertex bounds material and has the band of
+both tolerances about it. So a stretch the intersector finds within the band also stands where an
+enclosure (`Curve::proved_near`) proves every point of it within the reach of the seam or within
+the band of such a vertex (`BoundaryEdge::seam` carries the two).
+
+"One edge or two" takes a seam for an intersection curve by the same reach
+(`find_edge_proved_along`, given the crossing face's surface), and the loop check takes an edge as
+running along a periodic side of its face's domain only within the edge's own tolerance
+(`is_edgeuse_side_in_surface`). `HasSeamProblem` (face test 36) classifies the face's own seam
+curve against its edges within both tolerances, as upstream does (`SourceReach::Boundary`), so it
+reports an edge beside the seam inside that band as a seam it nearly misses.
+
+Two cases fix the two ends. A box face 1.97e-5 beside the seam plane of a 0.3 mm sphere (`gen0150`
+of `boolean.api_brep`) cuts it at a right angle: the circle is known to 1.05e-5 (enclosed; 1e-5
+exactly) and is an edge of its own beside the seam, passing the pole. A second face cuts a shallow
+cap at about 13°: no reach within the band is proved for that circle, but it ends 1.99e-5 short of
+the seam, along itself, and so does not reach it. With the 2e-5 band the first
+circle had half its length classified on the seam and its top on the pole, and the slab between
+the seam plane and the face went with the wrong side (union 4.2e-3 off, intersection and
+difference 4e-2). Two tubes of radius 16 joined end to end with 1e-5 between them
+(`wr575_tube_ends_join_adds_no_check_failure_at_any_gap`): a short intersection curve of two
+surfaces that cross at a right angle (reach 1e-5) starts on a tube's seam (1e-13) and ends 1.03e-5
+from it, beside the vertex where the seam ends. It lies within the reach but for its last stretch,
+and that within the band of the vertex: the seam's piece, as upstream has it within 2e-5. Held to
+1e-5 by the intersector alone it met the seam in one point only, and the union was refused ("the
+related vertex is not an end of the edge use").
+
 ## 6. Tangent contacts
 
 Where the two boundaries touch without crossing (a cylinder on a plane, a sphere in a cone, two boxes
@@ -449,6 +509,20 @@ What the port does today:
   second tool whole, as a void.
   Parallel cones (drill points) are met by the marching intersection and are not decided this
   way, nor are coplanar faces bounded by such circles.
+- **A curve ending tangent to an edge.** A curve that touches an edge in contact of high order
+  (where a wall's intersection with a top tangent to the floor ends on the floor's arc, apart from
+  it as the fourth power of the distance) stays within the scaled zero of the edge for a while
+  beside the touch, and the curve/curve intersection can report a range there with both ends
+  exact. Upstream keeps such a range as a coincidence and the curve is cut at its far end, which
+  is no event. `drop_ranges_of_tangencies` (`curve/curve/p8.rs`) drops a range whose gap grows
+  faster than linearly from a touching point beyond one of its ends (a point solution, or where
+  the two curves' interval ends meet) at which the curves are tangent, when the range stops short
+  of the touch and its far end, exact, lies off the ends of both curves: the touch is the
+  intersection. A coincidence through the touch reaches it, and one that ends where a curve ends
+  is not a flank; along a coincidence the gap is rounding and shows no growth either way. The
+  range is dropped before point contacts move to the curve ends (`move_contacts_to_curve_ends`),
+  which leaves a point whose stretch to the end crosses a range where it is: the flank's points
+  on the far side of the range then move to the touch.
 - **A line a hair inside a circle.** A line in a circle's plane, δ inside the circle, crosses
   it at two points `2√(2rδ)` apart and stays within δ of it between them, as two circles do.
   `line_coplanar_circle_intersect_distinct` (`geom/geom_utility/p1.rs`) takes an overlap below
@@ -488,9 +562,6 @@ only on a B-spline piece, since it is read point for point on its net. The test
 `a_boolean_cuts_a_reopened_round_on_its_definition` (`solidcore/tests/wr698_gn_round_is_its_definition.rs`)
 cuts a cylinder through a round, once as built and once rebuilt from its record, and checks the same
 volume, the same edges on the round, and every such edge on S within its own tolerance.
-
-The blend definitions themselves are opt-in (`fillet_round_as_definition`); without it a round is a
-bare net and there is no definition to keep.
 
 **Where exact edges still get fitted trims.**
 - A curve from a closed form (a line, circle or ellipse, [ssi.md](ssi.md) §5) has no UV curves; its

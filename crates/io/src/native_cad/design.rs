@@ -374,6 +374,7 @@ impl Builder {
                 second_follows_first: false,
                 corner: None,
                 to_body_apart: false,
+                from_level: false,
                 picked_placements: Vec::new(),
             },
             operation,
@@ -511,6 +512,7 @@ impl Builder {
                         reversed2: false,
                     },
                     bodies: Vec::new(),
+                    placements: Vec::new(),
                 }
             }
             Some("circular") => {
@@ -535,6 +537,7 @@ impl Builder {
                         axis_feature: None,
                     },
                     bodies: Vec::new(),
+                    placements: Vec::new(),
                 }
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),

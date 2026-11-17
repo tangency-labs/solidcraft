@@ -58,6 +58,7 @@ impl BarRig {
         let bar = AppBar {
             mark: &|_, _| {},
             name: self.name,
+            leading: None,
             home: BarButton { id: "home", icon: "home", tip: "Home", enabled: true, narrow: false, wide_only: false },
             file: "File",
             file_open: false,
