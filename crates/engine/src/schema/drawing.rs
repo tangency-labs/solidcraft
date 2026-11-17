@@ -38,6 +38,9 @@ pub struct DrawingCreateParams {
     /// Starts the first sheet without a title block when true.
     #[serde(default)]
     pub omit_first_sheet_title_block: bool,
+    /// Place front, top, right and isometric views on the first sheet at a fitted scale.
+    #[serde(default)]
+    pub standard_views: bool,
     /// Its content language, a BCP 47 tag (the template's when not given).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
