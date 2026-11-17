@@ -72,9 +72,13 @@ pub(crate) struct Bounds {
     list: usize,
     /// Lines in the whole outline.
     total: usize,
+    /// Plain values of a list joined on one line before "…".
+    joined: usize,
+    /// Characters of one value shown; the rest is cut with "…".
+    text: usize,
 }
-const SHOWN: Bounds = Bounds { list: 200, total: 20_000 };
-const ALL: Bounds = Bounds { list: usize::MAX, total: usize::MAX };
+const SHOWN: Bounds = Bounds { list: 200, total: 20_000, joined: MAX_JOINED, text: MAX_TEXT };
+const ALL: Bounds = Bounds { list: usize::MAX, total: usize::MAX, joined: usize::MAX, text: usize::MAX };
 /// Nesting deeper than this is shown as the JSON it is, on one line.
 const MAX_DEPTH: usize = 12;
 /// Characters of one value or label shown; the rest is cut with "…".
@@ -120,15 +124,15 @@ fn node(label: String, value: &Value, depth: usize, bounds: Bounds, budget: &mut
     }
     *budget -= 1;
     if depth >= MAX_DEPTH {
-        return Some(Node::leaf(label, clip(&value.to_string())));
+        return Some(Node::leaf(label, clip_to(&value.to_string(), bounds.text)));
     }
     Some(match value {
         Value::Array(list) if list.iter().all(|v| !v.is_array() && !v.is_object()) => {
-            let mut joined = list.iter().take(MAX_JOINED).map(scalar).collect::<Vec<_>>().join(", ");
-            if list.len() > MAX_JOINED {
+            let mut joined = list.iter().take(bounds.joined).map(scalar).collect::<Vec<_>>().join(", ");
+            if list.len() > bounds.joined {
                 joined.push_str(", …");
             }
-            Node::leaf(label, clip(&joined))
+            Node::leaf(label, clip_to(&joined, bounds.text))
         }
         Value::Array(list) => {
             let label = format("import_report.group", &[("title", &label), ("count", &list.len().to_string())]);
@@ -138,7 +142,7 @@ fn node(label: String, value: &Value, depth: usize, bounds: Bounds, budget: &mut
             let open = depth == 0 || map.values().all(|v| !v.is_array() && !v.is_object());
             Node { label, value: String::new(), children: fields(map, depth + 1, bounds, budget), open }
         }
-        other => Node::leaf(label, clip(&scalar(other))),
+        other => Node::leaf(label, clip_to(&scalar(other), bounds.text)),
     })
 }
 
@@ -180,8 +184,13 @@ fn humanize(key: &str) -> String {
 
 /// Printable text, at most [`MAX_TEXT`] characters.
 fn clip(text: &str) -> String {
-    let mut out: String = text.chars().take(MAX_TEXT).map(|c| if c.is_control() { ' ' } else { c }).collect();
-    if text.chars().nth(MAX_TEXT).is_some() {
+    clip_to(text, MAX_TEXT)
+}
+
+/// Printable text, at most `limit` characters.
+fn clip_to(text: &str, limit: usize) -> String {
+    let mut out: String = text.chars().take(limit).map(|c| if c.is_control() { ' ' } else { c }).collect();
+    if text.chars().nth(limit).is_some() {
         out.push('…');
     }
     out
@@ -351,7 +360,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::text(ui, &tally.join(" · "), ui_kit::Text::Hint("import_report_tally"));
             }
             if !shown.report.items.is_empty() || !shown.outline.is_empty() {
-                egui::ScrollArea::vertical().id_salt("import_report_items").max_height(360.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("import_report_items").max_height(320.0).show(ui, |ui| {
                     for (i, (severity, line)) in lines(&shown.report).iter().enumerate() {
                         let strong = *severity == LossSeverity::Dropped;
                         ui.push_id(i, |ui| ui_kit::text(ui, line, ui_kit::Text::Report("import_report_item", strong)));
@@ -483,6 +492,13 @@ mod tests {
         assert_eq!(nodes[0].children.len(), 201);
         assert_eq!(nodes[0].children[200].label, "and 50 more");
         assert_eq!(outline(&serde_json::json!({"losses": many}), ALL)[0].children.len(), 250, "a copied report has them all");
+        let long: Vec<serde_json::Value> = (0..51).map(|i| serde_json::json!(format!("v{i}"))).collect();
+        let text = "x".repeat(MAX_TEXT + 10);
+        let full = outline(&serde_json::json!({"list": long, "long": text}), ALL);
+        assert!(full[0].value.ends_with("v50"), "a copied report has every list element");
+        assert_eq!(full[1].value.chars().count(), MAX_TEXT + 10, "and every value in full");
+        let cut = outline(&serde_json::json!({"list": long, "long": text}), SHOWN);
+        assert!(cut[0].value.ends_with('…') && cut[1].value.ends_with('…'));
         let mut deep = serde_json::json!("bottom");
         for _ in 0..100 {
             deep = serde_json::json!({"x\u{7}y_z": [deep]});
