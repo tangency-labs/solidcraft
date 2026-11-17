@@ -633,4 +633,24 @@ mod tests {
             .unwrap()
             .is_ok());
     }
+
+    /// 16.2 passes through [m22]: Wall sunk through Bottom (z -2..66) overlaps S and runs out of
+    /// its far face (z = 0): `passes_through`, and the recipe makes nothing; flush with the far
+    /// face (z 0..66) it is an overlap joint, as is the wall sunk 4.
+    #[test]
+    fn a_wall_through_s_passes_through() {
+        let (s, p) = bottom();
+        let through = make_box([20.0, 30.0, -2.0], [120.0, 6.0, 68.0]).unwrap();
+        assert_eq!(
+            through.plate_pair(&s, p, TOL).unwrap(),
+            Err(PairSkip::PassesThrough)
+        );
+        assert!(matches!(
+            through.tab_slot_cut(&s, p, spec2(), TOL).unwrap(),
+            Err(PairSkip::PassesThrough)
+        ));
+        let flush = make_box([20.0, 30.0, 0.0], [120.0, 6.0, 66.0]).unwrap();
+        let joint = flush.plate_pair(&s, p, TOL).unwrap().expect("joint");
+        assert_eq!(joint.contact, Contact::Overlap);
+    }
 }

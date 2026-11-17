@@ -770,6 +770,9 @@ pub enum PairSkip {
     NotSquare(Option<f64>),
     /// The reverse pair (S as tab plate, T as slot plate) is a plate joint [m10].
     Swapped,
+    /// T overlaps S and runs out through a far face of S ([`passes_through`], design v2 5.3
+    /// [m22]).
+    PassesThrough,
 }
 
 /// A plate joint of T on P: how T meets P and T's plate faces there.
@@ -1197,7 +1200,9 @@ fn sigma_of(
 /// an area of S's face; the bodies' distance ([`boundary_distance`], on copies, bracketed to
 /// `tol`) only when neither holds. The strip Σ is the first footprint region sharing an area with
 /// S's faces (its extent stands for the strip's: no boolean runs); the candidates are T's planar
-/// faces; the rise is the greatest height of T's vertices over `p`. Neither body is changed.
+/// faces; the rise is the greatest height of T's vertices over `p`. An overlap whose T runs out
+/// through a far face of S ([`passes_through`]) is skipped `passes_through` before the plate
+/// faces are read. Neither body is changed.
 ///
 /// [`boundary_distance`]: crate::query::contact::boundary_distance
 ///
@@ -1234,6 +1239,9 @@ pub fn pair_at(
             }),
         }
     })?;
+    if how == Contact::Overlap && passes_through(k, s, t, &frame, tol)? {
+        return Ok(Err(PairSkip::PassesThrough));
+    }
     let candidates: Vec<Plane> = t_faces.iter().filter_map(|f| f.plane).collect();
     let rise = t_faces
         .iter()
