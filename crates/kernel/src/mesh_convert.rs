@@ -320,9 +320,7 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
         // goes on to the next axis and then to the faceted solid, rather than refusing the mesh.
         return Ok(None);
     }
-    if !nodes(&other_raw).iter().all(|p| on(&loops, *p))
-        || !nodes(&raw_loops).iter().all(|p| on(&other_loops, *p))
-    {
+    if !nodes(&other_raw).iter().all(|p| on(&loops, *p)) || !nodes(&raw_loops).iter().all(|p| on(&other_loops, *p)) {
         return Ok(None);
     }
     // Every side triangle lies on the straight extrusion of the section: projected along the
@@ -842,7 +840,7 @@ mod tests {
         let star = |i: usize| {
             let a = std::f64::consts::TAU * (i as f64 + 0.37) / n as f64;
             let b = std::f64::consts::TAU * ((i % n) as f64 + 0.37) / n as f64;
-            let r = if i % 2 == 0 { 20. } else { 19.5 };
+            let r = if i.is_multiple_of(2) { 20. } else { 19.5 };
             ((r * b.cos(), r * b.sin()), a, b)
         };
         // Where the ray from the centre at angle `a` meets the base's square outline.
@@ -890,7 +888,7 @@ mod tests {
         }
         // The base's four walls (a fan from each one's bottom corners up to its top points).
         for (k, points) in top_points.iter_mut().enumerate() {
-            let key = |p: &(f64, f64)| if k % 2 == 0 { p.1 } else { p.0 };
+            let key = |p: &(f64, f64)| if k.is_multiple_of(2) { p.1 } else { p.0 };
             points.sort_by(|x, y| key(x).total_cmp(&key(y)));
             points.dedup();
             let (Some(&first), Some(&last)) = (points.first(), points.last()) else { continue };
