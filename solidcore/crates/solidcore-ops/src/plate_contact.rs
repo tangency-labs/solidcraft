@@ -9,10 +9,11 @@ use solidcore::prism::profile::Region2;
 use solidcore::tab_slot::{self as ts, Layout, SlotSkip, StretchSkip, TabSkip};
 
 use crate::body::Body;
+use crate::boolean::{boolean, union_all, BooleanOp};
 use crate::contact::{copy_of, poisoned};
 use crate::error::status;
 use crate::session::{run, run_on, Answer};
-use crate::Result;
+use crate::{Error, Result};
 
 /// A pair's answer: the joint, or why there is none.
 pub type Pair = core::result::Result<PairJoint, PairSkip>;
@@ -35,6 +36,22 @@ pub struct TabSlotSpec {
     pub min_land: f64,
     /// How far a tab reaches past S's far face (negative: short of it, design 6.1).
     pub protrusion: f64,
+    /// The slot prism's overshoot `o_S` past each of S's faces (design 7.2).
+    pub overshoot: f64,
+}
+
+/// The recipe applied ([`Body::tab_slot_cut`]): T with its tabs joined, S with its slots cut,
+/// and the plan they were made from.
+#[derive(Debug)]
+pub struct TabSlotCut {
+    /// The tab plate T with every made tab joined.
+    pub tab_plate: Body,
+    /// The slot plate S with every made tab's slot cut.
+    pub slot_plate: Body,
+    /// The strip's run `d` in P's frame.
+    pub d: Vec2,
+    /// The stretches and tabs, made or skipped.
+    pub plan: Vec<StretchPlan>,
 }
 
 /// One tab of a stretch: where it starts along the strip, its slot outline in P's frame, and
@@ -229,6 +246,50 @@ impl Body {
         }
         Ok(Ok((d, out)))
     }
+
+    /// [`Body::tab_slot_plan`] applied (design 7): every tab whose slot passes 7.4 and whose
+    /// outline is made is extruded across T ([`tab_prism`]) and joined to a copy of this body,
+    /// and its slot ([`slot_prism`], S's thickness under `p`, `spec.overshoot` past each face)
+    /// cut from a copy of `slot`. A skipped slot makes no tab. The tab-plate cuts of 7.3 (root
+    /// dogbones, T-slot cut-outs) belong to router dogbones and bolts; a laser joint has none.
+    /// Neither body changes.
+    ///
+    /// # Errors
+    /// Those of [`Body::tab_slot_plan`], of the prisms and of the booleans.
+    pub fn tab_slot_cut(
+        &self,
+        slot: &Body,
+        p: Plane,
+        spec: TabSlotSpec,
+        tol: f64,
+    ) -> Result<core::result::Result<TabSlotCut, PairSkip>> {
+        let (d, plan) = match self.tab_slot_plan(slot, p, spec, tol)? {
+            Ok(planned) => planned,
+            Err(skip) => return Ok(Err(skip)),
+        };
+        let t_s = slot.slot_thickness(p, tol)?;
+        let mut tabs = vec![self.copy()?];
+        let mut slots = Vec::new();
+        for t in plan.iter().filter_map(|st| st.tabs.as_ref().ok()).flatten() {
+            let (Ok(outline), None, Some(t_s)) = (&t.tab, t.skip, t_s) else {
+                continue;
+            };
+            tabs.push(tab_prism(p, d, outline, t.faces)?);
+            slots.push(slot_prism(p, &t.slot, t_s, spec.overshoot)?);
+        }
+        let tab_plate = union_all(tabs)?;
+        let slot_plate = if slots.is_empty() {
+            slot.copy()?
+        } else {
+            boolean(slot.copy()?, union_all(slots)?, BooleanOp::Subtract)?.ok_or(Error::Empty)?
+        };
+        Ok(Ok(TabSlotCut {
+            tab_plate,
+            slot_plate,
+            d,
+            plan,
+        }))
+    }
 }
 
 /// Tab `k`'s prism ([`solidcore::plate_contact::tab_prism`]): `outline` (a [`TabPlan`]'s tab,
@@ -349,6 +410,7 @@ mod tests {
             clearance: 0.1,
             min_land: 0.5,
             protrusion: 1.0,
+            overshoot: 0.5,
         };
         let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
         let (d, plan) = wall
@@ -427,6 +489,48 @@ mod tests {
         let lifted = make_box([20.0, 30.0, 10.0], [120.0, 6.0, 60.0]).unwrap();
         assert!(matches!(
             lifted.tab_slot_plan(&s, p, spec, TOL).unwrap(),
+            Err(PairSkip::Contact(Contact::NoContact { .. }))
+        ));
+    }
+
+    /// 16.2 the recipe applied: Wall on Bottom, count 2: T gains two 10 x 6 x 7 tabs (43200 +
+    /// 840), S loses two 10.2 x 6.2 slots through its 6 (96000 - 758.88); the inputs are
+    /// untouched. Lifted: `no_contact`, nothing made.
+    #[test]
+    fn the_tab_slot_recipe_applied() {
+        let (s, p) = bottom();
+        let spec = TabSlotSpec {
+            layout: Layout::Count(2),
+            width: 10.0,
+            end_distance: 5.0,
+            clearance: 0.1,
+            min_land: 0.5,
+            protrusion: 1.0,
+            overshoot: 0.5,
+        };
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let cut = wall.tab_slot_cut(&s, p, spec, TOL).unwrap().expect("joint");
+        let v = |b: &Body| b.mass_properties(1e-9).unwrap().volume;
+        assert!(
+            (v(&cut.tab_plate) - 44040.0).abs() < 1e-6,
+            "{}",
+            v(&cut.tab_plate)
+        );
+        let want = 96000.0 - 2.0 * 10.2 * 6.2 * 6.0;
+        assert!(
+            (v(&cut.slot_plate) - want).abs() < 1e-6,
+            "{}",
+            v(&cut.slot_plate)
+        );
+        assert!((v(&wall) - 43200.0).abs() < 1e-6);
+        assert!((v(&s) - 96000.0).abs() < 1e-6);
+        assert_eq!(
+            cut.plan,
+            wall.tab_slot_plan(&s, p, spec, TOL).unwrap().unwrap().1
+        );
+        let lifted = make_box([20.0, 30.0, 10.0], [120.0, 6.0, 60.0]).unwrap();
+        assert!(matches!(
+            lifted.tab_slot_cut(&s, p, spec, TOL).unwrap(),
             Err(PairSkip::Contact(Contact::NoContact { .. }))
         ));
     }
