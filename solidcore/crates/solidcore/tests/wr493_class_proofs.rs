@@ -23,11 +23,11 @@
 //!   corner's volume and moments are those its trims bound (Stokes and Green agree), so
 //!   the geometry is exact. The `corpus.parity` volume is 5.1e-12 off the trims-bound
 //!   reference (old 9.8e-11). The `blend.fillet_executive_p3` mass row is closer in area,
-//!   volume, cx, the inertia and Pzx. cy, Pyz and Pxy are FARTHER (open): 7.3e-10,
-//!   7.1e-10 and 7.1e-10 relative off, against 1.7e-10, 2.5e-10 and 2.5e-10 before. That is
-//!   the corners' quadrature of the first moment in y at the row's requested accuracy 1e-4:
-//!   all eight corners err the same way (1.1e-10 in all, before 6.2e-11 summed by
-//!   magnitude), each within 1e-9 relative.
+//!   volume, cx, the inertia and Pzx. cy, Pyz and Pxy are EQUAL under RULING 3: 7.3e-10,
+//!   7.1e-10 and 7.1e-10 relative off, against 1.7e-10, 2.5e-10 and 2.5e-10 before (the
+//!   corners' quadrature of the first moment in y at the row's requested accuracy 1e-4),
+//!   all within the reference's certified bound, which the gaps between the file's faces
+//!   hold over 1e5 times wider (the y moment's enclosure floor, 2.0e-4).
 //! - `point_just_outside_the_sphere_pole_is_in_the_infinite_region`: the
 //!   `query.brep` `sphere_vertex3_off_region` point lies outside the sphere exactly.
 #![allow(
@@ -849,6 +849,7 @@ fn sphere_face_shares(
 /// the integrator's on both sides.
 #[test]
 fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
+    use solidcore::mass::enclosure::{enclose_mass_properties, enclose_quantity, Quantity};
     use solidcore::mass::integrator::properties::{
         brep_mass_properties_default, brep_volume_default,
     };
@@ -1012,9 +1013,7 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
         match i {
             // cz: no corner moves it
             5 => assert_eq!(new_off, old_off),
-            // cy, Pyz, Pxy: FARTHER, open (the corners' quadrature of the first moment in y
-            // at the requested 1e-4; the geometry is exact, above): asserted within 1e-9
-            // relative only
+            // cy, Pyz, Pxy: EQUAL to the reference's certified bound (below)
             4 | 9 | 11 => {}
             // area, volume, cx, inertia and Pzx: CLOSER
             _ => assert!(
@@ -1022,5 +1021,40 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
                 "mass[{i}]: new off {new_off:e} old off {old_off:e}"
             ),
         }
+    }
+
+    // cy, Pyz and Pxy are nearer the reference before (1.7e-10, 2.5e-10 and 2.5e-10
+    // relative) than now (7.3e-10, 7.1e-10 and 7.1e-10): the corners' quadrature at the
+    // requested 1e-4, about 1e-10 of the first moment in y. The reference is no nearer the
+    // body's true values than its certified bound, and that bound is set by the gaps
+    // between the file's faces: the certified enclosure of the body's y moment
+    // (`enclose_quantity`, the faces, the ruled strips across the edge gaps and the caps
+    // at the vertices) cannot be narrowed below its floor, 2.0e-4, as no cut narrows a
+    // strip's share. So every row within the certified bands is EQUAL under RULING 3: the
+    // bands hold the new row, the old row and the reference, each over 1e5 times
+    // wider than the rows' distance from the reference.
+    let mut g = read(&mut k, name);
+    let y = enclose_quantity(&k, &mut g, Quantity::Moment { x: 0, y: 1, z: 0 }, 3e-4).unwrap();
+    // (the y moment's error from cy's offset: the volume times cy's offset)
+    let moment_off = (new_row[4] - reference[4]).abs() * reference[1];
+    assert!(
+        y.floor > 1e5 * moment_off,
+        "the y moment's floor {:e}, the corners' quadrature {moment_off:e}",
+        y.floor
+    );
+    let e = enclose_mass_properties(&k, &mut g, 1e-3).unwrap();
+    for (i, band) in [(4, e.centroid[1]), (9, e.products[0]), (11, e.products[2])] {
+        for (what, v) in [
+            ("new", new_row[i]),
+            ("old", old_row[i]),
+            ("reference", reference[i]),
+        ] {
+            assert!(band.contains(v), "mass[{i}]: {what} {v} off {band:?}");
+        }
+        let off = (new_row[i] - reference[i]).abs();
+        assert!(
+            band.width() > 1e5 * off,
+            "mass[{i}]: band {band:?} against the offset {off:e}"
+        );
     }
 }
