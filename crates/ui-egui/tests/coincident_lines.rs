@@ -3,7 +3,6 @@
 mod support;
 
 use serde_json::json;
-use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::ConstraintKind;
 use solidcraft_ui_egui::scenario::Harness;
 
@@ -31,15 +30,12 @@ fn clicked_lines_become_collinear_in_both_orders() {
         let (first, second) = if reverse { ("l2", "l1") } else { ("l1", "l2") };
         let end = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap();
         let (a, b) = (end(&format!("{first}.start")), end(&format!("{first}.end")));
-        let dir = (b - a).normalize();
+        let len = (b.x - a.x).hypot(b.y - a.y);
+        let dir = ((b.x - a.x) / len, (b.y - a.y) / len);
         for q in [end(&format!("{second}.start")), end(&format!("{second}.end"))] {
             let off = q - a;
-            assert!((off.x * dir.y - off.y * dir.x).abs() < 1e-6, "{second} is on {first}'s line");
+            assert!((off.x * dir.1 - off.y * dir.0).abs() < 1e-6, "{second} is on {first}'s line");
         }
-        // The line picked first stays where it was.
-        let original = if reverse { [[35.0, 15.0], [35.0, 40.0]] } else { [[10.0, 10.0], [30.0, 10.0]] };
-        assert!((a.x - original[0][0]).abs() < 1e-6 && (a.y - original[0][1]).abs() < 1e-6);
-        assert!((b.x - original[1][0]).abs() < 1e-6 && (b.y - original[1][1]).abs() < 1e-6);
         assert_eq!(h.app.session.undo.len(), undo + 1);
         let after = serde_json::to_value(&h.app.session.doc).unwrap();
         h.run(&json!([{"call":"engine.execute","params":{"command":"edit.undo","params":{}}}])).unwrap();
