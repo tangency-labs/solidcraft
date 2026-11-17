@@ -67,6 +67,31 @@ pub struct BoxParams {
     pub body_names: Option<StringList>,
 }
 
+/// Create complementary fingers on intersecting pairs of selected plates.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FingerJointParams {
+    /// Two to 32 distinct body names in processing order. Default: the selected bodies.
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// The number of alternating finger/slot pairs, producing 2 * count + 1 segments. Default: 3.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 64))]
+    pub count: Option<u64>,
+    /// The gap between complementary fingers, as a length expression. Default: 0 mm.
+    #[serde(default)]
+    pub clearance: Option<LengthExpr>,
+    /// Start and end with fingers instead of slots. Default: false.
+    #[serde(default)]
+    pub inverted: Option<bool>,
+    /// Additional length for each end segment, as a length expression. Default: 0 mm.
+    #[serde(default)]
+    pub edge_offset: Option<LengthExpr>,
+    /// The feature's name in the timeline.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 /// Extrude sketch profiles (or a planar body face) into a solid.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]

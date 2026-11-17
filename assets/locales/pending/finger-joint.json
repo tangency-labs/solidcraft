@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.solid.finger_joint": "Finger Joint",
+    "help.solid.finger_joint": "Cuts complementary fingers through intersecting plates, perpendicular to each plate's face. Processes selected plates in order with shared settings; reports pairs that could not be cut."
+  },
+  "ar": {
+    "cmd.solid.finger_joint": "وصلة أصابع",
+    "help.solid.finger_joint": "يقطع أصابع متكاملة عبر الصفائح المتقاطعة عمودياً على سطح كل صفيحة. يعالج الصفائح بالترتيب بالإعدادات نفسها ويبلغ عن الأزواج التي تعذر قطعها."
+  },
+  "de": {
+    "cmd.solid.finger_joint": "Fingerzinken",
+    "help.solid.finger_joint": "Schneidet passende Finger senkrecht durch sich kreuzende Platten. Bearbeitet die Platten in Auswahlreihenfolge mit gemeinsamen Einstellungen und meldet fehlgeschlagene Paare."
+  },
+  "he": {
+    "cmd.solid.finger_joint": "חיבור אצבעות",
+    "help.solid.finger_joint": "חותך אצבעות משלימות בלוחות מצטלבים, בניצב לפני כל לוח. מעבד את הלוחות לפי סדר הבחירה ובהגדרות משותפות, ומדווח על זוגות שלא נחתכו."
+  },
+  "ja": {
+    "cmd.solid.finger_joint": "フィンガージョイント",
+    "help.solid.finger_joint": "交差する板をそれぞれの面に垂直に貫通して、組み合うフィンガーを切り込みます。選択順に共通設定で処理し、切れなかった組を報告します。"
+  },
+  "ko": {
+    "cmd.solid.finger_joint": "핑거 조인트",
+    "help.solid.finger_joint": "교차하는 판의 면에 수직으로 관통 절단하여 서로 맞물리는 손가락을 만듭니다. 선택 순서대로 같은 설정을 적용하며 절단하지 못한 쌍을 알립니다."
+  },
+  "vi": {
+    "cmd.solid.finger_joint": "Mối ghép ngón",
+    "help.solid.finger_joint": "Cắt các ngón ghép trên những tấm giao nhau, xuyên vuông góc qua mặt mỗi tấm. Xử lý theo thứ tự chọn với cùng thiết lập và báo các cặp không cắt được."
+  },
+  "zh": {
+    "cmd.solid.finger_joint": "指接榫",
+    "help.solid.finger_joint": "在相交的板上切出相互配合的榫指，切割方向垂直贯穿各自的板面。按选择顺序使用相同设置处理，并报告无法切割的板对。"
+  }
+}

@@ -12,6 +12,8 @@ use crate::{DocError, Result};
 
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMS: usize = 10_000;
+/// Limit the quadratic number of pair checks in a finger-joint feature.
+pub const MAX_FINGER_JOINT_BODIES: usize = 32;
 /// Largest feature id a replayed feature may keep (`Document::insert_feature`): exact in JSON
 /// numbers, and far from overflowing the next id.
 pub const MAX_FEATURE_ID: u64 = 1 << 52;
@@ -1077,6 +1079,18 @@ pub enum FeatureKind {
         operation: Operation,
         #[serde(default)]
         keep_tools: bool,
+    },
+    /// Alternating rectangular cuts in the intersection of two crossing rectangular blocks.
+    FingerJoint {
+        bodies: Vec<BodyName>,
+        count: usize,
+        #[walk(length = "Clearance")]
+        clearance: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        inverted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Edge offset")]
+        edge_offset: Option<Expr>,
     },
     /// Copies of other features' results, or of bodies (rectangular, circular or along a path).
     /// The copied features are named by id (#1134).
@@ -3217,6 +3231,7 @@ impl FeatureKind {
             FeatureKind::Torus { .. } => "TorusFeature",
             FeatureKind::Cone { .. } => "ConeFeature",
             FeatureKind::Combine { .. } => "CombineFeature",
+            FeatureKind::FingerJoint { .. } => "FingerJointFeature",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPatternFeature",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPatternFeature",
             FeatureKind::Pattern { .. } => "CircularPatternFeature",
@@ -3308,6 +3323,7 @@ impl FeatureKind {
             FeatureKind::Torus { .. } => "torus",
             FeatureKind::Cone { .. } => "cone",
             FeatureKind::Combine { .. } => "combine",
+            FeatureKind::FingerJoint { .. } => "finger_joint",
             FeatureKind::Pattern { .. } => "pattern",
             FeatureKind::Mirror { .. } => "mirror",
             FeatureKind::Hole { .. } => "hole",
@@ -3395,6 +3411,7 @@ impl FeatureKind {
             "TorusFeature" => "torus",
             "ConeFeature" => "cone",
             "CombineFeature" => "combine",
+            "FingerJointFeature" => "finger_joint",
             "RectangularPatternFeature" | "PathPatternFeature" | "CircularPatternFeature" => "pattern",
             "MirrorFeature" => "mirror",
             "ConstructionPlane" => "construction_plane",
@@ -3481,6 +3498,7 @@ impl FeatureKind {
             FeatureKind::Torus { .. } => "Torus",
             FeatureKind::Cone { .. } => "Cone",
             FeatureKind::Combine { .. } => "Combine",
+            FeatureKind::FingerJoint { .. } => "FingerJoint",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPattern",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPattern",
             FeatureKind::Pattern { .. } => "CircularPattern",
