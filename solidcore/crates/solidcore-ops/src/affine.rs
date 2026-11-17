@@ -182,10 +182,10 @@ pub fn span_along(
 /// (`lo` above `hi` on an axis) comes back as it is.
 ///
 /// # Errors
-/// [`Error::Argument`] for a matrix with a number not finite, or a corner of a non-empty box
-/// that is not finite or does not map to finite numbers.
+/// [`Error::Argument`] for a matrix with a number not finite, a NaN bound (an empty box's
+/// too), or a corner of a non-empty box that is not finite or does not map to finite numbers.
 pub fn moved_box(matrix: &Matrix, lo: [f64; 3], hi: [f64; 3]) -> Result<([f64; 3], [f64; 3])> {
-    if !finite(matrix.as_flattened()) {
+    if !finite(matrix.as_flattened()) || lo.iter().chain(&hi).any(|v| v.is_nan()) {
         return Err(Error::Argument);
     }
     if lo.iter().zip(&hi).any(|(l, h)| l > h) {
@@ -302,6 +302,9 @@ mod tests {
         let empty = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
         assert_eq!(moved_box(&turn, empty.0, empty.1).unwrap(), empty);
         assert!(moved_box(&turn, [f64::NAN, 0.0, 0.0], [1.0; 3]).is_err());
+        // a NaN on one axis is refused even when another axis is reversed (empty)
+        assert!(moved_box(&IDENTITY, [1.0, f64::NAN, 0.0], [0.0, 1.0, 1.0]).is_err());
+        assert!(moved_box(&IDENTITY, [1.0, 0.0, 0.0], [0.0, 1.0, f64::NAN]).is_err());
         let mut bad = IDENTITY;
         bad[3][0] = f64::NAN;
         assert!(moved_box(&bad, [0.0; 3], [1.0; 3]).is_err());
