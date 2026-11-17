@@ -9571,6 +9571,23 @@ pub fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f
     height_at(st, face_at(st, p, Some(plane.normal())), plane, centre, p)
 }
 
+/// Where an extrude From Object at `p` starts above `centre`, along `plane`'s normal, when the
+/// face there is flat and at a slant the extrude starts on: the level at which the line
+/// through `centre` along the normal meets the face's plane. `None` for any other face,
+/// including one within 5 degrees of running along the extrusion, which starts at
+/// [`object_height`] as the build does. The caller rules out To Object, Through All, a taper
+/// and a design kept on the old start (`from_level`), which also start there.
+pub fn from_slope_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> Option<f64> {
+    let n = plane.normal();
+    let slope = slanted_plane(st, face_at(st, p, Some(n))?, n)?;
+    let m = slope.normal();
+    let across = n.dot(m);
+    if across.abs() < FROM_SLOPE_LEAST_SINE {
+        return None;
+    }
+    Some(level_along(plane, centre + n * ((slope.origin - centre).dot(m) / across)))
+}
+
 /// How far `q` lies along `plane`'s normal from its origin.
 fn level_along(plane: &Plane, q: Vec3) -> f64 {
     (q - plane.origin).dot(plane.normal())

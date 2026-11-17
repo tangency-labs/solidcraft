@@ -396,16 +396,44 @@ fn adjacent_profiles_from_slanted_face_use_same_merged_centre_as_geometry() {
     let angle = 0.1f64.atan();
     let point = [2.0 * angle.sin(), 0.0, 10.0 + 2.0 * angle.cos()];
     h.app.run("solid.extrude", json!({"sketch":"Adjacent","distance":10,"from":point,"name":"Depth","body_name":"Main","operation":"new"})).unwrap();
-    let min_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z;
+    let mesh = h.app.session.world_state().unwrap().body("Main").unwrap().mesh();
+    let min_z = mesh.bounds().min.z;
+    // The extrude starts on the slanted face, so where it starts under the merged profiles'
+    // middle (x = 5, y = 5) is where a ray up through the solid first meets it.
+    let (t, _) = mesh.raycast(solidcore_record::Vec3::new(5.0, 5.0, 0.0), solidcore_record::Vec3::new(0.0, 0.0, 1.0)).unwrap();
+    let start_z = t;
+    assert!((start_z - (10.0 + 2.0 / angle.cos() - 5.0 * angle.tan())).abs() < 1e-6, "the start follows the face: {start_z}");
     open(&mut h);
     let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
-    assert!((base.z - min_z).abs() < 1e-7, "displayed start{} geometry start{min_z}", base.z);
+    assert!((base.z - start_z).abs() < 1e-6, "displayed start {} geometry start {start_z}", base.z);
     // Averaging the two unmerged rectangle loops gives x=3.5; their internal
     // seam must not bias the reference ray used by the extent handle.
     let unmerged_height = 10.0 + 2.0 / angle.cos() - 3.5 * angle.tan();
     assert!((base.z - unmerged_height).abs() > 0.01, "fixture must distinguish the raw-profile centre");
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!((h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z - min_z).abs() < 1e-7);
+}
+
+/// An extrude from a design saved before From followed a slanted face (`from_level`) still
+/// starts at the face's level, and the window's arrow starts there too, not on the slope.
+#[test]
+fn an_old_extrude_kept_on_its_flat_start_shows_the_arrow_at_that_level() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":2,"corner":[-10,-10,10],"body_name":"Reference"})).unwrap();
+    h.app.run("solid.move", json!({"bodies":["Reference"],"axis":[0,1,0],"angle":"atan(0.1)","origin":[0,0,10]})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Square"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let angle = 0.1f64.atan();
+    let point = [2.0 * angle.sin(), 0.0, 10.0 + 2.0 * angle.cos()];
+    h.app.run("solid.extrude", json!({"sketch":"Square","distance":10,"from":point,"name":"Depth","body_name":"Main","operation":"new"})).unwrap();
+    h.app.run("timeline.edit", json!({"feature":"Depth","set":{"extent":{"from_level":true}}})).unwrap();
+    let min_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().min.z;
+    let max_z = h.app.session.world_state().unwrap().body("Main").unwrap().mesh().bounds().max.z;
+    assert!((max_z - min_z - 10.0).abs() < 1e-6, "the old start is flat: z {min_z} to {max_z}");
+    open(&mut h);
+    let base = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().0;
+    assert!((base.z - min_z).abs() < 1e-6, "displayed start {} geometry start {min_z}", base.z);
 }
 
 #[test]
