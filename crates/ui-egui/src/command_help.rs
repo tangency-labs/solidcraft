@@ -57,6 +57,7 @@ pub const DOCUMENTED: &[&str] = &[
     "contact.enable_all",
     "contact.enable_sets",
     "contact.list",
+    "cutlist.layout",
     "cutlist.parts",
     "document.inspect",
     "document.units",

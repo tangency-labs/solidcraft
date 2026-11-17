@@ -281,3 +281,18 @@ fn a_body_the_stock_measure_refuses_is_left_out_and_the_rest_still_list() {
     assert_eq!(excluded[0]["body"], "Many sides");
     assert!(excluded[0]["reason"].as_str().unwrap().starts_with("stock size could not be measured"));
 }
+
+#[test]
+fn cutlist_keeps_grain_rules_separate_and_follows_body_moves() {
+    let mut s = Session::default();
+    for name in ["Long", "Cross", "Free"] {
+        s.execute("solid.box", &json!({"length":800,"width":400,"height":18,"body_name":name})).unwrap();
+    }
+    for (body, direction) in [("Long", "length"), ("Cross", "width")] {
+        s.execute("wood.grain", &json!({"body":body,"direction":direction})).unwrap();
+    }
+    let before = s.execute("cutlist.parts", &json!({})).unwrap();
+    assert_eq!(before["rows"].as_array().unwrap().len(), 3);
+    s.execute("solid.move", &json!({"bodies":["Long"],"translate":[20,30,40],"axis":[0,1,0],"angle":"45 deg"})).unwrap();
+    assert_eq!(s.execute("cutlist.parts", &json!({})).unwrap(), before);
+}

@@ -56,6 +56,7 @@ pub mod test_support {
 mod threemf;
 pub mod urdf;
 pub mod vfs;
+pub mod workshop;
 
 pub use airfoil::{Airfoil, AirfoilFormat, MAX_AIRFOIL_BYTES, MAX_AIRFOIL_POINTS, read_airfoil};
 pub use dxf::{DxfReadProfile, DxfWriteOptions, read_dxf, read_dxf_file, read_dxf_file_with_profile, write_dxf, write_dxf_entities, write_dxf_opts};

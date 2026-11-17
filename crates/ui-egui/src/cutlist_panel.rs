@@ -72,9 +72,13 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
     let units = app.session.doc.units.clone();
     let decimals = app.preferences.length_decimals;
     let mut export = None;
+    let mut layout = false;
     let top = ui.cursor().top();
     let report = egui::ScrollArea::vertical().id_salt("cutlist-report").min_scrolled_height(0.0).max_height(360.0).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
+            if crate::ui_kit::button(ui, tr("cmd.cutlist.layout"), crate::ui_kit::Button::Normal).clicked() {
+                layout = true;
+            }
             if crate::ui_kit::button(ui, tr("cutlist.csv"), crate::ui_kit::Button::Normal).clicked() {
                 export = Some("csv");
             }
@@ -143,6 +147,13 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
     let height = report.content_size.y.min(360.0);
     crate::panel_runtime::report_content_extent(ui, top, height, false);
     app.cutlist = Some(panel);
+    if layout {
+        if crate::cutting_plan_panel::available(app) {
+            crate::cutting_plan_panel::set_focus_pending(app, true);
+        } else {
+            crate::cutting_plan_panel::open(app);
+        }
+    }
 }
 
 /// The reason `cutlist.parts` gives for leaving a body out, in the reader's language. The stock

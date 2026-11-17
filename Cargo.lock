@@ -6064,6 +6064,7 @@ dependencies = [
  "solidcraft-geom",
  "solidcraft-io",
  "solidcraft-kernel",
+ "solidcraft-nest",
  "solidcraft-profile",
  "solidcraft-render",
  "solidcraft-sketch",
@@ -6217,6 +6218,13 @@ name = "solidcraft-mcp-server"
 version = "0.44.0"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "solidcraft-nest"
+version = "0.43.0"
+dependencies = [
+ "solidcraft-geom",
 ]
 
 [[package]]

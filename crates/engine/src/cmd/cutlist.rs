@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 use solidcraft_doc::BomType;
+use solidcraft_geom::Vec3Geom as _;
 
 use super::CommandSpec;
 use crate::params::bad;
@@ -22,7 +23,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&CONTRACT)
         .output(output_schema_for::<CutList>)
-        .params("include?: bodies (default, including loose bodies)|components; component?: id or name; group_by?: [material, stock]; path?: .csv or .json; format?: csv|json. Returns rows: [{item, name, count, material, stock: {kind, length, width, thickness, exact}, grain, bodies}], excluded, totals, total_occurrences. All sizes in mm to six decimal places. Grain is empty until assigned. Stock follows planar faces and straight edges; curved stock is approximate. Purchased and reference subtrees never count; phantom and inseparable contents count."),
+        .params("include?: bodies (default, including loose bodies)|components; component?: id or name; group_by?: [material, stock]; path?: .csv or .json; format?: csv|json. Returns rows: [{item, name, count, material, stock: {kind, length, width, thickness, exact}, grain, bodies}], excluded, totals, total_occurrences. All sizes in mm to six decimal places. Grain is empty until assigned; equal stock with different grain stays separate. Stock follows planar faces and straight edges; curved stock is approximate. Purchased and reference subtrees never count; phantom and inseparable contents count."),
 ];
 
 pub(crate) fn csv(rows: &[Row]) -> String {
@@ -47,7 +48,7 @@ pub(crate) fn csv(rows: &[Row]) -> String {
     out
 }
 
-fn parts(s: &mut Session, p: &Value) -> Result<Value> {
+pub(super) fn parts(s: &mut Session, p: &Value) -> Result<Value> {
     let p: CutListParams = serde_json::from_value(p.clone()).map_err(|e| bad(ID, e.to_string()))?;
     if let Some(group) = &p.group_by
         && !(group.len() == 2 && group.iter().any(|g| matches!(g, GroupBy::Material)) && group.iter().any(|g| matches!(g, GroupBy::Stock)))
@@ -102,7 +103,7 @@ fn parts(s: &mut Session, p: &Value) -> Result<Value> {
         *body_counts.entry(*owner).or_insert(0usize) += 1;
     }
     let mut out = CutList::default();
-    let mut grouped: BTreeMap<(String, [String; 3]), (Row, BTreeMap<String, u64>)> = BTreeMap::new();
+    let mut grouped: BTreeMap<(String, [String; 3], String), (Row, BTreeMap<String, u64>)> = BTreeMap::new();
     for (body, owner) in state.bodies.iter().zip(owners) {
         let Some(&count) = counts.get(&owner) else {
             if let Some(reason) = excluded.get(&owner) {
@@ -136,7 +137,18 @@ fn parts(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|_| s.doc.body_material(body.definition_name()))
             .or_else(|| component.and_then(|c| c.properties.get("material")).cloned())
             .unwrap_or_default();
-        let key = (material.clone(), [length, width, thickness].map(|d| format!("{d:.6}")));
+        let grain = match s.doc.grain_direction(body)? {
+            None => String::new(),
+            Some(direction) => size
+                .axes
+                .iter()
+                .zip(["length", "width", "thickness"])
+                .find(|(axis, _)| solidcore_record::Vec3::from(**axis).dot(direction).abs() > 1.0 - 1e-8)
+                .map(|(_, name)| name)
+                .unwrap_or("oblique")
+                .to_string(),
+        };
+        let key = (material.clone(), [length, width, thickness].map(|d| format!("{d:.6}")), grain.clone());
         let (row, names) = grouped.entry(key).or_insert_with(|| {
             let row = Row {
                 item: 0,
@@ -144,7 +156,7 @@ fn parts(s: &mut Session, p: &Value) -> Result<Value> {
                 count: 0,
                 material,
                 stock: Stock { kind: size.kind.into(), length, width, thickness, exact: size.exact },
-                grain: String::new(),
+                grain,
                 bodies: Vec::new(),
             };
             (row, BTreeMap::<String, u64>::new())
@@ -154,7 +166,7 @@ fn parts(s: &mut Session, p: &Value) -> Result<Value> {
         row.stock.exact &= size.exact;
         row.bodies.push(body.name.clone());
     }
-    // A line is one piece cut `count` times; different parts that share a material and stock size
+    // A line is one piece cut `count` times; different parts that share a material, stock size and grain
     // all stay named on it ("; " between them, a count after a name more than one piece holds).
     out.rows = grouped
         .into_values()
