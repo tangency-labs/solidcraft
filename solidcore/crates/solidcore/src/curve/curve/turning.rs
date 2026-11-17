@@ -1129,6 +1129,33 @@ mod tests {
         assert!(search(1.0).is_ok() && search(1.2).is_ok());
     }
 
+    /// (#17987) An interval wholly past the knots is searched over itself only, not over
+    /// the stretch between it and the knots: weights 1, 0.25, 0.0625 on [0, 1] give
+    /// `w = (1 - 0.75t)^2`, zero at t = 4/3, so over [0, 2] there is a pole, but over
+    /// [2, 3] the weight is positive and the search succeeds. The same reversed
+    /// (`w = (0.25 + 0.75t)^2`, zero at t = -1/3) succeeds over [-2, -1] before the knots.
+    #[test]
+    fn an_interval_wholly_past_the_knots_is_searched_over_itself() {
+        let pts = [[0.0, 0.0, 0.0], [1.0, 0.0, 1.0], [2.0, 0.0, 0.0]];
+        let search = |w: &[f64], lo: f64, hi: f64| {
+            let c = out_of_bounds_quadratic(&pts, Some(w), vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+            let mut pt = crate::geom::vector3d::Vec3::UNDEF;
+            c.add_turning_points(
+                &Kernel::default(),
+                &Extent1d::from_min_max(lo, hi),
+                &mut pt,
+                &mut |_| {},
+            )
+        };
+        let after = [1.0, 0.25, 0.0625];
+        let r = search(&after, 0.0, 2.0);
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
+        let r = search(&after, 2.0, 3.0);
+        assert!(r.is_ok(), "{r:?}");
+        let r = search(&[0.0625, 0.25, 1.0], -2.0, -1.0);
+        assert!(r.is_ok(), "{r:?}");
+    }
+
     /// A rational quadratic in two Bezier segments (knots 0, 0, 0, 1, 1, 2, 2, 2). Over
     /// [0, 1] z is 5 at both ends and `5 + dz` at the middle control point, with weights
     /// `wa`, `wb`, `wa`; over [1, 2] it falls to 1 with weights `wa`. x and y vary on both.
