@@ -500,11 +500,11 @@ fn a_sliver_narrower_than_the_chord_is_not_split_without_end_on_the_mesh_path() 
     assert!(refused.is_empty(), "{refused:?}");
     assert_closed(&w, "lips on a base");
     // Every face short of the spec's smallest angle is named, and is so only by a corner of its
-    // boundary sharper than the spec (the crescent's) or by a few degrees the shaping's rounds
-    // left. Faces 11 and 17, the lips' end walls (1 x 18 mm, a side 0.0001 mm long at a corner),
-    // reach the spec at the longest side the body's extent gives with its edges counted.
+    // boundary sharper than the spec (the crescent's) or by less than 5 degrees the shaping's
+    // rounds left. Faces 11 and 17, the lips' end walls (1 x 18 mm, a side 0.0001 mm long at a
+    // corner), reach the spec at the longest side the body's extent gives with its edges counted.
     for u in &stats.unshaped {
-        assert!(u.limits.contains(&crate::ShapeLimit::Corner) || u.smallest_angle > 20.0, "{u:?}");
+        assert!(u.limits.contains(&crate::ShapeLimit::Corner) || u.smallest_angle > spec.min_angle - 5.0, "{u:?}");
     }
     assert!(stats.unshaped.iter().all(|u| u.face != 11 && u.face != 17), "{:?}", stats.unshaped);
     let most = plan.edges.iter().map(Vec::len).max().unwrap_or(0);

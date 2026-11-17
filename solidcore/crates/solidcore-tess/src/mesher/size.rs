@@ -12,6 +12,7 @@ use solidcore::Vec3;
 use crate::vec::VecExt as _;
 use solidcore::eval::CurveEval;
 use solidcore::eval::plan::EvalSurface;
+use solidcore_convert as kernel;
 use solidcore_record::brep;
 
 use super::uv::Domain;
@@ -111,12 +112,12 @@ pub(crate) fn local(h: f64, at: Option<SizeAt<'_>>, p: Vec3) -> f64 {
 /// a bounding box diagonal it does not change when the body is turned, so a placed copy meshes
 /// like the original. The edges count: a sphere or a torus is closed along seams, so its vertices
 /// alone can be two poles or two points a tube apart (a half torus 1000 mm across with a 1 mm
-/// tube came out 1 mm across, and its 3142 mm edges passed [`super::edges::MAX_EDGE_NODES`] at a
-/// fifth of that). An edge whose curve does not evaluate adds its vertices only.
+/// tube came out 1 mm across, and its 3142 mm edges were split to a fifth of a millimetre, near
+/// [`super::edges::MAX_EDGE_NODES`]). An edge whose curve does not evaluate adds its vertices only.
 pub(crate) fn extent(b: &brep::Brep) -> f64 {
     let mut points: Vec<Vec3> = b.vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).collect();
     for e in &b.edges {
-        let Ok(value) = solidcore_convert::curve(e.parameters()) else { continue };
+        let Ok(value) = kernel::curve(e.parameters()) else { continue };
         let Ok(curve) = CurveEval::new(&value) else { continue };
         let [t0, t1] = e.interval;
         points.extend((1..4).filter_map(|i| curve.point(t0 + (t1 - t0) * f64::from(i) / 4.0)));
