@@ -1200,6 +1200,23 @@ mod byte_regressions {
         ("pocket-and-engraved-text-arcs.dxf", 40893, "e3b38c00b28d742d93c8d9163b190a1f92f561f77842f9c2442943c5800e7946"),
     ];
 
+    // Independently captured from unchanged upstream 5a884e5 on Windows 11 x86_64 with the MSVC
+    // toolchain (its C runtime's math functions), the same with the dev and ci profiles. Its
+    // arc-fit last decimals differ from both glibc sets (#18073). Exact pairs, as above.
+    const WINDOWS_MATH_OUTPUTS: [ExpectedOutput; 11] = [
+        ("cubic-spline-arcs.dxf", 13950, "d9b628e4841dd73f2972e7408cdbc8d5baee0948a549af38397aec5deaaf6745"),
+        ("text-outlines-arcs.dxf", 26401, "506a741f831daa901fd2ab0a0f7988232f2054a7abb15bb96ba063f0d5478997"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 45158, "86cb9b39468db91f5b4377dde79bcbaa6e95d9551ccfe8e756284dff852bd991"),
+        ("tray-arcs-cut-bends-true-single.dxf", 43584, "a2c8b58535675a4906cca96d34c8497046b8bb2a2f13f08dad790596221bd5fd"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 44612, "44eb1dab97a5ddb41d1b8aab71e093f301f383d0933423071668f1813db4ee1e"),
+        ("tray-arcs-cut-bends-false-single.dxf", 43064, "36c2c5443615023bfa05033b328cc74e828754c1322a0d80edbcb6cf37b2eba9"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 45158, "84e7da75925974d786ebc9af317ee2a7981e0bb66db8f3662ba8c5c12e84437a"),
+        ("tray-arcs-etch-bends-true-single.dxf", 43584, "1600491106e95ef2953230a4e1f1b1571c8e9d4cd8ed088144cdd326b20c1db4"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 44612, "ed14e734370ed096a5c7ec7d16aa66a774c8f4840070e1514444de8f4a432ddc"),
+        ("tray-arcs-etch-bends-false-single.dxf", 43064, "af2562cf994de114358e55fd246f2cd1af46143ff6f10d92bc079d3b1f92cf17"),
+        ("pocket-and-engraved-text-arcs.dxf", 40896, "c0f5e5015cec851f55ea4b40fe379b2c88a63e5a959daea1e6542cfc818aacd9"),
+    ];
+
     struct BytePins {
         expected: &'static [ExpectedOutput; 53],
         next: usize,
@@ -1217,9 +1234,12 @@ mod byte_regressions {
             assert_eq!(name, expected_name, "original-output case {} changed order or name", self.next + 1);
             let actual_sha256 = format!("{:x}", Sha256::digest(bytes));
             let primary_matches = bytes.len() == expected_len && actual_sha256 == expected_sha256;
-            let ubuntu_matches = UBUNTU_MATH_OUTPUTS.iter().any(|&(case, len, digest)| case == name && bytes.len() == len && actual_sha256 == digest);
+            let platform_matches = UBUNTU_MATH_OUTPUTS
+                .iter()
+                .chain(&WINDOWS_MATH_OUTPUTS)
+                .any(|&(case, len, digest)| case == name && bytes.len() == len && actual_sha256 == digest);
             assert!(
-                primary_matches || ubuntu_matches,
+                primary_matches || platform_matches,
                 "original bytes changed for {name}: length {}, SHA-256 {actual_sha256}; expected a complete independently captured baseline pair",
                 bytes.len()
             );

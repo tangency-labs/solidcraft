@@ -80,9 +80,13 @@
 //! - **Interval knots.** `CalculateTightBoundingBox` adds only the tangent
 //!   discontinuous knots strictly inside the interval (WR-474, #1054); upstream adds
 //!   them all, and the last knot.
-//! - **Stopping points (#17685).** `CalculateTightBoundingBox` also adds the points at
-//!   the curve's speed minima: a coordinate can peak where the curve stops and turns
-//!   back (`C' = 0`), which the perpendicular analyses refuse to evaluate.
+//! - **Turning points (#17685).** `CalculateTightBoundingBox` also adds the points where
+//!   a coordinate stops changing (`C' . e = 0`), isolated from the roots of the
+//!   derivative's numerator by Bezier subdivision (`curve::curve::turning`; B-spline
+//!   kinds and Hermite curves). A coordinate can peak where the curve stops or nearly
+//!   stops (`|C'|^2 < SM_EFF_ZERO`), and the perpendicular analyses refuse to evaluate
+//!   there. The subdivision is bounded (`turning::MAX_DEPTH`, `turning::MAX_NODES`) and
+//!   refuses with `InvalidInput` past either bound.
 //! - **Coordinate bound.** `GlobalCurveSolve` of a curve whose natural box reaches past
 //!   [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (`1e150`, below `sqrt(f64::MAX)`)
 //!   fails with `InvalidInput` before any cache is built (the curve cache is built over
@@ -1703,64 +1707,13 @@ impl Curve {
             })?;
         }
 
-        // Not upstream (#17685): the points where the curve stops.
-        self.add_stopping_points(k, interval, &mut pt, &mut |p| {
+        // Not upstream (#17685): the points where a coordinate stops changing, isolated
+        // from the roots of `C' . e` (`curve::curve::turning`).
+        self.add_turning_points(k, interval, &mut pt, &mut |p| {
             tight_box.add_point(p);
         })?;
 
         Ok(tight_box)
-    }
-
-    /// (Not upstream, #17685) The points of this curve over `interval` where it may stop,
-    /// for [`Curve::calculate_tight_bounding_box`]: the local minima of its speed
-    /// (`GlobalPropertyAnalysis(SM_CP_MINIMIZE_FIRST_DERIVATIVE)`, tolerance
-    /// `SM_EFF_ZERO_SQRT`), each added to `add`.
-    ///
-    /// A coordinate of the curve is greatest or least at an end, at a tangent
-    /// discontinuous knot, where `C' . e = 0` with the curve moving, or where `C' = 0`.
-    /// The perpendicular analyses find the third kind only: their objective refuses a
-    /// parameter with `|C'|^2 < SM_EFF_ZERO`, so they never reach the fourth. On a curve
-    /// that runs along z, rises and turns back down (the u = 0 side of a B-spline patch
-    /// whose first row of control points all lie on the z axis), `C' . z` is never zero
-    /// where the curve moves: the box ended 1.4e-3 below the curve's peak. Every point
-    /// with `C' = 0` is a minimum of the speed, so the speed's minima hold the points the
-    /// perpendicular analyses refuse. All of them are added, with no threshold on the
-    /// speed: each is a point of the curve, so the box only grows to points the curve
-    /// has, and a minimum where the curve still moves adds no point beyond the curve.
-    fn add_stopping_points(
-        &self,
-        k: &Kernel,
-        interval: &Extent1d,
-        pt: &mut Point3,
-        add: &mut dyn FnMut(Point3),
-    ) -> Result<()> {
-        let opts = PropertyAnalysisOptions {
-            property_value: None,
-            opt_vectors: &[],
-            want_comb: false,
-            handle: Some(CurveHandle(self.natural_interval())),
-        };
-        let sols = self
-            .global_property_analysis(
-                k,
-                interval,
-                CurvePropertyType::MinimizeFirstDerivative,
-                EFF_ZERO_SQRT,
-                &opts,
-            )?
-            .solutions;
-        for s in sols.as_slice() {
-            let ends = if s.solution_type == SolutionType::RangeOfValues {
-                [Some(s.start.parameters[0]), Some(s.end.parameters[0])]
-            } else {
-                [Some(s.start.parameters[0]), None]
-            };
-            for t in ends.into_iter().flatten() {
-                eval_keep(k, self, t, pt)?;
-                add(*pt);
-            }
-        }
-        Ok(())
     }
 
     /// `CalculateTightPseudoBox` into `pseudo_box`: its intervals reset, its basis set
@@ -2088,9 +2041,9 @@ mod tests {
     /// (#17685) A coordinate's extreme where the curve stops is in its tight box. The
     /// curve's tangent is +z or -z wherever it moves, never perpendicular to z, and the
     /// perpendicular analyses refuse the parameters where it has stopped: the box ended
-    /// at 0.43534, 1.4e-3 below the peak. With the stopping points it reaches the peak, to
-    /// the speed minimisation's accuracy, and stays on the curve (no higher than the peak
-    /// but for the evaluation's rounding).
+    /// at 0.43534, 1.4e-3 below the peak. With the turning points (the roots of `C' . z`,
+    /// isolated by subdivision) it reaches the peak to within 4 ulp and stays on the curve
+    /// (no higher than the peak but for the evaluation's rounding).
     #[test]
     fn tight_box_reaches_the_peak_where_a_curve_turns_back() {
         use crate::nurbs::crv_basic::Curve as NlCurve;
@@ -2107,8 +2060,10 @@ mod tests {
             .unwrap();
         let (lo, hi) = (bx.min(), bx.max());
         let (peak_lo, peak_hi) = TURNING_PEAK;
+        // The side is the curve at a parameter where z changes by at most its rounding
+        // from the peak: within 4 ulp of the exact interval, on both sides.
         assert!(
-            hi.z >= peak_lo - 1e-12,
+            hi.z >= peak_lo - 4.0 * f64::EPSILON * peak_lo,
             "box top {} below the peak {peak_lo}",
             hi.z
         );

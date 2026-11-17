@@ -1281,6 +1281,18 @@ fn look_key(
     h.finish()
 }
 
+/// A body's own colour (its look, or its component's identification colour, else the theme's)
+/// and each face's (a face with a look of its own takes that), opaque: how a Move's preview draws
+/// the bodies it moves, so they keep their look while they move.
+pub(crate) fn body_face_rgba(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> ([u8; 4], Vec<[u8; 4]>) {
+    let resolved = resolve_appearance(app, b);
+    let base = resolved.component.or(resolved.body).unwrap_or(Tokens::get().body);
+    let faces = (0..b.body.face_count())
+        .map(|f| c4(resolved.face_looks.get(&f).map_or(base, |l| Color32::from_rgb(l.color[0], l.color[1], l.color[2]))))
+        .collect();
+    (c4(base), faces)
+}
+
 fn resolve_appearance(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> ResolvedAppearance {
     let s = &app.session;
     ResolvedAppearance {
@@ -4722,6 +4734,24 @@ impl EdgeColours {
     }
 }
 
+/// A body that Move/Copy moves, outlined as picked: its edges in the selection colours over its
+/// own look, moved by `m`, and dimmed where the model hides them when `hidden` (Preferences' Show
+/// hidden edges of selected bodies, as a selected body's). The view draws it so where the body
+/// stands, and the move's preview draws it so where the body goes, the same way all through the
+/// move.
+pub(crate) fn moved_body_outline(sc: &mut GpuScene, mesh: &solidcraft_engine::geom::Mesh, m: &solidcraft_engine::doc::Mat, hidden: bool) {
+    let t = Tokens::get();
+    let cols = EdgeColours::new(sc, t.sel_edge, t.sel_edge_rim);
+    for (_, e) in mesh.edges.iter().enumerate().filter(|(ei, _)| mesh.edge_pickable(*ei)) {
+        let moved: Vec<Vec3> = e.iter().map(|p| solidcraft_engine::doc::apply_point(m, *p)).collect();
+        if hidden {
+            edge_lines(sc, &moved, cols, 2.0, &[]);
+        } else {
+            whole_body_edge_lines(sc, &moved, cols, 2.0);
+        }
+    }
+}
+
 fn edge_lines(sc: &mut GpuScene, e: &[Vec3], cols: EdgeColours, w: f32, normals: &[[[f32; 3]; 2]]) {
     seen_edge_lines(sc, e, cols, w, normals);
     hidden_edge_lines(sc, e, cols, w);
@@ -5314,12 +5344,14 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     // rather than every frame.
     let live = crate::dialogs_move::chained(app);
     let dragging = crate::dialogs_move::dragging(app);
+    // ...and outlined rather than filled, so they keep their look, as the preview draws them.
+    let move_outlined: std::collections::HashSet<String> = crate::dialogs_move::moved_bodies(app).into_iter().collect();
     let moving = |name: &str| dragging && chain_of(live.as_ref(), name).is_some();
     let chained = live.as_ref().filter(|_| !dragging);
     let carry = |b: &solidcraft_engine::doc::ModelBody| chain_of(chained, &b.name);
     let replaced = |name: &str| moving(name) || (app.preview.effective_replaced().iter().any(|n| n == name) && chain_of(chained, name).is_none());
-    // A moved body the preview draws as a layer moved on the GPU is lit by that layer, which
-    // draws it in the selection colour: lighting it here copied and moved its every triangle
+    // A moved body the preview draws as a layer moved on the GPU is drawn by that layer, in its
+    // own look and outlined as picked: lighting it here copied and moved its every triangle
     // again at each change of the move, seconds a keystroke on a large assembly (#17804).
     let as_layer = crate::dialogs_move::drawn_as_layer(app);
     let lit_by_layer = |name: &str| as_layer && chain_of(chained, name).is_some();
@@ -5614,12 +5646,17 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 }
             }
             Sel::Body { name } => {
-                // As a face: lit over a live preview, the old body fought with it in slivers.
+                let moved = move_outlined.contains(name);
+                // As a face: lit over a live preview, the old body fought with it in slivers. A body
+                // Move/Copy moves is outlined by its preview while one draws it.
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
                     && !replaced(name)
+                    && !(moved && app.preview.effective_replaced().iter().any(|n| n == name))
                 {
-                    if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
+                    if moved && has_pickable_outline(&shown(b)) {
+                        moved_body_outline(&mut feedback, &shown(b), &solidcraft_engine::doc::IDENTITY, app.preferences.show_selected_hidden_edges);
+                    } else if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
                             edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
                         }

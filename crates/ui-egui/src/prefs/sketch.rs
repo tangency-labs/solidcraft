@@ -111,6 +111,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "ui.first_dimension_scales_about_origin",
         ];
         let right_labels = [
+            "prefs.sketch.shortcut_again_ends_tool",
             "prefs.sketch.shortcut_cycles_modes",
             "prefs.ribbon_click_ends_tool",
             "ui.project_face_edges_sketch",
@@ -196,6 +197,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                check(
+                    ui,
+                    "shortcut_again_ends_tool",
+                    "prefs.sketch.shortcut_again_ends_tool",
+                    Some("prefs.sketch.shortcut_again_ends_tool_tip"),
+                    &mut app.preferences.shortcut_again_ends_tool,
+                );
                 check(
                     ui,
                     "shortcut_cycles_modes",
@@ -589,6 +597,7 @@ fn targets(key: &str, response: &egui::Response) {
         "sketch_auto_locate" => "Also place them from the origin (fully constrained)",
         "first_dimension_scales" => "The first dimension scales the drawing",
         "center_arc_follows_cursor" => "Center point arc follows the cursor's direction",
+        "shortcut_again_ends_tool" => "Pressing an active tool's shortcut again closes it",
         "shortcut_cycles_modes" => "Pressing a tool's shortcut again switches its mode",
         "project_options_dialog" => "Project options dialog",
         "sketch_state_icons" => "Sketch icons in the color of their state",

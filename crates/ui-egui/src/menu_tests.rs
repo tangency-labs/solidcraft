@@ -677,21 +677,17 @@ fn move_shortcut_uses_the_selected_nested_instance_and_pending_position() {
     let path = vec![copy, child];
     app.run("component.activate", json!({"component":"root"})).unwrap();
     app.run("occurrence.move", json!({"occurrence":child,"path":path,"translate":[5,0,0],"capture":false})).unwrap();
-    let baseline = app.session.pending_moves[&child];
     app.run("select.set", json!({"items":[{"type":"occurrence","path":path}]})).unwrap();
     crate::keymap::bind(&mut app, "solid.move", "Shift+M", false).unwrap();
     crate::keymap::press(&mut app, "M", false);
-    assert!(app.tree.occurrence_move.is_none(), "the old shortcut was cleared");
+    assert!(app.dialog.is_none(), "the old shortcut was cleared");
     app.ui.tab = "INSPECT".into();
     crate::keymap::press(&mut app, "Shift+M", false);
     assert_eq!(app.ui.tab, "MODEL", "starting component Move still selects the command's workspace tab");
-    let movement = app.tree.occurrence_move.as_ref().expect("component Move opens from its rebound shortcut");
-    assert_eq!(movement.occurrence, child);
-    assert_eq!(movement.path, path, "use the selected copy's path, not the component's first placement");
-    assert_eq!(movement.baseline, Some(baseline));
-    assert!(movement.had_pending);
-    assert!(app.dialog.is_none(), "the body Move dialog must not open too");
+    let moving = crate::dialogs_move::moving(&app).expect("Move/Copy opens on the component from its rebound shortcut");
+    assert_eq!(moving, path, "use the selected copy's path, not the component's first placement");
     assert!(app.tree.capture_prompt.is_none(), "continuing a component move does not ask to capture it first");
+    assert!(app.session.pending_moves.contains_key(&child), "its pending move stays until OK");
 }
 
 #[test]
@@ -702,13 +698,12 @@ fn move_shortcut_respects_grounding_and_keeps_body_selection_as_a_body_move() {
     app.run("occurrence.ground", json!({"occurrence":occurrence,"grounded":true})).unwrap();
     app.run("select.set", json!({"items":[{"type":"occurrence","path":[occurrence]}]})).unwrap();
     crate::keymap::press(&mut app, "M", false);
-    assert!(app.tree.occurrence_move.is_none(), "a grounded component cannot move");
     assert!(app.dialog.is_none(), "do not fall back to moving the grounded component's bodies");
 
     app.run("occurrence.ground", json!({"occurrence":occurrence,"grounded":false})).unwrap();
     app.run("select.set", json!({"items":[{"type":"body","name":"Body1"}]})).unwrap();
     crate::keymap::press(&mut app, "M", false);
-    assert!(app.tree.occurrence_move.is_none(), "a body selection still edits geometry");
+    assert!(crate::dialogs_move::moving(&app).is_none(), "a body selection still edits geometry");
     let dialog = app.dialog.as_ref().expect("body Move opens");
     assert!(matches!(dialog.kind, crate::dialogs::Kind::Move { .. }));
     assert_eq!(dialog.inputs[0].items, vec![solidcraft_engine::Sel::Body { name: "Body1".into() }]);
@@ -1534,31 +1529,6 @@ fn double_click_on_a_body_row_renames_it_in_the_row() {
     h.frames(3);
     context_menu::finish_rename(&mut h.app, Some("Base"), true).unwrap();
     assert!(h.app.session.model.state().body("Base").is_some());
-}
-
-#[test]
-fn occurrence_moves_turn_about_their_origin_then_move() {
-    let mut app = sample_app();
-    let b = body(&app);
-    app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
-    let occ = app.session.doc.occurrences[0].id;
-    app.run("occurrence.ground", json!({"occurrence": occ, "grounded": false})).unwrap();
-    let mut m = crate::browser::OccMove::new(occ);
-    m.pivot = Some(solidcore_record::Vec3::new(5.0, 0.0, 0.0));
-    m.translate = [10.0, 0.0, 0.0];
-    m.angles = [0.0, 0.0, 90.0];
-    crate::browser::apply_occurrence_move(&mut app, &m);
-    let t = *app.session.pending_moves.get(&occ).unwrap();
-    // The pivot lands 10 mm along X; X turns into Y.
-    let p = solidcraft_engine::doc::apply_point(&t, solidcore_record::Vec3::new(5.0, 0.0, 0.0));
-    let x = solidcraft_engine::doc::apply_vector(&t, solidcore_record::Vec3::X);
-    assert!((p.x - 15.0).abs() < 1e-9 && p.y.abs() < 1e-9, "{p:?}");
-    assert!((x.y - 1.0).abs() < 1e-9, "{x:?}");
-    // Changing the values again starts from where it was, not from the last move.
-    m.translate = [0.0, 0.0, 0.0];
-    m.angles = [0.0; 3];
-    crate::browser::apply_occurrence_move(&mut app, &m);
-    assert_eq!(*app.session.pending_moves.get(&occ).unwrap(), solidcraft_engine::doc::IDENTITY);
 }
 
 #[test]

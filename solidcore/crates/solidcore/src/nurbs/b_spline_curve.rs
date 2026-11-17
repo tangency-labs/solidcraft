@@ -19,4 +19,4 @@ pub use p1::{
     Tessellation,
 };
 pub use p2::{AnalyticCurve, BoundingBoxRequest, BoundingBoxes, ControlPointForm, CurveCanonical};
-pub use p3::{GapFix, OnPlane, SegmentLine};
+pub use p3::{GapCurves, GapFix, GapIntersection, OnPlane, SegmentLine};

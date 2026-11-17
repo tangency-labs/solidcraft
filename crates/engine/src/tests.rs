@@ -4565,6 +4565,56 @@ fn shell_tangent_chain_that_opens_every_face_explains_how_to_keep_walls() {
     assert_eq!(s.model.state().bodies.len(), 1);
 }
 
+#[test]
+fn shell_explicitly_opening_every_face_explains_how_to_keep_walls() {
+    for (command, params, faces) in [
+        ("solid.sphere", json!({"radius": 10}), json!([[10, 0, 0]])),
+        (
+            "solid.box",
+            json!({"length": 20, "width": 20, "height": 20}),
+            json!([[0, 10, 10], [20, 10, 10], [10, 0, 10], [10, 20, 10], [10, 10, 0], [10, 10, 20]]),
+        ),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, command, params);
+        let before = s.doc.to_json();
+        for tangent_chain in [true, false] {
+            for direction in ["inside", "outside", "both"] {
+                let error = s
+                    .execute("solid.shell", &json!({"faces": faces, "thickness": 1, "tangent_chain": tangent_chain, "direction": direction}))
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains("Removing every face leaves no walls") && error.contains("closed hollow body"), "{error}");
+                assert!(!error.contains("turn off Tangent Chain"), "{error}");
+                assert_eq!(s.doc.to_json(), before, "a refused shell must preserve the design");
+            }
+        }
+        run(&mut s, "solid.shell", json!({"faces": [], "thickness": 1}));
+        assert_eq!(s.model.state().bodies.len(), 1, "the suggested closed shell must succeed");
+    }
+}
+
+#[test]
+fn shell_repeated_picks_on_one_face_leave_walls() {
+    for tangent_chain in [true, false] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20}));
+        run(&mut s, "solid.shell", json!({"faces": vec![[10, 10, 20]; 6], "thickness": 1, "tangent_chain": tangent_chain}));
+        assert_eq!(s.model.state().bodies.len(), 1);
+    }
+}
+
+#[test]
+fn shell_invalid_pick_keeps_the_selection_error() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 10}));
+    let before = s.doc.to_json();
+    let error =
+        s.execute("solid.shell", &json!({"faces": [[10, 0, 0], [100, 0, 0]], "thickness": 1, "tangent_chain": false})).unwrap_err().to_string();
+    assert!(error.contains("no face"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
 /// Hole To Object (a face it meets, or a point) and holes at every point of a sketch.
 #[test]
 fn hole_to_object_and_at_sketch_points() {

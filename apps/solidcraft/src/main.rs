@@ -42,6 +42,7 @@ mod native_menu;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
 mod open_documents;
+mod single_instance;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
@@ -301,6 +302,12 @@ impl eframe::App for App {
         #[cfg(target_os = "macos")]
         for f in if self.solve.file_picker_busy() { Vec::new() } else { open_documents::take() } {
             self.solve.open_chosen_file(&f);
+        }
+        // Files other launches handed over (single_instance.rs).
+        if !self.solve.file_picker_busy() {
+            for f in single_instance::take() {
+                self.solve.open_chosen_file(&f);
+            }
         }
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
@@ -954,7 +961,11 @@ fn tickets_call(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Res
     let body = r.body.as_deref().unwrap_or_default();
     macro_rules! with_headers {
         ($req:expr) => {{
-            let mut req = $req;
+            // Each call has its own agent, so a kept-alive connection is never used again. Asked
+            // to close, the server ends a reply that has no length by closing; otherwise the
+            // reply is read until the server gives up and the call ends on `timeout: global`
+            // (#17932).
+            let mut req = $req.header("Connection", "close");
             for (k, v) in &r.headers {
                 req = req.header(k, v);
             }
@@ -1207,11 +1218,14 @@ fn main() -> eframe::Result {
     // `--theme-file PATH`: follow that theme file for this run without saving it (#7573).
     let mut theme_file: Option<String> = None;
     let mut max_file_size = None;
+    // `--new-instance`: open this launch as its own app even when SolidCraft already runs.
+    let mut new_instance = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
             "--sample" => sample = true,
+            "--new-instance" => new_instance = true,
             "--theme-file" => theme_file = args.next(),
             "--max-file-size" => max_file_size = Some(args.next()),
             s if s.starts_with("--max-file-size=") => max_file_size = Some(s.strip_prefix("--max-file-size=").map(str::to_string)),
@@ -1236,11 +1250,26 @@ fn main() -> eframe::Result {
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
+                    "usage: solidcraft [--control PORT] [--sample] [--theme-file THEME.json] [--crash-log] [--safe-mode] [--new-instance] [--max-file-size SIZE] [--view model|sketch|sheet|render|animation] [design.sc | part.step]"
                 );
                 return Ok(());
             }
             _ => files.push(a),
+        }
+    }
+    // Files given while SolidCraft already runs open in that window, and this launch ends (#18055).
+    // Not with a control port, the sample or safe mode, which want a window of their own; no answer
+    // within a moment starts normally.
+    if !files.is_empty()
+        && !new_instance
+        && !safe_mode
+        && !sample
+        && control_port.is_none()
+        && let Some(endpoint) = settings.as_deref().and_then(single_instance::Endpoint::in_settings)
+    {
+        let absolute: Vec<String> = files.iter().map(|f| single_instance::absolute(f)).collect();
+        if single_instance::forward(&endpoint, &absolute) {
+            return Ok(());
         }
     }
     // `--max-file-size 2GB`: the largest files this run reads, over Preferences, never saved (#4086).
@@ -1384,6 +1413,7 @@ fn main() -> eframe::Result {
     let created = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let created_in_app = created.clone();
     let starting = settings.clone();
+    let instance_dir = settings.clone();
     let attempt_in_app = backend_attempt.clone();
     // A panic on the window's thread ends the app without `on_exit`; this disconnects from the
     // 3D mouse driver then too.
@@ -1488,6 +1518,11 @@ fn main() -> eframe::Result {
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();
             app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone())));
+            // Later launches with a file hand it to this window instead of opening another app. Not
+            // when driven over the control channel or by `--new-instance`.
+            if !new_instance && !sample && control_port.is_none() {
+                single_instance::start(instance_dir.as_deref(), &cc.egui_ctx);
+            }
             // A launch from Finder: its files arrived before the window.
             #[cfg(target_os = "macos")]
             let files = {
@@ -1628,6 +1663,7 @@ fn main() -> eframe::Result {
         }),
     );
     control_server::remove_token_file();
+    single_instance::stop();
     match result {
         Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => {
             no_window(e, cpu_renderer, started, settings.as_deref(), backend_attempt.as_ref())
@@ -2005,6 +2041,49 @@ mod backend_tests {
         assert!(!titlebar_choice(Some(""), Some("system")));
         // Anything unknown keeps the application bar.
         assert!(titlebar_choice(Some("ssd"), None));
+    }
+}
+
+#[cfg(test)]
+mod tickets_http_tests {
+    use super::tickets_call;
+    use solidcraft_ui_egui::agent_chat::backend::HttpRequest;
+    use std::io::{Read, Write};
+
+    /// A server that answers without a length and keeps the connection open unless the request
+    /// asked to close it: the reply ends only when the connection does (#17932).
+    #[test]
+    fn a_ticket_reply_without_a_length_ends_without_waiting_for_the_timeout() {
+        let Ok(listener) = std::net::TcpListener::bind("127.0.0.1:0") else { return };
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = stream.read(&mut buf).unwrap();
+                assert!(n > 0, "the request ended early");
+                request.extend_from_slice(&buf[..n]);
+            }
+            let reply = b"HTTP/1.1 201 Created\r\nContent-Type: application/json\r\n\r\n{\"id\":\"up1\"}";
+            stream.write_all(reply).unwrap();
+            let close = String::from_utf8_lossy(&request).to_ascii_lowercase().contains("connection: close");
+            if !close {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        });
+        let request = HttpRequest {
+            method: "POST",
+            url: format!("http://127.0.0.1:{port}/api/uploads"),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: Some(b"{}".to_vec()),
+            timeout_s: 3,
+        };
+        let started = std::time::Instant::now();
+        let reply = tickets_call(&request);
+        assert_eq!(reply, Ok((201, br#"{"id":"up1"}"#.to_vec())), "after {:?}", started.elapsed());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2), "the reply ended with the connection, not the timeout");
+        server.join().unwrap();
     }
 }
 

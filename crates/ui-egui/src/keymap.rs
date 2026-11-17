@@ -501,7 +501,16 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             }
             return;
         }
-        app.start(variant_for_key(app, id));
+        let resolved = variant_for_key(app, id);
+        if app.preferences.shortcut_again_ends_tool {
+            if repeat {
+                return;
+            }
+            if crate::toolbar::end_running_command(app, resolved) {
+                return;
+            }
+        }
+        app.start(resolved);
     } else if let Some(id) = sketch_tool_for(app, key) {
         let then = variant_for_key(app, id);
         app.start("sketch.create");
