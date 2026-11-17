@@ -709,7 +709,7 @@ impl Body {
 
     /// Share this immutable record with a query that outlives the body handle.
     pub fn shared_record(&self) -> std::sync::Arc<Brep> {
-        self.record.clone()
+        self.record.arc().clone()
     }
 
     /// The body in SMLib, built from its record the first time it is asked for. The record is
