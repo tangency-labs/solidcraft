@@ -884,3 +884,34 @@ fn touch_within_tol_on_records_with_tolerances() {
     assert_eq!(got.contact, Contact::Overlap);
     assert!((got.faces.thickness - 6.0).abs() < 1e-9, "{got:?}");
 }
+
+/// `contact_distance` measures to Σ clipped to S's face (design v2 4.2's contact `on ∩ R_F`):
+/// a wall (−20, 30, 6)–(180, 36, 66) standing on Bottom overhangs its 160 wide top at both ends.
+/// From (50, 33, 6): 0. From (−20, 33, 6), on the overhang: 20 to x = 0 (not 0, Σ's own end).
+/// From (170, 33, 16): 10 over P and 10 past x = 160, √200. A wall lifted off Bottom: none.
+#[test]
+fn the_contact_distance_is_to_the_strip_on_s_face() {
+    let mut k = crate::kernel::Kernel::default();
+    let bottom = box_solid(&mut k, [0.0, 0.0, 0.0], [160.0, 100.0, 6.0]);
+    let long = box_solid(&mut k, [-20.0, 30.0, 6.0], [180.0, 36.0, 66.0]);
+    let mut d = |x: f64, y: f64, z: f64| {
+        contact_distance(&mut k, &long, &bottom, p(), Vec3::new(x, y, z), TOL)
+            .expect("distance")
+            .expect("contact")
+    };
+    assert!(d(50.0, 33.0, 6.0).abs() < 1e-9);
+    let end = d(-20.0, 33.0, 6.0);
+    assert!((end - 20.0).abs() < 1e-6, "{end}");
+    let past = d(170.0, 33.0, 16.0);
+    assert!((past - 200.0_f64.sqrt()).abs() < 1e-6, "{past}");
+    let lifted = box_solid(&mut k, [20.0, 30.0, 10.0], [140.0, 36.0, 66.0]);
+    let none = contact_distance(
+        &mut k,
+        &lifted,
+        &bottom,
+        p(),
+        Vec3::new(50.0, 33.0, 10.0),
+        TOL,
+    );
+    assert_eq!(none.expect("lifted"), None);
+}

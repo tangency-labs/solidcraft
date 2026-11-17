@@ -1349,8 +1349,9 @@ fn seg_distance(seg: &crate::prism::profile::Seg2, q: crate::math::Point2) -> f6
 }
 
 /// The distance from `near` to T's contact with S on `p` (design v2 4.2): from the point to the
-/// strip Σ ([`strip`]) in its plane, the height over `p` and the distance within it (0 inside
-/// Σ, else to its nearest loop) taken together. `None` when T meets no area of S's face on `p`.
+/// strip Σ ([`strip`]) clipped to S's face ([`slot_face`]) in its plane, the height over `p` and
+/// the distance within it (0 inside Σ ∩ S's face, else to its nearest boundary) taken together.
+/// `None` when T meets no area of S's face on `p`.
 /// Neither body is changed.
 ///
 /// # Errors
@@ -1381,18 +1382,72 @@ pub fn contact_distance(
         v.dot(Vec3::new(f.y_axis[0], f.y_axis[1], f.y_axis[2])),
     );
     let height = v.dot(p.normal);
-    let inside =
-        sigma.outer.holds(q) == Some(true) && sigma.holes.iter().all(|h| h.holds(q) == Some(false));
-    let within = if inside {
-        0.0
-    } else {
-        sigma
-            .loops()
-            .flat_map(|l| l.segs.iter())
-            .map(|g| seg_distance(g, q))
-            .fold(f64::INFINITY, f64::min)
+    let faces = face_regions_in(k, s, p, &f, tol)?;
+    let within = faces
+        .iter()
+        .map(|r| clipped_distance(&sigma, r, q))
+        .fold(f64::INFINITY, f64::min);
+    Ok(within.is_finite().then(|| height.hypot(within)))
+}
+
+/// Whether `q` lies in the closed region `r` (its boundary counts as in).
+fn closed_holds(r: &crate::prism::profile::Region2, q: crate::math::Point2) -> bool {
+    r.outer.holds(q) != Some(false) && r.holes.iter().all(|h| h.holds(q) != Some(true))
+}
+
+/// The distance from `q` to `a ∩ b`: 0 inside both, else to the nearest piece of either's
+/// boundary lying in the other. Lines are split where they cross the other's lines; other
+/// segments are kept whole when an end lies in the other. Infinite when they share nothing.
+fn clipped_distance(
+    a: &crate::prism::profile::Region2,
+    b: &crate::prism::profile::Region2,
+    q: crate::math::Point2,
+) -> f64 {
+    use crate::prism::profile::Seg2;
+    if closed_holds(a, q) && closed_holds(b, q) {
+        return 0.0;
+    }
+    let pieces = |x: &crate::prism::profile::Region2, y: &crate::prism::profile::Region2| {
+        let mut best = f64::INFINITY;
+        for g in x.loops().flat_map(|l| l.segs.iter()) {
+            let Seg2::Line { a: p0, b: p1 } = *g else {
+                let (s0, s1) = (g.start(), g.end());
+                if closed_holds(y, s0) || closed_holds(y, s1) {
+                    best = best.min(seg_distance(g, q));
+                }
+                continue;
+            };
+            let (ex, ey) = (p1.x - p0.x, p1.y - p0.y);
+            let mut ts = vec![0.0, 1.0];
+            for h in y.loops().flat_map(|l| l.segs.iter()) {
+                if let Seg2::Line { a: c, b: d } = *h {
+                    let (fx, fy) = (d.x - c.x, d.y - c.y);
+                    let den = ex * fy - ey * fx;
+                    if den.abs() > f64::EPSILON * (ex.hypot(ey) * fx.hypot(fy)).max(1.0) {
+                        let (gx, gy) = (c.x - p0.x, c.y - p0.y);
+                        let t = (gx * fy - gy * fx) / den;
+                        let u = (gx * ey - gy * ex) / den;
+                        if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+                            ts.push(t);
+                        }
+                    }
+                }
+            }
+            ts.sort_by(f64::total_cmp);
+            let at = |t: f64| crate::math::Point2::new(p0.x + t * ex, p0.y + t * ey);
+            for w in ts.windows(2) {
+                if closed_holds(y, at(0.5 * (w[0] + w[1]))) {
+                    let piece = Seg2::Line {
+                        a: at(w[0]),
+                        b: at(w[1]),
+                    };
+                    best = best.min(seg_distance(&piece, q));
+                }
+            }
+        }
+        best
     };
-    Ok(Some(height.hypot(within)))
+    pieces(a, b).min(pieces(b, a))
 }
 
 /// A face bounding the strip Σ across it (along `w`), as [`eased_edge`] reads it.
