@@ -103,19 +103,22 @@ impl ImportCache {
 
     /// [`Self::write`], once `finish` has completed the model (SMLib's check of an import's parts,
     /// which runs on after the import shows): on a thread of its own, so the caller does not
-    /// wait. A later [`Self::read`] of the entry or [`Self::clear`] waits for it.
+    /// wait. Nothing is written when `finish` says the model no longer stands. A later [`Self::read`] of the entry or [`Self::clear`] waits for it.
     pub fn write_after(
         &self,
         key: String,
         doc: Document,
         mut model: solidcraft_doc::SavedModel,
         reply: Value,
-        finish: impl FnOnce(&mut solidcraft_doc::SavedModel) + Send + 'static,
+        finish: impl FnOnce(&mut solidcraft_doc::SavedModel) -> bool + Send + 'static,
     ) {
         let Some(path) = self.path(&key) else { return };
         let cache = self.clone();
         let write = move || {
-            finish(&mut model);
+            // `finish` may say the model no longer stands (an import's check healed a part).
+            if !finish(&mut model) {
+                return;
+            }
             if let Err(e) = cache.write(&key, &doc, &model, &reply) {
                 log::info!("import was not cached: {e}");
             }

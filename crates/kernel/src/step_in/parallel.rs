@@ -89,7 +89,7 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
 pub(super) enum Healed {
     /// Healed: the part with its body and file faces replaced, what the import says of it, and
     /// SMLib's check of the body kept ([`crate::ToleranceHeal::check`]: `None` when it passes).
-    Kept(Part, String, Option<crate::CheckFailure>),
+    Kept(Box<Part>, String, Option<crate::CheckFailure>),
     /// Nothing the heal could prove, or a result whose check is not better: the part as it was.
     NotKept,
     /// The heal could not run (the part as it was): never a reason to change it.
@@ -115,7 +115,7 @@ pub(super) fn heal(part: &Part, item: u64) -> Healed {
         ))));
     };
     let healed = Part { body, closed: part.closed, file_faces: part.file_faces, face_origin, refused: part.refused.clone() };
-    Healed::Kept(healed, format!("healed SMLib's check failures: {}", heal.summary()), heal.check)
+    Healed::Kept(Box::new(healed), format!("healed SMLib's check failures: {}", heal.summary()), heal.check)
 }
 
 /// The part's body where its instance goes: the very same body at the identity (it keeps the

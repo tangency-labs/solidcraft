@@ -393,17 +393,24 @@ impl Model {
     /// the face names not asked for yet (a saved model keeps them as worked out).
     ///
     /// An import whose SMLib check of its parts is still running is saved with what the check
-    /// found: this waits for it ([`Self::saved_now`] does not).
+    /// found: this waits for it ([`Self::saved_now`] does not). `None` when the check healed a
+    /// part: the states are of the import as first shown ([`PendingChecks::settle`]).
     pub fn saved(&self, doc: &Document) -> Option<SavedModel> {
         let (mut saved, pending) = self.saved_now(doc)?;
-        pending.settle(&mut saved);
-        Some(saved)
+        pending.settle(&mut saved).then_some(saved)
     }
 
     /// [`Self::saved`] without waiting for the imports' checks: the records hold what each import
     /// found before its check, and [`PendingChecks::settle`] adds what the check finds.
     pub fn saved_now(&self, doc: &Document) -> Option<(SavedModel, PendingChecks)> {
-        if self.results.is_empty() || self.results.iter().any(|r| r.error.is_some()) || !self.is_current(doc) || has_legacy_names(doc) {
+        // An import its checks healed is fingerprinted with its heals, which a model read back
+        // does not have: it would never be taken.
+        if self.results.is_empty()
+            || self.results.iter().any(|r| r.error.is_some())
+            || !self.is_current(doc)
+            || has_legacy_names(doc)
+            || self.has_import_heals()
+        {
             return None;
         }
         kernel::guard("save the model", || {
@@ -450,9 +457,17 @@ impl PendingChecks {
     /// Wait for the checks and write what they found into `saved`'s feature records: each
     /// import's report and warning as an import that waited for its check has them. A check a
     /// token stopped leaves its record as it was.
-    pub fn settle(self, saved: &mut SavedModel) {
+    ///
+    /// Returns whether `saved` stands: not when a check healed a part
+    /// ([`kernel::ImportChecks::heals`]), since its states hold the import as it was first shown,
+    /// and the model evaluates it again as its healed bodies (with other fingerprints).
+    #[must_use]
+    pub fn settle(self, saved: &mut SavedModel) -> bool {
         for (k, report) in self.0 {
             let Some(settled) = report.settled() else { continue };
+            if report.checks.heals().is_some() {
+                return false;
+            }
             let Some(f) = saved.records.get_mut("features").and_then(|f| f.get_mut(k)).and_then(Json::as_object_mut) else { continue };
             match crate::eval::import_warning(&settled.issues.iter().map(|i| i.detail.as_str()).collect::<Vec<_>>()) {
                 Some(w) => f.insert("warning".into(), json!(w)),
@@ -463,6 +478,7 @@ impl PendingChecks {
                 _ => f.remove("import_report"),
             };
         }
+        true
     }
 }
 
