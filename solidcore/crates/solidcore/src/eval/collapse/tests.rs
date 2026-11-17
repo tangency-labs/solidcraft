@@ -832,13 +832,14 @@ impl Corner {
                 for jj in (r..=3).rev() {
                     let i = k - 3 + jj;
                     let t = (u - knots[i]) / (knots[i + 4 - r] - knots[i]);
-                    for e in 0..4 {
-                        d[jj][e] = (1.0 - t) * d[jj - 1][e] + t * d[jj][e];
+                    let prev = d[jj - 1];
+                    for (x, y) in d[jj].iter_mut().zip(prev) {
+                        *x = (1.0 - t) * y + t * *x;
                     }
                 }
             }
-            for e in 0..4 {
-                h[e] += bj * d[3][e];
+            for (x, y) in h.iter_mut().zip(d[3]) {
+                *x += bj * y;
             }
         }
         Vec3::new(h[0], h[1], h[2]) * (1.0 / h[3])
