@@ -260,8 +260,8 @@ pub(crate) fn cancel_placement_on_escape(app: &mut SolveApp, ctx: &egui::Context
         return false;
     }
     // Leave the key available to the app bar so it also cancels the drag held by its tab strip.
+    let key = drag_key(ctx);
     let drag = ctx.data_mut(|data| {
-        let key = drag_key(ctx);
         let drag = data.get_temp::<TabDrag>(key);
         data.remove::<TabDrag>(key);
         drag
@@ -751,6 +751,18 @@ mod tests {
         assert_eq!(slots.iter().copied().collect::<std::collections::HashSet<_>>().len(), 4);
         assert!(!slots.contains(&0), "the ordinary root viewport has its own slot");
     }
+    #[test]
+    fn escape_dismisses_view_placement() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let view = h.app.docs.views.active().id;
+        let copy = crate::documents::view_duplicate(&mut h.app, view).unwrap();
+        let tab = h.app.docs.active_tab();
+        h.app.docs.view_placement = Some((tab, copy));
+        h.call("ui.key", json!({"key":"Escape"}));
+        assert!(h.app.docs.view_placement.is_none());
+    }
+
     #[test]
     fn tiled_navigation_controls_only_change_their_own_view() {
         let mut h = crate::scenario::Harness::new();
