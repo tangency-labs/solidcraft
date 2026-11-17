@@ -3133,8 +3133,27 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
     // for the distance can turn it round; other curves compare both offsets' distance to it.
     let d = match side {
         Some(q) => {
-            let forward = order.iter().find(|x| x.0 == first).is_none_or(|x| x.1);
-            let left = match sk.curves.get(first).map(|c| c.kind.clone()) {
+            // An arc's own circle only says which side of the whole chain `q` is on when the
+            // arc is alone: a fillet's circle is small, and a point in the middle of the
+            // outline is outside it though on the arc's inner side (#18606). In a chain, ask the
+            // curve of it nearest `q`, a line before an arc where they are as near (the two
+            // meet tangent, so the line's half-plane says the same without the trap).
+            let (judge, forward) = if order.len() > 1 {
+                let near = |i: usize, f: bool| offset_piece(sk, i, f, 0.0).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX);
+                let is_line = |i: usize| matches!(sk.curves.get(i).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+                order.iter().copied().fold(None::<(usize, bool, f64)>, |best, (i, f)| {
+                    let dist = near(i, f);
+                    match best {
+                        Some((bi, _, bd)) if dist > bd - 1e-9 && !(dist <= bd + 1e-9 && is_line(i) && !is_line(bi)) => best,
+                        _ => Some((i, f, dist)),
+                    }
+                })
+                .map(|(i, f, _)| (i, f))
+                .unwrap_or((first, true))
+            } else {
+                (first, order.iter().find(|x| x.0 == first).is_none_or(|x| x.1))
+            };
+            let left = match sk.curves.get(judge).map(|c| c.kind.clone()) {
                 Some(CurveKind::Line { a, b }) => {
                     let (a, b) = (sk.point(a).unwrap_or_default(), sk.point(b).unwrap_or_default());
                     let (from, along) = if forward { (a, b - a) } else { (b, a - b) };
@@ -3148,7 +3167,7 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
                 _ => None,
             };
             let toward = left.unwrap_or_else(|| {
-                let dist = |dd: f64| offset_piece(sk, first, forward, dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX);
+                let dist = |dd: f64| offset_piece(sk, judge, forward, dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX);
                 dist(d0.abs()) <= dist(-d0.abs())
             });
             if toward { d0.abs() } else { -d0.abs() }
