@@ -860,6 +860,31 @@ fn a_part_given_as_triangles_comes_in_as_a_mesh_body() {
     assert!(lo.iter().all(|v| v.abs() < 1e-9) && hi.iter().all(|v| (v - 10.0).abs() < 1e-9), "{lo:?} {hi:?}");
 }
 
+/// The cylinder placed twice (`cylinder_twice.step`) with its part given as the tetrahedron's
+/// triangles instead of its B-rep: a body with no regions that a tessellation is of.
+fn mesh_placed_twice() -> cadmpeg_ir::document::CadIr {
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mut ir = neutral(&bytes, "cylinder_twice.step");
+    let mut t = neutral(TETRAHEDRON_PART.as_bytes(), "tetrahedron.step").model.tessellations[0].clone();
+    let body = ir.model.bodies.iter_mut().find(|b| !b.regions.is_empty()).unwrap();
+    body.regions.clear();
+    t.body = Some(body.id.clone());
+    ir.model.tessellations.push(t);
+    ir
+}
+
+/// A part given as triangles that an assembly places twice is one mesh placed again: the copy
+/// holds no triangles of its own, and both placements come in as mesh bodies.
+#[test]
+fn a_mesh_part_placed_twice_keeps_its_triangles_once() {
+    let (records, _) = traced_records(&mesh_placed_twice(), "twice", "", true);
+    let shape: Vec<(bool, Option<usize>)> = records.bodies.iter().map(|b| (b.mesh.is_some(), b.copy_of)).collect();
+    assert_eq!(shape, [(true, None), (false, Some(0))], "{:?}", records.warnings);
+    let imp = solidcraft_kernel::records_import(&records).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    assert!(imp.bodies.iter().all(|b| b.body.is_mesh()));
+}
+
 /// A mesh kept as records is hostile input like any record: too many vertices, a triangle naming
 /// a vertex the mesh lacks, or a vertex that is not finite leaves the body out with the reason.
 #[test]

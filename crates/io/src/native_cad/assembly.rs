@@ -197,22 +197,36 @@ impl Walk<'_, '_> {
                         let at = self.bodies.len();
                         node.bodies.push(at);
                         let placement = solidcraft_doc::mat_mul(&world, &u.record.placement.unwrap_or(IDENTITY));
+                        // The part's first placement keeps the record; each later one is a copy
+                        // of it, so the design knows them as one part placed again, and holds none
+                        // of its geometry (no record, faces or triangles), not even for a moment.
+                        let part = match self.first.get(&i) {
+                            Some(&original) => RecordBody {
+                                name: u.record.name.clone(),
+                                path: Vec::new(),
+                                instance: None,
+                                color: u.record.color,
+                                paint: u.record.paint.clone(),
+                                hidden: u.record.hidden,
+                                placement: None,
+                                brep: None,
+                                face_origin: Vec::new(),
+                                mesh: None,
+                                copy_of: Some(original),
+                                sheet: u.record.sheet,
+                            },
+                            None => {
+                                self.first.insert(i, at);
+                                u.record.clone()
+                            }
+                        };
                         let placed = RecordBody {
                             name: if u.record.name.is_empty() { name.clone() } else { u.record.name.clone() },
                             path: path.clone(),
                             instance: o.name.clone().filter(|n| !n.trim().is_empty()),
                             hidden: hidden || u.record.hidden,
                             placement: (placement != IDENTITY).then_some(placement),
-                            ..u.record.clone()
-                        };
-                        // The part's first placement keeps the record; each later one is a copy
-                        // of it, so the design knows them as one part placed again.
-                        let placed = match self.first.get(&i) {
-                            Some(&original) => RecordBody { brep: None, face_origin: Vec::new(), copy_of: Some(original), ..placed },
-                            None => {
-                                self.first.insert(i, at);
-                                placed
-                            }
+                            ..part
                         };
                         self.bodies.push(placed);
                         self.origins.push(Origin { body: u.body.clone(), world });
