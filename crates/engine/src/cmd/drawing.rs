@@ -45,7 +45,7 @@ const TEMPLATE_SAVE_CONTRACT: TypedContract<TemplateSaveParams> = TypedContract:
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", crate::checked!("drawing.create", create)).any_part().icon("new").doc_only().contract(&CREATE_CONTRACT).params(
-        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins); source?: another design file to draw instead of this design, which may then be empty: a design file's path of at most 4096 bytes, kept relative to this design's folder when saved. Adds a drawing of this design (or of the file) made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); first_sheet_name?: override the first sheet's name; first_sheet_paper?: override its {size, orientation, dpi}; omit_first_sheet_title_block?: true to start the first sheet without its template title block; standard_views?: true to place the front, top, right and isometric views at a fitted scale on the first sheet; language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins); source?: another design file to draw instead of this design, which may then be empty: a design file's path of at most 4096 bytes, kept relative to this design's folder when saved. Adds a drawing of this design (or of the file) made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
         .in_drawing()
@@ -168,6 +168,23 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     let steps = s.undo.iter().chain(&s.redo).filter_map(|step| step.part);
     let taken: BTreeSet<u64> = s.doc.drawings.iter().map(|d| d.id).chain(steps).collect();
     let mut d = template::instantiate(&chosen, &name, &taken, &mut s.ids).map_err(fail)?;
+    if (request.omit_first_sheet_title_block || request.first_sheet_name.is_some() || request.first_sheet_paper.is_some())
+        && let Some(sheet) = d.sheets.first_mut()
+    {
+        let sheet = Arc::make_mut(sheet);
+        if let Some(name) = request.first_sheet_name {
+            sheet.name = name;
+        }
+        if let Some(paper) = request.first_sheet_paper {
+            sheet.sheet.size = paper.size;
+            sheet.sheet.orientation = paper.orientation;
+            sheet.dpi = paper.dpi;
+        }
+        if request.omit_first_sheet_title_block {
+            sheet.title_block = None;
+            sheet.title_block_overrides.clear();
+        }
+    }
     if let Some(language) = request.language {
         d.language = language;
     }
@@ -187,6 +204,9 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         d.font = font.to_string();
     }
     d.validate().map_err(fail)?;
+    if request.standard_views {
+        d = super::drawing_view::first_standard_views(s, &d)?;
+    }
     s.open_drawing = Some(d.id);
     s.doc_mut().put_drawing(Arc::new(d));
     inspect(s, &Value::Null)

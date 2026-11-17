@@ -32,6 +32,7 @@ mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, NativeDesign, detects_freecad, is_freecad_path, is_native_cad_path, native_cad_design, native_cad_to_step};
 pub mod paper;
+mod pat;
 mod ply;
 mod ply_complex;
 pub use ply::{ply_counts, read_ply_mesh};
@@ -51,6 +52,7 @@ pub use dxf_out::{
     write_dxf_drawing_units,
 };
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
+pub use pat::{PatImportOptions, PatUnits, read_pat};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};

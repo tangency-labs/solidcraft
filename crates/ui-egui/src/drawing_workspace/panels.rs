@@ -7,11 +7,13 @@ use solidcraft_engine::doc::drawing::{
 };
 use solidcraft_engine::doc::{drawing_view::TangentEdges, ids};
 use solidcraft_engine::geom::{
-    drawing_sheet::{Orientation, PaperSize, SheetSize},
+    drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet as Paper, SheetSize},
     table::Heading,
+    title_block::{self, TitleBlock},
 };
 use solidcraft_engine::render::VisualStyle;
 use solidcraft_theme::Tokens;
+use std::sync::LazyLock;
 
 use crate::SolveApp;
 use crate::drawing_sheet_page::{active_sheet, select_sheet};
@@ -30,8 +32,8 @@ pub(super) enum Tool {
 impl Tool {
     pub(super) fn for_command(id: &str) -> Option<Self> {
         match id {
-            "drawing.view.base.planned" => Some(Self::Base),
-            "drawing.view.projected.planned" => Some(Self::Projected),
+            "drawing.view.base" | "drawing.view.base.planned" => Some(Self::Base),
+            "drawing.view.projected" | "drawing.view.projected.planned" => Some(Self::Projected),
             "drawing.view.edit" => Some(Self::Edit(None)),
             "drawing.dimension" => Some(Self::Dimension(None)),
             "drawing.note" => Some(Self::Note),
@@ -71,7 +73,7 @@ fn segments(ui: &mut egui::Ui, label: &str, mut selected: usize, options: &[&str
 }
 
 fn pending(ui: &mut egui::Ui, label: &str) {
-    ui_kit::button(ui, label, Button::Enabled(false)).backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
+    ui_kit::button(ui, label, ui_kit::Button::Enabled(false)).backing_on_disabled_hover_text(tr("ui.drawing_panel.planned"));
 }
 
 fn caption(ui: &mut egui::Ui, id: &'static str) {
@@ -305,22 +307,27 @@ fn parts_list(ui: &mut egui::Ui, drawing: Option<&Drawing>, sheet: Option<u64>, 
 pub(super) struct AddSheet {
     name: String,
     after: usize,
-    size: usize,
+    paper: PaperChoice,
     title_block: usize,
 }
 
-const SIZES: [PaperSize; 8] =
-    [PaperSize::A4, PaperSize::A3, PaperSize::A2, PaperSize::A1, PaperSize::A0, PaperSize::Letter, PaperSize::Legal, PaperSize::A5];
+const SIZES: &[PaperSize] = &[PaperSize::A4, PaperSize::A3, PaperSize::A2, PaperSize::A1, PaperSize::A0, PaperSize::Letter, PaperSize::AnsiB];
+static STANDARD_TITLE_BLOCK: LazyLock<TitleBlock> = LazyLock::new(title_block::default_block);
+
+pub(super) fn valid_sheet_name(name: &str) -> bool {
+    name.is_empty() || (!name.trim().is_empty() && name.len() <= MAX_NAME_BYTES && !name.chars().any(char::is_control))
+}
 
 fn size_name(size: PaperSize) -> String {
     match size {
+        PaperSize::AnsiB => tr("ui.drawing_first.tabloid").to_owned(),
         PaperSize::Letter => tr("ui.drawing_panel.letter").to_owned(),
         PaperSize::Legal => tr("ui.drawing_panel.legal").to_owned(),
         other => format!("{other:?}"),
     }
 }
 
-fn size_caption(size: PaperSize) -> String {
+pub(super) fn size_caption(size: PaperSize) -> String {
     let (short, long) = size.sides_mm();
     format!("{} · {long:.0} × {short:.0} mm", size_name(size))
 }
@@ -329,11 +336,8 @@ impl AddSheet {
     pub(super) fn open(app: &SolveApp) -> Option<Self> {
         let drawing = app.session.drawing("drawing.inspect").ok()?;
         let after = drawing.sheets.len().checked_sub(1)?;
-        let size = match drawing.sheets.get(after)?.sheet.size {
-            SheetSize::Standard(size) => SIZES.iter().position(|candidate| *candidate == size).unwrap_or(1),
-            SheetSize::Custom { .. } => 1,
-        };
-        Some(Self { name: String::new(), after, size, title_block: 0 })
+        let paper = PaperChoice::new(drawing.sheets.get(after)?.sheet);
+        Some(Self { name: String::new(), after, paper, title_block: 0 })
     }
 }
 
@@ -342,43 +346,49 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
     let after = drawing.sheets.get(form.after)?;
     let default_name =
         (drawing.sheets.len() + 1..).map(|n| format!("Sheet {n}")).find(|name| drawing.sheets.iter().all(|sheet| sheet.name != *name))?;
-    let ready = form.name.len() <= MAX_NAME_BYTES && (form.name.is_empty() || !form.name.trim().is_empty());
+    let ready = valid_sheet_name(&form.name) && form.paper.selected().is_some();
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_drawing_add_sheet"), "plus", tr("ui.drawing_sheets.add"))
         .cards(2.5)
         .fields()
         .actions(tr("ui.drawing_sheets.add"), tr("ui.cancel"), None)
         .show(ctx, ready, |ui| {
-            ui.columns(2, |columns| {
-                let [sizes, fields] = columns else { return };
-                ui_kit::section_heading(sizes, tr("ui.drawing_panel.paper_size"));
-                for (index, size) in SIZES.into_iter().enumerate() {
-                    let button = if form.size == index { Button::SmallSelected } else { Button::Small };
-                    if ui_kit::button(sizes, size_caption(size), button).clicked() {
-                        form.size = index;
-                    }
-                }
-                paper_preview(fields, SIZES.get(form.size).copied().unwrap_or(PaperSize::A3), after.sheet.orientation, form.title_block != 2);
+            sheet_columns(ui, &mut form.paper, |fields, paper| {
+                let block = match form.title_block {
+                    0 => after.title_block.is_some(),
+                    1 => true,
+                    _ => false,
+                };
+                paper_preview(fields, paper, after.border.is_some(), block);
                 ui_kit::text_row(fields, tr("ui.drawing_panel.name"), &mut form.name, &default_name);
-                fields.add_enabled_ui(false, |ui| {
-                    choice(ui, tr("ui.drawing_panel.border"), usize::from(after.border.is_none()), &["ISO 5457", tr("ui.drawing_panel.none")]);
+                paper_border(fields, paper, after.border.as_ref());
+                let choices = [tr("ui.drawing_panel.inherit"), tr("ui.drawing_panel.built_in"), tr("ui.drawing_panel.none")];
+                let inherited = match &after.title_block {
+                    Some(block) if *block == *STANDARD_TITLE_BLOCK => choices[1],
+                    Some(_) => choices[0],
+                    None => choices[2],
+                };
+                let current = [inherited, choices[1], choices[2]].get(form.title_block).copied().unwrap_or(inherited);
+                ui_kit::row(fields, tr("ui.drawing_panel.title_block"), |ui| {
+                    ui_kit::dropdown_menu(ui, "drawing_add_sheet_block", current, |ui| {
+                        for (index, label) in choices.into_iter().enumerate() {
+                            ui.selectable_value(&mut form.title_block, index, label);
+                        }
+                    })
                 });
-                ui_kit::choice_row(
-                    fields,
-                    tr("ui.drawing_panel.title_block"),
-                    "drawing_add_sheet_block",
-                    &mut form.title_block,
-                    &[tr("ui.drawing_panel.inherit"), tr("ui.drawing_panel.built_in"), tr("ui.drawing_panel.none")],
-                );
-                let names = drawing.sheets.iter().map(|sheet| sheet.name.as_str()).collect::<Vec<_>>();
-                ui_kit::choice_row(fields, tr("ui.drawing_panel.after_sheet"), "drawing_add_sheet_after", &mut form.after, &names);
+                let names = drawing.sheets.iter().map(|sheet| tr("ui.drawing_first.after_named").replace("{name}", &sheet.name)).collect::<Vec<_>>();
+                let names = names.iter().map(String::as_str).collect::<Vec<_>>();
+                ui_kit::choice_row(fields, tr("ui.drawing_first.position"), "drawing_add_sheet_after", &mut form.after, &names);
             });
         });
     if closed || action == ui_kit::Action::Cancel {
         return None;
     }
     if action == ui_kit::Action::Ok {
-        let size = *SIZES.get(form.size)?;
-        let mut params = json!({"after": ids::encode(drawing.sheets.get(form.after)?.id), "size": SheetSize::Standard(size)});
+        let Some(paper) = form.paper.selected() else { return Some(form) };
+        if !valid_sheet_name(&form.name) {
+            return Some(form);
+        }
+        let mut params = json!({"after": ids::encode(drawing.sheets.get(form.after)?.id), "size": paper.size, "orientation": paper.orientation});
         if !form.name.is_empty() {
             params["name"] = json!(form.name);
         }
@@ -400,47 +410,240 @@ pub(super) fn add_window(app: &mut SolveApp, ctx: &egui::Context, mut form: AddS
     Some(form)
 }
 
-fn paper_preview(ui: &mut egui::Ui, size: PaperSize, orientation: Orientation, block: bool) {
+#[derive(Clone)]
+pub(super) struct PaperChoice {
+    size: usize,
+    orientation: usize,
+    short: String,
+    long: String,
+}
+
+impl PaperChoice {
+    pub(super) fn new(paper: Paper) -> Self {
+        let (size, short, long) = match paper.size {
+            SheetSize::Standard(size) => {
+                let (short, long) = size.sides_mm();
+                (SIZES.iter().position(|&candidate| candidate == size).unwrap_or(SIZES.len()), short, long)
+            }
+            SheetSize::Custom { sides_mm: [a, b] } => (SIZES.len(), a.min(b), a.max(b)),
+        };
+        Self { size, orientation: usize::from(paper.orientation == Orientation::Portrait), short: short.to_string(), long: long.to_string() }
+    }
+
+    pub(super) fn selected(&self) -> Option<Paper> {
+        let size = if let Some(&size) = SIZES.get(self.size) {
+            SheetSize::Standard(size)
+        } else {
+            SheetSize::Custom { sides_mm: [self.short.trim().parse().ok()?, self.long.trim().parse().ok()?] }
+        };
+        let orientation = if self.orientation == 0 { Orientation::Landscape } else { Orientation::Portrait };
+        let paper = Paper { size, orientation };
+        paper.size_mm().ok()?;
+        Some(paper)
+    }
+
+    fn show(&mut self, ui: &mut egui::Ui) {
+        ui_kit::section_heading(ui, tr("ui.drawing_panel.paper_size"));
+        let mut labels = SIZES.iter().map(|&size| size_name(size)).collect::<Vec<_>>();
+        labels.push(tr("ui.graphics_custom").to_owned());
+        let mut ids = SIZES.iter().map(|size| format!("drawing:paper-size:{size:?}")).collect::<Vec<_>>();
+        ids.push("drawing:paper-size:custom".into());
+        let mut captions = Vec::with_capacity(labels.len());
+        let tiles = labels
+            .iter()
+            .zip(&ids)
+            .enumerate()
+            .map(|(index, (label, id))| {
+                let aspect = if let Some(&size) = SIZES.get(index) {
+                    let (short, long) = size.sides_mm();
+                    captions.push(match size {
+                        PaperSize::Letter => "11 × 8.5 in".to_owned(),
+                        PaperSize::AnsiB => "17 × 11 in".to_owned(),
+                        _ => format!("{long:.0} × {short:.0}"),
+                    });
+                    long / short
+                } else {
+                    captions.push(tr("ui.drawing_first.any_size").to_owned());
+                    1.0
+                };
+                ui_kit::AspectTile { id, label, aspect, selected: self.size == index }
+            })
+            .collect::<Vec<_>>();
+        if let Some(index) = ui_kit::aspect_grid_with_captions(ui, &tiles, &captions, 4) {
+            self.size = index;
+        }
+        ui.add_space(Tokens::get().space_16);
+        ui_kit::section_heading(ui, tr("ui.orientation"));
+        ui_kit::segmented(
+            ui,
+            &mut self.orientation,
+            &[tr("ui.drawing_first.landscape"), tr("ui.drawing_first.portrait")],
+            ui_kit::Segments {
+                workspace_accent: true,
+                targets: &["drawing:orientation:landscape", "drawing:orientation:portrait"],
+                ..Default::default()
+            },
+        );
+        if self.size == SIZES.len() {
+            ui_kit::text_row(ui, tr("ui.drawing_first.short_side"), &mut self.short, "");
+            ui_kit::text_row(ui, tr("ui.drawing_first.long_side"), &mut self.long, "");
+        }
+    }
+}
+
+pub(super) fn sheet_columns(ui: &mut egui::Ui, choice: &mut PaperChoice, fields: impl FnOnce(&mut egui::Ui, Option<Paper>)) {
     let t = Tokens::get();
-    let (short, long) = size.sides_mm();
-    let (width, height) = if orientation == Orientation::Landscape { (long, short) } else { (short, long) };
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), t.space_24 * 5.0), egui::Sense::hover());
-    let ratio = (width / height) as f32;
-    let area = rect.shrink(t.space_8);
-    let width = area.width().min(area.height() * ratio).max(0.0);
-    let paper = egui::Rect::from_center_size(area.center(), egui::vec2(width, width / ratio));
+    let width = (ui.available_width() - t.space_24).max(0.0);
+    let left = width * 0.59;
+    let columns = ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = t.space_24;
+        ui.vertical(|ui| {
+            ui.set_width(left);
+            choice.show(ui);
+        });
+        ui.vertical(|ui| {
+            ui.set_width(width - left);
+            fields(ui, choice.selected());
+        });
+    });
+    let bounds = columns.response.rect;
+    ui.painter().vline(bounds.left() + left + t.space_12, bounds.y_range(), egui::Stroke::new(1.0, t.control_border));
+}
+
+pub(super) fn paper_preview(ui: &mut egui::Ui, paper: Option<Paper>, has_border: bool, block: bool) {
+    let t = Tokens::get();
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), t.space_24 * 8.0), egui::Sense::hover());
     let painter = ui.painter();
-    painter.rect_filled(rect, t.radius_md, t.field);
+    painter.rect_filled(rect, t.radius_md, t.sheet_soft);
+    let Some(size) = paper.and_then(|sheet| sheet.size_mm().ok()) else { return };
+    let area = rect.shrink(t.space_16);
+    let long = size.x.max(size.y);
+    let width = size.x / long;
+    let height = size.y / long;
+    let scale =
+        (f64::from(area.width().max(0.0)) / width.max(f64::MIN_POSITIVE)).min(f64::from(area.height().max(0.0)) / height.max(f64::MIN_POSITIVE));
+    let paper = egui::Rect::from_center_size(area.center(), egui::vec2((width * scale) as f32, (height * scale) as f32));
     painter.rect_filled(paper, 0.0, t.paper_white);
     let line = egui::Stroke::new(t.space_2 * 0.5, t.paper_ink);
     let border = paper.shrink(t.space_4);
-    if border.is_positive() {
+    if has_border && border.is_positive() {
         painter.rect_stroke(border, 0.0, line, egui::StrokeKind::Inside);
         if block {
             let title = egui::Rect::from_min_max(border.right_bottom() - border.size() * egui::vec2(0.42, 0.18), border.right_bottom());
             painter.rect_stroke(title, 0.0, line, egui::StrokeKind::Inside);
+            for fraction in [0.25, 0.5, 0.75] {
+                painter.hline(title.x_range(), title.top() + title.height() * fraction, line);
+            }
+            for fraction in [1.0 / 3.0, 2.0 / 3.0] {
+                painter.vline(title.left() + title.width() * fraction, title.center().y..=title.bottom(), line);
+            }
         }
     }
+    ui.add_space(t.space_8);
+}
+
+pub(super) fn paper_border(ui: &mut egui::Ui, paper: Option<Paper>, border: Option<&DrawingBorderProfile>) {
+    let label = match border {
+        Some(border) if *border == DrawingBorderProfile::iso() => match paper.map(|paper| paper.size) {
+            Some(SheetSize::Standard(size)) => format!("ISO 5457 · {}", size_name(size)),
+            _ => "ISO 5457".to_owned(),
+        },
+        Some(_) => tr("ui.graphics_custom").to_owned(),
+        None => tr("ui.drawing_panel.none").to_owned(),
+    };
+    ui.add_enabled_ui(false, |ui| choice(ui, tr("ui.drawing_panel.border"), 0, &[&label]));
+}
+
+pub(super) struct SheetNotice {
+    owner: (u64, u64, u64),
+    revision: u64,
+    views: Vec<u64>,
 }
 
 fn change_sheet(app: &mut SolveApp, sheet: u64, key: &str, value: Value) {
     let mut params = json!({"sheet": ids::encode(sheet)});
     params[key] = value;
-    if let Err(error) = app.run("drawing.sheet.set", params) {
-        app.set_status(error, true);
+    match app.run("drawing.sheet.set", params) {
+        Ok(reply) => {
+            let views = reply["outside"].as_array().into_iter().flatten().filter_map(|view| ids::decode(view["view"].as_str()?)).collect::<Vec<_>>();
+            app.drawing_workspace.sheet_notice = app.session.open_drawing.filter(|_| !views.is_empty()).map(|drawing| SheetNotice {
+                owner: (app.session.uid, drawing, sheet),
+                revision: app.session.revision,
+                views,
+            });
+        }
+        Err(error) => app.set_status(error, true),
+    }
+}
+
+fn sheet_notice(app: &mut SolveApp, ui: &mut egui::Ui, drawing: &Drawing, sheet: &Sheet) {
+    let Some(notice) = app.drawing_workspace.sheet_notice.as_ref() else { return };
+    if notice.owner != (app.session.uid, drawing.id, sheet.id) || notice.revision != app.session.revision {
+        return;
+    }
+    let t = Tokens::get();
+    let message = solidcraft_ui_text::format("ui.drawing_settings.outside", &[("count", &notice.views.len().to_string())]);
+    let container = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel);
+    let frame =
+        container.edge_frame(t.pref_note_fill).stroke(t.control_border_stroke(t.pref_note)).corner_radius(t.radius_md).inner_margin(t.space_12);
+    let area = ui.available_rect_before_wrap();
+    let picked = container
+        .show_frame(ui, frame, area, |ui| {
+            ui.set_width((area.width() - 2.0 * t.space_12).max(0.0));
+            ui.label(egui::RichText::new(message).strong().color(t.pref_note));
+            ui.label(tr("ui.drawing_settings.unmoved"));
+            ui.horizontal_wrapped(|ui| {
+                let mut picked = None;
+                for (index, view) in drawing.views.iter().filter(|view| view.sheet == sheet.id).enumerate() {
+                    if notice.views.contains(&view.id) {
+                        let label = solidcraft_ui_text::format("ui.drawing_settings.view", &[("number", &(index + 1).to_string())]);
+                        if ui_kit::button(ui, label, Button::Small).clicked() {
+                            picked = Some(view.id);
+                        }
+                    }
+                }
+                picked
+            })
+            .inner
+        })
+        .inner;
+    if let Some(view) = picked {
+        super::edit_object(app, "view", view);
     }
 }
 
 pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let sheet = active_sheet(app).and_then(|id| app.session.drawing("drawing.inspect").ok()?.sheets.iter().find(|sheet| sheet.id == id).cloned());
-    if let Some(sheet) = sheet {
-        sheet_fields(app, ui, &sheet);
-    } else {
+    let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() else { return };
+    let Some(sheet) = active_sheet(app).and_then(|id| drawing.sheets.iter().find(|sheet| sheet.id == id)) else {
         caption(ui, "ui.drawing_panel.no_sheet");
-    }
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.screen"));
-    ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
-    ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
+        return;
+    };
+    let t = Tokens::get();
+    egui::Frame::NONE.inner_margin(t.space_12).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = t.space_2;
+        super::sheet_settings_actions(app, ui);
+        ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
+            sheet_notice(app, ui, &drawing, sheet);
+            sheet_fields(app, ui, sheet);
+
+            next_sheet_section(ui, "ui.drawing_panel.screen");
+            ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
+            ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
+        });
+        ui.add_space(t.space_8);
+        ui.separator();
+        settings_note(ui, "ui.drawing_settings.immediate");
+    });
+}
+
+fn next_sheet_section(ui: &mut egui::Ui, key: &'static str) {
+    ui.add_space(Tokens::get().space_12);
+    ui_kit::section_heading(ui, tr(key));
+}
+
+fn settings_note(ui: &mut egui::Ui, key: &'static str) {
+    let t = Tokens::get();
+    ui.add(egui::Label::new(egui::RichText::new(tr(key)).size(t.font_small).color(t.form_dim)).wrap());
 }
 
 fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
@@ -458,27 +661,37 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
         context.data_mut(|data| data.insert_temp(name_id, name));
     }
 
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.paper"));
+    next_sheet_section(ui, "ui.drawing_panel.paper");
     let selected = match sheet.sheet.size {
         SheetSize::Standard(size) => size_caption(size),
         SheetSize::Custom { sides_mm: [a, b] } => format!("{a} × {b} mm"),
     };
     let mut new_size = None;
-    ui_kit::row(ui, tr("ui.drawing_panel.size"), |ui| {
+    let picker = ui_kit::row(ui, tr("ui.drawing_panel.size"), |ui| {
         ui_kit::dropdown_menu(ui, "drawing_sheet_size", &selected, |ui| {
             for size in PaperSize::ALL {
-                if ui.selectable_label(sheet.sheet.size == SheetSize::Standard(size), size_caption(size)).clicked() {
+                let caption = size_caption(size);
+                let option = ui_kit::list_picker(ui, &caption, &caption, sheet.sheet.size == SheetSize::Standard(size));
+                crate::scenario::publish_target(&format!("drawing:settings:paper:{size:?}"), option.rect);
+                if option.clicked() {
                     new_size = Some(size);
+                    ui.close();
                 }
             }
-        });
+        })
     });
+    crate::scenario::publish_target("drawing:settings:paper", picker.rect);
     if let Some(size) = new_size {
         change_sheet(app, sheet.id, "size", json!(SheetSize::Standard(size)));
     }
     let mut orientation = usize::from(sheet.sheet.orientation == Orientation::Portrait);
     let changed = ui_kit::row(ui, tr("ui.drawing_panel.orientation"), |ui| {
-        ui_kit::segmented(ui, &mut orientation, &[tr("ui.drawing_panel.landscape"), tr("ui.drawing_panel.portrait")], ui_kit::Segments::default())
+        ui_kit::segmented(
+            ui,
+            &mut orientation,
+            &[tr("ui.drawing_panel.landscape"), tr("ui.drawing_panel.portrait")],
+            ui_kit::Segments { workspace_accent: true, ..Default::default() },
+        )
     });
     if changed {
         let value = if orientation == 0 { Orientation::Landscape } else { Orientation::Portrait };
@@ -486,7 +699,22 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     }
     let dpi_id = ui.make_persistent_id(("sheet_settings_dpi", app.session.uid, sheet.id));
     let mut dpi = context.data(|data| data.get_temp::<String>(dpi_id)).unwrap_or_else(|| sheet.dpi.to_string());
-    let (enter, response) = ui_kit::row(ui, tr("ui.drawing_panel.picture_dpi"), |ui| ui_kit::text_field_reserving(ui, &mut dpi, "", 0.0));
+    let picture = tr("ui.drawing_settings.picture");
+    let (enter, response) = ui_kit::row(ui, picture, |ui| {
+        let t = Tokens::get();
+        let (enter, response) = ui_kit::text_field_reserving(ui, &mut dpi, "", t.space_24);
+        ui.painter().text(
+            response.rect.right_center() - egui::vec2(t.space_8, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            "dpi",
+            egui::FontId::monospace(t.font_small),
+            t.form_dim,
+        );
+        (enter, response)
+    });
+    ui_kit::below_row_control(ui, picture, ui.available_width(), |ui| {
+        settings_note(ui, "ui.drawing_settings.picture_help");
+    });
     if enter || response.lost_focus() {
         if let Ok(value) = dpi.parse::<f64>()
             && (MIN_DPI..=MAX_DPI).contains(&value)
@@ -498,23 +726,37 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     } else if response.changed() {
         context.data_mut(|data| data.insert_temp(dpi_id, dpi));
     }
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.border_title"));
-    ui.add_enabled_ui(false, |ui| {
-        choice(
-            ui,
-            tr("ui.drawing_panel.border"),
-            0,
-            &[if sheet.border.is_some() { tr("ui.drawing_panel.existing") } else { tr("ui.drawing_panel.none") }],
-        );
-        choice(
-            ui,
-            tr("ui.drawing_panel.title_block"),
-            0,
-            &[if sheet.title_block.is_some() { tr("ui.drawing_panel.existing") } else { tr("ui.drawing_panel.none") }],
-        );
-        choice(ui, tr("ui.drawing_panel.template"), 0, &[tr("ui.drawing_panel.none")]);
+    next_sheet_section(ui, "ui.drawing_panel.border_title");
+    paper_border(ui, Some(sheet.sheet), sheet.border.as_ref());
+    let built_in = tr("ui.drawing_panel.built_in");
+    let none = tr("ui.drawing_panel.none");
+    let current = match sheet.title_block.as_ref() {
+        Some(block) if *block == *STANDARD_TITLE_BLOCK => built_in,
+        Some(_) => tr("ui.graphics_custom"),
+        None => none,
+    };
+    let mut replacement = None;
+    ui_kit::row(ui, tr("ui.drawing_panel.title_block"), |ui| {
+        ui_kit::dropdown_menu(ui, "drawing_sheet_title_block", current, |ui| {
+            for (label, value) in [(built_in, json!("built-in")), (none, Value::Null)] {
+                if ui_kit::list_picker(ui, label, label, current == label).clicked() {
+                    if current != label {
+                        replacement = Some(value);
+                    }
+                    ui.close();
+                }
+            }
+        });
     });
-    ui_kit::section_heading(ui, tr("ui.drawing_panel.counting"));
+    if let Some(value) = replacement {
+        change_sheet(app, sheet.id, "title_block", value);
+    }
+    let template = tr("ui.drawing_panel.template");
+    ui.add_enabled_ui(false, |ui| choice(ui, template, 0, &[none]));
+    ui_kit::below_row_control(ui, template, ui.available_width(), |ui| {
+        settings_note(ui, "ui.drawing_settings.template_help");
+    });
+    next_sheet_section(ui, "ui.drawing_panel.counting");
     let mut count = !sheet.excluded.count;
     if ui_kit::checkbox(ui, tr("ui.drawing_panel.count_sheet"), &mut count).changed() {
         change_sheet(app, sheet.id, "excluded", json!({"count": !count}));

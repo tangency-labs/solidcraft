@@ -164,6 +164,12 @@ pub enum ObjectKind {
     ViewLabel,
     /// A balloon's circle and number, with its leader to the part it numbers.
     Balloon,
+    /// A revision tag's triangle and the revision in it, on the sheet.
+    RevisionTag,
+    /// A sheet-owned sketch's printable curves.
+    Sketch,
+    /// A drawing-owned sketch fill, solid or expanded hatch marks.
+    Fill,
 }
 
 impl ObjectKind {
@@ -184,6 +190,9 @@ impl ObjectKind {
             ObjectKind::CentreLine => "CENTRE_LINE",
             ObjectKind::ViewLabel => "VIEW_LABEL",
             ObjectKind::Balloon => "BALLOON",
+            ObjectKind::RevisionTag => "REVISION_TAG",
+            ObjectKind::Sketch => "SKETCH",
+            ObjectKind::Fill => "FILL",
         }
     }
 
@@ -203,6 +212,8 @@ impl ObjectKind {
                 DrawnFor::Sheet => 5,
             },
             ObjectKind::PartsList | ObjectKind::RevisionTable => 4,
+            ObjectKind::Fill => 4,
+            ObjectKind::Sketch | ObjectKind::RevisionTag => 5,
             ObjectKind::TitleBlock => 6,
         }
     }

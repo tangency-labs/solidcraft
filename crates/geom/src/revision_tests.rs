@@ -141,7 +141,7 @@ fn deleting_a_row_reports_its_tags_which_keep_what_they_showed() {
     assert_eq!(record.tags().len(), 3, "never removed");
     assert_eq!(record.delete(one).unwrap(), [a]);
     assert_eq!(add_tag(&mut record, one), Err(Invalid("no row has that id")));
-    assert_eq!(record.tags()[0].size_mm, 5.0);
+    assert_eq!(record.tags()[0].size_mm, 8.3);
     record.validate().unwrap();
 }
 

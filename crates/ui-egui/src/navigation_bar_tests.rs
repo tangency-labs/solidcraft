@@ -44,7 +44,7 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
         assert!(ids.insert(slot.id), "duplicate catalogue id {}", slot.id);
         match slot.command {
             Some(command) => assert!(solidcraft_engine::find_command(command).is_some(), "{}", slot.id),
-            None => assert!(["projection", "display", "separator"].contains(&slot.id)),
+            None => assert!(["projection", "display", "sheet_zoom", "separator"].contains(&slot.id)),
         }
         if slot.kind != NavigationKind::Separator {
             assert!(!crate::icon_svg::resolve(slot.icon).placeholder, "{}: {}", slot.id, slot.icon);

@@ -13,7 +13,7 @@ mod progress;
 mod projection;
 mod scene;
 
-pub(crate) use meshes::{Ask, Scene, WORKERS, prepare};
+pub(crate) use meshes::{Ask, Placed, Scene, WORKERS, drawn_edges, placed, prepare};
 pub(crate) use progress::Stage;
 pub(crate) use projection::{Origin, Owner, Part, Path, View, clip};
 pub(crate) use scene::drawing;

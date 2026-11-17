@@ -58,6 +58,7 @@ rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 gethostname = { workspace = true }
 
 [dev-dependencies]
+solidcore-ops = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-testkit = { workspace = true }
 # Provenance tests sign with a software OpenPGP key, so they need no GnuPG or smartcard.

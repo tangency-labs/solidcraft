@@ -23,6 +23,8 @@
 //!   (first or third angle) every projected view follows.
 //! - **Dimensions** on its views, each measuring named corners or edges of the view's model
 //!   ([`dimension`]).
+//! - **Sketches** authored on sheets, in paper millimetres, stored with the shared sketch payload
+//!   ([`SheetSketch`]) and independent of every model sketch and view scale.
 //! - **Balloons** on its views, each pointing at a placed part by a named edge of it ([`balloon`]).
 //! - **Images** on its sheets, each file kept once however many places it sits ([`image`]).
 //! - **Tables** on its sheets: parts lists and revision tables ([`table`]).
@@ -76,13 +78,22 @@ pub mod coverage;
 pub mod cutting_line;
 pub mod dimension;
 pub mod fields;
+mod fill;
 pub mod fold;
 pub mod image;
 pub mod note;
+mod sketch;
 pub mod symbol;
 pub mod table;
 pub mod template;
+pub mod thread_lines;
 pub mod view;
+
+pub use fill::{
+    FillPaint, FillRegionStatus, MAX_FILL_REGION_PIECES, MAX_FILLED_SKETCHES, MAX_PATTERN_SNAPSHOTS, MAX_SKETCH_FILLS, PatternSnapshot,
+    ResolvedSketchFill, SheetFillProfile, SheetFillProfiles, SketchFill,
+};
+pub use sketch::{MAX_SHEET_SKETCHES, SheetSketch, SolvedSheetSketch};
 
 use balloon::Balloon;
 use by_id::ById;
@@ -201,6 +212,15 @@ pub struct Drawing {
     /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
     #[serde(default, skip_serializing_if = "no_revisions")]
     pub revisions: Arc<RevisionRecord>,
+    /// Authored sheet sketches, ordered by id on disk, with their original paper-mm payload.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "sketch::serialize_sorted")]
+    pub sketches: Vec<Arc<SheetSketch>>,
+    /// Exact whole-profile fills, with last admitted regions retained on loss.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "fill::serialize_fills")]
+    pub fills: Vec<Arc<SketchFill>>,
+    /// Imported or original pattern snapshots; names need not be unique.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", serialize_with = "fill::serialize_patterns")]
+    pub patterns: Vec<Arc<PatternSnapshot>>,
     /// Set when a newer SolidCraft saved the file this came from.
     #[serde(skip)]
     pub newer_file: Option<Arc<NewerDrawing>>,
@@ -227,6 +247,9 @@ const RECORD_FIELDS: &[&str] = &[
     "balloons",
     "images",
     "sheet_images",
+    "sketches",
+    "fills",
+    "patterns",
     "tables",
     "notes",
     "centre_marks",
@@ -429,6 +452,9 @@ pub struct OnSheet {
     pub centre_marks: Vec<u64>,
     /// The manual centre lines in its views.
     pub centre_lines: Vec<u64>,
+    /// Authored sketches whose coordinates are in this sheet's paper frame.
+    pub sketches: Vec<u64>,
+    pub fills: Vec<u64>,
 }
 
 impl OnSheet {
@@ -443,6 +469,8 @@ impl OnSheet {
             && self.notes.is_empty()
             && self.centre_marks.is_empty()
             && self.centre_lines.is_empty()
+            && self.sketches.is_empty()
+            && self.fills.is_empty()
     }
 }
 
@@ -504,6 +532,9 @@ impl Drawing {
             symbols: ById::default(),
             revisions: Arc::default(),
             newer_file: None,
+            sketches: Vec::new(),
+            fills: Vec::new(),
+            patterns: Vec::new(),
         };
         drawing.validate()?;
         Ok(drawing)
@@ -533,6 +564,8 @@ impl Drawing {
     fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Drawing> {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied)?;
+        sketch::check_raw(&v).map_err(damaged)?;
+        fill::check_raw(&v).map_err(damaged)?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
         d.sources.sort_by_key(|s| s.id);
         let (views, dimensions) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions));
@@ -545,6 +578,9 @@ impl Drawing {
         d.notes.put_in_order();
         d.centre_marks.put_in_order();
         d.centre_lines.put_in_order();
+        d.sketches.sort_by_key(|record| record.id);
+        d.fills.sort_by_key(|record| record.id);
+        d.patterns.sort_by_key(|record| record.id);
         d.symbols.put_in_order();
         d.validate().map_err(damaged)?;
         d.check_image_files().map_err(damaged)?;
@@ -602,6 +638,7 @@ impl Drawing {
     /// properties are kept as they came, and indenting them can make a drawing that read in
     /// under the limit save over it.
     pub fn to_json(&self) -> Result<String> {
+        self.validate()?;
         let unsaved = |e: serde_json::Error| DocError::Invalid(format!("drawing not saved: {e}"));
         let text = match &self.newer_file {
             None => serde_json::to_string_pretty(self).map_err(unsaved)?,
@@ -644,8 +681,9 @@ impl Drawing {
             || self.notes.by_id(id).is_some()
     }
 
-    /// What is on sheet `id`: its views and their annotations, and its images. Each later kind of record on a
-    /// sheet adds its own here, and goes with the sheet ([`Drawing::remove_sheet`]).
+    /// What is on sheet `id`: its views and their annotations, and its images, sketches and fills.
+    /// Each later kind of record on a sheet adds its own here, and goes with the sheet
+    /// ([`Drawing::remove_sheet`]).
     pub fn on_sheet(&self, id: u64) -> OnSheet {
         // The views are listed by id, so the sheet's are too, and so are its images, revision tags, tables and notes.
         let mut on = self.with_contents(self.views.iter().filter(|v| v.sheet == id).map(|v| v.id).collect());
@@ -654,6 +692,10 @@ impl Drawing {
         on.tables = self.tables.iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
         let in_views = |n: &Note| n.anchor.view().is_some_and(|v| on.views.binary_search(&v).is_ok());
         on.notes = self.notes.iter().filter(|n| n.anchor == Anchor::Sheet(id) || in_views(n)).map(|n| n.id).collect();
+        on.sketches = self.sketches.iter().filter(|record| record.sheet == id).map(|record| record.id).collect();
+        on.sketches.sort_unstable();
+        on.fills = self.fills.iter().filter(|fill| on.sketches.binary_search(&fill.sketch).is_ok()).map(|fill| fill.id).collect();
+        on.fills.sort_unstable();
         on
     }
 
@@ -664,7 +706,19 @@ impl Drawing {
         let notes = self.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| views.binary_search(&v).is_ok())).map(|n| n.id).collect();
         let centre_marks = self.centre_marks.iter().filter(|m| views.binary_search(&m.view).is_ok()).map(|m| m.id).collect();
         let centre_lines = self.centre_lines.iter().filter(|line| views.binary_search(&line.view).is_ok()).map(|line| line.id).collect();
-        OnSheet { views, dimensions, balloons, centre_marks, centre_lines, images: Vec::new(), tags: Vec::new(), tables: Vec::new(), notes }
+        OnSheet {
+            views,
+            dimensions,
+            centre_marks,
+            centre_lines,
+            balloons,
+            images: Vec::new(),
+            tags: Vec::new(),
+            tables: Vec::new(),
+            notes,
+            sketches: Vec::new(),
+            fills: Vec::new(),
+        }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -699,11 +753,23 @@ impl Drawing {
         if !objects.tags.is_empty() {
             Arc::make_mut(&mut self.revisions).delete_tags(&objects.tags);
         }
+        self.sketches.retain(|s| objects.sketches.binary_search(&s.id).is_err());
+        self.fills.retain(|fill| objects.fills.binary_search(&fill.id).is_err());
+    }
+
+    /// Read only this drawing's sketch. Identical local sketch ids in another drawing are unrelated.
+    pub fn sheet_sketch(&self, id: u64) -> Option<&Arc<SheetSketch>> {
+        self.sketches.iter().find(|record| record.id == id)
     }
 
     /// Every object's id, of every kind: what a new id must differ from. Each later kind adds its
     /// own here.
     fn ids(&self) -> impl Iterator<Item = u64> {
+        self.object_ids()
+    }
+
+    /// The canonical current drawing-global namespace, also used across undo/redo.
+    pub fn object_ids(&self) -> impl Iterator<Item = u64> {
         std::iter::once(self.id)
             .chain(self.sources.iter().map(|s| s.id))
             .chain(self.sheets.iter().map(|s| s.id))
@@ -718,11 +784,22 @@ impl Drawing {
             .chain(self.centre_lines.iter().map(|line| line.id))
             .chain(self.symbols.iter().map(|s| s.id))
             .chain(self.revisions.ids())
+            .chain(self.sketches.iter().map(|s| s.id))
+            .chain(self.fills.iter().map(|fill| fill.id))
+            .chain(self.patterns.iter().map(|pattern| pattern.id))
     }
 
     /// The record's rules (the module's notes): what reading a drawing checks, and what every edit
     /// keeps.
     pub fn validate(&self) -> Result<()> {
+        self.validate_structure()?;
+        sketch::check_drawing(self)
+    }
+
+    /// Ownership/header checks also used before staging one sketch edit. Deep
+    /// payload validation remains at the full publication and file boundaries.
+    fn validate_structure(&self) -> Result<()> {
+        require(self.sketches.len() <= MAX_SHEET_SKETCHES, || "too many sheet sketches".into())?;
         require((1..=MAX_SHEETS).contains(&self.sheets.len()), || format!("a drawing has 1 to {MAX_SHEETS} sheets"))?;
         self.check_sources()?;
         check_name(&self.name, "the drawing's")?;
@@ -734,6 +811,10 @@ impl Drawing {
             // A length unit of the expression unit table, written as the table writes it.
             let length = unit.trim() == unit.as_str() && expr::unit_info(unit).is_some_and(|(kind, _)| kind == expr::Kind::Length);
             require(length, || "the drawing's unit is not a length unit (such as `mm` or `in`)".into())?;
+        }
+        let sheets: BTreeSet<_> = self.sheets.iter().map(|sheet| sheet.id).collect();
+        for record in &self.sketches {
+            require(sheets.contains(&record.sheet), || "sheet sketch owner does not exist in this drawing".into())?;
         }
         let mut seen = BTreeSet::new();
         for id in self.ids() {
@@ -757,7 +838,8 @@ impl Drawing {
         self.check_centre_lines()?;
         self.check_images()?;
         self.check_notes()?;
-        self.check_symbols()
+        self.check_symbols()?;
+        fill::check_drawing(self)
     }
 
     /// The sources' rules: at most [`MAX_SOURCES`], by id, the design the drawing is in at most once,
