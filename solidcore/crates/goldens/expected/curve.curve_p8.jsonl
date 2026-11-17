@@ -3049,7 +3049,7 @@
 {"case":"polygon_test_far_gci","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"polygon_test_far_gci_skip","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"polyline_crossing_line","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[23.999999999999996,23.999999999999996,273.16666666666663]],"n":25}}}
-{"case":"polyline_touching_vertex","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[1.0,1.0,2.0,2.0,0.0,1.0,0.0,0.5,0.5]}}
+{"case":"polyline_touching_vertex","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[20.000001907348633,20.000001907348633,189.0000400543213]],"n":23}}}
 {"case":"range_end_preserves_noncollapsed_tail","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[24.30202812639228,24.30202812639228,228.90329974603583]],"n":17}}}
 {"case":"rect_edge_sub_segment_simple_gci","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[1.0,2.0,2.0,2.0,2.0,2.0,0.0,0.3,0.0,0.0,0.8,1.0]}}
 {"case":"rect_edge_sub_segment_simple_reversed_gci","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}

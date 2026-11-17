@@ -130,7 +130,7 @@
 {"case":"gen0004","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0,0.0]}}
 {"case":"gen0005","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
 {"case":"gen0006","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0]}}
-{"case":"gen0007","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":99}}}
+{"case":"gen0007","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":157}}}
 {"case":"gen0008","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":54}}}
 {"case":"gen0009","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":[0.0,0.0]}}
 {"case":"gen0010","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":35}}}
