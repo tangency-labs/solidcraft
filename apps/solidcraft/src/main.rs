@@ -97,6 +97,11 @@ struct App {
     starting: Option<std::path::PathBuf>,
     /// A newly selected API is confirmed only once the first frame has been presented.
     backend_attempt: Option<(std::path::PathBuf, startup::BackendAttempt)>,
+    /// A tracked full-graphics launch: `graphics.json`, where it reports that it proved itself, closed
+    /// normally or lost its device (`startup::SafeGraphics`). `None` in safe graphics mode.
+    safe_graphics_record: Option<std::path::PathBuf>,
+    /// When this full-graphics launch reached "app up"; cleared once it proved itself.
+    full_graphics_up: Option<std::time::Instant>,
     /// Frames the window has begun, the starting page's included: the first is fitted to the work
     /// area before the window shows, the second asks for the foreground.
     window_frames: u32,
@@ -283,8 +288,13 @@ impl eframe::App for App {
             if let Some(dir) = self.starting.take() {
                 startup::started(&dir);
             }
+            // The minute that proves full graphics runs from here (`prove_full_graphics`).
+            if self.safe_graphics_record.is_some() {
+                self.full_graphics_up = Some(std::time::Instant::now());
+            }
         }
         self.watch_device();
+        self.prove_full_graphics(ctx);
         // The design on screen is the one whose commands a crash report replays.
         self.solve.session.crash_journal = solidcraft_engine::crash::enabled();
         // The OS closing the window (Alt+F4, Cmd+Q, the window manager): ask about unsaved
@@ -417,6 +427,13 @@ impl eframe::App for App {
         // page, a close the user asked for is no failed start (#1210).
         if let Some(dir) = self.starting.take() {
             startup::closed_while_starting(&dir, self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none()));
+        }
+        // A full-graphics launch closing normally did not fail (a lost device took the record).
+        if self.gpu.as_ref().is_none_or(|g| g.lost_at.is_none())
+            && let Some(path) = self.safe_graphics_record.take()
+            && let Err(reason) = startup::update_safe_graphics(&path, startup::SafeGraphics::closed_normally)
+        {
+            log::warn!("graphics: safe graphics record not saved: {reason}");
         }
         // A shader compile from the start still running ends before the GPU is torn down: a
         // driver call cut off as the process exits can crash it (#1210).
@@ -576,6 +593,28 @@ impl App {
         gpu.lost_at = Some(device_lost::now_secs());
         gpu.reason = reason;
         self.solve.quit_requested = true;
+        // A full-graphics launch that lost its device failed, even after it proved itself.
+        if let Some(path) = self.safe_graphics_record.take()
+            && let Err(reason) = startup::update_safe_graphics(&path, startup::SafeGraphics::lost_device)
+        {
+            log::warn!("graphics: safe graphics record not saved: {reason}");
+        }
+    }
+
+    /// A full-graphics launch that has run [`startup::FULL_GRAPHICS_PROOF`] since "app up"
+    /// without losing its device clears the failures before it (`startup::SafeGraphics::proved`).
+    fn prove_full_graphics(&mut self, ctx: &egui::Context) {
+        let Some(up) = self.full_graphics_up else { return };
+        let Some(left) = startup::FULL_GRAPHICS_PROOF.checked_sub(up.elapsed()).filter(|left| !left.is_zero()) else {
+            self.full_graphics_up = None;
+            if let Some(path) = &self.safe_graphics_record
+                && let Err(reason) = startup::update_safe_graphics(path, startup::SafeGraphics::proved)
+            {
+                log::warn!("graphics: safe graphics record not saved: {reason}");
+            }
+            return;
+        };
+        ctx.request_repaint_after(left);
     }
 }
 
@@ -702,6 +741,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let open_parent = parent.clone();
     let program_parent = parent.clone();
     let file_parent = parent.clone();
+    let folder_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
@@ -751,6 +791,10 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             let future = file_folder.start(file_parent.clone()).add_filter(label, &all).add_filter("All files", &["*"]).pick_file();
             let folder = file_folder.clone();
             Box::pin(async move { folder.answer(future.await) })
+        })),
+        pick_folder: Some(Box::new(move || {
+            let future = folder_parent.clone().set_title("Choose a folder").pick_folder();
+            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
         })),
         pick_program: Some(Box::new(move || {
             let dialog = program_parent.clone().set_title("Choose your slicer");
@@ -1311,6 +1355,7 @@ fn main() -> eframe::Result {
             startup::BackendLaunch::default()
         }
     };
+    let backend_path_for_safe = backend_path.clone();
     let backend_attempt = backend_path.zip(backend_launch.attempt);
     let backend_note = backend_launch.note;
     // The launch before this one closed because its graphics device was lost (`App::watch_device`).
@@ -1322,6 +1367,33 @@ fn main() -> eframe::Result {
         }
         notes.push(device_lost::note(cpu_renderer, reason.as_deref()));
     }
+    // Safe graphics mode: after a launch that failed to come up or lost its device, or when asked
+    // for, this one starts on the plain path (`startup::SafeGraphics`). Decided and saved before
+    // any graphics device is created, so a launch that dies in the driver counts.
+    let tracked = control_port.is_none();
+    let previous_failed = failed_starts > 0 || after_loss;
+    let mut failed_backend = None;
+    let safe_graphics = match backend_path_for_safe.as_ref() {
+        Some(path) => match startup::update_safe_graphics(path, |record| (record.begin(previous_failed, tracked, safe_mode), record.backend.clone()))
+        {
+            Ok((reason, backend)) => {
+                // After a failure, the API the failed full launch used is avoided.
+                if matches!(reason, Some(startup::SafeGraphicsReason::Failed | startup::SafeGraphicsReason::Sticky)) {
+                    failed_backend = backend;
+                }
+                reason
+            }
+            Err(reason) => {
+                log::warn!("graphics: safe graphics record not saved: {reason}");
+                (safe_mode || (tracked && previous_failed)).then_some(startup::SafeGraphicsReason::Failed)
+            }
+        },
+        None => safe_mode.then_some(startup::SafeGraphicsReason::Asked),
+    };
+    if let Some(reason) = safe_graphics {
+        solidcraft_engine::note!("SolidCraft graphics: safe graphics mode ({reason:?})");
+    }
+    let safe = safe_graphics.is_some();
     if safe_mode {
         notes.push("Safe mode: default settings (yours are kept for the next normal start), no recovery offer, software rendering.".into());
     }
@@ -1332,8 +1404,21 @@ fn main() -> eframe::Result {
         notes.push(note.clone());
     }
     let saved_samples = if safe_mode { None } else { msaa() };
-    let wgpu_options = wgpu_options(cpu_renderer, if safe_mode { None } else { backend_launch.backend.as_deref() });
-    let depth_bits = if !safe_mode && startup::float_depth_everywhere(&wgpu_options) { FLOAT_DEPTH_BITS } else { DEPTH_BITS };
+    let wgpu_options =
+        if safe { safe_wgpu_options(cpu_renderer, failed_backend.as_deref()) } else { wgpu_options(cpu_renderer, backend_launch.backend.as_deref()) };
+    // A tracked full launch notes the API it starts, for the safe launch after a failure.
+    if !safe
+        && tracked
+        && !cpu_renderer
+        && let Some(path) = backend_path_for_safe.as_ref()
+        && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &wgpu_options.wgpu_setup
+    {
+        let backend = startup::backend_name(setup.instance_descriptor.backends).map(str::to_string);
+        if let Err(reason) = startup::update_safe_graphics(path, |record| record.backend = backend) {
+            log::warn!("graphics: safe graphics record not saved: {reason}");
+        }
+    }
+    let depth_bits = if !safe && startup::float_depth_everywhere(&wgpu_options) { FLOAT_DEPTH_BITS } else { DEPTH_BITS };
     // Crashes leave a report in the crash folder (solidcraft_engine::crash, docs/crash-reports.md).
     let crashed = solidcraft_engine::crash::default_dir()
         .map(|dir| {
@@ -1415,6 +1500,8 @@ fn main() -> eframe::Result {
     let starting = settings.clone();
     let instance_dir = settings.clone();
     let attempt_in_app = backend_attempt.clone();
+    // A tracked full-graphics launch reports how it went (`startup::SafeGraphics`).
+    let graphics_path_in_app = backend_path_for_safe.clone().filter(|_| !safe && tracked);
     // A panic on the window's thread ends the app without `on_exit`; this disconnects from the
     // 3D mouse driver then too.
     #[cfg(target_os = "macos")]
@@ -1453,7 +1540,8 @@ fn main() -> eframe::Result {
                 }
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
-            app.cpu_meshing = safe_mode;
+            app.cpu_meshing = safe_mode || safe;
+            app.safe_graphics = safe;
             app.graphics_fallback = fallback_note.clone();
             let stored_ui = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k)));
             restore_preferences(&mut app, stored_ui.as_deref(), graphics().as_ref(), safe_mode);
@@ -1506,7 +1594,8 @@ fn main() -> eframe::Result {
                 let supported = scene_sample_choices(depth_bits, STENCIL_BITS, |depth| {
                     eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth)
                 });
-                let scene_samples = scene_samples(info.backend, u32::from(samples), &supported);
+                // Safe graphics draws the scene without anti-aliasing; the saved choice is kept.
+                let scene_samples = if safe { 1 } else { scene_samples(info.backend, u32::from(samples), &supported) };
                 GpuSetup { rs: rs.clone(), depth_bits, samples, supported, scene_samples }
             });
             // `--control`/the environment name a port for this run; otherwise the preference (off
@@ -1595,7 +1684,7 @@ fn main() -> eframe::Result {
                     }
                     // No design given: the start page (not when driven over the control channel, whose
                     // clients expect the design view; `ui.home` shows it there).
-                    if files.is_empty() && !sample && control_port.is_none() {
+                    if app.preferences.home_on_launch(!files.is_empty(), sample, control_port.is_some()) {
                         let rev = app.session.revision;
                         app.home.show(rev);
                     }
@@ -1645,6 +1734,8 @@ fn main() -> eframe::Result {
                 gpu_job: None,
                 starting,
                 backend_attempt: attempt_in_app,
+                safe_graphics_record: graphics_path_in_app,
+                full_graphics_up: None,
                 window_frames: 0,
                 frames: 0,
                 up: false,
@@ -1666,7 +1757,7 @@ fn main() -> eframe::Result {
     single_instance::stop();
     match result {
         Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => {
-            no_window(e, cpu_renderer, started, settings.as_deref(), backend_attempt.as_ref())
+            no_window(e, cpu_renderer, safe, started, settings.as_deref(), backend_attempt.as_ref())
         }
         r => r,
     }
@@ -1783,14 +1874,41 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
         let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
         startup::configure_adapter(setup, cpu, environment, adapter);
-        // A float depth buffer with a stencil, wherever the adapter has it (see `FLOAT_DEPTH_BITS`).
+        // A float depth buffer with a stencil (see `FLOAT_DEPTH_BITS`), and indirect draws that
+        // start at an instance (instanced meshes drawn a call per pipeline), wherever the adapter
+        // has them.
         let base = setup.device_descriptor.clone();
         setup.device_descriptor = std::sync::Arc::new(move |adapter| {
             let mut d = base(adapter);
-            d.required_features |= adapter.features() & startup::FLOAT_DEPTH_STENCIL;
+            d.required_features |= adapter.features() & (startup::FLOAT_DEPTH_STENCIL | solidcraft_viewport_gpu::INDIRECT_DRAWS);
             d
         });
     }
+    options
+}
+
+/// Safe graphics mode's renderer settings (`startup::SafeGraphics`): wgpu's own backend and adapter
+/// choice, as v0.1.0 had, with no API order, no retries, no adapter preference and no float depth.
+/// After a failure, the API the failed launch used is left out (`failed`, [`startup::safe_backends`]).
+/// Kept: one frame in flight (eframe's own default), the D3D12 shader compiler that never loads a
+/// `dxcompiler.dll` from PATH (#6756), and the Intel Mac validation fix (#3080); with `cpu`, the
+/// software adapter.
+fn safe_wgpu_options(cpu: bool, failed: Option<&str>) -> eframe::egui_wgpu::WgpuConfiguration {
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+        let intel_mac = cfg!(all(target_os = "macos", target_arch = "x86_64"));
+        let indirect = std::env::var(startup::INDIRECT_VALIDATION_ENV).ok();
+        setup.instance_descriptor.flags = startup::window_instance_flags(setup.instance_descriptor.flags, intel_mac, indirect.as_deref());
+        setup.instance_descriptor.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
+        if cpu {
+            startup::configure_adapter(setup, true, None, None);
+        } else if std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| v.trim().is_empty()) || std::env::var_os(startup::WGPU_BACKEND_ENV).is_none()
+        {
+            // WGPU_BACKEND always has priority; otherwise the failed API is left out.
+            setup.instance_descriptor.backends = startup::safe_backends(setup.instance_descriptor.backends, failed);
+        }
+    }
+    solidcraft_engine::note!("SolidCraft graphics: safe graphics mode, wgpu's own backend choice");
     options
 }
 
@@ -1799,6 +1917,7 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
 fn no_window(
     error: eframe::Error,
     tried_cpu: bool,
+    safe_graphics: bool,
     failed: eframe::wgpu::Backends,
     settings: Option<&std::path::Path>,
     backend_attempt: Option<&(std::path::PathBuf, startup::BackendAttempt)>,
@@ -1830,7 +1949,13 @@ fn no_window(
         }
     }
     let explicit = std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| !v.trim().is_empty());
-    if let Some(next) = startup::fallback_backend(cfg!(target_os = "windows"), explicit, tried_cpu, failed)
+    // Safe graphics tries no other graphics API, only the software renderer as the last resort.
+    let next = if safe_graphics && !explicit && !tried_cpu {
+        Some("cpu")
+    } else {
+        startup::fallback_backend(cfg!(target_os = "windows"), explicit, tried_cpu, failed)
+    };
+    if let Some(next) = next
         && let Ok(exe) = std::env::current_exe()
     {
         let previous = std::env::var(startup::FALLBACK_NOTE_ENV).unwrap_or_default();
@@ -2339,6 +2464,23 @@ mod viewport_tests {
 
 #[cfg(test)]
 mod msaa_tests {
+    /// Safe graphics mode leaves the backend and adapter to wgpu (no API order, no adapter
+    /// preference, no float depth feature); its software fallback still picks the CPU adapter.
+    #[test]
+    fn safe_graphics_renderer_is_wgpus_own_choice() {
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(default) = eframe::egui_wgpu::WgpuConfiguration::default().wgpu_setup else { panic!() };
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(safe) = super::safe_wgpu_options(false, None).wgpu_setup else { panic!() };
+        assert_eq!(safe.instance_descriptor.backends, default.instance_descriptor.backends, "wgpu's own backends");
+        assert!(safe.native_adapter_selector.is_none(), "no adapter preference");
+        assert_eq!(safe.power_preference, default.power_preference);
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(cpu) = super::safe_wgpu_options(true, None).wgpu_setup else { panic!() };
+        assert!(cpu.native_adapter_selector.is_some(), "the last-resort software renderer");
+        if std::env::var_os("WGPU_BACKEND").is_none() {
+            let eframe::egui_wgpu::WgpuSetup::CreateNew(after) = super::safe_wgpu_options(false, Some("vulkan")).wgpu_setup else { panic!() };
+            assert!(!after.instance_descriptor.backends.contains(eframe::wgpu::Backends::VULKAN), "a failed Vulkan launch: no Vulkan");
+        }
+    }
+
     /// Safe mode uses default UI settings but edits the real graphics.json for the next start.
     #[test]
     fn safe_mode_preserves_graphics_choices_when_changing_antialiasing() {

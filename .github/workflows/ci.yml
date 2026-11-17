@@ -1179,13 +1179,23 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          # The other runs of ci.yml for this commit. While one is still going, wait for it (at
-          # most 90 minutes); then pass only when the newest one that ran its checks passed.
+          # The other runs of ci.yml for this commit. While one that runs checks is still going,
+          # wait for it (at most 90 minutes); then pass only when the newest one that ran its
+          # checks passed. A run another label started is not waited for: its only job is ci,
+          # which waits as this one does, so two labels added close together had their runs wait
+          # for each other until the deadline. Such a run has every job but ci skipped; a run
+          # whose jobs are not listed yet, or cannot be read, is waited for.
           deadline=$((SECONDS + 5400))
           while :; do
             runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=pull_request&per_page=100" \
               --jq "[.workflow_runs[] | select(.id != $RUN_ID)]")
-            pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            pending=0
+            for id in $(jq -r '.[] | select(.status != "completed") | .id' <<<"$runs"); do
+              checks=$(gh api "repos/$REPO/actions/runs/$id/jobs?filter=latest&per_page=100" \
+                --jq 'if (.jobs | length) == 0 then 1
+                      else [.jobs[] | select(.name != "ci" and .conclusion != "skipped")] | length end') || checks=1
+              if [ "${checks:-1}" -gt 0 ]; then pending=$((pending + 1)); fi
+            done
             if [ "$pending" -eq 0 ] || [ "$SECONDS" -ge "$deadline" ]; then break; fi
             echo "Waiting for $pending run(s) of this commit to finish."
             sleep 30

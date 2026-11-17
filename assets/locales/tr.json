@@ -2721,7 +2721,7 @@
   "render.cpu_body_choose": "Bir gövde seçin",
   "render.cpu_body_filter": "Gövdeleri ada göre filtrele",
   "render.cpu_body_filter_more": "Daha fazla gövde görmek için filtreyi daraltın.",
-  "render.cpu_body_missing": "Bir yansıma hedefi eksik, gizli, belirsiz veya adı 128 bayttan uzun. Yeniden seçin.",
+  "render.cpu_body_missing": "Bir yansıma hedefi eksik, gizli, belirsiz veya adı 512 bayttan uzun. Yeniden seçin.",
   "render.cpu_budget": "CPU kaynak profili",
   "render.cpu_budget_bodies": "Gövde üst sınırı",
   "render.cpu_budget_compact": "Sıkışık (eski sınırlar)",

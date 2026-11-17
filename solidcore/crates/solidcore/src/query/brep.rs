@@ -103,7 +103,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::topology_solver::p1::TopologySolver;
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, SQRT3};
+use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::knots::Side;
 use crate::query::edge as qe;
@@ -532,9 +532,8 @@ pub struct Ray {
 }
 
 impl Ray {
-    /// The ray from `origin` along `direction`, made unit at any finite length: the direction
-    /// is first divided by its largest absolute coordinate, so its squared length neither
-    /// overflows nor underflows, then made unit ([`Vec3::unitize`]).
+    /// The ray from `origin` along `direction`, made unit at any finite length
+    /// ([`Vec3::length_and_unit`]).
     ///
     /// # Errors
     ///
@@ -549,23 +548,8 @@ impl Ray {
             ));
         }
         let no_length = || SolidError::invalid_input(OP_RAY, "a direction of no length");
-        let scale = direction
-            .x
-            .abs()
-            .max(direction.y.abs())
-            .max(direction.z.abs());
-        // `scale` is the length to within a factor of sqrt 3, so this also refuses the zero
-        // direction before it divides.
-        if scale * SQRT3 < EFF_ZERO {
-            return Err(no_length());
-        }
-        let scaled = direction / scale;
-        // `scaled` has a coordinate of magnitude 1: its length is in [1, sqrt 3].
-        if scale * scaled.length() < EFF_ZERO {
-            return Err(no_length());
-        }
-        let direction = scaled.unitize().map_err(|_| no_length())?;
-        if !(finite(direction) && (direction.length() - 1.0).abs() <= EFF_ZERO) {
+        let (length, direction) = direction.length_and_unit().ok_or_else(no_length)?;
+        if length < EFF_ZERO {
             return Err(no_length());
         }
         Ok(Self { origin, direction })

@@ -2439,6 +2439,45 @@ fn sketch_entities_name_their_sketch() {
     assert_eq!(it["sketch"], json!(s.active_sketch.unwrap()), "{it}");
 }
 
+/// #18233: Select All takes every shown body; in an open sketch, every curve of the sketch
+/// (construction ones too) and its points on no curve, not projected geometry or the origin.
+/// It replaces the selection and is no undo step.
+#[test]
+fn select_all_takes_the_shown_bodies_or_the_open_sketchs_own_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name": "Block", "corner": [0, 0, 0], "length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"body_name": "Spare", "corner": [30, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "solid.box", json!({"body_name": "Stowed", "corner": [60, 0, 0], "length": 5, "width": 5, "height": 5}));
+    run(&mut s, "browser.visibility", json!({"items": ["Stowed"], "visible": false}));
+    run(&mut s, "select.set", json!({"items": [{"type": "face", "body": "Block", "index": 0}]}));
+    let undo = s.undo.len();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 2);
+    assert_eq!(s.selection, ["Block", "Spare"].map(|name| Sel::Body { name: name.into() }));
+    assert_eq!(s.undo.len(), undo, "no undo step");
+
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.project", json!({"refs": [{"edge": [5, 0, 0], "body": "Block"}]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 20], [40, 20]], "ids": ["rail"], "connect": false}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 30], [40, 30]], "ids": ["guide"], "construction": true, "connect": false}));
+    run(&mut s, "sketch.point", json!({"point": [50, 50], "id": "pin", "connect": false}));
+    let undo = s.undo.len();
+    let doc = s.doc.to_json();
+    assert_eq!(run(&mut s, "select.all", json!({}))["selected"], 3);
+    let mut got: Vec<String> = s.selection.iter().map(|x| format!("{x:?}")).collect();
+    got.sort();
+    let mut want: Vec<String> = [
+        Sel::SketchCurve { id: "guide".into(), sketch: None },
+        Sel::SketchCurve { id: "rail".into(), sketch: None },
+        Sel::SketchPoint { id: "pin".into() },
+    ]
+    .iter()
+    .map(|x| format!("{x:?}"))
+    .collect();
+    want.sort();
+    assert_eq!(got, want, "the projected edge and the origin stay out");
+    assert_eq!((s.doc.to_json(), s.undo.len()), (doc, undo), "selecting edits nothing");
+}
+
 #[test]
 fn construction_points_report_their_position() {
     let mut s = Session::default();
@@ -2525,12 +2564,18 @@ fn feature_and_folder_names_count_characters_not_bytes() {
         let error = s.execute(command, &params).unwrap_err().to_string();
         assert!(error.contains("1…128 characters"), "{command}: {error}");
     }
+    // A new folder is given such a name too.
+    let made = run(&mut s, "timeline.group", json!({"name": too_long.chars().skip(1).collect::<String>()}))["group"].as_u64().unwrap();
+    assert_eq!(s.doc.timeline_groups.iter().find(|g| g.id == made).map(|g| g.name.chars().count()), Some(128));
+    // A design with such names is saved and opens again.
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).map_err(|e| e.to_string());
+    assert_eq!(reopened.map(|d| d.timeline_groups[0].name.clone()), Ok(long));
 }
 
 /// #18094: one rim edge of a pocket selects the pocket's rim, the loop of the flat top face that
 /// holds the edge, from the exact topology; `face` picks another of the edge's faces, and a call
 /// that names no edge, half an edge, a face the edge doesn't bound or an unknown key is refused
-/// with the selection as it was.
+/// with the selection as it was. With `add`, an edge already selected is not added again.
 #[test]
 fn select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge() {
     let mut s = Session::default();
@@ -2540,20 +2585,29 @@ fn select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge() {
     run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Plate","point":[10,5,10]}]}));
     let Some(Sel::Edge { index: picked, .. }) = s.selection.first().cloned() else { panic!("{:?}", s.selection) };
     let history = (s.undo.len(), s.redo.len());
-    let on_rim = |p: Vec3| (p.z - 10.0).abs() < 1e-6 && ((p.x - 10.0).abs().max((p.y - 10.0).abs()) - 5.0).abs() < 1e-6;
+    let selected_edges = |s: &Session| {
+        let mut out: Vec<usize> = s.selection.iter().filter_map(|x| if let Sel::Edge { index, .. } = x { Some(*index) } else { None }).collect();
+        out.sort_unstable();
+        out
+    };
+    let sorted = |r: &Value| {
+        let mut out: Vec<usize> = r["edges"].as_array().unwrap().iter().map(|e| e.as_u64().unwrap() as usize).collect();
+        out.sort_unstable();
+        out
+    };
 
     let r = run(&mut s, "select.edge_loop", json!({}));
     assert_eq!(r["selected"], 4, "{r}");
-    assert_eq!(r["edges"].as_array().map(Vec::len), Some(4), "{r}");
-    assert!(r["edges"].as_array().unwrap().contains(&json!(picked)), "{r}");
+    let rim = sorted(&r);
+    assert_eq!(rim.len(), 4, "{r}");
+    assert!(rim.contains(&picked), "{r}");
+    assert!(s.selection.iter().all(|x| matches!(x, Sel::Edge { body, .. } if body == "Plate")), "{:?}", s.selection);
+    assert_eq!(selected_edges(&s), rim);
     let top = r["face"].as_u64().unwrap() as usize;
-    for item in &s.selection {
-        let Sel::Edge { body, point, .. } = item else { panic!("{item:?}") };
-        assert!(body == "Plate" && on_rim(*point), "{item:?}");
-    }
     assert_eq!(history, (s.undo.len(), s.redo.len()), "selecting is not an undo step");
 
-    // The pocket wall under the picked edge: its own loop of four, two of them off the rim.
+    // The pocket wall under the picked edge: its own loop of four, the picked edge the only one
+    // it shares with the rim.
     let state = s.world_state().unwrap();
     let record = state.body("Plate").unwrap().body.record();
     let wall = (0..record.faces.len())
@@ -2568,12 +2622,21 @@ fn select_edge_loop_takes_the_rim_of_a_pocket_from_one_edge() {
     drop(state);
     let r = run(&mut s, "select.edge_loop", json!({"body":"Plate", "edge":picked, "face":wall}));
     assert_eq!((r["face"].as_u64(), r["selected"].as_u64()), (Some(wall as u64), Some(4)), "{r}");
-    let off_rim = s.selection.iter().filter(|x| matches!(x, Sel::Edge { point, .. } if !on_rim(*point))).count();
-    assert_eq!(off_rim, 3, "{:?}", s.selection);
+    let around_wall = sorted(&r);
+    assert_eq!(selected_edges(&s), around_wall);
+    assert_eq!(around_wall.iter().filter(|e| !rim.contains(e)).count(), 3, "{r}");
 
     // `add` keeps what was selected: the rim's four and the wall's three others.
     run(&mut s, "select.edge_loop", json!({"body":"Plate", "edge":picked, "add":true}));
     assert_eq!(s.selection.len(), 7, "{:?}", s.selection);
+
+    // An edge picked away from its middle and then grown with `add` stays one item, at the point
+    // it was picked: the loop adds the other three only.
+    let off_middle = Vec3::new(7.0, 5.0, 10.0);
+    run(&mut s, "select.set", json!({"items":[{"type":"edge","body":"Plate","point":off_middle}]}));
+    run(&mut s, "select.edge_loop", json!({"add":true}));
+    assert_eq!(selected_edges(&s), rim, "{:?}", s.selection);
+    assert!(s.selection.contains(&Sel::Edge { body: "Plate".into(), index: picked, point: off_middle }), "{:?}", s.selection);
 
     let selected = s.selection.clone();
     for params in [
