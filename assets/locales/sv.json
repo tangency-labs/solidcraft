@@ -2722,7 +2722,7 @@
   "render.cpu_body_choose": "Välj en kropp",
   "render.cpu_body_filter": "Filtrera kroppar efter namn",
   "render.cpu_body_filter_more": "Förfina filtret för att se fler kroppar.",
-  "render.cpu_body_missing": "Ett reflektionsmål saknas, är dolt, är tvetydigt eller har ett namn som är längre än 128 byte. Välj det igen.",
+  "render.cpu_body_missing": "Ett reflektionsmål saknas, är dolt, är tvetydigt eller har ett namn som är längre än 512 byte. Välj det igen.",
   "render.cpu_budget": "CPU-resursprofil",
   "render.cpu_budget_bodies": "Tak för antal kroppar",
   "render.cpu_budget_compact": "Kompakt (äldre gränser)",

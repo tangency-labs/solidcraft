@@ -1959,7 +1959,7 @@ impl Dialog {
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
         // A body picked into Target Bodies is a choice by hand: Extrude stops choosing its
         // operation now, before a check (at once on the web) can turn Join and the pick away.
-        if self.inputs.get(self.active).is_some_and(|i| i.label == JOIN_TARGETS)
+        if self.inputs.get(self.active).is_some_and(|i| i.label == EXTRUDE_TARGETS)
             && let Kind::Extrude { auto_op, .. } = &mut self.kind
         {
             *auto_op = false;
@@ -2027,7 +2027,7 @@ impl Dialog {
             self.picked_edges.clear();
         }
         // As a click there: bodies boxed into Target Bodies stop Extrude choosing its operation.
-        if self.inputs.get(self.active).is_some_and(|i| i.label == JOIN_TARGETS)
+        if self.inputs.get(self.active).is_some_and(|i| i.label == EXTRUDE_TARGETS)
             && let Kind::Extrude { auto_op, .. } = &mut self.kind
         {
             *auto_op = false;
@@ -3364,6 +3364,9 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved planes/vectors/axes are real inputs even when they have no selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
+    if matches!(d.kind, Kind::Split) && index == 1 {
+        return Some("split_tool_mode");
+    }
     if matches!(d.kind, Kind::OffsetPlane { .. }) {
         return match index {
             0 => Some("base"),
@@ -4978,7 +4981,7 @@ fn set_object(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static st
 pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, accept: selection::Accept, on: bool) {
     if on && !object_on(inputs, label) {
         // Before Extrude's Target Bodies, which stays last.
-        let at = inputs.iter().position(|i| i.label == JOIN_TARGETS).unwrap_or(inputs.len());
+        let at = inputs.iter().position(|i| i.label == EXTRUDE_TARGETS).unwrap_or(inputs.len());
         inputs.insert(at, SelInput::new(label, accept, false));
         *active = at;
     } else if let Some(at) = inputs.iter().position(|i| i.label == label)
@@ -4994,21 +4997,39 @@ pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usiz
     }
 }
 
-/// Extrude's pick input for the bodies a Join joins (#17657).
-const JOIN_TARGETS: &str = "Target Bodies";
+/// Extrude's pick input for the bodies a Join joins or a Cut cuts.
+const EXTRUDE_TARGETS: &str = "Target Bodies";
 
-/// The Target Bodies input while an extrude's operation is Join; `None` otherwise.
-fn join_targets(d: &Dialog) -> Option<&SelInput> {
-    matches!(d.kind, Kind::Extrude { operation: 1, .. }).then(|| d.inputs.iter().find(|i| i.label == JOIN_TARGETS)).flatten()
+/// The Target Bodies input while an extrude's operation is Join or Cut; `None` otherwise.
+fn extrude_targets(d: &Dialog) -> Option<&SelInput> {
+    matches!(d.kind, Kind::Extrude { operation: 1 | 2, .. }).then(|| d.inputs.iter().find(|i| i.label == EXTRUDE_TARGETS)).flatten()
 }
 
-/// Show Extrude's Target Bodies input while the operation is Join, and remove it (with its picks)
-/// otherwise. Showing it leaves the active input where it is, so the profiles stay the next pick.
-fn set_join_targets(inputs: &mut Vec<SelInput>, active: &mut usize, on: bool) {
-    let at = inputs.iter().position(|i| i.label == JOIN_TARGETS);
-    match at {
-        None if on => inputs.push(SelInput::new(JOIN_TARGETS, BODIES, true).tip("ui.extrude_join_targets_tip")),
-        Some(at) if !on => {
+/// Show Extrude's Target Bodies input for Join and Cut, and remove it (with its picks) otherwise.
+/// Showing it leaves the active input where it is, so the profiles stay the next pick.
+fn set_extrude_targets(inputs: &mut Vec<SelInput>, active: &mut usize, extra: &mut serde_json::Map<String, Value>, operation: usize) {
+    let tip = match operation {
+        1 => Some("ui.extrude_join_targets_tip"),
+        2 => Some("ui.extrude_cut_targets_tip"),
+        _ => None,
+    };
+    let at = inputs.iter().position(|i| i.label == EXTRUDE_TARGETS);
+    match (at, tip) {
+        (None, Some(tip)) => {
+            let mut input = SelInput::new(EXTRUDE_TARGETS, BODIES, true).tip(tip);
+            // An edited Intersect can have stored targets without a pick input. Moving to
+            // Join or Cut transfers them into the input, which now owns the selection.
+            if let Some(Value::Array(targets)) = extra.remove("targets") {
+                input.items = targets.iter().filter_map(Value::as_str).map(|name| Sel::Body { name: name.into() }).collect();
+            }
+            inputs.push(input);
+        }
+        (Some(at), Some(tip)) => {
+            if let Some(input) = inputs.get_mut(at) {
+                input.tip = Some(tip);
+            }
+        }
+        (Some(at), None) => {
             inputs.remove(at);
             if *active > at {
                 *active -= 1;
@@ -5839,10 +5860,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if object_on(&d.inputs, FROM_OBJECT) {
                 common["from"] = object_point(&d.inputs, FROM_OBJECT).ok_or("select the object to extrude from")?;
             }
-            // A Join joins the bodies picked in Target Bodies. None picked: the command's own
-            // choice, the body the sketch or face is on (#17657).
-            let join_targets = join_targets(d);
-            if let Some(input) = join_targets
+            // Join and Cut use the bodies picked in Target Bodies. None picked keeps the
+            // command's automatic choice, including the existing cut scope.
+            let extrude_targets = extrude_targets(d);
+            if let Some(input) = extrude_targets
                 && !input.items.is_empty()
             {
                 common["targets"] = json!(input.items.body_names());
@@ -5852,8 +5873,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 if let (Value::Object(m), Value::Object(e)) = (&mut p, extra) {
                     m.extend(e);
                     for (k, v) in &d.extra {
-                        // An edited Join's stored targets are in Target Bodies, emptied or not.
-                        if k == "targets" && join_targets.is_some() {
+                        // The edited targets are in Target Bodies, emptied or not.
+                        if k == "targets" && extrude_targets.is_some() {
                             continue;
                         }
                         m.entry(k.clone()).or_insert_with(|| v.clone());
@@ -6430,10 +6451,22 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // A plane, a planar face's plane, or any other face (its surface extended).
             let p = match sels(d, 1).first() {
                 Some(Sel::Plane { name }) => json!({"body": body, "plane": name}),
-                Some(Sel::Face { body: b, index, point }) => match planar_face(s, b, *index) {
-                    Some((_, n)) => json!({"body": body, "plane": {"origin": pt(*point), "normal": pt(n)}}),
-                    None => json!({"body": body, "tool": {"body": b, "point": pt(*point)}}),
-                },
+                Some(Sel::Face { body: b, index, point }) => {
+                    let planar = planar_face(s, b, *index);
+                    let kept = d.extra.get("split_tool_mode").filter(|v| v["body"] == *b && v["index"] == *index);
+                    let exact = crate::open_meshing::session_world(s).body(b).is_some_and(|body| body.body.planar_face(*index).is_some());
+                    // A saved explicit plane stays fixed until the tool is picked again.
+                    if let Some(plane) = kept.and_then(|v| v.get("fixed_plane")) {
+                        json!({"body": body, "plane": plane})
+                    // Existing display-only planar fallbacks keep their fixed plane.
+                    } else if let Some((_, n)) = planar.filter(|_| kept.is_none() && !exact) {
+                        json!({"body": body, "plane": {"origin": pt(*point), "normal": pt(n)}})
+                    } else {
+                        // An unchanged saved surface tool keeps its mode even when it is planar.
+                        let tool_plane = kept.and_then(|v| v["plane"].as_bool()).unwrap_or(planar.is_some());
+                        json!({"body": body, "tool": {"body": b, "point": pt(*point)}, "tool_plane": tool_plane})
+                    }
+                }
                 // A straight sketch line, in the sketch it was picked in (#1552).
                 Some(Sel::SketchCurve { id, sketch: named }) => {
                     let picked = named.or_else(|| d.extra.get("tool_sketch").and_then(Value::as_u64));
@@ -6794,6 +6827,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         // A fillet option that doesn't apply with the others is never sent.
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
         for (k, v) in &d.extra {
+            // Saved selection mode is editor state, not a command parameter.
+            if matches!(d.kind, Kind::Split) && k == "split_tool_mode" {
+                continue;
+            }
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
                 continue;
             }
@@ -7270,7 +7307,7 @@ pub(crate) fn named_refill(s: &Session, body: Option<&str>, name: &str, point: V
     named_refill_in(s, body, name, point, edge, false)
 }
 
-/// A saved grouped Thread names each target body independently; never fall back to another body.
+/// A saved face pick names its body independently; never fall back to another body.
 pub(crate) fn named_refill_on_body(s: &Session, body: &str, name: &str, point: Vec3) -> Option<Sel> {
     named_refill_in(s, Some(body), name, point, false, true)
 }
@@ -7689,15 +7726,14 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
                 }
             }
-            if !targets.is_empty() {
-                d.extra.insert("targets".into(), json!(targets));
-            }
-            // A Join shows the bodies it joins in Target Bodies, to change there (#17657).
-            if *operation == Operation::Join {
-                set_join_targets(&mut d.inputs, &mut d.active, true);
-                if let Some(input) = d.inputs.iter_mut().find(|i| i.label == JOIN_TARGETS) {
+            // Join and Cut show their stored target bodies so the picks can be edited.
+            if matches!(operation, Operation::Join | Operation::Cut) {
+                set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, op_index(operation));
+                if let Some(input) = d.inputs.iter_mut().find(|i| i.label == EXTRUDE_TARGETS) {
                     input.items = targets.iter().map(|name| Sel::Body { name: name.0.clone() }).collect();
                 }
+            } else if !targets.is_empty() {
+                d.extra.insert("targets".into(), json!(targets));
             }
             d
         }
@@ -8546,7 +8582,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Split { body, plane, tool, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, sketch, line } => {
             let mut d = start("solid.split_body")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = vec![Sel::Body { name: body.to_string() }];
@@ -8558,9 +8594,35 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
             } else if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = match tool {
-                    Some(t) => face_sel(s, t.point.0).into_iter().collect(),
+                    Some(t) => {
+                        let pick = match f.face_names.first().filter(|name| !name.is_empty()) {
+                            Some(name) => named_refill_on_body(s, t.body.as_ref(), name, t.point.0),
+                            None => face_sel_on(s, Some(t.body.as_ref()), t.point.0),
+                        };
+                        if let Some(Sel::Face { body, index, .. }) = &pick {
+                            d.extra.insert("split_tool_mode".into(), json!({"body": body, "index": index, "plane": tool_plane}));
+                        }
+                        pick.into_iter().collect()
+                    }
                     None => plane_sel(s, plane).into_iter().collect(),
                 };
+                if tool.is_none()
+                    && let PlaneRef::Custom { plane } = plane
+                    && let Some(Sel::Face { body, index, .. }) = inp.items.first()
+                {
+                    let frame = feature_frame(s, f.component);
+                    d.extra.insert(
+                        "split_tool_mode".into(),
+                        json!({
+                            "body": body, "index": index,
+                            "fixed_plane": {
+                                "origin": pt(solidcraft_engine::doc::apply_point(&frame, plane.origin)),
+                                "x_dir": pt(solidcraft_engine::doc::apply_vector(&frame, plane.x)),
+                                "y_dir": pt(solidcraft_engine::doc::apply_vector(&frame, plane.y))
+                            }
+                        }),
+                    );
+                }
             }
             d
         }

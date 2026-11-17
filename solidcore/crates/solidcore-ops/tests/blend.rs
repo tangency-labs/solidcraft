@@ -20,7 +20,7 @@ use solidcore::blend::definition_check::surface_kind_name;
 use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
-use solidcore::primitive::api_primitives::create_box;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
 use solidcore::surface::surface::SurfaceKind;
@@ -1409,6 +1409,48 @@ fn a_round_larger_than_its_faces_is_refused_with_the_size_that_fits() {
     }
     // refused: the body as it came in
     assert!(rel(volume(&b), 600.0) < 1e-12);
+}
+
+/// #18190: an r 1.85 rod notched by an r 0.5 disc centred on the rod's surface, at
+/// (0, -1.85), from z = 5 to 15; the notch's floor and roof edges are arcs that end on the
+/// rod's side. Rounded at the notch's own radius, the ball's centre stays on the notch's axis
+/// and it touches the floor (roof) at the one point below it, which lies on the rod's side:
+/// the round's ends in the side run down to that point, so it would take the whole floor.
+/// Refused as a collapsed offset, naming a radius below 0.5 (open), at which it builds, not
+/// failed while intersecting the round with the side.
+#[test]
+fn a_round_at_a_notch_s_radius_ending_on_a_side_through_its_axis_names_the_size_below() {
+    all_fixes();
+    let b = built(|k| {
+        let rod = create_cylinder(k, Vec3::new(0.0, 0.0, 0.0), 1.85, 20.0)?;
+        let disc = create_cylinder(k, Vec3::new(0.0, -1.85, 5.0), 0.5, 10.0)?;
+        boolean_difference(k, rod, disc)
+    });
+    let before = volume(&b);
+    let edges = [
+        edge_at(&b, [0.0, -1.35, 5.0]),
+        edge_at(&b, [0.0, -1.35, 15.0]),
+    ];
+    let size = match blend(&b, Blend::Round, &edges, &[0.5], &[], Corners::Filled) {
+        Err(Error::TooLarge {
+            size, kind, why, ..
+        }) => {
+            let got = format!("{size} {kind:?} {why:?}");
+            assert_eq!(kind, FitKind::Radius, "{got}");
+            assert_eq!(
+                why,
+                Some(solidcore_ops::RoomReason::OffsetCollapses),
+                "{got}"
+            );
+            assert!((0.49..0.5).contains(&size), "{got}");
+            size
+        }
+        other => panic!("{other:?}"),
+    };
+    assert!(rel(volume(&b), before) < 1e-12);
+    blend(&b, Blend::Round, &edges, &[size], &[], Corners::Filled).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    assert!(volume(&b) > before);
 }
 
 /// A body the kernel sweeps along +z, `height` high, from a closed profile in z = 0.
@@ -3919,4 +3961,159 @@ fn a_round_on_a_revolved_end_cap_that_closes_to_a_cusp_builds() {
     assert!(report.is_valid(), "{report}");
     let added = volume(&b) - before;
     assert!((0.0360..=0.0381).contains(&added), "{added}");
+}
+
+/// #17616: the issue's sheet-metal part, 3 thick with 2 mm bends: a 90 x 75 base, a three-bend
+/// flange on its back edge, and on its right edge a flange split into an 8 mm and a 50 mm
+/// segment. The record is the body SolidCraft's trace gives the round
+/// (`tests/data/issue_17616_split_flange_tab.bodies.json.gz`).
+fn issue_17616_body() -> Body {
+    let case = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/data/issue_17616_split_flange_tab.bodies.json.gz"
+    );
+    let mut text = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(case).unwrap())
+        .read_to_string(&mut text)
+        .unwrap();
+    let records: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let record: Record = serde_json::from_value(records["b1"].clone()).unwrap();
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// A cylinder face: its radius, its axis (a point and the unit direction), its UV domain and
+/// its surface's natural domain (u and v, each from and to).
+type Cylinder = (f64, [Vec3; 2], [f64; 4], [f64; 4]);
+
+/// Each cylinder face of `b`.
+fn issue_17616_cylinders(b: &Body) -> Vec<Cylinder> {
+    use solidcore::topology::face::p2 as face;
+    let (k, brep) = kernel_copy(b);
+    let mut out = Vec::new();
+    for &f in brep.face_list() {
+        let s = face::surface(&brep, f).unwrap().unwrap();
+        let SurfaceKind::Cone(c) = s.kind() else {
+            continue;
+        };
+        let cone = c.canonical();
+        assert!(cone.semi_angle_deg == 0.0, "a face on a cone");
+        let d = face::uv_domain(&brep, f).unwrap();
+        let n = s.natural_uv_domain_with_nurb(&k).unwrap();
+        out.push((
+            cone.radius,
+            [cone.origin.origin(), cone.origin.z_axis()],
+            [d.u_min(), d.u_max(), d.v_min(), d.v_max()],
+            [n.u_min(), n.u_max(), n.v_min(), n.v_max()],
+        ));
+    }
+    out
+}
+
+/// #17616: an R10 round on the 50 mm tab's top outside edge (x = 90, z = 50, y 35 to 70)
+/// overflows the 3 mm top face and runs onto the inside face x = 87. Its ball's centre is
+/// (80, 40) in x, z, so the round takes off, per unit length, the tab's 3 x 10 corner less the
+/// disc strip under the arc: `30 - I(7, 10; 10)`, over the 35 of the tab. The top face goes and
+/// the round comes in its place, bounded by its rail on x = 90, its crease on x = 87 and its
+/// arcs on the tab's ends: 45 faces, 93 edges, 50 vertices, as before.
+///
+/// On main the round's last step (sewn faces on one surface made one face) tested the edge
+/// between the two bends of the split flange, which lie on one cylinder, for removal although
+/// it is kept, and the test expanded one bend's surface onto both, its parameterisation
+/// changing, while the bend kept its UV domain. Its trims dropped off that domain, and the
+/// round was not closed (ops) or its trim was fitted on a third of its edge (SolidCraft's
+/// export: "a UV trim on [0, 0.33], its edge on [0, 1]"). Every bend now keeps its surface.
+#[test]
+fn a_round_overflowing_a_split_flange_s_tab_top_leaves_the_bends_on_their_surfaces() {
+    rig_fixes();
+    let b = issue_17616_body();
+    let before = volume(&b);
+    // the ten bends, of radius 2 inside and 5 outside, each with its UV domain its surface's
+    // whole natural domain
+    let bends_on_their_surfaces = |b: &Body| {
+        let bends: Vec<_> = issue_17616_cylinders(b)
+            .into_iter()
+            .filter(|c| c.0 < 6.0)
+            .collect();
+        assert_eq!(bends.len(), 10);
+        for (r, _, d, n) in &bends {
+            assert!(
+                (r - 2.0).abs() <= 1e-9 || (r - 5.0).abs() <= 1e-9,
+                "a bend of radius {r}"
+            );
+            for (x, y) in d.iter().zip(n) {
+                assert!(
+                    (x - y).abs() <= 1e-9,
+                    "a bend's domain {d:?} is not its surface's {n:?}"
+                );
+            }
+        }
+    };
+    // each bend's surface by its radius, its axis line (the foot of the perpendicular from the
+    // origin and the direction up to sign) and its natural domain's two ranges (in either
+    // order: the round's stitch may swap a face's u and v), sorted
+    let bend_surfaces = |b: &Body| {
+        let mut keys: Vec<[f64; 11]> = issue_17616_cylinders(b)
+            .into_iter()
+            .filter(|c| c.0 < 6.0)
+            .map(|(r, [o, d], _, n)| {
+                let foot = o - d * o.dot(d);
+                let d = if d.x + d.y + d.z < 0.0 { d * -1.0 } else { d };
+                let (mut s, mut t) = ([n[0], n[1]], [n[2], n[3]]);
+                if s[0] > t[0] {
+                    std::mem::swap(&mut s, &mut t);
+                }
+                [
+                    r, foot.x, foot.y, foot.z, d.x, d.y, d.z, s[0], s[1], t[0], t[1],
+                ]
+            })
+            .collect();
+        keys.sort_by(|a, c| {
+            a.iter()
+                .zip(c)
+                .map(|(x, y)| x.total_cmp(y))
+                .fold(std::cmp::Ordering::Equal, std::cmp::Ordering::then)
+        });
+        keys
+    };
+    bends_on_their_surfaces(&b);
+    let surfaces = bend_surfaces(&b);
+    assert_eq!(issue_17616_cylinders(&b).len(), 10);
+    let e = edge_at(&b, [90.0, 52.5, 50.0]);
+    blend(&b, Blend::Round, &[e], &[10.0], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the tab's top edge does not round: {e:?}"));
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    assert_eq!(b.counts().unwrap(), [45, 93, 50]);
+    let removed = 35.0 * (30.0 - disc_strip(7.0, 10.0, 10.0));
+    let after = volume(&b);
+    assert!(
+        rel(before - after, removed) < 1e-6,
+        "{before} - {after} vs {removed}"
+    );
+    // the round: one exact cylinder of radius 10 about the ball centres' line x = 80, z = 40
+    let rounds: Vec<_> = issue_17616_cylinders(&b)
+        .into_iter()
+        .filter(|c| c.0 >= 6.0)
+        .collect();
+    assert_eq!(rounds.len(), 1);
+    let (r, [origin, axis], _, _) = rounds[0];
+    assert!((r - 10.0).abs() <= 1e-9, "the round's radius {r}");
+    assert!(
+        axis.cross(Vec3::new(0.0, 1.0, 0.0)).length() <= 1e-12,
+        "the round's axis {axis:?}"
+    );
+    assert!(
+        (origin.x - 80.0).abs() <= 1e-9 && (origin.z - 40.0).abs() <= 1e-9,
+        "{origin:?}"
+    );
+    // the bends the round does not reach as they were: each on its own surface, unexpanded
+    bends_on_their_surfaces(&b);
+    for (was, now) in surfaces.iter().zip(&bend_surfaces(&b)) {
+        for (x, y) in was.iter().zip(now) {
+            assert!(
+                (x - y).abs() <= 1e-9,
+                "a bend's surface {was:?} is now {now:?}"
+            );
+        }
+    }
 }

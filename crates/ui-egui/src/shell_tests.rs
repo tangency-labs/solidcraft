@@ -1913,6 +1913,56 @@ fn title_bar_pills_open_their_pages_and_the_x_turns_off_only_that_pill() {
     assert!(rect_of("titlebar:kofi").is_some() && rect_of("titlebar:discord").is_some());
 }
 
+/// #10260: an organization's policy shows "Managed by {name}" in the bar, Preferences and About;
+/// a computer without one shows none of it.
+#[test]
+fn an_organizations_policy_says_managed_by_in_the_bar_preferences_and_about() {
+    let _language = solidcraft_ui_text::scope("en");
+    let mut h = Harness::new();
+    h.app.preferences.language = "en".into();
+    h.call("ui.resize", json!({"width":1280,"height":720}));
+    h.app.home.open = false;
+    h.settle();
+    assert!(rect_of("titlebar:managed").is_none(), "no policy, no badge");
+    h.app.help.about = true;
+    h.frames(3);
+    assert!(rect_of("about:managed").is_none());
+    assert!(!crate::help::diagnostics(&h.app).contains("Policy"));
+    h.app.help.about = false;
+
+    h.app.policy = crate::policy::Policy::from_json(r#"{"OrganizationName": "ACME"}"#);
+    h.settle();
+    let badge = rect_of("titlebar:managed").expect("the bar says it is managed");
+    let report = rect_of("titlebar:report").unwrap();
+    assert!(badge.right() <= report.left(), "{badge:?} {report:?}");
+    let (donate, discord) = (rect_of("titlebar:kofi").unwrap(), rect_of("titlebar:discord").unwrap());
+    assert!(badge.right() < donate.left() && badge.right() < discord.left(), "the badge sits left of the link pills: {badge:?} {donate:?}");
+    assert!(h.widget("Managed by ACME").is_some(), "a wide bar names the organization");
+    assert!(!h.app.prefs_window.shell.open);
+    h.step(&json!({"click":{"handle":"titlebar:managed"}})).unwrap();
+    h.settle();
+    assert!(h.app.prefs_window.shell.open, "the badge opens Preferences");
+    assert!(rect_of("prefs:managed").is_some(), "Preferences says it too");
+    h.app.prefs_window.shell.open = false;
+    h.app.help.about = true;
+    h.frames(3);
+    assert!(rect_of("about:managed").is_some(), "and About");
+    let diagnostics = crate::help::diagnostics(&h.app);
+    assert!(diagnostics.ends_with("Policy: managed; locks nothing"), "{diagnostics}");
+    assert!(!diagnostics.contains("ACME"), "a bug report does not carry the organization's name");
+    h.app.help.about = false;
+
+    // A narrow bar keeps the badge clear of the controls, down to the briefcase alone.
+    for width in [900.0, 700.0] {
+        h.call("ui.resize", json!({"width": width, "height": 600}));
+        h.settle();
+        if let Some(badge) = rect_of("titlebar:managed") {
+            let report = rect_of("titlebar:report").unwrap();
+            assert!(badge.right() <= report.left() && badge.right() <= width, "{width}: {badge:?} {report:?}");
+        }
+    }
+}
+
 #[test]
 fn the_links_stay_in_help_about_and_home_when_the_pills_are_off() {
     let mut h = Harness::new();

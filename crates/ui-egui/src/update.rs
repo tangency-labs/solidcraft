@@ -989,7 +989,7 @@ pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: 
     // squeezed; the icon alone in a narrow bar.
     let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
     let labels = [full.as_str(), solidcraft_ui_text::tr("update.button")];
-    let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update")?;
+    let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update", false)?;
     if response.backing_on_hover_text(solidcraft_ui_text::format("update.available", &[("version", &version)])).clicked() {
         app.updater.open = !app.updater.open;
     }

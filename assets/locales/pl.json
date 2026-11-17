@@ -3446,7 +3446,7 @@
   "render.cpu_body_choose": "Wybierz bryłę",
   "render.cpu_body_filter": "Filtruj bryły po nazwie",
   "render.cpu_body_filter_more": "Zawęź filtr, aby zobaczyć więcej brył.",
-  "render.cpu_body_missing": "Cel odbić nie istnieje, jest ukryty, niejednoznaczny lub ma nazwę dłuższą niż 128 bajtów. Wybierz go ponownie.",
+  "render.cpu_body_missing": "Cel odbić nie istnieje, jest ukryty, niejednoznaczny lub ma nazwę dłuższą niż 512 bajtów. Wybierz go ponownie.",
   "render.cpu_budget": "Profil zasobów CPU",
   "render.cpu_budget_bodies": "Limit brył",
   "render.cpu_budget_compact": "Kompaktowy (dawne limity)",
