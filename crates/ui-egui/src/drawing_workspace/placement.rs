@@ -51,6 +51,17 @@ impl Placement {
         })
     }
 
+    pub(super) fn from_parent(app: &SolveApp, parent: u64) -> Option<Self> {
+        let mut placement = Self::new(app)?;
+        let drawing = app.session.drawing("drawing.view.projected").ok()?;
+        if drawing.view(parent)?.sheet != placement.owner.2 {
+            return None;
+        }
+        drawing.can_project_from(parent).ok()?;
+        placement.parent = Some(parent);
+        Some(placement)
+    }
+
     fn orientation(&self) -> &str {
         ORIENTATIONS.get(self.orientation).unwrap_or(&ORIENTATIONS[0]).0
     }

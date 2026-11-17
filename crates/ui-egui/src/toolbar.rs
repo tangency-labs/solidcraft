@@ -2468,7 +2468,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             continue;
         }
         if drawing && k == Key::Escape {
-            if crate::drawing_workspace::close_panel(app) {
+            if crate::drawing_workspace::close_panel(app) || crate::drawing_sheet_page::clear_view_selection(app) {
                 app.esc_handled = true;
             }
             continue;
