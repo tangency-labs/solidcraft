@@ -401,6 +401,50 @@ fn a_box_is_two_triangles_a_face() {
     }
 }
 
+/// A plane that stands off the box's shared edges is still drawn through their nodes.
+#[test]
+fn a_plane_with_displaced_shared_edges_reports_the_measured_sag() {
+    let name = "box_2x3x4";
+    let mut b = crate::fixtures::fixture(name);
+    let size = crate::fixtures::size_of(name);
+    let chord = 0.01;
+    let offset = 0.0625;
+    let tolerance = crate::MeshTolerance::chord(chord);
+    let (control, stats) = plan(&b, &tolerance, size).unwrap();
+    assert!(stats.over_tolerance.is_empty(), "{stats:?}");
+    let (control, refused) = control.welded().unwrap();
+    assert!(refused.is_empty(), "{refused:?}");
+
+    let face = &mut b.faces[0];
+    assert!(face.nurbs.is_none());
+    let brep::Surface::Plane { origin, .. } = &mut face.surface else { panic!("the box top must be planar") };
+    assert_eq!(origin[2], 4.0);
+    origin[2] += offset;
+    for edge_use in face_edges(face) {
+        b.edges[edge_use.edge as usize].tolerance = offset;
+    }
+    b.validate().unwrap();
+
+    let (plan, stats) = plan(&b, &tolerance, size).unwrap();
+    assert!(stats.unmeshed.is_empty() && stats.lenient.is_empty(), "{stats:?}");
+    let (mesh, refused) = plan.welded().unwrap();
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_eq!(mesh.triangles.len(), 12);
+    assert_eq!(mesh, control);
+    let mut directed = std::collections::BTreeSet::new();
+    for [a, b, c] in &mesh.triangles {
+        for (i, j) in [(*a, *b), (*b, *c), (*c, *a)] {
+            assert!(i != j && directed.insert((i, j)), "repeated side {i} to {j}");
+        }
+    }
+    assert!(directed.iter().all(|&(i, j)| directed.contains(&(j, i))), "the welded box is open");
+
+    let [report] = stats.over_tolerance.as_slice() else { panic!("{stats:?}") };
+    assert!(report.caps.is_empty() && !report.within, "{report:?}");
+    assert_eq!((report.face, report.tol, report.unmeasured), (0, chord, 0));
+    assert!((report.sag - offset).abs() < 1e-12, "{report:?}");
+}
+
 /// SolidCraft's coil from SMLib, its lower half: the counts the bake-off recorded for
 /// `793-coil-split-by-a-plane-across-its-axis` at the display and export tolerances, plus what
 /// shaping adds (18 triangles on its flat cut face, and at display 10 on its curved faces).

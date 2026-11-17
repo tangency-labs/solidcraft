@@ -2308,10 +2308,15 @@ fn plan_face(
     }
     let mut all = uvs;
     all.extend(extra);
-    // Whatever the layout, refine the curvature of the support while keeping the shared boundary fixed.
-    if !planar {
-        // Which nodes are poles, asked once per node over both passes.
-        let poles = sag::Poles::new(s, reach);
+    // Which nodes are poles, asked once per node across refinement and measurement.
+    let poles = sag::Poles::new(s, reach);
+    let check_sag = if let EvalSurface::Plane { origin, du, dv } = &**s {
+        // Distance along the plane's normal is affine on a triangle. Interior vertices
+        // lie on the plane, so a held boundary vertex must exceed tol for a sample to do so.
+        let normal = du.cross(*dv).normalized();
+        fixed.iter().any(|&p| normal.is_none_or(|n| (p - *origin).dot(n).abs() > tol))
+    } else {
+        // Refine the curvature of the support while keeping the shared boundary fixed.
         let refinement = sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE);
         if refinement.capped {
             caps.push(crate::Cap::Refine);
@@ -2321,11 +2326,14 @@ fn plan_face(
         if matches!(purpose, Purpose::Display) {
             sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
         }
-        // Measure finished triangles with their held positions when a bound or a remaining
-        // departure involving the shared boundary can leave them outside the tolerance.
-        if !caps.is_empty() || refinement.boundary_has_residual(s, tol, &poles, &fixed, &all, &triangles) {
-            let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
-            stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
+        !caps.is_empty() || refinement.boundary_has_residual(s, tol, &poles, &fixed, &all, &triangles)
+    };
+    // Report the measured sag on the finished triangles, using their held boundary points.
+    if check_sag {
+        let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
+        let within = sag <= tol && unmeasured == 0;
+        if !planar || !within {
+            stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within, caps: std::mem::take(&mut caps) });
         }
     }
     // A face the mesh path left short of its shape is named with its smallest angle in 3D.
