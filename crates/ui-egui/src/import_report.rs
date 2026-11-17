@@ -437,7 +437,7 @@ mod tests {
         crate::i18n::install();
         let nodes = outline(&details(), SHOWN);
         let labels: Vec<&str> = nodes.iter().map(|n| n.label.as_str()).collect();
-        assert_eq!(labels, ["Outcome", "Schema", "Stages (2)", "Tags"], "null, {} and [] are left out; keys read as words");
+        assert_eq!(labels, ["Outcome", "Schema", "Stages (2)", "Tags"], "null, {{}} and [] are left out; keys read as words");
         let outcome = &nodes[0];
         assert!(outcome.open, "a top-level group starts unfolded");
         let verification = outcome.children.iter().find(|n| n.label == "Verification").expect("verification");
