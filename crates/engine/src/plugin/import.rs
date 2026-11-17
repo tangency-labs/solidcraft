@@ -179,10 +179,8 @@ fn convert(session: &mut Session, importer: &Importer, path: &str, options: &Val
         if solidcraft_doc::progress::cancelled() {
             return Err(HostError::Cancelled.into());
         }
-        let mut doc = solidcraft_io::read_design(&imported.design).map_err(|e| HostError::InvalidInput {
-            field: "design".into(),
-            reason: format!("it wrote a design SolidCraft can't read: {e}"),
-        })?;
+        let mut doc = solidcraft_io::read_design(&imported.design)
+            .map_err(|e| HostError::InvalidInput { field: "design".into(), reason: format!("it wrote a design SolidCraft can't read: {e}") })?;
         if let Some(stem) = Path::new(path).file_stem().map(|s| s.to_string_lossy().into_owned())
             && doc.name.trim().is_empty()
         {

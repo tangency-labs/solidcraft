@@ -410,7 +410,10 @@ mod native {
         for (code, diagnostic) in [
             ("call $box unreachable", "trap=UnreachableCodeReached"),
             ("call $box i32.const 8 i32.const 1 i32.store", "entry result is not JSON"),
-            ("call $box (loop $forever br $forever)", "Sample: it used all 100000 fuel it asks for and was stopped. Ask its author to raise its fuel limit."),
+            (
+                "call $box (loop $forever br $forever)",
+                "Sample: it used all 100000 fuel it asks for and was stopped. Ask its author to raise its fuel limit.",
+            ),
             ("call $box i32.const 10000 memory.grow drop", "Sample: it needed more than the 1 MiB of memory it asks for and was stopped."),
             ("call $box i32.const -1 i32.load drop", "trap=MemoryOutOfBounds"),
             ("call $box i32.const 1 i32.const 0 i32.div_u drop", "trap=IntegerDivisionByZero"),
@@ -742,7 +745,10 @@ mod native {
         let path = installed["folder"].clone();
         let approval = s.execute("plugin.inspect", &json!({"path":path})).unwrap()["approval"].clone();
         let params = json!({"path":path,"approval":approval,"entry":"make"});
-        assert!(matches!(s.execute("plugin.run", &params).err().as_ref().and_then(EngineError::host_error), Some(HostError::PermissionDenied { .. })));
+        assert!(matches!(
+            s.execute("plugin.run", &params).err().as_ref().and_then(EngineError::host_error),
+            Some(HostError::PermissionDenied { .. })
+        ));
         s.execute(
             "plugin.install",
             &json!({"path":zip,"replace":true,"approve":{"folders":[{"name":"project","path":f.0,"read":true,"write":false}]}}),
@@ -777,10 +783,7 @@ mod native {
                 std::fs::write(other.0.join("sample/plugin.wasm"), component("call $box call $box")).unwrap();
             }
             let error = other.run(&mut s).unwrap_err();
-            assert!(
-                matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("re-approval")),
-                "{error}"
-            );
+            assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("re-approval")), "{error}");
             assert!(s.doc.features.is_empty(), "refuse before even non-sensitive plugin edits");
             assert!(s.plugin_state.file_grants.is_empty() && s.plugin_state.command_groups.is_empty());
             assert_eq!(s.plugin_state.grants, grants, "inspection cannot change approved grants");

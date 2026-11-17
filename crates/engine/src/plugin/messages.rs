@@ -18,7 +18,10 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "it asks for {requested} MiB of memory, and plugins may use {allowed} MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file).",
     ),
     ("plugin_error.out_of_fuel", "it used all {allowed} fuel it asks for and was stopped. Ask its author to raise its fuel limit."),
-    ("plugin_error.out_of_memory", "it needed more than the {allowed} MiB of memory it asks for and was stopped. Ask its author to raise its memory limit."),
+    (
+        "plugin_error.out_of_memory",
+        "it needed more than the {allowed} MiB of memory it asks for and was stopped. Ask its author to raise its memory limit.",
+    ),
     ("plugin_error.out_of_stack", "it ran out of its {allowed} KiB stack and was stopped. Ask its author to raise its stack size."),
     ("plugin_error.out_of_time", "it ran longer than its time limit of {seconds} s and was stopped. Ask its author to raise its time limit."),
     ("plugin_error.trap", "it stopped on an error inside the plugin ({reason}). Report this to its author."),

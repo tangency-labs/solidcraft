@@ -47,7 +47,9 @@ fn newer(error: OldError) -> HostError {
     use super::types::{CommandFailure, FieldFailure};
     host_error(match error {
         OldError::PermissionDenied(permission) => super::PluginError::PermissionDenied(permission),
-        OldError::CommandFailed(old::types::CommandFailure { command, reason }) => super::PluginError::CommandFailed(CommandFailure { command, reason }),
+        OldError::CommandFailed(old::types::CommandFailure { command, reason }) => {
+            super::PluginError::CommandFailed(CommandFailure { command, reason })
+        }
         OldError::LimitExceeded(limit) => super::PluginError::LimitExceeded(limit),
         OldError::InvalidManifest(old::types::FieldFailure { field, reason }) => super::PluginError::InvalidManifest(FieldFailure { field, reason }),
         OldError::InvalidInput(old::types::FieldFailure { field, reason }) => super::PluginError::InvalidInput(FieldFailure { field, reason }),
