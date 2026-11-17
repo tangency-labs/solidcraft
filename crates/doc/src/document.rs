@@ -423,6 +423,14 @@ pub struct Extent {
     /// before it carry none and keep measuring against the placements shown.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub picked_placements: Vec<PickedPlacement>,
+    /// A symmetric extrude that was one-sided: the way it went then (`positive`: along the
+    /// sketch normal, so its `start` cap was its low cap; `negative`: against it, so its high
+    /// cap). That cap, now at the same end of the symmetric extrude, also answers to `start`, so
+    /// what was picked on the old start cap is still found on the cap facing the same way.
+    /// Absent (a design saved before it, or an extrude made symmetric where the old one's way
+    /// was not known): no cap answers to `start`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub one_sided_direction: Option<Direction>,
 }
 
 /// A component's placement relative to a feature's own component, as it was when the feature

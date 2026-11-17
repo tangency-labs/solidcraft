@@ -351,17 +351,23 @@ fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
         active_sketch: s.active_sketch,
         pending_moves: s.pending_moves.clone(),
         visibility: s.visibility.clone(),
+        section: snap.section.as_ref().map(|_| s.section_state()),
     };
     let same = std::sync::Arc::ptr_eq(&s.doc, &snap.doc);
-    // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating.
+    // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating, and
+    // a section step needs nothing evaluated or drawn again.
     let display_only = same && s.visibility != snap.visibility;
+    let view_only = same && !display_only && snap.active_sketch == s.active_sketch && snap.pending_moves == s.pending_moves && snap.section.is_some();
+    if let Some(section) = snap.section {
+        s.set_section_state(section);
+    }
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;
     s.selection.clear();
     // A new document is evaluated by `execute`.
-    if same {
+    if same && !view_only {
         if display_only {
             s.refresh_display();
         } else {
@@ -1563,6 +1569,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if !sets_path(set, "extent.from_level") {
         keep_from_level_on_the_same_face(s, &f, &mut nf);
     }
+    // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
+    // start cap is still found on the cap facing the same way.
+    solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
     }
@@ -2430,6 +2439,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         after.to_body_apart = before.to_body_apart;
     }
     keep_from_level_on_the_same_face(s, &old, &mut new);
+    solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });

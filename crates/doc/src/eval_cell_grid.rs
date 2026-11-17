@@ -151,7 +151,7 @@ pub(crate) fn prism_tool(plane: &Plane, regions: &[Region2], lo: f64, hi: f64) -
     extrude_within_reach([lo, hi])?;
     let mut tools: Vec<Traced> = Vec::new();
     for region in regions {
-        tools.extend(centered_extrude(plane, region, lo, hi, None, None, false)?);
+        tools.extend(centered_extrude(plane, region, lo, hi, None, None, false, None)?);
     }
     // The regions lie apart (a cell grid's web, a hinge's bridges), so the kernel's own check of
     // their boxes (which a staggered grid's neighbours fail) is not asked.
