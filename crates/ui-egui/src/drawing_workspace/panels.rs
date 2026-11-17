@@ -618,16 +618,24 @@ pub(super) fn sheet_settings(app: &mut SolveApp, ui: &mut egui::Ui) {
         caption(ui, "ui.drawing_panel.no_sheet");
         return;
     };
+    let t = Tokens::get();
     ui_kit::settings_page(ui, |ui| {
-        sheet_notice(app, ui, &drawing, sheet);
-        sheet_fields(app, ui, sheet);
+        ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
+            sheet_notice(app, ui, &drawing, sheet);
+            sheet_fields(app, ui, sheet);
 
-        ui_kit::section_heading(ui, tr("ui.drawing_panel.screen"));
-        ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
-        ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
+            ui_kit::section_heading(ui, tr("ui.drawing_panel.screen"));
+            ui_kit::row(ui, tr("ui.sheet_page.colour"), |ui| crate::drawing_sheet_page::colour_choice(app, ui));
+            ui_kit::row(ui, tr("ui.drawing_backdrop.label"), |ui| crate::drawing_sheet_page::backdrop_choice(app, ui));
+        });
         ui.separator();
-        ui_kit::settings_inline_note(ui, tr("ui.drawing_settings.immediate"));
+        settings_note(ui, "ui.drawing_settings.immediate");
     });
+}
+
+fn settings_note(ui: &mut egui::Ui, key: &'static str) {
+    let t = Tokens::get();
+    ui.add(egui::Label::new(egui::RichText::new(tr(key)).size(t.font_small).color(t.form_dim)).wrap());
 }
 
 fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
@@ -697,7 +705,7 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
         (enter, response)
     });
     ui_kit::below_row_control(ui, picture, ui.available_width(), |ui| {
-        ui_kit::settings_inline_note(ui, tr("ui.drawing_settings.picture_help"));
+        settings_note(ui, "ui.drawing_settings.picture_help");
     });
     if enter || response.lost_focus() {
         if let Ok(value) = dpi.parse::<f64>()
@@ -738,7 +746,7 @@ fn sheet_fields(app: &mut SolveApp, ui: &mut egui::Ui, sheet: &Sheet) {
     let template = tr("ui.drawing_panel.template");
     ui.add_enabled_ui(false, |ui| choice(ui, template, 0, &[none]));
     ui_kit::below_row_control(ui, template, ui.available_width(), |ui| {
-        ui_kit::settings_inline_note(ui, tr("ui.drawing_settings.template_help"));
+        settings_note(ui, "ui.drawing_settings.template_help");
     });
     ui_kit::section_heading(ui, tr("ui.drawing_panel.counting"));
     let mut count = !sheet.excluded.count;
