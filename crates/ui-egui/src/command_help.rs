@@ -332,6 +332,7 @@ pub const DOCUMENTED: &[&str] = &[
     "view.tool",
     "view.visual_style",
     "wood.edge_profile",
+    "wood.estimate",
     "wood.grain",
     "wood.grain.query",
 ];

@@ -2561,6 +2561,10 @@ impl SolveApp {
             sketch_report::open(self);
             return;
         }
+        if id == "wood.estimate" {
+            cutting_plan_panel::open_estimate(self);
+            return;
+        }
         if id == "cutlist.layout" {
             if cutting_plan_panel::available(self) {
                 cutting_plan_panel::set_focus_pending(self, true);

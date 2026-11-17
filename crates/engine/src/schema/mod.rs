@@ -159,6 +159,7 @@ pub mod ui_prefs;
 pub mod view_navigation;
 pub mod view_pick;
 pub mod wood_edge_profile;
+pub mod wood_estimate;
 pub mod wood_grain;
 
 pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, issues, output_schema_for, run_checked, run_checked_as};

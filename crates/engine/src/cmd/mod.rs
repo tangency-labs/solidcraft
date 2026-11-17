@@ -170,6 +170,7 @@ mod view_dxf;
 mod view_navigation;
 mod view_pick;
 mod wood_edge_profile;
+mod wood_estimate;
 mod wood_grain;
 
 use serde::Serialize;
@@ -389,6 +390,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
     v.extend(wood_edge_profile::COMMANDS.iter());
+    v.extend(wood_estimate::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
     v.extend(frame_end_cap::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());

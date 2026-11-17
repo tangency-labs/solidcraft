@@ -2,12 +2,17 @@
 use crate::SolveApp;
 use serde_json::{Value, json};
 use solidcraft_engine::schema::cutting_plan::{Layout, StockChoice};
+use solidcraft_engine::schema::wood_estimate::Estimate;
 use solidcraft_ui_text::{format, tr};
 
 pub struct CuttingPlanPanel {
     document: String,
     focus_pending: bool,
     library: String,
+    rates: String,
+    glue_ups: String,
+    estimate: Option<Estimate>,
+    estimate_run: bool,
     kerf: String,
     trim: String,
     selected: Vec<String>,
@@ -25,6 +30,10 @@ impl Default for CuttingPlanPanel {
             document: String::new(),
             focus_pending: true,
             library: String::new(),
+            rates: String::new(),
+            glue_ups: "0".into(),
+            estimate: None,
+            estimate_run: false,
             kerf: "3.2".into(),
             trim: "10".into(),
             selected: vec![],
@@ -58,6 +67,29 @@ pub(crate) fn set_focus_pending(app: &mut SolveApp, pending: bool) {
     }
 }
 
+/// Open the Cutting Plan panel (or bring it forward) and calculate the estimate in it.
+pub fn open_estimate(app: &mut SolveApp) {
+    if !available(app) {
+        open(app);
+    }
+    if let Some(panel) = &mut app.cutting_plan {
+        panel.estimate_run = true;
+        panel.focus_pending = true;
+    }
+}
+
+fn estimate_params(panel: &CuttingPlanPanel) -> Result<Value, String> {
+    let mut p = params(panel)?;
+    if let Some(fields) = p.as_object_mut() {
+        fields.remove("mode");
+    }
+    p["glue_ups"] = json!(panel.glue_ups.trim().parse::<u32>().map_err(|_| tr("wood_estimate.valid_glue_ups").to_string())?);
+    if !panel.rates.trim().is_empty() {
+        p["rates"] = json!(panel.rates.trim());
+    }
+    Ok(p)
+}
+
 fn params(panel: &CuttingPlanPanel) -> Result<Value, String> {
     let kerf = crate::ui_kit::parse_number(&panel.kerf).ok_or_else(|| tr("cutting_plan.valid_lengths").to_string())?;
     let trim = crate::ui_kit::parse_number(&panel.trim).ok_or_else(|| tr("cutting_plan.valid_lengths").to_string())?;
@@ -75,9 +107,14 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(mut panel) = app.cutting_plan.take().filter(|panel| panel.document == app.session.document_id) else { return };
     if panel.revision != app.session.revision {
         panel.plan = None;
+        panel.estimate = None;
     }
     let mut run = panel.initial;
     panel.initial = false;
+    let mut estimate_run = panel.estimate_run;
+    panel.estimate_run = false;
+    let mut estimate_export = false;
+    let mut rates_browse = false;
     let mut export = None;
     let mut browse = false;
     let top = ui.cursor().top();
@@ -86,6 +123,7 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
         if crate::ui_kit::text_row(ui, tr("cutting_plan.library"), &mut panel.library, tr("cutting_plan.preset")).1 {
             panel.load = true;
             panel.plan = None;
+            panel.estimate = None;
         }
         if crate::ui_kit::button(ui, tr("cutting_plan.browse"), crate::ui_kit::Button::Normal).clicked() {
             browse = true;
@@ -94,10 +132,75 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
             | crate::ui_kit::text_row(ui, tr("cutting_plan.trim"), &mut panel.trim, "mm").1;
         if changed {
             panel.plan = None;
+            panel.estimate = None;
         }
         if crate::ui_kit::button(ui, tr("cutting_plan.run"), crate::ui_kit::Button::Normal).clicked() {
             run = true;
         }
+        ui.separator();
+        ui.label(tr("cmd.wood.estimate"));
+        if crate::ui_kit::text_row(ui, tr("wood_estimate.rates"), &mut panel.rates, tr("wood_estimate.defaults")).1
+            | crate::ui_kit::text_row(ui, tr("wood_estimate.glue_ups"), &mut panel.glue_ups, "").1
+        {
+            panel.estimate = None;
+        }
+        ui.horizontal_wrapped(|ui| {
+            if crate::ui_kit::button(ui, tr("wood_estimate.browse"), crate::ui_kit::Button::Normal).clicked() {
+                rates_browse = true;
+            }
+            if crate::ui_kit::button(ui, tr("wood_estimate.calculate"), crate::ui_kit::Button::Normal).clicked() {
+                estimate_run = true;
+            }
+        });
+        ui.label(tr("wood_estimate.currency"));
+        if let Some(estimate) = &panel.estimate {
+            for (key, amount) in [
+                ("wood_estimate.material", estimate.stock_cost),
+                ("wood_estimate.finishing", estimate.finishing_cost),
+                ("wood_estimate.time", estimate.work_minutes),
+                ("wood_estimate.total", estimate.total_cost),
+            ] {
+                ui.label(format(key, &[("value", &std::format!("{amount:.2}"))]));
+            }
+            if let Some(cost) = estimate.labour_cost {
+                ui.label(format("wood_estimate.labour", &[("value", &std::format!("{cost:.2}"))]));
+            } else {
+                ui.label(tr("wood_estimate.no_labour"));
+            }
+            if !estimate.complete {
+                ui.label(tr("wood_estimate.incomplete"));
+            }
+            crate::ui_kit::section(ui, "wood_estimate_breakdown", tr("wood_estimate.breakdown"), false, |ui| {
+                egui::ScrollArea::vertical().id_salt("wood_estimate_lines").max_height(140.0).show(ui, |ui| {
+                    egui::Grid::new("wood_estimate_grid").striped(true).show(ui, |ui| {
+                        for key in ["wood_estimate.item", "wood_estimate.quantity", "wood_estimate.minutes", "wood_estimate.cost"] {
+                            ui.label(tr(key));
+                        }
+                        ui.end_row();
+                        for line in &estimate.lines {
+                            let item = match line.category.as_str() {
+                                "saw_cut" => tr("wood_estimate.saw_cuts"),
+                                "glue_up" => tr("wood_estimate.glue_ups"),
+                                "labour" => tr("wood_estimate.labour_line"),
+                                _ => &line.item,
+                            };
+                            ui.label(item);
+                            ui.label(std::format!("{:.3}", line.quantity));
+                            ui.label(std::format!("{:.2}", line.minutes));
+                            ui.label(line.cost.map(|v| std::format!("{v:.2}")).unwrap_or_else(|| "—".into()));
+                            ui.end_row();
+                        }
+                    });
+                    for warning in &estimate.warnings {
+                        ui.label(warning);
+                    }
+                });
+            });
+            if crate::ui_kit::button(ui, tr("wood_estimate.csv"), crate::ui_kit::Button::Normal).clicked() {
+                estimate_export = true;
+            }
+        }
+        ui.separator();
         if let Some(error) = &panel.error {
             ui.label(error);
         }
@@ -119,6 +222,7 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             if changed {
                 panel.plan = None;
+                panel.estimate = None;
             }
         }
         if let Some(plan) = &panel.plan {
@@ -195,7 +299,7 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.label(tr("cutting_plan.regenerate"));
         }
     });
-    if run {
+    if run || (estimate_run && panel.load) {
         match params(&panel)
             .and_then(|p| app.session.execute("cutlist.layout", &p).map_err(|e| e.to_string()))
             .and_then(|v| serde_json::from_value::<Layout>(v).map_err(|e| e.to_string()))
@@ -212,6 +316,28 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             // The stock choices are filled by the first run that succeeds: until then every size stays selected.
             Err(e) => panel.error = Some(e),
+        }
+    }
+    if estimate_run {
+        match estimate_params(&panel)
+            .and_then(|p| app.session.execute("wood.estimate", &p).map_err(|e| e.to_string()))
+            .and_then(|v| serde_json::from_value::<Estimate>(v).map_err(|e| e.to_string()))
+        {
+            Ok(estimate) => {
+                panel.estimate = Some(estimate);
+                panel.revision = app.session.revision;
+                panel.error = None;
+            }
+            Err(error) => {
+                panel.estimate = None;
+                panel.error = Some(error);
+            }
+        }
+    }
+    if estimate_export {
+        match estimate_params(&panel) {
+            Ok(p) => app.pick_save_command("wood-estimate.csv", &["csv"], "wood.estimate", p),
+            Err(error) => panel.error = Some(error),
         }
     }
     if let Some(ext) = export {
@@ -235,11 +361,20 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui) {
     let height = report.content_size.y.min(720.0);
     crate::panel_runtime::report_content_extent(ui, top, height, false);
     app.cutting_plan = Some(panel);
+    if rates_browse {
+        app.pick_open_for(&["json"], |app, path| {
+            if let (Some(panel), Some(path)) = (app.cutting_plan.as_mut(), path) {
+                panel.rates = path;
+                panel.estimate = None;
+            }
+        });
+    }
     if browse {
         app.pick_open_for(&["json"], |app, path| {
             if let (Some(panel), Some(path)) = (app.cutting_plan.as_mut(), path) {
                 panel.library = path;
                 panel.plan = None;
+                panel.estimate = None;
                 panel.load = true;
             }
         });

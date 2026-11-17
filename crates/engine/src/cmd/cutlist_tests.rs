@@ -296,3 +296,23 @@ fn cutlist_keeps_grain_rules_separate_and_follows_body_moves() {
     s.execute("solid.move", &json!({"bodies":["Long"],"translate":[20,30,40],"axis":[0,1,0],"angle":"45 deg"})).unwrap();
     assert_eq!(s.execute("cutlist.parts", &json!({})).unwrap(), before);
 }
+
+#[test]
+fn routed_boards_list_their_enclosing_box_and_grain_and_are_planned_after_body_moves() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":500,"width":200,"height":18,"body_name":"Board"}));
+    run(&mut s, "wood.grain", json!({"body":"Board","direction":"length"}));
+    run(&mut s, "wood.edge_profile", json!({"body":"Board","edges":[[250,0,18]],"profile":"roundover","radius":3}));
+    for moved in [false, true] {
+        if moved {
+            run(&mut s, "solid.move", json!({"bodies":["Board"],"translate":[20,30,40],"axis":[0,1,0],"angle":"45 deg"}));
+        }
+        let list = run(&mut s, "cutlist.parts", json!({}));
+        // The finished board is measured: its rounded edge makes the box approximate, but the box still encloses it.
+        assert_eq!(list["rows"][0]["stock"], json!({"kind":"panel","length":500.,"width":200.,"thickness":18.,"exact":false}));
+        assert_eq!(list["rows"][0]["grain"], "length");
+        let plan = run(&mut s, "cutlist.layout", json!({}));
+        assert_eq!(plan["unplaced"], json!([]));
+        assert_eq!(plan["to_buy"][0]["count"], 1);
+    }
+}

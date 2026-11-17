@@ -77,3 +77,69 @@ fn a_failed_first_run_keeps_every_stock_size_for_the_next_run() {
     let plan = panel.plan.as_ref().unwrap();
     assert_eq!((plan.labels.len(), plan.unplaced.len()), (1, 0));
 }
+
+#[test]
+fn wood_estimate_panel_opens_calculates_refreshes_and_captures_totals() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":500,"width":200,"height":18,"body_name":"Shelf"})).unwrap();
+    h.step(&json!({"start":"wood.estimate"})).unwrap();
+    h.frames(3);
+    assert!(h.widget("Incomplete estimate: known costs only; review the warnings.").is_some());
+    assert!(h.widget("Labour cost off: no hourly rate set").is_some());
+    assert!(h.widget("Export estimate CSV…").is_some());
+    let dir = std::env::temp_dir().join(format!("wood-estimate-panel-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let library = dir.join("stock.json");
+    std::fs::write(
+        &library,
+        serde_json::to_vec(&json!({"stock":[{"id":"oak","name":"Oak board","kind":"panel","length":1000,"width":500,"thickness":18,"price":25}]}))
+            .unwrap(),
+    )
+    .unwrap();
+    let panel = h.app.cutting_plan.as_mut().unwrap();
+    panel.library = library.to_str().unwrap().into();
+    panel.load = true;
+    panel.glue_ups = "2".into();
+    h.step(&json!({"widget":"Calculate estimate"})).unwrap();
+    h.frames(2);
+    let estimate = h.app.cutting_plan.as_ref().unwrap().estimate.as_ref().unwrap();
+    assert!(estimate.complete);
+    assert_eq!(estimate.material_cost, 25.);
+    assert_eq!(estimate.work_minutes, 31.);
+    assert!(h.widget("Stock cost: 25.00").is_some());
+    assert!(h.widget("Workshop time: 31.00 min").is_some());
+    h.step(&json!({"widget":"Estimate breakdown and warnings"})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Saw cuts").is_some());
+    assert!(h.widget("Cost").is_some());
+    let ctx = crate::fonts::test_context();
+    let mut textures = std::collections::HashMap::new();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200., 1000.));
+    for frame in 0..6 {
+        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), time: Some(frame as f64 / 60.), ..Default::default() }, |ui| {
+            super::shared_content(&mut h.app, ui)
+        });
+        crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+        if frame == 5 {
+            assert!(crate::test_support::text_shapes(&output).any(|t| t.galley.text() == "Total cost: 25.00"));
+            if let Ok(dir) = std::env::var("SOLIDCRAFT_WOOD_ESTIMATE_EVIDENCE") {
+                std::fs::create_dir_all(&dir).unwrap();
+                crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures)
+                    .save(std::path::Path::new(&dir).join("wood-estimate.png"))
+                    .unwrap();
+            }
+        }
+    }
+    h.app.run("solid.box", json!({"length":100,"width":50,"height":18,"body_name":"Second"})).unwrap();
+    h.frames(2);
+    assert!(h.app.cutting_plan.as_ref().unwrap().estimate.is_none());
+    h.step(&json!({"widget":"Calculate estimate"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.cutting_plan.as_ref().unwrap().estimate.as_ref().unwrap().material_cost, 25.);
+    h.app.cutting_plan.as_mut().unwrap().glue_ups = "invalid".into();
+    h.step(&json!({"widget":"Calculate estimate"})).unwrap();
+    h.frames(2);
+    assert!(h.app.cutting_plan.as_ref().unwrap().estimate.is_none());
+    assert!(h.app.cutting_plan.as_ref().unwrap().error.is_some());
+    std::fs::remove_dir_all(dir).unwrap();
+}

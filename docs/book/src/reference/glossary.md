@@ -349,6 +349,12 @@ Radius of the surface neighbourhood used to estimate illumination from nearby ph
 
 - **In SolidCraft:** Caustics `radius_mm`; smaller values preserve sharper details and require more photons to reduce noise.
 
+### glue-up
+
+One batch of glue, assembly and clamping in the workshop.
+
+- **In SolidCraft:** `wood.estimate.glue_ups` takes the number of batches, because the assembly order is a workshop decision.
+
 ### grain direction
 
 The direction of the fibres in wood relative to a part's stock dimensions.
@@ -705,6 +711,12 @@ A program that shows web pages, such as the one that runs SolidCraft's web build
 - **For translators:** not the *browser* panel. Where a language uses one word for both, use the
   CAD word for the panel.
 
+
+### workshop estimate
+
+The known stock and finishing cost, an optional labour cost, and the time for saw cuts, router edges and glue-ups.
+
+- **In SolidCraft:** `wood.estimate` uses a shared JSON file of time rates and one currency; labour is off until an hourly rate is set. Estimates are not saved in designs.
 
 ### workshop mark
 
