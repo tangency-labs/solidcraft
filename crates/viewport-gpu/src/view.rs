@@ -2840,8 +2840,6 @@ struct Cut {
 pub struct Renderer {
     /// Lazily created depth-only pipelines for feedback over a live product image.
     product_depth: Option<product_highlights::DepthPipelines>,
-    /// The offscreen cache contains transparent product highlights rather than shaded colour.
-    product_highlights: bool,
     /// Why the last `prepare` could not upload a scene (the device refused a buffer), if so.
     refused_upload: Option<String>,
     /// What the last frame drew ([`Renderer::stats`]).
@@ -3015,6 +3013,8 @@ fn fs() -> @location(0) vec4<f32> {
 /// another tile has been prepared. Pipelines and uniforms are still shared by the renderer.
 #[derive(Default)]
 struct Picture {
+    /// The cached picture contains only transparent product highlights.
+    product_highlights: bool,
     model: Batches,
     /// The dragged bodies use a separate scene so they can share uploads with this view's model.
     moving: Batches,
@@ -4022,7 +4022,6 @@ impl Renderer {
             environment.set(studio.join());
             Renderer {
                 product_depth: None,
-                product_highlights: false,
                 refused_upload: None,
                 ao: ao.join(),
                 ground_ao: ground_ao.join(),
@@ -4620,8 +4619,8 @@ impl Renderer {
         let res = self;
         let cb = frame;
         res.pic.isolated = isolated;
-        if res.product_highlights {
-            res.product_highlights = false;
+        if res.pic.product_highlights {
+            res.pic.product_highlights = false;
             res.pic.ss_key = None;
             res.pic.cached = None;
         }
@@ -5417,7 +5416,7 @@ impl Renderer {
         };
         // See-through surfaces (order-independent transparency) and a window pass of another kind
         // (samples, depth) need a frame of their own, even at the viewport's own size.
-        let needs_own = see_through || self.pic.isolated || self.window_differs() || self.product_highlights;
+        let needs_own = see_through || self.pic.isolated || self.window_differs() || self.pic.product_highlights;
         let samples = self.target.samples;
         let mut drawn = None;
         for _ in 0..FRAME_TRIES {
@@ -5514,7 +5513,7 @@ impl Renderer {
         let (Some(p), Some(t), true) = (&self.oit, &self.pic.oit_targets, see_through) else {
             let mut first = pass(encoder, true);
             first.set_viewport(0.0, 0.0, size[0] as f32, size[1] as f32, 0.0, 1.0);
-            if self.product_highlights {
+            if self.pic.product_highlights {
                 self.draw_product_highlights(&mut first, &tally);
             } else {
                 self.draw(cb, &mut first, Phase::All, &tally);
