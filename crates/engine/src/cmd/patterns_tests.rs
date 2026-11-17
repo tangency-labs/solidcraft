@@ -592,6 +592,38 @@ fn rectangular_pattern_distance_types_place_the_copies() {
     assert_offsets(&got, &[[0.0, 25.0], [0.0, 50.0], [30.0, 0.0], [30.0, 25.0], [30.0, 50.0]]);
 }
 
+/// The command works a row out with the values the pattern is built with, so an expression's
+/// bare number is read in the design's unit there too (#8523): in an inch design `2 + 0` is a
+/// 2 in extent, not 2 mm that a 1 in spacing would not fit in.
+#[test]
+fn rectangular_pattern_extent_reads_an_expression_in_the_design_unit() {
+    let pattern = |p: Value| {
+        let mut s = Session::default();
+        run(&mut s, "document.units", json!({"units": "in"}));
+        run(&mut s, "solid.box", json!({"length": "10 mm", "width": "10 mm", "height": "10 mm", "body_name": "Cube"}));
+        let mut p = p;
+        p["bodies"] = json!(["Cube"]);
+        run(&mut s, "solid.pattern.rectangular", p);
+        let Some(solidcraft_doc::FeatureKind::Pattern { pattern, .. }) = s.doc.features.last().map(|f| f.kind.clone()) else {
+            panic!("no pattern");
+        };
+        let mats = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), &pattern).unwrap();
+        let mut xs: Vec<f64> = mats.iter().map(|m| m[3][0]).collect();
+        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        (xs, pattern)
+    };
+    let (xs, p) = pattern(json!({"dir1": [1, 0, 0], "distance1": "spacing_extent", "spacing1": "1 in", "extent1": "2 + 0"}));
+    assert_eq!(xs.len(), 2, "{xs:?}");
+    assert!((xs[0] - 25.4).abs() < 1e-9 && (xs[1] - 50.8).abs() < 1e-9, "{xs:?}");
+    let solidcraft_doc::PatternKind::Rectangular { count1, .. } = &p else { panic!("not rectangular") };
+    assert_eq!(count1.as_str(), "3");
+    let (xs, p) = pattern(json!({"dir1": [1, 0, 0], "distance1": "count_extent", "count1": 3, "extent1": "2 + 0"}));
+    assert_eq!(xs.len(), 2, "{xs:?}");
+    assert!((xs[1] - 50.8).abs() < 1e-9, "{xs:?}");
+    let solidcraft_doc::PatternKind::Rectangular { spacing1, .. } = &p else { panic!("not rectangular") };
+    assert_eq!(spacing1.as_str(), "25.4 mm");
+}
+
 /// The distance type, the extent and Copy at the end are saved, undone and reopened with the
 /// design, and the extent follows a parameter; a pattern set by count and spacing saves none of
 /// them, so older designs are unchanged.

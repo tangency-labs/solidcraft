@@ -151,9 +151,15 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // A surface extrude's profiles stand square to their sketch, as a solid extrude's do.
         Kind::Surface(crate::dialogs_surface::Surf::Extrude { .. }) => (at, normal),
         // The way the first copy goes: Flip turns the arrow round (#8523).
+        // A reopened pattern whose first direction is no origin axis keeps it only in `dir1`,
+        // as the second keeps `dir2`; a picked direction comes first.
         Kind::PatternRect { .. } => {
             let heading = pattern_heading(&d.extra, 0);
-            (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1 * heading))
+            let dir1 = match d.inputs.get(1).and_then(|i| i.items.first()) {
+                Some(x) => crate::dialogs::axis_of(app, x).map(|a| a.1),
+                None => d.extra.get("dir1").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2])),
+            };
+            (at, dir1.map(|n| n * heading))
         }
         // A sketch move's X Distance grows along the sketch's own x axis, so its drag arrow
         // lies in the sketch plane. Scale has no arrow: a factor is not a length, and the
@@ -749,18 +755,18 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         };
         let before = extent2.clone();
         let ts = extent_arrow(&app.session.doc, ui, painter, proj, (base, bs, n2), sides2, id, half_height, decimals, ink, extent2);
-        if let Some(ts) = ts {
-            value_box_in(
-                ui,
-                (egui::Id::unique("sc_canvas_area_extent2"), egui::Id::unique("sc_canvas_value_extent2")),
-                "ui.pattern_extent_2",
-                extent2,
-                (ts + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
-                *extent2 != before,
-                false,
-                box_place(app, proj),
-            );
-        }
+        // Text that is no length yet has no tip: the box stays beside the base, as Extent's
+        // does, so typing goes on in it.
+        value_box_in(
+            ui,
+            (egui::Id::unique("sc_canvas_area_extent2"), egui::Id::unique("sc_canvas_value_extent2")),
+            "ui.pattern_extent_2",
+            extent2,
+            (ts.unwrap_or(bs + vec2(16.0, 44.0)) + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
+            *extent2 != before,
+            false,
+            box_place(app, proj),
+        );
     }
     if let Some(n2) = pattern_dir2(app, d) {
         let solid_pattern = matches!(d.kind, Kind::PatternRect { .. });
@@ -769,34 +775,37 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             Kind::SketchModify(crate::sketch_modify_ui::Mod::PatternRect { spacing2, .. }) => Some(spacing2),
             _ => None,
         };
-        if let Some(spacing2) = spacing2
-            && let Some(l2) = crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite())
-        {
+        if let Some(spacing2) = spacing2 {
             let before = spacing2.clone();
-            let ts = drag_arrow(
-                &app.session.doc,
-                ui,
-                painter,
-                proj,
-                base,
-                bs,
-                n2,
-                l2,
-                true,
-                egui::Id::unique("sc_manipulator2"),
-                half_height,
-                0.0,
-                decimals,
-                spacing2,
-            );
-            // A solid pattern's Spacing 2 has its box at the tip, as Spacing has (#8523).
-            if solid_pattern && let Some(ts) = ts {
+            // Text that is no length yet has no arrow to draw.
+            let ts = match crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite()) {
+                Some(l2) => drag_arrow(
+                    &app.session.doc,
+                    ui,
+                    painter,
+                    proj,
+                    base,
+                    bs,
+                    n2,
+                    l2,
+                    true,
+                    egui::Id::unique("sc_manipulator2"),
+                    half_height,
+                    0.0,
+                    decimals,
+                    spacing2,
+                ),
+                None => None,
+            };
+            // A solid pattern's Spacing 2 has its box at the tip, as Spacing has (#8523); with
+            // no tip it stays beside the base, below Extent 2's, so typing goes on in it.
+            if solid_pattern {
                 value_box_in(
                     ui,
                     (egui::Id::unique("sc_canvas_area_spacing2"), egui::Id::unique("sc_canvas_value_spacing2")),
                     "Spacing 2",
                     spacing2,
-                    (ts + vec2(14.0, -30.0), egui::Align2::LEFT_TOP),
+                    (ts.map_or(bs + vec2(30.0, 82.0), |ts| ts + vec2(14.0, -30.0)), egui::Align2::LEFT_TOP),
                     *spacing2 != before,
                     false,
                     box_place(app, proj),

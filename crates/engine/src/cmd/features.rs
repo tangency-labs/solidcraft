@@ -2872,7 +2872,7 @@ fn pattern_direction(s: &Session, p: &Value, cmd: &str, k: &str, used: bool) -> 
     if !used {
         return Ok(direction);
     }
-    let (vals, _) = s.doc.param_values();
+    let vals = s.doc.evaluation_values();
     let row = solidcraft_doc::pattern_row(
         &vals,
         distance,

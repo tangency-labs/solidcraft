@@ -218,3 +218,54 @@ fn a_centred_extent_arrow_shows_its_own_side_and_turns_with_flip() {
     h.settle();
     assert!(handle_at("arrow").is_some() && handle_at("arrow_extent").is_some(), "Spacing and Extent shows both arrows");
 }
+
+/// A reopened pattern whose first direction is no origin axis keeps its arrow (#8523): the
+/// window keeps that direction in `dir1` alone, as it keeps a slanted second one in `dir2`.
+#[test]
+fn a_reopened_pattern_along_a_slanted_first_direction_keeps_its_arrow() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Cube"}}},
+        {"call": "engine.execute", "params": {"command": "solid.pattern.rectangular", "params": {"bodies": ["Cube"], "dir1": [0.6, 0.8, 0], "count1": 2, "spacing1": 20, "name": "Pattern"}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"call": "ui.editFeature", "params": {"feature": "Pattern"}}
+    ]))
+    .unwrap();
+    h.settle();
+    let d = h.app.dialog.as_ref().expect("the pattern dialog");
+    assert!(d.inputs.get(1).is_none_or(|i| i.items.is_empty()), "a slanted direction is no pick: {:?}", d.inputs);
+    let (_, dir) = crate::canvas::anchor(&h.app, d).expect("an anchor");
+    assert!(dir.is_some_and(|v| (v.x - 0.6).abs() < 1e-9 && (v.y - 0.8).abs() < 1e-9 && v.z.abs() < 1e-9), "{dir:?}");
+    assert!(handle_at("arrow").is_some(), "the Spacing arrow along the kept direction");
+}
+
+/// Spacing 2's and Extent 2's boxes in the view stay while their text does not evaluate, so a
+/// cleared box can be typed on in (#8523), as Distance 2's does for an extrude.
+#[test]
+fn a_solid_pattern_second_direction_boxes_stay_while_their_text_is_incomplete() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"start": "solid.pattern.rectangular"},
+        {"click": {"world": [5, 5, 10]}},
+        {"call": "ui.dialogInput", "params": {"index": 1}},
+        {"click": {"axis": "X"}},
+        {"call": "ui.dialogInput", "params": {"index": 2}},
+        {"click": {"axis": "Y"}}
+    ]))
+    .unwrap();
+    h.app.dialog.as_mut().unwrap().extra.insert("distance2".into(), json!("spacing_extent"));
+    h.settle();
+    let shown = |h: &Harness, what: &str| h.ctx.read_response(egui::Id::unique(what)).is_some();
+    assert!(shown(&h, "sc_canvas_value_spacing2") && shown(&h, "sc_canvas_value_extent2"), "both boxes with valid text");
+    for text in ["", "-"] {
+        if let Some(Kind::PatternRect { spacing2, extent2, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *spacing2 = text.into();
+            *extent2 = text.into();
+        }
+        h.settle();
+        assert!(shown(&h, "sc_canvas_value_spacing2"), "Spacing 2's box went away at {text:?}");
+        assert!(shown(&h, "sc_canvas_value_extent2"), "Extent 2's box went away at {text:?}");
+    }
+}
