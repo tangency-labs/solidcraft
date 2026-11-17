@@ -8,7 +8,7 @@
 //!
 //! | Rust               | What it is                                                         |
 //! |--------------------|--------------------------------------------------------------------|
-//! | [`GrooveWeld`]     | The two walls, the face and root contours, the penetration depth   |
+//! | [`GrooveWeld`]     | The two walls, the contour of each face, the penetration depth     |
 //! | [`Contour`]        | Flat, convex (sharp or blended toes) or concave                    |
 //! | [`groove_section`] | The weld's section and its notices                                 |
 //! | [`GrooveSection`]  | The region, the groove's depth, whether it runs through the plate  |
@@ -26,12 +26,15 @@
 //! the groove ends: on the root side's outer face when the groove runs through the plate, or
 //! where the two parts touch (both walls then end at the same point, the groove is closed).
 //!
-//! The *face* closes the section between the two toes, the *root* between the two wall ends
-//! when the groove runs through. Each is [`Contour::Flat`] (a straight chord, the default),
-//! [`Contour::Convex`] (an arc through the toes with its crest the given height off the chord),
-//! [`Contour::ConvexBlended`] (the same crest, run out tangentially past the toes) or
-//! [`Contour::Concave`] (an arc dipping the given depth below the chord). A double-sided
-//! groove's second face is its root.
+//! The *face* closes the section between the two toes. Where the groove runs through the plate
+//! the other side is closed between the two wall ends: flat on a weld from one side (its root,
+//! always flush), or by the *second face* of a weld from both sides (a weld symbol above and
+//! below the reference line: X, K, double-U, double-J, or any groove the user welds from both
+//! sides), which follows the user's contour for that side. Each face is [`Contour::Flat`] (a
+//! straight chord, the default), [`Contour::Convex`] (an arc through the toes with its crest
+//! the given height off the chord), [`Contour::ConvexBlended`] (the same crest, run out
+//! tangentially past the toes) or [`Contour::Concave`] (an arc dipping the given depth below
+//! the chord). The two faces of a weld from both sides are set apart, each flat by default.
 //!
 //! **Blended toes** (ISO 2553, "toes shall be blended smoothly"): a convex arc of radius `R`
 //! between the toes and at each toe a concave arc of radius `r`, tangent to the chord's line
@@ -42,14 +45,13 @@
 //! it (plates in one plane, toes at one height).
 //!
 //! **Penetration depth `s`**, measured from the face's chord: the weld fills only that deep
-//! and the rest of the groove stays empty; the root contour then does not apply. Without `s`
+//! and the rest of the groove stays empty; the second face then does not apply. Without `s`
 //! the whole groove is filled. An `s` deeper than the groove fills the groove and returns a
 //! notice, as does an `s` past the plate: neither is a refusal.
 //!
-//! A concave face or root is built as asked and returns how deep it dips below the chord
-//! (between plates in one plane that is below the plate's surface: ISO 6520-1 no. 511 on the
-//! face, no. 515 on the root). It is refused only when it would cross a wall, with the
-//! deepest that builds.
+//! A concave face is built as asked and returns how deep it dips below the chord (between
+//! plates in one plane that is below the plate's surface: ISO 6520-1 no. 511). It is refused
+//! only when it would cross a wall, with the deepest that builds.
 //!
 //! # Not covered
 //!
@@ -108,9 +110,10 @@ pub struct GrooveWeld {
     pub right: Vec<Seg2>,
     /// The face's contour.
     pub face: Contour,
-    /// The root's contour (the second face of a double-sided groove), used where the groove
-    /// runs through the plate and the whole groove is filled.
-    pub root: Contour,
+    /// The second face's contour for a weld from both sides (a symbol above and below the
+    /// reference line); `None` for a weld from one side, whose root is flat. Used where the
+    /// groove runs through the plate and is filled whole.
+    pub second_face: Option<Contour>,
     /// The penetration depth `s` from the face's chord; `None` fills the whole groove.
     pub depth: Option<f64>,
 }
@@ -120,8 +123,8 @@ pub struct GrooveWeld {
 pub enum WeldSide {
     /// The face (the side the walls start from).
     Face,
-    /// The root (the other side).
-    Root,
+    /// The second face of a weld from both sides.
+    Second,
 }
 
 /// What the weld tool tells the user about a section it built.
@@ -168,7 +171,7 @@ pub struct GrooveSection {
     pub notices: Vec<GrooveNotice>,
 }
 
-/// The section of `weld`: the groove between its walls filled, closed by its face and root.
+/// The section of `weld`: the groove between its walls filled, closed by its faces.
 ///
 /// # Errors
 ///
@@ -264,7 +267,7 @@ fn build(weld: &GrooveWeld) -> Result<std::result::Result<GrooveSection, Crossin
         }
     }
     if through && !cut {
-        bottom = closure(rb, lb, weld.root);
+        bottom = closure(rb, lb, weld.second_face.unwrap_or_default());
     }
 
     // the loop, clockwise: face, right wall down, bottom, left wall up
@@ -300,7 +303,11 @@ fn build(weld: &GrooveWeld) -> Result<std::result::Result<GrooveSection, Crossin
     }
     for (side, contour, used) in [
         (WeldSide::Face, weld.face, true),
-        (WeldSide::Root, weld.root, through && !cut),
+        (
+            WeldSide::Second,
+            weld.second_face.unwrap_or_default(),
+            through && !cut,
+        ),
     ] {
         if let (true, Contour::Concave { depth }) = (used, contour) {
             notices.push(GrooveNotice::BelowToes {
@@ -328,10 +335,10 @@ fn concave_fit(weld: &GrooveWeld) -> Result<SolidError> {
         )
     };
     let builds = |w: &GrooveWeld| -> Result<bool> { Ok(build(w)?.is_ok()) };
-    for side in [WeldSide::Face, WeldSide::Root] {
+    for side in [WeldSide::Face, WeldSide::Second] {
         let contour = match side {
             WeldSide::Face => weld.face,
-            WeldSide::Root => weld.root,
+            WeldSide::Second => weld.second_face.unwrap_or_default(),
         };
         let Contour::Concave { depth } = contour else {
             continue;
@@ -340,7 +347,7 @@ fn concave_fit(weld: &GrooveWeld) -> Result<SolidError> {
             let mut w = weld.clone();
             match side {
                 WeldSide::Face => w.face = d,
-                WeldSide::Root => w.root = d,
+                WeldSide::Second => w.second_face = Some(d),
             }
             w
         };
@@ -358,7 +365,7 @@ fn concave_fit(weld: &GrooveWeld) -> Result<SolidError> {
         }
         let what = match side {
             WeldSide::Face => "a concave face deeper than the groove's walls allow",
-            WeldSide::Root => "a concave root deeper than the groove's walls allow",
+            WeldSide::Second => "a concave second face deeper than the groove's walls allow",
         };
         return Ok(Failure::new(OP, Reason::Failed(what))
             .with_fit(Fit::new(lo, FitMeasure::Distance, None))
@@ -418,7 +425,7 @@ fn check_input(weld: &GrooveWeld) -> Result<()> {
         }
     }
     let positive = |v: f64| v.is_finite() && v > 0.0;
-    for contour in [weld.face, weld.root] {
+    for contour in [weld.face, weld.second_face.unwrap_or_default()] {
         let ok = match contour {
             Contour::Flat => true,
             Contour::Convex { height } => positive(height),

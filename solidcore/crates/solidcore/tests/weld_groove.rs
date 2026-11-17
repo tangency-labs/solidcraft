@@ -1,6 +1,7 @@
 //! Groove welds (`weld::groove`): the section of every standard groove and of grooves that
-//! match no standard against closed-form areas, every face and root contour, the penetration
-//! depth and its notices, and the refusals.
+//! match no standard against closed-form areas, the contour of each face (a weld from one side
+//! has a flat root, a weld from both sides a second face of its own), the penetration depth and
+//! its notices, and the refusals.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -233,7 +234,7 @@ fn a_groove_that_matches_no_standard_is_filled_as_modelled() {
 }
 
 #[test]
-fn convex_faces_and_roots_add_their_segments() {
+fn convex_faces_add_their_segments_and_a_one_sided_root_stays_flat() {
     let t = 6.0;
     let (l, r) = v_walls(t, 60.0, 0.0);
     let groove = G * t + t * t * tan(30.0);
@@ -243,31 +244,41 @@ fn convex_faces_and_roots_add_their_segments() {
         ..weld(l.clone(), r.clone())
     };
     close(area(&w), groove + segment(half, 1.5));
-    // the root's chord is the 1 mm gap: a 0.8 mm bead is more than half a circle
-    let w = GrooveWeld {
-        root: Contour::Convex { height: 0.8 },
-        ..w
-    };
-    close(
-        area(&w),
-        groove + segment(half, 1.5) + segment(G / 2.0, 0.8),
-    );
-    assert!(section(&w).notices.is_empty());
+    // welded from one side, the root closes the 1 mm gap flat: nothing below the plate
+    let s = section(&w);
+    let lowest = s
+        .region
+        .outer
+        .segs
+        .iter()
+        .flat_map(|seg| (0..=16).map(move |i| seg.point_at(f64::from(i) / 16.0).y))
+        .fold(f64::MAX, f64::min);
+    assert!((lowest + t).abs() < 1e-12, "root at {lowest}");
+    assert!(s.notices.is_empty());
 
-    // a double-V: each side its own convex face
+    // welded from both sides: each face follows its own contour, flat by default
     let (t2, c2) = (12.0, 2.0);
     let d = (t2 - c2) / 2.0;
     let (l, r) = x_walls(t2, c2);
+    let half = G / 2.0 + d * tan(30.0);
+    let x_groove = G * t2 + 2.0 * d * d * tan(30.0);
     let w = GrooveWeld {
         face: Contour::Convex { height: 1.0 },
-        root: Contour::Convex { height: 1.2 },
+        second_face: Some(Contour::Convex { height: 1.2 }),
+        ..weld(l.clone(), r.clone())
+    };
+    close(area(&w), x_groove + segment(half, 1.0) + segment(half, 1.2));
+    let w = GrooveWeld {
+        face: Contour::Convex { height: 1.0 },
+        second_face: Some(Contour::Flat),
+        ..weld(l.clone(), r.clone())
+    };
+    close(area(&w), x_groove + segment(half, 1.0));
+    let w = GrooveWeld {
+        second_face: Some(Contour::Convex { height: 1.2 }),
         ..weld(l, r)
     };
-    let half = G / 2.0 + d * tan(30.0);
-    close(
-        area(&w),
-        G * t2 + 2.0 * d * d * tan(30.0) + segment(half, 1.0) + segment(half, 1.2),
-    );
+    close(area(&w), x_groove + segment(half, 1.2));
 }
 
 /// The blended face's area above the chord: the convex arc between the toes and a concave
@@ -370,7 +381,7 @@ fn a_concave_face_is_built_and_says_how_deep_it_dips() {
     let a = G / 2.0 + t * tan(30.0);
     let w = GrooveWeld {
         face: Contour::Concave { depth: 1.0 },
-        ..weld(l.clone(), r.clone())
+        ..weld(l, r)
     };
     close(area(&w), groove - segment(a, 1.0));
     assert_eq!(
@@ -381,18 +392,24 @@ fn a_concave_face_is_built_and_says_how_deep_it_dips() {
             ratio: 1.0 / 6.0,
         }]
     );
-    // a concave root (suck-back) the same way
+    // a weld from both sides with its second face concave says so for that side
+    let (t2, c2) = (12.0, 2.0);
+    let d = (t2 - c2) / 2.0;
+    let (xl, xr) = x_walls(t2, c2);
     let w = GrooveWeld {
-        root: Contour::Concave { depth: 0.3 },
-        ..weld(l, r)
+        second_face: Some(Contour::Concave { depth: 0.5 }),
+        ..weld(xl, xr)
     };
-    close(area(&w), groove - segment(G / 2.0, 0.3));
+    close(
+        area(&w),
+        G * t2 + 2.0 * d * d * tan(30.0) - segment(G / 2.0 + d * tan(30.0), 0.5),
+    );
     assert_eq!(
         section(&w).notices,
         vec![GrooveNotice::BelowToes {
-            side: WeldSide::Root,
-            depth: 0.3,
-            ratio: 0.3 / 6.0,
+            side: WeldSide::Second,
+            depth: 0.5,
+            ratio: 0.5 / 12.0,
         }]
     );
 }
@@ -426,10 +443,10 @@ fn a_penetration_depth_fills_the_groove_only_that_deep() {
     let t = 6.0;
     let (l, r) = v_walls(t, 60.0, 0.0);
     let s = 4.0;
-    // the root's contour does not apply: the weld ends inside the groove
+    // a second face does not apply: the weld ends inside the groove
     let w = GrooveWeld {
         depth: Some(s),
-        root: Contour::Convex { height: 0.8 },
+        second_face: Some(Contour::Convex { height: 0.8 }),
         ..weld(l.clone(), r.clone())
     };
     close(area(&w), G * s + tan(30.0) * (t * t - (t - s) * (t - s)));
@@ -479,7 +496,7 @@ fn a_depth_past_a_closed_groove_fills_the_groove_and_says_so() {
     let right = mirror(&left);
     let w = GrooveWeld {
         depth: Some(8.0),
-        root: Contour::Convex { height: 1.0 },
+        second_face: Some(Contour::Convex { height: 1.0 }),
         ..weld(left, right)
     };
     let s = section(&w);
@@ -532,10 +549,10 @@ fn bad_walls_contours_and_depths_are_refused_as_invalid_input() {
             ..ok.clone()
         },
         GrooveWeld {
-            root: Contour::ConvexBlended {
+            second_face: Some(Contour::ConvexBlended {
                 height: 1.0,
                 overlap: Some(f64::NAN),
-            },
+            }),
             ..ok.clone()
         },
         GrooveWeld {
