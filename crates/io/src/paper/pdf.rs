@@ -37,8 +37,8 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::paper::{Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, ObjectKind, Piece, Prepared};
 use solidcraft_geom::prelude::*;
 
+use super::TEN_NANOMETRES;
 use super::flatten::{seg, vec};
-use super::push_mm;
 use crate::{IoError, MAX_DRAWING_BYTES, Result};
 
 /// How far an arc's cubics may stray from the arc, rounding onto the grid included.
@@ -51,14 +51,12 @@ const MIN_PAGE_PT: f64 = 3.0;
 const MAX_TITLE_CHARS: usize = 1000;
 /// The last second a PDF date can hold: 9999-12-31 23:59:59 UTC.
 const MAX_OUTPUT_TIME: u64 = 253_402_300_799;
-/// Decimals of a millimetre on the grid.
-const DECIMALS: u32 = 5;
-/// Steps a millimetre on the grid: 10 nm steps, [`DECIMALS`] decimals (Annex C's precision).
-const PER_MM: f64 = 1e5;
+/// Steps a millimetre on the grid: 10 nm steps, five decimals (Annex C's precision).
+const PER_MM: f64 = TEN_NANOMETRES.per_mm();
 
 /// The grid the scene is written on.
 fn grid() -> Result<Grid> {
-    Grid::new(PER_MM).ok_or_else(|| IoError::Invalid("the sheet PDF: no 10 nm grid".into()))
+    TEN_NANOMETRES.grid()
 }
 
 /// What a sheet PDF says beyond the scene.
@@ -292,7 +290,7 @@ impl Content {
 
     fn number(&mut self, n: i64) -> Result<()> {
         self.number_text.clear();
-        push_mm(&mut self.number_text, n, DECIMALS);
+        TEN_NANOMETRES.push(&mut self.number_text, n);
         append_bounded(&mut self.out, &self.number_text, self.max_bytes)
     }
 

@@ -30,14 +30,14 @@ use std::io::Write;
 use std::ops::RangeInclusive;
 
 use solidcore_record::Vec2;
-use solidcraft_geom::paper::{Clip, Grid, GridDashes, GridItem, GridPath, GridReport, Picture, Pictures, Prepared};
+use solidcraft_geom::paper::{Clip, GridDashes, GridItem, GridPath, GridReport, Picture, Pictures, Prepared};
 use solidcraft_geom::pixel_grid::{GridWindow, MAX_SIDE_PX, PixelGrid, PixelGridError};
 use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PremultipliedColorU8, Stroke, StrokeDash, Transform};
 
 use solidcraft_doc::drawing::{DEFAULT_DPI, MAX_DPI, MIN_DPI};
 
-use super::PaperColour;
 use super::flatten::flatten;
+use super::{NANOMETRES, PaperColour};
 use crate::{IoError, Result};
 
 /// The resolutions a sheet PNG may have, in dots per inch: a sheet's.
@@ -108,7 +108,7 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
     // exactly k × k of the sheet's, since both are anchored at the sheet's top-left corner.
     let k = (dpi / MAX_PICTURE_DPI).ceil().max(1.0) as u32;
     let asked = if k == 1 { grid } else { sheet_grid(scene.size_mm(), dpi / f64::from(k))? };
-    let on = scene.on_grid(Grid::NANOMETRE).map_err(|e| IoError::Invalid(e.to_string()))?;
+    let on = scene.on_grid(NANOMETRES.grid()?).map_err(|e| IoError::Invalid(e.to_string()))?;
     let px = dpi / 25.4e6; // pixels a nanometre
     let pixels = [grid.width, grid.height];
     let mut sheet = Sheet { px, height: on.size.y as f64, tolerance: 0.125 / px, points: 0 };

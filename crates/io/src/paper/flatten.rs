@@ -1,7 +1,7 @@
 //! A path on a writer's grid as straight lines (#4890, A4), for a writer that draws only lines
 //! (PNG): every point of every curve lies within the tolerance of them, and a path that would need
-//! more than [`MAX_POINTS`] points is refused, never drawn coarser. It is the one flattener for the
-//! paper scene: a writer that needs a curve as lines (PDF or DXF for what they can't hold) uses it.
+//! more than [`MAX_PATH_POINTS`] points is refused, never drawn coarser. It is the one flattener for
+//! the paper scene: a writer that needs a curve as lines (DXF, for what it can't hold) uses it.
 //!
 //! Each piece becomes the [`Seg2`] it is ([`seg`], which the PDF writer reads too) and takes its
 //! `chords` steps, the bound `Seg2::polyline` uses too. `polyline` itself doesn't fit here: it
@@ -15,7 +15,7 @@ use solidcraft_geom::prelude::*;
 type Result<T> = std::result::Result<T, Invalid>;
 
 /// The most points one path may flatten to.
-pub const MAX_POINTS: usize = 1 << 20;
+pub const MAX_PATH_POINTS: usize = 1 << 20;
 
 /// `path`'s points, from its start, joined by lines within `tolerance` steps (above 0) of its
 /// curves. A closed path's closing line is left to the reader, as on the grid.
@@ -62,10 +62,10 @@ pub(super) fn vec(p: GridPoint) -> Vec2 {
 }
 
 /// `bound` rounded up to whole steps, at least one, refused when a path that has `so_far` points
-/// would go over [`MAX_POINTS`].
+/// would go over [`MAX_PATH_POINTS`].
 fn steps(bound: f64, so_far: usize) -> Result<usize> {
     let n = bound.ceil().max(1.0);
-    if n.is_finite() && so_far as f64 + n <= MAX_POINTS as f64 {
+    if n.is_finite() && so_far as f64 + n <= MAX_PATH_POINTS as f64 {
         Ok(n as usize)
     } else {
         Err(Invalid("a curve needs over 1,048,576 points at this resolution"))
@@ -169,8 +169,8 @@ mod tests {
             assert!(flatten(&circle, tolerance).is_err(), "{tolerance}");
         }
         // The cap counts the points a path already has: it may reach the cap, never pass it.
-        assert_eq!(steps(10.0, MAX_POINTS - 10).ok(), Some(10));
-        assert!(steps(10.0, MAX_POINTS - 9).is_err());
-        assert!(steps(0.5, MAX_POINTS).is_err(), "a curve is at least one step");
+        assert_eq!(steps(10.0, MAX_PATH_POINTS - 10).ok(), Some(10));
+        assert!(steps(10.0, MAX_PATH_POINTS - 9).is_err());
+        assert!(steps(0.5, MAX_PATH_POINTS).is_err(), "a curve is at least one step");
     }
 }

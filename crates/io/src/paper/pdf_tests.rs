@@ -124,7 +124,7 @@ fn check_xref(bytes: &[u8]) -> std::result::Result<usize, String> {
     let end_of_count = rest.iter().position(|&c| c == b'\n').ok_or("truncated xref count")?;
     let count: usize =
         std::str::from_utf8(&rest[..end_of_count]).map_err(|_| "xref count is not ASCII")?.parse().map_err(|_| "invalid xref count")?;
-    // Five fixed objects plus up to five distinct current ObjectKinds, and the free object.
+    // The free object, five fixed ones and up to five layers: the most these tests write, not a PDF limit.
     if !(6..=11).contains(&count) {
         return Err(format!("unexpected PDF object count {count}"));
     }

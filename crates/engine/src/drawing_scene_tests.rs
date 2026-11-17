@@ -4646,6 +4646,28 @@ fn sheet_fill_dots_are_physical_disks_and_unrepresentable_widths_refuse() {
     assert!(why.contains("filled disk at the dot centre"), "{why}");
 }
 
+/// A hatch dot is held to every grid a paper writer draws on, as io lists them, finest first: a dot
+/// of 5 steps' radius on a grid (its quarter turns' chords merge there) is refused naming that grid.
+#[test]
+fn sheet_fill_dots_are_checked_on_every_paper_writers_grid() {
+    use solidcraft_doc::drawing::FillPaint;
+    let (mut s, drawing, _, sketch, boundary) = w38d_scene_fixture();
+    let imported = run(&mut s, "drawing.pattern.import", json!({"kind":"pat","source":"*DOTS,Original dots\n0,0,0,0,5,0,-5\n\n"}));
+    let pattern = ids::decode(imported["patterns"][0]["id"].as_str().unwrap()).unwrap();
+    let fill_id = w38d_create_fill(&mut s, sketch, &boundary, json!({"kind":"hatch","pattern":ids::encode(pattern),"pen_width_mm":0.25}));
+    let owner = s.doc.drawing(drawing).unwrap();
+    let grids = solidcraft_io::paper::writer_grids().unwrap();
+    assert!(grids.windows(2).all(|w| w[0].per_mm() > w[1].per_mm()), "finest first");
+    for grid in grids {
+        let mut candidate = (**owner).clone();
+        let pen_width_mm = 10.0 / grid.per_mm();
+        Arc::make_mut(candidate.fills.iter_mut().find(|fill| fill.id == fill_id).unwrap()).paint = FillPaint::Hatch { pattern, pen_width_mm };
+        let selected = candidate.resolve_sheet_fill(&s.doc, fill_id).unwrap();
+        let why = fill::paper_group(&candidate, &selected).unwrap_err().to_string();
+        assert!(why.contains(&format!("the {} steps/mm grid", grid.per_mm())), "{pen_width_mm}: {why}");
+    }
+}
+
 #[test]
 fn sheet_fill_solid_regions_keep_conic_and_quartic_bezier_geometry_exact() {
     use solidcraft_sketch::{CurveKind, Sketch};

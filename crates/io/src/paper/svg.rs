@@ -28,10 +28,10 @@ use std::fmt::Write;
 
 use solidcore_record::Vec2;
 use solidcraft_geom::Aabb2;
-use solidcraft_geom::paper::{Clip, FillRule, Grid, GridDashes, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
+use solidcraft_geom::paper::{Clip, FillRule, GridDashes, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
 
-use super::PaperColour;
 use super::png::{PICTURE_DPI, picture_png};
+use super::{NANOMETRES, PaperColour};
 use crate::{IoError, MAX_DRAWING_BYTES, Result};
 
 /// What writing a scene did that the scene didn't say: the grid's report.
@@ -48,7 +48,7 @@ pub fn paper_svg_on(scene: &Prepared, paper: Option<PaperColour>, pictures: &dyn
     if !PICTURE_DPI.contains(&picture_dpi) {
         return Err(IoError::Invalid(format!("an SVG's pictures are 25 to 1200 dpi, not {picture_dpi}")));
     }
-    let on = scene.on_grid(Grid::NANOMETRE).map_err(|e| IoError::Invalid(e.to_string()))?;
+    let on = scene.on_grid(NANOMETRES.grid()?).map_err(|e| IoError::Invalid(e.to_string()))?;
     let ink = paper.map_or_else(|| "#000".to_string(), |_| hex(PaperColour::INK));
     let mut w = Writer { out: String::new(), height: on.size.y, clips: 0, ink: ink.clone() };
     let (width, height) = (number(on.size.x), number(on.size.y));
@@ -101,7 +101,7 @@ fn hex([r, g, b]: [u8; 3]) -> String {
 
 /// Nanometres written as millimetres onto `out`, with up to six decimals.
 fn push_number(out: &mut String, n: i64) {
-    super::push_mm(out, n, 6);
+    NANOMETRES.push(out, n);
 }
 
 /// [`push_number`] as its own text, for the numbers written once per document.
@@ -123,7 +123,7 @@ struct Writer {
 
 /// A point on the lines' grid.
 fn on_lines(p: Vec2) -> Result<GridPoint> {
-    Grid::NANOMETRE.point(p).map_err(|e| IoError::Invalid(e.to_string()))
+    NANOMETRES.grid()?.point(p).map_err(|e| IoError::Invalid(e.to_string()))
 }
 
 impl Writer {
@@ -146,7 +146,7 @@ impl Writer {
             }
             Clip::Circle { center, radius } => {
                 let at = on_lines(center)?;
-                let r = Grid::NANOMETRE.steps(radius).map_err(|e| IoError::Invalid(e.to_string()))?;
+                let r = NANOMETRES.grid()?.steps(radius).map_err(|e| IoError::Invalid(e.to_string()))?;
                 let _ = write!(self.out, "<circle cx=\"{}\" cy=\"{}\" r=\"{}\"/>", number(at.x), number(self.height - at.y), number(r));
             }
         }

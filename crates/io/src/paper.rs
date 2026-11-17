@@ -3,6 +3,10 @@
 
 use std::fmt::Write;
 
+use solidcraft_geom::paper::Grid;
+
+use crate::{IoError, Result};
+
 mod flatten;
 mod pdf;
 mod png;
@@ -49,6 +53,39 @@ fn push_mm(out: &mut String, n: i64, decimals: u32) {
         }
         let _ = write!(out, ".{part:0digits$}");
     }
+}
+
+/// A writer's numbers: millimetres on a grid of 10^`decimals` steps a millimetre, written with up
+/// to that many decimals. One value, so a writer's grid and its number text can't disagree.
+#[derive(Clone, Copy)]
+struct Decimals(u32);
+
+/// Whole nanometres: SVG's numbers, and the grid PNG draws on.
+const NANOMETRES: Decimals = Decimals(6);
+/// 10 nm: PDF's numbers, Annex C's five decimals.
+const TEN_NANOMETRES: Decimals = Decimals(5);
+
+impl Decimals {
+    /// Steps a millimetre.
+    const fn per_mm(self) -> f64 {
+        10_u64.pow(self.0) as f64
+    }
+
+    /// The grid the writer puts a scene on.
+    fn grid(self) -> Result<Grid> {
+        Grid::new(self.per_mm()).ok_or_else(|| IoError::Invalid(format!("a paper writer has no grid of {} decimals", self.0)))
+    }
+
+    /// Grid steps written as millimetres onto `out` ([`push_mm`]).
+    fn push(self, out: &mut String, n: i64) {
+        push_mm(out, n, self.0);
+    }
+}
+
+/// Every grid a paper writer puts a scene on, finest first: for a check that a mark survives every
+/// writer (the engine's hatch dots).
+pub fn writer_grids() -> Result<[Grid; 2]> {
+    Ok([NANOMETRES.grid()?, TEN_NANOMETRES.grid()?])
 }
 
 #[cfg(test)]
