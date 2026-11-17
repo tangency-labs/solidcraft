@@ -136,6 +136,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn coupled_column_and_row_space_factors_solve_multiple_components() {
+        let column = solve(
+            &[vec![1.0, 1.0], vec![1.0, 0.0], vec![0.0, 1.0]],
+            &[2.0, 1.0, 1.0],
+            2,
+            1.0,
+        )
+        .unwrap();
+        let row = solve(
+            &[vec![1.0, 1.0, 0.0], vec![1.0, 0.0, 1.0]],
+            &[3.0, 3.0],
+            3,
+            1.0,
+        )
+        .unwrap();
+        for (actual, expected) in column
+            .into_iter()
+            .zip([0.75, 0.75])
+            .chain(row.into_iter().zip([1.5, 0.75, 0.75]))
+        {
+            assert!((actual - expected).abs() < 1e-12, "{actual} != {expected}");
+        }
+    }
+
+    #[test]
     fn underdetermined_fit_shares_change_between_identical_controls() {
         let solution = solve(&[vec![1.0, 1.0]], &[6.0], 2, 1.0).unwrap();
         assert!((solution[0] - 2.0).abs() < 1e-14 && solution[0] == solution[1]);

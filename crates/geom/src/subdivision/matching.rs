@@ -234,7 +234,8 @@ pub fn quadratic_extension(cage: &Cage) -> Result<Cage> {
     let mut out = cage.clone();
     let start = out.points.len();
     for ((&v, &a), &b) in ring.iter().zip(&inner).zip(&second) {
-        out.points.push(cage.point(v)? * 3.0 - cage.point(a)? * 3.0 + cage.point(b)?);
+        out.points
+            .push(solidcore_ops::form_match::quadratic_extension(cage.point(v)?, cage.point(a)?, cage.point(b)?).map_err(|e| bad(&e.to_string()))?);
     }
     for i in 0..ring.len() {
         let next = (i + 1) % ring.len();
@@ -358,30 +359,7 @@ fn score(r: &Report, c: &Config) -> f64 {
     score.sqrt()
 }
 fn closest(point: Vec3, station: &Station, at: impl Fn(f64) -> Result<Target>) -> Result<Target> {
-    let sample = |t: f64| at((station.interval[0] + station.interval[1] * t).rem_euclid(1.0));
-    let (mut a, mut b) = (0.0, 1.0);
-    let ratio = (5.0_f64.sqrt() - 1.0) / 2.0;
-    let (mut c, mut d) = (b - ratio * (b - a), a + ratio * (b - a));
-    let (mut pc, mut pd) = (sample(c)?, sample(d)?);
-    for _ in 0..48 {
-        if pc.point.dist(point) <= pd.point.dist(point) {
-            b = d;
-            d = c;
-            pd = pc;
-            c = b - ratio * (b - a);
-            pc = sample(c)?;
-        } else {
-            a = c;
-            c = d;
-            pc = pd;
-            d = a + ratio * (b - a);
-            pd = sample(d)?;
-        }
-    }
-    [sample(0.0)?, sample(1.0)?, pc, pd]
-        .into_iter()
-        .min_by(|a, b| a.point.dist(point).total_cmp(&b.point.dist(point)))
-        .ok_or_else(|| bad("no target boundary station"))
+    solidcore_ops::form_match::closest(point, station.interval, at, |target| target.point)
 }
 struct CheckContext<'a, F> {
     stations: &'a [Station],
@@ -395,36 +373,24 @@ fn measure<F: Fn(f64) -> Result<Target>>(jets: &[SurfaceJet], check: &CheckConte
     let config = check.config;
     let mut out = Report { position_mm: 0.0, tangent_deg: 0.0, curvature_relative: 0.0, iterations, controls: check.controls };
     for ((jet, original_target), station) in jets.iter().zip(check.targets).zip(check.stations) {
-        let target = if station.vertex || jet.point.dist(original_target.point) <= config.tolerances.position_mm * 0.1 {
+        let target = if station.vertex || solidcore_ops::form_match::retain_station(jet.point, original_target.point, config.tolerances.position_mm) {
             *original_target
         } else {
             closest(jet.point, station, check.at)?
         };
-        out.position_mm = out.position_mm.max(jet.point.dist(target.point));
-        if config.order == 0 || target.corner {
-            continue;
-        }
-        let normal = jet.normal().ok_or_else(|| {
-            bad(&format!("Match produced a singular boundary surface at face {} ({:.4}, {:.4})", station.root + 1, station.uv[0], station.uv[1]))
-        })?;
-        let target_normal = target.normal.normalized().ok_or_else(|| bad("Match support has no normal"))?;
-        out.tangent_deg = out.tangent_deg.max(normal.dot(target_normal).abs().clamp(0.0, 1.0).acos().to_degrees());
-        if config.order < 2 {
-            continue;
-        }
-        let a = target.tangent.normalized().ok_or_else(|| bad("Match support has no boundary tangent"))?;
-        let b = target_normal.cross(a).normalized().ok_or_else(|| bad("Match support has no tangent plane"))?;
-        let mut error = 0.0;
-        let mut reference = 0.0;
-        let source_sign = if normal.dot(target_normal) < 0.0 { -1.0 } else { 1.0 };
-        let target_sign = if target.support.normal().ok_or_else(|| bad("singular Match support"))?.dot(target_normal) < 0.0 { -1.0 } else { 1.0 };
-        for (u, v, weight) in [(a, a, 1.0), (a, b, 2.0), (b, b, 1.0)] {
-            let source = jet.curvature(u, v).ok_or_else(|| bad("invalid matched curvature"))? * source_sign;
-            let target = target.support.curvature(u, v).ok_or_else(|| bad("support curvature is unavailable"))? * target_sign;
-            error += (source - target).powi(2) * weight;
-            reference += target.powi(2) * weight;
-        }
-        out.curvature_relative = out.curvature_relative.max(error.sqrt() / reference.sqrt().max(1.0 / check.diagonal.max(1e-6)));
+        let convert = |j: &SurfaceJet| solidcore_ops::form_match::Jet { point: j.point, du: j.du, dv: j.dv, duu: j.duu, duv: j.duv, dvv: j.dvv };
+        let target = solidcore_ops::form_match::Target {
+            corner: target.corner,
+            point: target.point,
+            tangent: target.tangent,
+            normal: target.normal,
+            support: convert(&target.support),
+        };
+        let [position, tangent, curvature] =
+            solidcore_ops::form_match::residual(convert(jet), target, config.order, check.diagonal).map_err(|e| bad(&e.to_string()))?;
+        out.position_mm = out.position_mm.max(position);
+        out.tangent_deg = out.tangent_deg.max(tangent);
+        out.curvature_relative = out.curvature_relative.max(curvature);
     }
     Ok(out)
 }

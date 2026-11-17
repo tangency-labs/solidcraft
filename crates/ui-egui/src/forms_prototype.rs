@@ -2935,10 +2935,15 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn exact_face_press_fixture() -> (crate::scenario::Harness, Vec3, Proj) {
+        exact_face_press_fixture_with_segments([1, 1, 1])
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn exact_face_press_fixture_with_segments(segments: [usize; 3]) -> (crate::scenario::Harness, Vec3, Proj) {
         let mut h = crate::scenario::Harness::new();
         assert!(!h.app.preferences.forms_exact_face_picking);
         h.app.preferences.forms_exact_face_picking = true;
-        h.app.run("form.prototype.create", json!({"primitive":"face","dimensions":[12,12,1],"segments":[1,1,1],"levels":0})).unwrap();
+        h.app.run("form.prototype.create", json!({"primitive":"face","dimensions":[12,12,1],"segments":segments,"levels":0})).unwrap();
         h.app.cam.yaw = 0.0;
         h.app.cam.pitch = std::f64::consts::FRAC_PI_2;
         h.app.cam.distance = 24.0;
@@ -2985,7 +2990,7 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn a_new_press_and_escape_discard_delayed_native_face_results() {
+    fn a_new_press_and_escape_discard_delayed_native_face_drags() {
         let (mut h, point, projection) = exact_face_press_fixture();
         let at = projection.to_screen(point).unwrap();
         let before = h.app.session.forms_prototype.as_ref().unwrap().inspect();
@@ -2993,7 +2998,7 @@ mod tests {
         h.frame_with(crate::test_support::pointer(at, true));
         let answer = face_press::solve_for_test(&h.app).unwrap();
         let old = face_press::response_for_test(&mut h.app).unwrap();
-        h.frame_with(crate::test_support::pointer(at, false));
+        h.frame_with(crate::test_support::pointer(at + egui::vec2(4.0, 0.0), false));
         let next = at + egui::vec2(6.0, 0.0);
         h.frame_with(crate::test_support::pointer(next, true));
         old.send(answer).unwrap();
@@ -3007,6 +3012,51 @@ mod tests {
         h.frame_with(crate::test_support::pointer(next, false));
         assert!(!face_press::pending(&h.app));
         assert!(h.app.forms_prototype.elements.is_empty());
+        assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().inspect(), before);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn delayed_native_face_clicks_apply_additive_selection_and_toggles_in_order() {
+        let (mut h, first, projection) = exact_face_press_fixture_with_segments([2, 1, 1]);
+        let exact = live_cad::selection_geometry(&h.app).unwrap();
+        let face = &exact.body.record().faces[1];
+        let [[a, b], [c, d]] = face.domain;
+        let chart = solidcraft_engine::geom::brep::eval::SurfaceEval::new(face.parameters()).unwrap();
+        let second = chart.point([a + 0.37 * (b - a), c + 0.63 * (d - c)]).unwrap();
+        let points = [projection.to_screen(first).unwrap(), projection.to_screen(second).unwrap()];
+        let before = h.app.session.forms_prototype.as_ref().unwrap().inspect();
+        let _permit = face_press::hold_for_test(&h.app).unwrap();
+        let events = |at, pressed, ctrl| {
+            let mods = egui::Modifiers { ctrl, ..Default::default() };
+            crate::test_support::pointer(at, pressed)
+                .into_iter()
+                .map(|event| match event {
+                    egui::Event::PointerButton { pos, button, pressed, .. } => egui::Event::PointerButton { pos, button, pressed, modifiers: mods },
+                    event => event,
+                })
+                .collect()
+        };
+        h.frame_with(events(points[0], true, false));
+        let first_answer = face_press::solve_for_test(&h.app).unwrap();
+        let first_result = face_press::response_for_test(&mut h.app).unwrap();
+        h.frame_with(events(points[0], false, false));
+        h.frame_with(events(points[1], true, true));
+        h.frame_with(events(points[1], false, true));
+        h.frame_with(events(points[0], true, true));
+        h.frame_with(events(points[0], false, true));
+        assert!(h.app.forms_prototype.elements.is_empty());
+        first_result.send(first_answer).unwrap();
+        h.frames(1);
+        assert_eq!(h.app.forms_prototype.elements, BTreeSet::from([Element::Face(0)]));
+        for expected in [BTreeSet::from([Element::Face(0), Element::Face(1)]), BTreeSet::from([Element::Face(1)])] {
+            let answer = face_press::solve_for_test(&h.app).unwrap();
+            face_press::response_for_test(&mut h.app).unwrap().send(answer).unwrap();
+            h.frames(1);
+            assert_eq!(h.app.forms_prototype.elements, expected);
+            assert!(h.app.forms_prototype.drag.is_none());
+        }
+        assert!(!face_press::pending(&h.app));
         assert_eq!(h.app.session.forms_prototype.as_ref().unwrap().inspect(), before);
     }
 

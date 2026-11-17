@@ -29,6 +29,11 @@
     "forms.selection_frame.single_element": "اختر وجهًا أو حافة أو نقطة لضبط محاور التحديد.",
     "forms.selection_frame.unavailable": "لا يمكن تعيين محاور تحديد واضحة لهذا العنصر."
   },
+  "fr": {
+    "forms.selection_frame.current_cad": "Les axes de sélection nécessitent l’aperçu CAO à jour.",
+    "forms.selection_frame.single_element": "Sélectionnez une face, une arête ou un point pour définir les axes de sélection.",
+    "forms.selection_frame.unavailable": "Cet élément ne possède pas d’axes de sélection non ambigus."
+  },
   "he": {
     "forms.selection_frame.current_cad": "צירי הבחירה דורשים את תצוגת ה־CAD המקדימה העדכנית.",
     "forms.selection_frame.single_element": "יש לבחור פאה, קצה או נקודה כדי לקבוע את צירי הבחירה.",

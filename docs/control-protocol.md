@@ -809,6 +809,8 @@ drawing and answering while it runs:
   A cancelled chat receives one cancellation reply; its active check drains before its
   slot is reused. Folder scope and parameter-check level/echo apply as for the command run
   directly. Existing ingress file/design-switch barriers still apply.
+  In a native host, send this check as a separate `engine.execute` request.
+  Batches and scripts containing it are refused before their first step runs.
 - Batches with `timings` or `profile` still run on the window thread, so the times they report
   measure the real work.
 

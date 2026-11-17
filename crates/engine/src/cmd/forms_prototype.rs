@@ -1904,6 +1904,10 @@ mod tests {
         s.execute("form.prototype.tool.cancel", &json!({})).unwrap();
         assert_eq!(s.forms_prototype.as_ref().unwrap().definition(), before);
         s.execute("form.pipe", &request).unwrap();
+        let pipe_before = s.forms_prototype.as_ref().unwrap().inspect();
+        let error = s.execute("form.pipe", &json!({"curves":["Curve1"],"edges":edges})).unwrap_err();
+        assert!(error.to_string().contains("select one sketch path or one body's edges"));
+        assert_eq!(s.forms_prototype.as_ref().unwrap().inspect(), pipe_before);
         let translation = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 3, 1]];
         s.execute("form.prototype.transform", &json!({"matrix":translation})).unwrap();
         assert!(s.forms_prototype.as_ref().unwrap().pipe.as_ref().unwrap().follow_path);
@@ -6224,6 +6228,31 @@ mod tests {
             let form = s.forms_prototype.as_ref().unwrap();
             for (&id, &point) in form.logical.faces[0].iter().zip(&anchors) {
                 assert!(preview.vertices[id].dist(point + b) < 1e-7);
+                assert!(form.surface.vertices[id].dist(preview.vertices[id]) < 1e-7);
+            }
+        }
+    }
+    #[test]
+    fn surface_extrusion_feedback_reverses_a_zero_forward_probe() {
+        use solidcore_record::Vec3;
+        for axis in [None, Some(Vec3::X), Some(-Vec3::X)] {
+            let mut session = Session::default();
+            session.execute("form.prototype.create", &json!({"primitive":"face","dimensions":[12,12,1],"segments":[2,2,1],"levels":1})).unwrap();
+            let before = crate::recovery::capture_bytes(&session).unwrap();
+            let form = session.forms_prototype.as_ref().unwrap();
+            let direction = axis.unwrap_or(Vec3::X);
+            let initial = direction * -0.5;
+            let target = direction * -0.75;
+            let response = match axis {
+                Some(axis) => form.prepare_surface_extrusion_preview_on_axis(&[0], &[], initial, true, axis),
+                None => form.prepare_surface_extrusion_preview(&[0], &[], initial, true),
+            }
+            .unwrap();
+            let preview = response.preview(target).unwrap();
+            assert_eq!(crate::recovery::capture_bytes(&session).unwrap(), before);
+            session.execute("form.prototype.extrude_drag", &json!({"surface":true,"faces":[0],"displacement":[target.x,target.y,target.z]})).unwrap();
+            let form = session.forms_prototype.as_ref().unwrap();
+            for &id in &form.logical.faces[0] {
                 assert!(form.surface.vertices[id].dist(preview.vertices[id]) < 1e-7);
             }
         }

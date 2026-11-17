@@ -10911,6 +10911,29 @@ pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKi
 /// own coordinates there, where a part inserted twice has a face at the same point in each.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
+    if let FeatureKind::Form { definition, .. } = kind {
+        // Support picks are stored in the feature frame, as in Form recomputation.
+        // A flush unrelated body must never acquire the retained support's name.
+        let framed = face_point_state(doc, st, kind, comp)?;
+        return Ok(definition
+            .profile
+            .iter()
+            .map(|profile| &profile.source)
+            .chain(definition.matching.iter().map(|matching| &matching.source))
+            .filter_map(|source| match source {
+                crate::forms::SupportRef::Face { body, name, pick } => Some(
+                    framed
+                        .body(body)
+                        .and_then(|body| {
+                            crate::naming::face_on_body(body, name, *pick).and_then(|(index, _)| crate::naming::face_names(body).get(index).cloned())
+                        })
+                        .unwrap_or_default(),
+                ),
+                crate::forms::SupportRef::Wire { .. } => None,
+            })
+            .collect());
+    }
+
     if !matches!(kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }) {
         let own = ModelState { bodies: st.bodies.iter().filter(|b| doc.model_body_component(b) == comp).cloned().collect(), ..ModelState::default() };
         let names = crate::naming::face_names_at(&own, &pts);

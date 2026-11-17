@@ -153,7 +153,9 @@ impl Form {
         };
         let mut responses = vec![[Vec3::ZERO; 3]; reference.len()];
         for (column, direction) in directions.iter().enumerate() {
-            let (preview, _) = evaluate(displacement + *direction * step)?;
+            let forward = displacement + *direction * step;
+            let signed_step = if forward.len() < 1e-9 { -step } else { step };
+            let (preview, _) = evaluate(displacement + *direction * signed_step)?;
             if preview.mesh.triangles != template.mesh.triangles || preview.mesh.tri_face != template.mesh.tri_face {
                 return Err(error("surface extrusion feedback changed its topology"));
             }
@@ -162,7 +164,7 @@ impl Form {
                 return Err(error("surface extrusion feedback changed its layout"));
             }
             for (response, (next, &old)) in responses.iter_mut().zip(values.into_iter().zip(&reference)) {
-                response[column] = (next - old) / step;
+                response[column] = (next - old) / signed_step;
             }
         }
         let fixed = if original.matching.is_some() { self.fixed_extrusion_opening(&template, &original)? } else { Vec::new() };

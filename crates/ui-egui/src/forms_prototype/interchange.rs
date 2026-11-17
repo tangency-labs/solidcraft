@@ -12,7 +12,7 @@ pub(super) struct Pending {
     done: std::sync::mpsc::Receiver<Outcome>,
 }
 #[cfg(not(target_arch = "wasm32"))]
-fn export_permit() -> Option<finish::WorkerPermit> {
+fn worker_permit() -> Option<finish::WorkerPermit> {
     #[cfg(test)]
     thread_local! {
         static ACTIVE: Arc<std::sync::atomic::AtomicBool> = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -77,16 +77,11 @@ fn start_command(app: &mut SolveApp, import: bool, params: serde_json::Value) {
     let id = if import { "form.blend.import" } else { "form.blend.export" };
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let export_permit = if import {
-            None
-        } else {
-            // An export can still publish its file after the editor is gone.
-            // Retain the slot in the worker so a later export cannot overtake it.
-            let Some(permit) = export_permit() else {
-                app.set_status(app.tr("forms.prototype.command_worker_busy").to_owned(), true);
-                return;
-            };
-            Some(permit)
+        // Closing the editor drops the receiver while its import or export may
+        // still be computing. The worker owns the shared slot until it finishes.
+        let Some(permit) = worker_permit() else {
+            app.set_status(app.tr("forms.prototype.command_worker_busy").to_owned(), true);
+            return;
         };
         let mut copy = app.session.scratch();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -96,7 +91,7 @@ fn start_command(app: &mut SolveApp, import: bool, params: serde_json::Value) {
             } else {
                 Outcome::Exported(copy.execute(id, &params).map_err(|e| e.to_string()))
             };
-            drop(export_permit);
+            drop(permit);
             let _ = tx.send(result);
         });
         match spawned {
@@ -181,15 +176,17 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn native_export_capacity_survives_a_form_reset() {
+    fn native_interchange_capacity_survives_a_form_reset() {
         let mut app = SolveApp::new(Default::default(), Default::default());
-        let permit = export_permit().unwrap();
+        let permit = worker_permit().unwrap();
         app.forms_prototype = Default::default();
-        start_command(&mut app, false, json!({"path":"unused.blend"}));
-        assert!(app.forms_prototype.interchange.is_none());
-        assert_eq!(app.status.as_ref().unwrap().0, app.tr("forms.prototype.command_worker_busy"));
+        for import in [false, true] {
+            start_command(&mut app, import, json!({"path":"unused.blend"}));
+            assert!(app.forms_prototype.interchange.is_none());
+            assert_eq!(app.status.as_ref().unwrap().0, app.tr("forms.prototype.command_worker_busy"));
+        }
         drop(permit);
-        assert!(export_permit().is_some());
+        assert!(worker_permit().is_some());
     }
     #[test]
     fn blender_pickers_cancel_without_changing_the_editor_and_prepared_imports_keep_stale_edits() {

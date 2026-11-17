@@ -83,19 +83,27 @@ impl PlanarTensor {
         let mut bounds = [[f64::INFINITY, f64::NEG_INFINITY]; 2];
         for curve in curves {
             let mut add = |point: [f64; 2]| {
+                if point.iter().any(|value| !value.is_finite()) {
+                    return None;
+                }
                 for (axis, x) in bounds.iter_mut().zip(point) {
                     axis[0] = axis[0].min(x);
                     axis[1] = axis[1].max(x);
                 }
+                Some(())
             };
             match curve {
-                Curve2::Spline { points, .. } => points.iter().copied().for_each(&mut add),
+                Curve2::Spline { points, .. } => {
+                    for &point in points {
+                        add(point)?;
+                    }
+                }
                 Curve2::RationalSpline { homogeneous, .. } => {
                     for &[x, y, w] in homogeneous {
                         if !w.is_finite() || w <= 0.0 {
                             return None;
                         }
-                        add([x / w, y / w]);
+                        add([x / w, y / w])?;
                     }
                 }
             }
@@ -144,6 +152,38 @@ pub fn rectangular_trim(curves: &[Curve2], span: [[f64; 2]; 2]) -> bool {
 mod tests {
     use super::*;
     use crate::eval::Surface;
+
+    #[test]
+    fn parameter_bounds_refuse_nonfinite_trim_controls_and_projected_overflow() {
+        for point in [
+            [f64::NAN, f64::NAN],
+            [f64::INFINITY, 0.0],
+            [0.0, f64::NEG_INFINITY],
+        ] {
+            let curve = Curve2::Spline {
+                knots: vec![0.0, 0.0, 0.5, 1.0, 1.0],
+                points: vec![[0.0, 0.0], [1.0, 1.0], point],
+            };
+            assert!(PlanarTensor::parameter_box(std::iter::once(&curve)).is_none());
+        }
+        let curve = Curve2::RationalSpline {
+            knots: vec![0.0, 0.0, 0.5, 1.0, 1.0],
+            homogeneous: vec![
+                [0.0, 0.0, 1.0],
+                [1.0, 1.0, 1.0],
+                [f64::MAX, 0.0, f64::MIN_POSITIVE],
+            ],
+        };
+        assert!(PlanarTensor::parameter_box(std::iter::once(&curve)).is_none());
+        let curve = Curve2::Spline {
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0]],
+        };
+        assert_eq!(
+            PlanarTensor::parameter_box(std::iter::once(&curve)),
+            Some([[0.0, 1.0], [0.0, 2.0]])
+        );
+    }
 
     #[test]
     fn flat_tensor_projects_rational_controls_in_the_original_parameter() {

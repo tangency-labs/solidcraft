@@ -35,6 +35,131 @@ pub struct Target {
     pub support: SurfaceJet,
 }
 
+/// Continue three inward control rows with the same quadratic finite difference.
+pub fn quadratic_extension(point: Vec3, inward: Vec3, second: Vec3) -> Result<Vec3> {
+    let out = point * 3.0 - inward * 3.0 + second;
+    if !point.is_finite() || !inward.is_finite() || !second.is_finite() || !out.is_finite() {
+        return Err(bad("non-finite Match continuation"));
+    }
+    Ok(out)
+}
+
+/// Whether an original target is close enough to retain its exact station.
+pub fn retain_station(point: Vec3, target: Vec3, position_tolerance: f64) -> bool {
+    point.is_finite() && target.is_finite() && point.distance(target) <= position_tolerance * 0.1
+}
+
+/// Bounded closest-station search; callback errors keep their original type.
+pub fn closest<T, E>(
+    point: Vec3,
+    interval: [f64; 2],
+    at: impl Fn(f64) -> std::result::Result<T, E>,
+    position: impl Fn(&T) -> Vec3,
+) -> std::result::Result<T, E> {
+    let sample = |t: f64| at((interval[0] + interval[1] * t).rem_euclid(1.0));
+    let (mut a, mut b) = (0.0, 1.0);
+    let ratio = (5.0_f64.sqrt() - 1.0) / 2.0;
+    let (mut c, mut d) = (b - ratio * (b - a), a + ratio * (b - a));
+    let (mut pc, mut pd) = (sample(c)?, sample(d)?);
+    for _ in 0..48 {
+        if position(&pc).distance(point) <= position(&pd).distance(point) {
+            b = d;
+            d = c;
+            pd = pc;
+            c = b - ratio * (b - a);
+            pc = sample(c)?;
+        } else {
+            a = c;
+            c = d;
+            pc = pd;
+            d = a + ratio * (b - a);
+            pd = sample(d)?;
+        }
+    }
+    let mut best = sample(0.0)?;
+    for candidate in [sample(1.0)?, pc, pd] {
+        if position(&candidate)
+            .distance(point)
+            .total_cmp(&position(&best).distance(point))
+            .is_lt()
+        {
+            best = candidate;
+        }
+    }
+    Ok(best)
+}
+
+/// Position, tangent-plane angle (degrees), and relative curvature residual.
+pub fn residual(jet: SurfaceJet, target: Target, order: usize, diagonal: f64) -> Result<[f64; 3]> {
+    let mut out = [jet.point.distance(target.point), 0.0, 0.0];
+    if !out[0].is_finite() || !diagonal.is_finite() || diagonal < 0.0 || order > 2 {
+        return Err(bad("invalid Match residual input"));
+    }
+    if order == 0 || target.corner {
+        return Ok(out);
+    }
+    let normal = jet
+        .normal()
+        .ok_or_else(|| bad("Match produced a singular boundary surface"))?;
+    let target_normal = target
+        .normal
+        .normalized()
+        .ok_or_else(|| bad("Match support has no normal"))?;
+    out[1] = normal
+        .dot(target_normal)
+        .abs()
+        .clamp(0.0, 1.0)
+        .acos()
+        .to_degrees();
+    if order < 2 {
+        return Ok(out);
+    }
+    let a = target
+        .tangent
+        .normalized()
+        .ok_or_else(|| bad("Match support has no boundary tangent"))?;
+    let b = target_normal
+        .cross(a)
+        .normalized()
+        .ok_or_else(|| bad("Match support has no tangent plane"))?;
+    let mut error = 0.0;
+    let mut reference = 0.0;
+    let source_sign = if normal.dot(target_normal) < 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let target_sign = if target
+        .support
+        .normal()
+        .ok_or_else(|| bad("singular Match support"))?
+        .dot(target_normal)
+        < 0.0
+    {
+        -1.0
+    } else {
+        1.0
+    };
+    for (u, v, weight) in [(a, a, 1.0), (a, b, 2.0), (b, b, 1.0)] {
+        let source = jet
+            .curvature(u, v)
+            .ok_or_else(|| bad("invalid matched curvature"))?
+            * source_sign;
+        let target = target
+            .support
+            .curvature(u, v)
+            .ok_or_else(|| bad("support curvature is unavailable"))?
+            * target_sign;
+        error += (source - target).powi(2) * weight;
+        reference += target.powi(2) * weight;
+    }
+    out[2] = error.sqrt() / reference.sqrt().max(1.0 / diagonal.max(1e-6));
+    if out.iter().any(|v| !v.is_finite()) {
+        return Err(bad("invalid Match residual"));
+    }
+    Ok(out)
+}
+
 /// Reflection partners in the solve's ordered control columns.
 pub struct MirrorColumns {
     partners: Vec<usize>,
@@ -316,6 +441,80 @@ pub fn step(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closest_station_wraps_and_preserves_callback_failure() {
+        let selected = closest(
+            Vec3::new(0.3, 0.0, 0.0),
+            [0.9, 0.5],
+            |t| Ok::<_, &'static str>(Vec3::new(t, 0.0, 0.0)),
+            |p| *p,
+        )
+        .unwrap();
+        assert!(selected.distance(Vec3::new(0.3, 0.0, 0.0)) < 1e-9);
+        let failed = closest(
+            Vec3::ZERO,
+            [0.0, 1.0],
+            |_| Err::<Vec3, _>("missing source"),
+            |p| *p,
+        );
+        assert_eq!(failed, Err("missing source"));
+        assert_eq!(
+            quadratic_extension(
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::ZERO
+            )
+            .unwrap(),
+            Vec3::new(9.0, 0.0, 0.0)
+        );
+        assert!(
+            quadratic_extension(Vec3::new(f64::NAN, 0.0, 0.0), Vec3::ZERO, Vec3::ZERO).is_err()
+        );
+    }
+
+    #[test]
+    fn residual_measures_position_plane_angle_and_oriented_curvature() {
+        let flat = SurfaceJet {
+            point: Vec3::ZERO,
+            du: Vec3::X,
+            dv: Vec3::Y,
+            duu: Vec3::ZERO,
+            duv: Vec3::ZERO,
+            dvv: Vec3::ZERO,
+        };
+        let target = Target {
+            corner: false,
+            point: Vec3::Z * 2.0,
+            tangent: Vec3::X,
+            normal: Vec3::Z,
+            support: flat,
+        };
+        let curved = SurfaceJet {
+            duu: Vec3::Z * 0.5,
+            dvv: Vec3::Z * 0.25,
+            ..flat
+        };
+        let [position, angle, curvature] = residual(curved, target, 2, 4.0).unwrap();
+        assert_eq!(position, 2.0);
+        assert_eq!(angle, 0.0);
+        assert!((curvature - 0.3125_f64.sqrt() * 4.0).abs() < 1e-12);
+        let tilted = SurfaceJet {
+            dv: Vec3::Y + Vec3::Z,
+            ..flat
+        };
+        assert!((residual(tilted, target, 1, 4.0).unwrap()[1] - 45.0).abs() < 1e-12);
+        assert!(residual(
+            SurfaceJet {
+                dv: Vec3::X,
+                ..flat
+            },
+            target,
+            1,
+            4.0
+        )
+        .is_err());
+    }
 
     #[test]
     fn interior_curve_match_can_slide_along_its_tangent() {

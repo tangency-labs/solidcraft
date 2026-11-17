@@ -1132,6 +1132,14 @@ pub(crate) mod tests {
         );
     }
     #[test]
+    fn a_parameter_line_refuses_a_small_nonzero_jump_between_independent_pieces() {
+        let points: Vec<_> = [0.0, 1.0].into_iter().flat_map(|y| [0.0, 1.0, 1.0 + 5e-10, 2.0].map(|x| Vec3::new(x, y, 0.0))).collect();
+        let surface = NurbsSurface::new([1, 1], [vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], &points, &[1.0; 8]).unwrap();
+        for (a, b) in [([0.0, 0.5], [1.0, 0.5]), ([1.0, 0.5], [0.0, 0.5])] {
+            assert!(matches!(surface.parameter_line(a, b), Err(SplineError::Unsupported(message)) if message.contains("discontinuous")));
+        }
+    }
+    #[test]
     fn restricted_tensor_charts_keep_rational_positions_and_two_derivatives_through_rotations() {
         let points: Vec<_> = (0..5)
             .flat_map(|v| {

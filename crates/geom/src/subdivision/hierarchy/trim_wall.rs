@@ -24,10 +24,7 @@ impl TrimWall {
     }
 
     fn validate_delta(&self) -> Result<()> {
-        if !self.delta.is_finite() || self.delta.len() < 1e-9 || self.delta.x.abs().max(self.delta.y.abs()).max(self.delta.z.abs()) > 200_000.0 {
-            return Err(bad("trim wall needs a finite nonzero displacement within the Form bounds"));
-        }
-        Ok(())
+        solidcore_ops::form_subdivision::validate_trim_wall_delta(self.delta).map_err(|error| bad(&error.to_string()))
     }
 
     pub(super) fn append_preview(&self, surface: &mut SurfacePreview, logical: &mut Cage) -> Result<()> {
@@ -43,18 +40,16 @@ impl TrimWall {
         if base.len() < 2 || surface.vertices.len() != logical.points.len() {
             return Err(bad("trim preview control slots disagree with the active skin"));
         }
-        let top: Vec<_> = base.iter().map(|&p| p + self.delta).collect();
-        if top.iter().any(|p| !p.is_finite() || p.x.abs().max(p.y.abs()).max(p.z.abs()) > 100_000.0) {
-            return Err(bad("trim wall positions must remain within 100000 mm"));
-        }
+        let geometry = solidcore_ops::form_subdivision::trim_wall(&base, [logical.point(a)?, logical.point(b)?], self.delta)
+            .map_err(|error| bad(&error.to_string()))?;
+        let solidcore_ops::form_subdivision::TrimWallGeometry { top, normals, controls } = geometry;
+        let top_start = *top.first().ok_or_else(|| bad("empty trim preview path"))?;
+        let top_end = *top.last().ok_or_else(|| bad("empty trim preview path"))?;
 
         let first = logical.points.len();
         let owner = logical.faces.len() as u32;
         let mesh_start = u32::try_from(surface.mesh.positions.len()).map_err(|_| bad("trim preview mesh exceeds its index budget"))?;
-        for (i, (&p, &q)) in base.iter().zip(&top).rev().enumerate() {
-            let next = base.len() - 1 - i.saturating_sub(1);
-            let prev = base.len() - 1 - (i + 1).min(base.len() - 1);
-            let normal = (base[prev] - base[next]).cross(self.delta).normalized().ok_or_else(|| bad("trim wall displacement is along its seam"))?;
+        for (i, ((&p, &q), normal)) in base.iter().zip(&top).rev().zip(normals).enumerate() {
             surface.mesh.positions.extend([p, q]);
             surface.mesh.normals.extend([normal; 2]);
             if i > 0 {
@@ -65,14 +60,10 @@ impl TrimWall {
         }
         let cap = [first, first + 1];
         let [c, d] = cap;
-        let control = [logical.point(a)? + self.delta, logical.point(b)? + self.delta];
-        if control.iter().any(|p| !p.is_finite() || p.x.abs().max(p.y.abs()).max(p.z.abs()) > 100_000.0) {
-            return Err(bad("trim wall controls must remain within 100000 mm"));
-        }
-        logical.points.extend(control);
+        logical.points.extend(controls);
         logical.faces.push(vec![b, a, c, d]);
-        surface.vertices.extend([start + self.delta, end + self.delta]);
-        surface.boundaries.extend([(cap, top), ([a, c], vec![start, start + self.delta]), ([b, d], vec![end, end + self.delta])]);
+        surface.vertices.extend([top_start, top_end]);
+        surface.boundaries.extend([(cap, top), ([a, c], vec![start, top_start]), ([b, d], vec![end, top_end])]);
         Ok(())
     }
 }
@@ -128,8 +119,7 @@ impl Hierarchy {
     pub fn move_trim_rim(&self, delta: Vec3) -> Result<Self> {
         let mut out = self.clone();
         let wall = out.trim_wall.as_mut().ok_or_else(|| bad("missing derived trim wall"))?;
-        wall.delta += delta;
-        wall.validate_delta()?;
+        wall.delta = solidcore_ops::form_subdivision::move_trim_wall(wall.delta, delta).map_err(|error| bad(&error.to_string()))?;
         Ok(out)
     }
 }

@@ -37,3 +37,44 @@ pub fn regular_bezier(net: [Vec3; 16]) -> [Vec3; 16] {
 pub fn mirror_tangent(delta: Vec3, axis: usize) -> Option<Vec3> {
     kernel::mirror_tangent(vec3(delta), axis).map(record_vec3)
 }
+
+/// Portable ruled-wall coordinates, separate from preview topology and ownership.
+pub struct TrimWallGeometry {
+    /// Translated boundary samples in directed order.
+    pub top: Vec<Vec3>,
+    /// Reverse-order strip normals.
+    pub normals: Vec<Vec3>,
+    /// Translated endpoint controls.
+    pub controls: [Vec3; 2],
+}
+
+/// Validate a bounded nonzero trim-wall displacement.
+pub fn validate_trim_wall_delta(delta: Vec3) -> solidcore::Result<()> {
+    kernel::validate_trim_wall_delta(vec3(delta))
+}
+
+/// Move a trim-wall rim, validating before state mutation.
+pub fn move_trim_wall(delta: Vec3, offset: Vec3) -> solidcore::Result<Vec3> {
+    kernel::move_trim_wall(vec3(delta), vec3(offset)).map(record_vec3)
+}
+
+/// Construct all numerical wall data before application preview mutation.
+pub fn trim_wall(
+    base: &[Vec3],
+    controls: [Vec3; 2],
+    delta: Vec3,
+) -> solidcore::Result<TrimWallGeometry> {
+    if !(2..=1_000_000).contains(&base.len()) {
+        return Err(solidcore::SolidError::invalid_input(
+            "Form trim wall",
+            "trim preview path needs bounded stations",
+        ));
+    }
+    let base: Vec<_> = base.iter().copied().map(vec3).collect();
+    let geometry = kernel::trim_wall(&base, controls.map(vec3), vec3(delta))?;
+    Ok(TrimWallGeometry {
+        top: geometry.top.into_iter().map(record_vec3).collect(),
+        normals: geometry.normals.into_iter().map(record_vec3).collect(),
+        controls: geometry.controls.map(record_vec3),
+    })
+}

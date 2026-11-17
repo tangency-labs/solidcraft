@@ -106,7 +106,7 @@ impl Network {
                     let node = chain.nodes[end];
                     if self.degree[node] > 2 {
                         ports.entry(node).or_default().push(junction::Port {
-                            direction: sweep.tangents[end] * if end == 0 { 1.0 } else { -1.0 },
+                            direction: solidcore_ops::form_pipe::outward_port(sweep.tangents[end], end).map_err(|error| bad(&error.to_string()))?,
                             ring: sweep.ends[end].iter().map(|v| v + offset).collect(),
                             radius,
                             reverse: end == 1,

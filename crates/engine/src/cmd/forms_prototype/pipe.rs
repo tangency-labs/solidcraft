@@ -55,7 +55,11 @@ pub(super) fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(source) = &mut old_source {
         source.transform_picks(&inverse);
     }
-    if args.sketch.is_some() && args.body.is_some() || args.sketch.is_some() && args.edges.is_some() || args.body.is_some() && args.curves.is_some() {
+    if args.sketch.is_some() && args.body.is_some()
+        || args.sketch.is_some() && args.edges.is_some()
+        || args.body.is_some() && args.curves.is_some()
+        || args.curves.is_some() && args.edges.is_some()
+    {
         return Err(error("select one sketch path or one body's edges"));
     }
     let sketch = args.sketch.or_else(|| {

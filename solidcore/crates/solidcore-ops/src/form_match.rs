@@ -51,6 +51,49 @@ pub struct Target {
     pub support: Jet,
 }
 
+impl Target {
+    fn kernel(self) -> kernel::Target {
+        kernel::Target {
+            corner: self.corner,
+            point: vec3(self.point),
+            tangent: vec3(self.tangent),
+            normal: vec3(self.normal),
+            support: self.support.kernel(),
+        }
+    }
+}
+
+/// Continue a quadratic control row.
+pub fn quadratic_extension(point: Vec3, inward: Vec3, second: Vec3) -> solidcore::Result<Vec3> {
+    kernel::quadratic_extension(vec3(point), vec3(inward), vec3(second))
+        .map(solidcore_convert::record_vec3)
+}
+
+/// Whether the exact original target station is already within its retention band.
+pub fn retain_station(point: Vec3, target: Vec3, position_tolerance: f64) -> bool {
+    kernel::retain_station(vec3(point), vec3(target), position_tolerance)
+}
+
+/// Search one bounded periodic interval, preserving the application's callback errors.
+pub fn closest<T, E>(
+    point: Vec3,
+    interval: [f64; 2],
+    at: impl Fn(f64) -> Result<T, E>,
+    position: impl Fn(&T) -> Vec3,
+) -> Result<T, E> {
+    kernel::closest(vec3(point), interval, at, |target| vec3(position(target)))
+}
+
+/// Measure position, tangent angle, and curvature residuals in the kernel.
+pub fn residual(
+    jet: Jet,
+    target: Target,
+    order: usize,
+    diagonal: f64,
+) -> solidcore::Result<[f64; 3]> {
+    kernel::residual(jet.kernel(), target.kernel(), order, diagonal)
+}
+
 /// Solve one damped adjustment of the nearby control coordinates.
 pub fn step(
     samples: impl ExactSizeIterator<Item = (Station, Target, Jet, Jet)>,

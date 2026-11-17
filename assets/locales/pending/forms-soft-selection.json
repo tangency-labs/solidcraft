@@ -83,6 +83,20 @@
     "forms.soft.smooth": "ناعم",
     "forms.soft.trim_wall": "لا يتوفر التحديد الناعم للأشكال ذات جدران القصّ المشتقّة. أوقفه لتحرير الشكل."
   },
+  "fr": {
+    "forms.soft.empty": "Sélectionnez un point, une arête ou une face mobile pour utiliser la sélection adoucie.",
+    "forms.soft.enabled": "Sélection adoucie",
+    "forms.soft.falloff": "Atténuation",
+    "forms.soft.help": "Les points voisins suivent la transformation avec une influence décroissante. Le rayon est mesuré le long des arêtes logiques, ce qui sépare les îlots déconnectés. Les contours du profil restent fixes. L’extrusion utilise uniquement la sélection directe.",
+    "forms.soft.invalid_radius": "Saisissez un rayon d’influence fini entre 0,000001 mm et 100000 mm.",
+    "forms.soft.invalid_source": "Les points ou les connexions de la forme sont invalides pour la sélection adoucie.",
+    "forms.soft.limit": "La sélection adoucie dépasse les limites de modification. Réduisez le rayon ou raffinez moins d’éléments.",
+    "forms.soft.linear": "Linéaire",
+    "forms.soft.radius": "Rayon d’influence",
+    "forms.soft.sharp": "Abrupte",
+    "forms.soft.smooth": "Lisse",
+    "forms.soft.trim_wall": "La sélection adoucie est indisponible sur les formes munies de parois de découpe dérivées. Désactivez-la pour modifier la forme."
+  },
   "he": {
     "forms.soft.empty": "כדי להשתמש בבחירה רכה, יש לבחור נקודה, קצה או פאה הניתנים להזזה.",
     "forms.soft.enabled": "בחירה רכה",

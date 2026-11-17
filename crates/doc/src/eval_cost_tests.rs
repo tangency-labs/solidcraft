@@ -2081,3 +2081,55 @@ fn a_hole_whose_run_on_column_cannot_be_built_keeps_its_run_on() {
     assert!((top - 0.25).abs() < 1e-6, "top {top}");
     assert!(near.is_empty());
 }
+
+#[test]
+fn form_face_names_use_the_author_frame_and_only_the_named_support_body() {
+    for placed in [false, true] {
+        let mut doc = Document::new("Form support naming");
+        let author = if placed {
+            let component = doc.add_component(Some("Author"), 0).unwrap();
+            place(&mut doc, component, rigid(Vec3::new(80.0, 20.0, 5.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2));
+            component
+        } else {
+            0
+        };
+        let mut state = ModelState::default();
+        let support = kernel::box_solid(Vec3::new(78.0, 17.0, 0.0), Vec3::new(88.0, 27.0, 2.0)).unwrap();
+        state.bodies.push(ModelBody::new("Support".into(), support, 100));
+        let framed = crate::eval::state_in_frame(&doc, &state, author).unwrap();
+        let body = framed.body("Support").unwrap();
+        let top = (0..body.body.face_count()).find(|&i| body.body.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+        let (profile, cage) = forms::Profile::seed(body, top, [2, 2], 0).unwrap();
+        let forms::SupportRef::Face { name, .. } = &profile.source else {
+            panic!("face support");
+        };
+        let expected = name.clone();
+        let distractor = ModelBody::new("Flush unrelated".into(), body.body.clone(), 200);
+        drop(framed);
+        doc.body_components.insert("Flush unrelated".into(), author);
+        state.bodies.insert(0, distractor);
+        let kind = FeatureKind::Form {
+            definition: Box::new(forms::Definition {
+                cage,
+                parameters: Default::default(),
+                profile: Some(Box::new(profile)),
+                imported: None,
+                pipe: None,
+                matching: None,
+                placement: Default::default(),
+                symmetry: None,
+                hierarchy: None,
+            }),
+            tolerance: "0.01 mm".into(),
+            operation: Operation::NewBody,
+            targets: vec![],
+        };
+        assert_eq!(face_point_names(&doc, &state, &kind, author).unwrap(), vec![expected]);
+        state.bodies.retain(|body| body.name != "Support");
+        assert_eq!(
+            face_point_names(&doc, &state, &kind, author).unwrap(),
+            vec![String::new()],
+            "a missing support must not fall through to the flush body"
+        );
+    }
+}

@@ -89,6 +89,21 @@
     "prefs.forms_preserve_selection": "الإبقاء على التحديد عند تغيير مرشّحات الشكل",
     "prefs.forms_preserve_selection_help": "تقيّد المرشّحات الاختيارات الجديدة. عند تبديل المرشّحات، تبقى العناصر المحدّدة ومركز التحويل المخصّص. أوقف الخيار لمسح كليهما."
   },
+  "fr": {
+    "forms.selection.edge_one": "{count} arête",
+    "forms.selection.edges": "{count} arêtes",
+    "forms.selection.face_one": "{count} face",
+    "forms.selection.faces": "{count} faces",
+    "forms.selection.none": "Aucune sélection",
+    "forms.selection.point_one": "{count} point",
+    "forms.selection.points": "{count} points",
+    "forms.selection.separator": ", ",
+    "forms.selection.summary": "Sélection de {items}",
+    "forms.selection.surface_one": "{count} surface",
+    "forms.selection.surfaces": "{count} surfaces",
+    "prefs.forms_preserve_selection": "Conserver la sélection lors du changement de filtre",
+    "prefs.forms_preserve_selection_help": "Les filtres limitent les nouvelles sélections. Conserve les éléments sélectionnés et le pivot personnalisé lorsque le filtre change. Désactivez cette option pour les réinitialiser."
+  },
   "he": {
     "forms.selection.edge_one": "{count} קצה",
     "forms.selection.edges": "{count} קצוות",

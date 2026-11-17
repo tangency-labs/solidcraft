@@ -336,7 +336,12 @@ pub(super) fn retained_entries(app: &SolveApp) -> impl Iterator<Item = &Entry> {
         .filter(move |entry| !entry.name.as_ref().is_some_and(|name| combined.is_some_and(|preview| preview.replaced.contains(name))))
 }
 pub(super) fn render_entries(app: &SolveApp) -> impl Iterator<Item = &Entry> {
-    retained_entries(app).chain(combine_preview::ready(app).into_iter().flat_map(|preview| preview.entries.iter()))
+    retained_entries(app).chain(
+        combine_preview::ready(app)
+            .into_iter()
+            .flat_map(|preview| preview.entries.iter())
+            .filter(|entry| entry.name.as_ref().is_none_or(|name| app.session.body_visible(name))),
+    )
 }
 /// Unchanged opaque context shares exactly the renderer's visibility/replacement filter.
 /// Boolean replacement meshes include the authored Form/cutter itself: its editing
@@ -363,7 +368,7 @@ pub(super) fn append(app: &SolveApp, scene: &mut GpuScene) {
             }
         }
         for (i, curve) in entry.mesh.edges.iter().enumerate() {
-            if entry.mesh.seams.get(i).copied().unwrap_or(false) {
+            if !entry.mesh.edge_visible(i) {
                 continue;
             }
             for pair in curve.windows(2) {
@@ -379,6 +384,33 @@ pub(super) fn inspect(app: &SolveApp) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_draws_protected_sharp_seams_and_hides_unprotected_seams() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let mesh = Mesh {
+            edges: vec![vec![Vec3::ZERO, Vec3::X], vec![Vec3::ZERO, Vec3::Y]],
+            seams: vec![true, true],
+            sharp_edges: vec![true, false],
+            ..Default::default()
+        };
+        app.forms_prototype.context.entries.push(Entry {
+            name: None,
+            index: None,
+            mesh: Arc::new(mesh),
+            color: None,
+            exact: None,
+            detached_companion: false,
+        });
+        let mut protected = GpuScene::default();
+        append(&app, &mut protected);
+        assert!(!protected.lines.is_empty());
+        let entry = &mut app.forms_prototype.context.entries[0];
+        Arc::make_mut(&mut entry.mesh).sharp_edges[0] = false;
+        let mut unprotected = GpuScene::default();
+        append(&app, &mut unprotected);
+        assert!(unprotected.lines.is_empty());
+    }
 
     #[test]
     fn browser_context_admits_small_planar_sources_and_bounds_index_inputs() {

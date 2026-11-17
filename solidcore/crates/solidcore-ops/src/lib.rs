@@ -68,6 +68,7 @@ pub mod order;
 pub mod pcurve;
 pub mod prism;
 pub mod provenance;
+pub mod rational_rim;
 #[doc(hidden)]
 pub use solidcore::eval::ray_spline;
 #[doc(hidden)]

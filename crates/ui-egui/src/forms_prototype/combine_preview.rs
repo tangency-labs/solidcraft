@@ -262,6 +262,9 @@ fn compute(mut scratch: Session, params: &serde_json::Value, (max_triangles, max
     let mut edges = 0usize;
     let mut entries = Vec::new();
     for body in doc::world_state(&document, &changed).map_err(|e| e.to_string())?.bodies {
+        if !scratch.body_visible(&body.name) {
+            continue;
+        }
         let mesh = body.mesh();
         triangles = triangles.saturating_add(mesh.triangles.len());
         edges = edges.saturating_add(mesh.edges.iter().map(Vec::len).sum::<usize>());
@@ -371,6 +374,33 @@ pub(super) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn combined_preview_keeps_hidden_component_occurrences_hidden() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let created = app.session.execute("component.create", &json!({"name":"Repeated body"})).unwrap();
+        let component = created["component"].as_u64().unwrap();
+        let occurrence = created["occurrence"].as_u64().unwrap();
+        app.session.execute("solid.box", &json!({"corner":[-0.5,-0.5,-0.5],"length":1,"width":1,"height":1,"body_name":"Base"})).unwrap();
+        app.session.execute("component.activate", &json!({"component":0})).unwrap();
+        let copy =
+            app.session.execute("occurrence.copy", &json!({"occurrence":occurrence,"translate":[20,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+        app.session.execute("component.activate", &json!({"component":component})).unwrap();
+        app.session.execute("form.prototype.create", &json!({"size":8,"segments":[1,1,1],"levels":2})).unwrap();
+        app.session.execute("form.prototype.finish_options", &json!({"operation":"join","tolerance":"0.05 mm"})).unwrap();
+        controls::load(&mut app);
+        let params = json!({"operation":"join","tolerance":0.05,"targets":["Base"]});
+        let full = compute(app.session.scratch(), &params, NATIVE_DISPLAY_BUDGET).unwrap();
+        assert_eq!(full.entries.len(), 2);
+        app.session.execute("browser.visibility", &json!({"paths":[[copy]],"visible":false})).unwrap();
+        let hidden = compute(app.session.scratch(), &params, NATIVE_DISPLAY_BUDGET).unwrap();
+        assert_eq!(hidden.entries.len(), 1);
+        assert!(hidden.entries.iter().all(|entry| app.session.body_visible(entry.name.as_ref().unwrap())));
+        // A browser reply may contain all placements. Render using the live
+        // visibility, even when the source worker did not receive that state.
+        app.forms_prototype.combination.ready = Some((key(&app).unwrap(), Ok(full)));
+        assert_eq!(context::render_entries(&app).count(), 1);
+    }
 
     #[test]
     fn browser_worker_combined_preview_matches_exact_native_result() {

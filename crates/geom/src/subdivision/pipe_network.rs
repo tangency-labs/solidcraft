@@ -1,6 +1,5 @@
 //! Stable path chains and all-quad sweeps for editable network pipes.
 use super::{Cage, MAX_FACES, MAX_POINTS, Result, bad};
-use crate::prelude::*;
 use solidcore_record::Vec3;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -9,8 +8,6 @@ mod junction;
 mod sweep;
 pub use build::{BuiltPipe, PipeSettings, SegmentGeometry, SegmentOverride};
 pub use sweep::swept_path;
-
-use solidcore_ops::form_pipe::JOIN_TOLERANCE;
 
 /// An already evaluated source curve. Keys are persistent CAD/sketch identities;
 /// polyline samples describe its arc length, rather than editable cage vertices.
@@ -60,35 +57,15 @@ impl Network {
         if edges.windows(2).any(|e| e[0].key == e[1].key) {
             return Err(bad("pipe source edge identities must be distinct"));
         }
-        let mut nodes = Vec::<Vec3>::new();
-        let mut ends = Vec::with_capacity(edges.len());
+        let paths: Vec<_> = edges.iter().map(|edge| edge.points.as_slice()).collect();
+        let geometry = solidcore_ops::form_pipe::prepare_network(&paths).map_err(|error| bad(&error.to_string()))?;
+        let solidcore_ops::form_pipe::NetworkGeometry { paths, nodes, ends } = geometry;
         let mut adjacency = BTreeMap::<usize, Vec<usize>>::new();
-        for (id, edge) in edges.iter_mut().enumerate() {
-            if edge.points.iter().any(|p| !p.is_finite() || p.len() > 100_000.0) {
-                return Err(bad("pipe source points must be finite and bounded"));
-            }
-            edge.points.dedup_by(|a, b| a.dist(*b) <= 1e-10);
-            let (Some(&a), Some(&b)) = (edge.points.first(), edge.points.last()) else {
-                return Err(bad("empty pipe source edge"));
-            };
-            if edge.points.len() < 2 || solidcore_ops::form_pipe::length(&edge.points).map_err(|error| bad(&error.to_string()))? < JOIN_TOLERANCE {
-                return Err(bad("pipe source edges must have positive length"));
-            }
-            let mut indices = [0; 2];
-            for (slot, point) in [a, b].into_iter().enumerate() {
-                let node = nodes.iter().position(|p| p.dist(point) <= JOIN_TOLERANCE).unwrap_or_else(|| {
-                    nodes.push(point);
-                    nodes.len() - 1
-                });
-                indices[slot] = node;
+        for (id, (edge, points)) in edges.iter_mut().zip(paths).enumerate() {
+            edge.points = points;
+            for &node in &ends[id] {
                 adjacency.entry(node).or_default().push(id);
             }
-            // Shared endpoints use one coordinate, including a one-edge closed path.
-            edge.points[0] = nodes[indices[0]];
-            if let Some(last) = edge.points.last_mut() {
-                *last = nodes[indices[1]];
-            }
-            ends.push(indices);
         }
         let degree: Vec<_> = (0..nodes.len()).map(|i| adjacency.get(&i).map_or(0, Vec::len)).collect();
         if degree.iter().any(|n| *n > 6) {

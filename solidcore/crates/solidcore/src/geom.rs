@@ -38,6 +38,7 @@ pub mod polar_box;
 pub mod polynomial;
 pub mod pseudo_box;
 pub mod regularized_fit;
+pub mod rim_coincidence;
 pub mod solution_array;
 pub mod spline_interpolation;
 pub mod step_matrix;

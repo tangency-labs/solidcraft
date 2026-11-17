@@ -587,7 +587,46 @@ mod tests {
     use super::*;
     use crate::blend::dna::File;
     use solidcore_record::Vec3;
-    use solidcraft_geom::Mesh;
+    use solidcraft_geom::{Mesh, Vec3Geom};
+
+    #[test]
+    fn import_uses_the_active_scenes_units_and_refuses_a_broken_scene_pointer() {
+        let bytes = write(&[Object {
+            name: "Scene units".into(),
+            cage: solidcraft_geom::subdivision::primitives::Parameters { dimensions: [10.; 3], segments: [1; 3], ..Default::default() }
+                .build()
+                .unwrap(),
+            levels: 1,
+        }])
+        .unwrap();
+        let file = File::read(&bytes).unwrap();
+        let scene = file.blocks.iter().find(|b| b.code == "SC").unwrap();
+        let global = file.blocks.iter().find(|b| b.code == "GLOB").unwrap();
+        let global_offset = global.bytes.as_ptr() as usize - bytes.as_ptr() as usize;
+        let scene_field = file.view(global, "FileGlobal").unwrap().structure.fields["curscene"].offset;
+        let unit = file.view(scene, "Scene").unwrap().nested("unit").unwrap();
+        let scale = unit.bytes.as_ptr() as usize - bytes.as_ptr() as usize + unit.structure.fields["scale_length"].offset;
+        let scene_offset = scene.bytes.as_ptr() as usize - bytes.as_ptr() as usize;
+        let header_offset = scene_offset - 32;
+        let mut second_scene = bytes[header_offset..scene_offset + scene.bytes.len()].to_vec();
+        let second_address = 0x7fff_f000_u64;
+        second_scene[8..16].copy_from_slice(&second_address.to_le_bytes());
+        let second_scale = 32 + scale - scene_offset;
+        second_scene[second_scale..second_scale + 4].copy_from_slice(&0.002_f32.to_le_bytes());
+        let mut changed = bytes.clone();
+        changed[global_offset + scene_field..global_offset + scene_field + 8].copy_from_slice(&second_address.to_le_bytes());
+        changed.splice(header_offset..header_offset, second_scene);
+        let original = crate::blend::read(&bytes).unwrap();
+        let active = crate::blend::read(&changed).unwrap();
+        for (before, after) in original.objects[0].cage.points.iter().zip(&active.objects[0].cage.points) {
+            assert!((*after - *before * 2.0).len() < 1e-9);
+        }
+        let file = File::read(&changed).unwrap();
+        let global = file.blocks.iter().find(|b| b.code == "GLOB").unwrap();
+        let offset = global.bytes.as_ptr() as usize - changed.as_ptr() as usize + scene_field;
+        changed[offset..offset + 8].copy_from_slice(&0_u64.to_le_bytes());
+        assert!(crate::blend::read(&changed).is_err());
+    }
 
     #[test]
     fn separate_datablocks_can_reuse_temporary_data_addresses() {

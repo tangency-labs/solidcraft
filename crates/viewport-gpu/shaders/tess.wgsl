@@ -368,7 +368,6 @@ fn collapsed_boundary(s: Surface, u: f32, v: f32) -> bool {
         let along_v = d != 0u;
         d = d + 1u;
         var row = 0u;
-        var inward = 1u;
         var clamped = true;
         var j = 0u;
         if (t == data[k0 + p]) {
@@ -378,7 +377,6 @@ fn collapsed_boundary(s: Surface, u: f32, v: f32) -> bool {
             }
         } else if (t == data[k0 + n]) {
             row = n - 1u;
-            inward = row - 1u;
             while (j <= p) {
                 clamped = clamped && data[k0 + n + j] == t;
                 j = j + 1u;
@@ -398,19 +396,21 @@ fn collapsed_boundary(s: Surface, u: f32, v: f32) -> bool {
         while (j <= po) {
             let i = span + j - po;
             let index = select(i * s.nu + row, row * s.nu + i, along_v);
-            let next_index = select(i * s.nu + inward, inward * s.nu + i, along_v);
             let h = ctrl_at(s.ctrl + 4u * index);
-            let next = ctrl_at(s.ctrl + 4u * next_index);
-            if (h.w == 0.0 || next.w == 0.0) { valid = false; break; }
+            if (h.w == 0.0) { valid = false; break; }
             let point = h.xyz / h.w;
             if (j == 0u) { anchor = point; }
             let delta = abs(point - anchor);
-            let local = abs(next.xyz / next.w - point);
             deviation = max(deviation, max(max(delta.x, delta.y), delta.z));
-            scale = max(scale, max(max(local.x, local.y), local.z));
+            // Coincidence is limited by rounding of these boundary quotients.
+            // The neighboring row can be arbitrarily far from a regular edge.
+            let magnitude = abs(point);
+            scale = max(scale, max(max(magnitude.x, magnitude.y), magnitude.z));
             j = j + 1u;
         }
-        if (valid && deviation <= 7.62939453125e-6 * scale) { return true; }
+        // Four f32 epsilons cover the two rounded homogeneous quotients and
+        // their subtraction, measured only on this boundary.
+        if (valid && deviation <= 4.76837158203125e-7 * scale) { return true; }
     }
     return false;
 }

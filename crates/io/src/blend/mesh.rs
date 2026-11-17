@@ -374,7 +374,13 @@ pub(super) fn read(f: &File<'_>) -> Result<Import> {
     let mut total_faces = 0usize;
     let mut shape_budget = 8_000_000;
     let mut unit = 1000.0;
-    if let Some(scene) = f.blocks.iter().find(|b| b.code == "SC") {
+    let scene = if let Some(global) = f.blocks.iter().find(|b| b.code == "GLOB") {
+        let address = f.view(global, "FileGlobal")?.ptr("curscene")?;
+        Some(f.block(address)?)
+    } else {
+        f.blocks.iter().find(|b| b.code == "SC")
+    };
+    if let Some(scene) = scene {
         let s = f.view(scene, "Scene")?.nested("unit")?;
         let value = f.numbers.float(s.field("scale_length")?, 0)?;
         if !value.is_finite() || value <= 0.0 || value > 1e9 {

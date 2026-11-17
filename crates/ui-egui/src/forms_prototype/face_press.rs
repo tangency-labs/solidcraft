@@ -45,6 +45,7 @@ mod jobs {
     use super::*;
     use face_pick::{Answer, CaptureError, Owner, Query};
     use solidcraft_engine::geom::brep::ray::{ClipDepth, FrontError, ProofError};
+    use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{self, Receiver, TryRecvError};
 
@@ -54,6 +55,7 @@ mod jobs {
     pub(crate) struct State {
         serial: u64,
         gesture: Option<Gesture>,
+        clicks: VecDeque<Gesture>,
         worker: Option<Worker>,
         cached_query: Option<Arc<Query>>,
         #[cfg(test)]
@@ -81,6 +83,12 @@ mod jobs {
         }
     }
 
+    impl Gesture {
+        fn selection_click(&self) -> bool {
+            matches!(&self.intent, Intent::Direct(direct) if direct.motion.released && !direct.motion.moved && !direct.setting_pivot)
+        }
+    }
+
     enum Intent {
         Direct(Box<Direct>),
         Insert(tools::EdgePick),
@@ -88,6 +96,7 @@ mod jobs {
 
     struct Direct {
         pick: Pick,
+        preferred: Option<Element>,
         axis: Axis,
         orientation: usize,
         scale: bool,
@@ -110,6 +119,7 @@ mod jobs {
             let region = (!s.setting_pivot).then(|| selection::region_intent(app, projection, press.position, press.mods)).flatten();
             Self {
                 pick: s.pick,
+                preferred: None,
                 axis: s.axis,
                 orientation: s.orientation,
                 scale: s.scale,
@@ -145,6 +155,17 @@ mod jobs {
                 && self.active == selection::active(app)
                 && self.before.as_ref().is_none_or(|before| *before == s.elements)
                 && self.region.as_ref().is_none_or(|drag| drag.current(app, projection))
+        }
+
+        fn rebase_selection(&mut self, app: &SolveApp) {
+            self.active = selection::active(app);
+            self.pivot = app.forms_prototype.pivot;
+            if let Some(before) = &mut self.before {
+                before.clone_from(&app.forms_prototype.elements);
+            }
+            if let Some(region) = &mut self.region {
+                region.rebase_selection(app);
+            }
         }
 
         fn record(&mut self, ui: &egui::Ui, input: &CameraInput, press: Sample) -> bool {
@@ -210,23 +231,27 @@ mod jobs {
 
     pub(crate) fn cancel(app: &mut SolveApp) {
         app.forms_prototype.face_press.gesture = None;
+        app.forms_prototype.face_press.clicks.clear();
     }
 
     pub(crate) fn before_input(app: &mut SolveApp, ui: &egui::Ui) {
         if !enabled(app) {
             app.forms_prototype.face_press.cached_query = None;
         }
-        if ui.input(|i| {
-            i.pointer.primary_pressed()
-                || i.pointer.secondary_pressed()
-                || i.events.iter().any(|event| matches!(event, egui::Event::Key { pressed: true, .. }))
-        }) {
+        let (primary, cancel_input) = ui.input(|i| {
+            (
+                i.pointer.primary_pressed(),
+                i.pointer.secondary_pressed() || i.events.iter().any(|event| matches!(event, egui::Event::Key { pressed: true, .. })),
+            )
+        });
+        let released_click = app.forms_prototype.face_press.gesture.as_ref().is_some_and(Gesture::selection_click);
+        if cancel_input || primary && !released_click {
             cancel(app);
         }
     }
 
     pub(crate) fn pending(app: &SolveApp) -> bool {
-        app.forms_prototype.face_press.gesture.is_some()
+        app.forms_prototype.face_press.gesture.is_some() || !app.forms_prototype.face_press.clicks.is_empty()
     }
 
     pub(crate) fn direct(app: &mut SolveApp, ui: &egui::Ui, projection: &Proj, input: &CameraInput) -> bool {
@@ -235,15 +260,24 @@ mod jobs {
             return false;
         }
         let Some(press) = Sample::press(app, ui, projection, input) else { return true };
-        if pick == Pick::All
-            && let Some(hit) = surface::nearest_with(app, projection, press.position, Pick::Vertex)
-                .or_else(|| surface::nearest_with(app, projection, press.position, Pick::Edge))
+        let preferred = (pick == Pick::All)
+            .then(|| {
+                surface::nearest_with(app, projection, press.position, Pick::Vertex)
+                    .or_else(|| surface::nearest_with(app, projection, press.position, Pick::Edge))
+            })
+            .flatten();
+        if !pending(app)
+            && let Some(hit) = preferred
         {
             begin_drag_hit(app, projection, press.position, press.mods, hit);
             return true;
         }
         selection::cancel_region_work(app);
-        start(app, ui.ctx(), *projection, press, |app| Intent::Direct(Box::new(Direct::new(app, projection, press))));
+        start(app, ui.ctx(), *projection, press, |app| {
+            let mut direct = Direct::new(app, projection, press);
+            direct.preferred = preferred;
+            Intent::Direct(Box::new(direct))
+        });
         true
     }
 
@@ -258,6 +292,10 @@ mod jobs {
     }
 
     fn start(app: &mut SolveApp, ctx: &egui::Context, projection: Proj, press: Sample, intent: impl FnOnce(&SolveApp) -> Intent) {
+        if app.forms_prototype.face_press.clicks.len() >= 64 {
+            status(app, "forms.face_pick.limit");
+            return;
+        }
         let query = match query_for_press(app) {
             Ok(query) => query,
             Err(error) => {
@@ -272,6 +310,9 @@ mod jobs {
         };
         let intent = intent(app);
         let state = &mut app.forms_prototype.face_press;
+        if let Some(previous) = state.gesture.take().filter(Gesture::selection_click) {
+            state.clicks.push_back(previous);
+        }
         state.serial = state.serial.wrapping_add(1);
         state.gesture =
             Some(Gesture { serial: state.serial, projection, query, stop: Default::default(), press, scripted: app.synthetic_primary_press, intent });
@@ -298,7 +339,7 @@ mod jobs {
 
     fn launch(app: &mut SolveApp, ctx: &egui::Context) {
         let state = &mut app.forms_prototype.face_press;
-        let Some(gesture) = state.gesture.as_ref().filter(|_| state.worker.is_none()) else { return };
+        let Some(gesture) = state.clicks.front().or(state.gesture.as_ref()).filter(|_| state.worker.is_none()) else { return };
         #[cfg(test)]
         let gate = state.gate.clone();
         #[cfg(not(test))]
@@ -307,10 +348,11 @@ mod jobs {
         let (sender, done) = mpsc::channel();
         let (query, projection, pos, serial) = (gesture.query.clone(), gesture.projection, gesture.press.position, gesture.serial);
         let stop = gesture.stop.clone();
+        let preferred = matches!(&gesture.intent, Intent::Direct(direct) if direct.preferred.is_some());
         let wake = ctx.clone();
         match std::thread::Builder::new().name("form-face-pick".into()).spawn(move || {
             let _permit = permit;
-            let result = solve(&query, &projection, pos, &stop);
+            let result = if preferred { Ok(Answer::Miss) } else { solve(&query, &projection, pos, &stop) };
             let _ = sender.send(result);
             wake.request_repaint();
         }) {
@@ -357,7 +399,14 @@ mod jobs {
     }
 
     pub(crate) fn tick(app: &mut SolveApp, ui: &egui::Ui, projection: &Proj, input: &CameraInput, blocked: bool) -> bool {
-        if app.forms_prototype.face_press.gesture.as_ref().is_some_and(|gesture| !current(app, ui, projection, input, blocked, gesture)) {
+        if app
+            .forms_prototype
+            .face_press
+            .clicks
+            .iter()
+            .chain(app.forms_prototype.face_press.gesture.iter())
+            .any(|gesture| !current(app, ui, projection, input, blocked, gesture))
+        {
             cancel(app);
         }
         if let Some(gesture) = &mut app.forms_prototype.face_press.gesture
@@ -374,10 +423,29 @@ mod jobs {
         if let Some((serial, answer)) = result {
             let state = &mut app.forms_prototype.face_press;
             state.worker = None;
-            if state.gesture.as_ref().is_some_and(|gesture| gesture.serial == serial)
-                && let Some(mut gesture) = state.gesture.take()
-            {
-                return apply(app, ui.ctx(), projection, &mut gesture, answer);
+            let gesture = if state.clicks.front().is_some_and(|gesture| gesture.serial == serial) {
+                state.clicks.pop_front()
+            } else if state.gesture.as_ref().is_some_and(|gesture| gesture.serial == serial) {
+                state.gesture.take()
+            } else {
+                None
+            };
+            if let Some(mut gesture) = gesture {
+                let click = gesture.selection_click();
+                let replayed = apply(app, ui.ctx(), projection, &mut gesture, answer);
+                if click {
+                    let mut clicks = std::mem::take(&mut app.forms_prototype.face_press.clicks);
+                    let mut active = app.forms_prototype.face_press.gesture.take();
+                    for gesture in clicks.iter_mut().chain(active.iter_mut()) {
+                        if let Intent::Direct(direct) = &mut gesture.intent {
+                            direct.rebase_selection(app);
+                        }
+                    }
+                    app.forms_prototype.face_press.clicks = clicks;
+                    app.forms_prototype.face_press.gesture = active;
+                }
+                launch(app, ui.ctx());
+                return replayed;
             }
         }
         launch(app, ui.ctx());
@@ -409,16 +477,18 @@ mod jobs {
         }
         clear_pick_error(app);
         let press = gesture.press;
+        if let Intent::Direct(direct) = &mut gesture.intent
+            && let Some(hit) = direct.preferred
+        {
+            return apply_hit(app, projection, direct, press, hit);
+        }
         match (&mut gesture.intent, answer) {
             (Intent::Direct(direct), Answer::Hit { owner, .. }) => {
                 let hit = match owner {
                     Owner::Face(id) => Element::Face(id),
                     Owner::Surface => Element::Surface,
                 };
-                begin_drag_hit(app, projection, press.position, press.mods, hit);
-                enable_shift_extrusion(app, direct.motion.shift);
-                pull_with_modifiers(app, direct.motion.latest.position, direct.motion.latest.mods);
-                true
+                apply_hit(app, projection, direct, press, hit)
             }
             (Intent::Direct(direct), Answer::Miss) => {
                 if let Some(region) = direct.region.take() {
@@ -439,6 +509,20 @@ mod jobs {
             }
             _ => false,
         }
+    }
+
+    fn apply_hit(app: &mut SolveApp, projection: &Proj, direct: &Direct, press: Sample, hit: Element) -> bool {
+        begin_drag_hit(app, projection, press.position, press.mods, hit);
+        if direct.motion.released && !direct.motion.moved {
+            if let Some(drag) = app.forms_prototype.drag.take() {
+                selection::released(app, drag.toggle);
+            }
+            selection::release_blocked_drag(app);
+            return false;
+        }
+        enable_shift_extrusion(app, direct.motion.shift);
+        pull_with_modifiers(app, direct.motion.latest.position, direct.motion.latest.mods);
+        true
     }
 
     fn status(app: &mut SolveApp, key: &'static str) {
@@ -473,7 +557,7 @@ mod jobs {
     #[cfg(test)]
     pub(crate) fn response_for_test(app: &mut SolveApp) -> Option<mpsc::Sender<Result>> {
         let state = &mut app.forms_prototype.face_press;
-        let serial = state.gesture.as_ref()?.serial;
+        let serial = state.clicks.front().or(state.gesture.as_ref())?.serial;
         if state.worker.is_some() {
             return None;
         }
@@ -484,7 +568,8 @@ mod jobs {
 
     #[cfg(test)]
     pub(crate) fn solve_for_test(app: &SolveApp) -> Option<Result> {
-        let gesture = app.forms_prototype.face_press.gesture.as_ref()?;
+        let state = &app.forms_prototype.face_press;
+        let gesture = state.clicks.front().or(state.gesture.as_ref())?;
         Some(solve(&gesture.query, &gesture.projection, gesture.press.position, &gesture.stop))
     }
 }

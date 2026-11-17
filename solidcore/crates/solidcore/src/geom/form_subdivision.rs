@@ -58,9 +58,97 @@ pub fn mirror_tangent(delta: Vec3, axis: usize) -> Option<Vec3> {
     (delta.is_finite() && result.len() >= 1e-9).then_some(result)
 }
 
+/// Coordinate geometry of a derived ruled trim-wall preview.
+pub struct TrimWallGeometry {
+    /// Translated sampled boundary, in the original directed order.
+    pub top: Vec<Vec3>,
+    /// Unit normals in reverse sampled-boundary order, as used by the ruled strips.
+    pub normals: Vec<Vec3>,
+    /// Translated logical endpoint controls.
+    pub controls: [Vec3; 2],
+}
+
+/// Validate a nonzero derived-wall displacement within the Form extent.
+pub fn validate_trim_wall_delta(delta: Vec3) -> crate::Result<()> {
+    if !delta.is_finite()
+        || delta.length() < 1e-9
+        || delta.x.abs().max(delta.y.abs()).max(delta.z.abs()) > 200_000.0
+    {
+        return Err(crate::SolidError::invalid_input(
+            "Form trim wall",
+            "trim wall needs a finite nonzero displacement within the Form bounds",
+        ));
+    }
+    Ok(())
+}
+
+/// Add an editing displacement and validate before publishing the new wall.
+pub fn move_trim_wall(delta: Vec3, offset: Vec3) -> crate::Result<Vec3> {
+    let moved = delta + offset;
+    validate_trim_wall_delta(moved)?;
+    Ok(moved)
+}
+
+/// Build bounded ruled-wall positions and normals, refusing an along-seam displacement.
+pub fn trim_wall(
+    base: &[Vec3],
+    controls: [Vec3; 2],
+    delta: Vec3,
+) -> crate::Result<TrimWallGeometry> {
+    let bad = |reason| crate::SolidError::invalid_input("Form trim wall", reason);
+    validate_trim_wall_delta(delta)?;
+    if !(2..=1_000_000).contains(&base.len()) {
+        return Err(bad("trim preview path needs bounded stations"));
+    }
+    let bounded = |p: &Vec3| p.is_finite() && p.x.abs().max(p.y.abs()).max(p.z.abs()) <= 100_000.0;
+    let top: Vec<_> = base.iter().map(|&p| p + delta).collect();
+    if base.iter().chain(&top).any(|p| !bounded(p)) {
+        return Err(bad("trim wall positions must remain within 100000 mm"));
+    }
+    let controls = controls.map(|p| p + delta);
+    if controls.iter().any(|p| !bounded(p)) {
+        return Err(bad("trim wall controls must remain within 100000 mm"));
+    }
+    let normals = (0..base.len())
+        .map(|i| {
+            let next = base.len() - 1 - i.saturating_sub(1);
+            let prev = base.len() - 1 - (i + 1).min(base.len() - 1);
+            let a = *base.get(prev).ok_or_else(|| bad("invalid trim station"))?;
+            let b = *base.get(next).ok_or_else(|| bad("invalid trim station"))?;
+            (a - b)
+                .cross(delta)
+                .normalized()
+                .ok_or_else(|| bad("trim wall displacement is along its seam"))
+        })
+        .collect::<crate::Result<Vec<_>>>()?;
+    Ok(TrimWallGeometry {
+        top,
+        normals,
+        controls,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trim_wall_checks_all_geometry_before_returning_directed_strips() {
+        let base = [Vec3::ZERO, Vec3::X, Vec3::X * 2.0];
+        let wall = trim_wall(&base, [Vec3::ZERO, Vec3::X * 2.0], Vec3::Z).unwrap();
+        assert_eq!(
+            wall.top,
+            vec![Vec3::Z, Vec3::X + Vec3::Z, Vec3::X * 2.0 + Vec3::Z]
+        );
+        assert_eq!(wall.controls, [Vec3::Z, Vec3::X * 2.0 + Vec3::Z]);
+        assert!(wall
+            .normals
+            .iter()
+            .all(|normal| normal.distance(Vec3::Y) < 1e-12));
+        assert!(trim_wall(&base, [Vec3::ZERO, Vec3::X], Vec3::X).is_err());
+        assert!(trim_wall(&base, [Vec3::ZERO, Vec3::new(100_000.0, 0.0, 0.0)], Vec3::X).is_err());
+        assert!(move_trim_wall(Vec3::Z, -Vec3::Z).is_err());
+    }
 
     #[test]
     fn regular_planar_net_converts_to_uniform_bezier_coordinates() {

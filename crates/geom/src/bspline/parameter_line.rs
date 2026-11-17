@@ -56,8 +56,24 @@ impl NurbsSurface {
             if delta[d] == 0.0 {
                 continue;
             }
-            for &knot in &self.knots[d] {
+            for group in self.knots[d].chunk_by(|a, b| a == b) {
+                let Some(&knot) = group.first() else { continue };
                 if knot > a[d].min(b[d]) && knot < a[d].max(b[d]) {
+                    // A full knot multiplicity separates independent surface
+                    // pieces. Establish identical boundary control rows before
+                    // merging their endpoints into a C0 curve.
+                    if group.len() > self.degree[d] {
+                        charge(remaining, self.count[1 - d])?;
+                        let next = self.knots[d].partition_point(|&value| value <= knot) - self.degree[d] - 1;
+                        let previous = next.checked_sub(1).ok_or_else(|| SplineError::Invalid("missing discontinuous boundary row".into()))?;
+                        let other = 1 - d;
+                        if (0..self.count[other]).any(|i| {
+                            let (u, v) = if d == 0 { ((previous, i), (next, i)) } else { ((i, previous), (i, next)) };
+                            self.point(u.0, u.1) != self.point(v.0, v.1)
+                        }) {
+                            return Err(SplineError::Unsupported("parameter line crosses a discontinuous surface".into()));
+                        }
+                    }
                     let t = (knot - a[d]) / delta[d];
                     if !(0.0 < t && t < 1.0) {
                         return invalid("a knot crossing rounds to a parameter-line endpoint");

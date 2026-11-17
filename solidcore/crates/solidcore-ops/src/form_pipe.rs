@@ -7,6 +7,48 @@ use solidcore_record::Vec3;
 
 pub use kernel::{JOIN_TOLERANCE, MAX_PATHS, MAX_PATH_SAMPLES};
 
+/// Portable network geometry, independent of application source identities.
+pub struct NetworkGeometry {
+    /// Cleaned paths in stable input order.
+    pub paths: Vec<Vec<Vec3>>,
+    /// Clustered endpoint coordinates.
+    pub nodes: Vec<Vec3>,
+    /// Endpoint node indices per path.
+    pub ends: Vec<[usize; 2]>,
+}
+
+/// Cluster source endpoints and remove repeated adjacent stations in the kernel.
+pub fn prepare_network(paths: &[&[Vec3]]) -> solidcore::Result<NetworkGeometry> {
+    if paths.is_empty()
+        || paths.len() > MAX_PATHS
+        || paths
+            .iter()
+            .any(|p| !(2..=MAX_PATH_SAMPLES).contains(&p.len()))
+        || paths.iter().fold(0usize, |n, p| n.saturating_add(p.len())) > MAX_PATH_SAMPLES
+    {
+        return Err(budget());
+    }
+    let converted = paths
+        .iter()
+        .map(|p| p.iter().copied().map(vec3).collect())
+        .collect();
+    let result = kernel::prepare_network(converted)?;
+    Ok(NetworkGeometry {
+        paths: result
+            .paths
+            .into_iter()
+            .map(|p| p.into_iter().map(record_vec3).collect())
+            .collect(),
+        nodes: result.nodes.into_iter().map(record_vec3).collect(),
+        ends: result.ends,
+    })
+}
+
+/// Orient the exact terminal tangent for a junction port.
+pub fn outward_port(tangent: Vec3, end: usize) -> solidcore::Result<Vec3> {
+    kernel::outward_port(vec3(tangent), end).map(record_vec3)
+}
+
 /// An ordered ring of existing branch controls and its alignment parameters.
 pub struct JunctionPort {
     /// Branch direction away from the junction.

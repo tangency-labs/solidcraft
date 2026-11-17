@@ -1,5 +1,6 @@
 //! Arc-length sampling and branch clearances of sampled Form pipe paths.
 
+use crate::eval::vec::VecExt;
 use crate::{Result, SolidError, Vec3};
 
 pub mod junction;
@@ -10,6 +11,78 @@ pub use sweep::JOIN_TOLERANCE;
 pub const MAX_PATH_SAMPLES: usize = 32_768;
 /// Maximum number of named source paths in a pipe network.
 pub const MAX_PATHS: usize = 128;
+
+/// Coordinate-only endpoint clustering, in the caller's stable source order.
+pub struct NetworkGeometry {
+    /// Deduplicated paths with coincident endpoints sharing one coordinate.
+    pub paths: Vec<Vec<Vec3>>,
+    /// Distinct endpoint coordinates, in first-seen order.
+    pub nodes: Vec<Vec3>,
+    /// Endpoint node indices for each source path.
+    pub ends: Vec<[usize; 2]>,
+}
+
+/// Prepare bounded network geometry without assigning persistent source keys.
+pub fn prepare_network(mut paths: Vec<Vec<Vec3>>) -> Result<NetworkGeometry> {
+    if paths.is_empty()
+        || paths.len() > MAX_PATHS
+        || paths
+            .iter()
+            .any(|p| !(2..=MAX_PATH_SAMPLES).contains(&p.len()))
+        || paths.iter().fold(0usize, |n, p| n.saturating_add(p.len())) > MAX_PATH_SAMPLES
+    {
+        return Err(bad(
+            "a pipe needs 1..128 source edges and bounded curve samples",
+        ));
+    }
+    let mut nodes = Vec::<Vec3>::new();
+    let mut ends = Vec::with_capacity(paths.len());
+    for points in &mut paths {
+        if points
+            .iter()
+            .any(|p| !p.is_finite() || p.length() > 100_000.0)
+        {
+            return Err(bad("pipe source points must be finite and bounded"));
+        }
+        points.dedup_by(|a, b| (*a - *b).length() <= 1e-10);
+        let (Some(&a), Some(&b)) = (points.first(), points.last()) else {
+            return Err(bad("empty pipe source edge"));
+        };
+        if points.len() < 2 || length(points)? < JOIN_TOLERANCE {
+            return Err(bad("pipe source edges must have positive length"));
+        }
+        let mut indices = [0; 2];
+        for (slot, point) in indices.iter_mut().zip([a, b]) {
+            *slot = nodes
+                .iter()
+                .position(|p| (*p - point).length() <= JOIN_TOLERANCE)
+                .unwrap_or_else(|| {
+                    nodes.push(point);
+                    nodes.len() - 1
+                });
+        }
+        *points
+            .first_mut()
+            .ok_or_else(|| bad("empty pipe source edge"))? = *nodes
+            .get(indices[0])
+            .ok_or_else(|| bad("missing pipe endpoint"))?;
+        *points
+            .last_mut()
+            .ok_or_else(|| bad("empty pipe source edge"))? = *nodes
+            .get(indices[1])
+            .ok_or_else(|| bad("missing pipe endpoint"))?;
+        ends.push(indices);
+    }
+    Ok(NetworkGeometry { paths, nodes, ends })
+}
+
+/// Orient a terminal sweep tangent away from a junction at either end.
+pub fn outward_port(tangent: Vec3, end: usize) -> Result<Vec3> {
+    if end > 1 || !tangent.is_finite() || tangent.length() < 1e-12 {
+        return Err(bad("invalid pipe port tangent"));
+    }
+    Ok(tangent * if end == 0 { 1.0 } else { -1.0 })
+}
 
 /// Check the junction branching limit before converting or constructing geometry.
 pub fn validate_branch_count(count: usize) -> Result<()> {
@@ -172,6 +245,29 @@ pub fn clearance(chords: &[([Vec3; 2], f64)]) -> Result<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_preparation_deduplicates_and_clusters_in_stable_order() {
+        let prepared = prepare_network(vec![
+            vec![Vec3::ZERO, Vec3::ZERO, Vec3::X],
+            vec![
+                Vec3::X + Vec3::Y * (JOIN_TOLERANCE * 0.5),
+                Vec3::X + Vec3::Y,
+            ],
+        ])
+        .unwrap();
+        assert_eq!(prepared.nodes, vec![Vec3::ZERO, Vec3::X, Vec3::X + Vec3::Y]);
+        assert_eq!(prepared.ends, vec![[0, 1], [1, 2]]);
+        assert_eq!(prepared.paths[0], vec![Vec3::ZERO, Vec3::X]);
+        assert_eq!(prepared.paths[1][0], Vec3::X);
+        let closed = prepare_network(vec![vec![Vec3::ZERO, Vec3::X, Vec3::ZERO]]).unwrap();
+        assert_eq!(closed.ends, vec![[0, 0]]);
+        assert!(prepare_network(vec![vec![Vec3::ZERO, Vec3::ZERO]]).is_err());
+        assert!(prepare_network(vec![vec![Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 0.0)]]).is_err());
+        assert_eq!(outward_port(Vec3::X, 0).unwrap(), Vec3::X);
+        assert_eq!(outward_port(Vec3::X, 1).unwrap(), -Vec3::X);
+        assert!(outward_port(Vec3::X, 2).is_err());
+    }
 
     #[test]
     fn sampling_respects_direction_and_trimming_follows_arc_length() {

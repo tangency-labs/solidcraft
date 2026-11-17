@@ -29,6 +29,11 @@
     "forms.fill.retired_cap_bridge": "قد تستبدل أداة التجسير معرّفات الأوجه المحفوظة لرقع الإغلاق المُزالة.",
     "forms.fill.select_cap_only": "حدّد وجه رقعة الإغلاق وحده لحذفه."
   },
+  "fr": {
+    "forms.fill.cap_delete_desktop": "La suppression d’une surface de fermeture nécessite l’application de bureau.",
+    "forms.fill.retired_cap_bridge": "La création d’un pont remplacerait les identifiants enregistrés des surfaces de fermeture supprimées.",
+    "forms.fill.select_cap_only": "Sélectionnez uniquement la face de fermeture à supprimer."
+  },
   "he": {
     "forms.fill.cap_delete_desktop": "הסרת מכסה דורשת את יישום שולחן העבודה.",
     "forms.fill.retired_cap_bridge": "גישור יחליף את מזהי הפאות השמורים של מכסים שהוסרו.",

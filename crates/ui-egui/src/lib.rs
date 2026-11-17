@@ -2317,7 +2317,11 @@ impl SolveApp {
             return;
         }
         if id == "parameters.change" {
-            params_dialog::open(self);
+            if self.session.forms_prototype.is_some() {
+                self.set_status(self.tr("forms.context.finish_before_parameters").to_owned(), true);
+            } else {
+                params_dialog::open(self);
+            }
             return;
         }
         if matches!(id, "document.metadata" | "document.metadata.set") {

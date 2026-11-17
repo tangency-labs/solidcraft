@@ -45,7 +45,9 @@ fn fail(why: &str) -> TessError {
 /// A full nonperiodic spline rectangle, certified from the actual oriented
 /// linear pcurves, not from a trim's bounding box or sampled proximity.
 fn rectangle(face: &brep::Face, surface: &EvalSurface) -> Result<[[f64; 2]; 2]> {
-    let EvalSurface::Nurbs { .. } = surface else { return Err(fail("requires spline charts")) };
+    let EvalSurface::Nurbs { .. } = surface else {
+        return Err(fail("requires spline charts"));
+    };
     let domain = eval_uv::domain(surface);
     let ([Some((u0, u1)), Some((v0, v1))], [None, None]) = (domain.range, domain.period) else {
         return Err(fail("requires bounded nonperiodic charts"));
@@ -53,7 +55,9 @@ fn rectangle(face: &brep::Face, surface: &EvalSurface) -> Result<[[f64; 2]; 2]> 
     if ![u0, u1, v0, v1].iter().all(|x| x.is_finite()) || u1 <= u0 || v1 <= v0 {
         return Err(fail("invalid chart interval"));
     }
-    let [Loop::Edges { edges }] = face.loops.as_slice() else { return Err(fail("requires one rectangular loop")) };
+    let [Loop::Edges { edges }] = face.loops.as_slice() else {
+        return Err(fail("requires one rectangular loop"));
+    };
     if edges.len() != 4 {
         return Err(fail("requires four exact parameter sides"));
     }
@@ -62,7 +66,9 @@ fn rectangle(face: &brep::Face, surface: &EvalSurface) -> Result<[[f64; 2]; 2]> 
     let mut previous = None;
     let mut first = None;
     for edge in edges {
-        let brep::Curve2::Spline { knots, points } = &edge.pcurve else { return Err(fail("requires linear pcurves")) };
+        let brep::Curve2::Spline { knots, points } = &edge.pcurve else {
+            return Err(fail("requires linear pcurves"));
+        };
         if points.len() != 2 || knots.len() != 4 || knots.first() != knots.get(1) || knots.get(2) != knots.get(3) {
             return Err(fail("requires linear bounded pcurves"));
         }
@@ -113,6 +119,7 @@ pub fn mesh_with_guides(b: &brep::Brep, t: &crate::MeshTolerance, size: f64, gui
     }
     let mut output = vec![Vec::new(); guides.len()];
     let mut total = 0usize;
+    let mut native_curves = std::collections::BTreeMap::new();
     for fp in &mut plan.faces {
         let fi = fp.face as usize;
         let face = b.faces.get(fi).ok_or_else(|| fail("missing planned face"))?;
@@ -143,8 +150,8 @@ pub fn mesh_with_guides(b: &brep::Brep, t: &crate::MeshTolerance, size: f64, gui
                         // Certified NURBS rectangles retain their record parameters.
                         // Use the boundary planner's pcurve evaluator and interval clamp.
                         let [low, high] = use_.pcurve.interval().ok_or_else(|| fail("invalid pcurve interval"))?;
-                        let uv = kernel::curve2(&use_.pcurve).eval(parameter.clamp(low, high))
-                            .ok_or_else(|| fail("pcurve station does not evaluate"))?;
+                        let uv =
+                            kernel::curve2(&use_.pcurve).eval(parameter.clamp(low, high)).ok_or_else(|| fail("pcurve station does not evaluate"))?;
                         // This exact parameter was merged before native planning,
                         // so it must already be a canonical fixed prefix node.
                         let node = fp
@@ -166,10 +173,16 @@ pub fn mesh_with_guides(b: &brep::Brep, t: &crate::MeshTolerance, size: f64, gui
                                 let vertex = b.vertices.get(vertex as usize).ok_or_else(|| fail("missing canonical vertex"))?;
                                 Vec3::new(vertex.point[0], vertex.point[1], vertex.point[2])
                             }
-                            None => CurveEval::new(&kernel::curve(native.parameters()).map_err(|_| fail("invalid canonical curve"))?)
-                                .map_err(|_| fail("invalid canonical curve"))?
-                                .point(parameter)
-                                .ok_or_else(|| fail("canonical curve does not evaluate"))?,
+                            None => {
+                                let curve = match native_curves.entry(edge) {
+                                    std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                                    std::collections::btree_map::Entry::Vacant(entry) => {
+                                        let curve = kernel::curve(native.parameters()).map_err(|_| fail("invalid canonical curve"))?;
+                                        entry.insert(CurveEval::new(&curve).map_err(|_| fail("invalid canonical curve"))?)
+                                    }
+                                };
+                                curve.point(parameter).ok_or_else(|| fail("canonical curve does not evaluate"))?
+                            }
                         };
                         if fp.fixed.get(node).copied() != Some(kernel::record_vec3(expected)) {
                             return Err(fail("guided station does not retain its canonical native edge or vertex position"));

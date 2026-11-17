@@ -328,6 +328,12 @@ pub(super) struct RegionDrag {
     exceeded: bool,
 }
 impl RegionDrag {
+    /// Rebase a later press after an earlier queued selection click completes.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn rebase_selection(&mut self, app: &SolveApp) {
+        self.before.clone_from(&app.forms_prototype.elements);
+    }
+
     pub(super) fn extend(&mut self, pos: Pos2) {
         if !pos.is_finite() {
             return;

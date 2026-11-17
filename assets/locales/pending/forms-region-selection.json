@@ -65,6 +65,17 @@
     "forms.prototype.region_worker_lost": "توقّفت مهمة تحديد الشكل قبل إرجاع نتيجة.",
     "prefs.forms_region_selection": "تحديد عناصر الشكل بمستطيل أو برسم حر"
   },
+  "fr": {
+    "forms.prototype.region_browser_unavailable": "La sélection par zone nécessite actuellement l’application de bureau.",
+    "forms.prototype.region_busy": "Sélection des éléments de la forme…",
+    "forms.prototype.region_failed": "Impossible de sélectionner la zone de la forme. {error}",
+    "forms.prototype.region_help": "Tracez une zone depuis un espace vide. Maj ajoute à la sélection et Ctrl+Maj inverse la sélection des éléments. De gauche à droite, les éléments doivent être entièrement inclus. De droite à gauche, il suffit de les toucher. Le lasso trace une zone à main levée. Les raccourcis de navigation conservent leur fonction. La sélection s’effectue en arrière-plan. Échap l’annule.",
+    "forms.prototype.region_invalid": "Le résultat de la sélection n’est plus valide. Réessayez.",
+    "forms.prototype.region_limit": "Le contour de sélection est trop long. Tracez un lasso plus court.",
+    "forms.prototype.region_waiting": "En attente de la sélection précédente…",
+    "forms.prototype.region_worker_lost": "La sélection s’est interrompue avant de renvoyer un résultat.",
+    "prefs.forms_region_selection": "Sélectionner les éléments d’une forme avec un rectangle ou un lasso"
+  },
   "he": {
     "forms.prototype.region_browser_unavailable": "בחירת אזור עדיין אינה זמינה בדפדפן. יש להשתמש ביישום שולחן העבודה.",
     "forms.prototype.region_busy": "מתבצעת בחירה של רכיבי הצורה החופשית…",
