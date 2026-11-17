@@ -347,7 +347,7 @@ type Walk = Vec<Vec<(EdgeId, bool)>>;
 /// Whether face `f`'s outward side is its surface's natural normal's: its outer use (the one
 /// bounding the infinite region, [`face_p2::outer_faceuse`]) is its upward use (on the normal's
 /// side).
-fn outward_is_natural(b: &Brep, f: FaceId) -> Option<bool> {
+pub(super) fn outward_is_natural(b: &Brep, f: FaceId) -> Option<bool> {
     let up = face_p2::upward_faceuse(b, f).ok()??;
     let outer = face_p2::outer_faceuse(b, f).ok()??;
     Some(outer == up)

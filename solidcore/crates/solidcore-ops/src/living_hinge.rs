@@ -7,9 +7,15 @@
 
 use solidcore::living_hinge as kernel;
 use solidcore::living_hinge::NearEdge;
+use solidcore::prism::{read, sheet};
 use solidcore_convert as convert;
 use solidcore_record::living_hinge::{HingeSlot, LivingHingePlan, LivingHingeSpec};
-use solidcore_record::{Loop2, Region2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Vec2};
+
+use crate::boolean::BooleanOp;
+use crate::prism::planar_regions_boolean;
+use crate::session::{read_body, Answer};
+use crate::{Body, Error};
 
 pub use solidcore::living_hinge::{LivingHingeError, MAX_SLOTS};
 
@@ -84,6 +90,84 @@ pub fn slot_region(slot: &HingeSlot, slot_width: f64) -> Region2 {
         &convert::living_hinge::slot(slot),
         slot_width,
     ))
+}
+
+/// One flat face of a plate parallel to the sketch plane (design 6.1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlateFace {
+    /// The face's regions in the plane's coordinates.
+    pub regions: Vec<Region2>,
+    /// Its level along the plane's normal (0 in the plane).
+    pub level: f64,
+    /// Whether its outward normal is the plane's normal.
+    pub up: bool,
+    /// Whether its level is within [`PlateOutline::tolerance`] of 0: the face lies in the plane.
+    pub in_plane: bool,
+}
+
+/// A plate's outline seen along a plane's normal (design 6.1): the union of its flat faces facing
+/// along the normal, with every flat face parallel to the plane and the faces not read.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlateOutline {
+    /// The union of the regions of the faces facing along the normal: empty when there is none.
+    pub regions: Vec<Region2>,
+    /// The flat faces parallel to the plane, in the body's face order.
+    pub faces: Vec<PlateFace>,
+    /// Faces along the normal (walls).
+    pub walls: usize,
+    /// Faces neither parallel nor along the normal (a chamfer, a rounded edge): not read.
+    pub other: usize,
+    /// The tolerance the faces were read and united to (mm).
+    pub tolerance: f64,
+}
+
+struct Read(sheet::ParallelFaces, f64);
+
+impl Answer for Read {}
+
+/// The outline of the plate `body` seen along `plane`'s normal (design 6.1): its flat faces
+/// parallel to the plane read exactly ([`sheet::parallel_faces`]), and the union of those facing
+/// along the normal ([`planar_regions_boolean`], no boolean for one face). A face is `in_plane`
+/// when its level is within the read tolerance of 0.
+///
+/// # Errors
+/// [`Error::Empty`] for a body without size; [`Error::Unsupported`] for a face not read exactly;
+/// those of [`planar_regions_boolean`] and the session.
+pub fn plate_outline(body: &Body, plane: &Plane) -> crate::Result<PlateOutline> {
+    let frame = convert::plane(plane);
+    let Read(read, tolerance) = read_body("plate_outline", body, |k, b| {
+        let Some(tol) = read::planar_edges_tolerance(b) else {
+            return Ok(Read(sheet::ParallelFaces::default(), 0.0));
+        };
+        Ok(Read(sheet::parallel_faces(k, b, &frame, tol)?, tol))
+    })?;
+    if tolerance <= 0.0 {
+        return Err(Error::Empty);
+    }
+    let faces: Vec<PlateFace> = read
+        .faces
+        .iter()
+        .map(|f| PlateFace {
+            regions: f.regions.iter().map(convert::record_region2).collect(),
+            level: f.level,
+            up: f.up,
+            in_plane: f.level.abs() <= tolerance,
+        })
+        .collect();
+    let mut regions: Option<Vec<Region2>> = None;
+    for f in faces.iter().filter(|f| f.up) {
+        regions = Some(match regions {
+            None => f.regions.clone(),
+            Some(acc) => planar_regions_boolean(&acc, &f.regions, BooleanOp::Union, tolerance)?,
+        });
+    }
+    Ok(PlateOutline {
+        regions: regions.unwrap_or_default(),
+        faces,
+        walls: read.walls,
+        other: read.other,
+        tolerance,
+    })
 }
 
 #[cfg(test)]
@@ -199,5 +283,58 @@ mod tests {
             None,
         );
         assert!(matches!(e, Err(LivingHingeError::Parameter(_))));
+    }
+
+    /// Twice the signed area of a loop of lines (shoelace), for the plate tests.
+    fn line_area2(l: &Loop2) -> f64 {
+        l.segs
+            .iter()
+            .map(|s| match s {
+                Seg2::Line { a, b } => a.x * b.y - b.x * a.y,
+                _ => panic!("a plate loop of lines only"),
+            })
+            .sum()
+    }
+
+    #[test]
+    fn plate_outline_of_a_plain_plate_is_its_top() {
+        let plate = crate::make_box([0.0, 0.0, -2.0], [40.0, 20.0, 2.0]).unwrap();
+        let o = plate_outline(&plate, &Plane::XY).unwrap();
+        assert_eq!(o.faces.len(), 2);
+        assert_eq!((o.walls, o.other), (4, 0));
+        let top: Vec<_> = o.faces.iter().filter(|f| f.up).collect();
+        assert_eq!(top.len(), 1);
+        assert!(top[0].in_plane);
+        assert!(o.faces.iter().any(|f| !f.up && !f.in_plane));
+        assert_eq!(o.regions.len(), 1);
+        assert!(o.regions[0].holes.is_empty());
+        assert!((line_area2(&o.regions[0].outer) - 1600.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn plate_outline_of_a_recessed_plate_fills_the_recess() {
+        let plate = crate::make_box([0.0, 0.0, -2.0], [40.0, 20.0, 2.0]).unwrap();
+        let pocket = crate::make_box([10.0, 5.0, -1.0], [20.0, 10.0, 2.0]).unwrap();
+        let body = crate::boolean::boolean(plate, pocket, BooleanOp::Subtract)
+            .unwrap()
+            .unwrap();
+        let o = plate_outline(&body, &Plane::XY).unwrap();
+        let up: Vec<_> = o.faces.iter().filter(|f| f.up).collect();
+        assert_eq!(up.len(), 2, "the top and the recess floor");
+        assert_eq!(up.iter().filter(|f| f.in_plane).count(), 1);
+        assert_eq!(o.walls, 8);
+        assert_eq!(o.other, 0);
+        // the floor fills the top face's hole through their coincident edges
+        assert_eq!(o.regions.len(), 1);
+        assert!(o.regions[0].holes.is_empty());
+        assert!((line_area2(&o.regions[0].outer) - 1600.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn plate_outline_of_a_body_seen_edge_on_has_no_up_face() {
+        let plate = crate::make_box([0.0, 0.0, -2.0], [40.0, 20.0, 2.0]).unwrap();
+        let o = plate_outline(&plate, &Plane::XZ).unwrap();
+        assert_eq!(o.faces.iter().filter(|f| f.up).count(), 1);
+        assert_eq!(o.regions.len(), 1);
     }
 }

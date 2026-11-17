@@ -283,7 +283,7 @@ pub struct ParallelFaces {
 
 /// The faces of `b` seen along `frame`'s normal `n`: every planar face parallel to the frame read
 /// exactly as regions of the frame (as [`sheet_regions`] reads a face, then in canonical order),
-/// with its level along `n` and whether its outward normal is `+n`; the faces along `n` (a plane
+/// with its level along `n` and whether its outward normal (not its surface's) is `+n`; the faces along `n` (a plane
 /// square to the frame, a surface swept along `n`) counted as walls and the rest as `other`.
 /// `tol` (mm, at least the body's edges') is how far an edge's curve may end from its vertices.
 ///
@@ -314,10 +314,14 @@ pub fn parallel_faces(k: &Kernel, b: &Brep, frame: &Frame, tol: f64) -> Result<P
                 let mut regions = face_regions(k, b, face, f, up > 0.0, frame, tol, &mut read)?;
                 canonical(&mut regions, tol)?;
                 let (point, _, _) = plane.is_planar();
+                // the face's outward side, not its surface's normal: a boolean keeps a face on a
+                // surface facing the other way (a recess floor on the pocket tool's bottom)
+                let natural = super::measure::outward_is_natural(b, face)
+                    .ok_or_else(|| refused("a face whose outward side is not known"))?;
                 out.faces.push(ParallelFace {
                     regions,
                     level: (point - o).dot(n),
-                    up: up > 0.0,
+                    up: (up > 0.0) == natural,
                 });
                 continue;
             }
