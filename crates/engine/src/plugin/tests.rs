@@ -1527,14 +1527,14 @@ mod install_zip {
         assert_eq!(unpack(&stray).unwrap_err(), InstallError::NotOnePlugin);
         let deep = zip(&[("a/b/plugin.json", good), ("a/b/plugin.wasm", b"x")]);
         assert_eq!(unpack(&deep).unwrap_err(), InstallError::NotOnePlugin);
-        let newer = unpack(&zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))[..]), ("plugin.wasm", b"x")])).unwrap_err();
+        let newer = unpack(&zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.3"]))[..]), ("plugin.wasm", b"x")])).unwrap_err();
         assert!(matches!(&newer, InstallError::Manifest(HostError::UnsupportedCapability { .. })), "{newer}");
-        assert_eq!(newer.to_string(), "needs commands 0.2; update SolidCraft or the plugin");
+        assert_eq!(newer.to_string(), "needs commands 0.3; update SolidCraft or the plugin");
         // Through the command: refused, and the plugins folder is never created.
         let (mut s, root) = session("refused");
         let path = put(&root, "slip.zip", &zip(&[("plugin.json", good), ("plugin.wasm", b"x"), ("../evil", b"x")]));
         assert!(s.execute("plugin.install", &json!({"path": path})).is_err());
-        let path = put(&root, "newer.zip", &zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))[..]), ("plugin.wasm", b"x")]));
+        let path = put(&root, "newer.zip", &zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.3"]))[..]), ("plugin.wasm", b"x")]));
         let error = s.execute("plugin.install", &json!({"path": path})).unwrap_err();
         assert!(matches!(error.host_error(), Some(HostError::UnsupportedCapability { .. })), "{error}");
         assert!(!root.join("plugins").exists() && !root.join("evil").exists());
