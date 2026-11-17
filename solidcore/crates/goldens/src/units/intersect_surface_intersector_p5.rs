@@ -1273,4 +1273,85 @@ mod tests {
             assert!(rec.iter().skip(1).any(|v| *v != 0.0), "{}", case.name);
         }
     }
+
+    /// gen1277 (WR-455's contact move, tangency-labs/solidcraft#17404): main stopped its one
+    /// curve, along A's `v = 0` boundary, at `u = 0.0537` and found nothing along `v = 1`;
+    /// the new row runs that curve to `u = 0.625` and adds one along `v = 1` over
+    /// `[0, 0.875]`, tolerance 0.5635. PROVEN, per new curve: its 3D curve stays within the
+    /// tolerance of A's iso curve at that `v` along its UV curve's `u` range, and of B's iso
+    /// curve at the `v` its UV curve on B keeps, over that curve's `u` range
+    /// (`curves_stay_within`, certified, no samples; A and B build those iso curves
+    /// exactly, `max_gap_3d = 0`), so every point of it is a point of the tolerant
+    /// intersection. Main's curve, A's `v = 0` over `u in [0, 0.0537]` with its B side on
+    /// B's `v = 0` over `[0, 0.0773]`, lies on the first one's UV curves (main's record).
+    /// Class: closer (main left out tolerant intersection the new row certifies).
+    ///
+    /// Not this PR (MEASURED, the same on main): curve 2's UV curve on B is the drop of
+    /// its 3D curve onto B (`drop_and_trim_curve`, unchanged here, gives main the same
+    /// line from the same call), a line along B's `v` max edge to `u = 2.846`, where the
+    /// nearest point of that edge to the curve's end is near `u = 2.527`; B at that UV end
+    /// is 0.600 from the 3D curve's end, beyond the tolerance. The path for B therefore
+    /// ends near 2.527, not at the UV curve's end.
+    #[test]
+    fn wr455_gen1277_new_curves_are_certified_tolerant_intersections() {
+        use solidcore::curve::curve::p8::curves_stay_within;
+        use solidcore::nurbs::b_spline_surface::SurfParamType;
+        let seed = CaseContext::seed_for(Runner.id(), 1277);
+        let i: Inputs = serde_json::from_value(Runner.generate(&mut Rng::new(seed)).unwrap())
+            .unwrap();
+        let k = Kernel::default();
+        let a = rust_surface_with(&i.a, i.raw_knots[0]).unwrap();
+        let b = rust_surface_with(i.b.as_ref().unwrap(), i.raw_knots[1]).unwrap();
+        let (dom1, dom2) = (ext(i.dom1), ext(i.dom2));
+        let tol = i.tol.unwrap();
+        assert_eq!(tol, 0.563_509_128_660_695);
+        // as the runner: on caches holding the case's hand-built trees
+        let (ta, tb) = i.trees.as_ref().unwrap();
+        let mut caches = vec![
+            rust_cache(a.clone(), ta, H(0)).unwrap(),
+            rust_cache(b.clone(), tb.as_ref().unwrap(), H(1)).unwrap(),
+        ];
+        let mut ssi: AdvSurfaceIntersector<'_, '_, H> =
+            AdvSurfaceIntersector::new(&k, &a, &dom1, &b, &dom2, false).unwrap();
+        ssi.base.set_use_surface_edges(i.edges[0], i.edges[1]);
+        let r = ssi.do_intersection_with_caches(&k, &mut caches, i.tol, i.ang).unwrap();
+        assert_eq!(r.curves_3d.len(), 2);
+        // per curve: A's iso v, its u range, B's iso v, the B parameters the path from the
+        // curve's start to its end runs between (curve 1: its UV curve's ends on B; curve 2:
+        // from its UV curve's start to near the nearest point of B's edge to the curve's end,
+        // see above: any end with a certified node only picks the path)
+        let rows = [
+            (0.0, [0.0, 0.625], 0.0, [0.0, 2.194_154_392_942_427]),
+            (1.0, [0.0, 0.875], 3.281_850_727_176_471, [0.0, 2.527]),
+        ];
+        for (j, (va, ua, vb, ub)) in rows.into_iter().enumerate() {
+            let c3 = &r.curves_3d[j];
+            let ivl = c3.natural_interval();
+            assert_eq!([ivl.min(), ivl.max()], ua, "curve {j}: the 3D curve's interval");
+            assert!(r.deviations[j] < tol);
+            let uv = |c: &Option<Curve>, t: f64| {
+                let p = c.as_ref().unwrap().evaluate_point(&k, t).unwrap();
+                [p.x, p.y]
+            };
+            // the UV curves run along A's iso `va` over `ua` and B's iso `vb`
+            let e1 = [uv(&r.surface1_uv_curves[j], ua[0]), uv(&r.surface1_uv_curves[j], ua[1])];
+            let e2 = [uv(&r.surface2_uv_curves[j], ua[0]), uv(&r.surface2_uv_curves[j], ua[1])];
+            assert!(e1.iter().all(|p| (p[1] - va).abs() <= 1e-15), "curve {j}: {e1:?}");
+            assert!((e1[0][0] - ua[0]).abs() <= 1e-15 && (e1[1][0] - ua[1]).abs() <= 1e-15);
+            assert!(e2.iter().all(|p| (p[1] - vb).abs() <= 1e-15), "curve {j}: {e2:?}");
+            assert!(e2[0][0].abs() <= 1e-15, "curve {j}: {e2:?}");
+            for (s, v, u) in [(&a, va, ua), (&b, vb, ub)] {
+                let iso = s
+                    .create_iso_parametric_curve(&k, SurfParamType::V, v, 0.0, None, false)
+                    .unwrap();
+                assert_eq!(iso.max_gap_3d, 0.0, "curve {j}: an exact iso curve");
+                assert!(
+                    curves_stay_within(&k, c3, &iso.curve, [ua[0], u[0]], [ua[1], u[1]], tol)
+                        .unwrap(),
+                    "curve {j}: not certified within {tol} of the iso curve v = {v}"
+                );
+            }
+        }
+    }
+
 }

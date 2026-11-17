@@ -3002,6 +3002,11 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, tool);
             }
         }
+        FeatureKind::Split { body, tool: Some(tool), tool_plane: true, .. } => {
+            frame = st.and_then(|st| st.body(body)).map(|b| body_world(doc, b));
+            reads.placed_body(st, body);
+            reads.placed_body(st, &tool.body);
+        }
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
         // frame: copies of a root block, patterned in a component, move with the component.
@@ -7411,10 +7416,40 @@ fn feature_tools_with_constructor(
                 let c = pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64);
                 ss.plane.to_world(c)
             };
+            let from_face = extent.from.and_then(|p| object_face_at_level(&tst, from_name, p.0, &ss.plane));
             let from = match extent.from {
-                Some(p) => height_at(&tst, object_face_at_level(&tst, from_name, p.0, &ss.plane), &ss.plane, centre, p.0),
+                Some(p) => height_at(&tst, from_face, &ss.plane, centre, p.0),
                 None => 0.0,
             };
+            // From Object on a flat face at a slant starts on the face, so both ends follow its
+            // slope, unless the design was built when it started at the face's level. With To
+            // Object, through all or a taper, or on a face within 5 degrees of running along the
+            // extrusion (where the profile's shadow on it is long and thin), it still starts at
+            // that level, and the feature's warning says so.
+            let slanted_from = from_face.filter(|_| !extent.from_level).and_then(|face| slanted_plane(&tst, face, n));
+            let tapered = match &extent.taper {
+                Some(tp) => val(vals, tp, Kind::Angle)? != 0.0,
+                None => false,
+            };
+            let level_because = match &slanted_from {
+                None => None,
+                Some(_) if extent.to.is_some() => Some("To Object is set"),
+                Some(_) if extent.through_all => Some("Through All is set"),
+                Some(_) if tapered => Some("the extrude is tapered"),
+                Some(slope) if slope.normal().dot(n).abs() < FROM_SLOPE_LEAST_SINE => {
+                    Some("the face is within 5 degrees of running along the extrusion")
+                }
+                Some(_) => None,
+            };
+            if let Some(why) = level_because {
+                append_warning(
+                    warning,
+                    format!(
+                        "From Object starts on a plane parallel to the sketch, where the slanted face meets the middle of the profiles, not on the face itself, because {why}"
+                    ),
+                );
+            }
+            let from_slope = slanted_from.filter(|_| level_because.is_none());
             // Whether the extrusion runs toward the To object: false when a To offset carries the
             // end back across the start, so the tool never reaches the object's face.
             let mut toward_to = true;
@@ -7549,7 +7584,13 @@ fn feature_tools_with_constructor(
                 && let Some(tb) = tst.bodies.get(bi)
             {
                 let m = tb.mesh();
-                let hs: Vec<f64> = m.positions.iter().map(|q| (*q - ss.plane.origin).dot(n) - off).collect();
+                let mut hs: Vec<f64> = m.positions.iter().map(|q| (*q - ss.plane.origin).dot(n) - off).collect();
+                // A flat face at a slant: where its plane, extended past the face, lies over the
+                // profiles too, so a profile that overhangs the face still reaches it.
+                if let Some(slope) = to_face.and_then(|face| slanted_plane(&tst, face, n)) {
+                    let (rise_lo, rise_hi) = slope_rise(&slope, &ss.plane, &regions, off);
+                    hs.extend([rise_lo, rise_hi]);
+                }
                 let margin = tb.body.size() * 0.05 + 1.0 + to_offset.abs();
                 if hi > 0.0 {
                     hi = hs.iter().cloned().fold(hi, f64::max) + margin;
@@ -7557,11 +7598,27 @@ fn feature_tools_with_constructor(
                     lo = hs.iter().cloned().fold(lo, f64::min) - margin;
                 }
             }
-            extrude_within_reach([lo + off, hi + off])?;
+            // From a slanted face: the prism runs over the face's whole rise across the profiles,
+            // then is cut at the face's plane moved to each end.
+            let (run_lo, run_hi) = match &from_slope {
+                Some(fp) => {
+                    // The rise is measured over sampled outlines, so the prism runs a margin
+                    // past it: its own caps must never reach the result.
+                    let (rise_lo, rise_hi) = slope_rise(fp, &ss.plane, &regions, from);
+                    let margin = (rise_hi - rise_lo) * 0.05 + 1.0;
+                    (lo + rise_lo - margin, hi + rise_hi + margin)
+                }
+                None => (lo, hi),
+            };
+            extrude_within_reach([run_lo + off, run_hi + off])?;
             let untrimmed = extent.to.is_none() && extent.from.is_none() && !extent.through_all;
             let mut tools = Vec::new();
             for r in &regions {
-                tools.extend(centered_extrude(&ss.plane, r, lo + off, hi + off, Some(&ss), thin_roles.as_ref(), extent.distance2.is_some())?);
+                tools.extend(centered_extrude(&ss.plane, r, run_lo + off, run_hi + off, Some(&ss), thin_roles.as_ref(), extent.distance2.is_some())?);
+            }
+            if let Some(fp) = &from_slope {
+                let shift = off - from;
+                tools = trim_between_slopes(tools, fp, n, lo + shift, hi + shift)?;
             }
             // A cut or a join by profiles apart in the sketch (the letters of a text): each tool
             // lies in the prism over its profile, so the tools are apart too. The body is then cut once by all of them, or joined to
@@ -7592,7 +7649,7 @@ fn feature_tools_with_constructor(
             }
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`sheet_join`), which takes the sketch's regions.
-            if untrimmed || (*operation == Operation::Join && curved.is_none()) {
+            if untrimmed || (*operation == Operation::Join && curved.is_none() && from_slope.is_none()) {
                 *constructor = Some(ExtrudeConstructor { plane: ss.plane, interval: (lo + off, hi + off) });
             }
             // A Join tool's faces outlive the boolean where they stay on the result, so they are
@@ -9577,6 +9634,23 @@ pub fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f
     height_at(st, face_at(st, p, Some(plane.normal())), plane, centre, p)
 }
 
+/// Where an extrude From Object at `p` starts above `centre`, along `plane`'s normal, when the
+/// face there is flat and at a slant the extrude starts on: the level at which the line
+/// through `centre` along the normal meets the face's plane. `None` for any other face,
+/// including one within 5 degrees of running along the extrusion, which starts at
+/// [`object_height`] as the build does. The caller rules out To Object, Through All, a taper
+/// and a design kept on the old start (`from_level`), which also start there.
+pub fn from_slope_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> Option<f64> {
+    let n = plane.normal();
+    let slope = slanted_plane(st, face_at(st, p, Some(n))?, n)?;
+    let m = slope.normal();
+    let across = n.dot(m);
+    if across.abs() < FROM_SLOPE_LEAST_SINE {
+        return None;
+    }
+    Some(level_along(plane, centre + n * ((slope.origin - centre).dot(m) / across)))
+}
+
 /// How far `q` lies along `plane`'s normal from its origin.
 fn level_along(plane: &Plane, q: Vec3) -> f64 {
     (q - plane.origin).dot(plane.normal())
@@ -9830,8 +9904,18 @@ fn trim_to_face(tools: Vec<Traced>, target: &ModelBody, face: usize, plane: &Pla
     }
     if !on_face {
         let n = plane.normal();
-        let trimmed = trim_to_body(tools, target, |q: Vec3| ((q - plane.origin).dot(n) - start).abs())?;
+        let from_start = |q: Vec3| ((q - plane.origin).dot(n) - start).abs();
+        let trimmed = trim_to_body(tools.clone(), target, from_start)?;
         if trimmed.iter().any(|t| kernel::has_cap_at(&t.body, plane, far, far - start)) {
+            // Part of the profile lies beyond the face's edges. A flat face at a slant then ends
+            // the tools at its plane, extended past those edges, or at the target body where
+            // they meet its material first, as they do where the profile lies over it.
+            if let Some(kernel::FaceSurface::Plane { normal, point }) = kernel::face_surface(&target.body, face)
+                && let Some(face_plane) = Plane::from_normal(point, normal.vec())
+            {
+                let planed = trim_to_plane(tools, &face_plane, plane, start, far)?;
+                return trim_to_body(planed, target, from_start);
+            }
             return Err(DocError::Invalid("the profile reaches past the To face".into()));
         }
         return Ok(trimmed);
@@ -9992,6 +10076,129 @@ fn offset_sheet(target: &ModelBody, face: usize, near: Vec3, travel: Vec3, offse
         Some(side) if side * offset < 0.0 => kernel::offset_surface(&target.body, &[face], -offset, tol).map_err(|e| refused(&e)),
         _ => Ok(sheet),
     }
+}
+/// The sine of the least angle between a From Object face and the extrusion for the extrude to
+/// start on the face (5 degrees): nearer to running along it, the profile's shadow on the face
+/// is long and thin, the prism over it many times the extrude's length, and the extrude starts
+/// at the face's level instead.
+const FROM_SLOPE_LEAST_SINE: f64 = 0.087_155_742_747_658_17;
+
+/// Whether two versions of one extrude start From Object on the same face: the same pick
+/// point, or faces on one plane, each found as its build finds it in `st`, the model before the
+/// feature: by its face name or, failing that, at its pick point, with the component placements
+/// its pick measures against. An edit that keeps the From face on its plane leaves where a
+/// design saved before From Object followed a slanted face starts (`from_level`). Faces that are
+/// not flat, or not found, don't count.
+pub fn same_extrude_from_face(doc: &Document, st: &ModelState, a: &Feature, b: &Feature) -> bool {
+    let pick = |f: &Feature| match &f.kind {
+        FeatureKind::Extrude { extent, .. } => extent.from,
+        _ => None,
+    };
+    let (Some(pa), Some(pb)) = (pick(a), pick(b)) else { return false };
+    if pa.dist(pb.0) < 1e-8 {
+        return true;
+    }
+    // Each face's plane, its unit normal, and the tolerance its body is modelled to.
+    let plane = |f: &Feature| -> Option<(Vec3, Vec3, f64)> {
+        let FeatureKind::Extrude { extent, .. } = &f.kind else { return None };
+        let p = extent.from?;
+        let tst = state_in_frame_pinned_to(doc, st, f.component, &extent.picked_placements).ok()?;
+        let name = f.face_names.get(usize::from(extent.to.is_some())).map(String::as_str);
+        let (bi, fi) = object_face(&tst, name, p.0, None)?;
+        let b = tst.bodies.get(bi)?;
+        let Some(kernel::FaceSurface::Plane { normal, point }) = kernel::face_surface(&b.body, fi) else { return None };
+        Some((point, normal.vec().normalized()?, (b.body.size() * 1e-7).max(1e-7)))
+    };
+    // One plane: the same normal, and each face's point on the other's plane to within the
+    // bodies' tolerance, which depends on their size and not on where they are.
+    match (plane(a), plane(b)) {
+        (Some((p, m, ta)), Some((q, n, tb))) => m.dot(n) > 1.0 - 1e-9 && (q - p).dot(m).abs() < ta.max(tb),
+        _ => false,
+    }
+}
+
+/// The plane of face `(body, face)` when it is flat and at a slant to `n`: neither square to it
+/// nor running along it.
+fn slanted_plane(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> Option<Plane> {
+    let b = st.bodies.get(bi)?;
+    let Some(kernel::FaceSurface::Plane { normal, point }) = kernel::face_surface(&b.body, fi) else { return None };
+    let across = normal.vec().dot(n).abs();
+    (across > 1e-6 && across < 1.0 - 1e-9).then(|| Plane::from_normal(point, normal.vec())).flatten()
+}
+
+/// How far `slope` lies along `plane`'s normal over the profiles, measured from `level`: the
+/// least and the most, over every point of the regions' outer loops.
+fn slope_rise(slope: &Plane, plane: &Plane, regions: &[Region2], level: f64) -> (f64, f64) {
+    let n = plane.normal();
+    let m = slope.normal();
+    let across = n.dot(m);
+    let mut rise = (0.0_f64, 0.0_f64);
+    for q in regions.iter().flat_map(|r| r.outer.polyline(1e-2)) {
+        let q = plane.to_world(q);
+        let t = (slope.origin - q).dot(m) / across - level;
+        rise = (rise.0.min(t), rise.1.max(t));
+    }
+    rise
+}
+
+/// Each tool's part between `slope` moved `lo` and `hi` along `n` (the extrusion direction).
+fn trim_between_slopes(tools: Vec<Traced>, slope: &Plane, n: Vec3, lo: f64, hi: f64) -> Result<Vec<Traced>> {
+    let with_normal = n.dot(slope.normal()) > 0.0;
+    let moved = |d: f64| Plane { origin: slope.origin + n * d, ..*slope };
+    let mut out = Vec::new();
+    for t in &tools {
+        // The two ends are named as a two-sided extrude's caps are, by the end they close:
+        // both may lie on one side of the sketch plane, so their height can't tell them apart.
+        let Some(above) = half_space_traced(t, &moved(lo), with_normal, "bottom")? else { continue };
+        if let Some(part) = half_space_traced(&above, &moved(hi), !with_normal, "top")? {
+            out.push(part);
+        }
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the From face and the extrude's end".into()));
+    }
+    Ok(out)
+}
+
+/// `input`'s part on one side of `plane` ([`kernel::half_space`]), its history carried through
+/// the cut: the part's faces of `input` keep their roles, and its face in the plane takes the
+/// role `cap`, as a cap of the extrude the part ends.
+fn half_space_traced(input: &Traced, plane: &Plane, positive: bool, cap: &str) -> Result<Option<Traced>> {
+    let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
+    let Some(part) = part else { return Ok(None) };
+    // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
+    let cap = Some(cap.to_string());
+    let caps = if positive { [cap, None] } else { [None, cap] };
+    let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
+    Ok(Some(Traced::step(part, &[input, &tool])))
+}
+
+/// Tools run from `start` to `far` along `plane`'s normal, cut back to `face_plane` (a plane at a
+/// slant to the extrusion): each tool's part on the side of `face_plane` its start is on. Refused
+/// when a part still has its end cap at `far`, where the plane lies beyond the tool's reach.
+fn trim_to_plane(tools: Vec<Traced>, face_plane: &Plane, plane: &Plane, start: f64, far: f64) -> Result<Vec<Traced>> {
+    let travel = plane.normal() * (far - start).signum();
+    let across = travel.dot(face_plane.normal());
+    if across.abs() < 1e-9 {
+        return Err(DocError::Invalid("the profile reaches past the To face".into()));
+    }
+    // Along the travel, the side of the plane before it is the negative one when the travel
+    // runs with the plane's normal.
+    let positive = across < 0.0;
+    let cap = crate::lineage::extrude_cap_role(far);
+    let mut out = Vec::new();
+    for t in &tools {
+        if let Some(part) = half_space_traced(t, face_plane, positive, &cap)? {
+            if kernel::has_cap_at(&part.body, plane, far, far - start) {
+                return Err(DocError::Invalid("the profile reaches past the To face".into()));
+            }
+            out.push(part);
+        }
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("nothing lies between the profile and the To object".into()));
+    }
+    Ok(out)
 }
 
 /// One point on each face of a body (a triangle centre, so it lies on the face).
@@ -10493,6 +10700,23 @@ fn eval_feature_kind(
             };
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let picks = crate::plain(faces);
+            let face_count = mb.body.face_count();
+            if face_count > 0 && picks.len() >= face_count {
+                // Match the shell's picking reach, using exact faces. Every authored pick must
+                // resolve; leave a bad pick to the normal selection error. Repeated picks count once.
+                let reach = mb.body.size() * 1e-3 + 1e-6;
+                let picked: Option<Vec<_>> = picks.iter().map(|p| mb.body.nearest_face(*p).filter(|(d, _)| *d < reach).map(|(_, f)| f)).collect();
+                if let Some(mut picked) = picked {
+                    picked.sort_unstable();
+                    picked.dedup();
+                    if picked.len() == face_count {
+                        return Err(DocError::Invalid(
+                            "Removing every face leaves no walls. Select the body without faces for a closed hollow body, or select fewer faces."
+                                .into(),
+                        ));
+                    }
+                }
+            }
             let open = if *tangent_chain {
                 let chain = tangent_face_chain(&mb, &picks);
                 if !chain.is_empty() && chain.len() == mb.body.face_count() {
@@ -10695,7 +10919,7 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Split { body, plane, tool, sketch, line } => {
+        FeatureKind::Split { body, plane, tool, tool_plane, sketch, line } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Unknown(format!("body `{body}`"))) };
             let input = mb.traced();
@@ -10712,11 +10936,26 @@ fn eval_feature_kind(
                     let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
                     let face = crate::appearance::face_index_at(tb, t.point.0)
                         .ok_or_else(|| DocError::Invalid(format!("no face of `{}` at the tool point", t.body)))?;
-                    // The pieces keep the planar roles of the faces they share with the body (#565).
-                    kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?
-                        .into_iter()
-                        .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
-                        .collect::<Result<Vec<_>>>()?
+                    if *tool_plane {
+                        let plane =
+                            tb.body.planar_face(face).ok_or_else(|| DocError::Invalid("the splitting tool face is no longer planar".into()))?;
+                        let source = body_world(doc, tb);
+                        let target = body_world(doc, &mb);
+                        let plane = if source == target {
+                            plane
+                        } else {
+                            let inverse = crate::mat_inverse(&target)
+                                .ok_or_else(|| DocError::Invalid(format!("the component holding `{body}` has a singular placement")))?;
+                            placed_plane(&crate::mat_mul(&inverse, &source), &plane)?
+                        };
+                        split_by_plane_traced(&input, &plane)?
+                    } else {
+                        // The pieces keep the planar roles of the faces they share with the body (#565).
+                        kernel::split_body(&mb.body, &kernel::SplitTool::Face { body: &tb.body, face })?
+                            .into_iter()
+                            .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
+                            .collect::<Result<Vec<_>>>()?
+                    }
                 }
                 None => {
                     let pl = doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?;

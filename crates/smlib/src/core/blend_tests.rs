@@ -707,7 +707,7 @@ fn rounds_turning_round_a_boss_edge_mitred_or_swept() {
         rec.validate().unwrap();
         let mut tori = Vec::new();
         {
-            let g = b.0.lock().unwrap();
+            let g = b.kernel();
             for f in solidcore::query::api_queries::get_faces(&g).unwrap() {
                 if let Some(s) = solidcore::topology::face::p2::surface(&g, f).unwrap()
                     && let SurfaceKind::Torus(t) = s.kind()
@@ -828,7 +828,7 @@ fn pocket_chamfer_on_a_boolean_body() {
     assert!(r.is_ok(), "{} {}", s.error_info().code, s.error_info().comment);
     drop(s);
     b.refresh_cached_topology();
-    let v = volume(&Body::new(b), 1e-8).unwrap();
+    let v = volume(&Body::from_kernel(b), 1e-8).unwrap();
     let d: f64 = 5.5;
     assert!(rel(v, 21000.0 - (50.0 * d * d + 4.0 / 3.0 * d * d * d)) < 1e-8, "{v}");
 }
