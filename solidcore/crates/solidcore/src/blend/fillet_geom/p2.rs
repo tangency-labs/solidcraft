@@ -2659,11 +2659,8 @@ impl FilletBrep {
         if let Some(g1) = fillet_geom1 {
             // its status is ignored upstream (lRailIndex stays 0); fork 9b7cd48 passes
             // this on (SER)
-            let rail_index = ignore_status(crate::error::passed_on(
-                self.rail_index_of_side_eu_resolved(g1, side_eu1, target, &|id| solvers.solver(id)),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?
-            .unwrap_or(0);
+            let rail_index = self
+                .rail_index_of_side_eu_resolved(g1, side_eu1, target, &|id| solvers.solver(id))?;
 
             // Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled over a smooth far
             // edge of its solver's face, the whole length, lies on the face beyond, which the
@@ -3018,16 +3015,12 @@ impl FilletBrep {
             // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
             let other_rail_index =
                 // upstream dereferences a NULL side edge use there
-                ignore_status(crate::error::passed_on(
-                    match side_eu2 {
+                match side_eu2 {
                         Some(eu) => self.rail_index_of_side_eu_resolved(g2, eu, target, &|id| {
                             solvers.solver(id)
                         }),
                         None => Err(SolidError::blend_missing(OP, "the second side edge use")),
-                    },
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?
-                .unwrap_or(0);
+                }?;
             let side_eu2 = side_eu2
                 .ok_or_else(|| SolidError::blend_missing(OP, "the second side edge use"))?;
 
@@ -3253,12 +3246,7 @@ impl FilletBrep {
                     // its status is ignored upstream (the point is then whatever the
                     // call left; here the previous value); fork 9b7cd48 passes this on
                     // (SER)
-                    if let Some(uv) = ignore_status(crate::error::passed_on(
-                        vertexuse_unit::compute_uv_point(k, target, vu, true),
-                        k.fixes.fillet_statuses_pass_on,
-                    )?)? {
-                        *slot = uv;
-                    }
+                    *slot = vertexuse_unit::compute_uv_point(k, target, vu, true)?;
                     break;
                 }
             }
@@ -4191,10 +4179,7 @@ impl FilletBrep {
         } else {
             let mut uv = new_curve;
             // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                uv.convert_to_2d(),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            uv.convert_to_2d()?;
             uv_curve = Some(Curve::from(uv));
             curve_3d = None;
         }

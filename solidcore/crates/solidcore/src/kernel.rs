@@ -557,8 +557,6 @@ upstream_fixes! {
 #[allow(clippy::struct_excessive_bools)]
 #[non_exhaustive]
 pub struct UpstreamFixes {
-    /// `SmFilletGeom::Trim` returns the first curve/surface trim or interval-intersection error instead of dropping it and continuing with an unset interval (WR-604, #483). Earlier successful edits remain; off by default for pinned C++ parity.
-    pub fillet_trim_status: bool,
     /// `SmCurve::ComputeCrvsNormal` uses the sampled polygon's area vector, so a
     /// concave planar loop's normal follows its orientation and its taper drafts
     /// in the requested direction (WR-587, #1776). An open chain closes by its chord.
@@ -685,12 +683,6 @@ pub struct UpstreamFixes {
     /// its NURB-parameter points disagree with its NURB, and a negative-angle unbounded
     /// cone holds none of its points below the apex. Off by default for pinned parity.
     pub cone_unbounded_parameterized_as_nurb: bool,
-    /// The fillet executive, solvers, corners and geometry pass on the statuses SMLib
-    /// drops: a failed solver load, orientation, list edit, copy, trim, interval edit,
-    /// evaluation, knot edit or split-face update returns its error instead of the fillet
-    /// carrying on and reporting success (WR-661, #2009 group B; tangency-labs/smlib
-    /// 873c7c9, 66b02de, 9b7cd48). Off by default for pinned parity.
-    pub fillet_statuses_pass_on: bool,
     /// A boolean vertex takes its position from the intersection curve that crosses its edge most steeply (WR-410, #1059).
     pub boolean_vertex_by_best_crossing: bool,
     /// `SmProtoEdge::Resolve` splits a proto edge from a proto vertex back to itself whose curve ends find two of its vertex definitions at each other definition of that proto vertex lying on the curve (`DropPoint` within the larger of the two tolerances, farther than twice it from both ends), then resolves the proto vertex; upstream keeps the edge whole past that third vertex, a vertex of its own face, and the merge fails (`SM_ERR`; two equal tubes a hair apart end to end) (WR-579, #1517; the fork's tangency-labs/smlib@9eec159).

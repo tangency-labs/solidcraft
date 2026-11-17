@@ -171,7 +171,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_removal_takes_ring_fillets = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.join_touching_loops = true;

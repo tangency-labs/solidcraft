@@ -1,5 +1,4 @@
 [
-  "fillet_trim_status",
   "curve_loop_normal_from_area",
   "fillet_refuse_face_consuming_blends",
   "fillet_refuse_overlapping_bands",
@@ -24,7 +23,6 @@
   "ssi_proto_topology_statuses_pass_on",
   "cone_iso_circle_at_axial_height",
   "cone_unbounded_parameterized_as_nurb",
-  "fillet_statuses_pass_on",
   "boolean_vertex_by_best_crossing",
   "proto_edge_splits_at_captured_vertices",
   "classify_edge_interval",

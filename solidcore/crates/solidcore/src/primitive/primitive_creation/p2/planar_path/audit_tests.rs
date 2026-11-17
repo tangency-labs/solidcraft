@@ -270,17 +270,11 @@ fn inputs() -> (Vec<Curve>, Vec<Curve>) {
     let path = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::Z * 5.0).unwrap();
     (vec![profile.into()], vec![path.into()])
 }
-fn enable_audited_fixes(k: &mut Kernel) {
-    k.fixes.fillet_trim_status = true;
-}
 #[test]
 fn audit_483_planar_straight_sweep_keeps_valid_result_with_all_flags() {
     let (profiles, paths) = inputs();
-    for combined in [false, true] {
+    {
         let mut k = Kernel::default();
-        if combined {
-            enable_audited_fixes(&mut k);
-        }
         let mut a = FaultAccess::new(&mut k, ("", 0));
         let result = PrimitiveCreation::create_sweep_along_planar_path(
             &mut a,
@@ -314,7 +308,6 @@ fn audit_483_planar_failures_release_owned_bodies_and_stop() {
         ("manifold", 1),
     ] {
         let mut k = Kernel::default();
-        enable_audited_fixes(&mut k);
         let mut a = FaultAccess::new(&mut k, stage);
         let result = PrimitiveCreation::create_sweep_along_planar_path(
             &mut a,
@@ -376,7 +369,6 @@ fn audit_483_checked_sweep_supports_wr400_open_profiles() {
             .into(),
     ];
     let mut k = Kernel::default();
-    enable_audited_fixes(&mut k);
     let mut a = FaultAccess::new(&mut k, ("", 0));
     let id = PrimitiveCreation::create_sweep_along_planar_path(
         &mut a,
@@ -403,7 +395,6 @@ fn audit_483_union_failure_releases_every_owned_piece() {
             .into(),
     );
     let mut k = Kernel::default();
-    enable_audited_fixes(&mut k);
     let mut a = FaultAccess::new(&mut k, ("boolean_trees", 1));
     assert_eq!(
         PrimitiveCreation::create_sweep_along_planar_path(
@@ -453,7 +444,6 @@ fn audit_483_failed_mitre_search_is_returned() {
             .into(),
     ];
     let mut k = Kernel::default();
-    enable_audited_fixes(&mut k);
     let mut a = FaultAccess::new(&mut k, ("recover_search", 0));
     let result = PrimitiveCreation::create_sweep_along_planar_path(
         &mut a,

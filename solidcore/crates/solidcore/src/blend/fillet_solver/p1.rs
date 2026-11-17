@@ -111,8 +111,8 @@
 //!   is no recursion.
 //!
 //! An edge-curve copy that cannot be trimmed is no trimmed curve, as the fork does
-//! (66b02de; #483, #2009). With `Kernel::fixes.fillet_statuses_pass_on` the statuses
-//! tangency-labs/smlib 66b02de passes on (`SER`) are returned (WR-661).
+//! (66b02de; #483, #2009). The statuses
+//! tangency-labs/smlib 66b02de passes on (`SER`) are returned (WR-661); upstream drops them.
 //!
 
 use crate::blend::fillet_classification::{FilletClassObject, LegacyClassificationObjects};
@@ -1567,12 +1567,9 @@ impl FilletSolver {
         // FG::SetOffsetSurface() deletes what's there; its status is not checked
         let off_surf = geom_offset_surface_copy(k, self, pseudo, fillet_geom, other_idx)?;
         // fork 66b02de passes this on (SER)
-        ignore_status(crate::error::passed_on(
-            pseudo
-                .geom_mut(new_fillet_geom)?
-                .set_offset_surface(other_idx, off_surf),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        pseudo
+            .geom_mut(new_fillet_geom)?
+            .set_offset_surface(other_idx, off_surf)?;
 
         if which_end == 0 {
             let rail = pseudo
@@ -1585,19 +1582,13 @@ impl FilletSolver {
 
             let off_surf = geom_offset_surface_copy(k, self, pseudo, fillet_geom, rail_idx)?;
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                pseudo
-                    .geom_mut(new_fillet_geom)?
-                    .set_offset_surface(rail_idx, off_surf),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            pseudo
+                .geom_mut(new_fillet_geom)?
+                .set_offset_surface(rail_idx, off_surf)?;
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                pseudo
-                    .geom_mut(fillet_geom)?
-                    .set_offset_surface(rail_idx, Some(adj_off_surf)),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            pseudo
+                .geom_mut(fillet_geom)?
+                .set_offset_surface(rail_idx, Some(adj_off_surf))?;
         } else {
             // New FG becomes rollover, on adjacent face.
             pseudo
@@ -1612,12 +1603,9 @@ impl FilletSolver {
                 .set_original_face(Some(adj_face));
 
             // fork 66b02de passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                pseudo
-                    .geom_mut(new_fillet_geom)?
-                    .set_offset_surface(rail_idx, Some(adj_off_surf)),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            pseudo
+                .geom_mut(new_fillet_geom)?
+                .set_offset_surface(rail_idx, Some(adj_off_surf))?;
         }
         self.fillet_geoms.push(new_fillet_geom);
 
@@ -2429,26 +2417,22 @@ fn base_id(s: &FilletSolver, rail: usize) -> Result<Option<SurfaceId>> {
     Ok(s.surface(rail)?.map(|slot| slot.surface.base_id))
 }
 
-/// `pOffSurf->Copy(ctx, pSurf)` with its status ignored, as upstream: `None` for no
-/// surface or a failed copy (`pSurf` stays `NULL`). The copy shares the base surface
+/// `pOffSurf->Copy(ctx, pSurf)`: `None` for no surface; a failed copy is returned (upstream
+/// ignores it and leaves `pSurf` `NULL`; the fork passes it on, WR-661). The copy shares the base surface
 /// (the solvers' offsets do not own theirs), so it keeps the base identity.
 fn copy_offset_surface(k: &Kernel, s: Option<&OffsetSurfaceSlot>) -> Result<Option<OffsetSurface>> {
     let Some(slot) = s else {
         return Ok(None);
     };
     // fork 66b02de passes this on (SER)
-    Ok(ignored(crate::error::passed_on(
-        slot.surface.surface.copy(k),
-        k.fixes.fillet_statuses_pass_on,
-    )?)?
-    .map(|surface| OffsetSurface {
-        surface,
+    Ok(Some(OffsetSurface {
+        surface: slot.surface.surface.copy(k)?,
         base_id: slot.surface.base_id,
     }))
 }
 
-/// `pFG->GetOffsetSurface(rail)` copied with `Copy(m_crContext, pSurf)` (status
-/// ignored): `None` for no surface or a failed copy. The geometry's own surface, else
+/// `pFG->GetOffsetSurface(rail)` copied with `Copy(m_crContext, pSurf)`: `None`
+/// for no surface; a failed copy is returned (upstream ignores it; WR-661). The geometry's own surface, else
 /// the solver's (`solver`, the geometry's `GetFilletSolver()`).
 fn geom_offset_surface_copy(
     k: &Kernel,
@@ -2464,12 +2448,8 @@ fn geom_offset_surface_copy(
         return Ok(None);
     };
     // fork 66b02de passes this on (SER)
-    Ok(ignored(crate::error::passed_on(
-        orig.surface.copy(k),
-        k.fixes.fillet_statuses_pass_on,
-    )?)?
-    .map(|surface| OffsetSurface {
-        surface,
+    Ok(Some(OffsetSurface {
+        surface: orig.surface.copy(k)?,
         base_id: orig.base_id,
     }))
 }

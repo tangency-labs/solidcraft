@@ -2382,9 +2382,7 @@ pub(crate) use loader::{loader_rust, LoaderScript};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore::blend::fillet_executive::p2::{
-        with_temporary_radius_change, with_temporary_radius_change_with_fixes, TemporaryRadiusChange,
-    };
+    use solidcore::blend::fillet_executive::p2::{with_temporary_radius_change, TemporaryRadiusChange};
 
     #[test]
     fn temporary_radius_setup_error_never_enters_the_filleting_body() {
@@ -2410,26 +2408,6 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, expected);
         assert!(!default_body_called);
-        let fixes = solidcore::kernel::UpstreamFixes::default();
-        let error =
-            TemporaryRadiusChange::new_with_fixes(&mut access, solver, 0, side, &fixes).unwrap_err();
-        assert_eq!(error, expected);
-
-        let mut body_called = false;
-        let error = with_temporary_radius_change_with_fixes(
-            &mut access,
-            solver,
-            0,
-            side,
-            &fixes,
-            |_| {
-                body_called = true;
-                Ok(())
-            },
-        )
-        .unwrap_err();
-        assert_eq!(error, expected);
-        assert!(!body_called);
         assert_eq!(access.laws.len(), 1);
         assert!(matches!(
             access.laws[0].kind,
