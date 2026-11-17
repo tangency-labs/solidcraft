@@ -1719,9 +1719,12 @@ fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
             if body.body.is_mesh() {
                 return Err(bad(CMD, format!("`{name}` is a mesh body: sharp edges are found on solid bodies")));
             }
+            if body.is_surface() {
+                return Err(bad(CMD, format!("`{name}` is a surface body: sharp edges are found on solid bodies")));
+            }
             vec![body]
         }
-        None => state.bodies.iter().filter(|b| !b.body.is_mesh() && s.body_visible(&b.name)).collect(),
+        None => state.bodies.iter().filter(|b| !b.body.is_mesh() && !b.is_surface() && s.body_visible(&b.name)).collect(),
     };
     // The normal angle is judged on the faces' exact surfaces at stations along each edge's own
     // curve (the continuity analysis's measure), never on the mesh.
@@ -1741,7 +1744,15 @@ fn select_sharp_edges(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
-    select_set(s, &json!({"items": items, "add": request.add.unwrap_or(false)}))
+    let add = request.add.unwrap_or(false);
+    if add {
+        // An edge already selected is the same edge whatever point it was picked at: the items'
+        // points are the analysis's stations, not the user's.
+        let picked =
+            |body: &str, index: usize| s.selection.iter().any(|x| matches!(x, Sel::Edge { body: b, index: i, .. } if b == body && *i == index));
+        items.retain(|x| !matches!(x, Sel::Edge { body, index, .. } if picked(body, *index)));
+    }
+    select_set(s, &json!({"items": items, "add": add}))
 }
 
 /// In an open sketch, every curve of it (construction ones too) and every point of it on no

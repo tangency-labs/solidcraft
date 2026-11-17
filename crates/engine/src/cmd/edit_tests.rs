@@ -1639,7 +1639,6 @@ fn select_sharp_edges_takes_creases_over_the_angle_and_never_a_rounds_tangent_ed
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":20,"width":20,"height":20,"body_name":"Block"}));
     run(&mut s, "solid.fillet", json!({"edges": [[20, 10, 20]], "radius": 4}));
-    let history = (s.undo.len(), s.redo.len());
     assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 30}))["selected"], 13);
     for sel in &s.selection {
         let Sel::Edge { body, point, .. } = sel else { panic!("not an edge: {sel:?}") };
@@ -1652,8 +1651,22 @@ fn select_sharp_edges_takes_creases_over_the_angle_and_never_a_rounds_tangent_ed
     // With no angle (command search, a key, the menu) it takes 30°.
     assert_eq!(run(&mut s, "select.sharp_edges", json!({}))["selected"], 13);
     assert_eq!(run(&mut s, "select.sharp_edges", Value::Null)["selected"], 13);
+    // An edge already picked, at another point than the analysis's, is not added twice.
+    let Some(Sel::Edge { body, index, .. }) = s.selection.first().cloned() else { panic!("no edge: {:?}", s.selection) };
+    s.selection = vec![Sel::Edge { body, index, point: Default::default() }];
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"add": true}))["selected"], 13);
     run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
     assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 45, "add": true}))["selected"], 14);
+    // A surface body (an open tube with square corners) is not searched, and refused by name.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Square"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [50, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "Square", "distance": "10 mm", "name": "Tube", "body_name": "Tube"}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({}))["selected"], 13);
+    assert!(s.execute("select.sharp_edges", &json!({"body": "Tube"})).is_err());
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
+    assert_eq!(run(&mut s, "select.sharp_edges", json!({"angle_deg": 45, "add": true}))["selected"], 14);
+    let history = (s.undo.len(), s.redo.len());
     let selected = s.selection.clone();
     for params in [
         json!({"angle_deg": 0}),
