@@ -253,7 +253,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_chamfer_cone_on_arc = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.fillet_knife_edge_rounds = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
     k.fixes.fillet_patch_keeps_fillet_edges = true;
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
