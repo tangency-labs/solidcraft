@@ -2864,6 +2864,124 @@ fn piece_dist(p: &Piece, q: Vec2) -> f64 {
     }
 }
 
+/// A line or an arc of a chain as the chain walks it, from `from` to `to`; an arc turns round
+/// `c` anticlockwise when `ccw`.
+#[derive(Clone, Copy)]
+enum Walked {
+    Line { from: Vec2, to: Vec2 },
+    Arc { c: Vec2, from: Vec2, to: Vec2, ccw: bool },
+}
+
+fn cross2(u: Vec2, v: Vec2) -> f64 {
+    u.x * v.y - u.y * v.x
+}
+
+impl Walked {
+    fn of(sk: &Sketch, curve: usize, forward: bool) -> Option<Walked> {
+        match sk.curves.get(curve)?.kind {
+            CurveKind::Line { a, b } => {
+                let (a, b) = (sk.point(a)?, sk.point(b)?);
+                Some(if forward { Walked::Line { from: a, to: b } } else { Walked::Line { from: b, to: a } })
+            }
+            CurveKind::Arc { c, a, b } => {
+                let (c, a, b) = (sk.point(c)?, sk.point(a)?, sk.point(b)?);
+                Some(if forward { Walked::Arc { c, from: a, to: b, ccw: true } } else { Walked::Arc { c, from: b, to: a, ccw: false } })
+            }
+            _ => None,
+        }
+    }
+    fn ends(&self) -> (Vec2, Vec2) {
+        match *self {
+            Walked::Line { from, to } | Walked::Arc { from, to, .. } => (from, to),
+        }
+    }
+    /// An arc's centre, radius, and its anticlockwise start and sweep (the sketch's arc, `a` to
+    /// `b`, whichever way the chain walks it).
+    fn circle(&self) -> Option<(Vec2, f64, Vec2, f64)> {
+        let Walked::Arc { c, from, to, ccw } = *self else { return None };
+        let (a, b) = if ccw { (from, to) } else { (to, from) };
+        Some((c, (a - c).len(), a, ((b - c).angle() - (a - c).angle()).rem_euclid(TAU)))
+    }
+    /// The point of the piece nearest `q`, and the way the chain runs there.
+    fn nearest(&self, q: Vec2) -> (Vec2, Vec2) {
+        match *self {
+            Walked::Line { from, to } => {
+                let along = to - from;
+                let t = if along.len2() > 0.0 { ((q - from).dot(along) / along.len2()).clamp(0.0, 1.0) } else { 0.0 };
+                (from + along * t, along)
+            }
+            Walked::Arc { c, from, to, ccw } => {
+                let (centre, r, a, sweep) = self.circle().unwrap_or((c, 0.0, from, 0.0));
+                let w = q - centre;
+                let on_span = w.len2() > 0.0 && (w.angle() - (a - centre).angle()).rem_euclid(TAU) <= sweep;
+                let p = if on_span {
+                    centre + w * (r / w.len())
+                } else if q.dist(from) <= q.dist(to) {
+                    from
+                } else {
+                    to
+                };
+                // Anticlockwise the way on is the radius turned a quarter left.
+                let radial = p - centre;
+                let tangent = Vec2::new(-radial.y, radial.x);
+                (p, if ccw { tangent } else { tangent * -1.0 })
+            }
+        }
+    }
+}
+
+/// Whether `q` is on the left of a chain of lines and arcs, as it is walked, or `None` when
+/// the chain has another kind of curve. A closed chain is a loop, so the side is inside or
+/// outside it: the loop's winding number round `q`, taken on the polygon of its pieces' chords
+/// and corrected by each arc's segment (the region between an arc and its chord, which the arc
+/// winds round once its own way), is positive inside an anticlockwise loop and negative inside a
+/// clockwise one; outside, the loop's signed area gives its way round. An open chain has no
+/// inside: `q` is on the side of the piece whose nearest point to it is nearest, read off the
+/// way the chain runs at that point. Two pieces as near meet there, tangent on a smooth chain,
+/// so either gives the same side.
+fn chain_side(sk: &Sketch, order: &[(usize, bool)], closed: bool, q: Vec2) -> Option<bool> {
+    let pieces = order.iter().map(|(i, f)| Walked::of(sk, *i, *f)).collect::<Option<Vec<_>>>()?;
+    if !closed {
+        let (mut best, mut left) = (f64::INFINITY, None);
+        for piece in &pieces {
+            let (p, along) = piece.nearest(q);
+            let d = q.dist(p);
+            if d < best {
+                (best, left) = (d, Some(cross2(along, q - p) >= 0.0));
+            }
+        }
+        return left;
+    }
+    // The chord polygon, each piece's start joined to its end and its end to the next start.
+    let mut corners = Vec::with_capacity(pieces.len() * 2);
+    for piece in &pieces {
+        let (from, to) = piece.ends();
+        corners.extend([from, to]);
+    }
+    let (mut winding, mut area2) = (0i64, 0.0);
+    for (k, p0) in corners.iter().enumerate() {
+        let p1 = corners.get((k + 1) % corners.len()).copied().unwrap_or(*p0);
+        area2 += cross2(*p0, p1);
+        let turn = cross2(p1 - *p0, q - *p0);
+        if p0.y <= q.y && p1.y > q.y && turn > 0.0 {
+            winding += 1;
+        } else if p0.y > q.y && p1.y <= q.y && turn < 0.0 {
+            winding -= 1;
+        }
+    }
+    for piece in &pieces {
+        let (Walked::Arc { from, to, ccw, .. }, Some((c, r, _, sweep))) = (*piece, piece.circle()) else { continue };
+        let way = if ccw { 1.0 } else { -1.0 };
+        area2 += way * r * r * (sweep - sweep.sin());
+        // Walked anticlockwise an arc bulges to the right of its chord, clockwise to the left.
+        let beyond_chord = cross2(to - from, q - from) * way < 0.0;
+        if q.dist(c) < r && beyond_chord {
+            winding += if ccw { 1 } else { -1 };
+        }
+    }
+    Some(if winding != 0 { winding > 0 } else { area2 < 0.0 })
+}
+
 /// One side of an offset. The curves created at the signed distance, the parallel constraints
 /// added with them, and the association when the boundary carries an offset topology.
 struct Side {
@@ -3135,25 +3253,11 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
         Some(q) => {
             // An arc's own circle only says which side of the whole chain `q` is on when the
             // arc is alone: a fillet's circle is small, and a point in the middle of the
-            // outline is outside it though on the arc's inner side (#18606). In a chain, ask the
-            // curve of it nearest `q`, a line before an arc where they are as near (the two
-            // meet tangent, so the line's half-plane says the same without the trap).
-            let (judge, forward) = if order.len() > 1 {
-                let near = |i: usize, f: bool| offset_piece(sk, i, f, 0.0).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX);
-                let is_line = |i: usize| matches!(sk.curves.get(i).map(|c| &c.kind), Some(CurveKind::Line { .. }));
-                order.iter().copied().fold(None::<(usize, bool, f64)>, |best, (i, f)| {
-                    let dist = near(i, f);
-                    match best {
-                        Some((bi, _, bd)) if dist > bd - 1e-9 && !(dist <= bd + 1e-9 && is_line(i) && !is_line(bi)) => best,
-                        _ => Some((i, f, dist)),
-                    }
-                })
-                .map(|(i, f, _)| (i, f))
-                .unwrap_or((first, true))
-            } else {
-                (first, order.iter().find(|x| x.0 == first).is_none_or(|x| x.1))
-            };
-            let left = match sk.curves.get(judge).map(|c| c.kind.clone()) {
+            // outline is outside it though on the arc's inner side (#18606). A chain of lines
+            // and arcs answers for itself ([`chain_side`]); other chains ask the first curve.
+            let chained = if order.len() > 1 { chain_side(sk, &order, closed, q) } else { None };
+            let forward = order.iter().find(|x| x.0 == first).is_none_or(|x| x.1);
+            let left = chained.or_else(|| match sk.curves.get(first).map(|c| c.kind.clone()) {
                 Some(CurveKind::Line { a, b }) => {
                     let (a, b) = (sk.point(a).unwrap_or_default(), sk.point(b).unwrap_or_default());
                     let (from, along) = if forward { (a, b - a) } else { (b, a - b) };
@@ -3165,9 +3269,9 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
                     Some((q.dist(c) <= c.dist(a)) == forward)
                 }
                 _ => None,
-            };
+            });
             let toward = left.unwrap_or_else(|| {
-                let dist = |dd: f64| offset_piece(sk, judge, forward, dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX);
+                let dist = |dd: f64| offset_piece(sk, first, forward, dd).map(|pc| piece_dist(&pc, q)).unwrap_or(f64::MAX);
                 dist(d0.abs()) <= dist(-d0.abs())
             });
             if toward { d0.abs() } else { -d0.abs() }

@@ -3457,6 +3457,24 @@ fn offset_side_of_a_chain_starting_with_a_fillet_arc_means_the_outline_not_the_a
     assert!(box_is(&sk, &made, [-2.0, -2.0], [42.0, 32.0]), "outward: {:?}", bounds(&sk, &made));
 }
 
+/// An open L of a line, a fillet arc and a line: a point on the inner side but beyond the arc's
+/// circle is still inside the corner, read off the pieces nearest it (#18606).
+#[test]
+fn offset_side_of_an_open_chain_is_read_off_the_nearest_piece() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.arc.center_point", json!({"center": [5, 5], "start": [0, 5], "end": [5, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 5]]}));
+    run(&mut s, "sketch.line", json!({"points": [[5, 0], [20, 0]]}));
+    let inward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [11, 11]}));
+    let sk = sketch(&s);
+    let made = ids(&inward["curves"]);
+    assert!(box_is(&sk, &made, [2.0, 2.0], [20.0, 20.0]), "inward: {:?}", bounds(&sk, &made));
+    let outward = run(&mut s, "sketch.offset", json!({"curves": ["a1"], "distance": 2, "side": [-3, -3]}));
+    let sk = sketch(&s);
+    let made = ids(&outward["curves"]);
+    assert!(box_is(&sk, &made, [-2.0, -2.0], [20.0, 20.0]), "outward: {:?}", bounds(&sk, &made));
+}
+
 #[test]
 fn offset_instances_count_must_be_a_whole_number_within_the_cap() {
     let mut s = new_sketch();
