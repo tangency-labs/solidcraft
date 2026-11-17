@@ -7,10 +7,11 @@ use serde_json::Value;
 use solidcore_record::Loop2;
 use solidcore_record::living_hinge::HingeClip;
 use solidcraft_doc::expr::Kind;
-use solidcraft_doc::{BodyName, Expr, FeatureKind, ProfileSel, SketchId};
+use solidcraft_doc::{BodyName, Expr, FeatureKind, MAX_CUT_SLOTS, ProfileSel, SketchId};
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr, default_extrude_profiles, feature_sketch, point_param, profiles};
+use super::help_text::help_with_cap;
 use crate::params::{bad, expr, req_expr, string_list};
 use crate::schema::living_hinge::{LivingHingeParams, LivingHingeResult};
 use crate::schema::{TypedContract, output_schema_for};
@@ -25,7 +26,11 @@ const MAX_SIZE: f64 = 1e9;
 /// A slot's width when none is given (mm).
 const DEFAULT_SLOT_WIDTH: f64 = 0.2;
 
-const HELP: &str = "slot_length: expr (a slot's length tip to tip, as cut); bridge: expr (the material between two slots in one row); row_spacing: expr (centre line to centre line between rows); slot_width?: expr (the cut's width, about a laser's kerf; default 0.2 mm); angle?: expr (the slots' direction, which is the bend axis, from the sketch's X axis; default 0); anchor?: [x,y,z] (a slot's centre, projected onto the sketch plane; default: the pattern centred on the area); clip?: run_out|shorten|whole (slots the edges cross: every other row runs out through the plate's edge and the rest are shortened; all shortened, leaving a solid border; or only whole slots; default run_out); margin?: expr (the least material between a slot's end and every edge of the area and its keep-outs; default 0); sketch?: id|name (default: active or last sketch; its closed profiles hold the area: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body] (the plate); name?. Cuts through the plate in one operation; too many slots are refused with their count. Not for sheet metal yet. The faces cut have no stable names yet";
+const HELP_HEAD: &str = "slot_length: expr (a slot's length tip to tip, as cut); bridge: expr (the material between two slots in one row); row_spacing: expr (centre line to centre line between rows); slot_width?: expr (the cut's width, about a laser's kerf; default 0.2 mm); angle?: expr (the slots' direction, which is the bend axis, from the sketch's X axis; default 0); anchor?: [x,y,z] (a slot's centre, projected onto the sketch plane; default: the pattern centred on the area); clip?: run_out|shorten|whole (slots the edges cross: every other row runs out through the plate's edge and the rest are shortened; all shortened, leaving a solid border; or only whole slots; default run_out); margin?: expr (the least material between a slot's end and every edge of the area and its keep-outs; default 0); sketch?: id|name (default: active or last sketch; its closed profiles hold the area: a loop inside another is a keep-out); profiles?: as solid.extrude; targets?: [body] (the plate; default: the one body with a face in the sketch's plane under the area, found when the feature is made and stored in it); name?. Cuts through the plate, at most ";
+const HELP_TAIL: &str =
+    " slots in one operation (more are refused with their count). Not for sheet metal yet. The faces cut have no stable names yet";
+/// The parameter help, with the cap read from [`MAX_CUT_SLOTS`] so the text cannot drift from the limit.
+const HELP: &str = help_with_cap!(HELP_HEAD, MAX_CUT_SLOTS, HELP_TAIL);
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.living_hinge", "Living Hinge", crate::checked!("solid.living_hinge", living_hinge))
     .icon("perforate")

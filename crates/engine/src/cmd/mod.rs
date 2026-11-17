@@ -43,6 +43,7 @@ mod edit;
 mod face;
 mod features;
 mod features_more;
+mod help_text;
 mod join_pieces;
 mod living_hinge;
 pub(crate) use component::follow_expressed_moves;
