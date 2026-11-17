@@ -44,6 +44,7 @@ mod framing;
 mod history;
 mod history_group;
 pub mod icons;
+mod keyboard_focus;
 mod layout;
 mod look_chain;
 pub mod menu;
@@ -109,6 +110,7 @@ pub use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
 pub use framing::*;
 pub use history::*;
 pub use history_group::*;
+pub use keyboard_focus::*;
 pub use layout::*;
 pub use look_chain::{LookStep, look_chain};
 pub use menu::{Item, ItemIcon, LIST_W};
@@ -120,8 +122,8 @@ pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub use navigation_menu::*;
 pub use navigation_settings::*;
 pub use panel::{
-    ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
-    within,
+    ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, StackCard, StackSlot, WindowPage, WorkspaceOptions,
+    inspector_header, panel_header_hover, within,
 };
 pub use panel::{DialogButtons, Window};
 #[cfg(any(test, feature = "test-support"))]

@@ -1,7 +1,8 @@
 //! One-shot plugins share the engine's command surface, file scope and undo history.
 use super::CommandSpec;
 use crate::schema::plugin::{
-    InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams, MeshResult, RunParams, RunResult,
+    ImportParams, ImportedDesign, InspectParams, InspectResult, InstallParams, InstallResult, ListParams, ListResult, ListedPlugin, MeshParams,
+    MeshResult, RemoveParams, RemoveResult, RunParams, RunResult,
 };
 use crate::{
     Result, Session, checked,
@@ -12,6 +13,9 @@ use crate::{
 use serde_json::Value;
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("file.import", "Import with Plugin", checked!("file.import", import)).icon("import").noundo()
+        .contract(&TypedContract::<ImportParams>::new()).output(output_schema_for::<ImportedDesign>)
+        .params("path, format?: installed importer plugin_id.entry (default: the one claiming the file's extension; see plugin.list importers), options?: the importer's declared options; opens the file as a new, unsaved design made by the importer plugin and returns its loss_report; never opens a dialog"),
     CommandSpec::new("model.mesh", "Read Body Mesh", checked!("model.mesh", mesh)).icon("inspect").noundo().read_only()
         .contract(&TypedContract::<MeshParams>::new()).output(output_schema_for::<MeshResult>)
         .params("body, tolerance?: finite positive chord tolerance in mm (default 0.05); evaluated component-local mesh, at most 8192 vertices and 16384 triangles; no files or model changes"),
@@ -20,10 +24,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("path: plugin package folder; returns inert manifest and approval hash covering manifest and component; runs no plugin code"),
     CommandSpec::new("plugin.install", "Install Plugin", checked!("plugin.install", install)).icon("import").noundo().doc_only()
         .contract(&TypedContract::<InstallParams>::new()).output(output_schema_for::<InstallResult>)
-        .params("path: plugin .zip, replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool; checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
+        .params("path: plugin .zip, approval?: exact hash from a reviewed dry run (mismatch refuses installation), archive?: exact .zip hash from that dry run (any changed file refuses installation), replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?: exactly the manifest's limits.memory_mib, allowed above the user's ceiling for this package, input_folder?: bool, only for an importer that asks for it}; validates requested approvals and checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
     CommandSpec::new("plugin.list", "List Plugins", checked!("plugin.list", list)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<ListParams>::new()).output(output_schema_for::<ListResult>)
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
+    CommandSpec::new("plugin.remove", "Remove Plugin", checked!("plugin.remove", remove)).icon("delete").noundo().doc_only()
+        .contract(&TypedContract::<RemoveParams>::new()).output(output_schema_for::<RemoveResult>)
+        .params("id: installed plugin id; removes its folder and stored grants without executing code"),
     CommandSpec::new("plugin.run", "Run Plugin", checked!("plugin.run", run)).icon("play")
         .contract(&TypedContract::<RunParams>::new()).output(output_schema_for::<RunResult>)
         .params("path, approval: exact hash from plugin.inspect after reviewing permissions, entry, params?: JSON; explicit native Wasm component execution, one undo step; errors discard all edits"),
@@ -32,11 +39,12 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let p: InspectParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.inspect", e.to_string()))?;
     let package = plugin::read_package(&p.path)?;
     s.plugin_state.packages.insert(package.manifest.id.clone(), p.path.clone());
-    let limits_error = package.manifest.runtime.as_ref().and_then(|r| s.plugin_limits.check(&r.limits).err()).map(|e| e.to_string());
+    let limits = plugin::host_limits_for(s, &package.manifest.id, &package.approval);
+    let limits_error = package.manifest.runtime.as_ref().and_then(|r| limits.check(&r.limits).err()).map(|e| e.to_string());
     serde_json::to_value(InspectResult {
         manifest: package.manifest,
         approval: package.approval,
-        host_limits: s.plugin_limits,
+        host_limits: limits,
         within_host_limits: limits_error.is_none(),
         limits_error,
         param_warnings: vec![],
@@ -45,6 +53,16 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn install(s: &mut Session, p: &Value) -> Result<Value> {
     use plugin::install::{InstallError, MAX_ZIP_BYTES, unpack};
+    // Serde also accepts sequences for structs; approvals must use the declared object shape.
+    if !p.is_object() {
+        return Err(bad("plugin.install", "parameters must be an object"));
+    }
+    if p.get("approve").is_some_and(|approve| !approve.is_null() && !approve.is_object()) {
+        return Err(bad("plugin.install", "approve must be an object"));
+    }
+    if p.pointer("/approve/folders").and_then(Value::as_array).is_some_and(|folders| folders.iter().any(|folder| !folder.is_object())) {
+        return Err(bad("plugin.install", "approved folders must be objects"));
+    }
     let p: InstallParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.install", e.to_string()))?;
     let failed = |e: InstallError| match e {
         InstallError::Manifest(e) => crate::EngineError::Plugin(e),
@@ -53,8 +71,29 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
     let dir = s.plugin_state.plugins_dir().ok_or_else(|| failed(InstallError::NoPluginsFolder))?;
     let zip = solidcraft_io::vfs::read(&p.path, MAX_ZIP_BYTES).map_err(|e| crate::EngineError::Other(format!("could not read {}: {e}", p.path)))?;
     let plugin = unpack(&zip).map_err(failed)?;
+    if p.approval.as_ref().is_some_and(|approval| approval != &plugin.approval) {
+        return Err(craft_plugin::HostError::InvalidInput {
+            field: "approval".into(),
+            reason: "does not match this manifest and component; review the package again".into(),
+        }
+        .into());
+    }
+    if p.archive.as_ref().is_some_and(|archive| archive != &plugin.archive) {
+        return Err(craft_plugin::HostError::InvalidInput {
+            field: "archive".into(),
+            reason: "the .zip changed since it was reviewed; review the package again".into(),
+        }
+        .into());
+    }
     let manifest = &plugin.manifest;
     let folder = dir.join(&manifest.id);
+    // Validate a prospective state before publishing any files. Omitted approval resets grants.
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut approved_state = {
+        let mut scratch = s.scratch();
+        plugin::store_grants(&mut scratch, &plugin, p.approve.map(Into::into).unwrap_or_default())?;
+        scratch.plugin_state
+    };
     #[cfg(not(target_arch = "wasm32"))]
     let replaces = plugin::install::installed(&dir, &manifest.id).map(|(name, version)| format!("{name} {version}").trim().to_string());
     #[cfg(target_arch = "wasm32")]
@@ -62,22 +101,31 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
     let installed = !p.dry_run;
     if installed {
         // The plugins folder is the app's own, but a scoped caller must have been given it.
-        solidcraft_io::vfs::check(&folder.to_string_lossy()).map_err(|e| crate::EngineError::Other(e.to_string()))?;
+        solidcraft_io::vfs::check_new(&folder.to_string_lossy()).map_err(|e| crate::EngineError::Other(e.to_string()))?;
         #[cfg(not(target_arch = "wasm32"))]
-        plugin::install::install(&plugin, &dir, p.replace).map_err(failed)?;
+        {
+            plugin::install::install(&plugin, &dir, p.replace).map_err(failed)?;
+            std::mem::swap(&mut s.plugin_state.grants, &mut approved_state.grants);
+        }
         // Its entries resolve at once, as an inspected package's do.
         s.plugin_state.packages.insert(manifest.id.clone(), folder.to_string_lossy().into_owned());
     }
     let runtime = manifest.runtime.as_ref();
     serde_json::to_value(InstallResult {
+        approval: plugin.approval.clone(),
+        archive: plugin.archive.clone(),
         id: manifest.id.clone(),
         name: manifest.name.clone(),
         version: manifest.version.clone(),
         description: manifest.description.clone(),
         capabilities: manifest.capabilities.clone(),
         permissions: runtime.map(|r| r.permissions.clone()).unwrap_or_default(),
+        limits: runtime.map(|r| r.limits.clone()),
+        host_limits: s.plugin_limits,
         commands: runtime.map(|r| r.commands.iter().cloned().collect()).unwrap_or_default(),
         entries: runtime.map(|r| r.entries.iter().map(|e| format!("{}.{}", manifest.id, e.name)).collect()).unwrap_or_default(),
+        entry_points: runtime.map(|r| r.entries.clone()).unwrap_or_default(),
+        opens: runtime.map(|r| r.entries.iter().flat_map(|e| e.extensions.iter().cloned()).collect()).unwrap_or_default(),
         replaces,
         installed,
         folder: folder.to_string_lossy().into_owned(),
@@ -138,10 +186,35 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
                 .manifest
                 .runtime
                 .as_ref()
-                .map(|r| r.entries.iter().map(|e| format!("{}.{}", package.manifest.id, e.name)).collect())
+                .map(|r| {
+                    r.entries.iter().filter(|e| e.kind == plugin::EntryKind::Command).map(|e| format!("{}.{}", package.manifest.id, e.name)).collect()
+                })
                 .unwrap_or_default();
             plugins.push(ListedPlugin { disabled: s.disabled_plugins.contains(&package.manifest.id), manifest: package.manifest, commands });
         }
     }
-    serde_json::to_value(ListResult { plugins, param_warnings: vec![] }).map_err(|e| bad("plugin.list", e.to_string()))
+    serde_json::to_value(ListResult { plugins, importers: plugin::describe_importers(s), param_warnings: vec![] })
+        .map_err(|e| bad("plugin.list", e.to_string()))
+}
+
+fn import(s: &mut Session, p: &Value) -> Result<Value> {
+    let p: ImportParams = serde_json::from_value(p.clone()).map_err(|e| bad("file.import", e.to_string()))?;
+    let path = p.path.0;
+    let importer = plugin::importer_for(s, &path, p.format.as_deref())?
+        .ok_or_else(|| bad("file.import", "no installed, enabled importer plugin reads this file"))?;
+    let imported = plugin::import_file(s, &importer, &path, &p.options)?;
+    serde_json::to_value(imported).map_err(|e| bad("file.import", e.to_string()))
+}
+
+fn remove(_s: &mut Session, p: &Value) -> Result<Value> {
+    let p: RemoveParams = serde_json::from_value(p.clone()).map_err(|e| bad("plugin.remove", e.to_string()))?;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        serde_json::to_value(plugin::remove(_s, &p.id)?).map_err(|e| bad("plugin.remove", e.to_string()))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = p;
+        Err(bad("plugin.remove", "plugin management is desktop only"))
+    }
 }

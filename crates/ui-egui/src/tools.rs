@@ -102,9 +102,16 @@ pub struct Tool {
     /// The Line tool's chain, which a rest on its last point switches to tangent arcs and back
     /// (#9489).
     pub chain: crate::sketch_line_arc::LineChain,
-    /// The construction line tools' Construction/Normal switch (#10258): a segment with a length
-    /// becomes a normal sketch line. Each start of a tool begins at Construction.
-    pub normal: bool,
+    /// A construction line tool's line type (#10258, #15066), numbered as the Sketch Palette's
+    /// Line Type icons: 0 normal, 1 construction, 2 centerline, 3 infinite. Infinite draws an
+    /// infinite construction line in one click, or a construction segment once a length is
+    /// typed; the others always draw a segment. A tool starts at the type last chosen, so
+    /// switching between the construction line methods keeps it.
+    pub line_type: u8,
+    /// A construction line tool works as before #15066 (`construction_line_classic`): the
+    /// Construction/Normal switch under the Length box sets `line_type`, and only a typed length
+    /// makes a segment. Kept in step with the preference while the tool runs.
+    pub classic: bool,
 }
 
 impl Tool {
@@ -158,7 +165,8 @@ impl Tool {
             arc_turn: 0.0,
             lined: Vec::new(),
             chain: Default::default(),
-            normal: false,
+            line_type: 3,
+            classic: false,
         })
     }
 }
@@ -198,6 +206,10 @@ fn xy(p: &(Vec2, Option<String>)) -> Value {
 }
 
 /// Shift exposes a line midpoint as a point target, only in the alignment tool.
+/// How near (screen pixels) a Coincident pick on a model edge must be to the edge's middle to
+/// take that middle, as near as a sketch line's middle is offered.
+const EDGE_MIDDLE_PX: f32 = 8.0;
+
 fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(Vec2, String)> {
     let sid = app.session.active_sketch?;
     let state = crate::open_meshing::session_world(&app.session);
@@ -349,10 +361,16 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
             // reference): the command projects it, so any body can be constrained to, a mirrored
             // copy too (#6348). Projected geometry is already fixed, so Fix takes sketch entities.
+            // Coincident at an edge's middle takes that middle (#17920), as at a sketch line's.
             let model = || {
                 hits.iter()
                     .filter(|h| tool.cmd != "sketch.constraint.fix" && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. }))
-                    .find_map(|h| crate::sketch_tools::model_ref(app, h))
+                    .find_map(|h| {
+                        let r = crate::sketch_tools::model_ref(app, h)?;
+                        let middle = matches!(h, Hit::Edge { mid, .. } if tool.cmd == "sketch.constraint.coincident"
+                            && proj.to_screen(*mid).is_some_and(|at| at.distance(pos) <= EDGE_MIDDLE_PX));
+                        Some(if middle { json!({"midpoint": r}) } else { r })
+                    })
                     .map(|r| r.to_string())
             };
             if let Some(id) = entity.or_else(model) {
@@ -879,20 +897,31 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
 
 /// An origin axis as a pick of `tool`, or None when the tool does not take it. Symmetry's third
 /// pick may be an axis along the sketch's own x or y (#1075), which the command names `x` / `y`;
-/// either Coincident pick may be any origin axis: the sketch's own `x` / `y`, otherwise its
-/// reference, which the command projects.
+/// either pick of Coincident, Collinear and Tangent (#15461) may be any origin axis: the sketch's
+/// own `x` / `y`, otherwise its reference, which the command projects.
 fn axis_pick(app: &SolveApp, tool: &Tool, name: &str) -> Option<String> {
     match tool.cmd {
         // Symmetry takes no axis reference, so the axis isn't taken when a curve or point of the
         // sketch has its `x` / `y` as id: the command would read that entity instead.
         "sketch.constraint.symmetry" if tool.picks.len() == 2 => own_axis(app, name).map(str::to_string),
-        // The sketch's own `x` / `y`, unless a curve or point of the sketch is called that; then
-        // the axis reference, which can't be mistaken for it.
-        "sketch.constraint.coincident" => {
-            own_axis(app, name).map(str::to_string).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name}).to_string()))
-        }
+        cmd if cmd == "sketch.constraint.coincident" || takes_axis_curve(cmd) => axis_operand(app, name).map(|v| match v {
+            Value::String(id) => id,
+            other => other.to_string(),
+        }),
         _ => None,
     }
+}
+
+/// The curve-pair constraints whose `a` / `b` may be an origin axis: a line on it, a curve
+/// touching it (#15461).
+pub(crate) fn takes_axis_curve(command: &str) -> bool {
+    matches!(command, "sketch.constraint.tangent" | "sketch.constraint.collinear")
+}
+
+/// Origin axis `name` as a constraint operand: the sketch's own `x` / `y`, unless a curve or point
+/// of the sketch is called that; then the axis reference, which can't be mistaken for it.
+pub(crate) fn axis_operand(app: &SolveApp, name: &str) -> Option<Value> {
+    own_axis(app, name).map(|id| json!(id)).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name})))
 }
 
 /// The sketch's own `x` / `y` that origin axis `name` lies along, unless a curve or point of the
