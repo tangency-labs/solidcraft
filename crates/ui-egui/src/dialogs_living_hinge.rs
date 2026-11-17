@@ -3,7 +3,7 @@
 use crate::{
     SolveApp,
     dialogs::Kind,
-    selection::{BODIES, PROFILES, SelInput, SelectionExt as _, VERTICES},
+    selection::{BODIES, ORIGIN, PROFILES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES},
     ui_kit::{BackingTooltipExt as _, choice_row, expr_row},
 };
 use serde_json::{Map, Value, json};
@@ -13,6 +13,8 @@ use solidcraft_engine::{Sel, doc::FeatureKind};
 const CMD: &str = "solid.living_hinge";
 /// The clip choices, in the order of the Clip row.
 const CLIPS: [&str; 3] = ["run_out", "shorten", "whole"];
+/// What the Anchor takes (design 13.2 row 3): a vertex, the origin, a snap point.
+const ANCHOR_PICKS: crate::selection::Accept = VERTICES | ORIGIN | SNAP_POINTS;
 
 #[derive(Clone, Debug)]
 pub struct LivingHinge {
@@ -29,6 +31,9 @@ pub struct LivingHinge {
     /// The Plate pick was pre-filled (or left alone) once the area was picked; not again, so a
     /// plate the user clears stays cleared.
     pub plate_filled: bool,
+    /// The Bend axis was set: by the user, by Edit Feature, or once from the area's longer side;
+    /// a later change of the area never turns the slots.
+    pub axis_set: bool,
 }
 
 impl Default for LivingHinge {
@@ -44,6 +49,7 @@ impl Default for LivingHinge {
             clip: 0,
             margin: "0 mm".into(),
             plate_filled: false,
+            axis_set: false,
         }
     }
 }
@@ -79,7 +85,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             vec![
                 SelInput::new("ui.profiles", PROFILES, true),
                 SelInput::new("ui.living_hinge.plate", BODIES, true).tip("ui.living_hinge.plate_tip"),
-                SelInput::new("Anchor", VERTICES, false).tip("ui.living_hinge.anchor_tip"),
+                SelInput::new("Anchor", ANCHOR_PICKS, false).tip("ui.living_hinge.anchor_tip"),
             ],
         )
     })
@@ -142,8 +148,39 @@ fn prefill_plate(app: &SolveApp, h: &mut LivingHinge, inputs: &mut [SelInput]) {
     }
 }
 
+/// The Bend axis along the picked area's longer side, in the sketch's own axes: 0 (along X) when
+/// it is at least as wide as tall, else 1 (along Y). None when no profile is picked.
+fn axis_from_area(app: &SolveApp, inputs: &[SelInput]) -> Option<usize> {
+    use solidcraft_engine::geom::prelude::*;
+    let ps = crate::selection::items(inputs, 0).profiles();
+    let sketch = ps.first()?.0;
+    let st = crate::open_meshing::session_world(&app.session);
+    let ss = st.sketch(sketch)?;
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for p in ps.iter().filter(|p| p.0 == sketch).filter_map(|p| ss.profiles.get(p.1)) {
+        for q in p.region.outer.polyline(1e-2).into_vec() {
+            (lo[0], lo[1], hi[0], hi[1]) = (lo[0].min(q.x), lo[1].min(q.y), hi[0].max(q.x), hi[1].max(q.y));
+        }
+    }
+    (lo[0] <= hi[0]).then(|| usize::from(hi[1] - lo[1] > hi[0] - lo[0]))
+}
+
+/// Once the area is picked and the Bend axis is untouched, set it along the area's longer side
+/// (design 13.2 row 4: a 40 x 80 band gets Along Y). Set once and kept.
+fn preset_axis(app: &SolveApp, h: &mut LivingHinge, inputs: &[SelInput]) {
+    if h.axis_set {
+        return;
+    }
+    if let Some(axis) = axis_from_area(app, inputs) {
+        h.axis = axis;
+        h.axis_set = true;
+    }
+}
+
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, inputs: &mut [SelInput]) -> bool {
     prefill_plate(app, h, inputs);
+    preset_axis(app, h, inputs);
+    let axis = h.axis;
     choice_row(
         ui,
         "ui.living_hinge.bend_axis",
@@ -151,6 +188,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, h: &mut LivingHinge, inputs: &mut
         &mut h.axis,
         &["ui.living_hinge.along_x", "ui.living_hinge.along_y", "ui.living_hinge.at_angle"],
     );
+    h.axis_set |= h.axis != axis;
     let mut enter = false;
     if h.axis == 2 {
         enter |= expr_row(ui, "ui.angle", &mut h.angle);
@@ -283,6 +321,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         },
         margin: margin.as_deref().map_or(d.margin, str::to_string),
         plate_filled: true,
+        axis_set: true,
     };
     let st = crate::open_meshing::session_world(&app.session);
     let indices = st.sketch(sketch.0).map(|ss| crate::dialogs::profile_indices(ss, profiles)).unwrap_or_default();
@@ -419,5 +458,78 @@ mod tests {
         inputs[0].items = area(&app);
         prefill_plate(&app, &mut h, &mut inputs);
         assert!(inputs[1].items.is_empty(), "{:?}", inputs[1].items);
+    }
+
+    /// Picking the area sets the Bend axis along its longer side, once; a row the user set, or a
+    /// later change of the area, keeps it.
+    #[test]
+    fn living_hinge_bend_axis_from_the_area() {
+        let mut s = Session::default();
+        let run = |s: &mut Session, id: &str, p: Value| {
+            s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+        };
+        run(&mut s, "solid.box", json!({"length": 120, "width": 80, "height": 3, "body_name": "Wall"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 3, "name": "Tall"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [80, 80]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 3, "name": "Wide"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 20], "p1": [120, 60]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let app = SolveApp::new(s, Services::default());
+        let area = |name: &str| {
+            let st = crate::open_meshing::session_world(&app.session);
+            let ss = st.sketch(app.session.doc.find_feature(name).unwrap().id).unwrap();
+            (0..ss.profiles.len()).map(|index| Sel::Profile { sketch: ss.feature, index }).collect::<Vec<_>>()
+        };
+        let (Kind::LivingHinge(mut h), mut inputs) = start(&app, CMD).unwrap() else { panic!("not a living hinge") };
+        preset_axis(&app, &mut h, &inputs);
+        assert!((h.axis, h.axis_set) == (0, false), "nothing before the area is picked: {h:?}");
+        inputs[0].items = area("Tall");
+        preset_axis(&app, &mut h, &inputs);
+        assert_eq!((h.axis, h.axis_set), (1, true), "a 40 x 80 band gets Along Y");
+        // Set once: a wide area picked later does not turn the slots.
+        inputs[0].items = area("Wide");
+        preset_axis(&app, &mut h, &inputs);
+        assert_eq!(h.axis, 1);
+        let (Kind::LivingHinge(mut h), mut inputs) = start(&app, CMD).unwrap() else { panic!("not a living hinge") };
+        inputs[0].items = area("Wide");
+        preset_axis(&app, &mut h, &inputs);
+        assert_eq!(h.axis, 0, "a 120 x 40 band gets Along X");
+        // A row the user set first is kept.
+        let (Kind::LivingHinge(mut h), mut inputs) = start(&app, CMD).unwrap() else { panic!("not a living hinge") };
+        (h.axis, h.axis_set) = (2, true);
+        inputs[0].items = area("Tall");
+        preset_axis(&app, &mut h, &inputs);
+        assert_eq!(h.axis, 2);
+    }
+
+    /// The Anchor takes the origin and a snap point (a vertex of no body) as well as a vertex,
+    /// and the command carries the picked point.
+    #[test]
+    fn living_hinge_anchor_takes_the_origin_and_snap_points() {
+        use crate::viewport::Hit;
+        use solidcore_record::Vec3;
+        let mut s = Session::default();
+        let run = |s: &mut Session, id: &str, p: Value| {
+            s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+        };
+        run(&mut s, "solid.box", json!({"length": 120, "width": 80, "height": 3, "body_name": "Wall"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 3, "name": "HingeArea"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [80, 80]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let app = SolveApp::new(s, Services::default());
+        let (Kind::LivingHinge(h), mut inputs) = start(&app, CMD).unwrap() else { panic!("not a living hinge") };
+        let st = crate::open_meshing::session_world(&app.session);
+        let ss = st.sketch(app.session.doc.find_feature("HingeArea").unwrap().id).unwrap();
+        inputs[0].items = (0..ss.profiles.len()).map(|index| Sel::Profile { sketch: ss.feature, index }).collect();
+        let origin = Hit::Vertex { body: String::new(), point: Vec3::new(0.0, 0.0, 0.0) };
+        let snap = Hit::Vertex { body: String::new(), point: Vec3::new(60.0, 40.0, 3.0) };
+        let corner = Hit::Vertex { body: "Wall".into(), point: Vec3::new(120.0, 80.0, 3.0) };
+        for hit in [&origin, &snap, &corner] {
+            assert!(inputs[2].accepts(hit, None, |_, _| false).is_some(), "{hit:?}");
+        }
+        inputs[2].items = vec![inputs[2].accepts(&snap, None, |_, _| false).unwrap()];
+        let cmds = commands(&app, &h, &inputs, &Map::new()).unwrap();
+        assert_eq!(cmds[0].1["anchor"], crate::selection::point_value(Vec3::new(60.0, 40.0, 3.0)), "{:?}", cmds[0].1);
     }
 }
