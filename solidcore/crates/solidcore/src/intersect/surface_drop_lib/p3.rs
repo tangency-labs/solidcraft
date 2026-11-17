@@ -417,10 +417,11 @@ fn uv_curve_gap(
 /// [`DropPt::test_span_accuracy`] builds from `start` to `end` is proved farther than
 /// `approx_tol_3d` from the 3D Hermite span of the curve's drop at some parameter
 /// ([`sphere_span::sphere_span_image`] refuses with [`sphere_span::Refusal::Off`]): the
-/// Hermite runs between the surface points of the span's two UV ends with `curve`'s
-/// tangents there projected into the surface's tangent planes, so a curve that lies off the
-/// surface within the drop's own tests is compared with its drop, not with itself (at a
-/// span shrunk to a point the two ends agree and nothing is proved off).
+/// Hermite runs between the surface points of the span's two UV ends with the derivatives
+/// of the radial drop there (`curve`'s tangents projected into the surface's tangent planes
+/// and scaled by `R / |C - c|`), so a curve that lies off the surface, within the drop's own
+/// tests or by an offset, is compared with its drop, not with itself (at a span shrunk to a
+/// point the two ends agree and nothing is proved off).
 /// `false` on any other surface kind, and where the distance is not proved over the
 /// tolerance (certified, or not decided).
 ///
@@ -444,26 +445,38 @@ fn span_proved_off(
     end: &DropPt,
     approx_tol_3d: f64,
 ) -> Result<bool> {
-    if !matches!(surface.kind(), SurfaceKind::Sphere(_)) {
+    let SurfaceKind::Sphere(sphere) = surface.kind() else {
         return Ok(false);
-    }
+    };
+    let centre = sphere.base().position().origin();
+    let radius = sphere.radius();
     let delta_t = end.t - start.t;
-    // the drop of the curve at `t`: the surface point at `uv` and the curve's tangent in
-    // the surface's tangent plane there, scaled to the span
-    let at = |t: f64, uv: Point2| -> Result<(Vec3, Vec3)> {
+    // the drop of the curve at `t`: the surface point at `uv` and the derivative of the
+    // radial drop `c + R (C - c) / |C - c|`, the curve's tangent in the surface's tangent
+    // plane there times `R / |C - c|`, scaled to the span (a curve off the sphere moves its
+    // drop slower or faster than itself; unscaled, every span of an offset circle was
+    // proved off down to the shortest)
+    let at = |t: f64, uv: Point2| -> Result<Option<(Vec3, Vec3)>> {
         let pd = curve.evaluate(k, t, 1, true, true)?;
-        let Some(&d) = pd.get(1) else {
+        let (Some(&c), Some(&d)) = (pd.first(), pd.get(1)) else {
             return Err(SolidError::intersect_failed(
                 OP,
-                "the curve's first derivative was not evaluated",
+                "the curve's point and first derivative were not evaluated",
             ));
         };
+        let dist = (c - centre).length();
+        if !(dist.is_finite() && dist > EFF_ZERO) {
+            return Ok(None);
+        }
         let p = surface.evaluate_point(k, uv)?;
         let n = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
-        Ok((p, d.project_to_plane(n) * delta_t))
+        Ok(Some((p, d.project_to_plane(n) * (radius / dist * delta_t))))
     };
-    let (p0, d0) = at(start.t, start.uv_pd[0])?;
-    let (p1, d1) = at(end.t, end.uv_pd[0])?;
+    // a curve point at the centre has no drop: nothing is proved
+    let (Some((p0, d0)), Some((p1, d1))) = (at(start.t, start.uv_pd[0])?, at(end.t, end.uv_pd[0])?)
+    else {
+        return Ok(false);
+    };
     let lift = |p: Point2| Vec3::new(p.x, p.y, 0.0);
     let uv = [
         lift(start.uv_pd[0]),
