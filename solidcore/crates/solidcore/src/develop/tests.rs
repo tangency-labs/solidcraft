@@ -1365,7 +1365,8 @@ fn a_lapped_rip_moves_each_panels_own_edge() {
                     Ok(dev) => dev,
                     Err(why) => panic!("{lap:?} at {turn}: {why}"),
                 };
-                let (Some(Some(base)), Some(Some(flange))) = (dev.panels.first(), dev.panels.get(1))
+                let (Some(Some(base)), Some(Some(flange))) =
+                    (dev.panels.first(), dev.panels.get(1))
                 else {
                     panic!("both panels are laid out: {dev:?}")
                 };

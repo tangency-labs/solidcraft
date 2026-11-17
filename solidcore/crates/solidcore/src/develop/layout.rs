@@ -1206,7 +1206,10 @@ fn portion(segs: &[Seg2], from: f64, to: f64) -> Vec<(Seg2, usize)> {
 /// The part of `s` from parameter `t0` to `t1`.
 fn part(s: &Seg2, t0: f64, t1: f64) -> Seg2 {
     if let Seg2::Line { .. } = s {
-        return Seg2::Line { a: s.point_at(t0), b: s.point_at(t1) };
+        return Seg2::Line {
+            a: s.point_at(t0),
+            b: s.point_at(t1),
+        };
     }
     let right = if t0 > 0.0 { s.split_at(t0).1 } else { *s };
     let t = if t0 < 1.0 {

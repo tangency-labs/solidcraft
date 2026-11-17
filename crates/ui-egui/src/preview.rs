@@ -1113,6 +1113,8 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        flange_corners: Vec::new(),
+        flange_faces: Vec::new(),
         layer: None,
         joints: Vec::new(),
         plugin_view: None,
