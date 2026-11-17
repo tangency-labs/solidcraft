@@ -175,3 +175,22 @@ fn a_tab_slot_redefined_with_its_keys_keeps_them() {
     let twice = json!({"tab_plates": [{"key": 1, "body": "Wall"}], "slot_plates": [{"key": 1, "body": "Bottom"}]});
     assert!(s.execute("solid.tab_slot", &twice).is_err());
 }
+
+/// A tab plate that does not touch the slot plate is skipped `no_contact` with the distance in
+/// its text (design 11, 11.6): a plate far away never fails the whole feature, and a plate 4 mm
+/// above is named in the reply's `skipped` list, while Wall's joint is made.
+#[test]
+fn a_tab_slot_names_plates_that_do_not_meet_in_its_skipped_list() {
+    let mut s = fixture_f();
+    run(&mut s, "solid.box", json!({"corner": [20, 30, 10], "length": 120, "width": 6, "height": 60, "body_name": "Above", "operation": "new"}));
+    run(&mut s, "solid.box", json!({"corner": [500, 500, 500], "length": 120, "width": 6, "height": 60, "body_name": "Far", "operation": "new"}));
+    let reply = tab_slot(&mut s, json!({"tab_plates": ["Wall", "Above", "Far"]})).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(reply["plate_joints"].as_array().map(Vec::len), Some(1), "{reply}");
+    assert_eq!(reply["tabs"], 3, "{reply}");
+    let skipped = reply["skipped"].as_array().cloned().unwrap_or_default();
+    for (plate, apart) in [("Above", "4.00 mm apart"), ("Far", "mm apart")] {
+        let j = skipped.iter().find(|j| j["tab_plate"] == plate).unwrap_or_else(|| panic!("{plate} not skipped: {reply}"));
+        assert_eq!((j["slot_plate"].as_str(), j["reason"].as_str()), (Some("Bottom"), Some("no_contact")), "{reply}");
+        assert!(j["detail"].as_str().is_some_and(|d| d.contains(apart)), "{reply}");
+    }
+}

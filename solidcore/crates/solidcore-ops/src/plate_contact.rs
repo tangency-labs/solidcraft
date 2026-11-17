@@ -135,7 +135,8 @@ impl Body {
     /// asked in turn; one joint is taken as it is; of several, the face pick `near` chooses by
     /// [`solidcore::plate_contact::choose_contact`] over each joint's
     /// [`solidcore::plate_contact::contact_distance`], else the pair is skipped
-    /// [`PairSkip::SeveralContacts`]. No joint: the first plane's skip. Neither body changes.
+    /// [`PairSkip::SeveralContacts`]. No joint: the first plane's skip. Bodies whose exact boxes
+    /// are more than `tol` apart are `no_contact` before any plane is asked. Neither body changes.
     ///
     /// # Errors
     /// Those of [`Body::plate_pair`]; [`crate::Error::Argument`] for no planes.
@@ -149,6 +150,12 @@ impl Body {
         poisoned(&[self, slot])?;
         if planes.is_empty() {
             return Err(Error::Argument);
+        }
+        if let Some(gap) = boxes_gap(self, slot, tol)? {
+            // Quick reject (design v2 5.2, [m18]): exact boxes more than tol apart never meet on
+            // any plane, and a far pair's distance need not be decided to say so.
+            let distance = self.boundary_distance(slot, tol).map_or(gap, |g| g.upper);
+            return Ok(Err(PairSkip::Contact(Contact::NoContact { distance })));
         }
         run_on(
             "plate_contact::pair_near",

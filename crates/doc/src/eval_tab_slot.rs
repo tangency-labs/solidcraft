@@ -307,9 +307,8 @@ fn skipped_note(joints: &[TabSlotJoint]) -> Option<String> {
 /// The feature's failure when every pair is skipped (design v2 11.2, `no_plate_joint`): "tab and
 /// slot: no plate joint to make (Wall → Bottom cannot be cut: Bottom is sheet metal; Far → Bottom
 /// does not meet it (0.50 mm apart)) (no_plate_joint)".
-fn no_plate_joint(skipped: &[TabSlotJoint], passed: &[String]) -> DocError {
-    let mut items: Vec<String> = skipped.iter().map(|j| format!("{} → {} {}", j.tab, j.slot, j.skipped.as_deref().unwrap_or(""))).collect();
-    items.extend(passed.iter().cloned());
+fn no_plate_joint(skipped: &[TabSlotJoint]) -> DocError {
+    let items: Vec<String> = skipped.iter().map(|j| format!("{} → {} {}", j.tab, j.slot, j.skipped.as_deref().unwrap_or(""))).collect();
     if items.is_empty() {
         return DocError::Invalid("tab and slot: no tab plate stands on a slot plate (no_plate_joint)".into());
     }
@@ -328,8 +327,8 @@ pub struct TabSlotReport {
 
 /// The feature `k` applied to `st` (design 5.7): every tab plate against every slot plate, the
 /// pairs with a joint in pick order, each made joint cut in that order (a plate in several joints
-/// takes the previous joint's result), the plates replaced in place. Pairs that do not meet are
-/// passed by; a joint skipped, or a pair the cut refuses, is named in `warning` and the report.
+/// takes the previous joint's result), the plates replaced in place. A pair that does not meet is
+/// named in the report only; a joint skipped, or a pair the cut refuses, in `warning` and the report.
 pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut ModelState, warning: &mut Option<String>) -> Result<TabSlotReport> {
     let FeatureKind::TabSlot { tab_plates, slot_plates, .. } = k else {
         return Err(DocError::Invalid("not a tab and slot".into()));
@@ -352,11 +351,9 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
     let mut list: Vec<(usize, usize, Plane)> = Vec::new();
     let mut specs: Vec<TabSlotSpec> = Vec::new();
     // Pairs with a plate the cut cannot take (design v3 4.4 / 11.3): sheet metal or a mesh body in
-    // the state before the feature. Every pair with such a plate is skipped and named.
+    // the state before the feature; and pairs with no joint (no contact, ...). Every such pair is
+    // skipped and named.
     let mut unusable: Vec<TabSlotJoint> = Vec::new();
-    // Pairs that do not make a joint (no contact, ...), "Wall → Bottom does not meet it", for the
-    // `no_plate_joint` message.
-    let mut passed: Vec<String> = Vec::new();
     for t in tab_plates {
         for s in slot_plates {
             let (tn, sn) = (t.body.to_string(), s.body.to_string());
@@ -391,7 +388,16 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
             let (p, joint) = match kernel_ts::joint_plane(tab, slot, near, JOINT_TOL)? {
                 Ok(found) => found,
                 Err(skip) => {
-                    passed.push(format!("{tn} → {sn} {}", pair_skip_text(&skip)));
+                    // A pair with no joint (no contact, ...) is skipped and named in the report,
+                    // never silent; the warning leaves `no_contact` out (design 11.6).
+                    unusable.push(TabSlotJoint {
+                        tab: tn,
+                        slot: sn,
+                        skipped: Some(pair_skip_text(&skip)),
+                        reason: Some(skip.reason_id().into()),
+                        tabs: 0,
+                        left_out: Vec::new(),
+                    });
                     continue;
                 }
             };
@@ -400,7 +406,7 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
         }
     }
     if specs.is_empty() {
-        return Err(no_plate_joint(&unusable, &passed));
+        return Err(no_plate_joint(&unusable));
     }
     let refs: Vec<&Body> = plates.iter().collect();
     let (skips, tool_faces) = kernel_ts::joints_each(&refs, &list, &specs, JOINT_TOL)?;
@@ -436,7 +442,7 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
         report.joints.push(TabSlotJoint { tab: tab_name, slot: slot_name, skipped, reason, tabs, left_out });
     }
     if report.joints.iter().all(|j| j.reason.is_some()) {
-        return Err(no_plate_joint(&report.joints, &passed));
+        return Err(no_plate_joint(&report.joints));
     }
     if let Some(note) = skipped_note(&report.joints) {
         append_warning(warning, note);
