@@ -1,7 +1,11 @@
-//! WR-410 (tangency-labs/solidcore#1059): a boolean vertex takes the position of its steepest
-//! edge crossing, not of the first one found. Retiring `boolean_vertex_by_best_crossing`
-//! (tangency-labs/solidcraft#14246) moves two `offset.offset_executive_p2` rows, both rounded
-//! solid offsets whose stitch merges the offset faces with booleans:
+//! WR-410 (tangency-labs/solidcore#1059): a boolean vertex first placed by one edge crossing
+//! is placed again by a later crossing whose misplacement bound along the edge (gap over
+//! sine) is smaller, only where a certified bound proves that the edge stretch the vertex
+//! moves along stays within the vertex's tolerance of the other object and of the first
+//! crossing's curve (`VertexDefinition::place_by_crossing`); otherwise the first placement
+//! stays. Retiring `boolean_vertex_by_best_crossing` (tangency-labs/solidcraft#14246) moves
+//! two `offset.offset_executive_p2` rows, both rounded solid offsets whose stitch merges the
+//! offset faces with booleans:
 //!
 //! - `extrude_holes1_face0_inset24_7_rounded`: `Boolean/extrudeHoles1.smb` inset by 24.7
 //!   keeping face 0 as a shell face (approximation tolerance 0.0059574935488984). Its vertex
@@ -12,21 +16,30 @@
 //! The counts stay. A vertex belongs on every face it bounds, and the faces' surfaces are the
 //! exact offset surfaces while the edge curves are fits within the approximation tolerance, so
 //! the measure is the vertex's largest gap to its faces' surfaces (`surface_closest_point`).
-//! For each moved bound, measured with the change reverted (the first crossing):
+//! For each moved bound, measured with the first crossing (main before the retirement) and
+//! with the certified move:
 //!
-//! | row, bound | vertex's largest face gap, first crossing | best crossing |
+//! | row, bound | vertex's largest face gap, first crossing | certified move |
 //! |---|---|---|
 //! | extrudeHoles1 lo.x, lo.y | 2.75e-7 | 2.1e-12 |
 //! | extrudeHoles1 lo.z | 3.3e-13 | 1.5e-14 |
-//! | extrudeHoles1 hi.y | 9.20e-7 | 3.66e-7 |
+//! | extrudeHoles1 hi.y | 9.20e-7 | 3.66e-7 (its third face 9.20e-7 -> 1.9e-14) |
 //! | extrudeHoles1 hi.z | 7.93e-7 | 7.93e-7 (its largest edge gap 4.70e-6 -> 2.85e-6) |
-//! | problemShell10 hi.z | 9.73e-6 (its largest edge gap 1.03e-5, past the 1e-5 tolerance) | 2.9e-14 |
+//! | problemShell10 hi.z | 9.73e-6 (its largest edge gap 1.03e-5, past the 1e-5 tolerance) | 1.9e-14 |
 //!
-//! Every moved vertex is closer to its faces, or as close and closer to its edges. In
-//! problemShell10 the top vertex changes: the first crossing put (-50.8, -28.575) highest,
-//! 9.73e-6 off a face; with the best crossing both top vertices lie on their faces (2.9e-14
-//! and 1.9e-14, from 7.49e-7 and 9.73e-6). The tests below assert the best-crossing gaps
-//! under bounds the first-crossing vertices exceed.
+//! The hi.y vertex's gap to one edge grows from 2.43e-6 to 2.62e-6 as it moves onto its
+//! third face: it now lies on all three faces' surfaces (1.9e-14), their exact common point,
+//! and that edge's curve, a fit of two of those surfaces' intersection, passes 2.62e-6 from
+//! it (under the vertex tolerance 1e-5).
+//!
+//! In problemShell10 the two top vertices, (-50.8, -28.575) and (34.925, -28.575), move onto
+//! their faces by certified moves (each edge stretch within 9.73e-6 and 9.36e-6 of the other
+//! object and of the first crossing's curve, under the vertex tolerance 1.8e-3): 9.73e-6 ->
+//! 1.9e-14 and 9.35e-6 -> 1.6e-14 off their faces, their largest edge gaps 1.03e-5 -> 9.73e-6
+//! and 1.02e-5 -> 9.35e-6. The vertex (-50.8, -114.3) would move against a face on an offset
+//! surface, which has no certified bound, so it keeps its first placement, 7.49e-7 off a
+//! face. The tests below assert the moved gaps under bounds the first-crossing vertices
+//! exceed.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -208,9 +221,21 @@ fn wr_410_problem_shell_inset_vertices_meet_their_faces() {
         return;
     };
     assert_eq!(counts(&b), (6, 12, 8), "faces, edges, vertices");
-    // every vertex, the two top ones included (first crossing 9.73e-6 and 7.49e-7)
+    // the top vertex (first crossing 9.73e-6 off a face, 1.03e-5 off an edge)
+    let v = extreme_vertex(&b, 2, true);
+    let p = vertex::point(&b, v).unwrap();
+    assert!(
+        (p.x + 50.8).abs() < 1e-9 && (p.y + 28.575).abs() < 1e-9,
+        "top vertex {p:?}"
+    );
+    let gap = face_gap(&k, &b, v);
+    assert!(gap <= 1e-12, "top vertex {gap} off its faces");
+    let gap = edge_gap(&k, &b, v);
+    assert!(gap < 1e-5, "top vertex {gap} off its edges");
+    // every vertex lies within its tolerance of its faces; the one at (-50.8, -114.3)
+    // keeps its first placement, 7.49e-7 off a face (its move is not certified)
     for &v in b.vertex_list() {
         let gap = face_gap(&k, &b, v);
-        assert!(gap <= 1e-12, "vertex {v:?} {gap} off its faces");
+        assert!(gap <= 1e-6, "vertex {v:?} {gap} off its faces");
     }
 }
