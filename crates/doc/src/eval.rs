@@ -8543,6 +8543,7 @@ fn feature_op(f: &Feature) -> (Operation, Vec<String>) {
         FeatureKind::Loft { operation, targets, .. } | FeatureKind::Sweep { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::Coil { operation, targets, .. } => (*operation, crate::plain(targets)),
         FeatureKind::CellGrid { targets, .. } => (Operation::Cut, crate::plain(targets)),
+        FeatureKind::LivingHinge { targets, .. } => (Operation::Cut, crate::plain(targets)),
         FeatureKind::Rib { .. } => (Operation::Join, Vec::new()),
         _ => (Operation::NewBody, Vec::new()),
     }
@@ -10314,6 +10315,8 @@ fn eval_feature_kind(
             }
             Ok(())
         }
+        // The cut lands with `eval_living_hinge.rs` (the next commit of the doc layer).
+        FeatureKind::LivingHinge { .. } => Err(DocError::Invalid("living hinge: not built yet".into())),
         FeatureKind::Hole { thread, thread_depth, thread_class, diameter, hand, modeled, ease_out, depth, to, .. } => {
             if st.bodies.is_empty() {
                 return Err(empty_boolean_targets(doc, st, f, &[], f.participants.is_empty()));
@@ -11547,7 +11550,7 @@ fn drawn_tools_change_bodies(kind: &FeatureKind) -> bool {
         | FeatureKind::Sweep { operation, .. }
         | FeatureKind::Pipe { operation, .. }
         | FeatureKind::Coil { operation, .. } => *operation != Operation::NewBody,
-        FeatureKind::CellGrid { .. } => true,
+        FeatureKind::CellGrid { .. } | FeatureKind::LivingHinge { .. } => true,
         _ => false,
     }
 }

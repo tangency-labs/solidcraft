@@ -266,6 +266,8 @@ mod coil_tests;
 #[cfg(test)]
 mod feature_walk_tests;
 #[cfg(test)]
+mod living_hinge_tests;
+#[cfg(test)]
 mod named_projection_tests;
 #[cfg(test)]
 mod old_cap_anchor_tests;

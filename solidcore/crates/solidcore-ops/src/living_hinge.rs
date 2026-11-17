@@ -17,7 +17,7 @@ use crate::prism::planar_regions_boolean;
 use crate::session::{read_body, Answer};
 use crate::{Body, Error};
 
-pub use solidcore::living_hinge::{LivingHingeError, MAX_SLOTS};
+pub use solidcore::living_hinge::{LivingHingeError, MAX_SLOTS, MIN_SIZE};
 
 /// The pattern a new living hinge starts from (the kernel's defaults).
 #[must_use]
