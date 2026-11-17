@@ -1117,6 +1117,7 @@ mod importers {
         let listed = s.execute("plugin.list", &json!({})).unwrap();
         assert_eq!(listed["importers"][0]["id"], "smp.convert");
         assert_eq!(listed["plugins"][0]["commands"], json!([]), "an importer is not a command");
+        assert_eq!(listed["plugins"][0]["manifest"]["runtime"]["entries"][0]["effect"], "open", "it opens a new design, it does not edit");
         let opened = s.execute("doc.open", &json!({"path": put(&root, "bracket.smp", &design())})).unwrap();
         assert_eq!(
             (opened["format"].as_str(), opened["plugin"].as_str(), opened["bodies"].as_u64()),

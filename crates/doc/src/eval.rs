@@ -11147,6 +11147,14 @@ fn eval_feature_kind(
             };
             // Certifying may join faces; their history stays over the same operands.
             let nb = Traced::step(nb.with_shell_certificate(f.id)?, &operands.iter().collect::<Vec<_>>());
+            // The walls must read back as SMLib reads them for measuring and every step after
+            // (#18373: a 0.06 mm hollow of a tiny lens left a face whose NURBS form isn't its
+            // surface). Refused here, the body stays as it was. The reading is kept on the body.
+            if !nb.body.is_mesh()
+                && let Err(e) = nb.body.smlib()
+            {
+                return Err(DocError::Invalid(format!("the shell made walls that can't be used afterwards ({e})")));
+            }
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = mb.remade(nb);
             }
