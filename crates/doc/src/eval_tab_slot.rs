@@ -135,8 +135,60 @@ pub struct TabSlotJoint {
     pub tab: String,
     /// The slot plate's body.
     pub slot: String,
-    /// Why the joint was not cut (`None`: cut).
+    /// Why the joint was not cut, in the user's words (`None`: cut).
     pub skipped: Option<String>,
+    /// The skip's reason id of design 11.3 (`swapped`, `meets_other_plate_joint`, ...; `None`: cut).
+    pub reason: Option<String>,
+}
+
+/// The most skipped joints the feature's warning names before "and N more" (design 11.6).
+const SKIPS_NAMED: usize = 6;
+
+/// A pair's skip in the user's words (design 11.3), after "Wall → Bottom".
+fn pair_skip_text(skip: &kernel_ts::PairSkip) -> String {
+    use kernel_ts::PairSkip as P;
+    match skip {
+        P::Contact(kernel_ts::Contact::NoContact { distance }) => format!("does not meet it ({distance:.2} mm apart)"),
+        P::Contact(kernel_ts::Contact::EndNotFlat) => "meets it only along a line or at a point".into(),
+        P::Contact(_) | P::NoPlateFaces(_) => "is not a plate where they meet (no two parallel flat faces)".into(),
+        P::NotSquare(Some(angle)) => format!("is not at 90° to it ({angle:.1}°)"),
+        P::NotSquare(None) => "lies face to face on it".into(),
+        P::Swapped => "is the other way round: its face meets the slot plate's edge (swap them)".into(),
+        P::PassesThrough => "runs out past its far face".into(),
+        P::SeveralContacts => "meets it in several places: pick the face".into(),
+    }
+}
+
+/// A joint's skip in the user's words (design 11.3), naming the earlier joint (`earlier[j]`,
+/// "Back → Bottom") a skip refers to.
+fn joint_skip_text(skip: &kernel_ts::JointSkip, earlier: &[String]) -> String {
+    let named = |j: &usize| earlier.get(*j).map_or("another plate joint", String::as_str).to_string();
+    match skip {
+        kernel_ts::JointSkip::Pair(p) => pair_skip_text(p),
+        kernel_ts::JointSkip::MeetsOtherJoint(j) => format!("its slots come too close to those of {}", named(j)),
+        kernel_ts::JointSkip::OtherDirection(j) => format!("a plate already takes {} in another direction", named(j)),
+    }
+}
+
+/// The feature's warning for its skipped joints (design 11.6): "skipped 2 plate joints: Back →
+/// Bottom too short, Left → Bottom swapped", up to [`SKIPS_NAMED`] named, then "and N more".
+/// `no_contact` skips are left out (the reply names them).
+fn skipped_note(joints: &[TabSlotJoint]) -> Option<String> {
+    let skipped: Vec<String> = joints
+        .iter()
+        .filter(|j| j.reason.as_deref().is_some_and(|r| r != "no_contact"))
+        .map(|j| format!("{} → {} {}", j.tab, j.slot, j.skipped.as_deref().unwrap_or("")))
+        .collect();
+    if skipped.is_empty() {
+        return None;
+    }
+    let n = skipped.len();
+    let mut note = format!("tab and slot: skipped {n} plate joint{}: ", if n == 1 { "" } else { "s" });
+    note.push_str(&skipped.iter().take(SKIPS_NAMED).cloned().collect::<Vec<_>>().join(", "));
+    if n > SKIPS_NAMED {
+        note = format!("{note} and {} more", n - SKIPS_NAMED);
+    }
+    Some(note)
 }
 
 /// What a Tab and Slot feature did (design 5.7): its joints in pick order and the tool faces each
@@ -189,18 +241,19 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
             list.push((ti, si, p));
         }
     }
-    let Some(first) = specs.first().copied() else {
+    if specs.is_empty() {
         append_warning(warning, "tab and slot: no tab plate stands on a slot plate".into());
         return Ok(TabSlotReport::default());
-    };
+    }
     let refs: Vec<&Body> = plates.iter().collect();
-    let (skips, tool_faces) = kernel_ts::joints(&refs, &list, first, JOINT_TOL)?;
+    let (skips, tool_faces) = kernel_ts::joints_each(&refs, &list, &specs, JOINT_TOL)?;
+    let pair_names: Vec<String> = list.iter().map(|(ti, si, _)| format!("{} → {}", names[*ti], names[*si])).collect();
     check_tool_faces(&tool_faces, &names, kernel_ts::MAX_TOOL_FACES, kernel_ts::SLOW_TOOL_FACES, warning)?;
     let mut report = TabSlotReport { joints: Vec::new(), tool_faces: names.iter().cloned().zip(tool_faces).collect() };
     for (j, ((ti, si, p), spec)) in list.iter().zip(&specs).enumerate() {
         let (tab_name, slot_name) = (names[*ti].clone(), names[*si].clone());
         let skipped = if let Some(Some(skip)) = skips.get(j) {
-            Some(format!("{skip:?}"))
+            Some((skip.reason_id(), joint_skip_text(skip, &pair_names)))
         } else if let Some((tab, slot)) = plates.get(*ti).zip(plates.get(*si)) {
             match kernel_ts::cut(tab, slot, *p, *spec, JOINT_TOL)? {
                 Ok(c) => {
@@ -208,15 +261,16 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
                     plates[*si] = c.slot_plate;
                     None
                 }
-                Err(skip) => Some(format!("{skip:?}")),
+                Err(skip) => Some((skip.reason_id(), pair_skip_text(&skip))),
             }
         } else {
             continue;
         };
-        if let Some(why) = &skipped {
-            append_warning(warning, format!("tab and slot: {tab_name} on {slot_name} is skipped: {why}"));
-        }
-        report.joints.push(TabSlotJoint { tab: tab_name, slot: slot_name, skipped });
+        let (reason, skipped) = skipped.map_or((None, None), |(id, text)| (Some(id.to_string()), Some(text)));
+        report.joints.push(TabSlotJoint { tab: tab_name, slot: slot_name, skipped, reason });
+    }
+    if let Some(note) = skipped_note(&report.joints) {
+        append_warning(warning, note);
     }
     for (name, made) in names.iter().zip(plates) {
         if let Some(mb) = st.bodies.iter_mut().find(|b| &b.name == name)
@@ -343,5 +397,71 @@ mod tests {
         assert_eq!((joint.tab.as_str(), joint.slot.as_str(), joint.skipped.as_deref()), ("Wall", "Bottom", None));
         assert_eq!(report.tool_faces.len(), 2, "{report:?}");
         assert!(report.tool_faces.iter().all(|(_, n)| *n > 0), "{report:?}");
+    }
+
+    fn joint(tab: &str, reason: Option<&str>, text: &str) -> TabSlotJoint {
+        TabSlotJoint { tab: tab.into(), slot: "Bottom".into(), skipped: reason.map(|_| text.to_string()), reason: reason.map(Into::into) }
+    }
+
+    /// Design 11.3 and 11.6: skips read as the user's words keyed by the reason id; the warning
+    /// names up to six ("Back → Bottom ..."), then "and N more", and leaves `no_contact` out.
+    #[test]
+    fn tab_slot_skips_read_as_user_text_by_reason_id() {
+        use kernel_ts::{JointSkip, PairSkip};
+        let earlier = vec!["Back → Bottom".to_string()];
+        assert_eq!(JointSkip::Pair(PairSkip::Swapped).reason_id(), "swapped");
+        assert!(joint_skip_text(&JointSkip::Pair(PairSkip::Swapped), &earlier).contains("swap"));
+        assert!(joint_skip_text(&JointSkip::Pair(PairSkip::NotSquare(Some(45.0))), &earlier).contains("45.0°"));
+        assert!(joint_skip_text(&JointSkip::Pair(PairSkip::NotSquare(None)), &earlier).contains("face to face"));
+        let meets = joint_skip_text(&JointSkip::MeetsOtherJoint(0), &earlier);
+        assert!(meets.contains("Back → Bottom") && !meets.contains("MeetsOtherJoint"), "{meets}");
+        assert!(joint_skip_text(&JointSkip::OtherDirection(0), &earlier).contains("another direction"));
+        assert_eq!(skipped_note(&[joint("Wall", None, ""), joint("Far", Some("no_contact"), "does not meet it")]), None);
+        let note = skipped_note(&[joint("Wall", None, ""), joint("Left", Some("swapped"), "is the other way round")]).unwrap();
+        assert_eq!(note, "tab and slot: skipped 1 plate joint: Left → Bottom is the other way round");
+        let many: Vec<TabSlotJoint> = (0..8).map(|i| joint(&format!("W{i}"), Some("passes_through"), "runs out")).collect();
+        let note = skipped_note(&many).unwrap();
+        assert!(note.starts_with("tab and slot: skipped 8 plate joints: W0 → Bottom runs out") && note.ends_with("and 2 more"), "{note}");
+        assert!(!note.contains("W6"), "{note}");
+    }
+
+    /// Two plate pairs of different thickness in one feature: each joint is laid out with its own
+    /// defaults (tab width 3 × its tab plate's thickness, end distance the tab width), for the
+    /// skips and the cut alike. Bottom 160 × 100 × 6; Thin 6 and Thick 10 thick, 120 long, 60
+    /// high, two tabs each, clearance 0.1: Thin gains 2 × 18 × 6 × 6, Thick 2 × 30 × 10 × 6, Bottom
+    /// loses 2 × 18.2 × 6.2 × 6 + 2 × 30.2 × 10.2 × 6.
+    #[test]
+    fn tab_slot_apply_lays_out_each_pair_by_its_own_thickness() {
+        use solidcore_record::Vec3;
+        use solidcraft_kernel as kernel;
+        let mut st = ModelState::default();
+        let bottom = kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(160.0, 100.0, 6.0)).unwrap();
+        let thin = kernel::box_solid(Vec3::new(20.0, 30.0, 6.0), Vec3::new(140.0, 36.0, 66.0)).unwrap();
+        let thick = kernel::box_solid(Vec3::new(20.0, 60.0, 6.0), Vec3::new(140.0, 70.0, 66.0)).unwrap();
+        st.bodies.push(super::super::ModelBody::new("Bottom".into(), bottom, 0));
+        st.bodies.push(super::super::ModelBody::new("Thin".into(), thin, 0));
+        st.bodies.push(super::super::ModelBody::new("Thick".into(), thick, 0));
+        let k: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": "tab_slot",
+            "tab_plates": [{"key": 1, "body": "Thin"}, {"key": 2, "body": "Thick"}],
+            "slot_plates": [{"key": 3, "body": "Bottom"}],
+            "clearance": "0.1",
+            "count": "2",
+        }))
+        .unwrap();
+        let mut warning = None;
+        let report = apply(&BTreeMap::new(), &k, &mut st, &mut warning).unwrap();
+        assert!(warning.is_none(), "{warning:?}");
+        assert_eq!(report.joints.len(), 2, "{report:?}");
+        assert!(report.joints.iter().all(|j| j.skipped.is_none() && j.reason.is_none()), "{report:?}");
+        let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
+        let want = [
+            ("Thin", 43_200.0 + 2.0 * 18.0 * 6.0 * 6.0),
+            ("Thick", 72_000.0 + 2.0 * 30.0 * 10.0 * 6.0),
+            ("Bottom", 96_000.0 - 2.0 * 18.2 * 6.2 * 6.0 - 2.0 * 30.2 * 10.2 * 6.0),
+        ];
+        for (n, v) in want {
+            assert!((volume(n) - v).abs() < 1e-6, "{n}: {} not {v}", volume(n));
+        }
     }
 }

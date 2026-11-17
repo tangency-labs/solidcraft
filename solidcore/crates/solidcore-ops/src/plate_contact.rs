@@ -548,7 +548,7 @@ pub fn tab_slot_joints(
     spec: TabSlotSpec,
     tol: f64,
 ) -> Result<Vec<Option<JointSkip>>> {
-    Ok(plan_joints(plates, joints, spec, tol)?
+    Ok(plan_joints(plates, joints, &vec![spec; joints.len()], tol)?
         .into_iter()
         .map(|(skip, _)| skip)
         .collect())
@@ -560,19 +560,23 @@ fn boxes_gap(a: &Body, b: &Body, tol: f64) -> Result<Option<f64>> {
     Ok(pc::boxes_gap(a.bounds()?, b.bounds()?, tol))
 }
 
-/// [`tab_slot_joints`] with each made joint's plan (empty for a skipped joint).
+/// [`tab_slot_joints`] with each made joint's plan (empty for a skipped joint), joint `j` laid
+/// out by `specs[j]`.
 fn plan_joints(
     plates: &[Body],
     joints: &[(usize, usize, Plane)],
-    spec: TabSlotSpec,
+    specs: &[TabSlotSpec],
     tol: f64,
 ) -> Result<Vec<(Option<JointSkip>, Vec<StretchPlan>)>> {
+    if specs.len() != joints.len() {
+        return Err(Error::Argument);
+    }
     // (joint, slot plate, P, slot outline) of every made joint's slots.
     let mut cuts: Vec<(usize, usize, Plane, Region2)> = Vec::new();
     // The direction each plate takes and the joint that gave it.
     let mut dirs: Vec<Option<(solidcore::Vec3, usize)>> = vec![None; plates.len()];
     let mut out = Vec::with_capacity(joints.len());
-    for (j, &(t, s, p)) in joints.iter().enumerate() {
+    for (j, (&(t, s, p), &spec)) in joints.iter().zip(specs).enumerate() {
         let (Some(tab), Some(slot)) = (plates.get(t), plates.get(s)) else {
             return Err(Error::Argument);
         };
@@ -673,7 +677,23 @@ pub fn tab_slot_tool_faces(
     spec: TabSlotSpec,
     tol: f64,
 ) -> Result<(Vec<Option<JointSkip>>, Vec<usize>)> {
-    let planned = plan_joints(plates, joints, spec, tol)?;
+    tab_slot_tool_faces_each(plates, joints, &vec![spec; joints.len()], tol)
+}
+
+/// [`tab_slot_tool_faces`] with a spec per joint (`specs[j]` lays out joint `j`): plate pairs of
+/// one feature differ in thickness, so in their default tab width and overshoot, and the skips
+/// are decided on the tabs each joint will cut.
+///
+/// # Errors
+/// [`crate::Error::Argument`] when `specs` and `joints` differ in length; those of
+/// [`tab_slot_joints`].
+pub fn tab_slot_tool_faces_each(
+    plates: &[Body],
+    joints: &[(usize, usize, Plane)],
+    specs: &[TabSlotSpec],
+    tol: f64,
+) -> Result<(Vec<Option<JointSkip>>, Vec<usize>)> {
+    let planned = plan_joints(plates, joints, specs, tol)?;
     let mut faces = vec![0_usize; plates.len()];
     for (&(t, s, _), (_, plan)) in joints.iter().zip(&planned) {
         let (on_t, on_s) = tool_faces(plan);

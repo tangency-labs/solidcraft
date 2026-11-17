@@ -2,7 +2,7 @@
 //! T meets S square): solidcore's plan and its cut ([`solidcore_ops::plate_contact`]), each inside
 //! [`guard`], with the bodies made back into this crate's [`Body`]. Computes nothing itself.
 
-pub use solidcore::plate_contact::{PairSkip, Plane};
+pub use solidcore::plate_contact::{Contact, PairSkip, Plane};
 pub use solidcore::tab_slot::Layout;
 pub use solidcore_ops::plate_contact::{
     JointSkip, MAX_TOOL_FACES, NearPair, SLOW_TOOL_FACES, StretchPlan, TabPlan, TabSlotPlan, TabSlotSpec, ToolFaceCap, check_tool_faces,
@@ -129,6 +129,25 @@ pub fn joints(plates: &[&Body], joints: &[(usize, usize, Plane)], spec: TabSlotS
     guard(WHAT, || {
         let owned = ops.iter().map(|b| b.copy().map_err(kernel_error)).collect::<Result<Vec<_>>>()?;
         solidcore_ops::plate_contact::tab_slot_tool_faces(&owned, joints, spec, tol).map_err(kernel_error)
+    })
+}
+
+/// [`joints`] with a spec per joint (`specs[j]` lays out joint `j`): pairs of one feature differ
+/// in thickness, so in their default tab width and overshoot, and each joint's skips are decided
+/// on the tabs it will cut.
+///
+/// # Errors
+/// Those of [`joints`], and [`KernelError::Invalid`] when `specs` and `joints` differ in length.
+pub fn joints_each(
+    plates: &[&Body],
+    joints: &[(usize, usize, Plane)],
+    specs: &[TabSlotSpec],
+    tol: f64,
+) -> Result<(Vec<Option<JointSkip>>, Vec<usize>)> {
+    let ops = plates.iter().map(|b| ops_of(b, "joint")).collect::<Result<Vec<_>>>()?;
+    guard(WHAT, || {
+        let owned = ops.iter().map(|b| b.copy().map_err(kernel_error)).collect::<Result<Vec<_>>>()?;
+        solidcore_ops::plate_contact::tab_slot_tool_faces_each(&owned, joints, specs, tol).map_err(kernel_error)
     })
 }
 
