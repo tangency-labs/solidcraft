@@ -87,6 +87,7 @@ pub mod material_properties;
 pub mod materials;
 pub mod mesh;
 pub mod metadata;
+pub mod model_queries;
 pub mod motion;
 pub mod motion_analysis;
 pub mod motion_animation;

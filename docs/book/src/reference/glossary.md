@@ -269,6 +269,15 @@ when the design's parameters change. Compare *spline*, whose points are placed b
 - **Elsewhere:** equation-driven curve, curve from equation, function plot.
 - **For translators:** "equation" is a mathematical formula, not a balance or an equality constraint.
 
+### face outline
+
+The closed outer boundary and any inner boundaries of one planar face.
+
+- **In SolidCraft:** `model.face_outlines` reads analytic lines, arcs and circles from the
+  B-rep in model-space millimetres. Unsupported curves are refused, not replaced with a mesh.
+  `offset`, `limit` and `next` page the selected faces; refresh face indices after model edits.
+- **For translators:** the boundary of one face, not the silhouette of the whole body.
+
 ### feature
 
 One step in the timeline that creates or changes geometry, such as an extrude, a fillet or a
@@ -422,6 +431,15 @@ design, which then keeps a copy of its own. It is an app setting, not part of a 
 - **Don't use:** preset, template, library rule.
 - **Elsewhere:** rule library, sheet metal style library.
 - **For translators:** "personal" as in the user's own, not private or confidential.
+
+### point classification
+
+The location of a point inside a body's material, outside it, or on its boundary.
+
+- **In SolidCraft:** `model.classify_point` takes model-space millimetres and returns
+  `inside`, `outside` or `on` using the B-rep and its kernel tolerance. A cavity is outside.
+  A mesh body is refused. Reading a classification does not edit the design.
+- **For translators:** a geometric relation, not a label assigned to a sketch point.
 
 ### print face
 
