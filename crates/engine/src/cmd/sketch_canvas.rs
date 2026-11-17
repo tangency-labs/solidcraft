@@ -8,8 +8,8 @@ use solidcraft_geom::prelude::*;
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec2};
 use crate::schema::canvas::{
-    CanvasCalibrateParams, CanvasCalibrated, CanvasDecalParams, CanvasDeleteParams, CanvasDeleted, CanvasEditParams, CanvasEdited,
-    CanvasFrame, CanvasFrameSketchParams, CanvasFramed, CanvasInsertParams, CanvasPlaced, CanvasStraightenParams, CanvasStraightened,
+    CanvasCalibrateParams, CanvasCalibrated, CanvasDecalParams, CanvasDeleteParams, CanvasDeleted, CanvasEditParams, CanvasEdited, CanvasFrame,
+    CanvasFrameSketchParams, CanvasFramed, CanvasInsertParams, CanvasPlaced, CanvasStraightenParams, CanvasStraightened,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -389,10 +389,8 @@ fn frame_canvas(s: &mut Session, i: usize, name: Option<&str>, cmd: &str) -> Res
             // The frame unmirrored: a mirrored image's bottom-left corner is the frame's bottom-right.
             let k = c.corners();
             let corners = if c.flip { [k[1], k[0], k[2]] } else { [k[0], k[1], k[3]] };
-            let name = name
-                .filter(|n| !n.trim().is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| s.doc.free_sketch_name(&format!("{} frame", c.name)));
+            let name =
+                name.filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or_else(|| s.doc.free_sketch_name(&format!("{} frame", c.name)));
             let made = super::sketch::create_sketch_with_plane(s, &json!({ "name": name }), c.plane.clone(), None)?;
             let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "could not start a sketch on the canvas"))?;
             (sketch, name, corners, true)
@@ -454,7 +452,10 @@ fn frame_in_sketch(s: &Session, c: &Canvas, sketch: u64, cmd: &str) -> Result<[V
         if !((q - o).dot(n).abs() <= tolerance) {
             return Err(bad(
                 cmd,
-                format!("{} does not lie on the plane of sketch `{}`: put it on that plane, or finish the sketch to frame it in a new one", c.name, ss.name),
+                format!(
+                    "{} does not lie on the plane of sketch `{}`: put it on that plane, or finish the sketch to frame it in a new one",
+                    c.name, ss.name
+                ),
             ));
         }
         *slot = ss.plane.to_local(q);
