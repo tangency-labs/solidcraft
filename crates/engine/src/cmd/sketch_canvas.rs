@@ -32,13 +32,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("canvas")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data (base64 PNG or JPEG); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?"),
+        .params("path | data (base64 PNG, JPEG or SVG; an SVG is drawn into a PNG); resolution?: pixels (an SVG's longest side, default 1024, at most 4096); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?"),
     CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal))
         .at("SKETCH", "INSERT")
         .icon("decal")
         .contract(&DECAL_CONTRACT)
         .output(output_schema_for::<CanvasPlaced>)
-        .params("path | data; face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1)"),
+        .params("path | data (PNG, JPEG or SVG); resolution?: pixels (an SVG's longest side, default 1024); face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1)"),
     CommandSpec::new("canvas.edit", "Edit Canvas", crate::checked!("canvas.edit", edit_canvas))
         .at("SKETCH", "INSERT")
         .icon("canvas")
@@ -79,8 +79,18 @@ fn image_bytes(p: &Value, cmd: &str) -> Result<Vec<u8>> {
 }
 
 fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
-    let bytes = image_bytes(p, cmd)?;
-    let (format, pixels) = image_info(&bytes).ok_or_else(|| bad(cmd, "only PNG and JPEG images can be inserted"))?;
+    let mut bytes = image_bytes(p, cmd)?;
+    if super::canvas_svg::is_svg(&bytes) {
+        let side = match p.get("resolution") {
+            None | Some(Value::Null) => super::canvas_svg::DEFAULT_SIDE,
+            Some(_) => num(p, "resolution")
+                .filter(|r| (1.0..=f64::from(super::canvas_svg::MAX_SIDE)).contains(r))
+                .map(|r| r.round() as u32)
+                .ok_or_else(|| bad(cmd, format!("`resolution` must be a number of pixels from 1 to {}", super::canvas_svg::MAX_SIDE)))?,
+        };
+        bytes = super::canvas_svg::rasterize(&bytes, side).map_err(|e| bad(cmd, e))?;
+    }
+    let (format, pixels) = image_info(&bytes).ok_or_else(|| bad(cmd, "only PNG, JPEG and SVG images can be inserted"))?;
     let plane = super::sketch::plane_ref_numbers(s, p, cmd)?;
     let (vals, _) = s.doc.param_values();
     let pl = s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;
@@ -588,6 +598,22 @@ mod tests {
             (1.0, 92.0, 91.0 - 180.0),
         ] {
             assert!((deg(now, target) - want).abs() < 1e-9, "{now} -> {target}: {}", deg(now, target));
+        }
+    }
+
+    /// An SVG decal is kept as the PNG it draws, at the resolution asked for.
+    #[test]
+    fn an_svg_decal_is_kept_as_the_png_it_draws() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 0]})).unwrap();
+        let svg = base64_encode(br#"<svg xmlns="http://www.w3.org/2000/svg" width="30" height="10"><rect width="30" height="10" fill="red"/></svg>"#);
+        let r = s.execute("canvas.decal", &json!({"data": svg, "face": [20, 15, 10], "width": 30, "resolution": 300})).unwrap();
+        assert_eq!(r["pixels"], json!([300, 100]));
+        let c = s.doc.canvases.last().unwrap();
+        assert_eq!(c.format, "png");
+        assert!(c.bytes().unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+        for resolution in [json!(0), json!(5000), json!("big")] {
+            assert!(s.execute("canvas.decal", &json!({"data": svg, "face": [20, 15, 10], "resolution": resolution})).is_err(), "{resolution}");
         }
     }
 }
