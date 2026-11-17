@@ -3133,7 +3133,7 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_point_expr")]
         #[walk(placement)]
         anchor: Option<PointExpr>,
-        /// Advanced: each copy's size, height and turn follow its distance to attractor points.
+        /// Advanced: each copy's size, height and rotation follow its distance to attractor points.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attract: Option<Box<Attract>>,
     },
@@ -3198,13 +3198,13 @@ pub struct Attract {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(length = "Offset far")]
     pub offset_far: Option<Expr>,
-    /// How far a copy turns about the face's normal.
+    /// How far a copy rotates about the face's normal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[walk(angle = "Turn near")]
-    pub turn_near: Option<Expr>,
+    #[walk(angle = "Rotate near")]
+    pub rotate_near: Option<Expr>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[walk(angle = "Turn far")]
-    pub turn_far: Option<Expr>,
+    #[walk(angle = "Rotate far")]
+    pub rotate_far: Option<Expr>,
     /// No copy farther than this from every attractor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(length = "Cutoff")]

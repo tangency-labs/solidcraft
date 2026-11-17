@@ -73,7 +73,7 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 ### attractor
 
 A point, edge, face or body whose distance from each copy of a pattern sets how that copy is
-scaled, raised and turned.
+scaled, raised and rotated.
 
 Each value goes from its near setting at the near distance to its far setting at the far distance;
 copies nearer or farther than those take the end values. A copy takes the distance to the nearest
@@ -85,7 +85,7 @@ in full.
 
 - **In SolidCraft:** `solid.pattern.face`'s `attract` (`geometry`, `bodies`, `far_geometry`,
   `far_bodies`, `near`, `far`, `scale_near`, `scale_far`, `offset_near`, `offset_far`,
-  `turn_near`, `turn_far`, `cutoff`, `falloff`); the Advanced section of Pattern on Face.
+  `rotate_near`, `rotate_far`, `cutoff`, `falloff`); the Advanced section of Pattern on Face.
 - **Don't use:** magnet, driver, influence point.
 - **Elsewhere:** attractor point, attractor curve.
 - **For translators:** what draws an effect towards it, not a physical force or a magnet.
