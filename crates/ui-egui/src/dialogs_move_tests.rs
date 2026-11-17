@@ -982,6 +982,40 @@ fn editing_a_turn_about_a_slanted_axis_keeps_its_axis_and_angle_expression() {
     assert_eq!((*mode, x.as_str()), (FREE, "gap"), "a translation a parameter drives is kept");
 }
 
+/// #17560 with #17974: a turn about a picked edge reopens in Rotate with the edge kept, even when
+/// the edge runs along X, Y or Z, so saving it unchanged keeps the edge and the turn still follows
+/// it when a move is dragged before it. Free Move dropped the edge.
+#[test]
+fn editing_a_turn_about_a_picked_edge_keeps_the_edge() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+    let about = json!({"edge": [40.0, 15.0, 10.0], "body": "Body1"});
+    let turn = json!({"bodies": ["Body1"], "origin": ["40 mm", "0 mm", "10 mm"], "axis": [0.0, 1.0, 0.0], "angle": "10 deg", "about": about});
+    let id = h.app.run("solid.move", turn).unwrap()["feature"].as_u64().unwrap();
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let Kind::Move { mode, angle, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!((*mode, angle.as_str()), (ROTATE, "10 deg"), "reopens in Rotate with the angle as typed");
+    assert!(items(&d, 1).is_empty(), "no axis pick: the stored axis and edge are kept");
+    let commands = crate::dialogs::apply_commands(&h.app, &d).unwrap();
+    let [(_, redefine)] = commands.as_slice() else { panic!("one command: {commands:?}") };
+    assert_eq!(redefine["params"]["about"]["type"], "edge", "the edge goes back with the turn: {redefine}");
+    for (command, params) in commands {
+        h.app.run(&command, params).unwrap();
+    }
+    h.settle();
+    let saved = serde_json::to_value(&h.app.session.doc.features.last().unwrap().kind).unwrap();
+    assert_eq!(saved["rotate_about"]["type"], "edge", "saved unchanged, the edge is kept: {saved}");
+    let turned = h.app.session.model.state().body("Body1").unwrap().mesh().bounds();
+    // A move along X dragged before the turn: the turn still follows the edge.
+    h.app.run("solid.move", json!({"bodies": ["Body1"], "translate": [20, 0, 0]})).unwrap();
+    let last = h.app.session.doc.features.last().unwrap().name.clone();
+    h.app.run("timeline.reorder", json!({"feature": last, "position": 1})).unwrap();
+    h.settle();
+    let b = h.app.session.model.state().body("Body1").unwrap().mesh().bounds();
+    assert!((b.min - (turned.min + Vec3::new(20.0, 0.0, 0.0))).len() < 1e-6, "{b:?} vs {turned:?}");
+    assert!((b.max - (turned.max + Vec3::new(20.0, 0.0, 0.0))).len() < 1e-6, "{b:?} vs {turned:?}");
+}
+
 /// A design with a component `Part` holding a 20 mm cube at the origin, seen from above, with no
 /// dialog open. Returns the harness and the part's placement.
 fn part_harness() -> (crate::scenario::Harness, u64) {

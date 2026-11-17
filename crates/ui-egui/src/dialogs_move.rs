@@ -103,7 +103,7 @@ fn switch_type(app: &SolveApp, d: &mut Dialog, m: usize) {
         i.items = bodies;
     }
     // A kept turn (`axis`, `angle`, `origin`) is in `chain` now; keeping it would turn twice.
-    for key in ["pivot", "origin", "order", "axis", "angle"] {
+    for key in ["pivot", "origin", "order", "axis", "angle", "about"] {
         d.extra.remove(key);
     }
     d.active = if bodies_empty(d) { 0 } else { 1.min(d.inputs.len() - 1) };
@@ -916,6 +916,10 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
                 // An edited turn's own axis and pivot, as stored (#17560).
                 p["origin"] = origin.clone();
                 p["axis"] = axis.clone();
+                // And the edge or face it was picked on, so the turn still follows it (#17974).
+                if let Some(about) = d.extra.get("about") {
+                    p["about"] = about.clone();
+                }
             } else {
                 let Some((o, a)) = items(d, 1).first().and_then(|s| axis_line(app, d, s)) else {
                     return Ok(Step::Needs("select an axis, a straight or circular edge, or a cylinder, cone or torus face first".into()));
@@ -1004,7 +1008,8 @@ fn kept_axis_line(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
 /// Under Rotate's Angle row, while an edited turn keeps its own axis: says so (#17560).
 pub fn kept_axis_note(ui: &mut egui::Ui, inputs: &[SelInput], extra: &serde_json::Map<String, Value>) {
     if kept_axis(inputs, extra).is_some() {
-        let text = solidcraft_ui_text::tr("dialog.move_kept_axis");
+        let key = if extra.contains_key("about") { "dialog.move_kept_edge" } else { "dialog.move_kept_axis" };
+        let text = solidcraft_ui_text::tr(key);
         ui.add(egui::Label::new(egui::RichText::new(text).color(solidcraft_theme::Tokens::get().text_dim)).wrap());
     }
 }
@@ -1164,7 +1169,7 @@ pub fn for_feature(
     feature: &solidcraft_engine::doc::FeatureKind,
     frame: &solidcraft_engine::doc::Mat,
 ) {
-    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, origin, angle, copy, .. } = feature else { return };
+    let solidcraft_engine::doc::FeatureKind::Move { bodies, translate, rotate_axis, rotate_about, origin, angle, copy, .. } = feature else { return };
     let mut translate = translate.clone();
     let mut origin = origin.clone();
     let mut axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
@@ -1181,18 +1186,25 @@ pub fn for_feature(
     let still = translate
         .iter()
         .all(|e| solidcraft_engine::doc::expr::references(e).is_empty() && doc.eval(e, ValueKind::Length).is_ok_and(|v| v.abs() < 1e-12));
-    let mode = if angle.is_some() && world.is_none() && still { ROTATE } else { FREE };
+    // The edge or face a turn was picked about (#17974), kept as saved. In a placed component the
+    // dialog works in world space while the reference stays as saved, so it is not carried there.
+    let about = rotate_about.as_ref().filter(|_| solidcraft_engine::doc::is_identity(frame)).and_then(|g| serde_json::to_value(g).ok());
+    let mode = if angle.is_some() && (world.is_none() || about.is_some()) && still { ROTATE } else { FREE };
     let [x, y, z] = translate.map(String::from);
     let mut k = kind(mode, doc);
     if let (Some(a), Kind::Move { angle: ka, .. }) = (angle, &mut k)
         && mode == ROTATE
     {
-        // One turn about an axis that is not X, Y or Z: Rotate shows its angle as typed, and keeps
-        // the stored axis and pivot until another axis is picked (#17560). Free Move could show it
-        // only as three angles that make the same turn, losing an expression such as `-tent`.
+        // One turn about an axis that is not X, Y or Z, or about a picked edge or face: Rotate shows
+        // its angle as typed, and keeps the stored axis, pivot and edge until another axis is
+        // picked (#17560). Free Move could show it only as three angles that make the same turn,
+        // losing an expression such as `-tent`, and would drop the edge the turn follows.
         *ka = a.to_string();
         d.extra.insert("axis".into(), json!([axis.x, axis.y, axis.z]));
         d.extra.insert("origin".into(), json!(origin.unwrap_or_else(|| solidcraft_engine::doc::point_expr(Vec3::ZERO))));
+        if let Some(about) = about {
+            d.extra.insert("about".into(), about);
+        }
     } else if let Kind::Move { x: kx, y: ky, z: kz, rx, ry, rz, .. } = &mut k {
         (*kx, *ky, *kz) = (x, y, z);
         if let Some(a) = angle {
