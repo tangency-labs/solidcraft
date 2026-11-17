@@ -625,10 +625,21 @@ fn mesh_notes(stats: &solidcraft_kernel::PlanStats, spec: &solidcraft_kernel::Me
         });
     }
     for o in &stats.over_tolerance {
-        let caps = o.caps.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ");
-        let how = if o.within { "still within it" } else { "past it" };
+        let reason = if o.caps.is_empty() {
+            String::from("its shared boundary was kept")
+        } else {
+            let caps = o.caps.iter().map(|c| format!("{c:?}")).collect::<Vec<_>>().join(", ");
+            format!("its refinement stopped at a bound ({caps})")
+        };
+        let how = if o.within {
+            "still within it"
+        } else if o.sag > o.tol {
+            "past it"
+        } else {
+            "within it where measured"
+        };
         notes.push(format!(
-            "face {}: its refinement stopped at a bound ({caps}); its triangles lie up to {:.3e} mm off the surface, {how} (chord tolerance {:.3e} mm{})",
+            "face {}: {reason}. Its triangles lie up to {:.3e} mm off the surface, {how} (chord tolerance {:.3e} mm{})",
             o.face,
             o.sag,
             o.tol,

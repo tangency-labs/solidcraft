@@ -832,6 +832,17 @@ form_case!(offset_faces, "solid.offset_face", ["Distance"]);
 form_case!(section, "inspect.section", ["Distance"]);
 form_case!(move_copy, "solid.move", ["Move Type", "X Distance", "Y Distance", "Z Distance", "X Angle", "Y Angle", "Z Angle"]);
 form_case!(rib, "solid.rib", ["Direction", "Thickness", "Depth"]);
+
+/// Extend ends is opt-in (#13019): a new Rib or Web starts with it off, so it builds as before
+/// unless it is ticked.
+#[test]
+fn a_new_rib_starts_with_extend_ends_off() {
+    let h = Harness::new();
+    for command in ["solid.rib", "solid.web"] {
+        let d = Dialog::for_command(&h.app, command).unwrap();
+        assert!(matches!(&d.kind, Kind::Rib { extend: false, .. }), "{command}");
+    }
+}
 form_case!(web, "solid.web", ["Direction", "Thickness", "Depth"]);
 form_case!(emboss, "solid.emboss", ["Depth", "Type"]);
 form_case!(replace_face, "solid.replace_face", []);
