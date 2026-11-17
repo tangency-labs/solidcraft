@@ -1365,8 +1365,9 @@ fn the_bill_of_materials_and_the_physical_properties_weigh_one_measurement() {
     assert_eq!(body.volume().map(f64::to_bits), body.clone().volume().map(f64::to_bits), "a clone shares the measurement");
 }
 
-/// One pin modelled two ways, as a cylinder and as a revolved rectangle: tessellated differently,
-/// measured a little apart, still one part with one mass. A pin 0.1% wider is another part.
+/// One pin modelled two ways, as a cylinder and as a revolved rectangle: one part with one mass.
+/// The kernel measures a body on its exact surfaces (`smlib::measure`), and both pins have the same
+/// cylinder and planes, so they measure exactly alike. A pin 0.1% wider is another part.
 #[test]
 fn equal_parts_modelled_apart_have_one_mass() {
     let mut s = Session::default();
@@ -1386,8 +1387,7 @@ fn equal_parts_modelled_apart_have_one_mass() {
         run(s, "component.properties", json!({"component": name}))["total"]["mass_g"].as_f64().unwrap()
     };
     let (cylinder, revolved) = (pin(&mut s, "Pin A", false, 7.0), pin(&mut s, "Pin B", true, 7.0));
-    let apart = (cylinder - revolved).abs() / cylinder;
-    assert!(apart > 0.0 && apart <= bom::MEASURE_ACCURACY, "measured {apart} apart");
+    assert_eq!(cylinder.to_bits(), revolved.to_bits(), "{cylinder} g as a cylinder, {revolved} g revolved");
     let r = run(&mut s, "assembly.bom", json!({"mass": true}));
     assert_eq!(r["rows"].as_array().map(Vec::len), Some(1), "{r}");
     assert!(r["rows"][0]["mass_g"].as_f64().is_some(), "one mass for both: {r}");

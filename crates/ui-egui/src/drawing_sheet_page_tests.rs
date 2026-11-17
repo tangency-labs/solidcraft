@@ -425,8 +425,8 @@ fn a_view_is_outlined_only_near_its_edge() {
     assert!(outlined(&hit(ObjectKind::TitleBlock, false)));
 }
 
-/// Without a drawing open the page shows the workspace's note, and the control channel's sheet
-/// page is empty; outside Drawing there is none either.
+/// Without a drawing open the page shows the first-sheet start (#18159), and the control channel's
+/// sheet page is empty; outside Drawing there is none either.
 #[test]
 fn no_drawing_open_shows_the_note() {
     let mut h = Harness::new();
@@ -435,7 +435,7 @@ fn no_drawing_open_shows_the_note() {
     crate::drawing_workspace::enter(&mut h.app, true).unwrap();
     h.frames(2);
     assert_eq!(page(&mut h), Value::Null);
-    assert!(h.widget("No drawing is open.").is_some());
+    assert!(h.widget("Set up your drawing").is_some());
     let (mut h, _) = plate_sheet();
     crate::drawing_workspace::enter(&mut h.app, false).unwrap();
     h.frames(2);
