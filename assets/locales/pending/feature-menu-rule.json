@@ -1,0 +1,17 @@
+{
+  "en": {
+    "prefs.feature_menus_act_on_selection": "Feature menus act on the whole selection",
+    "prefs.feature_menus_act_on_selection_note": "With several features selected, an entry in a feature's menu (History and Browser) acts on all of them, or is greyed out when it takes only one feature. Off: Edit, Rename, Suppress, Roll back and Find act on the right-clicked feature alone, as before.",
+    "timeline.select_one_feature": "Select a single feature to use this."
+  },
+  "de": {
+    "prefs.feature_menus_act_on_selection": "Feature-Menüs wirken auf die ganze Auswahl",
+    "prefs.feature_menus_act_on_selection_note": "Sind mehrere Features ausgewählt, wirkt ein Eintrag im Menü eines Features (Verlauf und Browser) auf alle, oder er ist ausgegraut, wenn er nur ein Feature annimmt. Aus: Bearbeiten, Umbenennen, Unterdrücken, Hierher zurücksetzen und Suchen wirken wie zuvor nur auf das Feature unter dem Rechtsklick.",
+    "timeline.select_one_feature": "Dafür ein einzelnes Feature auswählen."
+  },
+  "pl": {
+    "prefs.feature_menus_act_on_selection": "Menu operacji działa na całe zaznaczenie",
+    "prefs.feature_menus_act_on_selection_note": "Gdy zaznaczono kilka operacji, pozycja w menu operacji (Historia i przeglądarka) działa na wszystkie albo jest wyszarzona, jeśli przyjmuje tylko jedną operację. Wyłączone: Edytuj, Zmień nazwę, Wygaś, Cofnij tutaj i Znajdź działają jak dotąd tylko na operację klikniętą prawym przyciskiem.",
+    "timeline.select_one_feature": "Zaznacz jedną operację, aby tego użyć."
+  }
+}
