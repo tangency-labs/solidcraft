@@ -1,5 +1,5 @@
-// Generated from the blessed `blend.fillet_executive_p3.jsonl` against the knot-line
-// integrator's: every row whose `mass_properties` moved, as (case, old row, this branch's row).
+// Generated from the blessed `blend.fillet_executive_p3.jsonl` against main's: every row
+// whose `mass_properties` moved, as (case, main's row, this branch's row).
 static ROWS: [Row; 11] = [
     (
         "source-file-box_w_slot-all-edges",

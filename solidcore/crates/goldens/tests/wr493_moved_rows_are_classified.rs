@@ -2,8 +2,7 @@
 //! (the found sphere keeps the NURB it tested, not upstream's fitted one), each moved entry
 //! classified against a certified enclosure of the body's true value.
 //!
-//! The old rows are the knot-line integrator's (the branch this one stacks on); the new are
-//! this branch's. Both are estimates (`brep_mass_properties(k, b, 1e-4, density 1, origin
+//! The old rows are main's; the new are this branch's. Both are estimates (`brep_mass_properties(k, b, 1e-4, density 1, origin
 //! 0)`), and exact floats, so which is nearer the true value depends only on which side of
 //! their midpoint the true value lies (`harness::side`). For each row the test runs the
 //! case with `goldens::dump::capture` on, checks that the run reproduces the new row (to
@@ -32,6 +31,7 @@ use harness::{Row, Side, Table};
 
 include!("wr493_moved_rows/rows.rs");
 include!("wr493_moved_rows/expected.rs");
+include!("wr493_moved_rows/beyond_rounding.rs");
 
 /// The width asked of each enclosure, relative to its value's scale.
 const ENCLOSURE_WIDTH: f64 = 1e-5;
@@ -73,4 +73,18 @@ fn expected_lists_every_moved_entry() {
     let pinned: Vec<(&str, usize)> = EXPECTED.iter().map(|e| (e.0, e.1)).collect();
     assert_eq!(TABLE.moved(), pinned);
     assert!((0..ROWS.len()).all(|i| TABLE.part_of(i) < PARTS));
+}
+
+/// Every entry main's row lies beyond this branch's summation-rounding bands for
+/// (`goldens::wr493_rows`) is pinned EQUAL here and is not [`WIDE`]: its new value is within
+/// the rows' accuracy of the certified enclosure, which the ignored parts check.
+#[test]
+fn beyond_rounding_entries_are_equal_within_accuracy() {
+    for &(case, i) in &BEYOND_ROUNDING {
+        assert!(
+            EXPECTED.contains(&(case, i, Side::Equal)),
+            "{case} {i}: not pinned EQUAL"
+        );
+        assert!(!WIDE.contains(&(case, i)), "{case} {i}: WIDE");
+    }
 }

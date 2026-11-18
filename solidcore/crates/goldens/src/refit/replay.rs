@@ -1,22 +1,24 @@
-//! #18195's refit replay of the golden rows the WR-493 retirement moved.
+//! The refit replay of the golden rows the WR-493 retirement moves.
 //!
 //! A sphere found in a file NURB now keeps that NURB, so the file's UV trims stay on it.
-//! #18230's tree replaced it by upstream's NURB made from the fitted circles, on which the
-//! read dropped the file's trims and rebuilt them. For each moved row, [`DATA`] holds the
-//! FNV-1a hash of #18230's committed row.
+//! Main replaces it by upstream's NURB made from the fitted circles, on which the read
+//! drops the file's trims and rebuilds them. For each moved row, [`DATA`] holds the FNV-1a
+//! hash of main's committed row.
 //!
 //! The tests run each case twice:
 //! 1. with every found sphere's file NURB replaced by the fitted one before the topology
 //!    is made ([`super::before_topology`]; at least one replaced, on a read the seam sees),
-//!    the encoded row hashes to #18230's row;
+//!    the encoded row hashes to main's row;
 //! 2. as is, the encoded row equals the committed golden line.
 //!
-//! So each committed row is this branch's output, and it differs from #18230's only
-//! through the NURB the found spheres keep. `corpus.parity` runs its two sides in this
-//! process (`run_in_process`) so the seam sees their reads.
+//! So each committed row is this branch's output, and it differs from main's only through
+//! the NURB the found spheres keep. `corpus.parity` runs its two sides in this process
+//! (`run_in_process`) so the seam sees their reads.
 //!
-//! [`DATA`] was made by [`record`] from #18230's expected rows (`REFIT_OLD`, its
-//! `expected` directory): every case whose committed row differs from #18230's.
+//! [`DATA`] was made by [`record`] from main's expected rows (`REFIT_OLD`, its `expected`
+//! directory): every case whose committed row differs from main's. A row the retirement
+//! moves by less than the goldens' comparator keeps main's committed line, so it is not
+//! listed (its run is not that line to the bit).
 
 use std::collections::BTreeMap;
 
@@ -35,7 +37,7 @@ use data::DATA;
 /// Generated cases per unit, as `goldens` runs them (`main.rs` `DEFAULT_SEEDS`).
 const SEEDS: usize = 16;
 
-/// One moved row: unit, case and #18230's row hash.
+/// One moved row: unit, case and main's row hash.
 pub(super) type Row = (&'static str, &'static str, u64);
 
 pub(crate) fn unit(id: &str) -> Box<dyn UnitDiff> {
@@ -98,7 +100,7 @@ fn replay(unit_id: &str) -> usize {
             failures.push(format!("{name}: {refit:?}"));
         }
         if hash(&line) != old_hash {
-            failures.push(format!("{name}: refit row is not #18230's row"));
+            failures.push(format!("{name}: refit row is not main's row"));
         }
         let line = run(u.as_ref(), case);
         if golden.get(name) != Some(&line) {
@@ -121,22 +123,52 @@ macro_rules! replay_tests {
 replay_tests! {
     api_files_rows_move_only_through_the_kept_nurb: "topology.api_files", 14;
     assert_valid_rows_move_only_through_the_kept_nurb: "topology.assert_valid", 2;
-    brep_p10_rows_move_only_through_the_kept_nurb: "topology.brep_p10", 6;
+    brep_p10_rows_move_only_through_the_kept_nurb: "topology.brep_p10", 5;
     brep_p4_rows_move_only_through_the_kept_nurb: "topology.brep_p4", 5;
     edge_rows_move_only_through_the_kept_nurb: "topology.edge", 32;
-    edgeuse_p1_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p1", 48;
-    edgeuse_p3_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p3", 16;
+    edgeuse_p1_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p1", 49;
+    edgeuse_p3_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p3", 29;
     face_p2_rows_move_only_through_the_kept_nurb: "topology.face_p2", 4;
     face_p3_rows_move_only_through_the_kept_nurb: "topology.face_p3", 24;
     face_p4_rows_move_only_through_the_kept_nurb: "topology.face_p4", 30;
     vertexuse_rows_move_only_through_the_kept_nurb: "topology.vertexuse", 4;
+    edgeuse_p2_rows_move_only_through_the_kept_nurb: "topology.edgeuse_p2", 8;
+    vertex_rows_move_only_through_the_kept_nurb: "topology.vertex", 1;
+    standard_solver_p1_rows_move_only_through_the_kept_nurb: "blend.fillet_standard_solver_p1", 1;
+}
+
+/// `topology.vertex` `surf_sphere150_rebuild_v3_gaps` (`max_up_dim_gap_3d` with its list):
+/// main's row and this branch's list the same gaps, every one of length 0, and differ only
+/// in which of them is reported as the largest (main a face gap held by vertex use 1, now
+/// an edge gap held by vertex use 2). Both are a largest gap of that list; this asserts the
+/// reported gap is one the list holds and that no listed gap is longer, so the row's answer
+/// is a maximum by construction.
+#[test]
+fn surf_sphere150_rebuild_v3_gaps_reports_a_largest_listed_gap() {
+    let u = unit("topology.vertex");
+    let all = cases(u.as_ref());
+    let case = &all["surf_sphere150_rebuild_v3_gaps"];
+    let out = u.run_rust(case).unwrap();
+    let s = &out.values["state"];
+    // [status, max kind, max holder, max length, list length, (kind, holder, length)...]
+    assert_eq!(s[0], 0.0);
+    let max = (s[1], s[2], s[3]);
+    let n = s[4] as usize;
+    let list: Vec<(f64, f64, f64)> = (0..n)
+        .map(|g| (s[5 + 3 * g], s[6 + 3 * g], s[7 + 3 * g]))
+        .collect();
+    assert_eq!(max, (0.0, 2.0, 0.0), "{s:?}");
+    assert!(list.contains(&max), "{max:?} not in {list:?}");
+    assert!(list.iter().all(|g| g.2 <= max.2), "{list:?}");
+    // main's answer, the face gap held by vertex use 1, is listed with the same length
+    assert!(list.contains(&(1.0, 1.0, 0.0)), "{list:?}");
 }
 
 /// Writes `$REFIT_OUT`, the source of [`DATA`]: per unit below, every case whose
-/// committed row differs from its row in `$REFIT_OLD` (#18230's `expected` directory),
+/// committed row differs from its row in `$REFIT_OLD` (main's `expected` directory),
 /// with the hash of that old row; and a line per case of what the refit run gives.
 #[test]
-#[ignore = "makes the replay's data from #18230's expected rows"]
+#[ignore = "makes the replay's data from main's expected rows"]
 fn record() {
     use std::fmt::Write as _;
     let old_dir = std::path::PathBuf::from(std::env::var("REFIT_OLD").unwrap());

@@ -1,6 +1,5 @@
-//! Rows the WR-493 retirement (and #18195's integrator change) move by rounding only
-//! (tests only), and the sphere-pole points against the sphere they lie on. Each case is
-//! run again and held to the row it replaces (#18230's, which the retirement stacks on).
+//! Rows the WR-493 retirement moves by rounding only (tests only), and the sphere-pole
+//! points against the sphere they lie on. Each case is run again and held to main's row.
 //!
 //! The rows record sums: an integrated mass property is a sum of the integrator's
 //! summands, and a stored block of a long array is a sum over up to [`BLOCK`] entries. A
@@ -94,24 +93,24 @@ fn assert_blocks(case: &str, what: &str, xs: &[f64], n: usize, old: &[[f64; 3]])
 /// A row before: its case, mass properties, result geometry length and blocks.
 type OldRow = (&'static str, [f64; 12], usize, &'static [[f64; 3]]);
 
-/// `blend.fillet_executive_p3`'s `sphere_diff_3cylinders` rows #18230 left (its mass
+/// `blend.fillet_executive_p3`'s `sphere_diff_3cylinders` rows on main (its mass
 /// properties, then its result geometry's length and blocks).
 const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
         [
-            38227.382010839705,
-            169498.7204488185,
-            169498.7204488185,
-            -3.618993989638384e-12,
-            -3.5986625303705324e-05,
-            0.00010882600582943419,
-            200903696.71037695,
-            200903696.71037072,
-            200904372.36347744,
-            248.5924784747251,
-            1.4063812144130523e-05,
-            7.987673777205798e-07,
+            38227.3820108397,
+            169498.7204488313,
+            169498.7204488313,
+            -6.114560407317939e-14,
+            -3.598662527301659e-05,
+            0.00010882600400569041,
+            200903696.71038696,
+            200903696.710392,
+            200904372.36348903,
+            248.59247835671283,
+            1.973124187014311e-08,
+            -1.773516745017131e-07,
         ],
         1044,
         &[
@@ -126,17 +125,17 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
         "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
         [
             38192.70266321392,
-            169488.11176530627,
-            169488.11176530627,
-            -5.889000292071394e-11,
-            -0.0009204325594738638,
-            0.0027597713564552497,
-            200882054.2463133,
-            200882054.24663433,
-            200899145.80766442,
-            6597.350496349905,
-            0.00022975309905973266,
-            1.18398253316734e-06,
+            169488.11176517553,
+            169488.11176517553,
+            -6.121288540895723e-14,
+            -0.0009204325605192529,
+            0.002759771374899137,
+            200882054.24621296,
+            200882054.24641633,
+            200899145.80754238,
+            6597.350500432896,
+            2.0507525094612877e-08,
+            -1.7776391437163526e-07,
         ],
         1044,
         &[
@@ -150,18 +149,18 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
         [
-            38235.99267453257,
+            38235.992674532565,
             169499.1503543268,
             169499.1503543268,
-            -6.229794975861349e-14,
-            -3.911533220714917e-07,
-            7.823071677343901e-07,
+            -6.229576286325623e-14,
+            -3.9115332202330604e-07,
+            7.823071671252264e-07,
             200904581.2882041,
             200904581.28820112,
             200904581.2882041,
-            -8.419921318608058,
-            2.2638975726078466e-08,
-            -1.9749435724341126e-07,
+            -8.419921318633904,
+            2.5275099149794463e-08,
+            -1.9533483200075475e-07,
         ],
         946,
         &[
@@ -174,18 +173,18 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
         [
-            38227.38201074549,
-            169498.7204488185,
-            169498.7204488185,
-            -3.6096460380862713e-12,
-            -3.598662529486385e-05,
-            -0.00010726138929369984,
-            200903696.7103769,
-            200903696.71037072,
-            200904372.36347732,
-            -265.4323220761774,
-            -1.402955162266303e-05,
-            8.153058577120819e-07,
+            38227.38201074548,
+            169498.72044883113,
+            169498.72044883113,
+            -4.979080091814951e-14,
+            -3.598662526162161e-05,
+            -0.0001072613874655039,
+            200903696.7103869,
+            200903696.71039194,
+            200904372.3634889,
+            -265.4323219548221,
+            1.1120885514499355e-08,
+            -1.6280852434782863e-07,
         ],
         1044,
         &[
@@ -200,17 +199,17 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
         "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
         [
             38192.7026631297,
-            169488.11176530627,
-            169488.11176530627,
-            -5.888649560297935e-11,
-            -0.0009204325594584959,
-            -0.0027582066419855294,
-            200882054.24631333,
-            200882054.24663436,
-            200899145.80766436,
-            -6614.190339950579,
-            -0.0002297201612639897,
-            1.194837502366222e-06,
+            169488.11176517545,
+            169488.11176517545,
+            -5.5565903320905924e-14,
+            -0.0009204325605013881,
+            -0.0027582066604249548,
+            200882054.246213,
+            200882054.24641624,
+            200899145.80754232,
+            -6614.190344030134,
+            9.501001257738387e-09,
+            -1.6906407974309621e-07,
         ],
         1044,
         &[
@@ -224,18 +223,18 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
         [
-            38235.99267453257,
+            38235.992674532565,
             169499.1503543268,
             169499.1503543268,
-            -6.229794975861349e-14,
-            -3.911533220714917e-07,
-            7.823071677343901e-07,
+            -6.229576286325623e-14,
+            -3.9115332202330604e-07,
+            7.823071671252264e-07,
             200904581.2882041,
             200904581.28820112,
             200904581.2882041,
-            -8.419921318608058,
-            2.2638975726078466e-08,
-            -1.9749435724341126e-07,
+            -8.419921318633904,
+            2.5275099149794463e-08,
+            -1.9533483200075475e-07,
         ],
         946,
         &[
@@ -248,18 +247,18 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
     (
         "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
         [
-            38235.99267453257,
+            38235.992674532565,
             169499.1503543268,
             169499.1503543268,
-            -6.229794975861349e-14,
-            -3.911533220714917e-07,
-            7.823071677343901e-07,
+            -6.229576286325623e-14,
+            -3.9115332202330604e-07,
+            7.823071671252264e-07,
             200904581.2882041,
             200904581.28820112,
             200904581.2882041,
-            -8.419921318608058,
-            2.2638975726078466e-08,
-            -1.9749435724341126e-07,
+            -8.419921318633904,
+            2.5275099149794463e-08,
+            -1.9533483200075475e-07,
         ],
         946,
         &[
@@ -272,18 +271,18 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
     (
         "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
         [
-            38235.99267453257,
+            38235.992674532565,
             169499.1503543268,
             169499.1503543268,
-            -6.229794975861349e-14,
-            -3.911533220714917e-07,
-            7.823071677343901e-07,
+            -6.229576286325623e-14,
+            -3.9115332202330604e-07,
+            7.823071671252264e-07,
             200904581.2882041,
             200904581.28820112,
             200904581.2882041,
-            -8.419921318608058,
-            2.2638975726078466e-08,
-            -1.9749435724341126e-07,
+            -8.419921318633904,
+            2.5275099149794463e-08,
+            -1.9533483200075475e-07,
         ],
         946,
         &[
@@ -296,18 +295,18 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
     (
         "sweep4-sphere_diff_3cylinders-all-r0.1",
         [
-            38235.99267453257,
+            38235.992674532565,
             169499.1503543268,
             169499.1503543268,
-            -6.229794975861349e-14,
-            -3.911533220714917e-07,
-            7.823071677343901e-07,
+            -6.229576286325623e-14,
+            -3.9115332202330604e-07,
+            7.823071671252264e-07,
             200904581.2882041,
             200904581.28820112,
             200904581.2882041,
-            -8.419921318608058,
-            2.2638975726078466e-08,
-            -1.9749435724341126e-07,
+            -8.419921318633904,
+            2.5275099149794463e-08,
+            -1.9533483200075475e-07,
         ],
         946,
         &[
@@ -320,18 +319,18 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
     (
         "sweep5-sphere_diff_3cylinders-e29-r1.0",
         [
-            38235.99267453257,
+            38235.992674532565,
             169499.1503543268,
             169499.1503543268,
-            -6.229794975861349e-14,
-            -3.911533220714917e-07,
-            7.823071677343901e-07,
+            -6.229576286325623e-14,
+            -3.9115332202330604e-07,
+            7.823071671252264e-07,
             200904581.2882041,
             200904581.28820112,
             200904581.2882041,
-            -8.419921318608058,
-            2.2638975726078466e-08,
-            -1.9749435724341126e-07,
+            -8.419921318633904,
+            2.5275099149794463e-08,
+            -1.9533483200075475e-07,
         ],
         946,
         &[
@@ -341,142 +340,6 @@ const SPHERE_DIFF_3CYLINDERS: [OldRow; 10] = [
             [-187.22231839074738, 2183.8077466814675, -34648.73480807489],
         ],
     ),
-];
-
-/// `blend.fillet_executive_p3`'s `stubs4-torii_unioned-e2-r0.5` mass properties before
-/// #18195's integrator change (each trim piece ends at the surface's v knot lines on
-/// every face, not only on banded ones): its only row that change moves, apart from the
-/// `sphere_diff_3cylinders` rows.
-const TORII_UNIONED: OldRow = (
-    "stubs4-torii_unioned-e2-r0.5",
-    [
-        4329.447683834924,
-        8906.447940918944,
-        8906.447940918944,
-        15.499999999999998,
-        -9.41193690342896e-13,
-        7.008098429528221e-13,
-        1146925.2559878067,
-        5573665.8550277185,
-        6648497.645755144,
-        -4.806595779430989e-08,
-        9.674975963972185e-08,
-        -1.2970727579522074e-07,
-    ],
-    0,
-    &[],
-);
-
-/// The moved mass entries of [`SPHERE_DIFF_3CYLINDERS`] and [`TORII_UNIONED`] FARTHER
-/// from their 1e-12 integration than #18230's (case, entry, whether #18230's refit sphere
-/// replayed through this branch's integrator gives the row within rounding: `true`, the
-/// move is the integrator change's alone; `false`, WR-493's other parametrisation of the
-/// sphere moves it). Each stays within the row's requested accuracy (asserted); a
-/// quadrature move at 1e-4, not a certified improvement.
-const FARTHER: [(&str, usize, bool); 27] = [
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
-        10,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        5,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        9,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
-        10,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        5,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        9,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.1",
-        10,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        5,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
-        9,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
-        11,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        5,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        9,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.1",
-        10,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        5,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        9,
-        false,
-    ),
-    (
-        "stubs4-delete-edge-sphere_diff_3cylinders-e5-r0.5",
-        10,
-        false,
-    ),
-    (
-        "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        5,
-        false,
-    ),
-    (
-        "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        9,
-        false,
-    ),
-    (
-        "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
-        10,
-        false,
-    ),
-    ("sweep4-sphere_diff_3cylinders-all-r0.1", 5, false),
-    ("sweep4-sphere_diff_3cylinders-all-r0.1", 9, false),
-    ("sweep4-sphere_diff_3cylinders-all-r0.1", 10, false),
-    ("sweep5-sphere_diff_3cylinders-e29-r1.0", 5, false),
-    ("sweep5-sphere_diff_3cylinders-e29-r1.0", 9, false),
-    ("sweep5-sphere_diff_3cylinders-e29-r1.0", 10, false),
-    ("stubs4-torii_unioned-e2-r0.5", 4, true),
-    ("stubs4-torii_unioned-e2-r0.5", 11, true),
 ];
 
 /// The record's 12 mass properties as `brep_mass_properties(1e-4, density 1, about the
@@ -510,27 +373,28 @@ fn derived(mid: [f64; 3], raw: &[f64], raw_err: &[f64]) -> [Iv; 12] {
     ]
 }
 
-/// The `sphere_diff_3cylinders` rows (WR-493 and #18195's integrator change) and the
-/// `torii_unioned` row (the integrator change). **Not a regression test of WR-493** (the
-/// entries' classification is measured, not certified).
+// The entries of [`SPHERE_DIFF_3CYLINDERS`] main's row lies outside this branch's
+// summation bands for (case, entry): `BEYOND_ROUNDING`, each classified EQUAL within the
+// rows' accuracy against a certified enclosure by `tests/wr493_moved_rows_are_classified`.
+include!("../tests/wr493_moved_rows/beyond_rounding.rs");
+
+/// The `sphere_diff_3cylinders` rows the WR-493 retirement moves: **a rounding-of-summation
+/// check, not a classification** (`goldens/tests/wr493_moved_rows_are_classified` classifies
+/// every moved entry against a certified enclosure of the body's true value).
 ///
-/// Each case's body is made twice, here and with #18230's refit replayed (the found
-/// sphere given upstream's fitted NURB, `refit::state`), and its mass integrated as the
-/// record integrates it, keeping each summand (`brep_properties_in_box_terms`). A sum of
-/// `k` summands in floating point is within `gamma_(k-1) M` of the exact sum of those
-/// summands, `M` the sum of their magnitudes (Higham, section 3.1), so per raw component
-/// the sum lies in `[T - gamma_(k-1) M, T + gamma_(k-1) M]`; the 12 recorded properties
-/// are derived from those intervals in interval arithmetic ([`derived`]). This branch's
-/// row is its sums' value (asserted). Area, volume, mass and the inertias are within
-/// their sums' rounding of #18230's (asserted). The centroid and product entries move by
-/// more: quadrature at the row's requested accuracy 1e-4, through the sphere's other
-/// parametrisation (WR-493: the refit replayed here lands near #18230's values) and the
-/// integrator change. Each is classified against the same body integrated to 1e-12
-/// (an estimate): those farther are pinned in [`FARTHER`]. The result geometry's blocks
-/// are held to #18230's within the sums' rounding bounds ([`assert_blocks`]).
+/// Each case's body is integrated as the record integrates it, keeping each summand
+/// (`brep_properties_in_box_terms`). A sum of `k` summands in floating point is within
+/// `gamma_(k-1) M` of the exact sum of those summands, `M` the sum of their magnitudes
+/// (Higham, section 3.1), so per raw component the sum lies in `[T - gamma_(k-1) M, T +
+/// gamma_(k-1) M]`; the 12 recorded properties are derived from those intervals in interval
+/// arithmetic ([`derived`]). This branch's row is its sums' value (asserted). The entries
+/// main's row lies outside those bands for are pinned (`BEYOND_ROUNDING`): the found
+/// sphere's other parametrisation moves them by quadrature at the row's accuracy 1e-4, not
+/// by rounding, and each is EQUAL within that accuracy against the body's certified
+/// enclosure (`wr493_moved_rows_are_classified` checks the list against its classes). The result geometry's blocks are held to main's within the sums' rounding
+/// bounds ([`assert_blocks`]).
 #[test]
-fn sphere_diff_3cylinders_moved_mass_entries_are_classified() {
-    use crate::refit::state::{self, Refit};
+fn sphere_diff_3cylinders_rows_are_their_sums() {
     use solidcore::geom::attribute::{AttributeStore, ObjectKey};
     use solidcore::mass::integrator::properties::{
         brep_properties_in_box_terms, MassPropertyBehavior, PreciseProperties, PropertyAttributes,
@@ -548,23 +412,20 @@ fn sphere_diff_3cylinders_moved_mass_entries_are_classified() {
         }
         v
     };
-    // (the row as integrated, and the derived properties' exact and rounding intervals)
-    let integrate = |case: &str, refit: bool, accuracy: f64| {
-        if refit {
-            state::set(Some(Refit::default()));
-        }
+    let mut beyond = Vec::new();
+    let mut failures = Vec::new();
+    for (case, old_mass, n, old_geometry) in SPHERE_DIFF_3CYLINDERS {
+        let output = run(&blend_fillet_executive_p3::Runner, case);
+        let mass = &output.values["mass_properties"];
+        assert_eq!(mass.len(), 12, "{case}");
         let mut k = solidcore::Kernel::default();
         let mut body = blend_fillet_executive_p3::result_body_of(&mut k, case);
-        if refit {
-            let seen = state::take().expect("the refit");
-            assert!(seen.failures.is_empty(), "{case}: {seen:?}");
-        }
         let bbox = calculate_tight_bounding_box(&k, &mut body).unwrap();
         let mid = bbox.mid();
         let (total, terms) = brep_properties_in_box_terms(
             &k,
             &mut body,
-            accuracy,
+            1e-4,
             mid,
             MassPropertyBehavior {
                 density: 1.0,
@@ -594,23 +455,8 @@ fn sphere_diff_3cylinders_moved_mass_entries_are_classified() {
                 Iv::exact(gamma).mul(m).hi
             })
             .collect();
-        (
-            derived(mid.to_array(), &raw, &vec![0.0; raw.len()]),
-            derived(mid.to_array(), &raw, &err),
-        )
-    };
-    let mut failures = Vec::new();
-    let mut moves = Vec::new();
-    for (case, old_mass, n, old_geometry) in
-        SPHERE_DIFF_3CYLINDERS.into_iter().chain([TORII_UNIONED])
-    {
-        let output = run(&blend_fillet_executive_p3::Runner, case);
-        let mass = &output.values["mass_properties"];
-        assert_eq!(mass.len(), 12, "{case}");
-        let (exact, band) = integrate(case, false, 1e-4);
-        let (_, refit) = integrate(case, true, 1e-4);
-        // the reference: the same body integrated to 1e-12 (an estimate, not certified)
-        let (reference, _) = integrate(case, false, 1e-12);
+        let exact = derived(mid.to_array(), &raw, &vec![0.0; raw.len()]);
+        let band = derived(mid.to_array(), &raw, &err);
         for (i, &now) in mass.iter().enumerate() {
             // (this branch's row is its sums' value: the record derives it so)
             if !exact[i].contains(now) {
@@ -619,40 +465,12 @@ fn sphere_diff_3cylinders_moved_mass_entries_are_classified() {
                     exact[i]
                 ));
             }
-            if band[i].contains(old_mass[i]) {
-                continue;
-            }
-            // moved by more than the sums' rounding: by WR-493 (the fitted NURB's other
-            // parametrisation, `refit`) and the integrator change, each a quadrature move
-            let r = 0.5 * (reference[i].lo + reference[i].hi);
-            let class = if (now - r).abs() <= (old_mass[i] - r).abs() {
-                "closer"
-            } else {
-                "farther"
-            };
-            let wr493 = !(band[i].lo > refit[i].hi || refit[i].lo > band[i].hi);
-            eprintln!(
-                "{case}: mass[{i}] #18230 {}, now {now}, refit here {:?}, 1e-12 reference {r}: {class}",
-                old_mass[i], refit[i]
-            );
-            // (area, volume, mass and the inertias move by no more than their rounding; a
-            // moved centroid or product entry stays within the row's requested accuracy
-            // 1e-4 of the 1e-12 reference, relative to the body's scale: its radius of
-            // gyration for a centroid, its largest inertia for a product)
-            let inertia = mass[6].abs().max(mass[7].abs()).max(mass[8].abs());
-            let scale = if i < 6 {
-                (inertia / mass[2].abs()).sqrt()
-            } else {
-                inertia
-            };
-            if i < 3 || (6..9).contains(&i) || (now - r).abs() > 1e-4 * scale {
-                failures.push(format!(
-                    "{case}: mass[{i}] #18230 {}, now {now}",
-                    old_mass[i]
-                ));
-            }
-            if class == "farther" {
-                moves.push((case, i, wr493));
+            if !band[i].contains(old_mass[i]) {
+                eprintln!(
+                    "{case}: mass[{i}] main {}, now {now}, band {:?}",
+                    old_mass[i], band[i]
+                );
+                beyond.push((case, i));
             }
         }
         if n > 0 {
@@ -665,13 +483,13 @@ fn sphere_diff_3cylinders_moved_mass_entries_are_classified() {
             );
         }
     }
-    assert_eq!(moves, FARTHER, "{moves:#?}");
     assert!(failures.is_empty(), "{failures:#?}");
+    assert_eq!(beyond, BEYOND_ROUNDING.to_vec(), "{beyond:#?}");
 }
 
 /// `offset.offset_geometry_creation` `gen0051`: **a rounding-only bound, not a regression
 /// test of WR-493** (it passes with it reverted): the state's digest within its sums'
-/// rounding bounds of the old one ([`assert_blocks`]; #18230: the second block's sum one
+/// rounding bounds of the old one ([`assert_blocks`]; main's: the second block's sum one
 /// unit in the last place higher).
 #[test]
 fn gen0051_moves_by_rounding_only() {
@@ -709,7 +527,7 @@ fn off_sphere(p: [f64; 3]) -> Iv {
 
 /// The point on `sphere.smb` that `topology.face_p2` (`state[4..7]`) and
 /// `topology.brep_p4` (`faces_values[9..12]`) record: CLOSER to the sphere than the point
-/// before (#18230: `(-5.000000000000003, -6.123233995736768e-16, 8.205698631791652e-16)`,
+/// before (main's: `(-5.000000000000003, -6.123233995736768e-16, 8.205698631791652e-16)`,
 /// 2.7e-15 off): each distance in interval arithmetic, this one's upper bound below the
 /// old one's lower bound.
 #[test]
@@ -761,15 +579,14 @@ fn sphere_point_rows_are_closer_to_the_sphere() {
 /// which are held to their references:
 /// - `Fillet__sphere_plane.smb`: the sphere of radius 5 between z = +-h (h the file's pole
 ///   vertices' height) less its cap beyond the plane x = -4, plus the disk of radius 3
-///   in that plane, in closed form: the row is 6.4e-7 from it, #18230's 309.8222156047109
-///   was 1.4e-5 (CLOSER). Splitting each trim piece at the face's interior v knot lines
-///   (the `box_w_slot` fix) moved it 3.4e-12 farther than this branch's earlier
-///   309.8222012093561 (pinned below);
-/// - `Solids__revolution_mold.smb`: moved only by that split (area 19098.629204575394 ->
-///   19098.629211118132, volume 100913.14334351341 -> 100913.14334348583), classified
-///   against certified enclosures in `heal_edge_tolerance_covers_edge_face_gap.rs`;
+///   in that plane, in closed form: the row is 6.4e-7 from it, main's 309.8222156047109
+///   is 1.4e-5 (CLOSER);
+/// - `Solids__revolution_mold.smb`: its committed line stays main's (the run agrees with
+///   it to the goldens' `1e-9`); the values the run gives are pinned here, and its moved
+///   entries are classified against certified enclosures in
+///   `heal_edge_tolerance_covers_edge_face_gap.rs`;
 /// - `ss_plane_sph1..4`: the plane face is the square of side 5, area 25 exactly: the row
-///   is 25 (CLOSER: #18230's was 25.000000000000004); the sphere face's row,
+///   is 25 (CLOSER: main's is 25.000000000000004); the sphere face's row,
 ///   25.14456696301113 (sph1, sph4) and 25.144566963011123 (sph2, sph3), is the value
 ///   `wr493_class_proofs`' `ss_plane_sph_area_is_the_area_its_edges_bound` holds to the
 ///   area the face's edge loop bounds.
@@ -786,7 +603,7 @@ fn corpus_parity_rows_are_closer() {
         (
             "Solids__revolution_mold.smb",
             &[19_098.629_211_118_132],
-            &[100_913.143_343_485_83],
+            &[100_913.143_343_685_2],
         ),
         (
             "ss_plane_sph1.smp",
@@ -832,17 +649,8 @@ fn corpus_parity_rows_are_closer() {
     let (now, before) = (309.822_201_209_352_7_f64, 309.822_215_604_710_9_f64);
     assert!(
         (now - exact).abs() < (before - exact).abs() && (now - exact).abs() < 1e-6,
-        "sphere_plane: row {now}, #18230 {before}, closed form {exact}"
+        "sphere_plane: row {now}, main {before}, closed form {exact}"
     );
-    // FARTHER than this branch's row before the trims were split at the v knot lines
-    // (309.8222012093561, 6.440672e-7 off) by 3.4e-12 (1.1e-14 relative): a quadrature
-    // move, inside the integrator's accuracy, not rounding. Pinned so it stays visible.
-    let unsplit = 309.822_201_209_356_1_f64;
-    assert!(
-        (unsplit - exact).abs() < (now - exact).abs()
-            && (now - exact).abs() - (unsplit - exact).abs() < 4e-12,
-        "sphere_plane: row {now}, before the split {unsplit}, closed form {exact}"
-    );
-    // the planes: 25 exactly, #18230's 25.000000000000004
+    // the planes: 25 exactly, main's 25.000000000000004
     assert!((25.0_f64 - 25.0).abs() < (25.000_000_000_000_004_f64 - 25.0).abs());
 }

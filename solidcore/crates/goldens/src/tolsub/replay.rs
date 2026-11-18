@@ -1,4 +1,4 @@
-//! #18230's tolerance-substitution replay of the golden rows the edge/face gap cover moved.
+//! The tolerance-substitution replay of the golden rows the edge/face gap cover moved.
 //!
 //! The healer's `Fix_TolSizes` now raises an edge tolerance that is under the edge's own
 //! edge/face gap to `zone_tol3d(gain * gap)`, and the vertex step then raises its vertices.
@@ -21,6 +21,13 @@
 //!
 //! [`DATA`] was made by [`record`] on main and on this branch (`TOLSUB_CASES`, a
 //! `unit<TAB>case` list, and `TOLSUB_OUT`), diffed read by read.
+//!
+//! The WR-493 retirement (found spheres keep the NURB they tested) moves some of these
+//! rows too: [`WR493_REFIT`] lists those replayed with the fitted NURB put back as well.
+//! Two rows it moves by less than the goldens' comparator (`corpus.parity`'s
+//! `Solids__revolution_mold.smb`, `topology.brep_p10`'s `read_Fillet_sphere_plane`) keep
+//! the committed line the substitution was checked against before it, which their run is
+//! no longer to the bit, so they were taken out of [`DATA`].
 
 use std::collections::BTreeMap;
 
@@ -122,8 +129,8 @@ fn replay(unit_id: &str) -> usize {
             already: 0,
             failures: Vec::new(),
         }));
-        // (a row the WR-493 retirement moves too, #18195: main's found spheres had the
-        // fitted NURB, so the replay puts that back as well)
+        // (a row the WR-493 retirement moves too: before it, found spheres had the fitted
+        // NURB, so the replay puts that back as well)
         let refit = WR493_REFIT.contains(&(unit_id, name));
         if refit {
             crate::refit::state::set(Some(crate::refit::state::Refit::default()));
@@ -163,10 +170,18 @@ fn replay(unit_id: &str) -> usize {
     n
 }
 
-/// The rows here that the WR-493 retirement (#18195) moves as well: replayed with the
-/// found spheres' fitted NURB put back too (`crate::refit`).
+/// The rows here that the WR-493 retirement moves as well: replayed with the found
+/// spheres' fitted NURB put back too (`crate::refit`).
 const WR493_REFIT: &[(&str, &str)] = &[
-    ("topology.brep_p10", "read_Fillet_sphere_plane"),
+    ("heal.stitch_p1", "file_revolution_mold.smb_advanced"),
+    (
+        "heal.stitch_p2",
+        "file_revolution_mold.smb_stitchfaces_0.001",
+    ),
+    (
+        "heal.stitch_p2",
+        "file_revolution_mold.smb_stitchfaces_0.005",
+    ),
     ("topology.brep_p10", "read_Solids_revolution_mold"),
     ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu21"),
     ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu33"),
@@ -187,10 +202,10 @@ replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
     fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 30;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
-    corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 26;
+    corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 25;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
-    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 39;
+    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
     face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 48;
 }

@@ -23,9 +23,10 @@
 //!   corner's volume and moments are those its trims bound (Stokes and Green agree), so
 //!   the geometry is exact. The `corpus.parity` volume is the trims-bound reference to
 //!   the bit (old 9.8e-11 off). The `blend.fillet_executive_p3` mass row is closer in
-//!   every component but cz, which no corner moves: the integrator now ends its trim
-//!   pieces where a trim crosses an interior v knot line of its surface on every face,
-//!   not only on a banded one (without that, cy, Pyz and Pxy were farther).
+//!   every component but cz, which moves by one ulp through the corners' z moment (EQUAL,
+//!   within the row's accuracy, to the certified enclosure): the integrator ends
+//!   its trim pieces where a trim crosses an interior v knot line of its surface on every
+//!   face, not only on a banded one (without that, cy, Pyz and Pxy were farther).
 //! - `point_just_outside_the_sphere_pole_is_in_the_infinite_region`: the
 //!   `query.brep` `sphere_vertex3_off_region` point lies outside the sphere exactly.
 #![allow(
@@ -1143,13 +1144,25 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
         // (before, only on a banded face, so cy, Pyz and Pxy were 7.3e-10, 7.1e-10
         // and 7.1e-10 relative off the reference against the old row's 1.7e-10, 2.5e-10
         // and 2.5e-10)
-        match i {
-            // cz: no corner moves it
-            5 => assert_eq!(new_off, old_off),
-            _ => assert!(
-                new_off.abs() < old_off.abs(),
-                "mass[{i}]: new off {new_off:e} old off {old_off:e}"
-            ),
+        if i == 5 {
+            // cz moves by one ulp: `brep_mass_properties` takes cz = mid.z + S.z / mass,
+            // and this run's S.z (the corners' z moment, summed in another order) gives
+            // this run's cz over main's mass as over its own, so the ulp is S.z's, not the
+            // volume's. One ulp is below this reference's own rounding, so cz is not ranked
+            // here; `goldens/tests/wr493_moved_rows_are_classified` holds it EQUAL, within
+            // the row's accuracy, to the body's certified enclosure (not WIDE)
+            let sz = mp.properties.moments[4].z;
+            assert_eq!(new_row[i].to_bits(), old_row[i].to_bits() + 1);
+            assert_eq!((mid.z + sz / old_row[2]).to_bits(), new_row[i].to_bits());
+            assert_eq!(
+                (mid.z + sz / mp.properties.mass).to_bits(),
+                new_row[i].to_bits()
+            );
+            continue;
         }
+        assert!(
+            new_off.abs() < old_off.abs(),
+            "mass[{i}]: new off {new_off:e} old off {old_off:e}"
+        );
     }
 }

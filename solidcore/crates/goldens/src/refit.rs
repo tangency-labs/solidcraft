@@ -3,10 +3,10 @@
 //! the read finds to be a sphere, the sphere as upstream's `IsNurbSurfaceSphere` returns
 //! it (its NURB made from the fitted circles). Outside `cfg(test)` it does nothing.
 //!
-//! The WR-493 replay (`refit::replay`, #18195) uses it to show that a golden row moved
-//! only through the NURB a found sphere keeps: with the fitted NURB put back, the read
-//! drops the file's UV trims on it and rebuilds them, as #18230's tree did, and the row
-//! is #18230's row bit for bit.
+//! The WR-493 replay (`refit::replay`) uses it to show that a golden row moved only
+//! through the NURB a found sphere keeps: with the fitted NURB put back, the read drops
+//! the file's UV trims on it and rebuilds them, as main did before the retirement, and
+//! the row is main's row bit for bit.
 //!
 //! The seams are the readers the runners share ([`read_from_file`]: [`crate::own_reader`],
 //! `topology.api_files`, `topology.brep_p7` and `corpus.parity`'s B-rep reads) and
@@ -105,7 +105,7 @@ pub(crate) mod state {
     /// Each B-spline surface of `data` that `CopyAndAddAnalytics` finds to be a sphere
     /// (its recognisers in their order: the plane, the cone, then the sphere, each at
     /// tolerance scale 1) becomes that sphere with upstream's fitted NURB. The topology
-    /// then copies it as a sphere, as #18230's `CopyAndAddAnalytics` returned it.
+    /// then copies it as a sphere, as `CopyAndAddAnalytics` returned it before the retirement.
     pub(super) fn before_topology(k: &Kernel, data: &mut BrepData, add_analytics: bool) {
         MODE.with(|m| {
             let mut m = m.borrow_mut();
