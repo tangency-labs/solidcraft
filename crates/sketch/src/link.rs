@@ -6,8 +6,10 @@
 //! Linked points are fixed and linked circles keep their radius, so the solver treats them as
 //! constants; they still bound profiles and take constraints and dimensions like any curve.
 
+use std::f64::consts::TAU;
+
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Vec2, Vec3};
+use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
 
@@ -51,6 +53,15 @@ pub enum LinkSource {
     Body { body: String },
     /// A body vertex at `at`.
     Vertex { body: String, at: Vec3 },
+    /// A model edge as a drawing view draws it, named as the drawing names edges (its fields are
+    /// the drawing's edge reference): only in that view's sketch.
+    ViewEdge {
+        body: String,
+        origin_feature: u64,
+        name: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path: Vec<u64>,
+    },
     /// A curve of another sketch.
     SketchCurve { sketch: u64, curve: String },
     /// A point of another sketch.
@@ -144,6 +155,7 @@ impl LinkSource {
             LinkSource::Face { body, .. } => of_body("face", body),
             LinkSource::Body { body } => body.clone(),
             LinkSource::Vertex { body, .. } => of_body("vertex", body),
+            LinkSource::ViewEdge { body, .. } => of_body("edge", body),
             LinkSource::SketchCurve { curve, .. } => format!("sketch curve {curve}"),
             LinkSource::SketchPoint { point, .. } => format!("sketch point {point}"),
             LinkSource::Origin => "origin".into(),
@@ -168,7 +180,8 @@ impl LinkSource {
             | LinkSource::Vertex { body, .. }
             | LinkSource::OnSurface { body, .. }
             | LinkSource::Iso { body, .. }
-            | LinkSource::Spun { body, .. } => vec![body.as_str()],
+            | LinkSource::Spun { body, .. }
+            | LinkSource::ViewEdge { body, .. } => vec![body.as_str()],
             LinkSource::Intersection { a, b } => {
                 let mut bodies = a.bodies();
                 bodies.extend(b.bodies());
@@ -285,6 +298,26 @@ pub enum LinkGeom {
 }
 
 impl LinkGeom {
+    /// A boundary segment as the link geometry of the same curve: an arc counter-clockwise
+    /// whichever way it was swept, a conic of weight `w` as rho `w / (1 + w)`, a Bézier as its
+    /// control spline. `None` for a Bézier whose degree is past its control points.
+    pub fn from_seg(s: &Seg2) -> Option<LinkGeom> {
+        Some(match *s {
+            Seg2::Line { a, b } => LinkGeom::Line(a, b),
+            Seg2::Arc { center, radius, sweep, .. } if sweep.abs() >= TAU - 1e-9 => LinkGeom::Circle(center, radius),
+            Seg2::Arc { center, radius, start, sweep } => {
+                let at = |t: f64| center + Vec2::new(t.cos(), t.sin()) * radius;
+                let (a, b) = if sweep > 0. { (at(start), at(start + sweep)) } else { (at(start + sweep), at(start)) };
+                LinkGeom::Arc { c: center, a, b }
+            }
+            Seg2::Conic { a, apex, b, w } => LinkGeom::Conic { a, apex, b, rho: w / (1. + w) },
+            Seg2::Cubic { p0, p1, p2, p3 } => LinkGeom::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: false, nurbs: None },
+            Seg2::Bezier { n, p } => {
+                LinkGeom::Spline { pts: p.get(..=usize::from(n))?.to_vec(), control: true, degree: n, periodic: false, nurbs: None }
+            }
+        })
+    }
+
     fn finite(&self) -> bool {
         let ok = |p: &Vec2| in_range(*p);
         match self {

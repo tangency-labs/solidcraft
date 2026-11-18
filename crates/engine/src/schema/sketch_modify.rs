@@ -1434,7 +1434,10 @@ pub struct FilletResult {
     /// others equal to it.
     pub constraints: Vec<String>,
     /// The parameter that holds the radius.
-    pub param: String,
+    pub param: Option<String>,
+    /// A sheet sketch keeps its radius expression without making a model parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expression: Option<String>,
     /// The points of corners kept as virtual sharp corners.
     pub virtual_corners: Vec<String>,
     /// The constraints and dimensions that moved to a virtual corner.

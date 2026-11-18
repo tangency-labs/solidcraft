@@ -118,14 +118,17 @@ pub fn show(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj)
     for c in doc.canvases.iter().filter(|c| c.visible) {
         let Ok([bl, br, _, tl]) = doc.canvas_corners(&vals, c, &state) else { continue };
         let Some(tex) = texture(ui.ctx(), c) else { continue };
-        let (u, v) = (br - bl, tl - bl);
+        let arr = |p: solidcore_record::Vec3| [p.x, p.y, p.z];
+        let (corner, u, v) = (arr(bl), arr(br - bl), arr(tl - bl));
         let tint = Color32::from_white_alpha((c.opacity.clamp(0.0, 1.0) * 255.0) as u8);
         let mut mesh = Mesh::with_texture(tex);
         let mut ok = true;
         for j in 0..=CELLS {
             for i in 0..=CELLS {
                 let (s, t) = (i as f64 / CELLS as f64, j as f64 / CELLS as f64);
-                let Some(q) = proj.to_screen(bl + u * s + v * t) else {
+                // The point on the image's quad, from the kernel.
+                let [x, y, z] = solidcore_ops::affine::parallelogram_point(corner, u, v, s, t);
+                let Some(q) = proj.to_screen(solidcore_record::Vec3::new(x, y, z)) else {
                     ok = false;
                     continue;
                 };
