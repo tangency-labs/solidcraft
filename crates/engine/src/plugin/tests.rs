@@ -570,6 +570,27 @@ mod native {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// `plugin.check` reports a theme file the package lacks under `themes`, with advice about the
+    /// theme list, not about the component.
+    #[test]
+    fn check_reports_a_missing_theme_file_under_themes() {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-theme-check-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let mut s = Session::default();
+        let plugin = json!({"id":"tints","name":"Tints","version":"1","capabilities":["themes@0.1"],"themes":[{"id":"night","source":"night.json"}]});
+        let text = serde_json::to_vec(&plugin).unwrap();
+        let path = root.join("tints.zip");
+        std::fs::write(&path, solidcraft_io::safe_zip::write(&[("plugin.json", &text[..])]).unwrap()).unwrap();
+        let reply = s.execute("plugin.check", &json!({"path": path.to_string_lossy()})).unwrap();
+        assert_eq!(reply["ok"], false, "{reply}");
+        let problem = &reply["problems"][0];
+        assert_eq!(problem["field"], "themes", "{reply}");
+        let fix = problem["fix"].as_str().unwrap();
+        assert!(fix.contains("night.json") && !fix.contains("component"), "{fix}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);

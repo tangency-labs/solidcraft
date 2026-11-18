@@ -118,3 +118,38 @@ fn the_card_names_a_plugins_themes() {
     let line = crate::plugin_themes::hint(&["Night", "Dawn"]);
     assert!(line.contains("Night") && line.contains("Dawn"), "{line}");
 }
+
+/// A plugin theme chosen for the day or night slot goes back to the built-in default when its plugin is
+/// removed, and stays while the plugin is only turned off.
+#[test]
+fn removing_a_plugin_resets_its_day_and_night_themes() {
+    let mut h = Harness::new();
+    let dir = install(&mut h);
+    crate::plugins::tick(&mut h.app, &h.ctx, true);
+    h.app.preferences.theme_day = "plugin:tints/night".into();
+    h.app.preferences.theme_night = "plugin:tints/night".into();
+
+    h.app.preferences.disabled_plugins.insert("tints".into());
+    crate::plugins::tick(&mut h.app, &h.ctx, true);
+    assert_eq!(h.app.preferences.theme_day, "plugin:tints/night", "turned off is not removed");
+    h.app.preferences.disabled_plugins.remove("tints");
+
+    std::fs::remove_dir_all(dir.join("tints")).unwrap();
+    h.app.plugin_themes.signature = None;
+    crate::plugins::tick(&mut h.app, &h.ctx, true);
+    assert_eq!((h.app.preferences.theme_day.as_str(), h.app.preferences.theme_night.as_str()), ("light", "dark"));
+}
+
+/// A slot that holds a built-in theme is left alone when a plugin goes.
+#[test]
+fn removing_a_plugin_leaves_other_day_and_night_themes() {
+    let mut h = Harness::new();
+    let dir = install(&mut h);
+    crate::plugins::tick(&mut h.app, &h.ctx, true);
+    h.app.preferences.theme_day = "akari".into();
+    h.app.preferences.theme_night = "plugin:tints/night".into();
+    std::fs::remove_dir_all(dir.join("tints")).unwrap();
+    h.app.plugin_themes.signature = None;
+    crate::plugins::tick(&mut h.app, &h.ctx, true);
+    assert_eq!((h.app.preferences.theme_day.as_str(), h.app.preferences.theme_night.as_str()), ("akari", "dark"));
+}

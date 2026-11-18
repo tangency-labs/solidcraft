@@ -10,17 +10,30 @@ use crate::SolveApp;
 /// the offer again.
 #[derive(Default)]
 pub(crate) struct State {
-    pub(crate) signature: Option<String>,
+    pub(crate) signature: Option<Signature>,
+}
+
+/// The inputs of the offer, compared in place each frame without building a string.
+pub(crate) struct Signature {
+    dir: Option<std::path::PathBuf>,
+    disabled: std::collections::BTreeSet<String>,
+    packages: std::collections::BTreeMap<String, String>,
+}
+
+impl Signature {
+    fn matches(&self, dir: &Option<std::path::PathBuf>, app: &SolveApp) -> bool {
+        self.dir == *dir && self.disabled == app.preferences.disabled_plugins && self.packages == app.session.plugin_state.packages
+    }
 }
 
 /// Reads the plugin themes again if the plugins changed since the last call.
 pub(crate) fn sync(app: &mut SolveApp) {
     let dir = if cfg!(target_arch = "wasm32") { None } else { app.session.plugin_state.plugins_dir() };
-    let signature = format!("{dir:?}|{:?}|{:?}", app.preferences.disabled_plugins, app.session.plugin_state.packages);
-    if app.plugin_themes.signature.as_deref() == Some(signature.as_str()) {
+    if app.plugin_themes.signature.as_ref().is_some_and(|signature| signature.matches(&dir, app)) {
         return;
     }
-    app.plugin_themes.signature = Some(signature);
+    app.plugin_themes.signature =
+        Some(Signature { dir: dir.clone(), disabled: app.preferences.disabled_plugins.clone(), packages: app.session.plugin_state.packages.clone() });
     let (plugins, _) = crate::plugins::inventory(dir.as_deref(), app.session.plugin_state.packages.values());
     let mut offers = Vec::new();
     let mut failure = None;
@@ -44,6 +57,18 @@ pub(crate) fn sync(app: &mut SolveApp) {
         app.ui.dark = true;
         app.set_status(format("prefs.plugin_theme_unavailable", &[("name", theme.as_str())]), true);
     }
+    for (slot, default) in [(&mut app.preferences.theme_day, "light"), (&mut app.preferences.theme_night, "dark")] {
+        if removed(slot, &plugins) {
+            *slot = default.into();
+        }
+    }
+}
+
+/// Whether `theme` names a plugin theme of a plugin that is no longer installed.
+fn removed(theme: &str, plugins: &[crate::plugins::Plugin]) -> bool {
+    let Some(rest) = theme.strip_prefix("plugin:") else { return false };
+    let id = rest.split('/').next().unwrap_or_default();
+    !plugins.iter().any(|plugin| plugin.id == id)
 }
 
 /// A theme file's text, read whole if it is within its size limit.

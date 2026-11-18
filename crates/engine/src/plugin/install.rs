@@ -26,6 +26,8 @@ pub enum InstallError {
     NotOnePlugin,
     #[error("the .zip has no {0}, which plugin.json names")]
     MissingModule(String),
+    #[error("the .zip has no {0}, which plugin.json names in themes")]
+    MissingTheme(String),
     /// The module is missing and the .zip holds Rust sources: most likely the "Source code"
     /// archive that GitHub lists beside a release, not the plugin's own .zip (#16736).
     #[error(
@@ -156,7 +158,7 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
 /// when it lists the theme.
 fn check_themes(manifest: &Manifest, files: &[safe_zip::File]) -> Result<(), InstallError> {
     for theme in &manifest.themes {
-        let file = files.iter().find(|f| f.path == theme.source).ok_or_else(|| InstallError::MissingModule(theme.source.clone()))?;
+        let file = files.iter().find(|f| f.path == theme.source).ok_or_else(|| InstallError::MissingTheme(theme.source.clone()))?;
         craft_plugin::theme::check_file(&theme.id, &file.bytes).map_err(InstallError::Manifest)?;
     }
     Ok(())
