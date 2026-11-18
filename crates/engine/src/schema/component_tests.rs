@@ -517,7 +517,7 @@ fn replies_match_the_output_schemas_of_the_component_commands() {
     let inserted = run("file.insert_mesh", json!({"path": rig_file("rig"), "up": "z"}));
     let rig = inserted["component"].clone();
     let unlocked = run("component.unlock", json!({"component": rig}));
-    assert!(unlocked["joints"].as_array().is_some_and(|j| !j.is_empty()), "{unlocked}");
+    assert!(unlocked["rigid_group"].as_u64().is_some(), "{unlocked}");
     matches(output_schema_for::<UnlockResult>(), "component.unlock", &unlocked);
 
     // Misspelt keys still run in Warn, say so, and the reply still matches.
