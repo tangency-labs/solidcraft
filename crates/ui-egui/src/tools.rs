@@ -1357,9 +1357,9 @@ pub(crate) fn polygon_outline(t: &Tool, hover: Vec2, sides: f64) -> Option<Vec<V
 /// The pointer ring is left out where it would touch a dimension's value being placed: drawn
 /// after the value, it would sit on the number (#14231). Its largest radius and half its stroke
 /// count, so a ring centred just outside the value is left out too.
-pub(crate) fn pointer_ring_shown(t: &Tool, at: Pos2) -> bool {
-    const REACH: f32 = 6.0 + 1.5 / 2.0;
-    !(t.kind == Kind::Dimension && crate::dim_view::draft_text().is_some_and(|r| r.expand(REACH).contains(at)))
+pub(crate) fn pointer_ring_shown(t: &Tool, at: Pos2, stroke_width: f32) -> bool {
+    let reach = 6.0 + stroke_width / 2.0;
+    !(t.kind == Kind::Dimension && crate::dim_view::draft_text().is_some_and(|r| r.expand(reach).contains(at)))
 }
 
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
@@ -1379,7 +1379,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
-        if pointer_ring_shown(t, sp) {
+        if pointer_ring_shown(t, sp, stroke.width) {
             painter.circle_stroke(sp, if snap.is_some() { 6.0 } else { 3.0 }, stroke);
         }
         if snap.as_deref() == Some("Midpoint") && t.kind == Kind::HorizontalVertical {

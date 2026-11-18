@@ -38,7 +38,7 @@
     "chip": "#ffffff",
     "command_hint_axis": "#ffffff",
     "command_hint_curve": "#ffffff",
-    "command_hint_plane": "#000000",
+    "command_hint_plane": "#000000a8",
     "command_hint_plane_edge": "#ffffff",
     "construction_geom": "#ffffff",
     "construction_plane": "#000000",

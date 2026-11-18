@@ -5090,8 +5090,20 @@ fn construction_axis_style(t: &Tokens, selected: bool, emphasize: bool) -> (Colo
     if emphasize { (t.command_hint_axis.to_opaque(), width * 3.0) } else { (if selected { t.sel_edge } else { t.construction_geom }, width) }
 }
 
-fn construction_plane_capture_style(t: &Tokens) -> (Color32, Color32) {
-    (t.command_hint_plane, t.command_hint_plane_edge.to_opaque())
+fn construction_plane_capture_style(t: &Tokens, selected: bool, hovered: bool) -> (Color32, Color32) {
+    let highlight = if hovered {
+        Some(t.origin_plane_hover)
+    } else if selected {
+        Some(t.sel_face)
+    } else {
+        None
+    };
+    let fill = highlight.map_or(t.command_hint_plane, |color| {
+        let [r, g, b, _] = color.to_opaque().to_array();
+        Color32::from_rgba_unmultiplied(r, g, b, t.command_hint_plane.a())
+    });
+    let edge = if selected { t.sel_edge } else { t.command_hint_plane_edge };
+    (fill, edge.to_opaque())
 }
 
 fn sketch_capture_style(t: &Tokens, emphasize: bool) -> (Color32, f32) {
@@ -5628,7 +5640,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 *base
             };
             let (fill, edge, width) = if *emphasize {
-                let (fill, edge) = construction_plane_capture_style(&t);
+                let (fill, edge) = construction_plane_capture_style(&t, selected, hovered);
                 (fill, edge, 2.4)
             } else {
                 (fill, if selected { t.sel_edge } else { t.origin_plane_edge }, 1.2)
@@ -9892,11 +9904,29 @@ mod tests {
     #[test]
     fn hint_capture_planes_are_more_opaque_with_solid_contrasting_edges() {
         for t in [Tokens::light(), Tokens::dark()] {
-            let (fill, edge) = construction_plane_capture_style(&t);
+            let (fill, edge) = construction_plane_capture_style(&t, false, false);
             assert!(fill.a() >= 160 && fill.a() < 255);
             assert!(u16::from(fill.a()) > u16::from(t.construction_plane.a()) * 2);
             assert_eq!(edge.a(), 255);
             assert_ne!(fill.to_opaque(), edge);
+        }
+    }
+
+    #[test]
+    fn hint_capture_planes_stay_translucent_and_distinguish_picks() {
+        solidcraft_look::themes::install();
+        let monochrome = ["1-bit", "1-bit-dark"].map(|name| {
+            let theme = solidcraft_ui_kit::theme_files::builtin().iter().find(|theme| theme.id == name).unwrap();
+            solidcraft_ui_kit::theme_files::resolve(theme)
+        });
+        for t in [Tokens::light(), Tokens::dark()].into_iter().chain(monochrome) {
+            let (ordinary_fill, ordinary_edge) = construction_plane_capture_style(&t, false, false);
+            assert!(ordinary_fill.a() > 0 && ordinary_fill.a() < 255);
+            for (selected, hovered) in [(true, false), (false, true)] {
+                let (fill, edge) = construction_plane_capture_style(&t, selected, hovered);
+                assert_eq!(fill.a(), ordinary_fill.a(), "picks keep the same transparency");
+                assert_ne!((fill, edge), (ordinary_fill, ordinary_edge), "the pick stands out");
+            }
         }
     }
 

@@ -466,6 +466,14 @@ pub struct Split<'a> {
     pub name: &'a str,
 }
 
+/// What the app can draw in the » menu.
+pub enum Overflow<'a> {
+    /// A group by index. Return true if the app drew the rows and the kit should skip its own.
+    Rows(usize),
+    /// A row without its own text hint. The app may paint a hint here; the return value is ignored.
+    Hint(&'a MoreRow<'a>, &'a egui::Response),
+}
+
 /// A row of a group in the » menu.
 pub struct MoreRow<'a> {
     pub id: &'a str,
@@ -595,10 +603,8 @@ fn handle(prefix: &str, key: &str) -> String {
 }
 
 /// Draws the groups in `rect` (below the tabs, from the first group's left edge), fitting them to
-/// its width ([`fit`]); the groups that do not fit go into the » menu. `more_rows` may draw a
-/// group's rows in the » menu itself: given the group's place, it returns true when it did (the
-/// row then lists none of its own).
-pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(&mut egui::Ui, usize) -> bool) -> Out {
+/// its width ([`fit`]); the groups that do not fit go into the » menu.
+pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, draw_overflow: &mut dyn FnMut(&mut egui::Ui, Overflow<'_>) -> bool) -> Out {
     let t = Tokens::get();
     let painter = ui.painter().clone();
     let labels = row.labels;
@@ -932,7 +938,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 for &gi in &overflow {
                     let Some(group) = row.groups.get(gi) else { continue };
                     crate::Menu::button(ui, group.name, |ui| {
-                        if more_rows(ui, gi) {
+                        if draw_overflow(ui, Overflow::Rows(gi)) {
                             return;
                         }
                         for r in &group.more {
@@ -945,7 +951,12 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                             } else {
                                 crate::command_menu_button(ui, r.id, r.label, r.icon, r.shortcut, r.enabled)
                             };
-                            let response = if let Some(hint) = r.hint { response.backing_on_hover_text(hint) } else { response };
+                            let response = if let Some(hint) = r.hint {
+                                response.backing_on_hover_text(hint)
+                            } else {
+                                draw_overflow(ui, Overflow::Hint(r, &response));
+                                response
+                            };
                             solidcraft_ui_registry::publish_handle(&handle(h.more_row, r.id), response.rect.center());
                             if response.clicked() {
                                 actions.push(Action::Run { id: r.id.to_string(), rect: response.rect, place: Place::More });
@@ -1347,8 +1358,8 @@ pub fn menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOn
     Some(area.inner.response.rect)
 }
 
-/// Keep an illustrated tip beside its menu and fit the media within the available screen space.
-pub fn illustrated_menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOnce(&mut egui::Ui)) -> Option<Rect> {
+/// Fit the illustration beside the menu, or show a compact text hint above or below it.
+pub fn illustrated_menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, compact_text: &str, add: impl FnOnce(&mut egui::Ui)) -> Option<Rect> {
     use crate::{Container, Surface};
     if !tip_ready(ui, resp) {
         return None;
@@ -1359,10 +1370,38 @@ pub fn illustrated_menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, ad
     let size = ctx.read_response(tip_id).map(|r| r.rect.size()).unwrap_or(egui::Vec2::ZERO);
     let screen = ctx.content_rect();
     let gap = Tokens::get().space_6;
+    let frame = Container::menu_frame();
+    let padding = frame.total_margin().sum();
     let right_room = (screen.right() - menu.right() - gap).max(0.0);
     let left_room = (menu.left() - screen.left() - gap).max(0.0);
-    let on_right = if size.x > 0.0 && right_room >= size.x { true } else { right_room >= left_room };
+    let minimum = padding.x + 96.0;
+    let on_right = right_room >= minimum && ((size.x > 0.0 && right_room >= size.x) || right_room >= left_room);
     let room = if on_right { right_room } else { left_room };
+    if room < minimum {
+        let below = screen.bottom() - menu.bottom() - gap;
+        let above = menu.top() - screen.top() - gap;
+        let height = ui.text_style_height(&egui::TextStyle::Body) + padding.y;
+        let width = (screen.width() - padding.x).min(300.0);
+        if below.max(above) < height || width <= 0.0 {
+            return None;
+        }
+        let (y, pivot) =
+            if below >= above { (menu.bottom() + gap, egui::Align2::CENTER_TOP) } else { (menu.top() - gap, egui::Align2::CENTER_BOTTOM) };
+        let area = Container::new(ctx, Surface::Popup)
+            .area(tip_id.with("compact"))
+            .order(egui::Order::Tooltip)
+            .interactable(false)
+            .pivot(pivot)
+            .fixed_pos(pos2(screen.center().x, y))
+            .default_size(vec2(width + padding.x, height))
+            .show(ctx, |ui| {
+                Container::new(ctx, Surface::Popup).show_frame(ui, frame, ui.max_rect(), |ui| {
+                    ui.set_max_width(width);
+                    ui.add(egui::Label::new(compact_text).truncate());
+                })
+            });
+        return Some(area.inner.response.rect);
+    }
     let x = if on_right { menu.right() + gap } else { menu.left() - gap };
     let y = resp.rect.top().min((screen.bottom() - size.y).max(screen.top()));
     let area = Container::new(ctx, Surface::Popup)
@@ -1372,8 +1411,8 @@ pub fn illustrated_menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, ad
         .pivot(if on_right { egui::Align2::LEFT_TOP } else { egui::Align2::RIGHT_TOP })
         .fixed_pos(pos2(x, y))
         .show(ctx, |ui| {
-            Container::new(ctx, Surface::Popup).show_frame(ui, Container::menu_frame(), ui.max_rect(), |ui| {
-                ui.set_max_width((room - gap * 2.0).max(1.0));
+            Container::new(ctx, Surface::Popup).show_frame(ui, frame, ui.max_rect(), |ui| {
+                ui.set_max_width(room - padding.x);
                 add(ui);
             })
         });

@@ -414,6 +414,44 @@ pub(crate) fn show(ui: &mut egui::Ui, command: &str, dark: bool, animate: bool) 
     true
 }
 
+#[cfg(test)]
+fn poster(command: &str, dark: bool) -> Asset {
+    let index = CATALOG.iter().position(|entry| entry.command == command).expect("command illustration in the catalog");
+    asset(index, dark, false).expect("a poster for the active theme")
+}
+
+#[cfg(test)]
+pub(crate) fn prime_test_poster(ctx: &egui::Context, command: &str, dark: bool) {
+    let poster = poster(command, dark);
+    let decoded = Arc::new(decode(poster.bytes, false).expect("a decodable poster"));
+    ctx.data_mut(|data| {
+        let cache = data.get_temp_mut_or_default::<Cache>(egui::Id::unique("command_hint_media"));
+        assert!(cache.prepare(poster.key, || Arc::new(OnceLock::from(Ok(decoded)))).is_some());
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn assert_test_poster_painted(ctx: &egui::Context, command: &str, dark: bool, rect: egui::Rect, shapes: &[egui::epaint::ClippedShape]) {
+    let poster = poster(command, dark);
+    let texture = ctx
+        .data(|data| data.get_temp::<Cache>(egui::Id::unique("command_hint_media")))
+        .and_then(|cache| cache.slots.into_iter().find(|slot| slot.key == poster.key))
+        .and_then(|slot| slot.texture)
+        .expect("the command's decoded poster was uploaded")
+        .id();
+    fn has_image(shape: &egui::Shape, texture: egui::TextureId, visible: egui::Rect) -> bool {
+        match shape {
+            egui::Shape::Mesh(mesh) => mesh.texture_id == texture && mesh.calc_bounds().intersect(visible).is_positive(),
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| has_image(shape, texture, visible)),
+            _ => false,
+        }
+    }
+    assert!(
+        shapes.iter().any(|shape| has_image(&shape.shape, texture, rect.intersect(shape.clip_rect))),
+        "{command}: tooltip painted the expected poster texture"
+    );
+}
+
 fn media_size(ui: &egui::Ui) -> egui::Vec2 {
     let tokens = solidcraft_theme::Tokens::get();
     let size = egui::vec2(tokens.command_hint_media_width, tokens.command_hint_media_height);
