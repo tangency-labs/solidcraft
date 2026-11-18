@@ -237,6 +237,7 @@ pub(crate) mod open_meshing;
 pub mod operations;
 pub mod panel_runtime;
 pub mod params_dialog;
+pub(crate) mod pattern_components;
 pub mod pencil;
 pub mod personal_sheet_rules;
 pub(crate) mod pick_index;
