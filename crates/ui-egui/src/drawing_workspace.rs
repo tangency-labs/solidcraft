@@ -39,6 +39,8 @@ pub struct State {
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
     settings: Option<Rect>,
+    /// The drawing open when Drawing was last left in this design: entering opens it again.
+    parked: Option<u64>,
     /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
     pub(crate) page: crate::drawing_sheet_page::Page,
 }
@@ -58,6 +60,12 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
             open_a_drawing(app);
         }
     } else if active(app) {
+        // An open drawing locks the model, so leaving closes it. The engine closes no drawing
+        // under a sheet sketch, so the user stays in Drawing until the sketch is finished.
+        if let Some(open) = app.session.open_drawing {
+            app.run("drawing.close", serde_json::json!({}))?;
+            app.drawing_workspace.parked = Some(open);
+        }
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
         app.drawing_workspace.options = None;
         app.drawing_workspace.placement = None;
@@ -77,15 +85,18 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Entering Drawing with no drawing open opens the design's first drawing, on its first sheet. A
-/// design without drawings starts on the page that makes one.
+/// Entering Drawing with no drawing open opens one: the drawing left last in this design, where
+/// its sheet and zoom are kept, else the design's first, fitted on its first sheet. A design
+/// without drawings starts on the page that makes one.
 fn open_a_drawing(app: &mut SolveApp) {
     if app.session.open_drawing.is_some() {
         return;
     }
-    let Some(id) = app.session.doc.drawings.first().map(|d| d.id) else { return };
+    let parked = app.drawing_workspace.parked.take().filter(|id| app.session.doc.drawing(*id).is_some());
+    let Some(id) = parked.or_else(|| app.session.doc.drawings.first().map(|d| d.id)) else { return };
     match app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(id)})) {
-        Ok(_) => crate::drawing_sheet_page::fit(app),
+        Ok(_) if parked.is_none() => crate::drawing_sheet_page::fit(app),
+        Ok(_) => {}
         Err(error) => app.set_status(error, true),
     }
 }
@@ -906,6 +917,67 @@ mod tests {
         assert_eq!(active_sheet(&h.app), Some(first), "on its first sheet");
         assert!(crate::scenario::handle_at("drawing:first:standard").is_none(), "not the new-drawing page");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Leaving Drawing closes the drawing, so the model can be changed in Design; coming back opens
+    /// the same drawing. Undo works on what is open: the drawing's steps in Drawing, the model's in
+    /// Design.
+    #[test]
+    fn leaving_drawing_closes_the_drawing_and_coming_back_opens_it() {
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(!active(&h.app));
+        assert!(h.app.session.open_drawing.is_none(), "leaving Drawing closes the drawing");
+        h.app.run("solid.box", serde_json::json!({"length":5,"width":5,"height":5})).unwrap();
+        let features = h.app.session.doc.features.len();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, drawing, "the same drawing opens again");
+        let views = |h: &Harness| h.app.session.drawing("test").unwrap().views.len();
+        assert_eq!(views(&h), 1);
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(views(&h), 0, "undo in Drawing takes back the drawing's step");
+        assert_eq!(h.app.session.doc.features.len(), features, "and not the model's");
+        crate::workspace::enter(&mut h.app, "render").unwrap();
+        assert!(h.app.session.open_drawing.is_none(), "Render leaves Drawing the same way");
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        h.app.run("edit.undo", serde_json::json!({})).unwrap();
+        assert_eq!(h.app.session.doc.features.len(), features - 1, "undo in Design takes back the model's step");
+    }
+
+    /// The drawing left last in this design comes back, not the design's first; a design opened
+    /// afresh starts on its first drawing.
+    #[test]
+    fn the_drawing_left_last_comes_back_not_the_first() {
+        let mut h = Harness::new();
+        drawing_with_a_view(&mut h);
+        h.app.run("drawing.create", serde_json::json!({"name":"Second"})).unwrap();
+        let ids: Vec<u64> = h.app.session.doc.drawings.iter().map(|d| d.id).collect();
+        let (first, later) = (ids[0], ids[1]);
+        h.app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(later)})).unwrap();
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(h.app.session.open_drawing.is_none());
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, Some(later), "the drawing left last");
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        reset_document(&mut h.app);
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        assert_eq!(h.app.session.open_drawing, Some(first), "a fresh start opens the design's first drawing");
+    }
+
+    /// A sheet sketch keeps its drawing open: leaving Drawing waits until it is finished.
+    #[test]
+    fn a_sheet_sketch_keeps_the_drawing_open_until_it_is_finished() {
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        let sheet = h.app.session.drawing("test").unwrap().sheets[0].id;
+        h.app.run("drawing.sketch.create", serde_json::json!({"owner": solidcraft_engine::doc::ids::encode(sheet)})).unwrap();
+        assert!(crate::workspace::enter(&mut h.app, "design").is_err());
+        assert!(active(&h.app));
+        assert_eq!(h.app.session.open_drawing, drawing);
+        h.app.run("sketch.finish", serde_json::json!({})).unwrap();
+        crate::workspace::enter(&mut h.app, "design").unwrap();
+        assert!(h.app.session.open_drawing.is_none());
     }
 
     #[test]
