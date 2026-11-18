@@ -523,6 +523,36 @@ fn editing_a_coil_keeps_its_explicit_world_axis_and_saved_base() {
 }
 
 #[test]
+fn editing_a_coil_keeps_its_sketch_axis_when_the_profile_owner_changes() {
+    use solidcraft_engine::Sel;
+
+    let mut h = design("mm");
+    let mut add_sketch = |axis_x| {
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.line", json!({"points":[[axis_x,0],[axis_x,10]],"construction":true})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[20,-1],"p1":[22,1]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        sketch
+    };
+    let original = add_sketch(0);
+    let replacement = add_sketch(5);
+    let id = h.app.run("solid.coil", json!({"sketch":original,"axis":"l1","revolutions":1,"pitch":8})).unwrap()["feature"].as_u64().unwrap();
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let params = |d: &crate::dialogs::Dialog| -> serde_json::Value { apply_commands(&h.app, d).unwrap()[0].1["params"].clone() };
+    assert_eq!(params(&d)["axis"], json!({"curve":"l1"}));
+    assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { sketch: Some(original), id: "l1".into() }]);
+
+    d.active = 0;
+    d.pick(&h.app.session, Sel::Profile { sketch: replacement, index: 0 });
+    assert_eq!(params(&d)["sketch"], replacement);
+    assert_eq!(params(&d)["axis"], json!({"sketch":original,"curve":"l1"}));
+
+    d.active = 1;
+    d.pick(&h.app.session, Sel::SketchCurve { sketch: Some(replacement), id: "l1".into() });
+    assert_eq!(params(&d)["axis"], "l1");
+}
+
+#[test]
 fn editing_a_coil_can_replace_a_deleted_sketch_axis() {
     let mut h = design("mm");
     let sketch = h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap()["sketch"].as_u64().unwrap();

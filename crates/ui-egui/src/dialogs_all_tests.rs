@@ -1545,6 +1545,40 @@ fn coil_picks_reference_axes_in_the_browser_and_viewport() {
 }
 
 #[test]
+fn coil_keeps_a_straight_model_edge_as_a_named_axis() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Box"})).unwrap();
+    let edge = edge_sel(&h.app.session, Vec3::new(0.0, 0.0, 5.0)).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.active = 1;
+    d.pick(&h.app.session, edge);
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let axis = commands[0].1["axis"].clone();
+    assert_eq!(axis["type"], "edge");
+    assert!(axis["name"].as_str().is_some_and(|name| !name.is_empty()), "{axis}");
+    let coil = h.app.run(&commands[0].0, commands[0].1.clone()).unwrap()["feature"].as_u64().unwrap();
+
+    let d = for_feature(&h.app, coil, None).unwrap();
+    assert!(matches!(d.inputs[1].items.as_slice(), [Sel::Edge { body, .. }] if body == "Box"));
+    assert_eq!(apply_commands(&h.app, &d).unwrap()[0].1["params"]["axis"], axis);
+}
+
+#[test]
+fn coil_uses_the_world_line_of_a_straight_3d_wire() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    let wire = h.app.run("sketch.line3d", json!({"points":[[5,7,3],[5,7,13]]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    d.active = 1;
+    d.pick(&h.app.session, Sel::SketchCurve { id: wire, sketch: Some(sketch) });
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands[0].1["axis"], json!({"origin":[5.0,7.0,3.0],"dir":[0.0,0.0,1.0]}));
+    h.app.run(&commands[0].0, commands[0].1.clone()).unwrap();
+}
+
+#[test]
 fn coil_requires_an_explicit_profile_when_the_sketch_has_several_regions() {
     let (mut h, sketch, _) = repeated_profile_fixture();
     h.app.session.selection = vec![Sel::Feature { id: sketch }];

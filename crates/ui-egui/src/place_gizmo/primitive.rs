@@ -209,7 +209,7 @@ fn frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
             .inputs
             .get(1)
             .and_then(|input| input.items.first())
-            .and_then(|sel| crate::dialogs::axis_of(app, sel))
+            .and_then(|sel| crate::dialogs::coil_axis_preview(app, sel))
             .or_else(|| d.extra.get("axis").and_then(|axis| coil_reference_frame(app, axis)));
         let (origin, direction) = picked.unwrap_or_else(|| {
             let origin = d

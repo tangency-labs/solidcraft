@@ -3131,8 +3131,16 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         // The Coil reads the axis in its own frame, using the same owner as axis evaluation.
         let owner = match axis {
             AxisRef::World { .. } => Some(0),
-            AxisRef::Construction { name } => {
+            AxisRef::Construction { name } | AxisRef::Model { geo: crate::construct::GeoRef::Axis { name } } => {
                 st.and_then(|st| st.construct.iter().find(|c| c.name == *name)).map(|c| doc.feature(c.feature).map_or(0, |feature| feature.component))
+            }
+            AxisRef::SketchLine { sketch: Some(sketch), .. } => doc.feature(*sketch).map(|s| s.component),
+            AxisRef::Model { geo: crate::construct::GeoRef::Edge { .. } | crate::construct::GeoRef::Face { .. } } => {
+                // These picks resolve in the world, including copies that share a name.
+                // Read the Coil frame and all placements because a different copy can find the pick.
+                reads.all = true;
+                reads.unlisted = true;
+                None
             }
             _ => None,
         };
@@ -8228,11 +8236,22 @@ fn feature_tools_with_constructor(
             profiles,
             ..
         } => {
+            let line_from_world = |origin, direction| {
+                let inverse = crate::mat_inverse(&doc.component_transform(f.component))
+                    .ok_or_else(|| DocError::Invalid("the feature's component frame is invalid".into()))?;
+                Ok::<_, DocError>((crate::apply_point(&inverse, origin), crate::apply_vector(&inverse, direction)))
+            };
             let (base, direction) = match axis_ref {
                 Some(AxisRef::Construction { name }) => construction_axis_in(Some(doc), st, name, f.component)?,
-                Some(reference @ AxisRef::Model { geo }) => {
-                    crate::construct::model_axis_in(Some(doc), &*axis_state(doc, st, f.component, reference)?, geo, f.component)?
-                }
+                Some(AxisRef::Model { geo }) => match geo {
+                    crate::construct::GeoRef::Edge { .. } | crate::construct::GeoRef::Face { .. } => {
+                        // Pick and orient the axis in the same frame as the command and viewport.
+                        let world = construction_state(doc, st, 0)?;
+                        let (origin, direction) = crate::construct::model_axis(&world, geo)?;
+                        line_from_world(origin, direction)?
+                    }
+                    _ => crate::construct::model_axis_in(Some(doc), st, geo, f.component)?,
+                },
                 Some(AxisRef::Line { origin, dir }) => (point(vals, origin)?, dir.0),
                 Some(AxisRef::SketchLine { curve, sketch: owner }) => {
                     let owner =
@@ -8248,9 +8267,7 @@ fn feature_tools_with_constructor(
                         "Z" => Vec3::Z,
                         _ => return Err(DocError::Unknown(format!("axis `{axis}`"))),
                     };
-                    let inverse = crate::mat_inverse(&doc.component_transform(f.component))
-                        .ok_or_else(|| DocError::Invalid("the feature's component frame is invalid".into()))?;
-                    (crate::apply_point(&inverse, Vec3::ZERO), crate::apply_vector(&inverse, direction))
+                    line_from_world(Vec3::ZERO, direction)?
                 }
                 Some(AxisRef::SketchAxis { axis }) => {
                     let solved =

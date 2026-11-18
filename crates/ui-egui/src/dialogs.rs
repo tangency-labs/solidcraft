@@ -4961,13 +4961,15 @@ pub(crate) fn confirm(app: &mut SolveApp) {
 }
 
 /// A right-click in the viewport with a dialog open confirms its active input (#6159): it goes
-/// on to the next input that is still empty, and once every input holds something, runs OK as
-/// Enter does. An empty input the dialog can't make its feature without stays active, and the
-/// status line says what to pick.
+/// on to the next input that is still empty, and when there is none, runs OK as Enter does.
+/// An empty input the dialog can't make its feature without stays active, and the status line
+/// says what to pick.
 pub(crate) fn right_click(app: &mut SolveApp) {
     let Some(mut d) = app.dialog.take() else { return };
     if enter_applies(&d) && app.applying.is_none() {
-        let empty = |i: &usize| d.inputs.get(*i).is_some_and(|input| input.items.is_empty());
+        // Coil can use its own section and direction, so empty pick fields do not stop OK.
+        let coil = matches!(d.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        let empty = |i: &usize| !coil && d.inputs.get(*i).is_some_and(|input| input.items.is_empty());
         let next = (d.active.saturating_add(1)..d.inputs.len()).chain(0..d.active.min(d.inputs.len())).find(empty);
         match d.active_input().filter(|input| input.items.is_empty()) {
             // An empty input is optional when the dialog makes its feature without it.
@@ -6907,6 +6909,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             if *cmd == "solid.coil" {
                 let (sketch, selected_profiles) = profiles();
+                // Like Revolve's qualified pick, keep the original owner when the profile
+                // changes. The saved axis and base remain in effect until the axis is replaced.
+                if let Some((id, _)) = d.editing
+                    && let Some(FeatureKind::Coil { sketch: Some(original), axis_ref: Some(AxisRef::SketchLine { curve, sketch: None }), .. }) =
+                        s.doc.feature(id).map(|f| &f.kind)
+                    && sketch.as_u64() != Some(original.0)
+                    && d.extra.get("axis") == Some(&json!({"curve": curve}))
+                {
+                    p.insert("axis".into(), json!({"sketch": original.0, "curve": curve}));
+                }
                 if !sketch.is_null() {
                     p.insert("sketch".into(), sketch);
                     p.insert("profiles".into(), selected_profiles);
@@ -7345,8 +7357,38 @@ fn selected_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -
 fn coil_axis_param(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
     match sel {
         Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Ok(json!({"type":"world","axis":name})),
+        Sel::Edge { body, index, point } => {
+            let state = crate::open_meshing::session_world(&app.session);
+            let body = state.body(body).ok_or(AXIS_PICK)?;
+            if body.body.is_mesh() {
+                return axis_param(app, sel);
+            }
+            // Name the picked edge on its placed body, where the viewport found it.
+            let name = solidcraft_engine::doc::naming::edge_names(body).into_iter().nth(*index).filter(|name| !name.is_empty());
+            Ok(json!({"type":"edge", "at":pt(*point), "name":name}))
+        }
+        Sel::SketchCurve { id, .. } => {
+            let owner = picks_sketch(app, std::slice::from_ref(sel), None);
+            let state = crate::open_meshing::session_world(&app.session);
+            if owner.and_then(|owner| state.sketch(owner)).is_some_and(|sketch| sketch.sketch.wire_index(id).is_some()) {
+                // A straight 3D wire supplies its line in world coordinates.
+                axis_param(app, sel)
+            } else {
+                sketch_curve_axis(app, sel, profile_sketch)
+            }
+        }
         _ => selected_axis_param(app, sel, profile_sketch),
     }
+}
+
+/// Preview a picked Coil model edge with the same world direction as evaluation.
+pub(crate) fn coil_axis_preview(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
+    let (origin, dir) = axis_of(app, sel)?;
+    let dir = match sel {
+        Sel::Edge { body, .. } if !is_mesh_body(&app.session, body) => solidcraft_engine::doc::construct::canonical_dir(dir),
+        _ => dir,
+    };
+    Some((origin, dir))
 }
 
 /// The world line of curve `id` on `sketch`, when that curve is a line.
@@ -8367,6 +8409,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             operation,
             targets,
         } => {
+            use solidcraft_engine::doc::construct::GeoRef;
+
             let mut d = start("solid.coil")?;
             // An edit starts from the saved Coil, including when the new dialog uses preselection.
             for input in &mut d.inputs {
@@ -8407,6 +8451,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         let pick = pick.filter(|pick| coil_axis_param(app, pick, profile_sketch).is_ok());
                         (axis, pick)
                     }
+                    (AxisRef::Model { geo: geo @ (GeoRef::Edge { .. } | GeoRef::Face { .. }) }, pick) => (serde_json::to_value(geo).ok()?, pick),
                     (_, Some(pick)) => (coil_axis_param(app, &pick, profile_sketch).ok()?, Some(pick)),
                     (AxisRef::Line { origin, dir }, None) => (line_axis_value(s, &feature_frame(s, f.component), origin, dir.0), None),
                     (AxisRef::Model { geo }, None) => (serde_json::to_value(geo).ok()?, None),
@@ -9614,6 +9659,23 @@ mod right_click_tests {
             assert!(std::time::Instant::now() < deadline, "OK did not finish");
             h.frames(1);
         }
+    }
+
+    #[test]
+    fn a_right_click_confirms_a_primitive_coil_without_picks() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.right_click_confirms = true;
+        h.app.start("solid.coil");
+        h.frames(2);
+        assert!(h.app.dialog.as_ref().unwrap().inputs.iter().all(|input| input.items.is_empty()));
+        right_click(&mut h, json!({"world": [-30, -30, 0]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while let Some(dialog) = &h.app.dialog {
+            assert!(std::time::Instant::now() < deadline, "right click did not run OK: {:?}", dialog.error);
+            h.frames(1);
+        }
+        assert!(h.app.session.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Coil { sketch: None, .. })));
     }
 
     #[test]

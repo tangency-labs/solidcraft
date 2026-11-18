@@ -1009,6 +1009,92 @@ fn a_coil_rebuilds_when_its_construction_axis_component_moves() {
 }
 
 #[test]
+fn a_coil_rebuilds_only_when_its_axis_sketch_moves_relative_to_it() {
+    for same_component in [false, true] {
+        let mut doc = Document::new("coil on a sketch line");
+        let owner = doc.add_component(Some("Axis part"), 0).unwrap();
+        let consumer = if same_component { owner } else { doc.add_component(Some("Coil part"), 0).unwrap() };
+        let mut line = Sketch::new();
+        line.add_line(Vec2::ZERO, Vec2::new(0., 10.), None, None, Some("l1")).unwrap();
+        let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XZ".into() }, sketch: line }, None).unwrap();
+        doc.feature_mut(sketch).unwrap().component = owner;
+        add_in(
+            &mut doc,
+            consumer,
+            "Coil",
+            serde_json::json!({
+                "type": "coil", "base": ["0", "0", "0"], "axis": [0, 0, 1],
+                "axis_ref": {"type": "sketch_line", "sketch": sketch, "curve": "l1"},
+                "diameter": "40", "section_size": "2", "pitch": "8", "turns": "2", "operation": "new_body"
+            }),
+        );
+
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        no_errors(&model);
+        let before = model.state().bodies[0].body.exact_bounds().unwrap();
+        doc.occurrences.iter_mut().find(|o| o.component == owner).unwrap().transform = rigid(Vec3::new(12., 0., 0.), Vec3::ZERO, Vec3::Z, 0.);
+        model.evaluate(&doc);
+        no_errors(&model);
+        let after = model.state().bodies[0].body.exact_bounds().unwrap();
+        let dx = if same_component { 0. } else { 12. };
+        assert_eq!(model.last_recomputed, usize::from(!same_component));
+        assert!((after.min.x - before.min.x - dx).abs() < 1e-6, "{before:?} -> {after:?}");
+    }
+}
+
+#[test]
+fn a_coil_keeps_the_picked_world_direction_as_its_model_axis_moves() {
+    use crate::construct::{GeoRef, model_axis};
+    let mut doc = Document::new("coil on another component's cylinder");
+    let owner = doc.add_component(Some("Cylinder part"), 0).unwrap();
+    let consumer = doc.add_component(Some("Coil part"), 0).unwrap();
+    doc.occurrences.iter_mut().find(|o| o.component == consumer).unwrap().transform = rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Y, std::f64::consts::PI);
+    add_in(
+        &mut doc,
+        owner,
+        "Cylinder",
+        serde_json::json!({
+            "type": "cylinder", "base": ["0", "0", "0"], "axis": [0, 0, 1],
+            "radius": "2", "height": "8", "operation": "new_body"
+        }),
+    );
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    no_errors(&model);
+    let mut geo = GeoRef::Face { at: Vec3::new(2., 0., 4.), name: None };
+    geo.name_picks(&model.state());
+    assert!(matches!(&geo, GeoRef::Face { name: Some(_), .. }));
+    let (origin, _) = model_axis(&model.state(), &geo).unwrap();
+    add_in(
+        &mut doc,
+        consumer,
+        "Coil",
+        serde_json::json!({
+            "type": "coil", "base": ["0", "0", "0"], "axis": [0, 0, 1],
+            "axis_ref": {"type": "model", "geo": geo},
+            "diameter": "40", "section_size": "2", "pitch": "8", "turns": "2", "operation": "new_body"
+        }),
+    );
+    let coil_bounds = |doc: &Document, model: &Model| {
+        crate::world_state(doc, &model.state()).unwrap().bodies.iter().find(|b| b.component == consumer).unwrap().body.exact_bounds().unwrap()
+    };
+    model.evaluate(&doc);
+    no_errors(&model);
+    let before = coil_bounds(&doc, &model);
+    // The pick grows along world +Z through two turns of 8 mm, with a 1 mm section radius.
+    assert!((before.min.z - (origin.z - 1.)).abs() < 1e-6 && (before.max.z - (origin.z + 17.)).abs() < 1e-6, "{before:?}");
+
+    doc.occurrences.iter_mut().find(|o| o.component == owner).unwrap().transform = rigid(Vec3::new(12., 0., 0.), Vec3::ZERO, Vec3::Z, 0.);
+    model.evaluate(&doc);
+    no_errors(&model);
+    let after = coil_bounds(&doc, &model);
+    assert_eq!(model.last_recomputed, 1, "only the Coil should rebuild");
+    assert!((after.min.x - before.min.x - 12.).abs() < 1e-6, "{before:?} -> {after:?}");
+}
+
+#[test]
 fn box_fillet_cut_timeline() {
     let (mut doc, _) = plate_doc();
     doc.add_feature(
