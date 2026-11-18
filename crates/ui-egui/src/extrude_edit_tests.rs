@@ -250,6 +250,23 @@ fn profile_invert_retains_the_resolved_sketch_after_clearing_all() {
         vec![Sel::Profile { sketch: later, index: 0 }],
         "an explicit pick followed by deselection retains the new sketch for inversion"
     );
+
+    // Browser and History use pick_sketch, not pick. Clearing the field after
+    // selecting B must still leave B as the next Invert target.
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Profile { sketch: first, index: 0 }];
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    assert!(h.app.dialog.as_mut().unwrap().pick_sketch(&h.app.session, later));
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Profile { sketch: later, index: 0 }]);
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:invert_profiles"}})).unwrap();
+    assert_eq!(
+        h.app.dialog.as_ref().unwrap().inputs[0].items,
+        vec![Sel::Profile { sketch: later, index: 0 }],
+        "Browser sketch selection remains the inversion context after clearing the field"
+    );
     assert_eq!(h.app.session.doc.to_json(), before);
     assert_eq!(h.app.session.undo.len(), undo);
 }
