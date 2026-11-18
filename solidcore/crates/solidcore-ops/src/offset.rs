@@ -129,6 +129,7 @@ fn offset_refused(
         OffsetFailure::SeamOpened { .. } => OffsetRefusal::SeamOpened,
         OffsetFailure::ExactCurveUncut => OffsetRefusal::ExactCurveUncut,
         OffsetFailure::FacesApart { .. } => OffsetRefusal::FacesApart,
+        OffsetFailure::PastSide { largest, .. } => OffsetRefusal::PastSide { largest },
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => match unsound(what, index) {

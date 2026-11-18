@@ -469,7 +469,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if placing_note && let Some(point) = on_paper {
         crate::drawing_workspace::note::on_sheet(app, &placement_painter, at.screen(point), point, sheet, response.clicked());
     }
-    let placing = placing || placing_note;
+    let placing_dimension = crate::drawing_workspace::placing_dimension(app);
+    if placing_dimension && let Some(point) = on_paper {
+        crate::drawing_workspace::dimension::on_sheet(app, &placement_painter, at, sheet, point, HOVER_BAND / at.scale, response.clicked());
+    }
+    let placing = placing || placing_note || placing_dimension;
     view_tools::Canvas { at, painter: &painter, response: &response, drawing: &drawing, sheet, objects: &view.objects, free: free_area(app, canvas) }
         .show(app, ui, placing);
     let hit = hover.filter(|_| !placing).and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
