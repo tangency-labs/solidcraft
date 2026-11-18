@@ -90,8 +90,7 @@ only definitions is `blend::definition_check::is_definition`, which is
 own surface kind (a torus stays a torus, so every match on the kind still sees it) and carries its
 definition beside it.
 
-The blend definitions are opt-in today: `UpstreamFixes::fillet_round_as_definition` builds and
-reads them, and every `UpstreamFixes` flag is off by default (`kernel.rs`). Tests turn them on (`UpstreamFixes::all`).
+The blend definitions are always built and read.
 
 ### 3.2 Exact nets: lines, arcs and quadrics
 
@@ -273,6 +272,7 @@ written as the operations it counts:
 | where | count | what it bounds |
 |---|---|---|
 | `eval::collapse` (private `de_boor`) | γ_(12p+4) of the largest coordinate | de Boor's p levels, three operations for each coefficient and four for each convex combination |
+| `eval::collapse` (private `bezier_piece`, `rational_partial_bound`) | G γ_(12p+4) of the largest coordinate, G the levels' growth (\|1 − α\| + \|α\| past a span); γ_6, γ_3 and γ_2 on lengths, weight products and weights; the bound × (1 + γ_32); the moved net's gap √3 γ_2 (\|c₀\| w + \|h\|) / w | a rational net's rows in Bézier form over a piece, blossomed past their span, and its partial bound, taken on the net moved by minus its box's middle c₀ |
 | `eval::sphere` (`Coefficient::finish`) | γ_(8 + 8·degree + terms) | a Bernstein coefficient of \|H − CW\|² − R²W² |
 | `blend::fillet_section::recertify::precision_floor` | G (D + γ_K M), K = 2(n + 1) + 6 | the net's rows from the stations |
 | `surface::procedural_sweep::ProceduralSweep::floor` | G γ_(2(p+3)+24) (A + (R + λ)Θ + R) | the sweep's net and evaluation |
@@ -521,9 +521,9 @@ A reviewer checks each of these on a change that touches a definition, a net or 
 8. **Records are files.** A definition persists as plain data: the database type
    (`PROCEDURAL_BLEND_TYPE`, `ProceduralBlend::read_from_db`) and the serde records of
    `surface::procedural_blend::record` (`ProceduralBlendRecord`, `ExactRoundRecord`,
-   `CornerRecord`), every number as stored; an `ExactRoundRecord`'s chamfer sizes carry the
-   section's sagitta (`ChamferRecord::sagitta`, written only when it is not 0, so a chamfer's
-   record is as before). `convert::rebuild`, `exact_rebuild` and
+   `CornerRecord`), every number as stored. A chord with a sagitta (a weld bead's) has no record
+   yet: `exact_to_record` refuses it (`Unsupported`) rather than write it as the flat chord.
+   `convert::rebuild`, `exact_rebuild` and
    `corner_rebuild` make the definition exactly and certify the net again before it is an operand
    (or take the proof the kernel already finished for the same record, §4.5).
    A weld bead's foot blend is a record of its own kind (`FootBlendRecord`: supports, sides,

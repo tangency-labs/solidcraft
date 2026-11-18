@@ -41,7 +41,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<MoveFeaturesParams>(), &["component", "features"]);
     assert_keys(input_schema_for::<MoveSketchesToPartsParams>(), &["sketches"]);
     assert_keys(input_schema_for::<ReparentItemsParams>(), &["bodies", "component", "component_path", "features", "occurrences"]);
-    assert_keys(input_schema_for::<CreateParams>(), &["activate", "grounded", "name", "parent", "parent_path"]);
+    assert_keys(input_schema_for::<CreateParams>(), &["activate", "bom_quantity", "grounded", "name", "parent", "parent_path", "virtual"]);
     assert_keys(input_schema_for::<FromBodiesParams>(), &["bodies"]);
     assert_keys(input_schema_for::<ActivateParams>(), &["component", "occurrence", "path"]);
     assert_keys(input_schema_for::<ListParams>(), &["bodies", "compact"]);
@@ -286,10 +286,45 @@ fn the_check_reads_keys_as_the_handlers_do() {
     assert_eq!(issues("component.rename", json!({"component": 0, "name": ""})), ["`name` must be 1…128 characters"]);
 }
 
-fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
-    let schema = schema.as_value();
+fn matches(schema: impl std::borrow::Borrow<schemars::Schema>, id: &str, reply: &Value) {
+    let schema = schema.borrow().as_value();
     assert!(conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
     assert!(reply.get("param_warnings").is_none(), "{id}: {reply}");
+}
+
+#[test]
+fn component_list_reports_occurrence_context() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let schema = output_schema_for::<ListResult>();
+    let check = |s: &mut Session, component: u64, path: &[u64]| {
+        let before = (s.active_component, s.active_occurrence_path.clone(), s.revision);
+        for params in [json!({}), json!({"compact": true}), json!({"compact": true, "bodies": true})] {
+            let listed = s.execute("component.list", &params).unwrap();
+            assert_eq!(listed["active"], component);
+            assert_eq!(listed["active_path"], json!(path));
+            matches(&schema, "component.list", &listed);
+            let mut missing = listed.clone();
+            missing.as_object_mut().unwrap().remove("active_path");
+            assert!(!conforms(schema.as_value(), schema.as_value(), &missing), "active_path must always be present");
+        }
+        assert_eq!((s.active_component, s.active_occurrence_path.clone(), s.revision), before, "listing only reads the context");
+    };
+    check(&mut s, 0, &[]);
+    let parent = s.execute("component.create", &json!({"name": "Assembly", "grounded": false})).unwrap();
+    let leaf = s.execute("component.create", &json!({"name": "Carrier", "grounded": false})).unwrap();
+    let copy = s.execute("occurrence.copy", &json!({"component": parent["component"], "parent": 0})).unwrap();
+    let component = leaf["component"].as_u64().unwrap();
+    let original = [parent["occurrence"].as_u64().unwrap(), leaf["occurrence"].as_u64().unwrap()];
+    let copied = [copy["occurrence"].as_u64().unwrap(), leaf["occurrence"].as_u64().unwrap()];
+    // The same leaf occurrence belongs to two paths. Its id alone cannot restore the context.
+    for path in [original, copied] {
+        s.execute("component.activate", &json!({"component": component, "occurrence": path[1], "path": path})).unwrap();
+        check(&mut s, component, &path);
+    }
+    s.execute("component.activate", &json!({"component": component})).unwrap();
+    check(&mut s, component, &[]);
+    s.execute("component.activate", &json!({"component": 0})).unwrap();
+    check(&mut s, 0, &[]);
 }
 
 /// #16547: `component.hide_history` and `component.show_history` answer the component they changed

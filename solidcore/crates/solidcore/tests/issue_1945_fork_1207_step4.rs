@@ -32,7 +32,6 @@ use solidcore::{Kernel, Point3};
 const EXACT_CIRCLES_VOLUME: f64 = 49712.42816838713;
 
 fn sc_fixes(k: &mut Kernel) {
-    k.fixes.fillet_trim_status = true;
     k.fixes.curve_loop_normal_from_area = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
@@ -49,9 +48,7 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
-    k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.found_torus_sphere_keep_tested_nurb = true;
     k.fixes.fillet_point_step_per_point = true;
@@ -60,12 +57,8 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_cleanup_keeps_target_faces = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.shell_edges_on_analytics_exact = true;
-    k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.box_face_failures_propagate = true;
-    k.fixes.fillet_removal_takes_ring_fillets = true;
 }
 
 fn read(k: &mut Kernel) -> Brep {

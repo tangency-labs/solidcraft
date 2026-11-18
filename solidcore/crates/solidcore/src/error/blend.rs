@@ -23,7 +23,7 @@
 //! | [`BlendFailure::BallsNest`]            | [`ErrorKind::BallsFold`] (105)                |
 //! | [`BlendFailure::CreasePieceEndUnbuildable`] | [`ErrorKind::Unsupported`] (5)           |
 //! | [`BlendFailure::NotCertified`]         | [`ErrorKind::NotWithinTolerance`] (9): neither defect nor refusal |
-//! | [`BlendFailure::WeldNotBuilt`]         | [`ErrorKind::Unsupported`]: neither defect nor refusal |
+//! | [`BlendFailure::WeldNotBuilt`]         | [`ErrorKind::Unsupported`] (5): neither defect nor refusal |
 //! | the phrase causes ([`BlendFailure::Failed`], [`BlendFailure::Missing`], ...) | their status's kind, as before the record; neither defect nor refusal |
 //!
 //! **Statuses.** Each failure also records, for difftest and the goldens only, the status
@@ -236,6 +236,15 @@ pub enum WeldGap {
     /// A tapered or rounded end of a flat bead (sagitta 0): the planar sweep that cuts those
     /// ends takes only a bead with a sagitta so far, even straight between two planes.
     EndShapeOfFlatBead,
+    /// A joint that is not a straight edge between two planes for the exact planar bead
+    /// ([`crate::blend::weld_bead::beads_apart`]); the bead on any joint is the foot blend's
+    /// ([`crate::blend::weld_bead::bead_body`]). The failure's site names the edge.
+    CurvedJoint,
+    /// A bead whose toe on one face is obtuse (its second leg at most its first times the
+    /// cosine of the angle between the faces, or the other way round): the exact planar
+    /// bead's surface is read through the chamfer's ball, which such legs fold. The failure's
+    /// site names the edge.
+    ObtuseToe,
 }
 
 /// The class of a blend larger than its faces allow, for `reason`: one of the blend's
@@ -590,6 +599,16 @@ impl core::fmt::Display for BlendFailure {
             Self::WeldNotBuilt(WeldGap::EndShapeOfFlatBead) => write!(
                 f,
                 "{}: a tapered or rounded end of a flat bead (sagitta 0) is not built yet; give the bead a sagitta",
+                self.class()
+            ),
+            Self::WeldNotBuilt(WeldGap::CurvedJoint) => write!(
+                f,
+                "{}: the exact weld bead is built only along a straight edge between two planes; the bead body builds on any joint",
+                self.class()
+            ),
+            Self::WeldNotBuilt(WeldGap::ObtuseToe) => write!(
+                f,
+                "{}: a weld bead with an obtuse toe (one leg at most the other's cosine of the angle between the faces) is not built yet",
                 self.class()
             ),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
@@ -968,6 +987,14 @@ mod tests {
                 ErrorKind::Unsupported,
             ),
             (
+                BlendFailure::WeldNotBuilt(WeldGap::CurvedJoint),
+                ErrorKind::Unsupported,
+            ),
+            (
+                BlendFailure::WeldNotBuilt(WeldGap::ObtuseToe),
+                ErrorKind::Unsupported,
+            ),
+            (
                 BlendFailure::StationDidNotConverge {
                     s: 0.42,
                     residual: Some(3e-6),
@@ -1312,7 +1339,7 @@ mod tests {
     /// sites lowers the pin to the new count, and a new site builds a typed cause.
     #[test]
     fn the_phrase_cause_sites_only_go_down() {
-        const PHRASE_CAUSE_SITES: usize = 1392;
+        const PHRASE_CAUSE_SITES: usize = 1335;
         use crate::blend::fillet_executive::NoRoomReason as R;
         let causes = [
             BlendFailure::NoRoom(R::BallDoesNotFit),
@@ -1348,6 +1375,7 @@ mod tests {
                 halvings: 0,
                 stations: 0,
             },
+            BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
             BlendFailure::Failed("x"),
             BlendFailure::Missing("x"),
             BlendFailure::InvalidValue("x"),

@@ -2,15 +2,16 @@
 //! faces, apart from the body it is laid on, which is left as it was. No boolean with the
 //! body and no copy of it, so the cost does not grow with the body.
 //!
-//! Between planes along a straight edge (all the bead does so far) the bead's body is its
+//! Between planes along a straight edge the exact bead's body ([`beads_apart`]) is its
 //! section swept along the edge: the edge's point, the feet at the setbacks on each face, and
 //! the arc between them ([`BeadArc`], the exact circle the blend builds the bead face from).
 //! Its faces are the bead face, the strips of the two planes between the edge and the feet,
-//! and the two section ends. A span ([`BeadSpan`]) sweeps its share of the edge only, so an
-//! intermittent weld is one body per span with no cutting.
+//! and the two section ends. On any joint the bead is built on the foot blend
+//! ([`bead_body`], [`crate::blend::foot_blend`]); a span ([`BeadSpan`]) builds its share of
+//! the edge only, so an intermittent weld is one body per span.
 //!
-//! A span ends square to the edge, or tapers, or is rounded ([`BeadEnd`]). Those two are cut
-//! from the span's own small body: the span is swept past its end first, so each cut crosses
+//! A span ends square to the edge, or tapers, or is rounded ([`BeadEnd`]); the last two only
+//! straight between two planes so far, cut from the span's own small planar body: the span is swept past its end first, so each cut crosses
 //! the bead's edges instead of passing through its corners, then
 //! - a taper is cut by the plane through the span's end on the edge at 45 degrees to the edge,
 //!   rising into the span along the bead's middle direction: a ramp as long as the bead is
@@ -32,11 +33,12 @@ use crate::blend::fillet_exact::ClassInputs;
 use crate::boolean::api_brep::boolean_difference;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::blend::{BlendFailure, WeldGap};
+use crate::error::{Failure, Result, Site, SolidError, TargetEdge, TargetVertex};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::EFF_ZERO;
+use crate::math::EFF_ZERO_RAD;
 use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use crate::nurbs::knots::Side;
 use crate::primitive::api_curves::create_line_segment;
@@ -50,10 +52,18 @@ use crate::sweep::api_brep::create_linear_sweep;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
-use crate::topology::{Brep, EdgeId, FaceId};
+use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 use core::f64::consts::TAU;
 
 const OP: &str = "blend::weld_bead";
+
+/// The refusal of a bead the kernel does not build yet, for `gap`, at `site`.
+#[track_caller]
+fn not_built(gap: WeldGap, site: Site) -> SolidError {
+    Failure::new(OP, BlendFailure::WeldNotBuilt(gap))
+        .or_at(site)
+        .into_error()
+}
 
 /// How a bead's span ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -111,11 +121,9 @@ fn frame(
         .curve
         .clone()
         .ok_or_else(|| SolidError::invalid_input(OP, "an edge with no curve"))?;
+    let at_edge = Site::edge(TargetEdge::of_target(edge_id));
     if !matches!(curve.kind(), CurveKind::Line(_)) {
-        return Err(SolidError::invalid_input(
-            OP,
-            "a bead apart is built along a straight edge only so far",
-        ));
+        return Err(not_built(WeldGap::CurvedJoint, at_edge));
     }
     let interval = edge::interval(target, edge_id)?;
     let at = |t: f64| -> Result<Point3> {
@@ -156,10 +164,7 @@ fn frame(
             .as_ref()
             .is_some_and(|s| matches!(s.kind(), SurfaceKind::Plane(_)));
         if !planar {
-            return Err(SolidError::invalid_input(
-                OP,
-                "a bead apart is built between planes only so far",
-            ));
+            return Err(not_built(WeldGap::CurvedJoint, at_edge));
         }
         let eval = evaluate_binormal(k, target, eu, middle, true, &BinormalOptions::default())?;
         let surface = target
@@ -183,11 +188,14 @@ fn frame(
         } else {
             [first, second]
         };
-    // an inside corner: the second face rises on the first one's outer side
-    if n1.dot(u2) <= EFF_ZERO {
+    // an inside corner: the second face rises on the first one's outer side. `n1 . u2` is the
+    // sine of the second face's rise off the first one's plane (both unit), an angle: at or
+    // below the angle zero the edge is an outside corner (negative) or tangent (zero), where
+    // the chord would run through the part or through the edge
+    if n1.dot(u2) <= EFF_ZERO_RAD {
         return Err(SolidError::invalid_input(
             OP,
-            "a bead lies in an inside corner (a concave edge) only",
+            "a weld bead lies in an inside corner (a concave edge) only, not on an outside or a tangent edge",
         ));
     }
     let wedge = u1.cross(u2).length().atan2(u1.dot(u2));
@@ -207,8 +215,13 @@ fn frame(
         .max(feet[1].dot(up))
         .max(arc_extreme(&arc, start, Some(up)));
     // the ball's centre at the edge's start: its offsets from the planes along the normals
-    // into the wedge, its feet the bead's (the chamfer's offsets, positive)
-    let offsets = bead.chamfer.offsets()?;
+    // into the wedge, its feet the bead's (the chamfer's offsets, positive). Legs with an
+    // obtuse toe fold the chamfer's ball (its offsets are not both positive), and the
+    // cylinder's side is read from that ball, so they are refused here
+    // (`ChamferDefinition::offsets` refuses nothing else)
+    let Ok(offsets) = bead.chamfer.offsets() else {
+        return Err(not_built(WeldGap::ObtuseToe, at_edge));
+    };
     let into = (u2 - u1 * u1.dot(u2)).unitize()?;
     let centre = start + feet[0] + into * offsets[0];
     // signed along each plane's own normal, as the blend reads them
@@ -250,8 +263,7 @@ fn frame(
 /// fit is a hair below it).
 fn sagitta_refusal(edge: EdgeId, bound: f64) -> SolidError {
     use crate::blend::fillet_executive::NoRoomReason;
-    use crate::error::blend::BlendFailure;
-    use crate::error::{Failure, Fit, FitMeasure, Site, TargetEdge};
+    use crate::error::{Fit, FitMeasure};
     let edge = TargetEdge::of_target(edge);
     Failure::new(OP, BlendFailure::NoRoom(NoRoomReason::BeadCutsFace))
         .or_at(Site::edge(edge))
@@ -424,20 +436,56 @@ impl Frame {
     }
 }
 
+/// Refuses, before anything is built, an edge listed twice in `edges` (native invalid input)
+/// and two of `edges` of `target` that meet at a vertex (a bead not built yet, naming the
+/// vertex: their corner).
+///
+/// # Errors
+///
+/// Those named; those of the edges' vertices.
+fn refuse_repeats_and_corners(target: &Brep, edges: &[EdgeId]) -> Result<()> {
+    // an edge listed twice would be two beads in one place
+    for (i, e) in edges.iter().enumerate() {
+        if edges.get(..i).is_some_and(|before| before.contains(e)) {
+            return Err(SolidError::invalid_input(OP, "each edge is listed once"));
+        }
+    }
+    // beads meeting at a vertex need a corner piece
+    let mut seen: std::collections::BTreeMap<VertexId, EdgeId> = std::collections::BTreeMap::new();
+    for &e in edges {
+        let (start, end) = edge::start_end_vertices(target, e)?;
+        for v in [start, end].into_iter().flatten() {
+            if seen.insert(v, e).is_some_and(|other| other != e) {
+                return Err(not_built(
+                    WeldGap::BeadsMeetAtVertex,
+                    Site::vertex(TargetVertex::of_target(v)),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The weld beads along `edges` of `target`, each as a body of its own built from its own
-/// faces, in the order of `edges`; `target` is left as it was. Each edge is straight between
-/// two planes in an inside corner; `sizes` (one per edge: the chamfer's setbacks, the bead's toes), `sagitta` the arc's height
-/// over the chord (`> 0` convex, `< 0` concave, [`BeadDefinition`]), and the first distance of a size runs along the face in `along` where one of the edge's faces is.
-/// A convex bead overhanging its toe is built: no trimming is involved.
+/// faces, in the order of `edges`; `target` is left as it was, whether the beads are built or
+/// refused. Each edge is straight between two planes in an inside corner; `sizes` are one per
+/// edge (the chamfer's setbacks, the bead's toes), `sagitta` is the arc's height over the
+/// chord (`> 0` convex, `< 0` concave, `0` flat, [`BeadDefinition`]), and the first distance of
+/// a size runs along the face in `along` where one of the edge's faces is. A convex bead
+/// overhanging its toe is built: no trimming is involved.
 ///
 /// `target` is mutable only for evaluating its edges' faces (a missing trim curve may be
 /// cached); its geometry and topology are left as they were.
 ///
 /// # Errors
 ///
-/// Native invalid input for sizes not one per edge, an edge that is not straight, not between
-/// two planes or not in an inside corner, and for a bead past its bound
-/// ([`BeadDefinition::new`]); those of the evaluations and the sweeps.
+/// Native invalid input for sizes not one per edge, an edge listed twice, an edge not in an
+/// inside corner (an outside or a tangent edge), and a bead past its bound
+/// ([`BeadDefinition::new`]); [`BlendFailure::WeldNotBuilt`] for two of `edges` that meet at a
+/// vertex ([`WeldGap::BeadsMeetAtVertex`], naming it), an edge that is not straight between
+/// two planes ([`WeldGap::CurvedJoint`]) or legs with an obtuse toe ([`WeldGap::ObtuseToe`]),
+/// naming the edge; those of the evaluations and the sweeps. Every refusal comes before any
+/// bead is built.
 pub fn beads_apart(
     k: &mut Kernel,
     target: &mut Brep,
@@ -449,43 +497,14 @@ pub fn beads_apart(
     if sizes.len() != edges.len() {
         return Err(SolidError::invalid_input(OP, "one size per edge"));
     }
-    edges
+    refuse_repeats_and_corners(target, edges)?;
+    // every frame first, so a refused edge leaves nothing built
+    let frames = edges
         .iter()
         .zip(sizes)
-        .map(|(&e, &size)| {
-            let f = frame(k, target, e, size, sagitta, along)?;
-            f.sweep(k, 0.0, f.length)
-        })
-        .collect()
-}
-
-/// The bead along the straight edge `edge_id` of `target` ([`beads_apart`], with `size`,
-/// `sagitta` and `along`) as one body per span of `spans`, in their order (fractions of the
-/// edge's length from the start of its curve's interval), each with `ends` at both of its
-/// ends. The end shapes lie inside the span, so a span's length stays the weld's length.
-///
-/// # Errors
-///
-/// Those of [`beads_apart`]; native invalid input for no span, spans out of order or
-/// overlapping ([`BeadSpan`]), and a span too short for its ends (a taper needs the bead's
-/// height at each end, a rounded end its reach); those of the cuts.
-#[allow(clippy::too_many_arguments)]
-pub fn beads_apart_in_spans(
-    k: &mut Kernel,
-    target: &mut Brep,
-    edge_id: EdgeId,
-    size: ChamferSize,
-    sagitta: f64,
-    along: &[FaceId],
-    spans: &[BeadSpan],
-    ends: BeadEnd,
-) -> Result<Vec<Brep>> {
-    let spans = BeadSpan::along(&spans.iter().map(|s| (s.from, s.to)).collect::<Vec<_>>())?;
-    let f = frame(k, target, edge_id, size, sagitta, along)?;
-    spans
-        .iter()
-        .map(|s| f.span(k, s.from * f.length, s.to * f.length, [ends; 2]))
-        .collect()
+        .map(|(&e, &size)| frame(k, target, e, size, sagitta, along))
+        .collect::<Result<Vec<_>>>()?;
+    frames.iter().map(|f| f.sweep(k, 0.0, f.length)).collect()
 }
 
 /// The weld bead along `edges` of `target` as one body of its own, built on the foot blend
@@ -504,8 +523,8 @@ pub fn beads_apart_in_spans(
 /// bead runs along each edge, fractions of the edge's length from the start of its curve's
 /// interval ([`BeadSpan`]; none: the whole edge), and `ends` the shape at each span's start
 /// and end: square on any joint; tapered or rounded only straight between two planes with a
-/// sagitta so far, where the bead is the planar sweep ([`beads_apart_in_spans`]) cut at its
-/// ends, its bead face keeping the chord's exact definition with its sagitta.
+/// sagitta so far, where the bead is the planar sweep ([`beads_apart`]'s) cut at its ends, its
+/// bead face keeping the chord's exact definition with its sagitta.
 ///
 /// A weld never changes the part it lies on: `target`'s geometry and topology are left as
 /// they were whether the bead is built or refused (it is mutable for the edges' binormals,
@@ -514,8 +533,8 @@ pub fn beads_apart_in_spans(
 ///
 /// # Errors
 ///
-/// Native invalid input for no edge, sizes not one per edge, a size that is not two legs, or
-/// spans out of order, overlapping or too short for their ends;
+/// Native invalid input for no edge, sizes not one per edge, an edge listed twice, a size
+/// that is not two legs, or spans out of order, overlapping or too short for their ends;
 /// [`crate::error::blend::BlendFailure::WeldNotBuilt`]
 /// naming the vertex for two of `edges` that meet at one, and for a shaped end the foot blend
 /// does not build; the foot blend's refusals, typed and with the size that builds (a toe off
@@ -532,30 +551,13 @@ pub fn bead_body(
     ends: [BeadEnd; 2],
 ) -> Result<Brep> {
     use crate::blend::foot_blend::{close_bead_body, BeadWeld, FootBlend, WELD_FIT_TOLERANCE};
-    use crate::error::blend::{BlendFailure, WeldGap};
-    use crate::error::{Failure, Site, TargetEdge, TargetVertex};
     if edges.is_empty() || sizes.len() != edges.len() {
         return Err(SolidError::invalid_input(
             OP,
             "a weld bead takes edges and one size per edge",
         ));
     }
-    // beads meeting at a vertex: refused before anything is built
-    let mut seen: std::collections::BTreeMap<crate::topology::VertexId, EdgeId> =
-        std::collections::BTreeMap::new();
-    for &e in edges {
-        let (start, end) = edge::start_end_vertices(target, e)?;
-        for v in [start, end].into_iter().flatten() {
-            if seen.insert(v, e).is_some_and(|other| other != e) {
-                return Err(Failure::new(
-                    OP,
-                    BlendFailure::WeldNotBuilt(WeldGap::BeadsMeetAtVertex),
-                )
-                .or_at(Site::vertex(TargetVertex::of_target(v)))
-                .into_error());
-            }
-        }
-    }
+    refuse_repeats_and_corners(target, edges)?;
     let spans = if spans.is_empty() {
         vec![BeadSpan::new(0.0, 1.0)?]
     } else {
@@ -589,9 +591,7 @@ pub fn bead_body(
                 None
             };
             if let Some(gap) = gap {
-                return Err(Failure::new(OP, BlendFailure::WeldNotBuilt(gap))
-                    .or_at(Site::edge(TargetEdge::of_target(e)))
-                    .into_error());
+                return Err(not_built(gap, Site::edge(TargetEdge::of_target(e))));
             }
             let f = frame(k, target, e, *size, sagitta, along)?;
             for s in &spans {
@@ -670,10 +670,7 @@ fn span_parameters(
         }
         let found = curve.find_parameter_at_arc_length(k, lo, share * length)?;
         if !found.converged || found.past_end {
-            return Err(SolidError::blend(
-                OP,
-                crate::error::blend::BlendFailure::StageFailed,
-            ));
+            return Err(SolidError::blend(OP, BlendFailure::StageFailed));
         }
         Ok(found.end_param.clamp(lo, hi))
     };
@@ -714,7 +711,7 @@ fn square_to(dir: Vec3) -> Result<[Vec3; 2]> {
 /// The length of the bead along `edge_id` of `target` in each of `spans`, in their order:
 /// the edge's arc length times the span's share (spans are fractions of that length). For a
 /// weld table; a bead's volume is its body's ([`crate::mass::integrator::properties::brep_volume`] of a body from
-/// [`beads_apart`] or [`beads_apart_in_spans`]).
+/// [`beads_apart`] or [`bead_body`]).
 ///
 /// # Errors
 ///

@@ -183,6 +183,11 @@ pub(crate) fn picked_feature(app: &SolveApp) -> Option<u64> {
     })
 }
 
+/// The feature under the pointer (in the 3D view, Browser, or timeline) or picked in the 3D view.
+pub(crate) fn from_view(app: &SolveApp) -> [Option<u64>; 2] {
+    [hovered_feature(app).or(app.viewport.hover_feature), picked_feature(app)]
+}
+
 /// A new face or edge picked in the view scrolls the history shown to the feature that made it,
 /// once per pick; the history stays where it is while the pick does not change.
 pub(crate) fn follow_view_pick(app: &mut SolveApp) {
@@ -408,17 +413,32 @@ pub(crate) fn delete_params(features: &[u64], groups: &[u64]) -> Value {
     if groups.is_empty() { json!({ "features": features }) } else { json!({ "features": features, "groups": groups }) }
 }
 
+/// The feature a selection item stands for in the Features list and the History: a picked
+/// feature itself, or the construction plane, axis or point the 3D view or the Construction
+/// folder picked by name. One mapping for both directions with [`viewport_sel_of_feature`], so
+/// the lists, the History and the 3D view agree on a construction feature (#17000).
+pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Option<u64> {
+    use solidcraft_engine::Sel;
+    match sel {
+        Sel::Feature { id } => Some(*id),
+        Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } => {
+            doc.features.iter().find(|f| f.kind.is_construction() && solidcraft_engine::browser_find::construction_sel(f) == *sel).map(|f| f.id)
+        }
+        _ => None,
+    }
+}
+
+/// What the 3D view lights for a selected construction feature: the plane, axis or point
+/// itself, picked by name. `None` for any other feature.
+pub(crate) fn viewport_sel_of_feature(doc: &Document, id: u64) -> Option<solidcraft_engine::Sel> {
+    doc.feature(id).filter(|f| f.kind.is_construction()).map(solidcraft_engine::browser_find::construction_sel)
+}
+
 /// The selected timeline features, in timeline order.
 pub(crate) fn selected_feature_ids(app: &SolveApp) -> Vec<u64> {
-    app.session
-        .doc
-        .features
-        .iter()
-        .filter(|feature| {
-            app.session.selection.iter().any(|selection| matches!(selection, solidcraft_engine::Sel::Feature { id } if *id == feature.id))
-        })
-        .map(|feature| feature.id)
-        .collect()
+    let doc = &app.session.doc;
+    let picked: std::collections::HashSet<u64> = app.session.selection.iter().filter_map(|selection| feature_of_sel(doc, selection)).collect();
+    doc.features.iter().filter(|feature| picked.contains(&feature.id)).map(|feature| feature.id).collect()
 }
 
 /// What Copy and Delete in a feature's menu act on: the selected features when the
@@ -429,7 +449,7 @@ pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
 }
 
 /// Delete's label in a feature's menu: how many features it deletes when that is more than one.
-fn delete_label(count: usize) -> String {
+pub(crate) fn delete_label(count: usize) -> String {
     match count {
         1 => solidcraft_ui_text::tr_label("Delete").to_string(),
         n => solidcraft_ui_text::format("timeline.delete_many", &[("count", &n.to_string())]),
@@ -724,6 +744,22 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
         None => return None,
     };
     result.import_report.as_deref().map(import_summary)
+}
+
+/// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
+/// what it found joins the import's result, so its History chip warns, and a part to repair is
+/// said on the status line, once per import, in history order. While a check runs the window
+/// looks again a few times a second.
+pub(crate) fn tick_import_checks(app: &mut SolveApp, ctx: &egui::Context) {
+    app.session.model.settle_import_checks();
+    for id in app.session.model.take_import_notices() {
+        if let Some(summary) = app.session.model.result(id).and_then(|r| r.import_report.as_deref()).map(import_summary) {
+            app.set_status(summary, false);
+        }
+    }
+    if app.session.model.checking_imports() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+    }
 }
 
 /// An import's warnings for a person who uses CAD: how many of the file's parts came in as
@@ -1172,8 +1208,8 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     let n = app.session.doc.features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
     let mut bar = bar(app, floating);
-    // The feature that made what is under the cursor or picked in the viewport.
-    let from_view = [hovered_feature(app), picked_feature(app)];
+    // The feature under the cursor (viewport, browser, or timeline) or picked in the viewport.
+    let from_view = from_view(app);
     // Long runs of one component's features show as one chip (`timeline_fold`). The bar shows the
     // edited or picked component's features, after the path to it (`timeline_scope`).
     let strip = crate::timeline_fold::Strip { marker, from_view, floating, accent };
@@ -1220,8 +1256,15 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
                 click_feature(app, order, step, modifiers);
             }
             history_bar::Action::Edit(id) => app.edit_feature(id),
-            // The same menu as the browser's, so the control channel reports it (#10745).
-            history_bar::Action::Menu { step, at } => crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: step }),
+            // The same menu as the browser's, so the control channel reports it (#10745). A
+            // right-click outside the selection selects that feature first, as the vertical
+            // History does, so the menu acts on what is highlighted.
+            history_bar::Action::Menu { step, at } => {
+                if !selected_feature_ids(app).contains(&step) {
+                    select_one(app, step);
+                }
+                crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: step });
+            }
             history_bar::Action::Seek { slot, before } => {
                 let slot = position(slot, before);
                 let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
@@ -1276,10 +1319,8 @@ impl history_bar::Contents for BarSteps<'_> {
         let results = BarResults::of(&self.rows.features, self.rows.unique_ids, &app.session.model.results);
         // The features picked in the design or in the open dialog, collected once for the
         // strip: the dialog built its item list again for every chip.
-        let feature_of = |selection: &solidcraft_engine::Sel| match selection {
-            solidcraft_engine::Sel::Feature { id } => Some(*id),
-            _ => None,
-        };
+        let doc = &app.session.doc;
+        let feature_of = |selection: &solidcraft_engine::Sel| feature_of_sel(doc, selection);
         let picked: std::collections::HashSet<u64> = app
             .session
             .selection
@@ -1599,6 +1640,7 @@ mod tests {
                 issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
                 issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
             ],
+            ..Default::default()
         };
         let summary = super::import_summary(&report);
         assert_eq!(
@@ -1610,7 +1652,8 @@ mod tests {
         );
         assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
         // Only repairs: no advice, and a part alone has no "of" count.
-        let repaired = ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")] };
+        let repaired =
+            ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")], ..Default::default() };
         assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
@@ -1744,6 +1787,7 @@ mod tests {
         let feature = FeatureKind::Pattern {
             features: Vec::new(),
             bodies: Vec::new(),
+            placements: Vec::new(),
             pattern: PatternKind::Path {
                 path_sketch: solidcraft_engine::doc::SketchId(0),
                 path: Vec::new(),
@@ -2878,7 +2922,8 @@ mod tests {
         assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["B", "C", "D", "E", "F"]));
     }
 
-    /// Copy on a feature outside the selection copies that feature alone.
+    /// Copy on a feature outside the selection copies that feature alone: the right-click
+    /// selects it first.
     #[test]
     fn copy_on_an_unselected_feature_copies_only_it() {
         let mut h = two_boxes(false);
@@ -2886,11 +2931,11 @@ mod tests {
         h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
         h.step(&json!({"widget": "Copy"})).unwrap();
         assert_eq!(copied(&h), ["Second"]);
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Second"]));
         // Ctrl+click again takes a feature back out of the selection.
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
-        let first = h.app.session.doc.find_feature("First").map(|f| f.id).unwrap();
-        assert_eq!(super::selected_feature_ids(&h.app), [first]);
+        h.step(&json!({"click": {"handle": "timeline:First"}, "ctrl": true})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:First"}, "ctrl": true})).unwrap();
+        assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Second"]));
     }
     fn three_boxes(left: bool) -> Harness {
         let mut h = two_boxes(left);
@@ -2952,6 +2997,30 @@ mod tests {
             assert_eq!(names(&h), ["Third"], "left: {left}");
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(names(&h), ["First", "Second", "Third"], "left: {left}");
+        }
+    }
+
+    /// A right-click on a feature outside the selection selects that feature alone, so its
+    /// menu acts on what is highlighted; a right-click inside the selection keeps it. The same
+    /// in both timelines.
+    #[test]
+    fn a_right_click_outside_the_selection_selects_that_feature() {
+        for left in [false, true] {
+            let mut h = three_boxes(left);
+            h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
+            assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["First", "Second"]), "inside keeps it, left: {left}");
+            assert!(h.widget("Delete 2 Selected Features").is_some(), "left: {left}");
+            h.step(&json!({"key": "Escape"})).unwrap();
+
+            h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+            assert_eq!(super::selected_feature_ids(&h.app), ids(&h, &["Third"]), "outside selects it alone, left: {left}");
+            assert!(h.widget("Delete 2 Selected Features").is_none(), "left: {left}");
+            h.step(&json!({"widget": if left { "Suppress Feature" } else { "Suppress Features" }})).unwrap();
+            h.settle();
+            let suppressed: Vec<&str> = h.app.session.doc.features.iter().filter(|f| f.suppressed).map(|f| f.name.as_str()).collect();
+            assert_eq!(suppressed, ["Third"], "left: {left}");
         }
     }
 
@@ -3923,7 +3992,7 @@ mod tests {
         let h = two_boxes(false);
         let plain = h.app.session.model.results[0].clone();
         let issue = ImportIssue { kind: IssueKind::Repaired, item: Some(3), part: String::new(), faces: 0, times: 1, detail: "solid #3: …".into() };
-        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues }));
+        let report = |issues: Vec<ImportIssue>| Some(std::sync::Arc::new(ImportReport { parts: 1, solids: 1, issues, ..Default::default() }));
         let with = |warning: Option<&str>, import_report| {
             let mut result = plain.clone();
             result.warning = warning.map(str::to_string);
@@ -3940,6 +4009,43 @@ mod tests {
         for (result, warned, what) in cases {
             assert_eq!(super::has_warning(&result), warned, "{what}");
             assert_eq!(super::has_warning(&result), super::warning_text(&result).is_some(), "{what}");
+        }
+    }
+
+    #[test]
+    fn browser_row_hover_highlights_feature_and_sketch_in_timeline() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.ui.show_browser = true;
+            h.app.ui.show_timeline = true;
+            h.app.run("view.history_layout", json!({"dock": if left { "left" } else { "bottom" }})).unwrap();
+            h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+            let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+            h.app.run("sketch.create", json!({"plane":"XY","name":"MySketch"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            let sketch = h.app.session.doc.find_feature("MySketch").unwrap().id;
+            h.app.tree.expanded.insert("c0/features".into());
+            h.app.tree.expanded.insert("c0/sketches".into());
+            h.frames(2);
+
+            // Hovering a feature row in the browser sets hover_feature and highlights it in the timeline.
+            let row_feature = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
+            h.step(&json!({"move":[row_feature.x, row_feature.y]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, Some(round), "left={left}");
+            assert_eq!(super::from_view(&h.app), [Some(round), None], "left={left}");
+
+            // Hovering a sketch row in the browser sets hover_feature and highlights it in the timeline.
+            let row_sketch = crate::scenario::handle_at("row:MySketch").unwrap();
+            h.step(&json!({"move":[row_sketch.x, row_sketch.y]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, Some(sketch), "left={left}");
+            assert_eq!(super::from_view(&h.app), [Some(sketch), None], "left={left}");
+
+            // Moving the cursor away clears the timeline highlight.
+            h.step(&json!({"move":[5, 5]})).unwrap();
+            assert_eq!(h.app.viewport.hover_feature, None, "left={left}");
+            assert_eq!(super::from_view(&h.app), [None, None], "left={left}");
         }
     }
 }

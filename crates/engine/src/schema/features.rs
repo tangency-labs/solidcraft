@@ -144,7 +144,8 @@ pub struct ExtrudeParams {
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
-    /// Start at this face or point (From Object).
+    /// Start at this face or point (From Object). On a flat face at a slant the start follows the
+    /// face, and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "FromPoint")]
     pub from: Option<FromPoint>,
@@ -827,6 +828,11 @@ pub struct FilletParams {
     /// picked edges.
     #[serde(default)]
     pub tangent_chain: Option<bool>,
+    /// Each picked edge's own radius, one per edge in the order of `edges`, all rounded in one
+    /// fillet (`radius` is then the nominal one, usually the first). Takes a constant, exact, rolling-corner,
+    /// mitred round with `tangent_chain: false`.
+    #[serde(default)]
+    pub edge_radii: Option<Vec<LengthExpr>>,
     #[serde(default, rename = "type")]
     pub kind: Option<FilletTypeParam>,
     /// `type: variable`: the radius at the end away from `start`; it or `radius` may be 0, where
@@ -1104,6 +1110,12 @@ pub struct MoveParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "Point3")]
     pub axis: Option<Point3>,
+    /// The edge or round face of the model the turn was picked on, `{edge|face: [x,y,z], body?}`:
+    /// the move keeps turning about it where it is, when an earlier step moves the body
+    /// (#17974). `axis` and `origin` give the line where it is now and the turn's sense.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "GeoRefParam")]
+    pub about: Option<GeoRefParam>,
     /// Angle expression; default zero.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "AngleExpr")]

@@ -62,17 +62,161 @@
 
 use crate::curve::curve::p2::HERMITE_CURVE_TYPE;
 use crate::error::Result;
+use crate::geom::assert_array::ObjectKey;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::segment_point_distance;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::polar_box::PolarBox;
 use crate::geom::pseudo_box::PseudoBox;
-use crate::geom::tol::is_zero;
+use crate::geom::tol::{context_zone_tol_3d, is_zero, SmallTopoType};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQ};
+use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+use crate::nurbs::crv_basic::Curve as NurbCurve;
+use crate::nurbs::math::{gamma, CPoint, NOW};
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
+
+/// Bound the distance of an entire cubic Bezier from its finite endpoint segment.
+/// The convex hull property puts every curve point within the larger distance of
+/// the two inner controls to the segment. Unlike distance to the infinite line,
+/// this also bounds overshoot and cubics whose endpoints coincide.
+/// Coordinates must be finite and small enough for segment distance arithmetic.
+#[must_use]
+pub fn cubic_chord_bound([a, c, d, b]: [Point3; 4]) -> f64 {
+    let (c_distance, _) = segment_point_distance(a, b, c);
+    let (d_distance, _) = segment_point_distance(a, b, d);
+    max2(c_distance, d_distance)
+}
+
+/// What a cubic Bezier curve on `[0, 1]`, the curve a profile cubic is built as, stands as in
+/// the model ([`classify_cubic`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CubicStanding {
+    /// The whole curve lies within the model's zone tolerance of the segment between its ends:
+    /// the model cannot tell it from that segment.
+    Chord,
+    /// A curve that passes the B-spline curve check.
+    Curve,
+    /// A curve the B-spline curve check refuses (a speed or a radius of curvature below its
+    /// tolerance, for example), which no body could keep.
+    Refused,
+}
+
+/// [`CubicStanding`] of the cubic Bezier curve through `points` on `[0, 1]`: its chord where
+/// [`cubic_chord_bound`] is at most the model's zone tolerance (the kernel's absolute linear
+/// tolerance, [`ZONE_TOL_3D`](crate::geom::tol::ZONE_TOL_3D) unless the session sets another),
+/// else the verdict of [`BSplineCurve::assert_valid`] on the curve.
+///
+/// # Errors
+///
+/// Those of building the curve and of its check's analyses.
+pub fn classify_cubic(k: &Kernel, points: [Point3; 4]) -> Result<CubicStanding> {
+    if cubic_chord_bound(points) <= context_zone_tol_3d(k, None, SmallTopoType::NormalSize) {
+        return Ok(CubicStanding::Chord);
+    }
+    let poles = points
+        .iter()
+        .map(|p| CPoint::new(p.x, p.y, p.z, NOW))
+        .collect();
+    let nurb = NurbCurve::new(poles, 3, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0])?;
+    let curve = BSplineCurve::from_nurb(nurb, 3, false);
+    Ok(if curve.assert_valid(k, None, false, ObjectKey(0))? {
+        CubicStanding::Curve
+    } else {
+        CubicStanding::Refused
+    })
+}
+
+/// One piece of a cubic Bezier curve on `[0, 1]` ([`cubic_pieces`]): the cubic Bezier curve
+/// through `points` on `[0, 1]` and what it stands as ([`classify_cubic`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CubicPiece {
+    /// Its four control points.
+    pub points: [Point3; 4],
+    /// What it stands as in the model.
+    pub standing: CubicStanding,
+}
+
+/// The two halves of the cubic Bezier curve through `points`, split at parameter 1/2 by de
+/// Casteljau's construction: together they are the same curve, each again a cubic Bezier
+/// curve on `[0, 1]`.
+fn halve_cubic([a, b, c, d]: [Point3; 4]) -> ([Point3; 4], [Point3; 4]) {
+    let ab = 0.5 * (a + b);
+    let bc = 0.5 * (b + c);
+    let cd = 0.5 * (c + d);
+    let abc = 0.5 * (ab + bc);
+    let bcd = 0.5 * (bc + cd);
+    let mid = 0.5 * (abc + bcd);
+    ([a, ab, abc, mid], [mid, bcd, cd, d])
+}
+
+/// Whether the cubic Bezier curve through `points` runs forward along its chord all the way:
+/// the projections of its control points on the chord direction strictly increase from start to
+/// end. Its derivative along the chord is then a quadratic whose Bernstein coefficients (the
+/// steps between those projections) are all positive, so the curve never stops or turns back,
+/// and the next piece cannot fold back over it.
+fn runs_along_chord([a, b, c, d]: [Point3; 4]) -> bool {
+    let along = d - a;
+    let (pb, pc, pd) = ((b - a).dot(along), (c - a).dot(along), (d - a).dot(along));
+    0.0 < pb && pb < pc && pc < pd
+}
+
+/// The cubic Bezier curve through `points` on `[0, 1]` as pieces the model can keep, in order
+/// from its start: the whole curve when [`classify_cubic`] does not refuse it. A curve the
+/// B-spline curve check refuses (#16190: a bend whose radius is below the check's tolerance,
+/// which is relative to the curve's own size) is split exactly at parameter 1/2, and each refused
+/// half again, until every piece is either a curve the check passes or lies within the zone
+/// tolerance of its chord ([`CubicStanding::Chord`]). The pieces are the same curve, except that
+/// a chord piece is its chord, as the model cannot tell them apart.
+///
+/// The whole curve is returned as [`CubicStanding::Refused`] when no such split exists: when a
+/// chord piece has its ends within the zone tolerance of each other (a point, which cannot be an
+/// edge: a curve refused at a zero-speed end keeps a refused piece there at every split down to
+/// that size), when a chord piece does not run forward along its chord ([`runs_along_chord`]: a
+/// curve that stops and turns back would become lines folded over each other), or when a piece
+/// would be split more often than a parameter on `[0, 1]` resolves
+/// (`f64::MANTISSA_DIGITS` halvings).
+///
+/// # Errors
+///
+/// Those of [`classify_cubic`] on the curve or a piece.
+pub fn cubic_pieces(k: &Kernel, points: [Point3; 4]) -> Result<Vec<CubicPiece>> {
+    let standing = classify_cubic(k, points)?;
+    let whole = vec![CubicPiece { points, standing }];
+    if standing != CubicStanding::Refused {
+        return Ok(whole);
+    }
+    let zone = context_zone_tol_3d(k, None, SmallTopoType::NormalSize);
+    let mut pieces = Vec::new();
+    // The pieces still to classify, with their number of halvings; the next one last.
+    let (first, second) = halve_cubic(points);
+    let mut pending = vec![(second, 1u32), (first, 1u32)];
+    while let Some((piece, depth)) = pending.pop() {
+        let standing = classify_cubic(k, piece)?;
+        let [start, _, _, end] = piece;
+        match standing {
+            CubicStanding::Refused => {
+                if depth >= f64::MANTISSA_DIGITS {
+                    return Ok(whole);
+                }
+                let (first, second) = halve_cubic(piece);
+                pending.push((second, depth + 1));
+                pending.push((first, depth + 1));
+            }
+            CubicStanding::Chord if (end - start).length() <= zone || !runs_along_chord(piece) => {
+                return Ok(whole)
+            }
+            CubicStanding::Chord | CubicStanding::Curve => pieces.push(CubicPiece {
+                points: piece,
+                standing,
+            }),
+        }
+    }
+    Ok(pieces)
+}
 
 /// A cubic Hermite curve on `[0, 1]` (`SmHermiteCurve`):
 ///
@@ -392,6 +536,62 @@ impl HermiteCurve {
         a + u * (b + u * (c + u * d))
     }
 
+    /// Not upstream: the error bound of each coordinate of [`Self::evaluate_point`] at
+    /// `param`. Each coordinate is a Horner evaluation of a cubic (six roundings), off by
+    /// at most `γ_6 (|a| + |u| |b| + u^2 |c| + |u|^3 |d|)` (Higham, Horner's rule); with
+    /// `|.|` the largest coordinate, widened to `γ_8` for the bound's own roundings.
+    /// `None` for numbers not finite.
+    #[must_use]
+    pub(crate) fn point_error(&self, param: f64) -> Option<f64> {
+        let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
+        let u = param.abs();
+        let e = gamma(8)
+            * (size(self.p1) + u * (size(self.d1) + u * (size(self.c) + u * size(self.d))));
+        e.is_finite().then_some(e)
+    }
+
+    /// Not upstream: an upper bound on the speed `|H'(t)|` for `t` in `interval`, from the
+    /// power basis (no sampling). `H' = q(t) = D1 + 2 C t + 3 D t^2` is a quadratic: on
+    /// `[lo, hi]` its Bernstein coefficients are `q(lo)`, `q(lo) + (hi - lo) q'(lo) / 2`
+    /// and `q(hi)` (`q' = 2 C + 6 D t`), and `q` lies in their convex hull, so the largest
+    /// norm bounds `|H'|`. Rounding: each coefficient is a short sum of products (at most
+    /// twelve roundings per coordinate), so it is within `γ_12` of the sum of its terms'
+    /// magnitudes, `T = |D1| + 2 |C| M + 3 |D| M^2 + (hi - lo) (|C| + 3 |D| M)` with `M =
+    /// max(|lo|, |hi|)`; a norm is within `√3 < 2` times a coordinate's error, so `2 γ_12
+    /// T` is added. `None` for numbers not finite.
+    #[must_use]
+    pub(crate) fn speed_bound(&self, interval: &Extent1d) -> Option<f64> {
+        let (lo, hi) = (interval.min(), interval.max());
+        let q = |t: f64| self.d1 + 2.0 * t * self.c + 3.0 * t * t * self.d;
+        let dq = |t: f64| 2.0 * self.c + 6.0 * t * self.d;
+        let b0 = q(lo);
+        let b1 = b0 + 0.5 * (hi - lo) * dq(lo);
+        let b2 = q(hi);
+        let m = lo.abs().max(hi.abs());
+        let (c, d) = (self.c.length(), self.d.length());
+        let terms =
+            self.d1.length() + 2.0 * c * m + 3.0 * d * m * m + (hi - lo) * (c + 3.0 * d * m);
+        let b = b0.length().max(b1.length()).max(b2.length()) + 2.0 * gamma(12) * terms;
+        (b.is_finite() && lo <= hi).then_some(b * (1.0 + gamma(4)))
+    }
+
+    /// Not upstream: an upper bound on the acceleration `|H''(t)|` for `t` in `interval`,
+    /// from the power basis (no sampling). `H'' = 2 C + 6 D t` is affine in `t`, so its
+    /// norm is largest at an end of `interval` (a norm is convex). Rounding: each
+    /// coordinate is a sum of two products (three roundings), within `γ_3 (2 |C| + 6 |D|
+    /// M)` with `M = max(|lo|, |hi|)`; a norm is within `√3 < 2` times a coordinate's
+    /// error, and the norm's own rounding is covered by widening by `1 + γ_4`. `None` for
+    /// numbers not finite.
+    #[must_use]
+    pub(crate) fn accel_bound(&self, interval: &Extent1d) -> Option<f64> {
+        let (lo, hi) = (interval.min(), interval.max());
+        let a = |t: f64| 2.0 * self.c + 6.0 * t * self.d;
+        let m = lo.abs().max(hi.abs());
+        let slack = 2.0 * gamma(3) * (2.0 * self.c.length() + 6.0 * self.d.length() * m);
+        let b = (a(lo).length().max(a(hi).length()) * (1.0 + gamma(4)) + slack) * (1.0 + gamma(4));
+        (b.is_finite() && lo <= hi).then_some(b)
+    }
+
     /// Largest distance from the chord to the inner Bezier control points, or the
     /// control polygon length for a closed curve (`ComputeChordHeight`).
     #[must_use]
@@ -401,9 +601,7 @@ impl HermiteCurve {
         if self.p1.distance_squared(self.p2) < EFF_ZERO_SQ {
             self.p1.distance(pnt1) + pnt1.distance(pnt2) + pnt2.distance(self.p2)
         } else {
-            let (dist, _) = segment_point_distance(self.p1, self.p2, pnt1);
-            let (dist2, _) = segment_point_distance(self.p1, self.p2, pnt2);
-            max2(dist, dist2)
+            cubic_chord_bound([self.p1, pnt1, pnt2, self.p2])
         }
     }
 
@@ -541,6 +739,24 @@ impl HermiteCurve {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cubic_chord_bound_covers_closed_and_overshooting_control_hulls() {
+        let p = |x, y, z| Point3::new(x, y, z);
+        assert_eq!(
+            cubic_chord_bound([p(0., 0., 0.), p(1., 2., 0.), p(2., -1., 0.), p(3., 0., 0.)]),
+            2.
+        );
+        assert_eq!(
+            cubic_chord_bound([p(0., 0., 0.), p(-2., 0., 0.), p(4., 0., 0.), p(3., 0., 0.)]),
+            2.
+        );
+        assert_eq!(
+            cubic_chord_bound([p(0., 0., 0.), p(0., 3., 0.), p(0., 0., 4.), p(0., 0., 0.)]),
+            4.
+        );
+        assert_eq!(cubic_chord_bound([p(1., 2., 3.); 4]), 0.);
+    }
+
     #[test]
     fn hermite_trait_rejects_order_above_evaluation_bound() {
         use crate::curve::curve::p2::CurveEvaluate;
