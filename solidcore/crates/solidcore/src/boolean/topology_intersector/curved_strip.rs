@@ -1701,6 +1701,53 @@ mod tests {
         }
     }
 
+    /// r8 N6: the knot guard holds in v too. The transposed net (linear in u, cubic in v
+    /// with 8 points) with v knots `0⁵, 0.4, 0.6, 0.8, 1⁴`, set without a knot fixup, is
+    /// not cut.
+    #[test]
+    fn a_net_with_an_end_knot_above_degree_plus_one_in_v_is_not_cut() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+        let z = [0.3, -0.2, 1.0, 0.5, -0.7, 0.2, 0.9, -0.4];
+        let points: Vec<Point3> = (0..2u32)
+            .flat_map(|i| {
+                (0..8u32).map(move |j| Point3::new(f64::from(i), f64::from(j), z[j as usize]))
+            })
+            .collect();
+        let base = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 3,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 2],
+            v_multiplicities: &[4, 1, 1, 1, 1, 4],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let mut nurb = base.gw_nurb().unwrap().clone();
+        let (_, _, _, s) = nurb.array_sizes();
+        assert_eq!(s, 11);
+        let v = [0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.6, 0.8, 1.0, 1.0, 1.0, 1.0];
+        nurb.v_knots_mut()[..=s].copy_from_slice(&v);
+        let net = BSplineSurface::from_nurb(nurb, true);
+        let plane = Implicit::Plane {
+            origin: crate::math::Vec3::ZERO,
+            normal: crate::math::Vec3::Z,
+        };
+        for (a, b) in [(-5e-9, 0.0), (0.0, 0.37), (0.55, 1.0)] {
+            let bx = Extent2d::from_bounds(0.25, a, 0.75, b);
+            assert!(
+                net_cut(&net, &bx).is_none(),
+                "box v [{a}, {b}]: a cut was given"
+            );
+            assert_eq!(net_bound_over(&net, &bx, &plane), None);
+        }
+    }
+
     /// r7 M1: an interior knot of multiplicity `p + 1` (`0⁴, 0.5⁴, 1⁴`) is a valid clamped
     /// net, and its cut is A's, but the Bézier decomposition fails on it. That is no
     /// bound (a refusal, the pair goes down today's path), not an error of the boolean.
