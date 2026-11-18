@@ -45,9 +45,7 @@
 
 use crate::curve::curve::p2::FindCurveDistanceExtrema;
 use crate::curve::curve::Curve;
-use crate::error::{
-    ignore_or_pass_on, ignore_status, ignored, ignored_or_pass_on, Result, SolidError,
-};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
@@ -74,9 +72,9 @@ fn null(what: &'static str) -> SolidError {
     SolidError::invalid_input(OP, what)
 }
 
-/// `NER(p)`: a `NULL` pointer is `SM_ERR_NULL_POINTER`.
-fn ner<T>(v: Option<T>) -> Result<T> {
-    v.ok_or_else(|| SolidError::null_pointer(OP))
+/// `NER(p)`: a `NULL` pointer (`what`) is `SM_ERR_NULL_POINTER`.
+fn ner<T>(v: Option<T>, what: &'static str) -> Result<T> {
+    v.ok_or_else(|| SolidError::blend_missing(OP, what))
 }
 
 /// Element `i` of an evaluation array.
@@ -393,7 +391,10 @@ pub fn test_for_fillet_surface_u_or_v(
     // 1. Check that min/max naturalDomain isoParmeter curves have fillet crossSection shapes
 
     // Construct temporary naturalDomain Iso boundaries for this direction: rib curves.
-    let (rib_min, rib_max) = ner(s.create_iso_boundaries(k, which_dir, EFF_ZERO)?)?;
+    let (rib_min, rib_max) = ner(
+        s.create_iso_boundaries(k, which_dir, EFF_ZERO)?,
+        "the surface's iso boundaries",
+    )?;
 
     // skip min isoParameter curves that don't have a known filletCrossSection shape
     let t = test_for_fillet_cross_section(k, &rib_min, tol3d)?;
@@ -594,32 +595,25 @@ pub fn calculate_fillet_radius(
     Ok((radius, is_circular))
 }
 
-/// The radius of [`calculate_fillet_radius`] as its ignoring callers see it: the `0`
-/// it starts with when it fails (passed on with the opt-in
-/// `Kernel::fixes.query_statuses_pass_on`, WR-663; tangency-labs/smlib 21dcf69).
-fn fillet_radius_or_zero(
+/// The radius of [`calculate_fillet_radius`]. SMLib's callers ignore its status and read
+/// the `0` it starts with; a failure is passed on, as the fork does (`SER`, WR-663;
+/// tangency-labs/smlib 21dcf69).
+fn fillet_radius(
     k: &Kernel,
     s: &Surface,
     rail_dir: SurfParamType,
     param: f64,
     want_circular: bool,
 ) -> Result<f64> {
-    Ok(ignored_or_pass_on(
-        calculate_fillet_radius(k, s, rail_dir, param, want_circular, None),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .map_or(0.0, |(r, _)| r))
+    Ok(calculate_fillet_radius(k, s, rail_dir, param, want_circular, None)?.0)
 }
 
-/// The extrema function at `t` with its status ignored: a failed evaluation leaves the
-/// zeros it starts with (passed on with the opt-in
-/// `Kernel::fixes.query_statuses_pass_on`, WR-663; tangency-labs/smlib 21dcf69).
-fn sample(k: &Kernel, efo: &mut FindCurveDistanceExtrema<'_>, t: f64) -> Result<FunctionValue> {
+/// The extrema function at `t`. SMLib ignores its status and reads the zeros it starts
+/// with; a failed evaluation is passed on, as the fork does (`SER`, WR-663;
+/// tangency-labs/smlib 21dcf69).
+fn sample(efo: &mut FindCurveDistanceExtrema<'_>, t: f64) -> Result<FunctionValue> {
     let mut v = FunctionValue::default();
-    ignore_or_pass_on(
-        efo.evaluate(t, &mut v, true),
-        k.fixes.query_statuses_pass_on,
-    )?;
+    efo.evaluate(t, &mut v, true)?;
     Ok(v)
 }
 
@@ -643,14 +637,17 @@ pub fn find_fillet_min_max_radii(
     radii.init();
 
     let rib_dir = other_dir(rail_dir);
-    let (rail1, rail2) = ner(s.create_iso_boundaries(k, rib_dir, tol)?)?;
+    let (rail1, rail2) = ner(
+        s.create_iso_boundaries(k, rib_dir, tol)?,
+        "the surface's iso boundaries",
+    )?;
 
     let domain = rail1.natural_interval();
 
     let mut param = domain.min();
-    radii.add_value(fillet_radius_or_zero(k, s, rail_dir, param, false)?);
+    radii.add_value(fillet_radius(k, s, rail_dir, param, false)?);
     param = domain.max();
-    radii.add_value(fillet_radius_or_zero(k, s, rail_dir, param, false)?);
+    radii.add_value(fillet_radius(k, s, rail_dir, param, false)?);
 
     let mut efo = FindCurveDistanceExtrema::new(k, &rail1, &rail2, domain, tol);
 
@@ -660,21 +657,21 @@ pub fn find_fillet_min_max_radii(
     let denom = f64::from(num_steps);
 
     let mut prev_t = domain.min();
-    let mut prev_f = sample(k, &mut efo, prev_t)?.f;
+    let mut prev_f = sample(&mut efo, prev_t)?.f;
 
     for i in 1..=num_steps {
         let frac = f64::from(i) / denom;
         param = domain.evaluate(frac);
 
-        let v = sample(k, &mut efo, param)?;
+        let v = sample(&mut efo, param)?;
         let f = v.f;
         if v.found_answer {
-            radii.add_value(fillet_radius_or_zero(k, s, rail_dir, param, true)?);
+            radii.add_value(fillet_radius(k, s, rail_dir, param, true)?);
         } else if f * prev_f < -EFF_ZERO {
             let guess_param = prev_t - prev_f * (param - prev_t) / (f - prev_f);
             match ls.solve_it(&mut efo, guess_param, tol) {
                 Ok(o) => {
-                    radii.add_value(fillet_radius_or_zero(k, s, rail_dir, o.t, true)?);
+                    radii.add_value(fillet_radius(k, s, rail_dir, o.t, true)?);
                 }
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {}
@@ -823,7 +820,10 @@ pub fn identify_fillet_u_or_v(
 
     // This will return the presumed rail curves:
     let rail_iso_dir = other_dir(rail_dir);
-    let (min_rail, max_rail) = ner(surface.create_iso_boundaries(k, rail_iso_dir, tol3d)?)?;
+    let (min_rail, max_rail) = ner(
+        surface.create_iso_boundaries(k, rail_iso_dir, tol3d)?,
+        "the surface's iso boundaries",
+    )?;
 
     // We will be using these:
     let min_rail_domain = min_rail.natural_interval();
@@ -1005,7 +1005,7 @@ pub fn identify_fillet(
             }
         } else {
             // (status ignored; the size is then unset upstream)
-            let s = ner(face::p2::surface(b, f)?)?;
+            let s = ner(face::p2::surface(b, f)?, "the face's surface")?;
             let sizes = ignored(s.approximate_size(k, None))?.unwrap_or(Vec2::new(0.0, 0.0));
             if sizes.x > sizes.y {
                 SurfParamType::U
@@ -1038,6 +1038,22 @@ pub fn identify_fillet(
 mod tests {
     #![allow(clippy::unwrap_used, clippy::float_cmp)]
     use super::*;
+
+    /// #13790: a missing object the identification needs is a typed blend failure that
+    /// keeps the `SM_ERR_NULL_POINTER` status of the bare `Upstream` it replaced.
+    #[test]
+    fn a_missing_object_is_a_typed_failure() {
+        let error = ner::<()>(None, "the face's surface").unwrap_err();
+        assert_eq!(
+            error.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the face's surface"
+            ))
+        );
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(error.upstream_status(), error.sm_status());
+        assert_eq!(error.operation(), OP);
+    }
 
     /// `F(t) = t^3 - 2t + 2`: Newton from 0 cycles between two values, with no root
     /// between them, so `SolveIt` falls back on `SolveOscillating`.

@@ -271,7 +271,7 @@ fn is_ascii(db: &DatabaseReader) -> bool {
 /// `*rDB.GetInStreamPtr()` (upstream dereferences `NULL` without a stream).
 fn stream(db: &mut DatabaseReader) -> Result<&mut InputStream> {
     db.in_stream_mut()
-        .ok_or_else(|| SolidError::null_pointer(OP_STREAM))
+        .ok_or_else(|| SolidError::topology_missing(OP_STREAM, "the database's input stream"))
 }
 
 /// `rFileIn >> ulong`: stores only when the extraction stores.
@@ -1811,7 +1811,12 @@ pub fn read_curve_from_db(
                 db.leave_nested();
                 r?
             }
-            _ => return Err(SolidError::sm_err(OP_CURVE)),
+            _ => {
+                return Err(SolidError::topology_failed(
+                    OP_CURVE,
+                    "the curve type is not one the database holds",
+                ))
+            }
         }
     };
 
@@ -1826,7 +1831,9 @@ pub fn read_curve_from_db(
                     operation: OP_CURVE,
                     reason: "attribute index past the attribute table",
                 })?;
-            let h = slot.ok_or_else(|| SolidError::null_pointer(OP_CURVE))?;
+            let h = slot.ok_or_else(|| {
+                SolidError::topology_missing(OP_CURVE, "the attribute in the attribute table")
+            })?;
             attrs.store.add_attribute(key, h)?;
         }
     }
@@ -1916,7 +1923,10 @@ fn read_old_composite(
 /// `SM_ERR` for another type up to version 32; those of
 /// [`OffsetSurface::new`] for an offset surface; [`SolidError::InvalidInput`] for an attribute index past the table (upstream reads
 /// past the array), an ASCII type header that could not be read, or an exhausted
-/// [`AttributeSink`] key domain; those of the surface readers.
+/// [`AttributeSink`] key domain; `SM_ERR` for a procedural blend whose net is not proved
+/// within its bound of its definition again (not upstream: the read surface is an
+/// operand, [`crate::surface::procedural_blend::ProceduralBlend::recertify`]); those of
+/// the surface readers.
 pub fn read_surface_from_db(
     k: &Kernel,
     version: u64,
@@ -1960,9 +1970,30 @@ pub fn read_surface_from_db(
                     SS_UNKNOWN,
                 )?)
             }
-            _ => return Err(SolidError::sm_err(OP_SURFACE)),
+            _ => {
+                return Err(SolidError::topology_failed(
+                    OP_SURFACE,
+                    "the surface type is not one the database holds",
+                ))
+            }
         }
     };
+
+    // not upstream (§7 invariant 8): a blend by its definition read from a record is an
+    // operand only once its net is proved within its bound of its definition again; a
+    // record whose net is not is refused (a cancel, or a spent certificate budget, passes
+    // through as it is)
+    if let Some(blend) = surface.procedural_blend() {
+        blend.recertify(k).map_err(|e| {
+            if e.is_cancelled() || e.is_not_certified() {
+                return e;
+            }
+            SolidError::topology_failed(
+                OP_SURFACE,
+                "a procedural blend's net is not proved within its bound of its definition",
+            )
+        })?;
+    }
 
     // for current versions - read attributes
     if version > 30 && persist_attribs {
@@ -2428,10 +2459,8 @@ mod tests {
         let mut attrs = AttributeSink::new(&mut store, &mut all, 0);
         // a version 31 line curve type is SM_ERR
         let mut db = ascii_reader("Object Type 14001\n");
-        assert!(matches!(
-            read_curve_from_db(&k, 3, 31, &mut attrs, &mut db, true),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        assert!(read_curve_from_db(&k, 3, 31, &mut attrs, &mut db, true)
+            .is_err_and(|e| e.upstream_status() == Some(1001)));
         // version 31 B-spline line segment with an attribute index into an empty slot
         let text = "Object Type 14033\n1\n1\n0\n3\n0 0 0\n1 1 1\n0\n0\n1\n1\n1 0\n";
         let mut db = ascii_reader(text);

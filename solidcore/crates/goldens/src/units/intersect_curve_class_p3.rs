@@ -693,7 +693,9 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         _ => -1.0,
     }
@@ -1097,6 +1099,15 @@ fn keeps_contract(s: &Script) -> bool {
 
 #[allow(clippy::too_many_lines)]
 fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
+    rust_run_inspected(s, &mut |_, _, _, _| {})
+}
+
+/// The state a script op runs on: the kernel, the pool, both classifications and the op.
+type Inspect<'a> = dyn FnMut(&Kernel, &Pool, &[CurveClassification<H>; 2], &OpIn) + 'a;
+
+/// [`rust_run`], showing `inspect` the state before each op (for the certificates in the
+/// tests).
+fn rust_run_inspected(s: &Script, inspect: &mut Inspect<'_>) -> Result<Vec<f64>, Fail> {
     let mut k = Kernel::default();
     let mut pool = build_pool(&s.objects)?;
     if let Some(face) = &s.face {
@@ -1110,6 +1121,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
         if let Some(why) = undefined_upstream(&k, &pool, &ccs, x)? {
             return Err(Fail::Undefined(why));
         }
+        inspect(&k, &pool, &ccs, x);
         let mut step = || -> Result<(), Fail> {
             let (code, t) = op_code(x);
             if t > 1 {
@@ -2304,6 +2316,8 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::geom::tol::scaled_zero_of_curve;
+    use solidcore::intersect::curve_class::p1::xsect_tol_2d_or_3d_for_classify_pair;
 
     /// The share of generated scripts that are not deferred.
     #[test]
@@ -2322,5 +2336,236 @@ mod tests {
         }
         assert!(total > 250, "{total}");
         assert!(deferred * 5 < total * 4, "{deferred} of {total} deferred");
+    }
+
+    fn gen_script(n: usize) -> Script {
+        let mut rng = Rng::new(CaseContext::seed_for("intersect.curve_class_p3", n));
+        serde_json::from_value(Runner.generate(&mut rng).unwrap()).unwrap()
+    }
+
+    /// A parameter strictly inside an interval but within `SM_EFF_ZERO_PARAM` of one of
+    /// its ends, which upstream's `FindInterval` snaps to that end.
+    #[derive(Debug)]
+    struct InsideSnap {
+        op: usize,
+        interval: usize,
+        at_start: bool,
+        end_param: f64,
+        dist_3d: f64,
+        pair_tol: f64,
+        scaled_zero: f64,
+    }
+
+    /// The [`InsideSnap`]s of the `FindInterval` and `Insert` ops of `s`, measured on the
+    /// state each op runs on.
+    fn inside_snaps(s: &Script) -> Vec<InsideSnap> {
+        let mut found = Vec::new();
+        let mut n_op = 0;
+        let _ = rust_run_inspected(s, &mut |k, pool, ccs, x| {
+            let here = n_op;
+            n_op += 1;
+            let (t, prm, tol) = match x {
+                OpIn::FindInterval { t, prm, tol, .. } => (*t, *prm, zone_tol3d(k, *tol)),
+                OpIn::Insert { t, pc, prm, .. } => {
+                    // a failure here would leave no snap to find: the callers' empty
+                    // lists would then pass without testing anything
+                    let pc = build_pc(k, pool, pc).unwrap();
+                    let tol = pc.obj_zone_tol_3d(k, pool).unwrap();
+                    (*t, *prm, tol)
+                }
+                _ => return,
+            };
+            let cc = &ccs[t];
+            let Some(curve) = cc.curve().and_then(|c| pool.curve(c)) else { return };
+            let surface1 = cc.surface1().and_then(|s| pool.surface(s));
+            let ezp = eff_zero_param();
+            let size = cc.size();
+            for (i, ivl) in cc.intervals().iter().enumerate() {
+                let (lo, hi) = (ivl.min(), ivl.max());
+                let is_last = if i + 1 == size { 1.0 } else { 0.0 };
+                if prm > hi + ezp * is_last {
+                    continue;
+                }
+                if !(prm > lo && prm < hi) {
+                    break;
+                }
+                let near_end = prm > hi - ezp;
+                let near_start = prm >= lo - ezp && prm < lo + ezp;
+                for (start, near, end_t, end_pc) in
+                    [(false, near_end, hi, &ivl.end), (true, near_start, lo, &ivl.start)]
+                {
+                    if !near {
+                        continue;
+                    }
+                    let Ok(end_tol) = end_pc.obj_zone_tol_3d(k, pool) else { continue };
+                    let pair = xsect_tol_2d_or_3d_for_classify_pair(
+                        k, curve, surface1, prm, tol, end_t, end_tol,
+                    )
+                    .unwrap();
+                    let d = curve
+                        .evaluate_point(k, prm)
+                        .unwrap()
+                        .distance(curve.evaluate_point(k, end_t).unwrap());
+                    found.push(InsideSnap {
+                        op: here,
+                        interval: i,
+                        at_start: start,
+                        end_param: end_t,
+                        dist_3d: d,
+                        pair_tol: pair,
+                        scaled_zero: scaled_zero_of_curve(k, curve).unwrap(),
+                    });
+                }
+                break;
+            }
+        });
+        found
+    }
+
+    /// #18342: in generated script 309, op 60 looks up a parameter 2.11e-9 in 3D before
+    /// the end of interval 0: at least the classification's pair tolerance (0 here: the
+    /// script's zone tolerances are 0) and more than the curve's scaled zero (6.7e-12).
+    /// `FindInterval` no longer snaps it to the end. Op 61's parameter, 2.1e-14 from an
+    /// end (below the 2e-5 pair tolerance), is still snapped.
+    #[test]
+    fn gen0309_a_point_distinct_in_3d_from_the_end_is_not_snapped() {
+        let snaps = inside_snaps(&gen_script(309));
+        assert_eq!(snaps.len(), 2, "{snaps:?}");
+        let (kept, snapped) = (&snaps[0], &snaps[1]);
+        assert_eq!((kept.op, kept.interval, kept.at_start), (60, 0, false));
+        assert!(kept.pair_tol <= 2.1e-9, "{kept:?}");
+        assert!(kept.dist_3d >= kept.pair_tol && kept.dist_3d > kept.scaled_zero, "{kept:?}");
+        assert!((2.1e-9..2.2e-9).contains(&kept.dist_3d), "{kept:?}");
+        assert_eq!(snapped.op, 61);
+        assert!(snapped.dist_3d < snapped.pair_tol, "{snapped:?}");
+    }
+
+    /// #18342: in generated script 1932, op 9 inserts vertex 6 at a parameter 2.81e-7 in
+    /// 3D after the start of interval 0: at least the pair tolerance (0) and more than
+    /// the curve's scaled zero (3.3e-10), so it is no longer merged into the start. The
+    /// insert is declined (status 0, nothing inserted). The same insert with the
+    /// parameter moved to just outside the snap band, where upstream never snaps either,
+    /// gives the identical outcome and classification.
+    #[test]
+    fn gen1932_an_insert_distinct_in_3d_from_the_start_is_declined_as_outside_the_band() {
+        let s = gen_script(1932);
+        let snaps = inside_snaps(&s);
+        assert_eq!(snaps.len(), 1, "{snaps:?}");
+        let near = &snaps[0];
+        assert_eq!((near.op, near.interval, near.at_start), (9, 0, true));
+        assert!(near.dist_3d >= near.pair_tol && near.dist_3d > near.scaled_zero, "{near:?}");
+        assert!((2.8e-7..2.82e-7).contains(&near.dist_3d), "{near:?}");
+        let mut upto = s.clone();
+        upto.ops.truncate(near.op + 1);
+        let mut moved = upto.clone();
+        let Some(OpIn::Insert { prm, .. }) = moved.ops.get_mut(near.op) else {
+            panic!("op {} is not an insert", near.op)
+        };
+        *prm = near.end_param + eff_zero_param();
+        assert!(inside_snaps(&moved).is_empty());
+        let mut before = s.clone();
+        before.ops.truncate(near.op);
+        let at = rust_run(&before).ok().unwrap().len();
+        let (a, b) = (rust_run(&upto).ok().unwrap(), rust_run(&moved).ok().unwrap());
+        assert_eq!(a, b);
+        // the op's code, its status (0) and whether the insert was made: it was not
+        assert_eq!(&a[at + 1..at + 3], &[0.0, 0.0]);
+    }
+
+    /// The state after the ops of a hand-built script on a line `[0,1]` with two bare
+    /// vertices (objects 1 and 2), whose interval 0 ends at `split` at vertex 1 (gap 0,
+    /// pre-snap `split`), with a second interval `[split, 1]` when `split < 1`, after
+    /// inserting vertex 2 at `split` (gap 0, pre-snap `split`, `sss` its surf/surf/surf
+    /// point): classification 0 and the two vertices' points.
+    fn tied_vertex_merge(split: f64, sss: Option<[f64; 3]>) -> (CurveClassification<H>, [Vec3; 2]) {
+        let vertex = |obj: usize| PcIn {
+            class: 104,
+            obj: Some(obj),
+            t: split,
+            gap: 0.0,
+            presnap: split,
+            tol: USE_DEFAULT,
+            sss: None,
+        };
+        let mut ops = vec![
+            OpIn::SetCurve { t: 0, obj: Some(0), owned: false },
+            OpIn::SetSize { t: 0, n: if split < 1.0 { 2 } else { 1 } },
+            OpIn::IvlSet { t: 0, j: 0, a: 0.0, b: split },
+            OpIn::PcSetClass { t: 0, j: 0, w: 2, class: 104, obj: Some(1) },
+            OpIn::PcSetT { t: 0, j: 0, w: 2, v: split },
+            OpIn::PcSetGap { t: 0, j: 0, w: 2, g: 0.0 },
+            OpIn::PcSetPresnap { t: 0, j: 0, w: 2, v: split },
+        ];
+        if split < 1.0 {
+            ops.push(OpIn::IvlSet { t: 0, j: 1, a: split, b: 1.0 });
+        }
+        ops.push(OpIn::Insert {
+            t: 0,
+            pc: PcIn { sss, ..vertex(2) },
+            prm: split,
+            last: BIG,
+            force: false,
+        });
+        // the op whose inspection reads the state the insert left
+        ops.push(OpIn::FindPc { t: 0, prm: 0.0, tol: USE_DEFAULT });
+        let s = Script {
+            objects: vec![
+                ObjIn::Curve(CurveIn::Line(LineIn {
+                    p: [0.0; 3],
+                    v: [1.0, 0.0, 0.0],
+                    domain: [0.0, 1.0],
+                    scale: 1.0,
+                    inside_out: false,
+                })),
+                ObjIn::Vertex,
+                ObjIn::Vertex,
+            ],
+            face: None,
+            ops,
+        };
+        let n = s.ops.len();
+        let mut n_op = 0;
+        let mut after = None;
+        let out = rust_run_inspected(&s, &mut |_, pool, ccs, _| {
+            n_op += 1;
+            if n_op == n {
+                let p = |i| pool.bare.vertex_point(i).unwrap();
+                after = Some((ccs[0].clone(), [p(1), p(2)]));
+            }
+        });
+        assert!(out.is_ok(), "the script failed");
+        after.unwrap()
+    }
+
+    /// #18342 r4 B1 (a): an exact tie (both gaps 0) of vertex 2 merged into the end held
+    /// by vertex 1, the input carrying a surf/surf/surf point. As upstream, `Combine` keeps
+    /// vertex 1 (`This`), copies the point onto the boundary and moves vertex 1 there.
+    #[test]
+    fn a_tied_vertex_merge_keeps_the_surf_surf_surf_point() {
+        let (cc, [v1, v2]) = tied_vertex_merge(1.0, Some([5.0, 6.0, 7.0]));
+        assert_eq!(cc.size(), 1);
+        let end = cc.at(0).unwrap().end;
+        assert_eq!(end.point_class(), PointClassType::Vertex);
+        assert_eq!(end.object().map(|h| h.0), Some(1));
+        assert!(end.sss_point_flag());
+        assert_eq!(end.sss_point(), Vec3::new(5.0, 6.0, 7.0));
+        assert_eq!(v1, Vec3::new(5.0, 6.0, 7.0));
+        assert_eq!(v2, Vec3::new(0.0, 0.0, 0.0));
+    }
+
+    /// #18342 r4 B1 (b): the same tie at an interior boundary whose neighbour start is
+    /// still unknown. As upstream, the neighbour is merged and takes vertex 2 at 0.5; the
+    /// end of interval 0 keeps vertex 1.
+    #[test]
+    fn a_tied_vertex_merge_still_merges_an_unknown_neighbour() {
+        let (cc, _) = tied_vertex_merge(0.5, None);
+        assert_eq!(cc.size(), 2);
+        let end = cc.at(0).unwrap().end;
+        assert_eq!(end.point_class(), PointClassType::Vertex);
+        assert_eq!(end.object().map(|h| h.0), Some(1));
+        let start = cc.at(1).unwrap().start;
+        assert_eq!(start.point_class(), PointClassType::Vertex);
+        assert_eq!(start.object().map(|h| h.0), Some(2));
+        assert_eq!(start.t_param(), 0.5);
     }
 }

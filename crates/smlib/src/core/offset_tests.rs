@@ -59,14 +59,14 @@ impl Shape {
                 let c = Curve::from(create_line_segment(v3(a), v3(b))?);
                 create_linear_sweep(k, &[Some(&c)], v3(dir), dist, false)
             })
-            .map(Body::new)
+            .map(Body::from_kernel)
             .unwrap(),
             Shape::ArcSheet(o, r, degrees, h) => run("sheet", |k| {
                 let frame = Axis2Placement::new(v3(o), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
                 let c = Curve::from(Ellipse::create_canonical_circle(k, &frame, r, Some(&Extent1d::from_min_max(0.0, degrees)), None)?);
                 create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 0.0, 1.0), h, false)
             })
-            .map(Body::new)
+            .map(Body::from_kernel)
             .unwrap(),
             Shape::Notched => {
                 let block = make_box([0.0; 3], [60.0, 40.0, 10.0]).unwrap();
@@ -327,7 +327,7 @@ fn solidcore_case(name: &'static str) -> Got {
             let size = if sheet { area(&body, 1e-8) } else { volume(&body, 1e-8) }.unwrap_or_else(|e| panic!("{name}: size: {e}"));
             let n = counts(&body).unwrap();
             let (rec, _) = native(&to_arrays(&body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-            solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
             let bx = bounds(&body).unwrap();
             Measured { size, bounds: bx, counts: n, kinds: kinds(&rec) }
         });
@@ -584,6 +584,42 @@ fn mitred_rounds_follow_a_moved_top() {
     }
 }
 
+/// A 100 x 60 x 5 plate extruded from a profile whose corners are rounded r 2 (#17414): its long
+/// side moved out between two rounds builds the 100 x (60 + d) plate with its corners still
+/// rounded, (100 (60 + d) - 4 (4 - pi)) 5. Each side's plane spans its own face only, so the new
+/// corners where the rounds come off lie past them.
+#[test]
+fn a_side_between_profile_rounds_moves() {
+    use crate::sweeps::{Curve, DraftCorner};
+    let (w, h, r) = (100.0, 60.0, 2.0);
+    let arc = |c: [f64; 2], start: f64| Curve::Arc {
+        center: [c[0], c[1], 0.0],
+        axis: Z,
+        reference: [1.0, 0.0, 0.0],
+        radius: r,
+        start,
+        end: start + PI / 2.0,
+    };
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], a[1], 0.0], end: [b[0], b[1], 0.0] };
+    let profile = [
+        line([r, 0.0], [w - r, 0.0]),
+        arc([w - r, r], 1.5 * PI),
+        line([w, r], [w, h - r]),
+        arc([w - r, h - r], 0.0),
+        line([w - r, h], [r, h]),
+        arc([r, h - r], 0.5 * PI),
+        line([0.0, h - r], [0.0, r]),
+        arc([r, r], PI),
+    ];
+    let plate = super::sweep::extrude(&profile, Z, 5.0, 0.0, DraftCorner::default(), true).unwrap();
+    for d in [80.0, 1.0] {
+        let moved = offset_faces(&plate, &[[55.0, 0.0, 2.5]], TOL, d).unwrap_or_else(|e| panic!("d {d}: {e}"));
+        let (v, want) = (volume(&moved, 1e-8).unwrap(), (w * (h + d) - 4.0 * (4.0 - PI)) * 5.0);
+        assert_eq!(counts(&moved).unwrap()[0], 10, "d {d}");
+        assert!(rel(v, want) < 1e-9, "d {d}: {v} vs {want}");
+    }
+}
+
 /// `moved_faces`: drafts so small they leave a plane or cylinder where it was still moved a face
 /// (solidcore's mark stays on it), and an angle that brings a wall onto the plane of the wall above
 /// it leaves the two faces apart: every draft here builds, none is "no effect".
@@ -619,15 +655,16 @@ fn a_draft_moves_a_face() {
 
 /// The tip cut off a triangular prism, drafted about a plane 100 mm off so that the whole face goes
 /// out past where its neighbours meet: its edges vanish, `SM_ERR_OFFSET_EDGE_VANISHES` in SMLib,
-/// which the capi's `status` answers as `SMLIB_ERR_UNSUPPORTED`.
+/// refused with that reason (#13989), not as not supported.
 #[test]
-fn a_draft_past_the_neighbours_meeting_is_unsupported() {
+fn a_draft_past_the_neighbours_meeting_is_refused_as_an_edge_that_vanishes() {
     use crate::sweeps::{Curve, DraftCorner};
     let p = [[0.0, 0.0, 0.0], [20.0, 0.0, 0.0], [11.0, 18.0, 0.0], [9.0, 18.0, 0.0]];
     let profile: Vec<Curve> = (0..4).map(|i| Curve::Line { start: p[i], end: p[(i + 1) % 4] }).collect();
     let prism = super::sweep::extrude(&profile, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
     let (tip, z, origin, angle) = ([[10.0, 18.0, 5.0]], [0.0, 0.0, 1.0], [0.0, 0.0, -100.0], (-2f64).to_radians());
-    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Unsupported));
+    let vanishes = solidcore_ops::Error::OffsetRefused { face: None, why: solidcore_ops::OffsetRefusal::EdgeVanishes };
+    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Refused(vanishes)));
 }
 
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).
@@ -643,7 +680,7 @@ fn an_l_sheet_thickens() {
 /// solidcore#2350's parabolic sheet: the quadratic Bézier (-10, 0), (0, 10), (10, 0) lofted 20
 /// along z, a B-spline face whose radius of curvature at its apex is 10. Thickened 11 towards
 /// its centre of curvature its offset folds there: solidcore's one construction refuses it
-/// naming 10, the largest wall that works (`fixes.shell_one_construction`); 2 builds.
+/// naming 10, the largest wall that works; 2 builds.
 #[test]
 fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
     use crate::sweeps::Curve;

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Browse drawing resources</title>
+  <path d="M15 7L51 7A3 3 0 0 1 54 10L54 48A3 3 0 0 1 51 51L15 51A3 3 0 0 1 12 48L12 10A3 3 0 0 1 15 7Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10 12L46 12A3 3 0 0 1 49 15L49 53A3 3 0 0 1 46 56L10 56A3 3 0 0 1 7 53L7 15A3 3 0 0 1 10 12Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14 20L42 20L42 47L14 47Z" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M14 38L42 38M28 38L28 47" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22 27L34 27L34 36L22 36Z" fill="#b9ddf8" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

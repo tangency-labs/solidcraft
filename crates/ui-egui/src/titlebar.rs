@@ -55,6 +55,8 @@ mod tests {
             Self { ctx, app, width, time: 0.0, maximized: false, full: false }
         }
 
+        /// One frame with `events`, the input going through `release_press_taken_by_os` first
+        /// as in the desktop app.
         fn frame(&mut self, events: Vec<Event>) -> egui::FullOutput {
             self.time += 0.05;
             let mut input = RawInput {
@@ -66,6 +68,8 @@ mod tests {
             if let Some(v) = input.viewports.get_mut(&ViewportId::ROOT) {
                 v.maximized = Some(self.maximized);
             }
+            // As the desktop app's raw-input hook does first.
+            crate::window_chrome::release_press_taken_by_os(&self.ctx, &mut input);
             let (app, full) = (&mut self.app, self.full);
             let mut out = self.ctx.run_ui(input, |ui| {
                 if full {
@@ -91,6 +95,16 @@ mod tests {
             events.into_iter().flat_map(|e| self.frame(e).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()).collect()
         }
 
+        /// A gesture whose release the OS keeps, as an X11 window manager does once a press
+        /// started a window move or resize: press, move along `path`, then one quiet frame.
+        fn gesture_os_keeps_release(&mut self, path: &[Pos2]) -> Vec<ViewportCommand> {
+            let press = Event::PointerButton { pos: path[0], button: PointerButton::Primary, pressed: true, modifiers: Default::default() };
+            let mut events = vec![vec![Event::PointerMoved(path[0])], vec![press]];
+            events.extend(path[1..].iter().map(|p| vec![Event::PointerMoved(*p)]));
+            events.push(vec![]);
+            events.into_iter().flat_map(|e| self.frame(e).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default()).collect()
+        }
+
         fn click(&mut self, p: Pos2) -> Vec<ViewportCommand> {
             self.gesture(&[p])
         }
@@ -113,6 +127,23 @@ mod tests {
         v
     }
 
+    /// SolidCraft's name leaves Home where it has always been: 88 pt right of the name's start
+    /// (Home centred at 124 from the bar's content edge, the name starting at 36), the kit's least
+    /// place for Home.
+    #[test]
+    fn home_keeps_its_place_after_solidcrafts_name() {
+        let mut w = Win::new(1600.0);
+        w.app.home.open = false;
+        w.frame(vec![]);
+        let out = w.frame(vec![]);
+        let name = texts(&out).into_iter().find(|(text, _)| text == "SolidCraft").map(|(_, rect)| rect).expect("the name is drawn");
+        let home = crate::scenario::rect_of("titlebar:home").expect("Home is drawn");
+        assert_eq!(home.center().x - name.left(), 88.0);
+        assert!(name.right() < home.left());
+    }
+
+    /// Report a bug and the link pills are not in this list: they are flat brand-coloured capsules
+    /// whose hover is a slightly lighter fill of their own colour, not the bar's translucent chrome.
     #[test]
     fn every_bar_control_uses_translucent_hover_chrome() {
         let previous = solidcraft_theme::is_dark();
@@ -134,7 +165,6 @@ mod tests {
                 "titlebar:assistant",
                 "titlebar:preferences",
                 "appbar:help",
-                "titlebar:report",
             ]
             .into_iter()
             .map(|name| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{name}")))
@@ -180,6 +210,62 @@ mod tests {
     }
 
     #[test]
+    fn the_link_pills_leave_the_caption_buttons_and_the_controls_alone() {
+        for width in [1280.0, 1600.0] {
+            let mut w = Win::new(width);
+            w.app.home.open = false;
+            w.frame(vec![]);
+            let out = w.frame(vec![]);
+            let [min, ..] = CAPTIONS.map(|c| w.caption(c));
+            let rect = |name: &str| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{name} at {width}"));
+            let (donate, discord, report) = (rect("titlebar:kofi"), rect("titlebar:discord"), rect("titlebar:report"));
+            assert_eq!(donate.height().max(discord.height()), solidcraft_ui_kit::app_bar::PILL_HEIGHT, "{width}");
+            assert!(
+                donate.right() < discord.left() && discord.right() < report.left() && report.right() <= min.left(),
+                "{width}: {donate:?} {discord:?} {report:?} {min:?}"
+            );
+            for hide in ["titlebar:kofi:hide", "titlebar:discord:hide"] {
+                let x = rect(hide);
+                assert!(x.right() <= report.left() && x.left() >= donate.left(), "{width}: {hide} inside its pill");
+            }
+            // The pills sit left of the assistant and the other controls, which keep their places.
+            if let Some(a) = crate::scenario::rect_of("titlebar:assistant") {
+                assert!(discord.right() <= a.left(), "{width}: the pills overlap the assistant: {discord:?} {a:?}");
+            }
+            for (t, r) in &texts(&out) {
+                assert!(r.right() <= min.left() || r.top() >= min.bottom(), "`{t}` runs under the caption buttons at {width}");
+            }
+            let tabs = crate::scenario::rect_of("tab:design:0");
+            if let Some(tabs) = tabs {
+                assert!(tabs.right() <= donate.left(), "{width}: tabs {tabs:?} run under the pills {donate:?}");
+            }
+            // Donate carries its name on a wide bar and drops it on a narrow one.
+            let named = texts(&out).iter().any(|(t, r)| t == "Donate" && donate.contains_rect(*r));
+            assert_eq!(named, width >= solidcraft_ui_kit::app_bar::PILL_LABEL_MIN, "{width}");
+        }
+    }
+
+    /// On a narrow bar the pills give way to the document tabs: they are left out, and where they
+    /// stay they clear the tabs and the caption buttons.
+    #[test]
+    fn narrow_bars_leave_the_pills_out_before_they_crowd_the_tabs() {
+        for width in [700.0, 900.0, 960.0, 1100.0] {
+            let mut w = Win::new(width);
+            w.app.home.open = false;
+            w.frame(vec![]);
+            w.frame(vec![]);
+            let [min, ..] = CAPTIONS.map(|c| w.caption(c));
+            let tabs = crate::scenario::rect_of("tab:design:0").expect("a tab");
+            for name in ["titlebar:kofi", "titlebar:discord"] {
+                if let Some(r) = crate::scenario::rect_of(name) {
+                    assert!(r.left() >= tabs.right() && r.right() <= min.left(), "{width}: {name} {r:?} crowds the tab {tabs:?}");
+                }
+            }
+            assert!(crate::scenario::rect_of("titlebar:report").is_some(), "{width}: Report a bug stays");
+        }
+    }
+
+    #[test]
     fn no_caption_buttons_without_a_custom_title_bar() {
         let mut w = Win::new(1200.0);
         w.app.custom_titlebar = false;
@@ -221,6 +307,38 @@ mod tests {
         let undo = crate::scenario::handle_at("appbar:undo").unwrap();
         let cmds = w.gesture(&[undo, undo + vec2(12.0, 4.0), undo + vec2(30.0, 8.0)]);
         assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "{cmds:?}");
+    }
+
+    /// On X11 the window manager keeps the release of the press that started a window move or
+    /// resize: every drag on the bar or the design's tab still moves the window and every edge
+    /// drag still resizes, not every other one (#13334).
+    #[test]
+    fn a_move_whose_release_the_os_keeps_does_not_swallow_the_next_drag() {
+        let starts = |cmds: &[ViewportCommand]| cmds.iter().filter(|c| matches!(c, ViewportCommand::StartDrag)).count();
+        let mut w = Win::new(1600.0);
+        w.frame(vec![]);
+        let empty = pos2(900.0, 17.0);
+        for round in 1..=3 {
+            let cmds = w.gesture_os_keeps_release(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+            assert_eq!(starts(&cmds), 1, "bar drag {round}: {cmds:?}");
+            w.time += 1.0;
+        }
+        let east = pos2(1598.0, 300.0);
+        for round in 1..=2 {
+            let cmds = w.gesture_os_keeps_release(&[east, east + vec2(6.0, 0.0)]);
+            assert_eq!(cmds, vec![ViewportCommand::BeginResize(ResizeDirection::East)], "resize {round}");
+        }
+        // The only design's tab is part of the title bar: a drag on it moves the window too.
+        let tab = crate::scenario::handle_at("tab:design:0").expect("the design's tab");
+        for round in 1..=2 {
+            let cmds = w.gesture_os_keeps_release(&[tab, tab + vec2(4.0, 12.0), tab + vec2(8.0, 30.0)]);
+            assert_eq!(starts(&cmds), 1, "tab drag {round}: {cmds:?}");
+            w.time += 1.0;
+        }
+        // A real release that does arrive later is ignored: no click, so no maximize.
+        let mut cmds = w.gesture(&[empty, empty + vec2(12.0, 4.0), empty + vec2(30.0, 8.0)]);
+        cmds.extend(w.frame(vec![]).viewport_output.remove(&ViewportId::ROOT).map(|v| v.commands).unwrap_or_default());
+        assert!(!cmds.iter().any(|c| matches!(c, ViewportCommand::Maximized(_))), "{cmds:?}");
     }
 
     #[test]

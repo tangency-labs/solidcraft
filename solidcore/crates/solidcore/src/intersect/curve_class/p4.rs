@@ -73,6 +73,14 @@
 //!   leaves them (an edge use outside a loop touches neither; any later failure sets the
 //!   point to `(0,0,0)` and keeps the binormal), and only [`SolidError::Unported`] and
 //!   [`SolidError::InvalidInput`] (a null dereference upstream) propagate.
+//! - **3D-distinct end touches (solidcore-native, #18342).** `GetLoopTouches` types the
+//!   first and last touch as on the curve's start or end by comparing the curve parameter
+//!   with the face's zone tolerance mapped to UV. A touch strictly inside the interval
+//!   whose point is at least the face's intersection tolerance and more than the curve's
+//!   scaled zero from that end stays inside (`distinct_end_type`), as `FindInterval` keeps
+//!   such points off an interval end (part 3). When a point or the scaled zero cannot be
+//!   computed, upstream's type stands (no new error; unported, cancelled and uncertified
+//!   still propagate).
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::{Curve, CurveKind};
@@ -83,8 +91,8 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::periodic_extent1d::PeriodicExtent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::tol::{
-    are_same, eff_zero, is_degenerate_vec3, scaled_zero2, xsect_tol_3d_from_zones, zone_tol_3d,
-    SmallTopoType, ANG_TOL_DEG,
+    are_same, eff_zero, is_degenerate_vec3, scaled_zero2, scaled_zero_of_curve,
+    xsect_tol_3d_from_zones, zone_tol_3d, SmallTopoType, ANG_TOL_DEG,
 };
 use crate::heal::face_props::{FaceProps, HealerOpType, LoopObject, PropStage, Tri, UNDEF_ULONG};
 use crate::intersect::curve_class::p1::{
@@ -115,8 +123,7 @@ use crate::topology::vertexuse as topo_vertexuse;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexuseId};
 
 const OP_CROSS: &str = "intersect::curve_class::p4::CurveClassification::get_loop_crossings";
-// `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
-use crate::error::SM_ERR_ASSERT_FAILURE;
+use crate::error::intersect::IntersectFailure;
 const OP_BOUND: &str = "intersect::curve_class::p4::CurveClassification::ivl_bound_edgeuse_obj";
 const OP_SQUEEZE: &str = "intersect::curve_class::p4::squeeze_out_smallest_interval";
 
@@ -441,7 +448,8 @@ fn edge_edgeuses<O: ClassObject, G: ClassGeometry<O>>(
 /// `SmEdge::GetCurve` (unit `topology.edge`), dereferenced upstream.
 fn edge_curve<O: ClassObject, G: ClassGeometry<O>>(geometry: &G, edge: O) -> Result<&Curve> {
     let (b, e) = edge_id(geometry, edge, OP_CROSS)?;
-    topo_edge::curve(b, e)?.ok_or_else(|| SolidError::null_pointer(OP_CROSS))
+    topo_edge::curve(b, e)?
+        .ok_or_else(|| SolidError::intersect_missing(OP_CROSS, "the edge's curve"))
 }
 
 /// `SmEdge::GetInterval` (unit `topology.edge`).
@@ -453,7 +461,8 @@ fn edge_interval<O: ClassObject, G: ClassGeometry<O>>(geometry: &G, edge: O) -> 
 /// `SmEdgeuse::GetEdge` (unit `topology.edgeuse_p1`), dereferenced upstream.
 fn edgeuse_edge<O: ClassObject, G: ClassGeometry<O>>(geometry: &G, edgeuse: O) -> Result<O> {
     let (b, eu) = edgeuse_id(geometry, edgeuse, OP_CROSS)?;
-    let e = eu1::edge(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+    let e = eu1::edge(b, eu)?
+        .ok_or_else(|| SolidError::intersect_missing(OP_CROSS, "the edge use's edge"))?;
     handle_of(geometry, b, EntityRef::Edge(e), OP_CROSS)
 }
 
@@ -553,15 +562,23 @@ fn vertexuse_is_loop_vertexuse<O: ClassObject, G: ClassGeometry<O>>(
 
 /// `SmVertexuse::ComputeUVSector(sectorIO, FALSE)` (unit `topology.vertexuse`) with the
 /// status ignored: a failed computation keeps the outputs it wrote. With `bOkToMake` false
-/// nothing is created, so the port runs it on a copy of the B-rep (it takes `&mut Brep`).
+/// nothing is created; it reads the B-rep in place, and only where it would reach a step
+/// that can change the B-rep (a global point solve, which builds the face's surface cache)
+/// does the port run it on a copy of the B-rep (it takes `&mut Brep` there), so the
+/// B-rep is never changed. Copying the whole B-rep for each sector made the seam checks
+/// of a large body slow.
 fn vertexuse_compute_uv_sector<O: ClassObject, G: ClassGeometry<O>>(
     k: &Kernel,
     geometry: &G,
     vertexuse: O,
 ) -> Result<UvSectorIo<O>> {
     let (b, vu) = vertexuse_id(geometry, vertexuse, OP_CROSS)?;
-    let mut scratch = b.clone_sharing_surface_caches();
-    let io = topo_vertexuse::compute_uv_sector(k, &mut scratch, vu, false)?.io;
+    let io = if let Some(sector) = topo_vertexuse::compute_uv_sector_read_only(k, b, vu)? {
+        sector.io
+    } else {
+        let mut scratch = b.clone_sharing_surface_caches();
+        topo_vertexuse::compute_uv_sector(k, &mut scratch, vu, false)?.io
+    };
     let eu_handle = |eu: Option<EdgeuseId>| -> Result<Option<O>> {
         eu.map(|eu| handle_of(geometry, b, EntityRef::Edgeuse(eu), OP_CROSS))
             .transpose()
@@ -612,9 +629,10 @@ fn find_edgeuse_seam_sides(
         let mut found = false;
         let mut uv_guess: Option<Point2> = None;
         loop {
-            let edge = eu1::edge(b, current)?.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
-            let curve =
-                topo_edge::curve(b, edge)?.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+            let edge = eu1::edge(b, current)?
+                .ok_or_else(|| SolidError::intersect_missing(OP_CROSS, "the edge use's edge"))?;
+            let curve = topo_edge::curve(b, edge)?
+                .ok_or_else(|| SolidError::intersect_missing(OP_CROSS, "the edge's curve"))?;
             let interval = topo_edge::interval(b, edge)?;
             let increasing = (eu1::orientation(b, current)? == OrientType::Same) == (way == 0);
             let start = if current == edgeuse {
@@ -642,7 +660,10 @@ fn find_edgeuse_seam_sides(
                 };
                 let drop = surface.drop_point::<SurfHandle>(k, point, &domain, &opts)?;
                 if !drop.success {
-                    return Err(SolidError::sm_err(OP_CROSS));
+                    return Err(SolidError::intersect_failed(
+                        OP_CROSS,
+                        "a point of the edge could not be dropped onto the face's surface",
+                    ));
                 }
                 let uv = drop.result_uv;
                 uv_guess = Some(uv);
@@ -674,7 +695,9 @@ fn find_edgeuse_seam_sides(
             } else {
                 eu1::cw_edgeuse(b, current)?
             }
-            .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+            .ok_or_else(|| {
+                SolidError::intersect_missing(OP_CROSS, "the next edge use around the vertex")
+            })?;
             if current == edgeuse {
                 break;
             }
@@ -744,6 +767,45 @@ fn drop_vector(k: &Kernel, surface: &Surface, uv: Point2, v: Vec3) -> Result<Vec
 /// `sU.CCWAngleBetween(v, angle)` with the status ignored.
 fn ccw_angle(v: Vec2) -> Result<f64> {
     Ok(ignored(Vec2::new(1.0, 0.0).ccw_angle_between(v))?.unwrap_or(UNDEF_DOUBLE))
+}
+
+/// solidcore-native: `ty` (a touch's `ClassifyPoint` against the classification interval
+/// with a UV tolerance) with `Start` or `End` turned into `Inside` when `param` is strictly
+/// inside `ivl` and its curve point is 3D-distinct from that end: at least `tol_3d` (the
+/// face's intersection tolerance) and more than the curve's scaled zero away. Upstream
+/// compares the curve parameter with a tolerance mapped into the surface's UV space, which
+/// marks a crossing far from the curve's end as an end touch when the curve parameter is
+/// much finer than the UV one (the loop bisector over the sentinel range). When a point or
+/// the scaled zero cannot be computed, `ty` stands (this extra measurement adds no new
+/// error), except that an unported callee, a cancellation or a certification refusal
+/// (`SolidError::is_unported_or_cancelled`) propagates.
+fn distinct_end_type(
+    k: &Kernel,
+    curve: &Curve,
+    ivl: &Extent1d,
+    param: f64,
+    ty: ExtentPointType,
+    tol_3d: f64,
+) -> Result<ExtentPointType> {
+    let end = match ty {
+        ExtentPointType::Start => ivl.min(),
+        ExtentPointType::End => ivl.max(),
+        _ => return Ok(ty),
+    };
+    if !(param > ivl.min() && param < ivl.max()) {
+        return Ok(ty);
+    }
+    let distinct = || -> Result<bool> {
+        let dist = curve
+            .evaluate_point(k, param)?
+            .distance(curve.evaluate_point(k, end)?);
+        Ok(dist >= tol_3d && dist > scaled_zero_of_curve(k, curve)?)
+    };
+    match distinct() {
+        Ok(true) => Ok(ExtentPointType::Inside),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Ok(false) | Err(_) => Ok(ty),
+    }
 }
 
 /// `SM_IS_BETWEEN(c, a, b)` (`SmMath.h`).
@@ -985,9 +1047,9 @@ impl<O: ClassObject> CurveClassification<O> {
         let edgeuses = edge_edgeuses(geometry, tgt_edge_obj, upper_faceuse, OP_BOUND)?;
 
         // ObjCrv Pt/1stDer at ObjCrv/ClassifyCrv XSect
-        let tgt_object_crv = tgt_pt_classify
-            .curve_object(geometry)?
-            .ok_or_else(|| SolidError::null_pointer(OP_BOUND))?;
+        let tgt_object_crv = tgt_pt_classify.curve_object(geometry)?.ok_or_else(|| {
+            SolidError::intersect_missing(OP_BOUND, "the target point classification's curve")
+        })?;
         let tgt_edge_pn = eval_pn(k, tgt_object_crv, tgt_pt_classify.t_param())?;
 
         // ClassifyCrv Pt/1stDer at ObjCrv/ClassifyCrv XSect
@@ -998,7 +1060,7 @@ impl<O: ClassObject> CurveClassification<O> {
         };
         let classify_crv = classify_crv
             .and_then(|h| geometry.curve(h))
-            .ok_or_else(|| SolidError::null_pointer(OP_BOUND))?;
+            .ok_or_else(|| SolidError::intersect_missing(OP_BOUND, "the classified curve"))?;
         let classify_crv_pn = eval_pn(k, classify_crv, tgt_classify_crv_param)?;
 
         // CrvClassification Face locals (statuses ignored)
@@ -1197,7 +1259,7 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// # Errors
     ///
-    /// Those of [`CurveClassification::get_loop_touches`]; `SM_ERR_ASSERT_FAILURE` for a
+    /// Those of [`CurveClassification::get_loop_touches`]; an [`IntersectFailure::Inconsistent`] for a
     /// closed curve whose seam end pair is incomplete (`AERN`); those of
     /// [`remove_non_crossings`].
     pub fn get_loop_crossings<G: ClassGeometry<O>>(
@@ -1285,9 +1347,9 @@ impl<O: ClassObject> CurveClassification<O> {
             // SmTol::IsClosed(GetCurve(), &tol): a NULL curve is not closed
             let closed = match self.curve() {
                 Some(h) => {
-                    let curve = geometry
-                        .curve(h)
-                        .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+                    let curve = geometry.curve(h).ok_or_else(|| {
+                        SolidError::intersect_missing(OP_CROSS, "the classified curve")
+                    })?;
                     curve.is_closed(k, &curve.natural_interval(), xsect_tol)?
                 }
                 None => false,
@@ -1295,11 +1357,12 @@ impl<O: ClassObject> CurveClassification<O> {
             if closed {
                 if !(count >= 4 && is_seam(touch_at(&out.raw_touches, count - 1)?.loop_dir)) {
                     out.done_touches = crossings;
-                    out.status = Some(SolidError::Upstream {
-                        operation: OP_CROSS,
-                        code: SM_ERR_ASSERT_FAILURE,
-                        entity: None,
-                    });
+                    out.status = Some(SolidError::intersect(
+                        OP_CROSS,
+                        IntersectFailure::Inconsistent(
+                            "a closed curve has fewer than four touches or its last is not on a seam",
+                        ),
+                    ));
                     return Ok(out);
                 }
                 // Join the last arrival and first departure; the pair may not be a
@@ -1514,10 +1577,23 @@ impl<O: ClassObject> CurveClassification<O> {
         };
 
         // remember when first/last touch is on ClassifyCrv Start/Stop
-        let mut touch_1st_type =
-            crv_classification_interval.classify_point(first_touch.param, first_zone_tol_2d);
-        let mut touch_last_type =
-            crv_classification_interval.classify_point(last_touch.param, last_zone_tol_2d);
+        // (solidcore-native: a touch 3D-distinct from that end stays inside)
+        let mut touch_1st_type = distinct_end_type(
+            k,
+            classify_crv,
+            &crv_classification_interval,
+            first_touch.param,
+            crv_classification_interval.classify_point(first_touch.param, first_zone_tol_2d),
+            face_xsect_tol_3d,
+        )?;
+        let mut touch_last_type = distinct_end_type(
+            k,
+            classify_crv,
+            &crv_classification_interval,
+            last_touch.param,
+            crv_classification_interval.classify_point(last_touch.param, last_zone_tol_2d),
+            face_xsect_tol_3d,
+        )?;
 
         // check state - stored params must be on or inside the interval
         if touch_1st_type == ExtentPointType::Outside || touch_last_type == ExtentPointType::Outside
@@ -1706,26 +1782,30 @@ impl<O: ClassObject> CurveClassification<O> {
         if touch.loop_dir != CrvDirOnFaceType::Seam {
             return Ok(());
         }
-        let first_loop_face = first_loop_face.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+        let first_loop_face = first_loop_face
+            .ok_or_else(|| SolidError::intersect_missing(OP_CROSS, "the loop's first face"))?;
         let (b, f) = face_id(geometry, first_loop_face, OP_CROSS)?;
-        let pf = props
-            .face
-            .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+        let pf = props.face.ok_or_else(|| {
+            SolidError::intersect_missing(OP_CROSS, "the face of the loop properties")
+        })?;
         let face = if pf == f {
             first_loop_face
         } else {
             handle_of(geometry, b, EntityRef::Face(pf), OP_CROSS)?
         };
         let surface = face_surface(geometry, face, OP_CROSS)?
-            .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+            .ok_or_else(|| SolidError::intersect_missing(OP_CROSS, "the face's surface"))?;
         let sample = self
             .curve()
             .and_then(|h| geometry.curve(h))
-            .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+            .ok_or_else(|| SolidError::intersect_missing(OP_CROSS, "the classified curve"))?;
         let domain = surface.natural_uv_domain_with_nurb(k)?;
         let pn = sample.evaluate(k, touch.param, 1, true, true)?;
         let (Some(&sample_pt), Some(&sample_tan)) = (pn.first(), pn.get(1)) else {
-            return Err(SolidError::sm_err(OP_CROSS));
+            return Err(SolidError::intersect_failed(
+                OP_CROSS,
+                "the classified curve's first derivative was not evaluated",
+            ));
         };
         let uv = if matches!(sample.kind(), CurveKind::CrvOnSurf(_)) {
             if first {
@@ -1748,17 +1828,28 @@ impl<O: ClassObject> CurveClassification<O> {
             };
             let drop = surface.drop_point::<SurfHandle>(k, sample_pt, &domain, &opts)?;
             if !drop.success {
-                return Err(SolidError::sm_err(OP_CROSS));
+                return Err(SolidError::intersect_failed(
+                    OP_CROSS,
+                    "the classified curve's point could not be dropped onto the face's surface",
+                ));
             }
             drop.result_uv
         };
         let direction = drop_vectors_at(k, surface, uv, Side::Left, Side::Left, &[sample_tan])?
             .first()
             .copied()
-            .ok_or_else(|| SolidError::sm_err(OP_CROSS))?;
+            .ok_or_else(|| {
+                SolidError::intersect_failed(
+                    OP_CROSS,
+                    "dropping the curve's tangent onto the surface gave no uv vector",
+                )
+            })?;
         let seam_info = surface.is_on_seam(k, uv, None)?;
         if !seam_info.on_seam {
-            return Err(SolidError::sm_err(OP_CROSS));
+            return Err(SolidError::intersect_failed(
+                OP_CROSS,
+                "the seam touch is not on the surface's seam",
+            ));
         }
         let mut seam = seam_info.seam_dir;
         if seam == SurfParamType::Both {
@@ -1791,13 +1882,19 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
                 let eu = topo_vertexuse::edgeuse(b, vu)?;
                 let param = topo_vertexuse::compute_t_point(b, vu)?;
-                let eu = eu.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+                let eu = eu.ok_or_else(|| {
+                    SolidError::intersect_missing(OP_CROSS, "the vertex use's edge use")
+                })?;
                 uses.push((eu, param));
-                let cw =
-                    eu1::cw_edgeuse(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
-                let mate = eu1::mate(b, cw)?.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
-                let mate_vu =
-                    eu1::vertexuse(b, mate)?.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+                let cw = eu1::cw_edgeuse(b, eu)?.ok_or_else(|| {
+                    SolidError::intersect_missing(OP_CROSS, "the clockwise edge use")
+                })?;
+                let mate = eu1::mate(b, cw)?.ok_or_else(|| {
+                    SolidError::intersect_missing(OP_CROSS, "the edge use's mate")
+                })?;
+                let mate_vu = eu1::vertexuse(b, mate)?.ok_or_else(|| {
+                    SolidError::intersect_missing(OP_CROSS, "the mate's vertex use")
+                })?;
                 uses.push((cw, topo_vertexuse::compute_t_point(b, mate_vu)?));
             }
         }
@@ -1831,15 +1928,19 @@ impl<O: ClassObject> CurveClassification<O> {
                 if sides == 0 {
                     // An entire seam loop has no off-seam anchor; its left side is
                     // defined by the directed edgeuse. Retain tangential encounters.
-                    let edge =
-                        eu1::edge(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
-                    let curve = topo_edge::curve(b, edge)?
-                        .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+                    let edge = eu1::edge(b, eu)?.ok_or_else(|| {
+                        SolidError::intersect_missing(OP_CROSS, "the edge use's edge")
+                    })?;
+                    let curve = topo_edge::curve(b, edge)?.ok_or_else(|| {
+                        SolidError::intersect_missing(OP_CROSS, "the edge's curve")
+                    })?;
                     let edge_pn = curve.evaluate(k, param, 1, true, true)?;
-                    let mut edge_tan = edge_pn
-                        .get(1)
-                        .copied()
-                        .ok_or_else(|| SolidError::sm_err(OP_CROSS))?;
+                    let mut edge_tan = edge_pn.get(1).copied().ok_or_else(|| {
+                        SolidError::intersect_failed(
+                            OP_CROSS,
+                            "the edge curve's first derivative was not evaluated",
+                        )
+                    })?;
                     let normal = surface.evaluate_normal(k, uv, Side::Left, Side::Left)?;
                     if eu1::orientation(b, eu)? == OrientType::Opposite {
                         edge_tan = -edge_tan;
@@ -2068,8 +2169,9 @@ impl<O: ClassObject> CurveClassification<O> {
                                 sector.end_edge_uv_tan.length(),
                             )
                         };
-                        let tgt_edgeuse =
-                            tgt_edgeuse.ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+                        let tgt_edgeuse = tgt_edgeuse.ok_or_else(|| {
+                            SolidError::intersect_missing(OP_CROSS, "the target edge use")
+                        })?;
                         let speed_ratio = classify_crv_uv_1st_dir.length() / end_speed;
                         let tgt_ivl =
                             edge_interval(c.geometry, edgeuse_edge(c.geometry, tgt_edgeuse)?)?;
@@ -2345,4 +2447,45 @@ struct TouchContext<'a, O, G> {
     crv_classification_interval: Extent1d,
     /// `lCrvClassification_IvlCnt`.
     ivl_cnt: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::curve::line::Line;
+
+    /// #18342: on a line 2 469 134 long over [0, 1] (a loop bisector across an infinite
+    /// cylinder's ±1234567 axial sentinel range), `distinct_end_type` keeps the `Start` or
+    /// `End` type of a genuine end touch (1e-9 in 3D, below the face's intersection
+    /// tolerance, or at the end parameter itself) and turns only a touch 3.5e-3 away in 3D
+    /// into `Inside`; other types pass through.
+    #[test]
+    fn distinct_end_type_keeps_genuine_end_touches() {
+        use ExtentPointType::{Both, End, Inside, Start};
+        let k = Kernel::default();
+        let curve = Curve::from(Line::from_points(
+            Point3::new(0.0, 0.0, 1_234_567.0),
+            Point3::new(0.0, 0.0, -1_234_567.0),
+            3,
+        ));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let tol = 1e-7;
+        let len = 2_469_134.0;
+        let ty = |param: f64, ty: ExtentPointType| {
+            distinct_end_type(&k, &curve, &ivl, param, ty, tol).expect("type")
+        };
+        // genuine end touches: close in 3D, or exactly on the end
+        assert_eq!(ty(1e-9 / len, Start), Start);
+        assert_eq!(ty(1.0 - 1e-9 / len, End), End);
+        assert_eq!(ty(0.0, Start), Start);
+        assert_eq!(ty(1.0, End), End);
+        // just below the tolerance in 3D still an end touch
+        assert_eq!(ty(0.9 * tol / len, Start), Start);
+        // 3D-distinct from the end: inside
+        assert_eq!(ty(3.538e-3 / len, Start), Inside);
+        assert_eq!(ty(1.0 - 3.538e-3 / len, End), Inside);
+        // other types are never changed
+        assert_eq!(ty(3.538e-3 / len, Both), Both);
+        assert_eq!(ty(0.5, Inside), Inside);
+    }
 }

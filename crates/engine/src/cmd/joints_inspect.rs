@@ -55,20 +55,22 @@ fn joint_json(s: &Session, st: &ModelState, sol: &joints::Solution, j: &Joint, q
         visible: s.joint_visible(j.id),
         flip: j.flip,
         offset: j.offset,
+        offset_xy: j.offset_xy,
         angle: j.angle.to_degrees(),
         values: named_value_list(j, q),
         dofs: j.kind.dofs().iter().map(|d| (*d).to_string()).collect(),
-        a: side_json(s, st, &j.a),
-        b: side_json(s, st, &j.b),
+        a: side_json(s, st, &j.a, Some(j)),
+        b: side_json(s, st, &j.b, None),
         links,
         errors: why(&sol.errors),
         conflicts: why(&sol.conflicts),
         expressions: (!j.exprs.is_empty()).then(|| j.exprs.clone()),
+        constraint: j.constraint,
     }
 }
 
 /// One of a joint's origins: what it sits on, what it refers to, and where it is now.
-fn side_json(s: &Session, st: &ModelState, o: &JointOrigin) -> JointSide {
+fn side_json(s: &Session, st: &ModelState, o: &JointOrigin, joint: Option<&Joint>) -> JointSide {
     let component = component_of(s, o.occurrence);
     let component_name = if component == 0 {
         "root".to_string()
@@ -82,6 +84,7 @@ fn side_json(s: &Session, st: &ModelState, o: &JointOrigin) -> JointSide {
         component,
         component_name,
         path: occurrence_path(&s.doc, o.occurrence),
+        inside: o.inside.clone(),
         snap: o.snap.clone(),
         references: references(&s.doc, &o.snap),
         resolves: false,
@@ -90,6 +93,7 @@ fn side_json(s: &Session, st: &ModelState, o: &JointOrigin) -> JointSide {
     };
     match s.doc.origin_world(st, o) {
         Ok(m) => {
+            let m = joint.map_or(m, |j| j.offset_frame_a(m));
             v.resolves = true;
             v.frame = Some(WorldFrame { origin: [m[3][0], m[3][1], m[3][2]], z: [m[2][0], m[2][1], m[2][2]], x: [m[0][0], m[0][1], m[0][2]] });
         }
@@ -144,6 +148,11 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
             }
             if let Some(e) = corner {
                 out.push(Reference { role: ReferenceRole::Corner, to: Referent::Edge(edge_ref(doc, e)) });
+            }
+        }
+        Snap::Plane { x, .. } | Snap::Axis { x, .. } => {
+            if let Some(XRef::Face { face: n, .. }) = x {
+                face(ReferenceRole::X, &Some(n.clone()));
             }
         }
         Snap::Frame { .. } | Snap::Point { .. } => {}

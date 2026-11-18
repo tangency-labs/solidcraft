@@ -62,7 +62,7 @@ fn loose_faces(sides: &[usize], lift: f64) -> Body {
         b.refresh_cached_topology();
         Ok(b)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap()
 }
 
@@ -192,7 +192,7 @@ fn solidcore_case(name: &str) -> Got {
     };
     let got = r.map(|(b, closed)| {
         let (rec, _) = native(&to_arrays(&b).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         let size = if is_sheet(name) { area(&b, 1e-8) } else { volume(&b, 1e-8) }.unwrap();
         Measured { size, counts: counts(&b).unwrap(), closed, bounds: bounds(&b).unwrap(), kinds: kinds(&rec) }
     });
@@ -250,7 +250,7 @@ fn cube_and_sheet(sheet: impl FnOnce(&mut Kernel) -> solidcore::Result<Brep>) ->
         cube.refresh_cached_topology();
         Ok(cube)
     })
-    .map(Body::new)
+    .map(Body::from_kernel)
     .unwrap()
 }
 

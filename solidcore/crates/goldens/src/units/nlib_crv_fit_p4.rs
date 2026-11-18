@@ -106,7 +106,9 @@ fn nl_status(e: &SolidError) -> f64 {
 /// The `SmStatus` of a Rust error.
 fn sm_status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }

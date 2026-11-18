@@ -27,8 +27,9 @@ pub struct PartsLibraryParams {
 #[schemars(deny_unknown_fields)]
 pub struct PartsInsertParams {
     /// The family, as `parts.library` lists it: socket_head_cap_screw, button_head_cap_screw,
-    /// countersunk_socket_screw, hex_bolt, hex_nut, washer, set_screw, dowel_pin, bearing, hex_cap_screw_inch,
-    /// hex_nut_inch, washer_sae or washer_uss.
+    /// countersunk_socket_screw, hex_bolt, hex_nut, washer, set_screw, dowel_pin, bearing, hex_bolt_gost,
+    /// socket_head_cap_screw_gost, set_screw_gost, hex_nut_gost, hex_nut_thin_gost, washer_gost,
+    /// washer_large_gost, dowel_pin_gost, hex_cap_screw_inch, hex_nut_inch, washer_sae or washer_uss.
     #[serde(deserialize_with = "family")]
     pub family: String,
     /// The size, as `parts.library` lists it: `M6`, `608` for a bearing, `1/2-13 UNC` for an
@@ -49,6 +50,10 @@ pub struct PartsInsertParams {
     /// The component's name (default: the part's, such as `Socket Head Cap Screw M6x20`).
     #[serde(default)]
     pub name: Option<String>,
+    /// Turn the part over from the way it is placed: with `at`, head into the material and shank
+    /// out of the face; with `point`, its +Z against `direction` (default false).
+    #[serde(default)]
+    pub flip: Option<bool>,
 }
 
 /// Change an inserted standard part's size or length, rebuilding it in place; its joints keep it
@@ -215,6 +220,10 @@ pub struct InsertedPart {
     /// With `at`: a joint per hole, in pick order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub joints: Option<Vec<u64>>,
+    /// The way each placement's head points (its +Z, from the shank's tip toward the head), in
+    /// world coordinates and in pick order: the direction that was chosen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directions: Vec<[f64; 3]>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

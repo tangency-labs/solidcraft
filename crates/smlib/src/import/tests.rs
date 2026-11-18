@@ -92,7 +92,7 @@ fn cube(s: f64) -> Record {
 #[test]
 fn a_cube_record_is_valid_and_maps_to_two_shells() {
     let r = cube(10.0);
-    solidcraft_geom::brep::check::validate(&r).unwrap();
+    solidcore_ops::record_check::validate(&r).unwrap();
     let a = arrays(&r, true).unwrap();
     // The infinite region (a void in SMLib) and the solid, one shell each, every face once per side.
     assert_eq!(a.ints[&flat::REGION_SHELL_COUNT], vec![1, 1]);
@@ -144,7 +144,7 @@ fn a_plane_on_other_axes_goes_as_smlibs_plane() {
             }
         }
     }
-    solidcraft_geom::brep::check::validate(&r).unwrap();
+    solidcore_ops::record_check::validate(&r).unwrap();
     let a = arrays(&r, true).unwrap();
     assert_eq!(a.ints[&flat::FACE_SURFACE_TYPE][0], i64::from(flat::SURFACE_PLANE));
     let b = crate::Brep::from_record(&r, true).unwrap();

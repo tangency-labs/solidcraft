@@ -133,6 +133,17 @@ pub(crate) fn limit_normal(
 /// incident triangle its limit normal, else the averaged one, named with the kernel's reason.
 /// A boundary node the evaluator refuses otherwise is left to [`crate::TessPlan::evaluate`],
 /// which refuses the face there.
+/// The first direction (u, then v) `s` is collapsed along at `q` to within `reach`, as the
+/// kernel's classifier says; its refusal as its message.
+fn pole_dir(s: &EvalSurface, q: [f64; 2], reach: f64) -> Result<Option<usize>, String> {
+    for d in 0..2 {
+        if solidcore::eval::uv::degenerate_within(s, q, d, reach).map_err(crate::eval_message)? {
+            return Ok(Some(d));
+        }
+    }
+    Ok(None)
+}
+
 pub(crate) fn plan_poles(
     fi: usize,
     s: &EvalSurface,
@@ -152,8 +163,7 @@ pub(crate) fn plan_poles(
             f.uv.get(k as usize).copied().unwrap_or_default(),
             f.fixed.get(k as usize).copied().unwrap_or_default(),
         );
-        let limit = crate::planner::pole_dir(s, q, reach)
-            .map_err(|e| e.to_string())
+        let limit = pole_dir(s, q, reach)
             .and_then(|d| d.ok_or_else(|| format!("no direction is collapsed at {q:?}")))
             .and_then(|along| {
                 for t in f.triangles.iter().filter(|t| t.contains(&k)) {

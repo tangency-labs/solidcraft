@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Print drawing</title>
+  <path d="M18.5 7L45.5 7A2.5 2.5 0 0 1 48 9.5L48 29.5A2.5 2.5 0 0 1 45.5 32L18.5 32A2.5 2.5 0 0 1 16 29.5L16 9.5A2.5 2.5 0 0 1 18.5 7Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.5 24L55.5 24A2.5 2.5 0 0 1 58 26.5L58 49.5A2.5 2.5 0 0 1 55.5 52L8.5 52A2.5 2.5 0 0 1 6 49.5L6 26.5A2.5 2.5 0 0 1 8.5 24Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="48" cy="32" r="2.5" fill="#236ead" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.5 37L45.5 37A2.5 2.5 0 0 1 48 39.5L48 55.5A2.5 2.5 0 0 1 45.5 58L18.5 58A2.5 2.5 0 0 1 16 55.5L16 39.5A2.5 2.5 0 0 1 18.5 37Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23 44L41 44M23 51L36 51" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

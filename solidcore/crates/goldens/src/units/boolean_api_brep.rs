@@ -483,7 +483,9 @@ fn level_2() -> u8 {
 fn status(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        SolidError::Upstream { .. } | SolidError::Failed(_) => {
+            e.sm_status().map_or(-1, i64::from)
+        }
         _ => -1,
     }
 }
@@ -709,6 +711,7 @@ fn measures(k: &Kernel, b: &mut Brep) -> Result<Vec<f64>, Stop> {
             None => Ok(status(e) as f64),
         }
     };
+    crate::dump::body(k, "volume", b);
     let mut o = match brep_volume(k, b, VOLUME_ACCURACY, &attrs) {
         Ok(v) => vec![0.0, v],
         Err(e) => vec![fail(&e)?, 0.0],

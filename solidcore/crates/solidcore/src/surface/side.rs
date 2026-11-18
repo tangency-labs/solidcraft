@@ -305,7 +305,9 @@ fn differenced(
     c: Vec3,
     op: &'static str,
 ) -> Result<(BSplineSurface, f64)> {
-    let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(op))?;
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(op, "the B-spline surface has no NURB"))?;
     let cpts = nurb.cpts();
     let size = c.x.abs().max(c.y.abs()).max(c.z.abs());
     let g = gamma(2);
@@ -536,7 +538,9 @@ impl Rounding {
         to: f64,
         op: &'static str,
     ) -> Result<Self> {
-        let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(op))?;
+        let nurb = form
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_failed(op, "the B-spline surface has no NURB"))?;
         let (p, q) = nurb.degrees();
         let (held, along, dp, dq) = if window.along_u {
             (nurb.v_knots(), nurb.u_knots(), p, q)
@@ -554,7 +558,9 @@ impl Rounding {
     }
 
     fn of(form: &BSplineSurface, extra: &[f64], op: &'static str) -> Result<Self> {
-        let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(op))?;
+        let nurb = form
+            .gw_nurb()
+            .ok_or_else(|| SolidError::surface_failed(op, "the B-spline surface has no NURB"))?;
         let (mut kmax, mut smin) = (0.0_f64, f64::INFINITY);
         for kv in [nurb.u_knots(), nurb.v_knots()] {
             for (&a, &b) in kv.iter().zip(kv.iter().skip(1)) {
@@ -796,7 +802,7 @@ fn iso_pieces(
     // (by up to 1e-6) and the pieces would be cut to them, neither said
     let nurb = form
         .gw_nurb()
-        .ok_or_else(|| SolidError::sm_err(OP_LENGTH))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_LENGTH, "the B-spline surface has no NURB"))?;
     let (held, along) = if along_u {
         (nurb.v_knots(), nurb.u_knots())
     } else {
@@ -819,7 +825,7 @@ fn iso_pieces(
     let nurb = iso
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::sm_err(OP_LENGTH))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_LENGTH, "the iso curve has no NURB"))?;
     let (a, b) = if from <= to { (from, to) } else { (to, from) };
     let mut out = Vec::new();
     let mut p = 0;
@@ -1015,9 +1021,9 @@ impl Surface {
             });
         }
         let along_u = side.is_u();
-        let nurb = form
-            .gw_nurb()
-            .ok_or_else(|| SolidError::sm_err(OP_LENGTH))?;
+        let nurb = form.gw_nurb().ok_or_else(|| {
+            SolidError::surface_failed(OP_LENGTH, "the B-spline surface has no NURB")
+        })?;
         let window = Window::of(nurb, along_u, fixed, from, to);
         let rational = nurb.is_rational();
         let resolution = resolution_of(nurb, &window, OP_LENGTH)?;
@@ -1048,7 +1054,7 @@ impl Surface {
             let cpts = iso
                 .nurb
                 .as_ref()
-                .ok_or_else(|| SolidError::sm_err(OP_LENGTH))?
+                .ok_or_else(|| SolidError::surface_failed(OP_LENGTH, "the iso curve has no NURB"))?
                 .cpts();
             let columns = nurb.cpts().len();
             let columns = if along_u {

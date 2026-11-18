@@ -496,6 +496,7 @@ fn rust_srf_srf(i: &Inputs) -> Result<Rec, HarnessError> {
         SrfSrfOptions {
             skip_two_pnts_intersection: *skip,
             ref_point: ref_point.map(v3),
+            closed_by_start_direction: false,
         },
     );
     o.push(match st(&r) {
@@ -1506,6 +1507,27 @@ mod tests {
             let error = Runner.run_rust(&case);
             assert!(error.is_err(), "{}: {error:?}", case.name);
         }
+    }
+
+    /// `gen0014`: the surface-and-plane trace (WR-682, on every kernel since its flag was
+    /// retired) between two points of a surface whose curve runs off its domain. The march
+    /// went on along the B-spline's extrapolation to u = -6e5 on a domain of [0, 1], and each
+    /// refining pass split every span that missed, doubling the stations until the
+    /// allocation failed (an abort, 4.9 GB). The trace refuses a station off the domain
+    /// (status 1001, as the golden), and holds at most `MAX_STATIONS` in any case.
+    #[test]
+    fn gen0014_the_trace_stays_on_its_surface() {
+        // only `gen0014`, from its own seed, as `CaseContext::generated_cases` draws it
+        let seed = CaseContext::seed_for("blend.fillet_geom_p2", 14);
+        let inputs = Runner.generate(&mut Rng::new(seed)).unwrap();
+        let case = Case {
+            unit: "blend.fillet_geom_p2".into(),
+            name: "gen0014".into(),
+            source: crate::case::CaseSource::Generated { seed },
+            inputs,
+        };
+        let out = Runner.run_rust(&case).unwrap();
+        assert_eq!(out.values["status"], [1001.0], "{out:?}");
     }
 
     /// Tallies the Rust outcome of every case per query (status `0`, an upstream error

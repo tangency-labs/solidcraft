@@ -16,6 +16,9 @@
     clippy::needless_range_loop
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
+
 use solidcore::blend::blend_setback::{
     certified_scale, containment, distances, fill_hole, Edge, Face, Round,
 };
@@ -213,20 +216,16 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId, VertexId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`, `fillet_exact_round_classes` and
-/// `face_swap_uv_transposes_trims`. The pins are the
-/// fork's; `fillet_exact_round_classes` carries a solidcore-native change the fork does not
-/// have (#2419, WR-669 addendum: a line round's cylinder on its exact spine), which moves the
-/// volumes by about 1e-10, and so does `face_swap_uv_transposes_trims` (#2479, WR-729: the
-/// exact transpose of a swapped face's trims).
+/// Every fix but `geometric_g2_continuity` and `fillet_exact_round_classes`. The pins are
+/// the fork's; `fillet_exact_round_classes` carries a solidcore-native change the fork does
+/// not have (#2419, WR-669 addendum: a line round's cylinder on its exact spine), which moves
+/// the volumes by about 1e-10. `SmFace::SwapUV`'s exact transpose of a swapped face's trims
+/// (WR-729, no longer a flag) moves them by at most 6e-12, within [`PIN_TOL`].
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity"
-            && name != "fillet_exact_round_classes"
-            && name != "face_swap_uv_transposes_trims"
-        {
+        if name != "geometric_g2_continuity" && name != "fillet_exact_round_classes" {
             *f.flag_mut(name).unwrap() = true;
         }
     }
@@ -621,11 +620,21 @@ fn eased_asked_setback_is_the_setback_fill() {
     let ask = asked(8.0, 2.0);
     let mut k = all_fixes();
     let r = blend_box(&mut k, [60.0, 40.0, 20.0], &ASKED_AT, &[5.0; 3], Some(&ask));
-    built(&mut k, r, (15, 36, 23), 47413.5259896674);
+    // The fork printed 47413.5259896674; `brep_volume` closing the tolerant edges' gaps
+    // (#16735) moved it by 9.6e-5, within the old integrator's leak bound (MEASURED).
+    let mut b = built(&mut k, r, (15, 36, 23), 47413.52608616617);
+    volume_leak::assert_moved_by_the_old_leak(
+        &k,
+        &mut b,
+        47413.5259896674,
+        47413.52608616617,
+        PIN_ACCURACY,
+    );
 }
 
 /// A setback asked for that does not fit on the corner's edges (20, the upright edge's
-/// length) is refused as no room, naming the setback that fits; one that stops short of
+/// length) is refused by the overlap check (#3145) before the corner is built, naming the
+/// setback that fits (20 less a thousand of the edge's tolerances); one that stops short of
 /// where the rails cross (0), or whose rails cross behind their ends (5), is refused with
 /// its reason (the fork's `SM_FILERR_CORNER_UNSUPPORTED`, this port's 9).
 #[test]
@@ -640,7 +649,13 @@ fn asked_setback_that_does_not_fit_is_refused() {
     );
     assert!(r.body.is_none());
     assert_eq!(r.code, 8);
-    assert_eq!(r.comment, "Fillet Error: a setback of 20 (with its ease, 20) does not fit on the corner's edges: a setback below 20 fits");
+    assert!(
+        r.comment.starts_with(
+            "Fillet Error: a setback of 20 reaches past an edge at its corner, or the far end's claim on it: a setback of at most 19.99"
+        ) && r.comment.ends_with(" fits"),
+        "{}",
+        r.comment
+    );
     assert!(r.fit < 0.0);
     let r = blend_box(
         &mut k,

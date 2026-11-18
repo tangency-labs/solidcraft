@@ -15,13 +15,13 @@
 //! path's box uses the B-spline override, as the typed path is a B-spline; for a
 //! line path that override evaluates the interval's end points, as
 //! `SmLine::CalculateBoundingBox` does (`SmLine.cpp:605-657`), so the box is the
-//! same. With `Kernel::fixes.sweep_statuses_pass_on` (fork c8f6a31, WR-662) the
-//! trim, circle and box statuses are returned instead. No recursion.
+//! same. The trim, circle and box statuses are returned, as the fork does (c8f6a31,
+//! WR-662); upstream ignores them. No recursion.
 
 use super::PrimitiveCreationAccess;
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::Ellipse;
-use crate::error::{ignore_status, ignored, passed_on, Result, SolidError};
+use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -45,12 +45,11 @@ fn trimmed_edge_curve(
     let k = a.kernel(target)?;
     let source = a.brep(edge.0)?;
     let curve = crate::topology::edge::curve(source, edge.1)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::primitive_missing(OP, "the edge's curve"))?;
     let mut copy = curve.copy(k)?;
     let mut interval = crate::topology::edge::interval(source, edge.1)?;
     // fork c8f6a31 (WR-662): SER(pCrv->Trim(sInterval, FALSE)).
-    let p = k.fixes.sweep_statuses_pass_on;
-    ignore_status(passed_on(copy.trim(k, &mut interval, TrimMode::Silent), p)?)?;
+    copy.trim(k, &mut interval, TrimMode::Silent)?;
     Ok(copy)
 }
 
@@ -79,7 +78,7 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         // Get Profile curves from input edges (in the target region's context)
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(OP, "the target region"));
         }
         let mut curves = Vec::new();
         for &edge in edges {
@@ -127,7 +126,7 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         // Get Profile curves from input faces (in the target region's context)
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(OP, "the target region"));
         }
         let mut curves = Vec::new();
         for &face in input_faces {
@@ -181,7 +180,7 @@ impl PrimitiveCreation {
         side_faces.clear();
         end_faces.clear();
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(OP, "the target region"));
         }
 
         // Get the Shape from the first pipe (its status is ignored upstream)
@@ -189,27 +188,20 @@ impl PrimitiveCreation {
         let domain = Extent1d::from_min_max(0.0, 360.0);
         // fork c8f6a31 (WR-662): SER(SmCircle::CreateCanonical(..)) and
         // SER(pPathCurve->CalculateBoundingBox(..)).
-        let p = a.kernel(brep)?.fixes.sweep_statuses_pass_on;
-        let circle = ignored(passed_on(
-            Ellipse::create_canonical_circle(a.kernel(brep)?, &place, radius, Some(&domain), None),
-            p,
-        )?)?;
-        let shape = vec![circle.map(Curve::from)];
+        let circle =
+            Ellipse::create_canonical_circle(a.kernel(brep)?, &place, radius, Some(&domain), None)?;
+        let shape = vec![Some(Curve::from(circle))];
 
         let mut bounds = Extent3d::new();
-        if let Some(boxes) = ignored(passed_on(
-            path.calculate_bounding_box(
-                &path.natural_interval(),
-                BoundingBoxRequest {
-                    normal: true,
-                    ..BoundingBoxRequest::default()
-                },
-            ),
-            p,
-        )?)? {
-            if let Some(normal) = boxes.normal {
-                bounds = normal;
-            }
+        let boxes = path.calculate_bounding_box(
+            &path.natural_interval(),
+            BoundingBoxRequest {
+                normal: true,
+                ..BoundingBoxRequest::default()
+            },
+        )?;
+        if let Some(normal) = boxes.normal {
+            bounds = normal;
         }
         let mut size = bounds.size().length();
         size /= 2.0;
@@ -222,6 +214,7 @@ impl PrimitiveCreation {
             orient_profile_perpendicular_to_path: true,
             move_to_profile: false,
             profile_at_path_start: false,
+            up: None,
         };
         self.create_curve_sweep(
             a,

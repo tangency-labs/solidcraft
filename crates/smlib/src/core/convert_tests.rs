@@ -38,8 +38,8 @@ fn rel(a: f64, b: f64) -> f64 {
 /// The record of solidcore's arrays, validated and its geometry checked.
 fn record(a: &Arrays) -> b::Brep {
     let (rec, _) = native(a).unwrap();
-    solidcraft_geom::brep::check::validate(&rec).unwrap();
-    solidcraft_geom::brep::geometry::check(&rec).unwrap();
+    solidcore_ops::record_check::validate(&rec).unwrap();
+    solidcore_ops::record_check::agreement(&rec).unwrap();
     rec
 }
 
@@ -179,7 +179,7 @@ fn tolerances_cross_the_arrays_per_entity() {
     a.reals.get_mut(&TOLERANCE).unwrap()[0] = 8.0 * base;
     for round in 0..3 {
         let body = from_arrays(&a).unwrap();
-        assert_eq!(body.0.lock().unwrap().tolerance(), base / 2.0, "round {round}");
+        assert_eq!(body.kernel().tolerance(), base / 2.0, "round {round}");
         a = to_arrays(&body).unwrap();
         assert_eq!(a.reals[&TOLERANCE], [base], "round {round}");
         let edges = &a.reals[&EDGE_TOLERANCE];

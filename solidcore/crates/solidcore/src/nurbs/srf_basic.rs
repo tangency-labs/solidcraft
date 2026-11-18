@@ -26,7 +26,7 @@
 //! | [`Surface::copy_into`], `Clone`              | `N_SrfCopy`                       |
 //! | [`Surface::counts_are_valid`]                | `N_SrfCountsAreValid`             |
 //! | [`Surface::weights_are_valid`]               | `N_SrfWeightsAreValid`            |
-//! | [`Surface::is_valid`], [`Surface::is_valid_with_kernel`] | `N_SrfIsValid`        |
+//! | [`Surface::is_valid`]                  | `N_SrfIsValid`        |
 //! | [`Surface::is_sized`]                        | `N_SrfIsSized`                    |
 //! | [`Surface::is_rational`]                     | `N_IsSrfRat`                      |
 //! | [`Surface::is_closed`], [`Surface::is_closed_tol`] | `N_SrfIsClosed`             |
@@ -42,6 +42,8 @@
 //! | [`Surface::average_len`], [`AverageLen`]     | `N_SrfGetAverageLen`              |
 //! | [`Direction`]                                | `NL_UDIR` / `NL_VDIR` / `NL_UVDIR` |
 //! | [`WEIGHT_MIN`], [`WEIGHT_MAX`], [`WEIGHT_TOL`] | `NL_WMIN`, `NL_WMAX`, `NL_WTOL` |
+//! | [`Surface::displace_cpts`]                   | none                              |
+//! | [`falloff_weight`], [`FalloffShape`]         | none                              |
 //!
 //! Deviations:
 //! - [`Surface`] owns its control net and knot arrays (upstream points at caller- or
@@ -49,6 +51,13 @@
 //!   indices in use (`n`, `m`, `r`, `s`) are kept apart from the storage, which may be
 //!   larger; every index is checked against the storage, so the out-of-bounds accesses
 //!   upstream allows (e.g. `N_SrfSetSizeIndices` past the arrays) are `InvalidInput`.
+//! - `N_SrfFromCNetAndKnotVectors` takes any net; [`Surface::new`] and
+//!   [`Surface::with_indices`] refuse with `InvalidInput` control points in use that do
+//!   not all share the rationality of `Pw[0][0]`, so no surface they build holds such a
+//!   net. A net mixed later (through [`Surface::cpt_mut`], [`Surface::set_cpts_and_knots`]
+//!   or [`Surface::set_size_indices`] over storage of the other kind) is not refused;
+//!   [`Surface::counts_are_valid`] reports it, and [`crate::nurbs::srf_tool::p3::join`]
+//!   and [`crate::nurbs::srf_tool::p3::make_compatible`] refuse it.
 //! - The NULL surface of `N_SrfInitArrays` (null pointers, degrees `-1`) is `None`
 //!   in an `Option<Surface>`; partly NULL surfaces cannot be expressed. Storage that
 //!   upstream allocates uninitialised (`malloc`) is zero-filled.
@@ -71,21 +80,17 @@
 //!   anything.
 //! - `N_SrfIsFlatCheap` leaves its outputs unwritten when `N_PlanePtNormalToImplicit`
 //!   fails; [`Surface::is_flat_cheap`] returns only the error then.
-//! - [`Surface::is_valid`] matches upstream `N_SrfIsValid`;
-//!   [`Surface::is_valid_with_kernel`] forwards `k` to
-//!   [`KnotVector::validate_with_kernel`] for the opt-in `WR-24` span check.
 
 use std::sync::Arc;
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
-use crate::kernel::Kernel;
 use crate::limits;
 use crate::math::Vec3;
 use crate::nurbs::geom::{
     dist_pt_pt, dist_signed_pt_plane, plane_pt_normal_to_implicit, Rectangle,
 };
 use crate::nurbs::knots::{KnotVector, MAX_DEGREE};
-use crate::nurbs::math::{combine2_pts, combine4_pts, CPoint, MODEL_TOL, NOW};
+use crate::nurbs::math::{combine2_pts, combine4_pts, CPoint, MODEL_TOL, NOW, NOZ};
 
 /// Minimum valid weight (`NL_WMIN`).
 pub const WEIGHT_MIN: f64 = 1.0e-03;
@@ -95,8 +100,12 @@ pub const WEIGHT_MAX: f64 = 100.0;
 pub const WEIGHT_TOL: f64 = 1.0e-03;
 
 const OP_NEW: &str = "nurbs::srf_basic::Surface::new";
+/// Why [`Surface::new`] and [`Surface::with_indices`] refuse a net whose points mix
+/// weights with the non-rational marker [`NOW`].
+const MIXED_RATIONALITY: &str = "control points mix rational and non-rational";
 const OP_WITH_INDICES: &str = "nurbs::srf_basic::Surface::with_indices";
 const OP_CPT: &str = "nurbs::srf_basic::Surface::cpt";
+const OP_DISPLACE: &str = "nurbs::srf_basic::Surface::displace_cpts";
 const OP_SET_CPTS: &str = "nurbs::srf_basic::Surface::set_cpts_and_knots";
 const OP_SET_SIZE: &str = "nurbs::srf_basic::Surface::set_size_indices";
 const OP_COUNTS: &str = "nurbs::srf_basic::Surface::counts_are_valid";
@@ -216,6 +225,20 @@ fn net_holds(net: &[Vec<CPoint>], n: usize, m: usize) -> bool {
     }
 }
 
+/// `true` when every point of rows `0..=n`, columns `0..=m` shares the rationality
+/// of `Pw[0][0]` (all weighted, or all carrying the non-rational marker [`NOW`]).
+fn rationality_is_uniform(net: &[Vec<CPoint>], n: usize, m: usize) -> bool {
+    let mut points = net
+        .iter()
+        .take(n.saturating_add(1))
+        .flat_map(|row| row.iter().take(m.saturating_add(1)));
+    let Some(first) = points.next() else {
+        return true;
+    };
+    let rational = first.w != NOW;
+    points.all(|pw| (pw.w != NOW) == rational)
+}
+
 /// A zero-filled `(n+1) x (m+1)` net.
 fn zero_net(n: usize, m: usize) -> Vec<Vec<CPoint>> {
     vec![vec![CPoint::default(); m.saturating_add(1)]; n.saturating_add(1)]
@@ -226,8 +249,9 @@ impl Surface {
     /// (`n = net.len() - 1`, `m = net[0].len() - 1`, `r = u.len() - 1`,
     /// `s = v.len() - 1`).
     ///
-    /// Errors with `InvalidInput` for an empty net, rows of different lengths, or an
-    /// empty knot array. Nothing else is checked (see [`Surface::is_valid`]).
+    /// Errors with `InvalidInput` for an empty net, rows of different lengths, an empty
+    /// knot array, or control points that do not all share the rationality of
+    /// `Pw[0][0]`. Nothing else is checked (see [`Surface::is_valid`]).
     pub fn new(
         net: Vec<Vec<CPoint>>,
         p: usize,
@@ -254,6 +278,9 @@ impl Surface {
             .len()
             .checked_sub(1)
             .ok_or_else(|| invalid(OP_NEW, "empty v knot vector"))?;
+        if !rationality_is_uniform(&net, n, m) {
+            return Err(invalid(OP_NEW, MIXED_RATIONALITY));
+        }
         Ok(Self {
             net: Arc::new(net),
             n,
@@ -271,7 +298,8 @@ impl Surface {
     /// `r + 1` / `s + 1` knots of `u` / `v` (upstream `N_SrfFromCNetAndKnotVectors`
     /// with a net and knot vectors whose indices may be below their storage).
     ///
-    /// Errors with `InvalidInput` when the storage does not hold the indices.
+    /// Errors with `InvalidInput` when the storage does not hold the indices, or when
+    /// the control points in use do not all share the rationality of `Pw[0][0]`.
     pub fn with_indices(
         net: Vec<Vec<CPoint>>,
         u: Vec<f64>,
@@ -284,6 +312,9 @@ impl Surface {
         }
         if u.len() <= r || v.len() <= s {
             return Err(invalid(OP_WITH_INDICES, "knot array smaller than (r, s)"));
+        }
+        if !rationality_is_uniform(&net, n, m) {
+            return Err(invalid(OP_WITH_INDICES, MIXED_RATIONALITY));
         }
         Ok(Self {
             net: Arc::new(net),
@@ -415,6 +446,45 @@ impl Surface {
     #[must_use]
     pub fn cpts(&self) -> Vec<Vec<CPoint>> {
         self.rows().map(<[CPoint]>::to_vec).collect()
+    }
+
+    /// Moves control points by fractions of one displacement (not upstream): each
+    /// `((i, j), t)` of `moves` moves the Euclidean point of `Pw[i][j]` by `t * delta`, its
+    /// weight kept (a rational point's weighted coordinates move by `w t delta`). A point
+    /// listed twice moves by the sum of its fractions. All or nothing: on a refusal the net
+    /// is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an index past the net, a fraction or `delta` not finite, a 2D net
+    /// (no `z`), or a moved point not finite.
+    pub fn displace_cpts(&mut self, moves: &[((usize, usize), f64)], delta: Vec3) -> Result<()> {
+        if !(delta.x.is_finite() && delta.y.is_finite() && delta.z.is_finite()) {
+            return Err(invalid(OP_DISPLACE, "a displacement not finite"));
+        }
+        let mut next = self.clone();
+        for &((i, j), t) in moves {
+            if !t.is_finite() {
+                return Err(invalid(OP_DISPLACE, "a fraction not finite"));
+            }
+            let c = next.cpt_mut(i, j)?;
+            if c.z == NOZ {
+                return Err(invalid(OP_DISPLACE, "a 2D control net"));
+            }
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            let moved = CPoint {
+                x: c.x + w * t * delta.x,
+                y: c.y + w * t * delta.y,
+                z: c.z + w * t * delta.z,
+                w: c.w,
+            };
+            if !(moved.x.is_finite() && moved.y.is_finite() && moved.z.is_finite()) {
+                return Err(invalid(OP_DISPLACE, "a moved point not finite"));
+            }
+            *c = moved;
+        }
+        *self = next;
+        Ok(())
     }
 
     /// The u knots `U[0..=r]` (`N_SrfGetKnots`).
@@ -640,17 +710,11 @@ impl Surface {
         }
 
         // Check for consistency.
-        let oldrat = self.cpt(0, 0)?.w != NOW;
-        for row in self.rows() {
-            for pw in row {
-                let newrat = pw.w != NOW;
-                if newrat != oldrat {
-                    return Err(SolidError::nurbs(
-                        OP_COUNTS,
-                        NurbsFailure::SurfaceDefinition,
-                    ));
-                }
-            }
+        if !rationality_is_uniform(&self.net, n, m) {
+            return Err(SolidError::nurbs(
+                OP_COUNTS,
+                NurbsFailure::SurfaceDefinition,
+            ));
         }
         Ok(())
     }
@@ -675,8 +739,7 @@ impl Surface {
 
     /// Complete check: counts, weights, then both knot vectors (`N_SrfIsValid`).
     ///
-    /// Matches pinned C++ parity; see [`Surface::is_valid_with_kernel`] for the
-    /// opt-in `WR-24` knot-vector span check.
+    /// The knot vectors need a strictly positive span (`WR-24`).
     ///
     /// Errors with the first failing check's code ([`NurbsFailure::SurfaceDefinition`],
     /// [`NurbsFailure::Degree`], [`NurbsFailure::Weight`] or [`NurbsFailure::Knots`]).
@@ -686,21 +749,6 @@ impl Surface {
         let (knu, knv) = self.knot_vectors()?;
         knu.validate(self.p)?;
         knv.validate(self.q)?;
-        Ok(())
-    }
-
-    /// Complete check: counts, weights, then both knot vectors using `k`'s
-    /// [`crate::kernel::UpstreamFixes::knot_vector_valid_requires_span`] setting
-    /// (`N_SrfIsValid`, `WR-24`).
-    ///
-    /// Errors with the first failing check's code ([`NurbsFailure::SurfaceDefinition`],
-    /// [`NurbsFailure::Degree`], [`NurbsFailure::Weight`] or [`NurbsFailure::Knots`]).
-    pub fn is_valid_with_kernel(&self, k: &Kernel) -> Result<()> {
-        self.counts_are_valid()?;
-        self.weights_are_valid()?;
-        let (knu, knv) = self.knot_vectors()?;
-        knu.validate_with_kernel(k, self.p)?;
-        knv.validate_with_kernel(k, self.q)?;
         Ok(())
     }
 
@@ -716,6 +764,17 @@ impl Surface {
     }
 
     // ---- predicates -----------------------------------------------------------------
+
+    /// The check of [`Surface::new`] on the net in use, for a net mixed later through
+    /// a mutator: `InvalidInput` from `operation` when the control points do not all
+    /// share the rationality of `Pw[0][0]`.
+    pub(crate) fn refuse_mixed_rationality(&self, operation: &'static str) -> Result<()> {
+        if rationality_is_uniform(&self.net, self.n, self.m) {
+            Ok(())
+        } else {
+            Err(invalid(operation, MIXED_RATIONALITY))
+        }
+    }
 
     /// `true` when `Pw[0][0]` carries a weight (`N_IsSrfRat`).
     #[must_use]
@@ -1058,6 +1117,31 @@ fn rescale(u: &mut [f64], r: usize, p: usize, lo: f64, hi: f64) -> Result<()> {
     Ok(())
 }
 
+/// How a soft move's share falls with a control point's index distance from the moved points
+/// (not upstream), with `s = d / (radius + 1)` for a point `d` index steps away.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FalloffShape {
+    /// `1 - s`.
+    Linear,
+    /// `1 - (3 s² - 2 s³)`: flat at the moved points and at the radius's edge.
+    Smooth,
+}
+
+/// The fraction of a soft move ([`Surface::displace_cpts`]) taken by a control point `d` index
+/// steps from the nearest moved point (not upstream): 1 at `d = 0`, falling by `shape` with
+/// `s = d / (radius + 1)`, and 0 past `radius`.
+#[must_use]
+pub fn falloff_weight(shape: FalloffShape, radius: u32, d: u32) -> f64 {
+    if d > radius {
+        return 0.0;
+    }
+    let s = f64::from(d) / (f64::from(radius) + 1.0);
+    match shape {
+        FalloffShape::Linear => 1.0 - s,
+        FalloffShape::Smooth => 1.0 - s * s * (3.0 - 2.0 * s),
+    }
+}
+
 /// Makes the surfaces rationality-compatible (`N_MakeSrfsRatCompatible`): when any
 /// is rational, every non-rational one gets weights `1.0`.
 pub fn make_rat_compatible(surfaces: &mut [Surface]) {
@@ -1187,6 +1271,54 @@ mod tests {
     }
 
     #[test]
+    fn falloff_is_one_at_the_moved_points_and_zero_past_the_radius() {
+        for shape in [FalloffShape::Linear, FalloffShape::Smooth] {
+            assert_eq!(falloff_weight(shape, 0, 0), 1.0);
+            assert_eq!(falloff_weight(shape, 0, 1), 0.0);
+            assert_eq!(falloff_weight(shape, 3, 0), 1.0);
+            assert_eq!(falloff_weight(shape, 3, 4), 0.0);
+            assert_eq!(falloff_weight(shape, 3, u32::MAX), 0.0);
+            let w: Vec<f64> = (0..=3).map(|d| falloff_weight(shape, 3, d)).collect();
+            assert!(w.windows(2).all(|p| p[1] < p[0]), "{shape:?}: {w:?}");
+        }
+        // s = 1/4 at one step of radius 3
+        assert_eq!(falloff_weight(FalloffShape::Linear, 3, 1), 0.75);
+        assert_eq!(
+            falloff_weight(FalloffShape::Smooth, 3, 1),
+            1.0 - 0.0625 * 2.5
+        );
+    }
+
+    #[test]
+    fn displaced_points_move_by_their_fraction_of_the_delta() {
+        let mut s = bilinear();
+        let d = Vec3::new(0.0, 0.0, 2.0);
+        // a point listed twice moves by the sum of its fractions
+        s.displace_cpts(&[((1, 1), 0.5), ((0, 0), 1.0), ((1, 1), 0.25)], d)
+            .unwrap();
+        assert_eq!(s.cpt(0, 0).unwrap(), CPoint::new(0.0, 0.0, 2.0, NOW));
+        assert_eq!(s.cpt(1, 1).unwrap(), CPoint::new(1.0, 1.0, 1.5, NOW));
+        assert_eq!(s.cpt(0, 1).unwrap(), CPoint::new(0.0, 1.0, 0.0, NOW));
+        assert_eq!(s.cpt(1, 0).unwrap(), CPoint::new(1.0, 0.0, 0.0, NOW));
+        // a rational point keeps its weight; its weighted coordinates move by w t delta
+        let mut r = bilinear();
+        r.non_rat_to_rat();
+        *r.cpt_mut(1, 0).unwrap() = CPoint::new(2.0, 0.0, 0.0, 2.0);
+        r.displace_cpts(&[((1, 0), 1.0)], d).unwrap();
+        assert_eq!(r.cpt(1, 0).unwrap(), CPoint::new(2.0, 0.0, 4.0, 2.0));
+        // all or nothing: a bad move after a good one leaves the net as it was
+        let before = bilinear();
+        let mut t = before.clone();
+        assert!(t.displace_cpts(&[((0, 0), 1.0), ((2, 0), 1.0)], d).is_err());
+        assert!(t.displace_cpts(&[((0, 0), f64::NAN)], d).is_err());
+        assert!(t
+            .displace_cpts(&[((0, 0), 1.0)], Vec3::new(f64::INFINITY, 0.0, 0.0))
+            .is_err());
+        assert!(t.displace_cpts(&[((0, 0), f64::MAX)], d).is_err());
+        assert_eq!(t, before);
+    }
+
+    #[test]
     fn construct_and_access() {
         let s = bilinear();
         assert_eq!(s.array_sizes(), (1, 1, 3, 3));
@@ -1199,6 +1331,48 @@ mod tests {
         assert!(
             Surface::new(vec![vec![CPoint::ZERO], vec![]], 1, 1, vec![0.0], vec![0.0]).is_err()
         );
+    }
+
+    #[test]
+    fn mixed_rationality_is_refused_where_built() {
+        let refused = |r: Result<Surface>| matches!(r, Err(SolidError::InvalidInput { reason, .. }) if reason == MIXED_RATIONALITY);
+        // A biquadratic 3 x 3 net whose weights are all `w`.
+        let net = |w: f64| -> Vec<Vec<CPoint>> {
+            (0..3)
+                .map(|i| {
+                    (0..3)
+                        .map(|j| CPoint::new(f64::from(i), f64::from(j), 0.0, w))
+                        .collect()
+                })
+                .collect()
+        };
+        let knots = || vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let idx = SurfaceIndices {
+            n: 2,
+            m: 2,
+            p: 2,
+            q: 2,
+            r: 5,
+            s: 5,
+        };
+        // One weighted point among non-rational ones, and one non-rational point among
+        // weighted ones: at the first point, inside the net and on an edge.
+        for (base, odd) in [(NOW, 2.0), (1.0, NOW)] {
+            for (i, j) in [(0, 0), (1, 1), (2, 1)] {
+                let mut pw = net(base);
+                pw[i][j].w = odd;
+                assert!(refused(Surface::new(pw.clone(), 2, 2, knots(), knots())));
+                assert!(refused(Surface::with_indices(pw, knots(), knots(), idx)));
+            }
+        }
+        // Storage past the indices in use is not part of the surface.
+        let mut pw = net(NOW);
+        for row in &mut pw {
+            row.push(CPoint::new(0.0, 3.0, 0.0, 1.0));
+        }
+        pw.push(vec![CPoint::new(3.0, 0.0, 0.0, 1.0); 4]);
+        let s = Surface::with_indices(pw, knots(), knots(), idx).unwrap();
+        assert!(s.counts_are_valid().is_ok());
     }
 
     #[test]

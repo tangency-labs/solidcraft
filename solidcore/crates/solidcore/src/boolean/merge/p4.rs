@@ -15,30 +15,40 @@
 //! are explicit; `None` for the second kernel means a shared context. Contexts are temporarily moved
 //! together only for the existing paired mark-lock API. No input-driven recursion
 //! is introduced; the two retry loops retain upstream's ten-attempt limits.
+//! Not upstream (#16935): `MarkCommon` goes on to the next single vertex after a loop
+//! closure that deleted no topology and left the vertex with two common edges, instead of
+//! starting a new pass, so the ten passes are not a limit of ten gaps.
 //! Global cache queue limits are absent (the port has no global caches).
 //! The temporary origin shift goes through `merge_p1`, before any topology
 //! mutation. Its inverse token spans the entire operation,
 //! including error/imprint exits, extraction and deletion of either operand.
 //! The complete subsequent stages remain here.
 //! Component face copies use `brep::p7::copy_faces` with the native merge defaults.
-//! Opt-in fixes (`Kernel::fixes`, off by default, so the default is SMLib's):
-//! with `slice_coincident_faces_sheet_side`, `SM_BO_SLICE` gets its own coincident-face
-//! rule in steps 7.3e and 7.B for a primary face bounding material (keep the pair on the
-//! sheet's `SM_OT_SAME` side only) instead of upstream's difference rule, which keeps a
-//! face lying in the sheet in both parts (issue #528, WR-254). With
-//! `boolean_outer_shell_first`, after step 8 a Union, Difference or Intersection whose
-//! result is a manifold solid with a nested shell runs
+//! Not upstream: `SM_BO_SLICE` gets its own coincident-face rule in steps 7.3e and 7.B
+//! for a primary face bounding material (keep the pair on the sheet's `SM_OT_SAME` side
+//! only) instead of upstream's difference rule, which keeps a face lying in the sheet in
+//! both parts (issue #528, WR-254). After step 8 a Union, Difference or Intersection
+//! whose result is a manifold solid with a nested shell runs
 //! `SetRegionIsVoidFlagsForNestedSolids`, so every region's outer shell is first (and
-//! its void flags follow the nesting): a union that seals a void left the void's shell
-//! first and failed `SmBrep::AssertValid` test 12 (the fork's fix,
+//! its void flags follow the nesting): upstream's union that seals a void left the
+//! void's shell first and failed `SmBrep::AssertValid` test 12 (the fork's fix,
 //! tangency-labs/smlib `abastran/void-shell-check`; WR-265,
-//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). With
-//! `boolean_union_refuses_solid_leak` (own design, WR-619), a union whose step 6 would
-//! delete a face between the infinite region and a solid region is refused with `SM_ERR`
-//! (the face in the error) instead of returning a body whose solid merged into the outside.
+//! `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md`). Own design
+//! (WR-619): a union whose step 6 deletes a face between the infinite region and a solid
+//! region, and after which that solid's side (the uses of its faces that stay) no longer lies
+//! in a solid region (the solid merged into the outside), is refused with `SM_ERR` (the face
+//! in the error) instead of returning that body. Where none of those uses is left, the union
+//! is refused when it has no solid region at all.
+//! Own design, not upstream: in step 6 a region that a deleted face joins to another, neither
+//! with merge data (no face of the other body was copied into them, as when a union fills a
+//! void exactly), takes the class a deleted face has on both sides ([`deleted_face_sides`]);
+//! upstream leaves it the flag it had, so the filled void stayed void.
+
+use std::collections::BTreeSet;
 
 use super::p1::{self, MergeOptions};
-use crate::error::{Result, SolidError, SM_ERR};
+use crate::error::boolean::BooleanFailure;
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::{
     ids, Attribute, AttributeStore, Behavior, MergeRegionData, ObjectKey,
@@ -51,6 +61,7 @@ use crate::math::Vec3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::BrepQuery;
 use crate::topology::brep::p1 as bp;
+use crate::topology::brep::p9::OrientSheetNote;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::face::p2 as face;
 use crate::topology::topology_traverser::{self as traverser, Entity, Marks};
@@ -369,7 +380,7 @@ pub enum MergeEntity {
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+    value.ok_or_else(|| SolidError::entity_missing(OP, "a topology entity the Boolean needs"))
 }
 
 fn ignored<T>(result: Result<T>) -> Result<Option<T>> {
@@ -400,9 +411,8 @@ struct Faces {
     other_sets: Vec<Vec<FaceId>>,
 }
 
-// `slice_same` (`Slice` with a primary face bounding material only, and only with the
-// opt-in `Kernel::fixes.slice_coincident_faces_sheet_side`): that material lies on the
-// side the sheet's `SM_OT_SAME` faceuse bounds. Upstream (and the default) gives
+// `slice_same` (`Slice` with a primary face bounding material only; WR-254): that
+// material lies on the side the sheet's `SM_OT_SAME` faceuse bounds. Upstream gives
 // `SM_BO_SLICE` the difference rule, which never deletes a pair against a sheet (void on
 // both sides), so a face lying in the slicing sheet is kept in both parts (issue #528,
 // WR-254). The fix keeps such a pair on the sheet's same side only, the rule step 7.4d
@@ -452,12 +462,22 @@ fn region_pair(b: &Brep, fu: FaceuseId) -> Result<(RegionId, RegionId)> {
     ))
 }
 
-/// Not upstream (WR-619): the first of `delete` with the infinite region on one side and a
-/// solid region on the other, whose deletion would merge that solid into the outside.
-fn face_leaking_solid(b: &Brep, delete: &[FaceId]) -> Result<Option<FaceId>> {
+/// Not upstream (WR-619): a face to be deleted with the infinite region on one side and a
+/// solid region on the other, and the face uses, on faces that stay, that bound that solid.
+struct SolidLeak {
+    face: FaceId,
+    region: RegionId,
+    bounding: Vec<FaceuseId>,
+}
+
+/// Not upstream (WR-619): one [`SolidLeak`] per solid region that a face of `delete` lies
+/// between it and the infinite region (the first such face names it). Deleting such a face
+/// joins the solid to the outside unless the other body's solid lies just across it.
+fn solid_leaks(b: &Brep, delete: &[FaceId]) -> Result<Vec<SolidLeak>> {
     let Some(infinite) = b.infinite_region() else {
-        return Ok(None);
+        return Ok(Vec::new());
     };
+    let mut leaks: Vec<SolidLeak> = Vec::new();
     for &f in delete {
         let Some(fu) = face::faceuses(b, f)?.0 else {
             continue;
@@ -468,11 +488,72 @@ fn face_leaking_solid(b: &Brep, delete: &[FaceId]) -> Result<Option<FaceId>> {
             (false, true) => r1,
             _ => continue,
         };
-        if void(b, inside)? == 0 {
-            return Ok(Some(f));
+        if void(b, inside)? == 0 && !leaks.iter().any(|l| l.region == inside) {
+            leaks.push(SolidLeak {
+                face: f,
+                region: inside,
+                bounding: Vec::new(),
+            });
         }
     }
-    Ok(None)
+    if leaks.is_empty() {
+        return Ok(leaks);
+    }
+    let deleted: BTreeSet<FaceId> = delete.iter().copied().collect();
+    for f in bp::faces(b, None)? {
+        if deleted.contains(&f) {
+            continue;
+        }
+        let (fu1, fu2) = face::faceuses(b, f)?;
+        for fu in [fu1, fu2].into_iter().flatten() {
+            let Some(r) = eu::faceuse_region(b, fu)? else {
+                continue;
+            };
+            for leak in leaks.iter_mut().filter(|l| l.region == r) {
+                leak.bounding.push(fu);
+            }
+        }
+    }
+    Ok(leaks)
+}
+
+/// Not upstream (WR-619): whether the solid a [`SolidLeak`]'s face bounded still lies in a
+/// solid region. Each face use that bounded it and is left must lie in a region that is
+/// neither the infinite one nor a void: the solid's material is in one of the operands, so
+/// a use whose side ends outside or in a void shows a wrong union. When no such use is left
+/// the solid cannot be located; the test is then the whole-body one, `b` has a solid region
+/// ([`has_solid_region`]), so that case refuses exactly what it refused before the per-leak
+/// check.
+fn leak_stays_solid(b: &Brep, leak: &SolidLeak) -> Result<bool> {
+    let infinite = b.infinite_region();
+    let mut located = false;
+    for &fu in &leak.bounding {
+        if b.faceuses().get(fu).is_none() {
+            continue;
+        }
+        let Some(r) = eu::faceuse_region(b, fu)? else {
+            continue;
+        };
+        if Some(r) == infinite || void(b, r)? != 0 {
+            return Ok(false);
+        }
+        located = true;
+    }
+    if located {
+        return Ok(true);
+    }
+    has_solid_region(b)
+}
+
+/// Not upstream (WR-619): whether `b` has a solid region other than the infinite one.
+fn has_solid_region(b: &Brep) -> Result<bool> {
+    let infinite = b.infinite_region();
+    for r in bp::regions(b, None)? {
+        if Some(r) != infinite && void(b, r)? == 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn void(b: &Brep, r: RegionId) -> Result<i32> {
@@ -567,6 +648,22 @@ fn mark_common(
                 if status?.is_none() {
                     made = false;
                 }
+            }
+            // Not upstream (#16935): a closure that deleted nothing and gave `v` a second
+            // common edge (so `v` no longer ends the loop) leaves the vertex list valid and
+            // closed its gap, so the pass goes on to the loop's other ends. Upstream ended
+            // the pass at each closure, so its ten passes closed at most ten gaps: a cut
+            // with twenty left the rest open and classified whole faces across them. A
+            // closure that made topology but left `v` an end ends the pass as upstream: it
+            // closed nothing, and going on would repeat such closures at the other ends
+            // too (#1036's coincident skins, whose closures split edges each pass without
+            // relating them).
+            if made
+                && !intersector.topology_deleted()
+                && common_count(intersector, primary, v)?.0 != 1
+            {
+                done = false;
+                continue;
             }
             if made || intersector.topology_deleted() {
                 done = false;
@@ -690,9 +787,7 @@ fn classify_edge_faces(
             let non_solid = first_equal && !second_equal;
             // the coincident faceuses point the same way (FindRadialSector): when the
             // primary face bounds material, its faceuse faces it if its region is solid
-            let slice_same = if operation == BooleanOperation::Slice
-                && kernels.primary.fixes.slice_coincident_faces_sheet_side
-            {
+            let slice_same = if operation == BooleanOperation::Slice {
                 let solid = void(primary, pf_regions.0)? == 0;
                 if solid == (void(primary, pf_regions.1)? == 0) {
                     None
@@ -793,7 +888,10 @@ fn classify_edge_faces(
                 }
             }
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::stage_failed(
+                OP,
+                "the faces are neither in a shell nor classified",
+            ));
         }
     }
     Ok(true)
@@ -871,7 +969,9 @@ fn classify_remaining(
                 let selected = if reverse {
                     edge_id
                 } else {
-                    *edges.first().ok_or_else(|| SolidError::null_pointer(OP))?
+                    *edges.first().ok_or_else(|| {
+                        SolidError::entity_missing(OP, "the edge list has an edge")
+                    })?
                 };
                 let e = source.edge(selected)?;
                 let curve = required(e.curve.as_ref())?;
@@ -1050,7 +1150,6 @@ fn remember_split(
     original: RegionId,
     new_face: FaceId,
     other_face: FaceId,
-    pass_on: bool,
 ) -> Result<()> {
     let (r1, r2) = region_pair(primary, required(face::upward_faceuse(primary, new_face)?)?)?;
     let (o1, o2) = region_pair(other, required(face::upward_faceuse(other, other_face)?)?)?;
@@ -1082,10 +1181,7 @@ fn remember_split(
             )?;
             let first = required(data.this_region(0))?;
             // (fork e7ebc8d passes this status on: `SER`)
-            ignored(crate::error::passed_on(
-                data.set_regions(0, first, this_type, other_key, other_type),
-                pass_on,
-            )?)?;
+            data.set_regions(0, first, this_type, other_key, other_type)?;
         } else {
             let h = attributes.insert(Attribute::merge_region(
                 key(original),
@@ -1158,7 +1254,6 @@ fn make_other_faces(
                     required(made.old_region)?,
                     new_face,
                     f,
-                    kernels.primary.fixes.brep_edit_statuses_pass_on,
                 )?;
             }
         }
@@ -1209,11 +1304,62 @@ fn result_solid(operation: BooleanOperation, data: &MergeRegionData, was_solid: 
     }
 }
 
+/// What a regularized operation makes both sides of a face it deletes (§4.4 of
+/// `docs/booleans.md`): solid for a union, void for an intersection or a difference. Each
+/// deletes a face exactly where the result is the same on both sides: a union a face inside
+/// the other body or a coincident pair bounding material on opposite sides, an intersection
+/// a face outside it or such a pair, a difference a face inside it or a pair bounding
+/// material on the same side. `None` for the operations whose deletions are not all one class.
+fn deleted_face_sides(operation: BooleanOperation) -> Option<bool> {
+    match operation {
+        BooleanOperation::Union => Some(true),
+        BooleanOperation::Intersection | BooleanOperation::Difference => Some(false),
+        _ => None,
+    }
+}
+
+/// The regions of `primary` on either side of a face in `delete` that joins two of them
+/// with no merge data on either, the infinite region aside. A region gets merge data when a
+/// face of the other body is copied into it ([`remember_split`]); one whose boundary the
+/// other body's faces all lie on gets none, as the void a union fills exactly, so the
+/// deletion joins it to its neighbour with nothing to give the joined region its flag.
+fn joined_without_data(
+    primary: &Brep,
+    intersector: &impl ManifoldIntersector,
+    attributes: &AttributeStore,
+    delete: &[FaceId],
+) -> Result<Vec<RegionId>> {
+    let infinite = primary.infinite_region();
+    let recorded = |r: RegionId| {
+        merge_data(
+            attributes,
+            intersector.object_key(false, MergeEntity::Region(r)),
+        )
+        .is_some()
+    };
+    let mut joined = Vec::new();
+    for &f in delete {
+        let Some(fu) = face::faceuses(primary, f)?.0 else {
+            continue;
+        };
+        let (r1, r2) = region_pair(primary, fu)?;
+        if r1 == r2 || infinite == Some(r1) || infinite == Some(r2) || recorded(r1) || recorded(r2)
+        {
+            continue;
+        }
+        for r in [r1, r2] {
+            if !joined.contains(&r) {
+                joined.push(r);
+            }
+        }
+    }
+    Ok(joined)
+}
+
 /// Every region's enclosing shell first, the region's outer shell that
 /// `SmBrep::AssertValid` test 12 takes it to be (the fork's fix, tangency-labs/smlib
-/// `abastran/void-shell-check`), only with the opt-in
-/// `Kernel::fixes.boolean_outer_shell_first` (WR-265); off (the default), upstream's
-/// order is left. Step 6 merges regions and appends the merged region's shells after
+/// `abastran/void-shell-check`; WR-265); upstream leaves step 6's order. Step 6 merges
+/// regions and appends the merged region's shells after
 /// the survivor's own, so when a union seals a void the void's shell can come first;
 /// step 8 only swaps void flags. [`bp::set_region_is_void_flags_for_nested_solids`]
 /// walks the nesting from the infinite region and makes each nested region's outer
@@ -1224,12 +1370,10 @@ fn put_outer_shells_first(
     primary: &mut Brep,
     operation: BooleanOperation,
 ) -> Result<()> {
-    if !kernels.primary.fixes.boolean_outer_shell_first
-        || !matches!(
-            operation,
-            BooleanOperation::Union | BooleanOperation::Difference | BooleanOperation::Intersection
-        )
-    {
+    if !matches!(
+        operation,
+        BooleanOperation::Union | BooleanOperation::Difference | BooleanOperation::Intersection
+    ) {
         return Ok(());
     }
     let regions = bp::regions(primary, None)?;
@@ -1279,7 +1423,9 @@ fn is_oriented_sheet(kernels: &mut BooleanKernels<'_>, other: &Brep) -> Result<b
 /// under the type code and arena index of each entity (`loopuse::notify_ref`, as the
 /// slit-loop removal below), and without a context: the boolean holds no notification
 /// state for the other B-rep, so its attributes and the context's callbacks see none
-/// of these edits (upstream's do).
+/// of these edits (upstream's do). Its note is returned as upstream's status `1`
+/// ([`OrientSheetNote::stop_on_note`]), which the merge ignores or passes on as it does
+/// any other status of the call.
 fn orient_sheet_surfaces(
     kernels: &mut BooleanKernels<'_>,
     other: &mut Brep,
@@ -1295,7 +1441,13 @@ fn orient_sheet_surfaces(
         context: None,
         key_of: &crate::topology::loopuse::notify_ref,
     };
-    crate::topology::brep::p9::orient_sheet_surfaces(k, other, Some(face), same, &mut env)
+    OrientSheetNote::stop_on_note(crate::topology::brep::p9::orient_sheet_surfaces(
+        k,
+        other,
+        Some(face),
+        same,
+        &mut env,
+    ))
 }
 
 /// `new SmBrep(dSize, dRatio, pOptContextForStack)` for a component: the B-rep and its
@@ -1341,10 +1493,7 @@ fn editing_stages(
     for _ in 0..10 {
         for &f in faces.keep.iter().chain(&faces.delete) {
             if let Some(of) = intersector.face_mate(f) {
-                ignored(crate::error::passed_on(
-                    intersector.remove_relationship(f, of),
-                    kernels.primary.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                intersector.remove_relationship(f, of)?;
             }
         }
         faces.keep.clear();
@@ -1461,19 +1610,18 @@ fn editing_stages(
             }
         }
     }
-    // Not upstream unless opted in (`fixes.boolean_union_refuses_solid_leak`, WR-619): a
-    // union never deletes a face that bounds a solid against the outside.
-    if kernels.primary.fixes.boolean_union_refuses_solid_leak
-        && operation == BooleanOperation::Union
-    {
-        if let Some(f) = face_leaking_solid(primary, &faces.delete)? {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR,
-                entity: Some(EntityRef::Face(f)),
-            });
-        }
-    }
+    // Not upstream (WR-619): a union whose face deletion merges a solid into the outside is
+    // refused after post-processing, if the solid side of any deleted face between a solid
+    // and the outside no longer lies in a solid region. A leak whose solid's remaining face
+    // uses all lie in solid regions is kept, as the region count kept it; no known input
+    // records such a leak: coincident-wall joins delete no face between a solid and the
+    // outside.
+    let leaks = if operation == BooleanOperation::Union {
+        solid_leaks(primary, &faces.delete)?
+    } else {
+        Vec::new()
+    };
+    let joined = joined_without_data(primary, intersector, attributes, &faces.delete)?;
     intersector.delete_faces(
         kernels,
         primary,
@@ -1488,25 +1636,21 @@ fn editing_stages(
         ) {
             let solid = result_solid(operation, data, void(primary, r)? == 0);
             primary.region_mut(r)?.set_is_void(i32::from(!solid));
+        } else if let (true, Some(solid)) = (joined.contains(&r), deleted_face_sides(operation)) {
+            primary.region_mut(r)?.set_is_void(i32::from(!solid));
         }
     }
     if !infinite_current || void(primary, required(primary.infinite_region())?)? == 0 {
-        ignored(crate::error::passed_on(
-            find_and_set_infinite(
-                kernels,
-                primary,
-                None,
-                bp::SetRegionVoidType::InfiniteRegionSwap,
-                None,
-            ),
-            kernels.primary.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        find_and_set_infinite(
+            kernels,
+            primary,
+            None,
+            bp::SetRegionVoidType::InfiniteRegionSwap,
+            None,
+        )?;
     }
     put_outer_shells_first(kernels, primary, operation)?;
-    ignored(crate::error::passed_on(
-        intersector.propagate_regions(kernels, primary, other, attributes, operation),
-        kernels.primary.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    intersector.propagate_regions(kernels, primary, other, attributes, operation)?;
     if options.boolean_post_process
         && matches!(
             operation,
@@ -1518,6 +1662,13 @@ fn editing_stages(
         )
     {
         intersector.post_process(kernels, primary, attributes, state, false)?;
+    }
+    for leak in &leaks {
+        if !leak_stays_solid(primary, leak)? {
+            return Err(
+                Failure::new(OP, BooleanFailure::SolidLeaks { face: leak.face }).into_error(),
+            );
+        }
     }
     Ok(false)
 }
@@ -1639,14 +1790,14 @@ fn manifold_boolean_translated(
     }
     if operation == BooleanOperation::Slice {
         if !is_sheet(kernels, b)? {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::stage_failed(
+                OP,
+                "a slice needs a sheet, and the B-rep is not one",
+            ));
         }
         if !is_oriented_sheet(kernels, b)? {
             let first = required(bp::faces(b, None)?.first().copied())?;
-            ignored(crate::error::passed_on(
-                orient_sheet_surfaces(kernels, b, first, true),
-                kernels.primary.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            orient_sheet_surfaces(kernels, b, first, true)?;
         }
     }
     kernels.doing_boolean(true);
@@ -1750,17 +1901,14 @@ fn manifold_boolean_translated(
                     None,
                 )?;
                 // Native defaults: new_faces=NULL, use_merge=TRUE, merge_object=NULL.
-                ignored(crate::error::passed_on(
-                    intersector.copy_component_faces(
-                        kernels,
-                        source,
-                        reverse,
-                        set,
-                        &mut component,
-                        attributes,
-                    ),
-                    kernels.primary.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                intersector.copy_component_faces(
+                    kernels,
+                    source,
+                    reverse,
+                    set,
+                    &mut component,
+                    attributes,
+                )?;
                 components.push(component);
             }
         }
@@ -1768,18 +1916,15 @@ fn manifold_boolean_translated(
             *primary = None;
         }
     }
-    // Not upstream (tangency-labs/solidcore#746; opt-in,
-    // `Kernel::fixes.remove_slit_loops_where_solids_touch`): a volumetric Boolean's result
+    // Not upstream (tangency-labs/solidcore#746, WR-360): a volumetric Boolean's result
     // loses the zero-area inner loops a contact curve inside a face left, and the shells
     // joined only through them are split (the fork's `RemoveSlitLoopsWhereSolidsTouch`
     // before `rpResult = m_vTI.m_pBrep`). The destroyed edge uses notify on call-local
     // records under their type code and arena index.
-    if kernels.primary.fixes.remove_slit_loops_where_solids_touch
-        && matches!(
-            operation,
-            BooleanOperation::Union | BooleanOperation::Intersection | BooleanOperation::Difference
-        )
-    {
+    if matches!(
+        operation,
+        BooleanOperation::Union | BooleanOperation::Intersection | BooleanOperation::Difference
+    ) {
         if let Some(a) = primary.as_mut() {
             let editing = a.editing_enabled();
             a.set_editing_enabled(true);
@@ -1795,6 +1940,15 @@ fn manifold_boolean_translated(
                 a,
                 &mut env,
             );
+            let removed = removed.and_then(|_| {
+                // Not upstream (#16640): the faces of no area between edges that coincide
+                // to within tolerance go too.
+                crate::topology::brep::p3::collapse_zero_area_two_edge_faces(
+                    &mut *kernels.primary,
+                    a,
+                    &mut env,
+                )
+            });
             a.set_editing_enabled(editing);
             removed?;
         }
@@ -1825,10 +1979,7 @@ fn finish_boolean(
         *other = None;
     }
     if let Some(a) = primary.as_mut() {
-        ignored(crate::error::passed_on(
-            delete_caches(a),
-            kernels.primary.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        delete_caches(a)?;
     }
     kernels.doing_boolean(false);
     Ok(operation != BooleanOperation::ExtractSeparate)
@@ -1840,18 +1991,16 @@ mod tests {
 
     #[test]
     fn paired_mark_contexts_survive_a_failing_action() {
-        for opt_in in [false, true] {
+        {
             let mut first = Kernel::default();
             let mut second = Kernel::default();
-            first.fixes.mark_lock_pair_advances_and_locks_second_context = opt_in;
             first.context.set_doing_boolean(true);
             let mut kernels = BooleanKernels {
                 primary: &mut first,
                 other: Some(&mut second),
             };
-            let fixes = kernels.primary.fixes;
             let mut lock = kernels
-                .mark_action(|contexts| MarkLock::new_pair_with_fixes(contexts, 0, 1, &fixes))
+                .mark_action(|contexts| MarkLock::new_pair(contexts, 0, 1))
                 .unwrap();
             let marks = (lock.mark_type1(), lock.mark_type2());
             let before = (
@@ -1905,7 +2054,7 @@ mod tests {
                                 0 => Ok(()),
                                 1 => Err(SolidError::sm_err("test::cache")),
                                 _ => Err(SolidError::unported(
-                                    "SmBrep::DeleteStaleCaches",
+                                    "topology::brep::p2::delete_stale_caches",
                                     "topology.brep_p2",
                                 )),
                             }
@@ -1917,8 +2066,10 @@ mod tests {
                         other.is_none(),
                         !keep && operation != BooleanOperation::PartialMerge
                     );
-                    assert_eq!(result.is_err(), late == 2);
-                    assert_eq!(kernels.primary.context.doing_boolean(), late == 2);
+                    // DeleteStaleCaches' ordinary failure is passed on too (WR-658,
+                    // tangency-labs/smlib e7ebc8d), before the boolean flag is cleared
+                    assert_eq!(result.is_err(), late != 0);
+                    assert_eq!(kernels.primary.context.doing_boolean(), late != 0);
                 }
             }
         }
@@ -1994,14 +2145,13 @@ mod tests {
     /// floor 10) joined with a lid over its top 10 closes the cavity 80 x 80 x 80. For
     /// either operand order, whether each shell of the one solid region is mated to the
     /// infinite region (the outer shell).
-    fn cup_and_lid_outer_shells(fix: bool) -> Vec<Vec<bool>> {
+    fn cup_and_lid_outer_shells() -> Vec<Vec<bool>> {
         use crate::boolean::api_brep::boolean;
         use crate::math::Point3;
         use crate::primitive::api_primitives::create_box;
         let mut out = Vec::new();
         for lid_first in [false, true] {
             let mut k = Kernel::default();
-            k.fixes.boolean_outer_shell_first = fix;
             let cube = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 100.0, 100.0, 100.0).unwrap();
             let hollow =
                 create_box(&mut k, Point3::new(10.0, 10.0, 10.0), 80.0, 80.0, 100.0).unwrap();
@@ -2036,23 +2186,80 @@ mod tests {
         out
     }
 
-    /// WR-265 with `Kernel::fixes.boolean_outer_shell_first`: the outer shell comes
-    /// first, as `SmBrep::AssertValid` test 12 wants.
+    /// WR-619's per-leak check on a cube [0, 1]^3: its region `solid` and every face's use
+    /// on each side. A leak names `solid` and the face uses that bounded it.
+    fn cube_leak_parts() -> (Kernel, Brep, RegionId, Vec<FaceuseId>, Vec<FaceuseId>) {
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let infinite = b.infinite_region().unwrap();
+        let solid = bp::regions(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&r| r != infinite)
+            .unwrap();
+        let (mut inside, mut outside) = (Vec::new(), Vec::new());
+        for f in bp::faces(&b, None).unwrap() {
+            let (fu1, fu2) = face::faceuses(&b, f).unwrap();
+            for fu in [fu1.unwrap(), fu2.unwrap()] {
+                match eu::faceuse_region(&b, fu).unwrap() {
+                    Some(r) if r == solid => inside.push(fu),
+                    Some(r) if r == infinite => outside.push(fu),
+                    other => panic!("face use {fu:?} in region {other:?}"),
+                }
+            }
+        }
+        assert_eq!((inside.len(), outside.len()), (6, 6));
+        (k, b, solid, inside, outside)
+    }
+
+    /// A leak whose remaining face uses lie in the solid region stays solid; one with a use
+    /// in the infinite region, or in a region flagged void, does not.
+    #[test]
+    fn wr_619_leak_with_a_use_left_follows_that_use() {
+        let (_k, mut b, solid, inside, outside) = cube_leak_parts();
+        let face = bp::faces(&b, None).unwrap()[0];
+        let leak = |bounding: Vec<FaceuseId>| SolidLeak {
+            face,
+            region: solid,
+            bounding,
+        };
+        assert!(leak_stays_solid(&b, &leak(inside.clone())).unwrap());
+        let mut mixed = inside.clone();
+        mixed.push(outside[0]);
+        assert!(!leak_stays_solid(&b, &leak(mixed)).unwrap());
+        assert!(!leak_stays_solid(&b, &leak(outside)).unwrap());
+        b.region_mut(solid).unwrap().set_is_void(1);
+        assert!(!leak_stays_solid(&b, &leak(inside)).unwrap());
+    }
+
+    /// A leak with none of its face uses left falls back to the whole-body test: it stays
+    /// solid exactly when the body still has a solid region (the check before per-leak
+    /// tracking), so this branch refuses nothing that test did not refuse.
+    #[test]
+    fn wr_619_leak_with_no_use_left_falls_back_to_a_solid_region() {
+        let (_k, mut b, solid, _inside, _outside) = cube_leak_parts();
+        let face = bp::faces(&b, None).unwrap()[0];
+        let unlocated = SolidLeak {
+            face,
+            region: solid,
+            bounding: Vec::new(),
+        };
+        assert!(has_solid_region(&b).unwrap());
+        assert!(leak_stays_solid(&b, &unlocated).unwrap());
+        b.region_mut(solid).unwrap().set_is_void(1);
+        assert!(!has_solid_region(&b).unwrap());
+        assert!(!leak_stays_solid(&b, &unlocated).unwrap());
+    }
+
+    /// WR-265: the outer shell comes first, as `SmBrep::AssertValid` test 12 wants
+    /// (SMLib's step 6 left the cavity's shell first).
     #[test]
     fn issue_388_union_sealing_a_void_puts_the_outer_shell_first() {
         assert_eq!(
-            cup_and_lid_outer_shells(true),
+            cup_and_lid_outer_shells(),
             [vec![true, false], vec![true, false]]
-        );
-    }
-
-    /// WR-265 by default (SMLib): step 6 leaves the cavity's shell first, as the C++
-    /// build does (`boolean.api_brep` cases `cup_lid_*`).
-    #[test]
-    fn union_sealing_a_void_leaves_the_cavity_shell_first_by_default() {
-        assert_eq!(
-            cup_and_lid_outer_shells(false),
-            [vec![false, true], vec![false, true]]
         );
     }
 }

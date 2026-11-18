@@ -26,11 +26,53 @@ use super::types::{IdOrName, Point3, present};
 #[schemars(deny_unknown_fields)]
 pub struct EditParams {
     pub sketch: IdOrName,
-    /// When present, temporarily roll to this sketch and restore this position when the edit
-    /// ends. Null means the end of the timeline; omission leaves the timeline in place.
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<usize>")]
-    pub restore_marker: Option<Option<usize>>,
+    /// A position (or null, the end of the timeline): temporarily roll to this sketch and
+    /// restore that position when the edit ends. Left out, a sketch with features after it is
+    /// rolled to and the current position restored, so those features rebuild once, when the
+    /// edit ends (#14010). `false` leaves the timeline in place, rebuilding them after every
+    /// sketch command.
+    #[serde(default, deserialize_with = "present")]
+    pub restore_marker: Option<EditMarker>,
+}
+
+/// `sketch.edit`'s `restore_marker`: where the timeline goes back to when the edit ends, or
+/// `false` to edit with the timeline left in place.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EditMarker {
+    /// Roll to the sketch; restore this position (`None`: the end) when the edit ends.
+    Restore(Option<usize>),
+    /// Leave the timeline in place.
+    InPlace,
+}
+
+impl EditMarker {
+    pub(crate) fn read(v: &Value) -> Option<Self> {
+        match v {
+            Value::Null => Some(Self::Restore(None)),
+            Value::Bool(false) => Some(Self::InPlace),
+            Value::Number(n) => n.as_u64().and_then(|m| usize::try_from(m).ok()).map(|m| Self::Restore(Some(m))),
+            _ => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EditMarker {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        Self::read(&v).ok_or_else(|| D::Error::custom("`restore_marker` must be a nonnegative timeline position, null or false"))
+    }
+}
+
+impl JsonSchema for EditMarker {
+    fn schema_name() -> Cow<'static, str> {
+        "EditMarker".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A timeline position to restore when the edit ends (null: the end), or false to leave the timeline in place.",
+            "anyOf": [{"type": "integer", "minimum": 0}, {"type": "null"}, {"const": false}]
+        })
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -195,12 +237,14 @@ fn midpoint_schema() -> Value {
 }
 
 /// A point of `sketch.constraint.coincident`: an id, a model edge or vertex, or a line's middle
-/// as `{midpoint: line_id}`, which becomes a point tied there.
+/// as `{midpoint: line_id}`, which becomes a point tied there. A model edge's middle,
+/// `{midpoint: {edge: [x,y,z], body?}}`, projects the edge and is its line's middle (#17920).
 #[derive(Clone, Debug, PartialEq)]
 pub enum PointOperand {
     Id(String),
     Model(Value),
     Midpoint(String),
+    ModelMidpoint(Value),
 }
 
 impl JsonSchema for PointOperand {
@@ -209,9 +253,11 @@ impl JsonSchema for PointOperand {
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let model = model_pick_schema(generator);
+        let point = generator.subschema_for::<Point3>();
+        let edge = json!({"type": "object", "properties": {"edge": point, "body": {"type": "string"}}, "required": ["edge"]});
         json_schema!({
-            "description": "A sketch point, curve or axis by its id, a model edge or vertex (projected into the sketch first), or a line's middle {\"midpoint\": line_id}.",
-            "anyOf": [{"type": "string"}, model, midpoint_schema()]
+            "description": "A sketch point, curve or axis by its id, a model edge or vertex (projected into the sketch first), or a line's middle {\"midpoint\": line_id} or a model edge's middle {\"midpoint\": {\"edge\": [x, y, z], \"body\"?}}.",
+            "anyOf": [{"type": "string"}, model, midpoint_schema(), {"type": "object", "properties": {"midpoint": edge}, "required": ["midpoint"]}]
         })
     }
 }
@@ -229,6 +275,7 @@ fn point_operand(v: Option<&Value>) -> Result<Option<PointOperand>, Wrong> {
         Some(v) if model_pick(v) => Ok(Some(PointOperand::Model(v.clone()))),
         Some(v) => match v.get("midpoint") {
             Some(Value::String(line)) => Ok(Some(PointOperand::Midpoint(line.clone()))),
+            Some(edge) if edge.get("edge").is_some() && model_pick(edge) => Ok(Some(PointOperand::ModelMidpoint(edge.clone()))),
             Some(_) => Err(Wrong::Midpoint),
             None => Err(Wrong::Form),
         },
@@ -402,7 +449,7 @@ pub struct CoincidentResult {
 pub enum CoincidentMade {
     /// A coincident (or point-on-curve) constraint was added.
     Added(Constrained),
-    /// The two points (or two lines' closest ends) were already coincident: nothing was added.
+    /// The two points were already coincident, or the two lines already collinear: nothing was added.
     Existing {
         /// The constraint that already joins them.
         constraint: String,
@@ -468,8 +515,9 @@ pub struct SymmetryResult {
 pub struct FixOutcome {
     /// Whether they are fixed now (`false`: released).
     pub fixed: bool,
-    /// How many points and curves changed; those already as asked, the origin, projected
-    /// geometry and a point fixed by its own coordinates are not counted.
+    /// How many points and curves changed; those already as asked, the origin and projected
+    /// geometry are not counted. A point placed by parameter expressions is released as plain
+    /// numbers at its current place.
     pub changed: usize,
 }
 
@@ -624,8 +672,8 @@ impl<'de> Deserialize<'de> for EqualParams {
     }
 }
 
-/// Make two points coincident, put a point on a curve or a sketch axis, join the closest ends of
-/// two lines, or put one circle or arc on another (concentric and equal).
+/// Make two points coincident, put a point on a curve or a sketch axis, make two lines collinear,
+/// or put one circle or arc on another (concentric and equal).
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = a_and_b_required)]
 pub struct CoincidentParams {
@@ -635,7 +683,7 @@ pub struct CoincidentParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointOperand")]
     pub a: Option<PointOperand>,
-    /// The other one, as `a`. Two lines join their closest ends; two circles or arcs make the
+    /// The other one, as `a`. Two lines become collinear; two circles or arcs make the
     /// second lie on the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointOperand")]
@@ -837,7 +885,8 @@ impl<'de> Deserialize<'de> for SymmetryParams {
 }
 
 /// Fix points and curves where they are, or release them (a curve keeps its radius too; the
-/// origin, projected geometry and a point fixed by its own coordinates are left as they are).
+/// origin and projected geometry are left as they are; a point placed by parameter expressions
+/// is released where they come to now, as plain numbers).
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = fix_required)]
 pub struct FixParams {

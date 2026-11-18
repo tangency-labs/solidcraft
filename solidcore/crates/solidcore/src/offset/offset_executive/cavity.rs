@@ -8,9 +8,10 @@
 //! |-----------------------------|-----------------------|
 //! | `is_cavity_region` (crate)  | `sm_IsCavityRegion`   |
 //!
-//! Deviations: opt-in (`Kernel::fixes.offset_keep_cavity_regions`, read by
-//! `do_extended_offset`). The body's `BrepPointSolve` runs on one point-solve cache of the
-//! body made by the caller (`p1`'s original-body solve, as `RemoveExcessFaces` uses it);
+//! Deviations: `do_extended_offset` asks only when the merge left two or more finite
+//! regions (with one there is nothing to select). The body's `BrepPointSolve` runs on
+//! one point-solve cache of the body made by the caller (`p1`'s original-body solve, as
+//! `RemoveExcessFaces` uses it);
 //! a failed internal point, point solve or normal skips the face as the fork does, but an
 //! unported dependency still propagates. No recursion.
 
@@ -105,7 +106,7 @@ fn count_behind_ahead(
                 let face_data = result.face(f)?;
                 let Some(surface) = face_data.surface.as_ref() else {
                     // (NER on GetSurface: a face without one is a null pointer)
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::offset_missing(OP, "the face's surface"));
                 };
                 (surface.clone_for_evaluation()?, face_data.uv_domain)
             };

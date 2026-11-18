@@ -1,5 +1,6 @@
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 use solidcraft_kernel::{Body, BoolOp};
 
 use solidcore_tess::EvalSurface;
@@ -38,6 +39,126 @@ fn gpu() -> Option<TessGpu> {
     }
 }
 
+/// Native teardown can fail after the test body returns, so verify a fresh process's exit too.
+#[test]
+fn fresh_headless_devices_finish_and_their_process_exits() {
+    const CHILD: &str = "SOLIDCRAFT_GPU_LIFETIME_TEST_CHILD";
+    const COMPLETE: &str = "headless GPU lifetimes completed: 10";
+    const UNAVAILABLE: &str = "headless GPU lifetimes unavailable";
+    if std::env::var_os(CHILD).as_deref() == Some(std::ffi::OsStr::new("1")) {
+        let made = std::thread::scope(|scope| {
+            let create = || {
+                let mut made = 0;
+                for _ in 0..5 {
+                    let Some(device) = gpu() else { return made };
+                    assert!(!device.adapter_name().is_empty());
+                    drop(device);
+                    made += 1;
+                }
+                made
+            };
+            let first = scope.spawn(create);
+            let second = scope.spawn(create);
+            [ok(first.join()), ok(second.join())]
+        });
+        if made == [0, 0] && std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() {
+            println!("{UNAVAILABLE}");
+            return;
+        }
+        assert_eq!(made, [5, 5], "both workers must finish every actual GPU lifetime");
+        println!("{COMPLETE}");
+        return;
+    }
+    let mut child = ok(std::process::Command::new(ok(std::env::current_exe()))
+        .args(["--exact", "tests::fresh_headless_devices_finish_and_their_process_exits", "--nocapture", "--test-threads=1"])
+        .env(CHILD, "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn());
+    // This bounds a stuck native destructor; it is not a performance expectation.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    let stdout_pipe = ok(child.stdout.take().ok_or("missing child stdout pipe"));
+    let stderr_pipe = ok(child.stderr.take().ok_or("missing child stderr pipe"));
+    fn drain(mut pipe: impl std::io::Read) -> (Vec<u8>, std::io::Result<usize>, bool) {
+        const CAPTURE_LIMIT: usize = 4 * 1024 * 1024;
+        let mut bytes = Vec::new();
+        let mut buffer = [0; 8192];
+        let mut total = 0_usize;
+        let mut truncated = false;
+        loop {
+            match pipe.read(&mut buffer) {
+                Ok(0) => return (bytes, Ok(total), truncated),
+                Ok(count) => {
+                    total = total.saturating_add(count);
+                    let keep = count.min(CAPTURE_LIMIT.saturating_sub(bytes.len()));
+                    bytes.extend_from_slice(&buffer[..keep]);
+                    truncated |= keep < count;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return (bytes, Err(error), truncated),
+            }
+        }
+    }
+    let (timed_out, poll_error, kill_error, status, stdout, stderr) = std::thread::scope(|scope| {
+        let stdout = match std::thread::Builder::new().name("gpu-test-stdout".into()).spawn_scoped(scope, move || drain(stdout_pipe)) {
+            Ok(reader) => reader,
+            Err(error) => {
+                let kill = child.kill();
+                let status = child.wait();
+                panic!("could not start GPU child stdout reader: {error}; kill={kill:?}, status={status:?}");
+            }
+        };
+        let stderr = match std::thread::Builder::new().name("gpu-test-stderr".into()).spawn_scoped(scope, move || drain(stderr_pipe)) {
+            Ok(reader) => reader,
+            Err(error) => {
+                let kill = child.kill();
+                let status = child.wait();
+                let drained = stdout.join();
+                panic!("could not start GPU child stderr reader: {error}; kill={kill:?}, status={status:?}, stdout={drained:?}");
+            }
+        };
+        let mut poll_error = None;
+        let mut kill_error = None;
+        let timed_out = loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break false,
+                Ok(None) => {}
+                Err(error) => {
+                    poll_error = Some(error);
+                    kill_error = child.kill().err();
+                    break false;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                kill_error = child.kill().err();
+                break true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let status = child.wait();
+        (timed_out, poll_error, kill_error, status, ok(stdout.join()), ok(stderr.join()))
+    });
+    let (stdout_bytes, stdout_read, stdout_truncated) = stdout;
+    let (stderr_bytes, stderr_read, stderr_truncated) = stderr;
+    let stdout = String::from_utf8_lossy(&stdout_bytes);
+    let stderr = String::from_utf8_lossy(&stderr_bytes);
+    assert!(
+        !timed_out
+            && poll_error.is_none()
+            && status.as_ref().is_ok_and(|status| status.success())
+            && stdout_read.is_ok()
+            && stderr_read.is_ok()
+            && !stdout_truncated
+            && !stderr_truncated,
+        "native GPU child timed_out={timed_out}, status={status:?}, poll={poll_error:?}, kill={kill_error:?}, stdout={stdout_read:?}, stderr={stderr_read:?}, truncated=({stdout_truncated},{stderr_truncated}):\n{stdout}\n{stderr}"
+    );
+    assert!(
+        stdout.contains(COMPLETE) || (std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() && stdout.contains(UNAVAILABLE)),
+        "the child must execute the scoped GPU lifetimes: {stdout}\n{stderr}"
+    );
+}
+
 /// A shader the device rejects when the pipeline is created (its binding 1 is writable, the
 /// layout's read-only), standing in for one a device's compiler cannot build.
 const REJECTED: &str = "
@@ -74,7 +195,7 @@ fn a_pipeline_the_device_rejects_is_an_error_not_a_crash() {
     let gpu = ok(TessGpu::new(name, device, queue));
     let body = ok(solidcraft_kernel::torus(Vec3::ZERO, 6.0, 1.5));
     let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
-    assert_eq!(ok(gpu.evaluate(&gpu_form(&plan))).positions.len(), plan.evaluate().positions.len());
+    assert_eq!(ok(gpu.evaluate(&gpu_form(&plan))).positions.len(), plan.evaluate_mesh().positions.len());
 }
 
 /// The shader as the D3D12 backend translates it (naga's HLSL for shader model 5.1, the FXC
@@ -199,6 +320,7 @@ fn bodies() -> Vec<(&'static str, Body)> {
         ("cross hole", cut(&pin, &cross)),
         ("torus", ok(solidcraft_kernel::torus(Vec3::ZERO, 6.0, 1.5))),
         ("fillets", ok(solidcraft_kernel::fillet(&bx, &edges, 1.5))),
+        ("sphere", ok(solidcraft_kernel::sphere(Vec3::ZERO, 12.0))),
         (
             "mirrored",
             ok(solidcraft_kernel::transform_matrix(&pin, [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [3.0, 0.0, 1.0, 1.0]])),
@@ -211,7 +333,7 @@ fn gpu_evaluation_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
     for (name, body) in bodies() {
         let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
-        let cpu = plan.evaluate();
+        let cpu = plan.evaluate_mesh();
         let got = ok(gpu.evaluate(&gpu_form(&plan)));
         assert_eq!(got.triangles, cpu.triangles, "{name}");
         assert_eq!(got.tri_face, cpu.tri_face, "{name}");
@@ -234,6 +356,27 @@ fn gpu_evaluation_matches_the_cpu() {
     }
 }
 
+/// A sphere's pole has no cross product to give its normal: the shader takes it from a step
+/// inside, and that step must stay in the surface's parameter range. Stepping out of it gave a
+/// normal from the other side of the sphere, the dark quarter-disc at a fillet's corner patch
+/// (#14889).
+#[test]
+fn a_spheres_pole_normal_is_the_surfaces_normal_on_the_gpu() {
+    let Some(gpu) = gpu() else { return };
+    let body = ok(solidcraft_kernel::sphere(Vec3::ZERO, 12.0));
+    let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
+    let got = ok(gpu.evaluate(&gpu_form(&plan)));
+    let mut poles = 0;
+    for (p, n) in got.positions.iter().zip(&got.normals) {
+        let Some(radial) = p.normalized() else { continue };
+        if radial.z.abs() > 0.999 {
+            poles += 1;
+            assert!(n.dist(radial) < 2e-3, "pole normal {n:?} is not {radial:?}");
+        }
+    }
+    assert!(poles >= 2, "both poles are vertices");
+}
+
 /// A plan drawn straight from the GPU: `prepare` and `record` into an encoder, as the viewport
 /// does, give the vertices and triangles the CPU evaluator gives (read back here only to check).
 #[test]
@@ -241,7 +384,7 @@ fn a_resident_mesh_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
     for (name, body) in bodies() {
         let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) }));
-        let cpu = plan.evaluate();
+        let cpu = plan.evaluate_mesh();
         let mesh = ok(gpu.prepare(&gpu_form(&plan)));
         assert_eq!(mesh.vertex_count as usize, cpu.positions.len(), "{name}");
         assert_eq!(mesh.index_count as usize, cpu.triangles.len() * 3, "{name}");
@@ -306,7 +449,7 @@ fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     ok(d.poll(wgpu::PollType::wait_indefinitely()));
     let out: Vec<f32> = ok(slice.get_mapped_range()).as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
     for ((plan, part), (name, _)) in plans.iter().zip(&mesh.parts).zip(bodies()) {
-        let cpu = plan.evaluate();
+        let cpu = plan.evaluate_mesh();
         assert_eq!((part.vertices.end - part.vertices.start) as usize, cpu.positions.len(), "{name}");
         assert_eq!((part.indices.end - part.indices.start) as usize, cpu.triangles.len() * 3, "{name}");
         for (k, p) in cpu.positions.iter().enumerate() {
@@ -358,7 +501,7 @@ fn bench_plate() {
             let plan = ok(plate.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(tol)));
             p.push(ms(t));
             let t = std::time::Instant::now();
-            let m = plan.evaluate();
+            let m = plan.evaluate_mesh();
             c.push(ms(t));
             np = m.triangles.len();
             if let Some(gpu) = &gpu {
@@ -375,8 +518,12 @@ fn bench_plate() {
 /// Plans that use every packed field: a plane face with a pinned node, a flipped rational NURBS
 /// face closed along u, and a revolved face with its parameters swapped under a mirroring transform.
 fn synthetic_plans() -> Vec<GeomPlan> {
-    use solidcraft_geom::tess::{EvalCurve, EvalSurface, FacePlan};
-    let plane = EvalSurface::Plane { origin: Vec3::new(1.0, 2.0, 3.0), du: Vec3::new(0.5, 0.0, 0.0), dv: Vec3::new(0.0, 0.25, 0.0) };
+    use solidcraft_geom::tess::{EvalCurve, EvalSurface, FacePlan, to_kernel};
+    let plane = EvalSurface::Plane {
+        origin: to_kernel(Vec3::new(1.0, 2.0, 3.0)),
+        du: to_kernel(Vec3::new(0.5, 0.0, 0.0)),
+        dv: to_kernel(Vec3::new(0.0, 0.25, 0.0)),
+    };
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let ctrl = vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0], [1.0, 0.0, 2.0, 1.0], [w, w, 2.0 * w, w], [0.0, 1.0, 2.0, 1.0]];
     let nurbs = EvalSurface::Nurbs {
@@ -389,8 +536,8 @@ fn synthetic_plans() -> Vec<GeomPlan> {
     let profile = EvalCurve { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], ctrl: vec![[2.0, 0.0, 0.0, 1.0], [3.0, 0.0, 1.5, 1.0]] };
     let revolved = EvalSurface::Revolved {
         profile,
-        origin: Vec3::new(0.0, 0.0, -1.0),
-        axis: Vec3::Z,
+        origin: to_kernel(Vec3::new(0.0, 0.0, -1.0)),
+        axis: to_kernel(Vec3::Z),
         transform: [[-1.0, 0.0, 0.0, 4.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.5]],
         swap: true,
     };
@@ -402,6 +549,7 @@ fn synthetic_plans() -> Vec<GeomPlan> {
         normals: Vec::new(),
         flip,
         triangles: vec![[0, 1, 2], [1, 3, 2]],
+        poles: Vec::new(),
     };
     vec![
         GeomPlan {
@@ -456,7 +604,7 @@ fn plans_pack_to_the_same_bytes() {
     let synthetic: Vec<TessPlan> = synthetic_plans().iter().map(gpu_form).collect();
     let kinds = |k: fn(&EvalSurface) -> bool| synthetic.iter().flat_map(|p| &p.surfaces).filter(|s| k(s)).count();
     assert!(kinds(|s| matches!(s, EvalSurface::Plane { .. })) > 0);
-    assert!(kinds(|s| matches!(s, EvalSurface::Nurbs(_))) > 0 && kinds(|s| matches!(s, EvalSurface::Revolved { .. })) > 0);
+    assert!(kinds(|s| matches!(s, EvalSurface::Nurbs { .. })) > 0 && kinds(|s| matches!(s, EvalSurface::Revolved { .. })) > 0);
     let digests: Vec<u64> = synthetic.iter().map(|p| packed_digest(&[p])).collect();
     let together = packed_digest(&synthetic.iter().collect::<Vec<_>>());
     assert_eq!((digests, together), (vec![5379207237662626536, 16919141291401223349], 4471009163941807655));

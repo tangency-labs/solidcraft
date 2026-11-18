@@ -1,9 +1,8 @@
-//! #2371: the G^n section round (`fixes.fillet_gn_section_generator`, the curvature
-//! fillet) polls the kernel's [`CancelToken`] (#2136) in the loops it spends its time in:
+//! #2371: the G^n section round (the curvature fillet, WR-685) polls the kernel's [`CancelToken`] (#2136) in the loops it spends its time in:
 //! the stations, the certificate's spans, pieces and Krawczyk steps, and the skin.
 //!
 //! - A token that never fires leaves every result bit for bit as without one (the
-//!   volume, every vertex and the faces' points), with the flag on and off.
+//!   volume, every vertex and the faces' points).
 //! - A token fired before the call, or from another thread while the boss root's
 //!   order-2 round certifies its spans (4 min uncancelled in the difftest profile, a
 //!   227-span certificate), turns the call into `Err(Cancelled)`, never `Ok`, and the call
@@ -35,14 +34,6 @@ use solidcore::query::api_queries::edge_closest_point;
 use solidcore::topology::face::p2 as face;
 use solidcore::topology::{vertex, EdgeId, FaceId};
 use solidcore::{Brep, CancelToken, Kernel, Result};
-
-/// The G^n section's flag and the one its plane rails need (as `fork_ea59e9c_section_orders`).
-fn gn_kernel(gn: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = gn;
-    k.fixes.fillet_surface_plane_curve_on_plane_equation = true;
-    k
-}
 
 fn box_40_30_20(k: &mut Kernel) -> Result<Brep> {
     create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0)
@@ -129,14 +120,13 @@ const ROUND: Blend = (1, 1, 1.0);
 
 /// The case's model, built without a token, and its blend's result with `token`.
 fn round(
-    gn: bool,
     build: Build,
     at: [f64; 3],
     r: f64,
     blend: Blend,
     token: Option<CancelToken>,
 ) -> (Kernel, Brep, Result<()>) {
-    let mut k = gn_kernel(gn);
+    let mut k = Kernel::default();
     let mut b = build(&mut k).unwrap();
     let e = pick(&k, &b, at);
     if let Some(t) = token {
@@ -153,21 +143,17 @@ fn is_cancelled(r: &Result<()>) -> bool {
 
 /// Without a token and with one that never fires: the same status, and for a built blend
 /// the same result, bit for bit.
-fn assert_unfired_is_identical(gn: bool, build: Build, at: [f64; 3], r: f64, blend: Blend) {
-    let (k0, mut b0, made0) = round(gn, build, at, r, blend, None);
-    let (k1, mut b1, made1) = round(gn, build, at, r, blend, Some(CancelToken::new()));
+fn assert_unfired_is_identical(build: Build, at: [f64; 3], r: f64, blend: Blend) {
+    let (k0, mut b0, made0) = round(build, at, r, blend, None);
+    let (k1, mut b1, made1) = round(build, at, r, blend, Some(CancelToken::new()));
     assert_eq!(made0, made1, "the statuses differ");
     if std::env::var_os("ISSUE_2371_PRINT").is_some() {
-        eprintln!("ISSUE_2371 gn={gn} at={at:?} blend={blend:?} status={made0:?}");
+        eprintln!("ISSUE_2371 at={at:?} blend={blend:?} status={made0:?}");
     }
-    if made0.is_err() {
-        // the blend curve at continuity 2 without the G^n generator: refused alike
-        assert!(!gn, "the G^n round failed: {made0:?}");
-        return;
-    }
+    made0.expect("the round builds");
     let (f0, f1) = (fingerprint(&k0, &mut b0), fingerprint(&k1, &mut b1));
     if std::env::var_os("ISSUE_2371_PRINT").is_some() {
-        eprintln!("ISSUE_2371 gn={gn} at={at:?} blend={blend:?} bits={f0:x?}");
+        eprintln!("ISSUE_2371 at={at:?} blend={blend:?} bits={f0:x?}");
     }
     assert_eq!(f0, f1, "an unfired token changed the result");
 }
@@ -175,31 +161,25 @@ fn assert_unfired_is_identical(gn: bool, build: Build, at: [f64; 3], r: f64, ble
 #[test]
 fn an_unfired_token_leaves_the_box_edge_rounds_bit_for_bit() {
     let edge = [20.0, 30.0, 20.0];
-    for gn in [true, false] {
-        for blend in [GN2, GN3, ROUND] {
-            assert_unfired_is_identical(gn, box_40_30_20, edge, 3.0, blend);
-        }
+    for blend in [GN2, GN3, ROUND] {
+        assert_unfired_is_identical(box_40_30_20, edge, 3.0, blend);
     }
 }
 
 #[test]
 fn an_unfired_token_leaves_the_pipe_root_rounds_bit_for_bit() {
     let edge = [30.0, 28.0, 10.0];
-    for gn in [true, false] {
-        for blend in [GN2, ROUND] {
-            assert_unfired_is_identical(gn, pipe_on_plate, edge, 2.0, blend);
-        }
+    for blend in [GN2, ROUND] {
+        assert_unfired_is_identical(pipe_on_plate, edge, 2.0, blend);
     }
 }
 
 #[test]
 fn a_token_fired_before_the_call_cancels_the_gn_round() {
-    for gn in [true, false] {
-        let token = CancelToken::new();
-        token.cancel();
-        let (_, _, made) = round(gn, box_40_30_20, [20.0, 30.0, 20.0], 3.0, GN2, Some(token));
-        assert!(is_cancelled(&made), "gn={gn}: {made:?}");
-    }
+    let token = CancelToken::new();
+    token.cancel();
+    let (_, _, made) = round(box_40_30_20, [20.0, 30.0, 20.0], 3.0, GN2, Some(token));
+    assert!(is_cancelled(&made), "{made:?}");
 }
 
 /// The boss root's order-2 round, cancelled from another thread `delay` into the call:
@@ -210,7 +190,7 @@ fn cancel_boss_root_after(
     delay: std::time::Duration,
 ) -> Option<(std::time::Duration, &'static str)> {
     use std::time::Instant;
-    let mut k = gn_kernel(true);
+    let mut k = Kernel::default();
     let mut b = boss_on_plate(&mut k).unwrap();
     let e = pick(&k, &b, BOSS_ROOT);
     let token = CancelToken::new();
@@ -239,6 +219,17 @@ fn cancel_boss_root_after(
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_token_fired_from_another_thread_stops_the_boss_root_round_soon() {
+    // How long the round takes here uncancelled: its sections are most of it, and the
+    // glue and finish after them its last part, whose own checks may end it instead
+    // (solidcore#3247; on a slower machine 4 s in can be there).
+    let full = {
+        let mut k = Kernel::default();
+        let mut b = boss_on_plate(&mut k).unwrap();
+        let e = pick(&k, &b, BOSS_ROOT);
+        let started = std::time::Instant::now();
+        let _ = fillet_edges(&mut k, &mut b, &[e], 2.0, 2, 2, 0.0);
+        started.elapsed()
+    };
     // 0 ms fires as soon as the call starts: the round cannot finish first, so this
     // case always cancels; the later ones are skipped when a faster build is done by then
     for ms in [0, 200, 1500, 4000, 10000] {
@@ -259,7 +250,8 @@ fn a_token_fired_from_another_thread_stops_the_boss_root_round_soon() {
         // past the set-up the round is building its sections (4 min in the difftest
         // profile): the check point there ends it, not one in a later loop after a
         // status-ignoring helper absorbed the cancel
-        if ms >= 1500 {
+        let in_sections = std::time::Duration::from_millis(ms) < full.mul_f64(0.75);
+        if ms >= 1500 && in_sections {
             assert!(
                 at.starts_with("blend::fillet_section::"),
                 "cancelled {ms} ms in, at {at}"

@@ -19,6 +19,15 @@
 //! | [`Curve::is_on_positive_side_of_planes`]          | `SmCurve::IsOnPositiveSideOfPlanes`              |
 //!
 //! Deviations:
+//! - **Projected Single maxima (#13698).** Definition enclosures and feasible
+//!   witnesses replace the incomplete stationary search; subdivision is bounded
+//!   to 32,768 boxes and depth 128 in `projected_pair`. Proof failures propagate.
+//!   Structural affine and identical monotone NURBS All classes share the definition enclosures and
+//!   preserve the existing retention and ordered duplicate rules.
+//! - **Identical open ellipse All maxima.** Bounded interval edge-root
+//!   construction and the antipodal-axis theorem cover the finite candidate set;
+//!   at most 4,096 cells, depth 48 and 64 Newton contractions per root. Selected
+//!   ambiguities refuse; full turns and distinct ellipse pairs keep the old path.
 //! - **Curves and kernel.** The solver's trees only name their curves by the
 //!   caller's handle ([`crate::geom::tree::Tree::owner_object`]), so the solver
 //!   carries the curves and the kernel ([`CcGlobalSolver::with_curves`]); a solver
@@ -68,9 +77,16 @@
 //!   repeated here with the kind's own `EvaluatePoint` (upstream's virtual call) and
 //!   `IsKindOf(SmLine_TYPE)` test, the control polygon coming from the B-spline
 //!   part.
-//! - **Opt-in fix.** `CalculateTightBoundingBox` adds only the knots strictly inside
-//!   the interval with `Kernel::fixes.curve_tight_box_interval_knots` (WR-474, #1054);
-//!   off by default, as upstream.
+//! - **Interval knots.** `CalculateTightBoundingBox` adds only the tangent
+//!   discontinuous knots strictly inside the interval (WR-474, #1054); upstream adds
+//!   them all, and the last knot.
+//! - **Turning points (#17685).** `CalculateTightBoundingBox` also adds the points where
+//!   a coordinate stops changing (`C' . e = 0`), isolated from the roots of the
+//!   derivative's numerator by Bezier subdivision (`curve::curve::turning`; B-spline
+//!   kinds and Hermite curves). A coordinate can peak where the curve stops or nearly
+//!   stops (`|C'|^2 < SM_EFF_ZERO`), and the perpendicular analyses refuse to evaluate
+//!   there. The subdivision is bounded (`turning::MAX_DEPTH`, `turning::MAX_NODES`) and
+//!   refuses with `InvalidInput` past either bound.
 //! - **Coordinate bound.** `GlobalCurveSolve` of a curve whose natural box reaches past
 //!   [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (`1e150`, below `sqrt(f64::MAX)`)
 //!   fails with `InvalidInput` before any cache is built (the curve cache is built over
@@ -81,26 +97,25 @@
 //! - `SM_ASSERT`s and the `SM_DEBUG_CODE` blocks are not ported. `GlobalCurveSolve`
 //!   recurses once at most (the signed angle minimiser asks for projected
 //!   tangencies), so it needs no depth bound.
-//! - **Statuses passed on (WR-663).** With the opt-in
-//!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
-//!   fork (tangency-labs/smlib 8311f8e): `SmCCGlobalSolver::LocalSolve` (end points, end
+//! - **Statuses passed on (WR-663).** The statuses SMLib drops are passed on, as the
+//!   fork (tangency-labs/smlib 8311f8e):`SmCCGlobalSolver::LocalSolve` (end points, end
 //!   solves, cylinder guesses, `LocalCurveSolve`), `GlobalCurveSolve`'s boxes and
 //!   `SolveIt`s, the tight boxes' evaluations and `IsOnPlane`; `IsOnPositiveSideOfPlanes`
 //!   is `FALSE` when the classification fails.
 
 use crate::curve::curve::p2::{
-    ignored_or_soft, proj_signed_angle, CcGlobalSolver, CciGlobalSolver, Curve, CurveKind,
-    CurvePropertyType, Soft, BSPLINE_CURVE_TYPE, LINE_TYPE,
+    proj_signed_angle, CcGlobalSolver, CciGlobalSolver, Curve, CurveKind, CurvePropertyType,
+    BSPLINE_CURVE_TYPE, LINE_TYPE,
 };
 use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::p3::PointSolveOptions;
-use crate::curve::curve::p4::{point_or_pass_on, proj_dist};
+use crate::curve::curve::p4::proj_dist;
 use crate::curve::curve::p5::{local_property_analysis, make_curve_cache};
 use crate::curve::curve::p6::is_measurable_box;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::{operand_handles, CurveIntersectOptions};
 use crate::curve::curve_cache::CurveCache;
-use crate::error::{ignore_or_pass_on, ignored_or_pass_on, Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{
@@ -154,15 +169,11 @@ const fn ord(c: ContinuityType) -> i32 {
     c as i32
 }
 
-/// `EvaluatePoint` whose status upstream ignores into a reused point: `pt` keeps its
-/// previous value on failure; [`SolidError::Unported`] is propagated. With the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`] a failure is returned, as
-/// the fork's tight boxes (`SER`, tangency-labs/smlib 8311f8e).
+/// `EvaluatePoint` into a reused point, whose status upstream ignores (keeping the
+/// previous value); a failure is returned, as the fork's tight boxes (`SER`,
+/// tangency-labs/smlib 8311f8e).
 fn eval_keep(k: &Kernel, curve: &Curve, t: f64, pt: &mut Point3) -> Result<()> {
-    if let Some(p) = ignored_or_pass_on(curve.evaluate_point(k, t), k.fixes.query_statuses_pass_on)?
-    {
-        *pt = p;
-    }
+    *pt = curve.evaluate_point(k, t)?;
     Ok(())
 }
 
@@ -175,8 +186,10 @@ fn set_param(end: &mut SolutionEnd, i: usize, v: f64) -> Result<()> {
 /// The `SmStatus` value of an error a `double` function returns as its value
 /// (`sm_GetProjDist`'s `SER`).
 fn status_value(e: &SolidError) -> f64 {
+    if let Some(code) = e.upstream_status() {
+        return f64::from(code);
+    }
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         _ => 1001.0,
     }
@@ -229,8 +242,8 @@ struct EndSolve<'v> {
 
 impl EndSolve<'_> {
     /// One solve; `vectors` (`saVectors`) is updated as upstream does for the
-    /// projected operations. Errors other than [`SolidError::Unported`] are no answer
-    /// (statuses ignored upstream, which initialises the answer to `FALSE`).
+    /// projected operations. Errors are returned, as the fork (tangency-labs/smlib
+    /// 8311f8e); upstream ignores the statuses (the answer initialised to `FALSE`).
     fn solve<O: Copy>(
         &self,
         k: &Kernel,
@@ -250,7 +263,8 @@ impl EndSolve<'_> {
             } else {
                 -vectors[0].dot(point)
             };
-            match local_property_analysis(
+            // (passed on as the fork, tangency-labs/smlib 8311f8e)
+            local_property_analysis(
                 k,
                 curve,
                 ivl,
@@ -259,26 +273,17 @@ impl EndSolve<'_> {
                 Some(property_value),
                 vectors,
                 solution,
-            ) {
-                Ok(f) => Ok(f),
-                // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-                Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => Err(e),
-                Err(_) => Ok(false),
-            }
+            )
         } else {
             let opts = PointSolveOptions {
                 distance_tolerance: Some(self.tol),
                 target_distance: None,
                 vectors: self.opt_vectors,
             };
-            match curve.local_point_solve::<O>(k, ivl, self.op, point, &opts, ivl.evaluate(0.5)) {
-                Ok((f, s)) => {
-                    merge_point_solution(solution, f, &s, self.op);
-                    Ok(f)
-                }
-                Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => Err(e),
-                Err(_) => Ok(false),
-            }
+            let (f, s) =
+                curve.local_point_solve::<O>(k, ivl, self.op, point, &opts, ivl.evaluate(0.5))?;
+            merge_point_solution(solution, f, &s, self.op);
+            Ok(f)
         }
     }
 }
@@ -319,7 +324,10 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
         let curve_node1 = self.base.branch_node(branch, 0)?;
         let curve_node2 = self.base.branch_node(branch, 1)?;
         if !has_data(curve_node1) || !has_data(curve_node2) {
-            return Err(SolidError::null_pointer(OP_LOCAL));
+            return Err(SolidError::curve_missing(
+                OP_LOCAL,
+                "the branch's curve node data",
+            ));
         }
         let tree1: &Tree<O> = self.base.tree(0)?;
         let tree2: &Tree<O> = self.base.tree(1)?;
@@ -393,15 +401,15 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
             }
         }
 
-        // get node1 span endPoints and endPoint chords (statuses ignored; passed on
-        // with the opt-in fix, tangency-labs/smlib 8311f8e)
-        let start1 = point_or_pass_on(k, curve1, ivl1.min())?;
-        let mut end1 = point_or_pass_on(k, curve1, ivl1.max())?;
+        // get node1 span endPoints and endPoint chords (statuses ignored upstream;
+        // passed on as the fork, tangency-labs/smlib 8311f8e)
+        let start1 = curve1.evaluate_point(k, ivl1.min())?;
+        let mut end1 = curve1.evaluate_point(k, ivl1.max())?;
         let line_vec1 = end1 - start1;
 
-        // get node2 span endPoints and endPoint chords (statuses ignored)
-        let mut start2 = point_or_pass_on(k, curve2, ivl2.min())?;
-        let mut end2 = point_or_pass_on(k, curve2, ivl2.max())?;
+        // get node2 span endPoints and endPoint chords (statuses ignored upstream)
+        let mut start2 = curve2.evaluate_point(k, ivl2.min())?;
+        let mut end2 = curve2.evaluate_point(k, ivl2.max())?;
         let line_vec2 = end2 - start2;
 
         let turn1 = bez_span1.aux.max_turning_angle_deg;
@@ -895,19 +903,16 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                     want_comb: false,
                     handle,
                 };
-                // (status ignored; passed on with the opt-in fix)
-                let sols = ignored_or_pass_on(
-                    target_curve.global_property_analysis(
+                // (status ignored upstream; passed on as the fork)
+                let sols = target_curve
+                    .global_property_analysis(
                         k,
                         target_ivl,
                         CurvePropertyType::CylinderIntersection,
                         tol,
                         &opts,
-                    ),
-                    k.fixes.query_statuses_pass_on,
-                )?
-                .map(|r| r.solutions)
-                .unwrap_or_default();
+                    )?
+                    .solutions;
                 for s in sols.as_slice() {
                     if this_is_1 {
                         guesses1.push(s.start.parameters[0]);
@@ -917,7 +922,10 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                         guesses2.push(s.start.parameters[0]);
                     }
                     if guesses1.len() == NUM_PARAM_GUESS {
-                        return Err(SolidError::sm_err(OP_LOCAL));
+                        return Err(SolidError::curve_failed(
+                            OP_LOCAL,
+                            "the parameter guesses are full",
+                        ));
                     }
                 }
             }
@@ -926,7 +934,8 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
         // for every guess point
         let local_solver_op = op;
         for (&g1, &g2) in guesses1.iter().zip(&guesses2) {
-            // call LocalCurveSolve (status ignored)
+            // call LocalCurveSolve (status ignored upstream; passed on as the fork,
+            // tangency-labs/smlib 8311f8e)
             let found = match curve1.local_curve_solve::<O>(
                 k,
                 &ivl1,
@@ -938,13 +947,9 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                 opt_slice,
                 [g1, g2],
                 handles,
-            ) {
-                Ok((true, s)) => Some(s),
-                // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-                Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => {
-                    return Err(e)
-                }
-                Ok((false, _)) | Err(_) => None,
+            )? {
+                (true, s) => Some(s),
+                (false, _) => None,
             };
 
             // when a solution was found
@@ -1199,35 +1204,34 @@ fn build_cache<O: SolutionObject>(
     match make_curve_cache::<O>(k, curve, handle) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::null_pointer(OP_GCS)),
+        Err(_) => Err(SolidError::curve_missing(OP_GCS, "the curve's cache")),
     }
 }
 
 /// The cache tree (`GetTree`, `NER`).
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
-    cache.tree().ok_or(SolidError::null_pointer(OP_GCS))
+    cache
+        .tree()
+        .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the curve cache's tree"))
 }
 
 /// The axis aligned box of `CalculateBoundingBox` of `curve` over its natural
-/// interval (status ignored: the default box on failure; passed on with the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], tangency-labs/smlib
-/// 8311f8e).
+/// interval (status ignored upstream: the default box on failure; passed on as the
+/// fork, tangency-labs/smlib 8311f8e).
 fn natural_bounding_box(k: &Kernel, curve: &Curve) -> Result<Extent3d> {
     Ok(natural_box(k, curve)?.unwrap_or_else(Extent3d::new))
 }
 
-/// [`natural_bounding_box`], `None` where upstream keeps the default box.
+/// [`natural_bounding_box`], `None` where no normal box was computed.
 fn natural_box(k: &Kernel, curve: &Curve) -> Result<Option<Extent3d>> {
     let req = BoundingBoxRequest {
         normal: true,
         pseudo: false,
         polar: false,
     };
-    Ok(ignored_or_pass_on(
-        curve.calculate_bounding_box(k, &curve.natural_interval(), req, true),
-        k.fixes.query_statuses_pass_on,
-    )?
-    .and_then(|b| b.normal))
+    Ok(curve
+        .calculate_bounding_box(k, &curve.natural_interval(), req, true)?
+        .normal)
 }
 
 impl Curve {
@@ -1250,7 +1254,10 @@ impl Curve {
     /// [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (module docs); those of the
     /// line/line intersection and of the signed angle minimum. Errors of the global
     /// solve itself are ignored (upstream ignores `SolveIt`'s status), except
-    /// [`SolidError::Unported`].
+    /// [`SolidError::Unported`]. A projected `Single` maximum instead constructs
+    /// feasible witnesses and bounds the entire bounded parameter domain; an
+    /// unsupported definition or unresolved bound is an explicit error, regardless
+    /// of the legacy error-passing flag.
     pub fn global_curve_solve<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -1302,6 +1309,75 @@ impl Curve {
                     "curve solve of a curve with a coordinate beyond 1e150",
                 ));
             }
+        }
+
+        // A projected Single maximum needs a whole-domain certificate. In
+        // particular, endpoint candidates cannot be filtered by an unconstrained
+        // stationary solve. Proof refusals propagate regardless of legacy flags.
+        if op == Op::ProjectedMaximize && requested == SolutionRequested::Single {
+            return super::projected_pair::solve(
+                k,
+                [self, other],
+                [*interval, *other_interval],
+                opt(0)?,
+                dist_tol,
+                opts.handles,
+                opts.target_distance,
+            );
+        }
+
+        // The finite affine All class is selected structurally, before proof.
+        // A selected refusal propagates; curved/multi-piece enumeration keeps
+        // its existing path and remains a separate #13698 obligation.
+        if op == Op::ProjectedMaximize
+            && requested == SolutionRequested::All
+            && super::projected_pair_all::supports([self, other], [*interval, *other_interval])
+        {
+            return super::projected_pair_all::solve(
+                k,
+                [self, other],
+                [*interval, *other_interval],
+                opt(0)?,
+                dist_tol,
+                opts.handles,
+                opts.target_distance,
+            );
+        }
+
+        // Identical native NURBS in one continuous union span form a separate
+        // structural class. The whole-union derivative-sign proof must succeed;
+        // a selected uncertainty is never routed back to the legacy solver.
+        if op == Op::ProjectedMaximize
+            && requested == SolutionRequested::All
+            && super::projected_pair_monotone::supports([self, other], [*interval, *other_interval])
+        {
+            return super::projected_pair_monotone::solve(
+                k,
+                [self, other],
+                [*interval, *other_interval],
+                opt(0)?,
+                dist_tol,
+                opts.handles,
+                opts.target_distance,
+            );
+        }
+
+        // Identical native noncircular open ellipse arcs admit a complete
+        // finite construction. Closed seams and unrelated ellipse pairs are
+        // outside this structural class; selected proof failures propagate.
+        if op == Op::ProjectedMaximize
+            && requested == SolutionRequested::All
+            && super::projected_pair_ellipse::supports([self, other], [*interval, *other_interval])
+        {
+            return super::projected_pair_ellipse::solve(
+                k,
+                [self, other],
+                [*interval, *other_interval],
+                opt(0)?,
+                dist_tol,
+                opts.handles,
+                opts.target_distance,
+            );
         }
 
         // init outputs
@@ -1422,19 +1498,17 @@ impl Curve {
                 projection_type,
             )
             .with_curves(self, other, k);
-            // (status ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-            ignore_or_pass_on(
-                gs.solve_it(
-                    &SolveRequest {
-                        operation: op,
-                        solution_requested: requested,
-                        tolerance_3d: dist_tol,
-                        best_answer_so_far_sq: BIG_DOUBLE,
-                        opt_vectors: opts.opt_vectors.unwrap_or(&[]),
-                    },
-                    &mut sols,
-                ),
-                k.fixes.query_statuses_pass_on,
+            // (status ignored upstream; passed on as the fork, tangency-labs/smlib
+            // 8311f8e)
+            gs.solve_it(
+                &SolveRequest {
+                    operation: op,
+                    solution_requested: requested,
+                    tolerance_3d: dist_tol,
+                    best_answer_so_far_sq: BIG_DOUBLE,
+                    opt_vectors: opts.opt_vectors.unwrap_or(&[]),
+                },
+                &mut sols,
             )?;
             // all done
             return Ok(sols);
@@ -1474,7 +1548,7 @@ impl Curve {
             Op::AtDistance => {
                 let target = opts
                     .target_distance
-                    .ok_or(SolidError::null_pointer(OP_GCS))?;
+                    .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the target distance"))?;
                 gs.base.set_at_distance(target);
             }
             Op::SignedDirectedMinimize | Op::Signed3dDirectedMinimize => {
@@ -1496,19 +1570,16 @@ impl Curve {
             _ => {}
         }
 
-        // get global solver solutions (status ignored; passed on with the opt-in fix)
-        ignore_or_pass_on(
-            gs.solve_it(
-                &SolveRequest {
-                    operation: op,
-                    solution_requested: requested,
-                    tolerance_3d: dist_tol,
-                    best_answer_so_far_sq,
-                    opt_vectors: opts.opt_vectors.unwrap_or(&[]),
-                },
-                &mut sols,
-            ),
-            k.fixes.query_statuses_pass_on,
+        // get global solver solutions (status ignored upstream; passed on as the fork)
+        gs.solve_it(
+            &SolveRequest {
+                operation: op,
+                solution_requested: requested,
+                tolerance_3d: dist_tol,
+                best_answer_so_far_sq,
+                opt_vectors: opts.opt_vectors.unwrap_or(&[]),
+            },
+            &mut sols,
         )?;
 
         Ok(sols)
@@ -1579,8 +1650,8 @@ impl Curve {
     /// from its end points, (for B-splines) its tangent discontinuous knots and last
     /// knot, and the points where its tangent is perpendicular to x, y and z. The
     /// line override is [`crate::curve::line::Line::calculate_tight_bounding_box`].
-    /// With [`crate::kernel::UpstreamFixes::curve_tight_box_interval_knots`] only the
-    /// tangent discontinuous knots strictly inside `interval` are added (WR-474, #1054).
+    /// Only the tangent discontinuous knots strictly inside `interval` are added
+    /// (WR-474, #1054).
     ///
     /// # Errors
     ///
@@ -1610,19 +1681,14 @@ impl Curve {
             let (knots, _) = self.knots(k, None)?;
             let (_, continuities) = self.calculate_continuities(k, 2.0)?;
 
-            let n = knots.len();
             for (i, &knot) in knots.iter().enumerate().skip(1) {
                 let low = continuities
                     .get(i)
                     .is_some_and(|&c| ord(c) <= ord(ContinuityType::C1));
-                let add = if k.fixes.curve_tight_box_interval_knots {
-                    // WR-474 (#1054): only the tangent discontinuous knots strictly inside
-                    // the interval; its ends are in the box already, and a knot outside it
-                    // is a point the curve never reaches over `interval`.
-                    low && knot > interval.min() && knot < interval.max()
-                } else {
-                    i == n - 1 || low
-                };
+                // WR-474 (#1054): only the tangent discontinuous knots strictly inside the
+                // interval; its ends are in the box already, and a knot outside it is a
+                // point the curve never reaches over `interval`.
+                let add = low && knot > interval.min() && knot < interval.max();
                 if add {
                     eval_keep(k, self, knot, &mut pt)?;
                     tight_box.add_point(pt);
@@ -1640,6 +1706,12 @@ impl Curve {
                 tight_box.add_point(p);
             })?;
         }
+
+        // Not upstream (#17685): the points where a coordinate stops changing, isolated
+        // from the roots of `C' . e` (`curve::curve::turning`).
+        self.add_turning_points(k, interval, &mut pt, &mut |p| {
+            tight_box.add_point(p);
+        })?;
 
         Ok(tight_box)
     }
@@ -1779,22 +1851,19 @@ impl Curve {
                 want_comb: false,
                 handle: Some(CurveHandle(ivl)),
             };
-            // (status ignored; with the opt-in fix a curve that cannot be classified is
+            // (status ignored upstream; as the fork a curve that cannot be classified is
             // not shown on the positive side, tangency-labs/smlib 8311f8e)
-            let Soft::Kept(sols) = ignored_or_soft(
-                self.global_property_analysis(
-                    k,
-                    &ivl,
-                    CurvePropertyType::PlaneClassify,
-                    EFF_ZERO,
-                    &opts,
-                ),
-                k.fixes.query_statuses_pass_on,
-            )?
+            let Some(sols) = ignored(self.global_property_analysis(
+                k,
+                &ivl,
+                CurvePropertyType::PlaneClassify,
+                EFF_ZERO,
+                &opts,
+            ))?
             else {
                 return Ok(false);
             };
-            let sols = sols.map(|r| r.solutions).unwrap_or_default();
+            let sols = sols.solutions;
 
             // when curve is NOT (totally on the positive side of this plane)
             let whole = sols.len() == 1
@@ -1888,8 +1957,8 @@ fn bspline_is_on_plane(
 ///
 /// # Errors
 ///
-/// [`SolidError::Unported`] from the tight pseudo box (whose other failures leave
-/// the partial box, statuses ignored upstream).
+/// Those of the basis construction and the tight pseudo box, which upstream ignores
+/// and the fork passes on (tangency-labs/smlib 8311f8e).
 pub fn is_on_plane_base(
     curve: &Curve,
     k: &Kernel,
@@ -1898,16 +1967,12 @@ pub fn is_on_plane_base(
     tol: f64,
     interval: Option<&Extent1d>,
 ) -> Result<OnPlane> {
-    // build an unitorthonormal basis from crPlaneNormal (status ignored: a failed
-    // Unitize of the normal leaves (0, 0, 1) in the x axis, the others unwritten)
-    // (with the opt-in fix this status and the box's are passed on,
+    // build an unitorthonormal basis from crPlaneNormal (status ignored upstream: a
+    // failed Unitize of the normal leaves (0, 0, 1) in the x axis, the others
+    // unwritten; as the fork this status and the box's are passed on,
     // tangency-labs/smlib 8311f8e)
-    let pass_on = k.fixes.query_statuses_pass_on;
-    let basis = match plane_normal.make_unit_ortho_vectors(None) {
-        Ok([x, y, z]) => [y, z, x],
-        Err(e) if pass_on => return Err(e),
-        Err(_) => [Vec3::UNDEF, Vec3::UNDEF, plane_normal.unitize_or_z()],
-    };
+    let [x, y, z] = plane_normal.make_unit_ortho_vectors(None)?;
+    let basis = [y, z, x];
 
     // calculate tight pseudo box
     let iv = match interval {
@@ -1915,10 +1980,7 @@ pub fn is_on_plane_base(
         None => curve.natural_interval(),
     };
     let mut pseudo_box = PseudoBox::new();
-    ignore_or_pass_on(
-        curve.calculate_tight_pseudo_box_into(k, &iv, basis, &mut pseudo_box),
-        pass_on,
-    )?;
+    curve.calculate_tight_pseudo_box_into(k, &iv, basis, &mut pseudo_box)?;
 
     // classify the PlanePoint
     let mut on_plane = pseudo_box.contains_point(plane_point, tol);
@@ -1952,14 +2014,75 @@ mod tests {
         ]
     }
 
+    /// The u = 0 side of `query.brep` gen0128's patch: a quadratic B-spline whose control
+    /// points all lie on the z axis, so it runs up the axis, stops and runs back down.
+    const TURNING_Z: [f64; 5] = [
+        0.336_409_316_230_782_1,
+        0.448_428_932_357_200_6,
+        0.412_240_069_159_368_5,
+        -0.128_554_999_916_893,
+        -0.388_250_346_477_554_63,
+    ];
+    /// Its knots.
+    const TURNING_KNOTS: [f64; 8] = [
+        0.0,
+        0.0,
+        0.0,
+        0.324_471_410_413_183_8,
+        0.897_412_383_425_158_5,
+        1.0,
+        1.0,
+        1.0,
+    ];
+    /// Its peak, from exact rational arithmetic on these control points and knots (Bezier
+    /// subdivision and convex hulls in `Fraction`s, to a width of 6e-22), rounded outward.
+    const TURNING_PEAK: (f64, f64) = (0.436_712_872_774_132_9, 0.436_712_872_774_132_95);
+
+    /// (#17685) A coordinate's extreme where the curve stops is in its tight box. The
+    /// curve's tangent is +z or -z wherever it moves, never perpendicular to z, and the
+    /// perpendicular analyses refuse the parameters where it has stopped: the box ended
+    /// at 0.43534, 1.4e-3 below the peak. With the turning points (the roots of `C' . z`,
+    /// isolated by subdivision) it reaches the peak to within 4 ulp and stays on the curve
+    /// (no higher than the peak but for the evaluation's rounding).
+    #[test]
+    fn tight_box_reaches_the_peak_where_a_curve_turns_back() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        let pw = TURNING_Z
+            .iter()
+            .map(|&z| CPoint::new(0.0, 0.0, z, NOW))
+            .collect();
+        let nl = NlCurve::new(pw, 2, TURNING_KNOTS.to_vec()).unwrap();
+        let curve = Curve::from(BSplineCurve::from_nurb(nl, 3, false));
+        let k = Kernel::default();
+        let bx = curve
+            .calculate_tight_bounding_box(&k, &curve.natural_interval())
+            .unwrap();
+        let (lo, hi) = (bx.min(), bx.max());
+        let (peak_lo, peak_hi) = TURNING_PEAK;
+        // The side is the curve at a parameter where z changes by at most its rounding
+        // from the peak: within 4 ulp of the exact interval, on both sides.
+        assert!(
+            hi.z >= peak_lo - 4.0 * f64::EPSILON * peak_lo,
+            "box top {} below the peak {peak_lo}",
+            hi.z
+        );
+        assert!(
+            hi.z <= peak_hi + 4.0 * f64::EPSILON,
+            "box top {} above the peak",
+            hi.z
+        );
+        assert_eq!(lo.z, TURNING_Z[4], "the least is the end");
+        assert_eq!((lo.x, lo.y, hi.x, hi.y), (0.0, 0.0, 0.0, 0.0));
+    }
+
     #[test]
     fn perspective_culling_keeps_a_projected_curve_intersection() {
         use crate::curve::line::{BoundedLineOptions, Line};
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::nurbs::math::{CPoint, NOW};
         // Existing native gen0415: the reference culls this entire sub-domain.
-        let mut k = Kernel::default();
-        k.fixes.perspective_sphere_offsets = true;
+        let k = Kernel::default();
         let end = 3.066334533625111;
         let a = Curve::from(
             BSplineCurve::from_data(
@@ -2047,6 +2170,593 @@ mod tests {
     }
 
     #[test]
+    fn projected_pair_maximum_respects_projection_scale_and_trimmed_domains() {
+        let k = Kernel::default();
+        let a = segment([-1.0, 0.0, -8.0], [1.0, 0.0, 12.0]);
+        let b = segment([-0.5, 0.5, 20.0], [0.5, 0.5, -40.0]);
+        let ia = Extent1d::from_min_max(0.25, 0.75);
+        let ib = Extent1d::from_min_max(0.1, 0.9);
+        for scale in [0.001, 1.0, 1000.0, 0.0] {
+            let normal = [Vec3::new(0.0, 0.0, scale)];
+            let tolerance = 1e-8 * (scale * scale).max(1.0);
+            let opts = CurveSolveOptions {
+                handles: handles(&a, &b),
+                opt_vectors: Some(&normal),
+                ..CurveSolveOptions::default()
+            };
+            let sols = a
+                .global_curve_solve(
+                    &k,
+                    &ia,
+                    &b,
+                    &ib,
+                    SolverOperation::ProjectedMaximize,
+                    tolerance,
+                    &opts,
+                    SolutionRequested::Single,
+                )
+                .unwrap();
+            let found = &sols.as_slice()[0];
+            let [ta, tb] = [found.start.parameters[0], found.start.parameters[1]];
+            assert!(ia.contains_value(ta, 0.0) && ib.contains_value(tb, 0.0));
+            let delta = a.evaluate_point(&k, ta).unwrap() - b.evaluate_point(&k, tb).unwrap();
+            let measured = normal[0].cross(delta).cross(normal[0]).length();
+            assert!((found.start.solution_value - measured).abs() <= tolerance);
+            let expected = 1.06_f64.sqrt() * scale * scale;
+            assert!(
+                (measured - expected).abs() <= tolerance,
+                "scale={scale}, got={measured}"
+            );
+        }
+    }
+
+    #[test]
+    fn projected_pair_maximum_same_curve_distinct_intervals_and_target() {
+        let k = Kernel::default();
+        let a = segment([-1.0, 0.0, 8.0], [1.0, 0.0, -12.0]);
+        let ia = Extent1d::from_min_max(0.1, 0.2);
+        let ib = Extent1d::from_min_max(0.7, 0.9);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        for (target, count) in [(None, 1), (Some(1.5), 1), (Some(2.0), 0)] {
+            let opts = CurveSolveOptions {
+                handles: handles(&a, &a),
+                opt_vectors: Some(&normal),
+                target_distance: target,
+            };
+            let sols = a
+                .global_curve_solve(
+                    &k,
+                    &ia,
+                    &a,
+                    &ib,
+                    SolverOperation::ProjectedMaximize,
+                    1e-8,
+                    &opts,
+                    SolutionRequested::Single,
+                )
+                .unwrap();
+            assert_eq!(sols.len(), count);
+            for found in sols.as_slice() {
+                assert!((found.start.solution_value - 1.6).abs() <= 1e-8);
+                assert!(ia.contains_value(found.start.parameters[0], 0.0));
+                assert!(ib.contains_value(found.start.parameters[1], 0.0));
+            }
+        }
+    }
+
+    #[test]
+    fn projected_pair_maximum_zero_retention_and_cancellation_propagate() {
+        let a = segment([-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let mut k = Kernel::default();
+        let opts = CurveSolveOptions {
+            handles: handles(&a, &a),
+            opt_vectors: Some(&normal),
+            ..CurveSolveOptions::default()
+        };
+        let solve = |k: &Kernel, tol| {
+            a.global_curve_solve(
+                k,
+                &a.natural_interval(),
+                &a,
+                &a.natural_interval(),
+                SolverOperation::ProjectedMaximize,
+                tol,
+                &opts,
+                SolutionRequested::Single,
+            )
+        };
+        let zero = solve(&k, 0.0).unwrap();
+        assert_eq!(zero.len(), 1);
+        assert!((zero.as_slice()[0].start.solution_value - 2.0).abs() <= f64::EPSILON);
+        let token = crate::kernel::CancelToken::new();
+        token.cancel();
+        k.set_cancel_token(token);
+        assert!(matches!(solve(&k, 1e-8), Err(SolidError::Cancelled { .. })));
+    }
+
+    #[test]
+    fn projected_pair_maximum_rational_quadratic_single_variant_1839() {
+        use crate::nurbs::math::CPoint;
+        // Single variant: the original generated record requests All and stays open.
+        let k = Kernel::default();
+        let a = Curve::from(
+            BSplineCurve::from_data(
+                3,
+                2,
+                5,
+                2,
+                &[
+                    CPoint::new(11.842545634155265, 7.344713691606567, 5.46251826429733, 1.0),
+                    CPoint::new(
+                        6.776096256477461,
+                        10.257732173030126,
+                        5.881478943491939,
+                        0.829018189211171,
+                    ),
+                    CPoint::new(
+                        1.8974778199934033,
+                        11.021078891759203,
+                        6.655645433105123,
+                        1.0,
+                    ),
+                ],
+                &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+        );
+        let ia = Extent1d::from_min_max(0.11409671825899509, 0.43561427937496744);
+        let ib = Extent1d::from_min_max(0.03474215986040488, 0.4670833692125368);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let opts = CurveSolveOptions {
+            handles: handles(&a, &a),
+            opt_vectors: Some(&normal),
+            ..CurveSolveOptions::default()
+        };
+        let sols = a
+            .global_curve_solve(
+                &k,
+                &ia,
+                &a,
+                &ib,
+                SolverOperation::ProjectedMaximize,
+                1e-4,
+                &opts,
+                SolutionRequested::Single,
+            )
+            .unwrap();
+        let found = &sols.as_slice()[0];
+        assert!((found.start.solution_value - 4.40801559960347).abs() <= 1e-4);
+        assert!(ia.contains_value(found.start.parameters[0], 0.0));
+        assert!(ib.contains_value(found.start.parameters[1], 0.0));
+    }
+
+    #[test]
+    fn projected_pair_maximum_ellipse_definition_and_stale_form() {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let k = Kernel::default();
+        let mut ellipse = Ellipse::new(
+            &k,
+            Vec3::new(0.0, 0.0, 5.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Extent1d::from_min_max(0.0, 180.0),
+            2.0,
+            1.0,
+            &EllipseOptions {
+                dim: 3,
+                nurb: None,
+                inside_out: false,
+            },
+        )
+        .unwrap();
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let a = Curve::from(ellipse.clone());
+        let solve = |a: &Curve| {
+            a.global_curve_solve(
+                &k,
+                &a.natural_interval(),
+                a,
+                &a.natural_interval(),
+                SolverOperation::ProjectedMaximize,
+                1e-6,
+                &CurveSolveOptions {
+                    handles: handles(a, a),
+                    opt_vectors: Some(&normal),
+                    ..CurveSolveOptions::default()
+                },
+                SolutionRequested::Single,
+            )
+        };
+        let sols = solve(&a).unwrap();
+        assert!((sols.as_slice()[0].start.solution_value - 4.0).abs() <= 1e-6);
+        ellipse.set_radius(9.0); // Deliberately leaves the old net attached.
+        assert!(matches!(
+            solve(&Curve::from(ellipse)),
+            Err(SolidError::Unsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn projected_pair_maximum_generated_line_0844_clips_to_natural_domain() {
+        use crate::curve::line::{BoundedLineOptions, Line};
+        let k = Kernel::default();
+        let natural = Extent1d::from_min_max(-2.44896896704292, 3.5766624083285947);
+        let a = Curve::from(Line::bounded(
+            Vec3::new(-4.587438706180511, -9.529818190209767, 5.027155732575041),
+            Vec3::new(-2.480820988853792, -1.517644966092429, -0.08450541636227982),
+            &natural,
+            &BoundedLineOptions {
+                scale: 2.0,
+                ..BoundedLineOptions::default()
+            },
+        ));
+        let b = a.clone();
+        let ia = Extent1d::from_min_max(-2.9807734864734265, 3.2785985252214527);
+        let ib = Extent1d::from_min_max(1.63857830683894, 3.043140518489156);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let opts = CurveSolveOptions {
+            handles: handles(&a, &b),
+            opt_vectors: Some(&normal),
+            ..CurveSolveOptions::default()
+        };
+        let sols = a
+            .global_curve_solve(
+                &k,
+                &ia,
+                &b,
+                &ib,
+                SolverOperation::ProjectedMaximize,
+                0.5,
+                &opts,
+                SolutionRequested::Single,
+            )
+            .unwrap();
+        let found = &sols.as_slice()[0];
+        assert_eq!(found.start.parameters[0], natural.min());
+        assert_eq!(found.start.parameters[1], ib.max());
+        let delta =
+            a.evaluate_point(&k, natural.min()).unwrap() - b.evaluate_point(&k, ib.max()).unwrap();
+        let expected = normal[0].cross(delta).cross(normal[0]).length();
+        assert!((found.start.solution_value - expected).abs() <= 1e-10);
+    }
+
+    #[test]
+    fn projected_pair_maximum_repeated_knot_keeps_isolated_upper_value() {
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let a = Curve::from(
+            BSplineCurve::from_data(
+                3,
+                3,
+                5,
+                1,
+                &[
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, 0.0, 0.0, NOW),
+                    CPoint::new(5.0, 0.0, 0.0, NOW),
+                    CPoint::new(6.0, 0.0, 0.0, NOW),
+                ],
+                &[0.0, 0.0, 0.5, 0.5, 1.0, 1.0],
+            )
+            .unwrap(),
+        );
+        let b = segment([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let opts = CurveSolveOptions {
+            handles: handles(&a, &b),
+            opt_vectors: Some(&normal),
+            ..CurveSolveOptions::default()
+        };
+        let sols = a
+            .global_curve_solve(
+                &k,
+                &Extent1d::from_min_max(0.0, 0.5),
+                &b,
+                &b.natural_interval(),
+                SolverOperation::ProjectedMaximize,
+                1e-8,
+                &opts,
+                SolutionRequested::Single,
+            )
+            .unwrap();
+        let found = &sols.as_slice()[0];
+        assert_eq!(found.start.parameters[0], 0.5);
+        assert!((found.start.solution_value - 5.0).abs() <= 1e-8);
+    }
+
+    #[test]
+    fn projected_pair_maximum_refuses_rounded_incumbent_boundary() {
+        let k = Kernel::default();
+        let a = segment([-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        // f64 subtraction rounds 2.1 - 0.1 to 2.0, though the exact
+        // difference of those represented inputs is strictly greater than 2.
+        let opts = CurveSolveOptions {
+            handles: handles(&a, &a),
+            opt_vectors: Some(&normal),
+            target_distance: Some(2.1),
+        };
+        let result = a.global_curve_solve(
+            &k,
+            &a.natural_interval(),
+            &a,
+            &a.natural_interval(),
+            SolverOperation::ProjectedMaximize,
+            0.1,
+            &opts,
+            SolutionRequested::Single,
+        );
+        assert!(matches!(
+            result,
+            Err(SolidError::Unsupported {
+                reason: "maximum enclosure straddles the incumbent cutoff",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn projected_pair_maximum_preserves_coordinate_guard() {
+        let k = Kernel::default();
+        let a = segment([0.0, 0.0, 0.0], [1e151, 0.0, 0.0]);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let result = a.global_curve_solve(
+            &k,
+            &a.natural_interval(),
+            &a,
+            &a.natural_interval(),
+            SolverOperation::ProjectedMaximize,
+            1e-6,
+            &CurveSolveOptions {
+                handles: handles(&a, &a),
+                opt_vectors: Some(&normal),
+                ..CurveSolveOptions::default()
+            },
+            SolutionRequested::Single,
+        );
+        assert!(matches!(
+            result,
+            Err(SolidError::InvalidInput {
+                operation: OP_GCS,
+                reason: "curve solve of a curve with a coordinate beyond 1e150",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn projected_pair_maximum_keeps_stored_z_despite_dimension_metadata() {
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        // The native evaluator reads the homogeneous controls' NOZ markers,
+        // rather than discarding stored Z merely because dim is two.
+        let a = Curve::from(
+            BSplineCurve::from_data(
+                2,
+                1,
+                3,
+                1,
+                &[
+                    CPoint::new(0.0, 0.0, -2.0, NOW),
+                    CPoint::new(0.0, 0.0, 3.0, NOW),
+                ],
+                &[0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+        );
+        let normal = [Vec3::new(0.0, 1.0, 0.0)];
+        let sols = a
+            .global_curve_solve(
+                &k,
+                &a.natural_interval(),
+                &a,
+                &a.natural_interval(),
+                SolverOperation::ProjectedMaximize,
+                1e-8,
+                &CurveSolveOptions {
+                    handles: handles(&a, &a),
+                    opt_vectors: Some(&normal),
+                    ..CurveSolveOptions::default()
+                },
+                SolutionRequested::Single,
+            )
+            .unwrap();
+        assert!((sols.as_slice()[0].start.solution_value - 5.0).abs() <= 1e-8);
+    }
+
+    #[test]
+    fn projected_pair_maximum_refuses_nonclamped_definition_domain() {
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let a = Curve::from(
+            BSplineCurve::from_data(
+                3,
+                2,
+                5,
+                2,
+                &[
+                    CPoint::new(10.0, 0.0, 0.0, NOW),
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                ],
+                &[-2.0, -1.0, 0.0, 1.0, 2.0, 3.0],
+            )
+            .unwrap(),
+        );
+        let b = segment([0.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let result = a.global_curve_solve(
+            &k,
+            &a.natural_interval(),
+            &b,
+            &b.natural_interval(),
+            SolverOperation::ProjectedMaximize,
+            1e-8,
+            &CurveSolveOptions {
+                handles: handles(&a, &b),
+                opt_vectors: Some(&normal),
+                ..CurveSolveOptions::default()
+            },
+            SolutionRequested::Single,
+        );
+        assert!(matches!(
+            result,
+            Err(SolidError::Unsupported {
+                reason: "projected pair enclosure requires clamped knot ends",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn projected_pair_maximum_empty_natural_domain_is_empty_success() {
+        let k = Kernel::default();
+        let a = segment([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let sols = a
+            .global_curve_solve(
+                &k,
+                &Extent1d::from_min_max(2.0, 3.0),
+                &a,
+                &a.natural_interval(),
+                SolverOperation::ProjectedMaximize,
+                0.0,
+                &CurveSolveOptions {
+                    handles: handles(&a, &a),
+                    opt_vectors: Some(&normal),
+                    ..CurveSolveOptions::default()
+                },
+                SolutionRequested::Single,
+            )
+            .unwrap();
+        assert!(sols.is_empty());
+    }
+
+    #[test]
+    fn projected_pair_all_public_dispatch_preserves_ties_and_refusals() {
+        let a = segment([-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let b = segment([-0.5, 0.5, 0.0], [0.5, 0.5, 0.0]);
+        let vertical = segment([0.0, 0.0, -1.0], [0.0, 0.0, 1.0]);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let k = Kernel::default();
+        let solve = |other: &Curve| {
+            a.global_curve_solve(
+                &k,
+                &a.natural_interval(),
+                other,
+                &other.natural_interval(),
+                SolverOperation::ProjectedMaximize,
+                0.0,
+                &CurveSolveOptions {
+                    handles: handles(&a, other),
+                    opt_vectors: Some(&normal),
+                    ..CurveSolveOptions::default()
+                },
+                SolutionRequested::All,
+            )
+        };
+        let sols = solve(&b).unwrap();
+        assert_eq!(sols.len(), 2);
+        for solution in sols.as_slice() {
+            assert_eq!(solution.start.solution_value, 2.5_f64.sqrt());
+        }
+        assert!(matches!(
+            solve(&vertical),
+            Err(SolidError::Unsupported {
+                operation: "curve::curve::projected_pair_all",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn projected_pair_maximum_retention_does_not_relax_interior_peak() {
+        use crate::curve::hermite_curve::HermiteCurve;
+        let k = Kernel::default();
+        let a = segment([-1.0, 0.0, 7.0], [1.0, 0.0, -9.0]);
+        // y(t) = 1 - (t - 0.3)^2 has its strict maximum between the
+        // initial endpoint/midpoint samples. Projection discards varying z.
+        let b = Curve::from(HermiteCurve::new(
+            Vec3::new(0.0, 0.91, 2.0),
+            Vec3::new(0.0, 0.6, 3.0),
+            Vec3::new(0.0, 0.51, 5.0),
+            Vec3::new(0.0, -1.4, 3.0),
+            3,
+        ));
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let opts = CurveSolveOptions {
+            handles: handles(&a, &b),
+            opt_vectors: Some(&normal),
+            ..CurveSolveOptions::default()
+        };
+        let solve = |tolerance| {
+            a.global_curve_solve(
+                &k,
+                &a.natural_interval(),
+                &b,
+                &b.natural_interval(),
+                SolverOperation::ProjectedMaximize,
+                tolerance,
+                &opts,
+                SolutionRequested::Single,
+            )
+        };
+        let zero = solve(0.0).unwrap();
+        let slack = solve(0.5).unwrap();
+        let exact = 2.0_f64.sqrt();
+        let point = &zero.as_slice()[0].start;
+        assert!((point.solution_value - exact).abs() < 2e-14);
+        assert_eq!(point.parameters, slack.as_slice()[0].start.parameters);
+        assert_eq!(
+            point.solution_value,
+            slack.as_slice()[0].start.solution_value
+        );
+    }
+
+    #[test]
+    fn projected_pair_maximum_includes_constrained_corners() {
+        let k = Kernel::default();
+        let a = segment([-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let b = segment([-0.5, 0.5, 0.0], [0.5, 0.5, 0.0]);
+        let normal = [Vec3::new(0.0, 0.0, 1.0)];
+        let opts = CurveSolveOptions {
+            handles: handles(&a, &b),
+            opt_vectors: Some(&normal),
+            ..CurveSolveOptions::default()
+        };
+        let sols = a
+            .global_curve_solve(
+                &k,
+                &a.natural_interval(),
+                &b,
+                &b.natural_interval(),
+                SolverOperation::ProjectedMaximize,
+                1e-8,
+                &opts,
+                SolutionRequested::Single,
+            )
+            .unwrap();
+        assert_eq!(sols.len(), 1);
+        let solution = &sols.as_slice()[0];
+        let expected = 2.5_f64.sqrt();
+        assert!(
+            (solution.start.solution_value - expected).abs() <= 1e-8,
+            "reported={}, expected={expected}",
+            solution.start.solution_value
+        );
+        let ta = solution.start.parameters[0];
+        let tb = solution.start.parameters[1];
+        assert!(a.natural_interval().contains_value(ta, 0.0));
+        assert!(b.natural_interval().contains_value(tb, 0.0));
+        let measured = a
+            .evaluate_point(&k, ta)
+            .unwrap()
+            .distance(b.evaluate_point(&k, tb).unwrap());
+        assert!((solution.start.solution_value - measured).abs() <= 1e-8);
+    }
+
+    #[test]
     fn minimum_between_parallel_segments() {
         let k = Kernel::default();
         let a = segment([0.0, 0.0, 0.0], [4.0, 0.0, 0.0]);
@@ -2126,8 +2836,7 @@ mod tests {
         use crate::geom::axis2_placement::Axis2Placement;
         use crate::nurbs::b_spline_curve::NurbCircleParam;
 
-        let mut k = Kernel::default();
-        k.fixes.curve_tight_box_interval_knots = true;
+        let k = Kernel::default();
         let frame = Axis2Placement::new(
             Vec3::from_array([0.0, 0.0, 0.0]),
             Vec3::from_array([1.0, 0.0, 0.0]),
@@ -2147,11 +2856,6 @@ mod tests {
         let ivl = arc.natural_interval();
         // Half the arc: from its start to the midpoint of its interval (0 deg to 45 deg).
         let half = Extent1d::from_min_max(ivl.min(), 0.5 * (ivl.max() - ivl.min()) + ivl.min());
-        let pinned = arc
-            .calculate_tight_bounding_box(&Kernel::default(), &half)
-            .expect("upstream tight box over a sub-interval");
-        assert!(pinned.u_min().abs() < 1e-6);
-        assert!((pinned.v_max() - 50.0).abs() < 1e-6);
         let bx = arc
             .calculate_tight_bounding_box(&k, &half)
             .expect("tight box over a sub-interval");

@@ -30,8 +30,8 @@
 //!   passed in, the step's own `sSheetMarkLock` is claimed and released inside).
 //! - **Statuses.** Upstream ignores the `SmFaceProps::SetProps` statuses of
 //!   `Cache_FaceProps_Stage2` and every `CreateUVTrimCurves` failure (a `WARN`), and
-//!   `Cache_FaceProps_Stage3` reacts only to `SM_ERR_NOTYET_HEAL_FACE`. Those
-//!   statuses ([`SolidError::Upstream`], NURBS failures) are ignored here too;
+//!   `Cache_FaceProps_Stage3` reacts only to `SM_ERR_NOTYET_HEAL_FACE`
+//!   ([`HealFailure::NotYetHealable`]). Those statuses (the healing and NURBS failures) are ignored here too;
 //!   [`SolidError::Unported`], [`SolidError::InvalidInput`] (a null pointer upstream
 //!   dereferences) and [`SolidError::NotFound`] (a dangling id) propagate.
 //!   Stage two takes `&mut Brep` to retain the gap-cache writes of its seam queries,
@@ -57,11 +57,10 @@
 //!   shells; `HealBrep` and `SmApiHealBrep` run the heal sequence of [`super::p3`].
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
+use crate::error::heal::HealFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::context::{MarkLock, ALL_MARKS};
-use crate::heal::face_props::{
-    HealerOpType, LoopObject, MixedLinkType, PropStage, SM_ERR_NOTYET_HEAL_FACE, SS_NONE,
-};
+use crate::heal::face_props::{HealerOpType, LoopObject, MixedLinkType, PropStage, SS_NONE};
 use crate::kernel::Kernel;
 use crate::math::BIG_DOUBLE;
 use crate::topology::edge::NotifyEnv;
@@ -81,7 +80,7 @@ const OP: &str = "heal::heal_data::p1";
 fn ignore_status(r: Result<()>) -> Result<()> {
     match r {
         Ok(()) => Ok(()),
-        Err(e) if matches!(e, SolidError::Upstream { .. }) || e.is_nurbs_failure() => Ok(()),
+        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(()),
         Err(e) => Err(e),
     }
 }
@@ -661,7 +660,7 @@ impl<O: LoopObject> HealData<O> {
 
                 match rtn {
                     // When Face has NotYet supported problems
-                    Err(SolidError::Upstream { code, .. }) if code == SM_ERR_NOTYET_HEAL_FACE => {
+                    Err(e) if matches!(e.heal_failure(), Some(HealFailure::NotYetHealable)) => {
                         // isolate the face from the heal sequence
                         self.move_to_not_yet_problems(id)?;
 
@@ -1028,13 +1027,25 @@ mod tests {
         // heal sequence of heal_data_p3 runs past Fix_TolSizes (SmBrep::SetTolerance
         // raises the face's tolerance through SmFace::SetTolerance) past
         // Cache_DegenFaces (SmFace::GetEdges, topology.face_p4) and the SmLockBrepBox
-        // (query.brep) up to the SmStitch of heal.stitch_p1 (SmBrep::HealBrep passes
-        // Unported through, ignoring every other status)
+        // (query.brep) up to stage 2 of the face properties, which refuses the face
+        // without surface
         let mut b = Brep::default();
         let face = b
             .add_face_record(Face::new(ShellId::from_index(0)))
             .unwrap();
-        assert!(api_heal_brep(&mut k, Some(&mut b)).is_ok());
+        // SmBrep::HealBrep ignores the healer's status; the fork passes it on (WR-658,
+        // tangency-labs/smlib 60a8a51): here stage 2's refusal of a face without surface
+        let r = api_heal_brep(&mut k, Some(&mut b));
+        assert!(
+            matches!(
+                &r,
+                Err(SolidError::InvalidInput {
+                    operation: "heal::face_props::FaceProps::set_props_stage2",
+                    reason,
+                }) if *reason == "face without surface"
+            ),
+            "{r:?}"
+        );
         let r = h.heal_brep(
             &mut k,
             Some(&mut b),

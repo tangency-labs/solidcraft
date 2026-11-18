@@ -117,6 +117,11 @@ impl PlacedMesh {
 
     /// The definition's display plan mesh at quality `q` (shared by every placement of it) and
     /// this placement.
+    /// The definition's plan meshes, by display quality (made or not yet).
+    pub(super) fn plan_mesh_cells(&self) -> &Arc<[OnceLock<Option<Arc<Mesh>>>; 4]> {
+        &self.plan_meshes
+    }
+
     pub(super) fn source_plan_mesh(&self, q: crate::display_quality::DisplayQuality, name: &str) -> Option<(Arc<Mesh>, crate::Mat)> {
         let cell = self.plan_meshes.get(q.index())?;
         let source = cell
@@ -165,6 +170,19 @@ impl ModelBody {
             self.gpu_plan = old.gpu_plan.clone();
             self.plan_mesh = old.plan_mesh.clone();
             self.opposite_hand = old.opposite_hand.clone();
+        }
+    }
+
+    /// Draw this body, which is `old` moved by `transform` (a body moved to another component),
+    /// from `old`'s triangles and display plans: the very ones for the identity, moved for
+    /// another rigid motion. Moving a pattern of bodies then meshes none of them again.
+    pub(crate) fn drawn_as_moved(&mut self, old: &ModelBody, transform: &crate::Mat) {
+        if crate::is_identity(transform) && same_triangles(&self.body, &old.body) {
+            self.keep_meshes_of(old);
+            self.mesh_placement = old.mesh_placement.clone();
+            self.mirrored_mesh = old.mirrored_mesh.clone();
+        } else {
+            self.mesh_placement = PlacedMesh::new(old, transform).map(Arc::new);
         }
     }
 }
@@ -293,7 +311,10 @@ fn proper_rigid(m: &crate::Mat) -> bool {
 }
 #[cfg(test)]
 mod tests {
+    use solidcore_record::{Plane, Vec2};
+
     use super::*;
+    use solidcraft_geom::tess::EvaluateMesh as _;
 
     #[test]
     fn mesh_outlines_keep_boundaries_and_creases_without_smooth_facet_lines() {
@@ -368,6 +389,32 @@ mod tests {
         assert!(Arc::ptr_eq(&mesh, &nested.mesh()));
     }
 
+    /// A block 100 x 50 x 20 mm seen on a view's plane measures as worked by hand: its size along
+    /// each principal pair of axes, and from an isometric corner (150/sqrt(2) wide, 190/sqrt(6)
+    /// high; the box's extremes are its corners, so the mesh gives them exactly). A body meshed
+    /// already is measured from its own mesh.
+    #[test]
+    fn a_bodys_bounds_on_a_plane_are_its_mesh_seen_on_it() {
+        let block = ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(100., 50., 20.)).unwrap(), 1);
+        let plane = |x: Vec3, y: Vec3| Plane { origin: Vec3::ZERO, x, y };
+        let iso_x = Vec3::new(1., 1., 0.) * (1. / 2f64.sqrt());
+        let iso_y = Vec3::new(-1., 1., 2.) * (1. / 6f64.sqrt());
+        let views = [
+            (plane(Vec3::X, Vec3::Z), (100., 20.)),
+            (plane(Vec3::X, Vec3::Y), (100., 50.)),
+            (plane(Vec3::Y, Vec3::Z), (50., 20.)),
+            (plane(iso_x, iso_y), (150. / 2f64.sqrt(), 190. / 6f64.sqrt())),
+        ];
+        for (basis, (w, h)) in views {
+            let size = block.mesh_bounds_in(&basis).size();
+            assert!((size.x - w).abs() < 1e-9 && (size.y - h).abs() < 1e-9, "{basis:?}: {size:?}");
+        }
+        assert!(block.cached_mesh().is_some(), "an unplaced body measures its own mesh");
+        let moved = Plane { origin: Vec3::new(30., 0., 5.), ..plane(Vec3::X, Vec3::Z) };
+        let b = block.mesh_bounds_in(&moved);
+        assert!(b.min.dist(Vec2::new(-30., -5.)) < 1e-9 && b.max.dist(Vec2::new(70., 15.)) < 1e-9, "{b:?}");
+    }
+
     /// A placement hands out its definition's own meshes and its move without making the moved
     /// copy: every placement of a part gives the same mesh, and that mesh moved is the
     /// placement's own.
@@ -391,13 +438,23 @@ mod tests {
             let (mesh, m) = p.mesh_in_place();
             assert!(Arc::ptr_eq(&mesh, &own), "the definition's mesh, not a copy");
             let bounds = p.mesh_bounds();
+            let tilted = Plane { origin: Vec3::new(1., 2., 3.), x: Vec3::new(0.6, 0.8, 0.), y: Vec3::Z };
+            let seen = p.mesh_bounds_in(&tilted);
             assert!(p.cached_mesh().is_none(), "no moved copy is made");
             let (plan_mesh, pm) = p.plan_mesh_in_place_at(q).unwrap();
             assert!(Arc::ptr_eq(&plan_mesh, &source.plan_mesh_at(q).unwrap()));
             assert_eq!(pm, m);
             let moved = p.mesh();
+            assert!(p.cached_mesh().is_some());
+            let cached = p.mesh_bounds_in(&tilted);
+            assert!(cached.min.dist(seen.min) < 1e-9 && cached.max.dist(seen.max) < 1e-9, "a meshed placement measures its own mesh the same");
             let exact = moved.bounds();
             assert!(bounds.min.dist(exact.min) < 1e-9 && bounds.max.dist(exact.max) < 1e-9, "{bounds:?} vs {exact:?}");
+            let on_plane = moved.positions.iter().fold(solidcraft_geom::Aabb2::EMPTY, |mut b, q| {
+                b.add(tilted.to_local(*q));
+                b
+            });
+            assert!(seen.min.dist(on_plane.min) < 1e-9 && seen.max.dist(on_plane.max) < 1e-9, "{seen:?} vs {on_plane:?}");
             for (a, b) in mesh.positions.iter().zip(&moved.positions) {
                 assert!(crate::apply_point(&m, *a).dist(*b) < 1e-9);
             }
@@ -434,10 +491,10 @@ mod tests {
             let plans: Vec<_> = placed.iter().map(|p| p.display_plan_at(q).unwrap()).collect();
             assert!(source.plan.get(q.index()).unwrap().get().is_some(), "placing plans the definition, in its own cell");
             let own = source.display_plan_at(q).unwrap();
-            let local = own.evaluate();
+            let local = own.evaluate_mesh();
             for (m, plan) in [a, b].iter().zip(&plans) {
                 assert!(!Arc::ptr_eq(plan, &own));
-                let moved = plan.evaluate();
+                let moved = plan.evaluate_mesh();
                 assert_eq!(moved.triangles, local.triangles);
                 for (p, q) in local.positions.iter().zip(&moved.positions) {
                     assert!(crate::apply_point(m, *p).dist(*q) < 1e-9, "{p:?} -> {q:?}");

@@ -135,7 +135,13 @@ pub fn current_version() -> &'static str {
 /// The release workflow built this binary (`SOLIDCRAFT_VERSION` is set there). Anything else is a
 /// development build, which never checks for updates.
 pub fn release_build() -> bool {
-    option_env!("SOLIDCRAFT_VERSION").is_some_and(|v| !v.is_empty()) && !cfg!(debug_assertions)
+    option_env!("SOLIDCRAFT_VERSION").is_some_and(|v| !v.is_empty() && !is_test_version(v)) && !cfg!(debug_assertions)
+}
+
+/// A one-off test build (`0.43.0-test+abc1234`, from test-build.yml): it is not a release, so it
+/// is treated like a development build and never checks for or offers an update.
+pub fn is_test_version(v: &str) -> bool {
+    parse_version(v).is_some_and(|v| v.pre.as_str() == "test")
 }
 
 // ---- installations ----------------------------------------------------------------------------
@@ -200,7 +206,7 @@ pub fn detect(p: &Probe) -> InstallKind {
             if let Some(id) = env("FLATPAK_ID") {
                 return InstallKind::Flatpak(id);
             }
-            if env("SNAP").is_some() && env("SNAP_NAME").is_none_or(|n| n.starts_with("solidcraft")) {
+            if is_snap(&env) {
                 // Locally installed (unasserted) snaps have revisions x1, x2, …
                 return InstallKind::Snap { store: !env("SNAP_REVISION").is_some_and(|r| r.starts_with('x')) };
             }
@@ -233,6 +239,12 @@ pub fn detect(p: &Probe) -> InstallKind {
         "macos" => app_bundle(&exe).map_or(InstallKind::Other, InstallKind::MacApp),
         _ => InstallKind::Other,
     }
+}
+
+/// The SolidCraft Snap is running: `SNAP` is set and `SNAP_NAME`, when set, is ours. SolidCraft
+/// started from a terminal inside another snap (a confined editor) sees that snap's variables.
+pub(crate) fn is_snap(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    env("SNAP").is_some() && env("SNAP_NAME").is_none_or(|n| n.starts_with("solidcraft"))
 }
 
 /// `path` is inside `dir` (Windows paths: case-insensitive).
@@ -666,6 +678,8 @@ pub struct Updater {
     pub installed: Option<Result<install::Outcome, String>>,
     /// A program for the host to start as SolidCraft exits (restart, installer).
     launch: Option<(PathBuf, Vec<String>)>,
+    /// The host should drop process-local graphics fallback overrides for this restart.
+    graphics_restart: bool,
 }
 
 impl Updater {
@@ -690,9 +704,12 @@ pub fn offered(app: &SolveApp) -> Option<&Release> {
     app.preferences.update.offers(r, current_version(), unix_now()).then_some(r)
 }
 
-/// Checks may run here: a release build with the host's HTTP client, or a test feed.
+/// Checks may run here: a release build with the host's HTTP client, or a test feed, unless the
+/// organization's policy turned checks off.
 pub fn available(app: &mut SolveApp) -> bool {
-    !app.updater.off && (app.updater.feed.is_some() || (app.services.http_get.is_some() && app.updater.kind().checks()))
+    !app.updater.off
+        && app.policy.mandatory.check_for_updates != Some(false)
+        && (app.updater.feed.is_some() || (app.services.http_get.is_some() && app.updater.kind().checks()))
 }
 
 /// Per frame: the first frame of each launch starts an automatic check, the open app checks
@@ -702,6 +719,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     // Quitting to restart or install was cancelled (a "save changes?" answered Cancel).
     if app.updater.launch.is_some() && app.docs.quitting.is_none() && !app.quit_requested {
         app.updater.launch = None;
+        app.updater.graphics_restart = false;
     }
     if !app.updater.started {
         app.updater.started = true;
@@ -720,7 +738,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     let launch = !app.updater.launch_checked;
     if app.updater.job.is_none()
         && app.updater.rx.is_none()
-        && app.preferences.check_updates
+        && crate::policy::check_updates(app)
         && app.preferences.update.due(now, launch)
         && available(app)
     {
@@ -916,6 +934,7 @@ fn poll_install(app: &mut SolveApp) {
                 Ok(exe) => install::relaunch_after(program, args, &exe),
                 _ => (program.clone(), args.clone()),
             });
+            app.updater.graphics_restart = false;
             crate::documents::request_quit(app);
         }
         Ok(install::Outcome::Opened(dmg)) => {
@@ -935,8 +954,24 @@ fn poll_install(app: &mut SolveApp) {
 pub fn restart(app: &mut SolveApp) {
     if let Some(Ok(install::Outcome::Restart(program))) = &app.updater.installed {
         app.updater.launch = Some((program.clone(), Vec::new()));
+        app.updater.graphics_restart = false;
         crate::documents::request_quit(app);
     }
+}
+
+/// Apply a saved graphics choice through the ordinary quit/save flow. Cancellation
+/// leaves the app open and tick clears the scheduled relaunch.
+pub fn restart_graphics(app: &mut SolveApp) {
+    if let Some(launch) = app.services.graphics_restart.clone() {
+        app.updater.launch = Some(launch);
+        app.updater.graphics_restart = true;
+        crate::documents::request_quit(app);
+    }
+}
+
+/// Whether the pending launch applies graphics settings, consumed by the native host.
+pub fn take_graphics_restart(app: &mut SolveApp) -> bool {
+    std::mem::take(&mut app.updater.graphics_restart) && app.updater.launch.is_some()
 }
 
 /// For the host, as SolidCraft exits: the program to start (the new version, an installer).
@@ -954,7 +989,7 @@ pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: 
     // squeezed; the icon alone in a narrow bar.
     let full = solidcraft_ui_text::format("update.button_version", &[("version", &version)]);
     let labels = [full.as_str(), solidcraft_ui_text::tr("update.button")];
-    let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update")?;
+    let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update", false)?;
     if response.backing_on_hover_text(solidcraft_ui_text::format("update.available", &[("version", &version)])).clicked() {
         app.updater.open = !app.updater.open;
     }
@@ -1124,7 +1159,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Manual checks also have a visible result when no update can be offered.
 fn show_check_status(app: &mut SolveApp, ctx: &egui::Context) {
-    let (message, warning) = if !available(app) {
+    let (message, warning) = if app.policy.mandatory.check_for_updates == Some(false) {
+        (solidcraft_ui_text::tr("policy.updates_off").to_string(), false)
+    } else if !available(app) {
         (solidcraft_ui_text::tr("update.check_unavailable").to_string(), false)
     } else {
         match &app.updater.status {
@@ -1167,8 +1204,11 @@ enum State {
 pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     let can = available(app);
     let kind = app.updater.kind().clone();
+    let policy = app.policy.mandatory.check_for_updates;
     let note = if kind == InstallKind::Web {
         solidcraft_ui_text::tr("update.prefs_web").to_string()
+    } else if policy == Some(false) {
+        solidcraft_ui_text::tr("policy.updates_off").to_string()
     } else if can && let Some(manager) = app.updater.managed_by().map(str::to_string) {
         solidcraft_ui_text::format("update.prefs_managed", &[("version", current_version()), ("manager", &manager)])
     } else if can {
@@ -1197,7 +1237,8 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::settings_inline_note(ui, &checked);
             }
         } else {
-            ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr("update.check_unavailable"));
+            let why = if policy == Some(false) { "policy.updates_off" } else { "update.check_unavailable" };
+            ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr(why));
         }
         let busy = app.updater.status == Status::Checking;
         let r = ui_kit::button(ui, solidcraft_ui_text::tr("update.check_now"), ui_kit::Button::Enabled(can && !busy));
@@ -1209,10 +1250,24 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
         let help = ui_kit::help_icon(ui, &note);
         crate::scenario::publish_target("prefs:updates_help", help.rect);
     });
-    ui.add_enabled_ui(can, |ui| {
-        let check = ui_kit::checkbox(ui, solidcraft_ui_text::tr("update.check_automatically"), &mut app.preferences.check_updates);
-        crate::scenario::publish_target("prefs:check_updates", check.rect);
-    });
+    match policy {
+        // The organization's answer shows in place of the person's, which is kept for when the policy goes.
+        Some(mut set) => {
+            ui.horizontal_wrapped(|ui| {
+                ui.add_enabled_ui(false, |ui| {
+                    let check = ui_kit::checkbox(ui, solidcraft_ui_text::tr("update.check_automatically"), &mut set);
+                    crate::scenario::publish_target("prefs:check_updates", check.rect);
+                });
+                ui_kit::settings_inline_note(ui, solidcraft_ui_text::tr("policy.set_by_organization"));
+            });
+        }
+        None => {
+            ui.add_enabled_ui(can, |ui| {
+                let check = ui_kit::checkbox(ui, solidcraft_ui_text::tr("update.check_automatically"), &mut app.preferences.check_updates);
+                crate::scenario::publish_target("prefs:check_updates", check.rect);
+            });
+        }
+    }
     if let Some(v) = offered_or_newer(app)
         && offered(app).is_none()
         && ui_kit::button(ui, solidcraft_ui_text::format("update.show", &[("version", &v)]), ui_kit::Button::Normal).clicked()
@@ -1254,11 +1309,16 @@ pub enum Block {
     Paragraph(Vec<Span>),
     /// A list item, at a nesting depth.
     Item(usize, Vec<Span>),
+    /// A row of a `|` table, its cells in order; `header` for the row above the `|---|` line.
+    Row {
+        header: bool,
+        cells: Vec<Vec<Span>>,
+    },
 }
 
 /// The Markdown GitHub release notes use, enough to read them: headings, paragraphs (soft line
-/// breaks joined), `-`/`*` lists, `**strong**`, `` `code` ``, `[links](…)` and bare pull-request
-/// URLs (shown as `#123`, linking to them). Anything else shows as written.
+/// breaks joined), `-`/`*` lists, `|` tables, `**strong**`, `` `code` ``, `[links](…)` and bare
+/// pull-request URLs (shown as `#123`, linking to them). Anything else shows as written.
 pub fn parse_markdown(src: &str) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut para = String::new();
@@ -1277,6 +1337,17 @@ pub fn parse_markdown(src: &str) -> Vec<Block> {
         let indent = line.len() - trimmed.len();
         if trimmed.is_empty() {
             flush(&mut blocks, &mut para, &mut item);
+        } else if let Some(row) = trimmed.strip_prefix('|') {
+            flush(&mut blocks, &mut para, &mut item);
+            let row = row.trim_end().strip_suffix('|').unwrap_or(row);
+            if row.contains('-') && row.chars().all(|c| matches!(c, '-' | ':' | '|' | ' ')) {
+                // The `|---|` line under a header row.
+                if let Some(Block::Row { header, .. }) = blocks.last_mut() {
+                    *header = true;
+                }
+            } else {
+                blocks.push(Block::Row { header: false, cells: row.split('|').map(|cell| inline(cell.trim())).collect() });
+            }
         } else if let Some(h) = trimmed.strip_prefix('#') {
             flush(&mut blocks, &mut para, &mut item);
             blocks.push(Block::Heading(inline(h.trim_start_matches('#').trim())));
@@ -1366,7 +1437,30 @@ fn strip_links(s: &str) -> String {
         .collect()
 }
 
+/// One table row as a line of text: the cells in order, between ` · `, empty ones left out. A
+/// row of a long table reads as an entry led by its first cell (bold), so it wraps to a narrow
+/// window instead of widening it (#7776).
+pub fn row_spans(cells: &[Vec<Span>], header: bool) -> Vec<Span> {
+    let mut out = Vec::new();
+    for (i, cell) in cells.iter().filter(|cell| !cell.is_empty()).enumerate() {
+        if i > 0 {
+            out.push(Span::Text(" · ".into()));
+        }
+        out.extend(cell.iter().cloned().map(|span| match span {
+            Span::Text(s) if i == 0 && !header => Span::Strong(s),
+            span => span,
+        }));
+    }
+    out
+}
+
 fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
+    markdown_blocks(ui, &parse_markdown(src), t);
+}
+
+/// Parsed Markdown, for a text shown every frame that is parsed once (the About dialog's
+/// attributions, #7776).
+pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
     let body = ui.visuals().text_color();
     let job = |spans: &[Span], size: f32, strong: bool, wrap: f32| {
         let mut job = LayoutJob::default();
@@ -1404,25 +1498,32 @@ fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
     };
     // The notes wrap to the card; they never widen it, whatever their lines.
     let width = (ui.available_width() - 2.0 * t.space_8).max(60.0);
-    for block in parse_markdown(src) {
+    for block in blocks {
         match block {
             Block::Heading(spans) => {
                 ui.add_space(4.0);
-                ui.add(egui::Label::new(job(&spans, t.font_heading, true, width)).wrap());
+                ui.add(egui::Label::new(job(spans, t.font_heading, true, width)).wrap());
             }
             Block::Paragraph(spans) => {
-                ui.add(egui::Label::new(job(&spans, t.font_label, false, width)).wrap());
-                links(ui, &spans, 0.0);
+                ui.add(egui::Label::new(job(spans, t.font_label, false, width)).wrap());
+                links(ui, spans, 0.0);
                 ui.add_space(3.0);
             }
+            Block::Row { header, cells } => {
+                let spans = row_spans(cells, *header);
+                let size = if *header { t.font_caption } else { t.font_label };
+                ui.add(egui::Label::new(job(&spans, size, false, width)).wrap());
+                links(ui, &spans, 0.0);
+                ui.add_space(2.0);
+            }
             Block::Item(depth, spans) => {
-                let indent = 6.0 + 12.0 * depth.min(4) as f32;
+                let indent = 6.0 + 12.0 * (*depth).min(4) as f32;
                 ui.horizontal_top(|ui| {
                     ui.add_space(indent);
                     ui.label(RichText::new("•").size(solidcraft_theme::Tokens::get().font_label));
-                    ui.add(egui::Label::new(job(&spans, t.font_label, false, width - indent - 14.0)).wrap());
+                    ui.add(egui::Label::new(job(spans, t.font_label, false, width - indent - 14.0)).wrap());
                 });
-                links(ui, &spans, indent + 14.0);
+                links(ui, spans, indent + 14.0);
             }
         }
     }
