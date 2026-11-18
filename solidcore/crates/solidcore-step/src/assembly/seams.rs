@@ -1925,7 +1925,31 @@ impl Assembly<'_> {
                         b = m;
                     }
                 }
-                let t = 0.5 * (a + b);
+                let mut t = 0.5 * (a + b);
+                // The solve runs through the surface's projection, whose parameter carries its
+                // own rounding, so a crossing it lands a rounding away from where the edge's own
+                // form has a knot is read as that knot exactly: within the record's tolerance of
+                // the solved point, the knot is the crossing. The split vertex then lies where
+                // the form has it, and the trims and the pcurves made beside the split agree
+                // with it exactly; a rounding apart, a loop that runs a whole turn of a form
+                // that closes comes off the pcurve maker a rounding wider than the form's
+                // range, and the clamp that then puts its end on the range leaves the rounding
+                // as a gap the record's check names. A spline's knots are its own; a circle's
+                // form is four quarter arcs, its knots the quarter turns of its parameter.
+                if let Some(p) = c.point(t) {
+                    let near = |k: &f64| *k > lo && *k < hi && c.point(*k).is_some_and(|q| q.dist(p) <= self.tol);
+                    let nearest = |xs: Vec<f64>| xs.into_iter().filter(near).min_by(|x, y| (x - t).abs().total_cmp(&(y - t).abs()));
+                    let candidates: Vec<f64> = match &edge.curve {
+                        BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. } => knots.iter().copied().collect(),
+                        BCurve::Circle { .. } => {
+                            let first = (lo / FRAC_PI_2).floor() as i64;
+                            let last = (hi / FRAC_PI_2).ceil() as i64;
+                            (first..last).map(|k| k as f64 * FRAC_PI_2).collect()
+                        }
+                        _ => Vec::new(),
+                    };
+                    t = nearest(candidates).unwrap_or(t);
+                }
                 // Inside the edge by more than the tolerance along it, measured in length: a split
                 // nearer an end would leave an edge no longer than its tolerance (the end vertex
                 // is then the one on the line, within the tolerance).

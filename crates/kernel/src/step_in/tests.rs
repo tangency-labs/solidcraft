@@ -5534,3 +5534,27 @@ fn repair_without_heal_first_is_the_repair_before_the_heal() {
     let (out, report) = crate::repair(&hair, &crate::RepairOptions { gap: 0.01, patch_holes: false, heal_first: true }).unwrap();
     assert!(report.healed.is_some() && out.face_count() == 7);
 }
+
+/// #18539: a face whose one boundary loop is a whole turn written as a single closed edge (the
+/// way Onshape writes a parallel circle: one `EDGE_CURVE` whose two ends are the same vertex, no
+/// pcurves) reads with the loop inside its face's parameter domain, so the solid measures its
+/// true volume and its whole box. Read before the fix, the pcurve maker followed the rim a whole
+/// turn off the face's form range, the face's domain covered only part of it and the body
+/// measured a fraction of its volume with a box clipped at its rim's edge vertices.
+#[test]
+fn a_cap_whose_rim_is_one_closed_edge_measures_its_whole_volume() {
+    let mut e = Entities::default();
+    let sphere_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = e.add(format!("SPHERICAL_SURFACE('',#{sphere_axis},100.0)"));
+    let rim_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let rim = e.add(format!("CIRCLE('',#{rim_axis},100.0)"));
+    let v = e.vertex([6.12323e-15, 100.0, 0.0]);
+    let edge = e.add(format!("EDGE_CURVE('',#{v},#{v},#{rim},.T.)"));
+    let cap = e.face(&[(edge, true)], sphere);
+    let bottom_axis = e.axis([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let bottom = e.add(format!("PLANE('',#{bottom_axis})"));
+    let base = e.face(&[(edge, false)], bottom);
+    let text = e.solid(&[cap, base]);
+    // The hemisphere: 2 pi R^3 / 3.
+    assert_closed_solid(&text, 2, 2.0 * std::f64::consts::PI * 100.0_f64.powi(3) / 3.0);
+}
