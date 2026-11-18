@@ -1228,6 +1228,31 @@ pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
     picked_chain(body, picks).map(|(_, chain, _)| chain)
 }
 
+/// Points along each edge that `picks`' tangent chains run on into beyond the picked edges
+/// themselves ([`tangent_chain`]): one list per such edge, in chain order, of `per_edge` points
+/// spread evenly inside the edge, never at its ends (solidcore's
+/// [`solidcore_ops::Body::edge_points`]; `per_edge` is held to 1 … its
+/// [`solidcore_ops::EDGE_POINTS_MAX`]). For a caller that
+/// checks which of those edges a blend left as they were: a blend may take part of an edge it
+/// runs past the end of, so its middle alone does not tell. Picks that find no edge are
+/// refused; a mesh body has no chain.
+pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize) -> Result<Vec<Vec<Vec3>>> {
+    let (_, chain, picked) = picked_chain(body, picks)?;
+    let most = usize::try_from(solidcore_ops::EDGE_POINTS_MAX).unwrap_or(1);
+    let per_edge = if per_edge == 0 { 1 } else { per_edge.min(most) };
+    let Some((ops, order)) = body.ops_body() else {
+        return Err(KernelError::Invalid("a mesh body has no tangent chain".into()));
+    };
+    chain
+        .into_iter()
+        .skip(picked)
+        .map(|e| {
+            let points = ops.edge_points(order, e, per_edge).map_err(|err| KernelError::Failed(format!("points along a chain edge: {err}")))?;
+            Ok(points.into_iter().map(|[x, y, z]| Vec3::new(x, y, z)).collect())
+        })
+        .collect()
+}
+
 /// The body's record, the picked edges' tangent chain as its edge indices (the picked edges
 /// first, each once), and how many of those the picks took.
 fn picked_chain(body: &Body, picks: &[Vec3]) -> Result<(Faces, Vec<usize>, usize)> {
