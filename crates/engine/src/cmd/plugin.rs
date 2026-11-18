@@ -58,7 +58,12 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     s.plugin_state.refresh_stored();
     s.plugin_state.packages.insert(package.manifest.id.clone(), p.path.clone());
     let limits = plugin::host_limits_for(s, &package.manifest.id, &package.approval);
-    let limits_error = package.manifest.runtime.as_ref().and_then(|r| limits.check(&r.limits).err()).map(|e| e.to_string());
+    let limits_error = package
+        .manifest
+        .runtime
+        .as_ref()
+        .and_then(|r| limits.check(&r.limits).err())
+        .map(|error| plugin::PluginFailure { plugin: package.manifest.name.clone(), file: None, error }.text());
     serde_json::to_value(InspectResult {
         manifest: package.manifest,
         approval: package.approval,

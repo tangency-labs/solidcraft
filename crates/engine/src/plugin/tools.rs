@@ -118,8 +118,16 @@ fn read_only(plugin: &str, entry: &str, kind: &str, name: &str) -> EngineError {
 /// A failed `<plugin>.<entry>` call's error in words an agent can act on ([`explain`]), with the
 /// grants `session` holds for the plugin.
 pub fn explain_named(session: &Session, manifest: &Manifest, entry: &str, error: EngineError) -> EngineError {
+    let grants = session.plugin_state.grants.get(&manifest.id).cloned().unwrap_or_default();
     match error {
-        EngineError::Plugin(e) => explain(e, manifest, &session.plugin_state.grants.get(&manifest.id).cloned().unwrap_or_default(), entry),
+        EngineError::Plugin(e) => explain(e, manifest, &grants, entry),
+        EngineError::PluginFailed(failure) => {
+            // Keep the catalog's plugin, file and budget details beside the tool's structured refusal.
+            match explain(failure.error.clone(), manifest, &grants, entry) {
+                EngineError::Other(explanation) => EngineError::Other(format!("{} {explanation}", failure.text())),
+                _ => EngineError::PluginFailed(failure),
+            }
+        }
         e => e,
     }
 }
@@ -167,6 +175,7 @@ fn explain(error: HostError, manifest: &Manifest, grants: &Grants, entry: &str) 
             error.into()
         }
         HostError::LimitExceeded { limit } if limit.starts_with("memory exceeds") => missing_grant(id, "memory_mib"),
+        HostError::OverCeiling { limit, .. } if limit == "memory_mib" => missing_grant(id, "memory_mib"),
         _ => error.into(),
     }
 }

@@ -1,6 +1,46 @@
 use super::*;
 use serde_json::{Value, json};
 
+#[test]
+fn named_tool_refusals_keep_plugin_file_and_budget_details() {
+    let session = Session::default();
+    let mut m = manifest();
+    m["runtime"]["permissions"] = json!({"files":[{"name":"project","write":true}]});
+    let manifest = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap();
+    for file in [None, Some("part.smp")] {
+        for (error, structured) in [
+            (
+                HostError::PermissionDenied { permission: "files.write:project".into() },
+                json!({"plugin":"sample","grant":"files.write:project","approve":tools::APPROVE}),
+            ),
+            (
+                HostError::PermissionDenied { permission: format!("{}write-file", craft_plugin::READ_ENTRY_IMPORT) },
+                json!({"plugin":"sample","entry":"make","refused_import":"write-file"}),
+            ),
+            (
+                HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
+                json!({"plugin":"sample","grant":"memory_mib","approve":tools::APPROVE}),
+            ),
+        ] {
+            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), error };
+            let original = failure.text();
+            let explained = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure))).to_string();
+            assert!(explained.starts_with(&original), "{explained}");
+            assert_eq!(structured_tool_error(&explained), Some(structured), "{explained}");
+        }
+        let failure = PluginFailure {
+            plugin: "Sample".into(),
+            file: file.map(String::from),
+            error: HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
+        };
+        let original = failure.text();
+        let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
+        assert!(matches!(unchanged, EngineError::PluginFailed(_)));
+        assert_eq!(unchanged.to_string(), original);
+    }
+    assert!(matches!(explain_named(&session, &manifest, "make", HostError::Cancelled.into()), EngineError::Plugin(HostError::Cancelled)));
+}
+
 fn manifest() -> Value {
     json!({"id":"sample", "name":"Sample", "version":"0.1.0", "capabilities":["commands@0.1"],"runtime":{
         "module":"plugin.wasm","entries":["make"],"commands":["solid.box"],
@@ -25,7 +65,7 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
         |m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(0),
         |m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(30_001),
         |m: &mut Value| m["runtime"]["api"] = json!("solidcraft:plugin@1.0.0"),
-        |m: &mut Value| m["capabilities"] = json!(["commands@0.2"]),
+        |m: &mut Value| m["capabilities"] = json!(["commands@0.3"]),
         |m: &mut Value| m["capabilities"] = json!([]),
         |m: &mut Value| m["runtime"]["commands"] = json!(["solid.no_such_command"]),
         |m: &mut Value| m["runtime"]["permissions"] = json!({"command_groups":["network"]}),
@@ -47,7 +87,7 @@ fn plugin_entries_cannot_shadow_host_commands() {
     m["id"] = json!("solid");
     m["runtime"]["entries"] = json!(["box"]);
     let error = parse_manifest(&serde_json::to_vec(&m).unwrap(), "solid").unwrap_err();
-    assert!(matches!(&error, EngineError::Plugin(HostError::InvalidManifest { field, .. }) if field == "runtime.entries"), "{error}");
+    assert!(matches!(error.host_error(), Some(HostError::InvalidManifest { field, .. }) if field == "runtime.entries"), "{error}");
     assert!(error.to_string().contains("solid.box"));
 }
 
@@ -58,7 +98,7 @@ fn capability_refusals_are_plain_and_name_solidcraft() {
         m["capabilities"] = capabilities;
         parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap_err().to_string()
     };
-    assert_eq!(refusal(json!(["commands@0.2"])), "plugin: needs commands 0.2; update SolidCraft or the plugin");
+    assert_eq!(refusal(json!(["commands@0.3"])), "plugin: needs commands 0.3; update SolidCraft or the plugin");
     assert!(refusal(json!(["commands@0.1", "viewport@0.1"])).contains("needs viewport 0.1, which this version of SolidCraft does not have"));
     let mut old = manifest();
     old["runtime"]["api"] = json!("solidcraft:plugin@1.0.0");
@@ -353,9 +393,12 @@ mod native {
         let inspection = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
         assert_eq!(inspection["within_host_limits"], false);
         assert_eq!(inspection["host_limits"]["max_memory_mib"], 128);
-        assert!(inspection["limits_error"].as_str().unwrap().contains("user host limits"));
+        let refusal = "Sample: it asks for 200000000000 fuel, and plugins may use 100000000000. Raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).";
+        assert_eq!(inspection["limits_error"], refusal);
         let before = s.doc.to_json();
-        assert!(f.run(&mut s).unwrap_err().to_string().contains("user host limits"));
+        let error = f.run(&mut s).unwrap_err();
+        assert_eq!(error.to_string(), refusal);
+        assert_eq!(error.host_error(), Some(&HostError::OverCeiling { limit: "fuel".into(), requested: 200_000_000_000, allowed: 100_000_000_000 }));
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
         s.plugin_limits = HostLimits { max_fuel: 200_000_000_000, max_memory_mib: 256 };
@@ -441,7 +484,7 @@ mod native {
                 let error = f.run(&mut s).unwrap_err();
                 let expected = if write { "files.write:project" } else { "files.read:project" };
                 assert!(
-                    matches!(&error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { permission }) if permission == expected),
+                    matches!(error.host_error(), Some(craft_plugin::HostError::PermissionDenied { permission }) if permission == expected),
                     "write={write}, declared={declared}: {error}"
                 );
                 assert_eq!(std::fs::read(&secret).unwrap(), b"private contents");
@@ -456,8 +499,11 @@ mod native {
         for (code, diagnostic) in [
             ("call $box unreachable", "trap=UnreachableCodeReached"),
             ("call $box i32.const 8 i32.const 1 i32.store", "entry result is not JSON"),
-            ("call $box (loop $forever br $forever)", "trap=OutOfFuel"),
-            ("call $box i32.const 10000 memory.grow drop", "forcing trap when growing memory"),
+            (
+                "call $box (loop $forever br $forever)",
+                "Sample: it used all 100000 fuel it asks for and was stopped. Ask its author to raise its fuel limit.",
+            ),
+            ("call $box i32.const 10000 memory.grow drop", "Sample: it needed more than the 1 MiB of memory it asks for and was stopped."),
             ("call $box i32.const -1 i32.load drop", "trap=MemoryOutOfBounds"),
             ("call $box i32.const 1 i32.const 0 i32.div_u drop", "trap=IntegerDivisionByZero"),
             ("call $box i32.const 2048 i32.const 11 i32.const 1024 i32.const 33 i32.const 0 call $run", "not granted"),
@@ -474,10 +520,7 @@ mod native {
             let history = (s.undo.len(), s.redo.len());
             let message = f.run(&mut s).unwrap_err().to_string();
             assert!(message.contains(diagnostic), "{code}: {message}");
-            if diagnostic == "trap=OutOfFuel" {
-                assert!(message.contains("fuel_consumed=100000"), "{message}");
-                assert!(message.contains("fuel_remaining=0"), "{message}");
-            }
+            assert!(message.starts_with("Sample"), "a plugin's failure names it first: {message}");
             assert_eq!(s.doc.to_json(), before, "{code}");
             assert_eq!((s.undo.len(), s.redo.len()), history, "{code}");
             assert_eq!(s.active_sketch, None);
@@ -541,7 +584,7 @@ mod native {
         let mut s = Session::default();
         let before = s.doc.to_json();
         let error = f.run(&mut s).unwrap_err();
-        assert!(matches!(error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { ref permission }) if permission == "net"));
+        assert!(matches!(error.host_error(), Some(craft_plugin::HostError::PermissionDenied { permission }) if permission == "net"));
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
     }
@@ -563,7 +606,7 @@ mod native {
             let mut s = Session::default();
             let before = s.doc.to_json();
             let error = f.run(&mut s).unwrap_err();
-            assert!(matches!(error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { .. })), "{import}: {error}");
+            assert!(matches!(error.host_error(), Some(craft_plugin::HostError::PermissionDenied { .. })), "{import}: {error}");
             assert!(error.to_string().contains(&import), "{error}");
             assert_eq!(s.doc.to_json(), before);
             assert!(s.undo.is_empty());
@@ -621,7 +664,7 @@ mod native {
             let history = (s.undo.len(), s.redo.len());
             let error = f.run(&mut s).unwrap_err();
             assert!(
-                matches!(error, EngineError::Plugin(craft_plugin::HostError::PermissionDenied { ref permission }) if permission.contains("read entry")),
+                matches!(error.host_error(), Some(craft_plugin::HostError::PermissionDenied { permission }) if permission.contains("read entry")),
                 "{command}: {error}"
             );
             assert_eq!(s.doc.to_json(), before);
@@ -703,7 +746,7 @@ mod native {
                 for scope in [None, Some(scope)] {
                     solidcraft_io::vfs::scoped(scope, || {
                         let error = f.run(&mut s).unwrap_err();
-                        assert!(matches!(error, EngineError::Plugin(HostError::PermissionDenied { .. })), "{write} {name}: {error}");
+                        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { .. })), "{write} {name}: {error}");
                     });
                     assert_eq!(std::fs::read(&target).unwrap(), b"private contents");
                 }
@@ -736,7 +779,7 @@ mod native {
         s.plugin_state.file_grants.push(grant.clone());
         s.plugin_state.grants.insert("another-plugin".into(), Grants { folders: vec![grant], ..Default::default() });
         let error = f.run(&mut s).unwrap_err();
-        assert!(matches!(error, EngineError::Plugin(HostError::PermissionDenied { .. })), "{error}");
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { .. })), "{error}");
         assert!(s.doc.features.is_empty());
     }
 
@@ -763,7 +806,7 @@ mod native {
         s.plugin_state.command_groups.insert("app".into());
         s.plugin_state.grants.insert("another-plugin".into(), Grants { command_groups: BTreeSet::from(["app".into()]), ..Default::default() });
         let error = f.run(&mut s).unwrap_err();
-        assert!(matches!(&error, EngineError::Plugin(HostError::PermissionDenied { permission }) if permission.contains("app")), "{error}");
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("app")), "{error}");
         let bytes =
             solidcraft_io::safe_zip::write(&[("plugin.json", &serde_json::to_vec(&m).unwrap()), ("plugin.wasm", &wat::parse_str(&source).unwrap())])
                 .unwrap();
@@ -773,7 +816,7 @@ mod native {
         s.execute("plugin.install", &json!({"path":zip,"approve":{"command_groups":["app"]}})).unwrap();
         assert_eq!(f.run(&mut s).unwrap()["result"], json!({}));
         s.plugin_state.grants.remove("sample");
-        assert!(matches!(f.run(&mut s), Err(EngineError::Plugin(HostError::PermissionDenied { .. }))));
+        assert!(matches!(f.run(&mut s).err().as_ref().and_then(EngineError::host_error), Some(HostError::PermissionDenied { .. })));
         assert!(s.doc.features.is_empty());
     }
 
@@ -814,7 +857,7 @@ mod native {
         for (mutate, field) in [
             ((|m: &mut Value| m["runtime"]["permissions"] = json!({"net": true})) as fn(&mut Value), "runtime.permissions.net"),
             (|m: &mut Value| m["id"] = json!("Sample"), "id"),
-            (|m: &mut Value| m["capabilities"] = json!(["commands@0.2"]), "capabilities"),
+            (|m: &mut Value| m["capabilities"] = json!(["commands@0.3"]), "capabilities"),
             (|m: &mut Value| m["runtime"]["commands"] = json!(["file.export"]), "runtime.commands"),
             (|m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(60_000), "runtime.limits.deadline_ms"),
             (|m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(200_000_000_000_u64), "runtime.limits.fuel"),
@@ -865,7 +908,10 @@ mod native {
         let path = installed["folder"].clone();
         let approval = s.execute("plugin.inspect", &json!({"path":path})).unwrap()["approval"].clone();
         let params = json!({"path":path,"approval":approval,"entry":"make"});
-        assert!(matches!(s.execute("plugin.run", &params), Err(EngineError::Plugin(HostError::PermissionDenied { .. }))));
+        assert!(matches!(
+            s.execute("plugin.run", &params).err().as_ref().and_then(EngineError::host_error),
+            Some(HostError::PermissionDenied { .. })
+        ));
         s.execute(
             "plugin.install",
             &json!({"path":zip,"replace":true,"approve":{"folders":[{"name":"project","path":f.0,"read":true,"write":false}]}}),
@@ -900,10 +946,7 @@ mod native {
                 std::fs::write(other.0.join("sample/plugin.wasm"), component("call $box call $box")).unwrap();
             }
             let error = other.run(&mut s).unwrap_err();
-            assert!(
-                matches!(&error, EngineError::Plugin(HostError::PermissionDenied { permission }) if permission.contains("re-approval")),
-                "{error}"
-            );
+            assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("re-approval")), "{error}");
             assert!(s.doc.features.is_empty(), "refuse before even non-sensitive plugin edits");
             assert!(s.plugin_state.file_grants.is_empty() && s.plugin_state.command_groups.is_empty());
             assert_eq!(s.plugin_state.grants, grants, "inspection cannot change approved grants");
@@ -926,7 +969,7 @@ mod native {
         let inspected = s.execute("plugin.inspect", &json!({"path":installed})).unwrap();
         let args = json!({"path":installed,"approval":inspected["approval"],"entry":"make"});
         let error = s.execute("plugin.run", &args).unwrap_err();
-        assert!(matches!(&error, EngineError::Plugin(HostError::PermissionDenied { permission }) if permission.contains("re-approval")), "{error}");
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("re-approval")), "{error}");
         assert!(s.doc.features.is_empty());
         assert_eq!(s.plugin_state.grants["sample"].package_hash, old_hash);
         f.install(&mut s, json!({}));
@@ -943,7 +986,7 @@ mod native {
         assert_eq!(legacy.package_hash, None);
         s.plugin_state.grants.insert("sample".into(), legacy.clone());
         let error = f.run(&mut s).unwrap_err();
-        assert!(matches!(&error, EngineError::Plugin(HostError::PermissionDenied { permission }) if permission.contains("re-approval")), "{error}");
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { permission }) if permission.contains("re-approval")), "{error}");
         assert_eq!(s.plugin_state.grants["sample"], legacy);
         assert!(s.doc.features.is_empty() && s.plugin_state.file_grants.is_empty());
         f.install(&mut s, json!({}));
@@ -1322,7 +1365,8 @@ mod importers {
         s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
         let before = s.doc.to_json();
         let failure = s.execute("doc.open", &json!({"path": put(&root, "broken.smp", b"T")})).unwrap_err().to_string();
-        assert!(failure.contains("Sample Importer failed on broken.smp") && failure.contains("UnreachableCodeReached"), "{failure}");
+        assert!(failure.starts_with("Sample Importer could not open broken.smp: it stopped on an error inside the plugin ("), "{failure}");
+        assert!(failure.contains("UnreachableCodeReached") && failure.ends_with("Report this to its author."), "{failure}");
         assert_eq!(s.doc.to_json(), before, "the open design is untouched");
         assert_eq!(s.execute("doc.open", &json!({"path": put(&root, "good.smp", &design())})).unwrap()["bodies"], 1);
         s.disabled_plugins.insert("smp".into());
@@ -1333,6 +1377,37 @@ mod importers {
         assert!(two.execute("doc.open", &json!({"path": put(&root2, "x.smp", &design()), "format": "other.convert"})).is_ok());
         std::fs::remove_dir_all(root).unwrap();
         std::fs::remove_dir_all(root2).unwrap();
+    }
+
+    #[test]
+    fn an_import_failure_names_the_plugin_and_the_file_and_says_not_supported_plainly() {
+        let (mut s, root) = installed("errors", &[("smp", &["smp"], false)]);
+        // A valid file the importer does not convert: "does not support", not "invalid".
+        let error = s.execute("doc.open", &json!({"path": put(&root, "sketch.smp", b"U")})).unwrap_err();
+        assert_eq!(error.to_string(), "Sample Importer does not support sketch.smp: the model has no solids");
+        assert_eq!(error.host_error(), Some(&HostError::Unsupported { reason: "the model has no solids".into() }));
+        // An importer built before 0.2 could only say invalid-input: still named, without the jargon.
+        let error = s.execute("doc.open", &json!({"path": put(&root, "broken.smp", b"I")})).unwrap_err();
+        assert_eq!(error.to_string(), "Sample Importer could not open broken.smp: the model has no solids");
+        // More memory than plugins may use: both numbers, and the two ways to allow it.
+        let path = root.join("plugins/smp/plugin.json");
+        let mut m = importer_manifest("smp", &["smp"], false);
+        m["runtime"]["limits"]["memory_mib"] = json!(2048);
+        std::fs::write(&path, m.to_string()).unwrap();
+        let error = s.execute("doc.open", &json!({"path": put(&root, "big.smp", &design())})).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Sample Importer could not open big.smp: it asks for 2048 MiB of memory, and plugins may use 128 MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file)."
+        );
+        // The time limit, in seconds.
+        m["runtime"]["limits"] = json!({"fuel":100_000_000_000_u64,"memory_mib":2,"deadline_ms":50,"stack_kib":16384});
+        std::fs::write(&path, m.to_string()).unwrap();
+        let error = s.execute("doc.open", &json!({"path": put(&root, "slow.smp", b"L")})).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Sample Importer could not open slow.smp: it ran longer than its time limit of 0.05 s and was stopped. Ask its author to raise its time limit."
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1534,7 +1609,7 @@ mod install_zip {
         std::fs::write(&path, zip(&files)).unwrap();
         let approve = json!({"command_groups":["file"],"folders":[{"name":"project","path":root,"read":true,"write":false}]});
         let error = s.execute("plugin.install", &json!({"path":path,"approval":dry["approval"],"approve":approve})).unwrap_err();
-        assert!(matches!(error, crate::EngineError::Plugin(HostError::InvalidInput { field, .. }) if field == "approval"));
+        assert!(matches!(error.host_error(), Some(HostError::InvalidInput { field, .. }) if field == "approval"));
         assert!(!root.join("plugins").exists(), "even the plugins root and staging folders stay unwritten");
         assert!(s.plugin_state.grants.is_empty());
         assert!(s.plugin_state.packages.is_empty());
@@ -1584,7 +1659,7 @@ mod install_zip {
         ] {
             for dry_run in [false, true] {
                 let error = s.execute("plugin.install", &json!({"path":path,"dry_run":dry_run,"approve":unasked})).unwrap_err();
-                assert!(matches!(error, EngineError::Plugin(HostError::PermissionDenied { .. })), "{error}");
+                assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { .. })), "{error}");
                 assert!(s.plugin_state.grants.is_empty() && !root.join("plugins").exists());
             }
         }
@@ -1595,7 +1670,7 @@ mod install_zip {
         let error = s
             .execute("plugin.install", &json!({"path":read_only,"approve":{"folders":[{"name":"project","path":root,"read":true,"write":true}]}}))
             .unwrap_err();
-        assert!(matches!(error, EngineError::Plugin(HostError::PermissionDenied { .. })));
+        assert!(matches!(error.host_error(), Some(HostError::PermissionDenied { .. })));
         s.execute("plugin.install", &json!({"path":path,"approve":approve})).unwrap();
         let granted = s.plugin_state.grants["sample"].clone();
         assert_eq!(granted.package_hash.as_deref(), Some(read_package(&root.join("plugins/sample").to_string_lossy()).unwrap().approval.as_str()));
@@ -1757,16 +1832,16 @@ mod install_zip {
         assert_eq!(unpack(&stray).unwrap_err(), InstallError::NotOnePlugin);
         let deep = zip(&[("a/b/plugin.json", good), ("a/b/plugin.wasm", b"x")]);
         assert_eq!(unpack(&deep).unwrap_err(), InstallError::NotOnePlugin);
-        let newer = unpack(&zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))[..]), ("plugin.wasm", b"x")])).unwrap_err();
+        let newer = unpack(&zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.3"]))[..]), ("plugin.wasm", b"x")])).unwrap_err();
         assert!(matches!(&newer, InstallError::Manifest(HostError::UnsupportedCapability { .. })), "{newer}");
-        assert_eq!(newer.to_string(), "needs commands 0.2; update SolidCraft or the plugin");
+        assert_eq!(newer.to_string(), "needs commands 0.3; update SolidCraft or the plugin");
         // Through the command: refused, and the plugins folder is never created.
         let (mut s, root) = session("refused");
         let path = put(&root, "slip.zip", &zip(&[("plugin.json", good), ("plugin.wasm", b"x"), ("../evil", b"x")]));
         assert!(s.execute("plugin.install", &json!({"path": path})).is_err());
-        let path = put(&root, "newer.zip", &zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.2"]))[..]), ("plugin.wasm", b"x")]));
+        let path = put(&root, "newer.zip", &zip(&[("plugin.json", &manifest_bytes("gears", json!(["commands@0.3"]))[..]), ("plugin.wasm", b"x")]));
         let error = s.execute("plugin.install", &json!({"path": path})).unwrap_err();
-        assert!(matches!(error, crate::EngineError::Plugin(HostError::UnsupportedCapability { .. })), "{error}");
+        assert!(matches!(error.host_error(), Some(HostError::UnsupportedCapability { .. })), "{error}");
         assert!(!root.join("plugins").exists() && !root.join("evil").exists());
         let _ = std::fs::remove_dir_all(root);
     }

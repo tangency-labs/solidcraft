@@ -2,10 +2,10 @@
 
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
-    API, Effect, Entry, EntryKind, FileGrant, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
+    API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
     MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, valid_id,
 };
-use craft_plugin::{CommandSchema, HostError, PluginHost};
+use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -286,7 +286,13 @@ pub(super) fn package_hash(manifest: &[u8], component: &[u8]) -> String {
     format!("{:x}", digest.finalize())
 }
 
+/// Runs `entry` of `package`. A failure starts with the plugin's name.
 pub fn run(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
+    let name = package.manifest.name.clone();
+    run_package(session, package, entry, params).map_err(messages::named(&name, None))
+}
+
+fn run_package(session: &mut Session, package: Package, entry: &str, params: &serde_json::Value) -> Result<crate::schema::plugin::RunResult> {
     session.plugin_state.refresh_stored();
     if session.disabled_plugins.contains(&package.manifest.id) {
         return Err(error("plugin is disabled"));
@@ -352,12 +358,14 @@ pub mod check;
 pub mod grant_store;
 mod import;
 pub mod install;
+pub mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 mod package;
 #[cfg(not(target_arch = "wasm32"))]
 pub use package::{remove, store_grants, validate_grants};
 
 pub use import::{Importer, describe as describe_importers, import_file, importer_for, importers, open_filters};
+pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;
 mod tools;

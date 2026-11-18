@@ -97,6 +97,9 @@ pub enum EngineError {
     Other(String),
     #[error("plugin: {0}")]
     Plugin(#[from] craft_plugin::HostError),
+    /// A plugin failed while it ran or was refused before it ran: named, with its file.
+    #[error("{}", .0.text())]
+    PluginFailed(Box<plugin::PluginFailure>),
     /// The host's pre-command check ([`Session::set_command_check`]) refused the command; the
     /// message is the reason it gave.
     #[error("{reason}")]
@@ -135,6 +138,14 @@ impl From<solidcraft_kernel::KernelError> for EngineError {
 }
 
 impl EngineError {
+    /// The plugin host's error underneath, for a program to tell refusals apart.
+    pub fn host_error(&self) -> Option<&craft_plugin::HostError> {
+        match self {
+            EngineError::Plugin(error) => Some(error),
+            EngineError::PluginFailed(failure) => Some(&failure.error),
+            _ => None,
+        }
+    }
     /// The error a failed feature's result reports: internal when the kernel caught a panic.
     pub(crate) fn of_feature(r: &solidcraft_doc::FeatureResult, error: String) -> EngineError {
         if r.internal { EngineError::Internal(String::new(), error) } else { EngineError::Other(error) }
