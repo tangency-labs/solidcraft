@@ -128,6 +128,7 @@ fn edges(ui: &mut egui::Ui, handle: &str, side: crate::frame::Side, scrollbar: O
         if response.dragged() {
             ui.ctx().set_cursor_icon(cursor);
         }
+        paint_grip(ui, name, rect, free_left, response.hovered() || response.dragged());
         if response.double_clicked() {
             out = Resize::Reset(axes);
         } else if response.dragged() {
@@ -140,4 +141,36 @@ fn edges(ui: &mut egui::Ui, handle: &str, side: crate::frame::Side, scrollbar: O
         }
     }
     out
+}
+
+/// A visible mark on the side edge and the corner, so the card shows where it can be dragged to
+/// a new size (#18846): two short lines across the middle of the side edge and three diagonal
+/// lines in the corner, drawn stronger while the pointer is on them. The bottom edge, like the
+/// header, is found by its cursor.
+fn paint_grip(ui: &egui::Ui, name: &str, rect: egui::Rect, free_left: bool, active: bool) {
+    let t = solidcraft_theme::Tokens::get();
+    let color = if active { t.form_primary } else { t.form_dim.gamma_multiply(0.6) };
+    let stroke = egui::Stroke::new(1.0, color);
+    let painter = ui.painter();
+    match name {
+        "side" => {
+            let half = (t.space_6 * 2.0).min(rect.height() * 0.5);
+            let y = rect.center().y;
+            for dx in [-1.5, 1.5] {
+                painter.vline(rect.center().x + dx, y - half..=y + half, stroke);
+            }
+        }
+        "corner" => {
+            // The corner's outer point is the card's bottom corner on the free side.
+            let corner = if free_left { rect.left_bottom() } else { rect.right_bottom() };
+            let toward_x = if free_left { 1.0 } else { -1.0 };
+            let inset = 2.0;
+            let tip = corner + egui::vec2(inset * toward_x, -inset);
+            for step in 1..=3 {
+                let d = step as f32 * t.space_6 * 0.5;
+                painter.line_segment([tip + egui::vec2(d * toward_x, 0.0), tip + egui::vec2(0.0, -d)], stroke);
+            }
+        }
+        _ => {}
+    }
 }

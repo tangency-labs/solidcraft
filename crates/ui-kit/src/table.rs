@@ -16,22 +16,53 @@ pub struct Column<'a> {
     manual: Option<f32>,
     /// Held at the left edge while the table scrolls sideways.
     frozen: bool,
+    /// The widest a shared column grows before the rest of the width goes to the other columns.
+    max: Option<f32>,
+    /// The window, not a divider, sizes this column: it has no divider and ignores a stored width.
+    fills: bool,
 }
 
 impl<'a> Column<'a> {
     pub fn new(label: &'a str, width: f32) -> Self {
-        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false, manual: None, frozen: false }
+        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false, manual: None, frozen: false, max: None, fills: false }
     }
 
-    /// Hold the column at a width the user chose by dragging its header divider.
+    /// Hold the column at a width the user chose by dragging its header divider. A `fills`
+    /// column ignores it.
     pub fn manual_width(mut self, width: Option<f32>) -> Self {
-        self.manual = width.filter(|w| w.is_finite() && *w > 0.0);
+        self.manual = width.filter(|w| !self.fills && w.is_finite() && *w > 0.0);
         self
     }
 
-    /// Whether this column still takes a share of the remaining width: flexible and not dragged.
+    /// Stop a flexible column growing at `width`, so the width past it goes to the columns that
+    /// still share. A column held at a dragged width ignores this; one with a larger content
+    /// minimum keeps that minimum.
+    pub fn max_width(mut self, width: Option<f32>) -> Self {
+        self.max = width.filter(|w| w.is_finite() && *w > 0.0);
+        self
+    }
+
+    /// Let the window alone size this column: it keeps taking its share whatever the user drags,
+    /// has no header divider, and ignores a width stored for it earlier. For the flexible column
+    /// meant to take a wider window's spare width (with the others capped by `max_width`).
+    pub fn fills(mut self) -> Self {
+        self.fills = true;
+        self.manual = None;
+        self
+    }
+
+    /// Whether this column still takes a share of the remaining width: flexible and not held at
+    /// a dragged width.
     fn shares(&self) -> bool {
         self.flexible && self.manual.is_none()
+    }
+
+    /// The most this column grows while sharing.
+    fn share_cap(&self) -> Option<f32> {
+        if self.manual.is_some() {
+            return None;
+        }
+        self.max.map(|max| dimension(max).max(self.min_content_width))
     }
 
     /// Share the remaining visible table width using this column's width as its weight.
@@ -148,12 +179,26 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
             break;
         }
         let available = remaining;
+        let portion = |column: &Column<'_>| available * dimension(column.width) / weight;
+        // Columns whose minimum is above their portion keep the minimum first. Caps are applied
+        // only in a pass that froze no minimum, because each minimum frozen shrinks the other
+        // portions and could take them back under their caps.
         let mut frozen = false;
         for ((column, width), share) in columns.iter().zip(&mut widths).zip(&mut sharing) {
-            if *share && *width > available * dimension(column.width) / weight {
+            if *share && *width > portion(column) {
                 *share = false;
                 remaining = (remaining - *width).max(0.0);
                 frozen = true;
+            }
+        }
+        if !frozen {
+            for ((column, width), share) in columns.iter().zip(&mut widths).zip(&mut sharing) {
+                if let Some(cap) = column.share_cap().filter(|cap| *share && portion(column) > *cap) {
+                    *width = cap;
+                    *share = false;
+                    remaining = (remaining - cap).max(0.0);
+                    frozen = true;
+                }
             }
         }
         if !frozen {
@@ -248,7 +293,7 @@ impl Table<'_> {
                 },
             );
             solidcraft_ui_registry::publish_rect(&format!("dialog:column:{}:{}", self.id, column.label), cell);
-            if index + 1 < self.columns.len() && clip_left.is_none_or(|x| cell.right() > x) {
+            if index + 1 < self.columns.len() && !column.fills && clip_left.is_none_or(|x| cell.right() > x) {
                 dividers.push((index, cell.right() + t.space_8 * 0.5));
             }
             left = at.right() + t.space_8;

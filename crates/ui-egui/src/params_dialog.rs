@@ -594,13 +594,15 @@ impl ui_kit::GridSource for ParamGrid<'_> {
         let units = UNITS.iter().map(|u| unit_label(u).to_owned()).collect();
         // Name keeps a larger share and a shared content floor so long identifiers stay readable
         // and every section's columns line up (#8533, #8551 review).
+        // Name, Expression and Value stop at about their width in the default card, so a wider
+        // window goes to Comment. Comment has no divider: the window sizes it (#18846).
         vec![
             GridColumn::new("favorite", "", 0.0, CellKind::Custom).min_content_width(t.space_24 * 3.0),
-            GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(self.name_floor),
+            GridColumn::new("name", "Name", 2.0, CellKind::Text).flex().min_content_width(self.name_floor).max_width(t.form_card_width * 0.75),
             GridColumn::new("unit", "Unit", 0.65, CellKind::Choice(units)).min_content_width(self.unit_width),
-            GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click(),
-            GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex(),
-            GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().edit_on_click(),
+            GridColumn::new("expression", "Expression", 1.5, CellKind::Expression).flex().edit_on_click().max_width(t.form_card_width * 0.75),
+            GridColumn::new("value", "Value", 1.1, CellKind::ReadOnly).flex().max_width(t.form_card_width * 0.5),
+            GridColumn::new("comment", "Comment", 1.0, CellKind::Text).flex().fills().edit_on_click(),
             GridColumn::new("actions", "Actions", 0.0, CellKind::Custom).icon_only().min_content_width(ui_kit::table_row_height()),
         ]
     }
