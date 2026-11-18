@@ -163,45 +163,41 @@ pub fn find_planar_3d_profiles(sk: &Sketch, plane: Plane) -> Vec<Profile3D> {
     }
     key.sort_unstable();
     key.dedup();
-    // A sketch with few enough points spans planes by all of them: a plane can hold just part of
-    // a wire (one tooth of a zigzag) and none of its key points but the ends of that part.
-    if nodes.pts.len() <= MAX_NODES {
-        key = (0..nodes.pts.len()).collect();
-    }
     if edges.is_empty() || key.len() < 3 || key.len() > MAX_NODES {
         return Vec::new();
     }
+    // A sketch with few enough points then spans planes by all of them too: a plane can hold just
+    // part of a wire (one tooth of a zigzag) and none of its key points but the ends of that part.
+    // The key points go first, so a long wire's other points cannot use up `MAX_PLANES` before a
+    // loop listed after it gets its plane.
+    let all: Vec<usize> = if nodes.pts.len() <= MAX_NODES { (0..nodes.pts.len()).collect() } else { Vec::new() };
     // The planes the nodes span, deduplicated. A plane needs at least three edges on it, one of
     // them from a wire, to bound anything this module should report. The sketch plane itself is a
     // candidate too (flat 3D loops take part there); profiles bounded only by in-plane curves are
     // dropped below, so nothing is listed twice.
     let mut candidates: Vec<Candidate> = Vec::new();
-    for i in 0..key.len() {
-        for j in i + 1..key.len() {
-            for k in j + 1..key.len() {
-                let (a, b, c) = (nodes.pts[key[i]], nodes.pts[key[j]], nodes.pts[key[k]]);
-                let (ab, ac) = (b - a, c - a);
-                let n = ab.cross(ac);
-                let len = n.len();
-                if len < 1e-12 || len < 1e-9 * ab.len().max(1e-300) * ac.len().max(1e-300) {
-                    continue;
-                }
-                let (n, off) = canonical(n / len, n.dot(a) / len);
-                let known = candidates.iter().any(|p| (p.n.dot(n) - 1.0).abs() < 1e-9 && (p.off - off).abs() < 1e-6);
-                if known {
-                    continue;
-                }
-                candidates.push(Candidate { n, off, anchor: a });
-                if candidates.len() >= MAX_PLANES {
-                    break;
+    'sets: for set in [&key, &all] {
+        for i in 0..set.len() {
+            for j in i + 1..set.len() {
+                for k in j + 1..set.len() {
+                    let (a, b, c) = (nodes.pts[set[i]], nodes.pts[set[j]], nodes.pts[set[k]]);
+                    let (ab, ac) = (b - a, c - a);
+                    let n = ab.cross(ac);
+                    let len = n.len();
+                    if len < 1e-12 || len < 1e-9 * ab.len().max(1e-300) * ac.len().max(1e-300) {
+                        continue;
+                    }
+                    let (n, off) = canonical(n / len, n.dot(a) / len);
+                    let known = candidates.iter().any(|p| (p.n.dot(n) - 1.0).abs() < 1e-9 && (p.off - off).abs() < 1e-6);
+                    if known {
+                        continue;
+                    }
+                    candidates.push(Candidate { n, off, anchor: a });
+                    if candidates.len() >= MAX_PLANES {
+                        break 'sets;
+                    }
                 }
             }
-            if candidates.len() >= MAX_PLANES {
-                break;
-            }
-        }
-        if candidates.len() >= MAX_PLANES {
-            break;
         }
     }
     candidates.sort_by(|x, y| x.n.x.total_cmp(&y.n.x).then(x.n.y.total_cmp(&y.n.y)).then(x.n.z.total_cmp(&y.n.z)).then(x.off.total_cmp(&y.off)));
