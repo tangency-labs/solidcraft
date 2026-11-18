@@ -250,6 +250,8 @@ async function asset(event) {
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   if (RETIRE || request.method !== "GET" || new URL(request.url).origin !== self.location.origin) return;
+  // A SolidCraft server's API (`solidcraft-cli serve`) is never the app's files: straight to it.
+  if (new URL(request.url).pathname.startsWith(`${PATH}api/`)) return;
   const path = request.url.split(/[?#]/)[0];
   const start = request.mode === "navigate" && (path === url("") || path === url("index.html"));
   event.respondWith(start ? launchOrKept(event) : asset(event));

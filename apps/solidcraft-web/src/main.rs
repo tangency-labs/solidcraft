@@ -26,6 +26,8 @@ mod linked;
 #[cfg(any(target_arch = "wasm32", test))]
 mod mouse_buttons;
 #[cfg(any(target_arch = "wasm32", test))]
+mod server;
+#[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
 
 /// The folder the page serves its fonts from: index.html copies each there, and a drawing's text
@@ -846,6 +848,9 @@ mod web {
                         if ui_kit::button(ui, "Download open design", ui_kit::Button::Normal).clicked() {
                             act = Some(("download_open", String::new()));
                         }
+                        if self.files.server.available() && ui_kit::button(ui, "Files on this server…", ui_kit::Button::Normal).clicked() {
+                            act = Some(("server", String::new()));
+                        }
                     });
                     if !disk::supported() {
                         ui.weak("This browser can't save to a folder: designs stay in this browser. Download design saves a file.");
@@ -966,6 +971,11 @@ mod web {
                     // The file is gone, so there is nothing left to keep forgotten.
                     self.app.home.forgotten.remove(&path);
                 }
+                "server" => {
+                    self.files.panel.set(false);
+                    self.files.server.panel.set(true);
+                    crate::server::refresh(&self.files);
+                }
                 "rename_cancel" => self.renaming = None,
                 "rename" => {
                     if let Some((from, _)) = self.renaming.take() {
@@ -992,6 +1002,183 @@ mod web {
                             Err(e) => self.app.set_status(e, true),
                         }
                     }
+                }
+                _ => {}
+            }
+        }
+
+        /// The server's folder (`solidcraft-cli serve`), one folder at a time: go into a folder,
+        /// open a design, make a folder, and choose where a Save As goes; the token is asked here
+        /// the first time.
+        fn server_panel(&mut self, ctx: &egui::Context) {
+            let server = &self.files.server;
+            if !server.panel.get() || !server.available() {
+                return;
+            }
+            let mut act: Option<(&'static str, String)> = None;
+            let title = if server.save_as.borrow().is_some() { "Save on this server" } else { "Files on this server" };
+            let closed =
+                solidcraft_ui_egui::ui_kit::Window::new(egui::Id::unique("sc_server_files"), "folder", title).cards(4.0).show_body(ctx, |ui| {
+                    if !crate::server::secure_enough() {
+                        ui.label("This server is reached over plain HTTP, so the page won't send it the token. Open it over HTTPS.");
+                        return;
+                    }
+                    if server.needs_token.get() {
+                        ui.label("Enter the token the server was started with. It is kept in this browser.");
+                        let mut token = server.token_input.borrow_mut();
+                        ui.horizontal(|ui| {
+                            let field = ui.add(egui::TextEdit::singleline(&mut *token).password(true).hint_text("Server token"));
+                            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if (ui_kit::button(ui, "Connect", ui_kit::Button::Normal).clicked() || enter) && !token.trim().is_empty() {
+                                act = Some(("token", std::mem::take(&mut *token)));
+                            }
+                        });
+                        return;
+                    }
+                    let dir = server.dir.borrow().clone();
+                    // The path bar: the top, then each folder down to this one.
+                    ui.horizontal_wrapped(|ui| {
+                        if ui_kit::button(ui, "Server", ui_kit::Button::Small).clicked() {
+                            act = Some(("go", String::new()));
+                        }
+                        for (name, path) in crate::server::crumbs(&dir) {
+                            ui.weak("›");
+                            if ui_kit::button(ui, &name, ui_kit::Button::Small).clicked() {
+                                act = Some(("go", path));
+                            }
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if !dir.is_empty() && ui_kit::button(ui, "Up", ui_kit::Button::Normal).clicked() {
+                            act = Some(("go", crate::server::parent(&dir)));
+                        }
+                        if ui_kit::button(ui, "New folder", ui_kit::Button::Normal).clicked() {
+                            *server.new_folder.borrow_mut() = Some(String::new());
+                        }
+                        if ui_kit::button(ui, "Refresh", ui_kit::Button::Normal).clicked() {
+                            act = Some(("refresh", String::new()));
+                        }
+                        if server.save_as.borrow().is_none() {
+                            if ui_kit::button(ui, "Files in this browser…", ui_kit::Button::Normal).clicked() {
+                                act = Some(("browser", String::new()));
+                            }
+                            if ui_kit::button(ui, "Forget token", ui_kit::Button::Normal).clicked() {
+                                act = Some(("forget", String::new()));
+                            }
+                        }
+                    });
+                    if let Some(name) = server.new_folder.borrow_mut().as_mut() {
+                        ui.horizontal(|ui| {
+                            let field = ui.add(egui::TextEdit::singleline(name).hint_text("Folder name"));
+                            let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if (ui_kit::button(ui, "Make folder", ui_kit::Button::Normal).clicked() || enter) && !name.trim().is_empty() {
+                                act = Some(("mkdir", name.clone()));
+                            }
+                        });
+                    }
+                    ui.separator();
+                    let folders = server.folders.borrow().clone();
+                    let entries = server.entries.borrow().clone();
+                    let saving = server.save_as.borrow().is_some();
+                    egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                        let empty = if server.listing.get() { "Reading the folder…" } else { "No folders or designs here yet." };
+                        ui_kit::name_list(ui, "server_files", &["Name", "Size", "Actions"], empty, |list| {
+                            for (name, path) in &folders {
+                                list.row(path, |row| {
+                                    row.name(&format!("{name}/"));
+                                    row.cell(|ui| ui.weak("Folder"));
+                                    row.cell(|ui| {
+                                        if ui_kit::button(ui, "Open", ui_kit::Button::Small).clicked() {
+                                            act = Some(("go", path.clone()));
+                                        }
+                                    });
+                                });
+                            }
+                            for e in &entries {
+                                list.row(&e.path, |row| {
+                                    row.name(&e.name);
+                                    row.cell(|ui| ui.label(format!("{:.1} KB", e.size as f64 / 1024.0)));
+                                    row.cell(|ui| {
+                                        // Saving: a click takes the file's name (to replace it).
+                                        let (label, what) = if saving { ("Use name", "pick_name") } else { ("Open", "open") };
+                                        if ui_kit::button(ui, label, ui_kit::Button::Small).clicked() {
+                                            act = Some((what, if saving { e.name.clone() } else { e.path.clone() }));
+                                        }
+                                    });
+                                });
+                            }
+                        });
+                    });
+                    if let Some(save) = server.save_as.borrow_mut().as_mut() {
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label("Save as");
+                            if ui.add(egui::TextEdit::singleline(&mut save.name).hint_text("Name")).changed() {
+                                save.confirm = false;
+                            }
+                            let name = crate::server::design_name(&save.name);
+                            let taken = entries.iter().any(|e| e.name.eq_ignore_ascii_case(&name));
+                            // A question asked in another folder, or for another name, is not this one.
+                            save.confirm &= taken;
+                            let label = if save.confirm { "Replace" } else { "Save here" };
+                            if ui_kit::button(ui, label, ui_kit::Button::Normal).clicked() {
+                                if taken && !save.confirm {
+                                    save.confirm = true;
+                                } else {
+                                    act = Some(("save_here", name.clone()));
+                                }
+                            }
+                            if save.confirm {
+                                ui.label(format!("{name} is already here. Replace it?"));
+                            }
+                        });
+                    }
+                });
+            let files = self.files.clone();
+            if closed {
+                files.server.panel.set(false);
+                crate::server::finish_save(&files, None);
+            }
+            let Some((what, value)) = act else { return };
+            match what {
+                "token" => {
+                    crate::server::set_token(Some(&value));
+                    files.server.needs_token.set(false);
+                    crate::server::refresh(&files);
+                }
+                "forget" => {
+                    crate::server::set_token(None);
+                    files.server.needs_token.set(true);
+                    files.server.entries.borrow_mut().clear();
+                    files.server.folders.borrow_mut().clear();
+                }
+                "refresh" => crate::server::refresh(&files),
+                "go" => crate::server::go(&files, &value),
+                "mkdir" => {
+                    *files.server.new_folder.borrow_mut() = None;
+                    crate::server::make_folder(&files, &value);
+                }
+                "browser" => {
+                    files.server.panel.set(false);
+                    files.panel.set(true);
+                }
+                "open" => crate::server::open(&files, &value),
+                "pick_name" => {
+                    if let Some(save) = files.server.save_as.borrow_mut().as_mut() {
+                        save.name = value;
+                        save.confirm = false;
+                    }
+                }
+                "save_here" => {
+                    let rel = crate::server::join(&files.server.dir.borrow(), &value);
+                    // Replacing a file chosen here: saved over the version listed, so a change
+                    // someone made since is still refused.
+                    let listed = files.server.entries.borrow().iter().find(|e| e.path == rel).map(|e| e.etag.clone());
+                    match listed {
+                        Some(tag) => files.server.etags.borrow_mut().insert(rel.clone(), tag),
+                        None => files.server.etags.borrow_mut().remove(&rel),
+                    };
+                    crate::server::finish_save(&files, Some(&rel));
                 }
                 _ => {}
             }
@@ -1241,6 +1428,7 @@ mod web {
             let ctx = ui.ctx().clone();
             if self.launch.persists() {
                 self.file_panel(&ctx);
+                self.server_panel(&ctx);
                 self.recovery_prompt(&ctx);
                 self.keep_prompt(&ctx);
             }
@@ -1369,6 +1557,8 @@ mod web {
                         let files = Rc::new(Files::default());
                         if launch.persists() {
                             files::start(&files);
+                            // Served by `solidcraft-cli serve`: its data folder too.
+                            crate::server::detect(&files);
                         }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer) = (files.clone(), files.clone());
@@ -1378,7 +1568,14 @@ mod web {
                             // browser's files window. A command that reads another kind of file
                             // (Insert DXF or SVG, an image, a mesh, settings) gets a file dialog
                             // offering that kind, and runs on the picked file.
+                            // On a SolidCraft server, a design opens from the server's files
+                            // window, which also leads to the computer and the browser's files.
                             pick_open: Some(Box::new(move |exts: &[&str]| match disk::open_route(disk::supported(), exts) {
+                                _ if opener.server.available() && disk::opens_design(exts) => {
+                                    opener.server.panel.set(true);
+                                    crate::server::refresh(&opener);
+                                    Box::pin(std::future::ready(None))
+                                }
                                 disk::OpenRoute::Disk => Box::pin(disk::pick_open(&opener)),
                                 disk::OpenRoute::Upload => Box::pin(files::pick_upload(&opener, exts)),
                                 disk::OpenRoute::Panel => {
@@ -1390,6 +1587,10 @@ mod web {
                             // where the browser can't pick one; everything else is downloaded.
                             pick_save: Some(Box::new(move |name: &str, exts: &[&str]| {
                                 let design = exts.contains(&solidcraft_engine::io::DESIGN_EXT);
+                                // On a SolidCraft server, a design is saved there, by its name.
+                                if design && saver.server.available() {
+                                    return Box::pin(crate::server::pick_save(&saver, name));
+                                }
                                 match disk::save_target(disk::supported(), design) {
                                     SaveTarget::Disk => Box::pin(disk::pick_save(&saver, name)),
                                     SaveTarget::Browser => {
