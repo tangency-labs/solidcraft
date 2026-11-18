@@ -2992,3 +2992,96 @@ mod g5_blend_corner_certificates {
         }
     }
 }
+
+#[cfg(test)]
+mod wr664_near_knot_trims {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::{counts, inputs};
+    use super::*;
+    use solidcore::blend::definition_check::BlendFaceLog;
+    use solidcore::geom::tol::{brep_zone_tol_3d, SmallTopoType};
+
+    /// The rows whose results the near-knot snap (WR-664) moves: name, the golden's status
+    /// and vertex, edge and face counts, which the snap leaves as they were, and the number
+    /// of rail edges.
+    const ROWS: [(&str, [i64; 4], usize); 5] = [
+        ("stubs4-delete-edge-bottle-e8-r0.1", [0, 31, 47, 18], 5),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1", [0, 27, 42, 10], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5", [0, 27, 42, 10], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1", [0, 27, 42, 10], 2),
+        ("stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5", [0, 27, 42, 10], 2),
+    ];
+
+    /// `name` builds with the golden's counts and `rails` rail edges (an edge between a blend
+    /// face the round made and a face it did not make, with knots inside: the traced rail,
+    /// not a one-span end of the blend), and every rail edge starts in a span at
+    /// least as long as the B-rep's zone tolerance: the chord from the edge's start to its
+    /// curve's first knot inside the edge, a lower bound of the span's length. The start is where
+    /// `TrimRailCurves` trims the rail at its vertex's drop. On main the `sphere_diff` rails
+    /// started 9.5e-7 to 9.8e-7 short of their knot at 0.004 (a span of 9.5e-7 to 9.6e-7),
+    /// their control points coinciding there.
+    ///
+    /// Their other ends are not checked here: there the trace's own last span, from knot to
+    /// knot, is 9.5e-7 long on the `sphere_diff` rails, and no trim at a knot can lengthen
+    /// it (on main one of them ended 2.2e-8 past that knot; the snap moves it onto it). The
+    /// snap of an end is `blend::fillet_geom::p5`'s
+    /// `rail_end_snaps_to_a_knot_within_the_zone_tolerance`. The bottle's rails start in long
+    /// spans on main too; its golden pins what the snap moves there.
+    fn check(name: &str, expected: [i64; 4], rails: usize) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        k.blend_face_log = Some(BlendFaceLog::default());
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        assert_eq!(counts(&body, 0), expected, "{name}");
+        let made: Vec<_> = k.blend_face_log.as_ref().unwrap().last().iter().map(|m| m.face).collect();
+        let zone = brep_zone_tol_3d(&k, &body, SmallTopoType::NormalSize);
+        let mut found = 0;
+        for e in p1::edges(&body, None).unwrap() {
+            let faces = edge::faces(&body, e, None).unwrap();
+            if faces.iter().filter(|f| made.contains(f)).count() != 1 {
+                continue;
+            }
+            let curve = edge::curve(&body, e).unwrap().expect("an edge curve");
+            let ivl = edge::interval(&body, e).unwrap();
+            let (knots, _) = curve.knots(&k, None).unwrap();
+            // a traced rail has knots inside; an edge of one span (a blend's end) is no rail
+            let Some(&first) = knots.iter().find(|&&t| t > ivl.min() && t < ivl.max()) else {
+                continue;
+            };
+            found += 1;
+            let start = curve.evaluate_point(&k, ivl.min()).unwrap();
+            let span = start.distance(curve.evaluate_point(&k, first).unwrap());
+            println!("WR664 {name}: rail edge {e:?} starts at {} in a span of {span:e}", ivl.min());
+            assert!(span >= zone, "{name}: rail edge {e:?} starts in a span of {span:e} < {zone:e}");
+        }
+        assert_eq!(found, rails, "{name}: rail edges");
+    }
+
+    #[test]
+    fn bottle_e8_r0_1() {
+        check(ROWS[0].0, ROWS[0].1, ROWS[0].2);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e1_r0_1() {
+        check(ROWS[1].0, ROWS[1].1, ROWS[1].2);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e1_r0_5() {
+        check(ROWS[2].0, ROWS[2].1, ROWS[2].2);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e4_r0_1() {
+        check(ROWS[3].0, ROWS[3].1, ROWS[3].2);
+    }
+
+    #[test]
+    fn sphere_diff_3cylinders_e4_r0_5() {
+        check(ROWS[4].0, ROWS[4].1, ROWS[4].2);
+    }
+}

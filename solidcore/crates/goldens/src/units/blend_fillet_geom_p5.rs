@@ -1289,4 +1289,80 @@ mod tests {
             );
         }
     }
+
+    /// The rail trims the near-knot snap (WR-664) refused with 1006 before it trimmed
+    /// anything: it looked up the solver's first edge use (the fork reads the zone
+    /// tolerance as `SmTol::GetZoneTol3d(GetEdgeuse(0)->GetBrep())`) and refused when
+    /// there was none, although the B-rep it needs is the `target` it is given. These
+    /// cases build their solvers bare (`FilletSolver::new`, no edge uses), as a solver is
+    /// before it is set up on an edge. Each now trims both rails.
+    #[test]
+    fn wr664_rail_trims_of_a_solver_without_edge_uses_build() {
+        let cases = Runner
+            .cases(&CaseContext {
+                root: crate::case::repo_root(),
+                seeds: 16,
+            })
+            .expect("cases");
+        assert_eq!(WR664_TRIMS.len(), 73);
+        for &name in WR664_TRIMS {
+            let case = cases
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("missing {name}"));
+            let i: Inputs = case.parse().expect("inputs");
+            let Query::TrimRails { g } = &i.query else {
+                panic!("{name}: not a rail trim");
+            };
+            let mut rm = RustModel::build(&i.model).expect("model");
+            let solvers: Vec<FilletSolver> = i
+                .solvers
+                .iter()
+                .map(|s| FilletSolver::new(s.approx, s.ang, s.tang))
+                .collect();
+            for gi in 0..i.model.geoms.len() {
+                if let Ok(si) = u32::try_from(geom_solver(&i, gi)) {
+                    let gid = rm.geom(gi).expect("geometry");
+                    rm.fb.geom_mut(gid).expect("geometry").solver = Some(FilletSolverId(si));
+                }
+            }
+            let si = usize::try_from(geom_solver(&i, *g)).expect("a solver");
+            let solver = solvers.get(si).expect("the solver");
+            assert_eq!(
+                solver.edgeuse(0).expect("index 0"),
+                None,
+                "{name}: the solver has an edge use"
+            );
+            let mut k = Kernel::default();
+            k.fixes.fillet_rail_trim_at_near_knot = true;
+            let target = rm.target.clone_standing_for_self().expect("target");
+            let gid = rm.geom(*g).expect("geometry");
+            rm.fb
+                .trim_rail_curves(&k, gid, &solvers, &target)
+                .unwrap_or_else(|e| panic!("{name}: the rail trim is refused: {e:?}"));
+            let fb = &rm.fb;
+            for ii in 0..2 {
+                let rail = fb.geom(gid).expect("geometry").rail(ii).expect("rail");
+                let curve = edge::curve(fb.brep(), rail).expect("curve").expect("rail curve");
+                let ivl = curve.natural_interval();
+                assert!(ivl.min() < ivl.max(), "{name}: rail {ii} trimmed to {ivl:?}");
+            }
+        }
+    }
+
+    /// The rail trims of [`wr664_rail_trims_of_a_solver_without_edge_uses_build`]: the 73
+    /// rows of this unit's golden that build (status 0) and that the edge-use lookup
+    /// refused.
+    const WR664_TRIMS: &[&str] = &[
+        "gen0003", "gen0005", "gen0010", "gen0012", "gen0014", "gen0018", "gen0022", "gen0026",
+        "gen0028", "gen0034", "gen0036", "gen0042", "gen0045", "gen0049", "gen0050", "gen0056",
+        "gen0057", "gen0061", "gen0068", "gen0075", "gen0077", "gen0078", "gen0079", "gen0082",
+        "gen0085", "gen0086", "gen0088", "gen0089", "gen0090", "gen0095", "gen0097", "gen0101",
+        "gen0102", "gen0106", "gen0108", "gen0112", "gen0125", "gen0126", "gen0132", "gen0134",
+        "gen0136", "gen0143", "gen0150", "gen0159", "gen0167", "gen0172", "gen0173", "gen0180",
+        "gen0189", "gen0195", "gen0222", "gen0226", "gen0227", "gen0228", "gen0229", "gen0230",
+        "gen0234", "gen0241", "gen0242", "gen0245", "gen0247", "gen0248", "gen0255", "gen0257",
+        "gen0258", "gen0260", "gen0270", "gen0272", "gen0274", "gen0277", "gen0293", "gen0297",
+        "gen0299",
+    ];
 }
