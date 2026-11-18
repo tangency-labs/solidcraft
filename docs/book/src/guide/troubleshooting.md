@@ -155,8 +155,10 @@ SolidCraft on Windows starts Vulkan first and loads no other graphics API when V
 graphics card. Direct3D 12 and then OpenGL are tried only on a computer without one (older Intel
 graphics, virtual machines, Remote Desktop). A Vulkan device that fails to start falls back to
 Direct3D 12, then to software rendering. From 0.11.1 until this change Direct3D 12 came first;
-before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together. If the Vulkan driver
-crashes the app while it starts, choose **Direct3D 12** below.
+before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together. A computer with an Intel
+graphics card (including laptops that draw on another card) starts Direct3D 12 first and loads
+no Vulkan driver, since Intel's crashed SolidCraft 0.44.0 and 0.44.1 at startup. If the Vulkan
+driver crashes the app while it starts, choose **Direct3D 12** below.
 
 Choose **Preferences > Graphics > Graphics API** to select an API for the next start.
 The page shows the current API separately from the saved choice. **Automatic** keeps

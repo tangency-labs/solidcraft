@@ -1850,8 +1850,8 @@ fn startup_step(step: &'static str, detail: &str) {
 }
 
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe). The
-/// backends come from `startup::choose_backends` (on Windows Vulkan first, and only the backend
-/// in use is started); `preference` is `graphics.json`'s `backend`.
+/// backends come from `startup::choose_backends` (on Windows Vulkan first, D3D12 first with an
+/// Intel card, and only the backend in use is started); `preference` is `graphics.json`'s `backend`.
 fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuConfiguration {
     // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's
     // `WgpuConfiguration::default()` is HIGH_THROUGHPUT (two frames queued), which added a frame
@@ -1862,7 +1862,19 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         // A retry applies only to this launch. WGPU_BACKEND always has priority.
         let retry = std::env::var(startup::RETRY_BACKEND_ENV).ok();
         let preference = if cpu { preference } else { retry.as_deref().or(preference) };
-        if let Some(backends) = startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, startup::has_hardware_adapter) {
+        // D3D12's list is read once: it says whether there is an Intel card (#18683) and, with
+        // one, whether D3D12 has a card. Reading it loads no Vulkan driver.
+        let dx12 = std::cell::OnceCell::new();
+        let dx12_adapters = || dx12.get_or_init(|| startup::adapters_alone(eframe::wgpu::Backends::DX12)).clone();
+        let intel_gpu = || startup::intel_gpu_listed(dx12_adapters().iter().map(|a| (a.vendor, a.device_type)));
+        let has_hardware = |b: eframe::wgpu::Backends| {
+            if b == eframe::wgpu::Backends::DX12 {
+                dx12_adapters().iter().any(|a| a.device_type != eframe::wgpu::DeviceType::Cpu)
+            } else {
+                startup::has_hardware_adapter(b)
+            }
+        };
+        if let Some(backends) = startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, intel_gpu, has_hardware) {
             solidcraft_engine::note!("SolidCraft graphics: starting {backends:?}");
             setup.instance_descriptor.backends = backends;
         }
@@ -1905,7 +1917,10 @@ fn safe_wgpu_options(cpu: bool, failed: Option<&str>) -> eframe::egui_wgpu::Wgpu
         } else if std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| v.trim().is_empty()) || std::env::var_os(startup::WGPU_BACKEND_ENV).is_none()
         {
             // WGPU_BACKEND always has priority; otherwise the failed API is left out.
-            setup.instance_descriptor.backends = startup::safe_backends(setup.instance_descriptor.backends, failed);
+            // With an Intel card on Windows, Vulkan is left out too (#18683).
+            let intel_windows = cfg!(target_os = "windows")
+                && startup::intel_gpu_listed(startup::adapters_alone(eframe::wgpu::Backends::DX12).iter().map(|a| (a.vendor, a.device_type)));
+            setup.instance_descriptor.backends = startup::safe_backends(setup.instance_descriptor.backends, failed, intel_windows);
         }
     }
     solidcraft_engine::note!("SolidCraft graphics: safe graphics mode, wgpu's own backend choice");
