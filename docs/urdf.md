@@ -20,8 +20,8 @@ Next to `robot.urdf` the export writes one binary STL per component, in metres:
   in `robot-base.stl`.
 - `robot-<component>-collision.stl` appears only when a component mixes closed solids with
   open surfaces: it holds the closed ones, which are the collision geometry.
-- `robot-<component>-<decal>.dae` and `robot-<component>-<decal>.png` (or `.jpg`) appear for
-  each decal (**Insert → Decal**, `canvas.decal`) of the component: a COLLADA mesh with texture
+- With `images: true`, `robot-<component>-<decal>.dae` and `robot-<component>-<decal>.png` (or
+  `.jpg`) appear for each shown picture of the component: a COLLADA mesh with texture
   coordinates, and the decal's image beside it. See [Decals](#decals).
 
 Every path is checked before anything is written, including against the folders an agent may
@@ -35,6 +35,7 @@ way, the error names the files already written and the one that failed.
 | `mesh_prefix` | none | Put before each mesh file name. Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
 | `effort` | 1000 | Joint effort limit, in N (sliding) or N m (turning). |
 | `velocity` | 10 | Joint velocity limit, in m/s or rad/s. |
+| `images` | false | Also write each picture shown on the model as a textured visual; see [Decals](#decals). |
 
 URDF requires `effort` and `velocity` on every moving joint. When they are not given, the
 defaults are written and a warning says so. A value that is not a positive number is refused.
@@ -62,8 +63,9 @@ defaults are written and a warning says so. A value that is not a positive numbe
 
 ## Decals
 
-A decal is an image on a face of a part, such as a label, a logo or an ArUco marker. Each shown
-image, placed with **Insert → Decal** or **Insert → Canvas**, becomes one more `<visual>` of
+A decal is an image on a face of a part, such as a label, a logo or an ArUco marker. With
+`images: true` (off by default, so an export made the usual way writes what it always has), each
+shown image, placed with **Insert → Decal** or **Insert → Canvas**, becomes one more `<visual>` of
 every link its component gives, at the same origin as the link's own mesh. Its mesh is a COLLADA file (`.dae`) that names the image as its material's
 texture, so Gazebo (Classic and Sim), RViz and other COLLADA readers draw the image where
 SolidCraft shows it.

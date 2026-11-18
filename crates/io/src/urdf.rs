@@ -753,15 +753,11 @@ fn metres(m: &Mesh) -> Mesh {
 /// one that takes it for a clear surface hides an RGBA image (every SVG is drawn into one)
 /// altogether.
 fn decal_dae(d: &UrdfDecal, image: &str) -> Option<String> {
-    if !d.corners.iter().all(|p| p.is_finite()) {
-        return None;
-    }
-    let [bl, br, _, tl] = d.corners;
-    let normal = (br - bl).cross(tl - bl).normalized()?;
-    let lift = normal * DECAL_LIFT_MM;
-    let front = d.corners.iter().map(|p| (*p + lift) * 1e-3);
-    let back = d.corners.iter().map(|p| (*p - lift) * 1e-3);
-    let positions = front.chain(back).map(triple).collect::<Vec<_>>().join(" ");
+    // The quad lifted clear of the face on both sides, from the kernel.
+    let (normal, front, back) = solidcore_ops::affine::lifted_quad(d.corners.map(|p| [p.x, p.y, p.z]), DECAL_LIFT_MM)?;
+    let normal = Vec3::new(normal[0], normal[1], normal[2]);
+    let metres = |[x, y, z]: [f64; 3]| Vec3::new(x, y, z) * 1e-3;
+    let positions = front.into_iter().chain(back).map(|p| triple(metres(p))).collect::<Vec<_>>().join(" ");
     let normals = format!("{} {}", triple(normal), triple(-normal));
     // Per corner: position, normal, texture coordinate. The front is counter-clockwise about the
     // normal (bottom-left, bottom-right, top-right; bottom-left, top-right, top-left), the back

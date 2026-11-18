@@ -2511,7 +2511,7 @@ fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, 
                 continue;
             }
         };
-        let Some(to_component) = solidcraft_doc::mat_inverse(&doc.component_transform(c.component)) else {
+        let Ok(to_component) = solidcore_ops::affine::inverse(&doc.component_transform(c.component)) else {
             warnings.push(format!("decal `{}`: its component's placement is degenerate: left out", c.name));
             continue;
         };
@@ -2526,7 +2526,10 @@ fn urdf_decals(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, 
         decals.push(solidcraft_io::urdf::UrdfDecal {
             name: c.name.clone(),
             component: c.component,
-            corners: corners.map(|p| solidcraft_doc::apply_point(&to_component, p)),
+            corners: corners.map(|p| {
+                let [x, y, z] = solidcore_ops::affine::apply_point(&to_component, [p.x, p.y, p.z]);
+                solidcore_record::Vec3::new(x, y, z)
+            }),
             image,
         });
     }
@@ -2543,6 +2546,12 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
     // `io::urdf` refuses a prefix XML cannot hold.
     let mesh_prefix = str_(p, "mesh_prefix").unwrap_or("").to_string();
     let mut options = solidcraft_io::UrdfOptions { mesh_prefix, effort: positive("effort")?, velocity: positive("velocity")?, decals: Vec::new() };
+    // The pictures shown on the model are written only when asked for, so an export made the
+    // usual way writes what it always has.
+    let images = match p.get("images") {
+        None | Some(Value::Null) => false,
+        Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`images` must be true or false"))?,
+    };
     let file = std::path::Path::new(path);
     let stem = file.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // Occurrences where they are shown, uncaptured moves included, except those the joint solver
@@ -2567,7 +2576,9 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
         std::borrow::Cow::Owned(doc)
     };
     let mut decal_warnings = Vec::new();
-    options.decals = urdf_decals(&doc, &st, &mut decal_warnings);
+    if images {
+        options.decals = urdf_decals(&doc, &st, &mut decal_warnings);
+    }
     let mut pkg = solidcraft_io::urdf(&doc, &doc.painted(&st), &stem, &options)?;
     pkg.warnings.extend(decal_warnings);
     for name in held {
