@@ -117,7 +117,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
     if !block_magnitudes_ok(&block) {
         return Err(harness("B-rep value above 1e150 (HANG-29)"));
     }
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let conv = &Conventions::EDGEUSE_GRAPH;
     match build_any(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)? {
         Built::Brep(b) => {
@@ -234,7 +234,7 @@ fn put_created_lift(
 /// upstream status (unported, null dereference).
 #[allow(clippy::too_many_lines)]
 fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     // a failing upstream status is reported with the state, like the shim
     let finish = |b: &Brep, mut v: Vec<f64>| -> Result<Vec<f64>, SolidError> {
         put_states(&k, &mut v, b, eu)?;

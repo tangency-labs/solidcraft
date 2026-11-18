@@ -589,16 +589,6 @@ pub struct UpstreamFixes {
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).
     pub geometric_g2_continuity: bool,
-    /// `SmSurface::FindDegenParamForDirection` compares the actual singular parameter
-    /// mapped into `sSIvl` (`s_ivl.evaluate(this_param)` and
-    /// `s_ivl.evaluate(near_best_param)`) with the caller's singular parameter `dS` in
-    /// the "nearly as good and closer to the input" tie-break, so the nearest candidate
-    /// starting guess is chosen on degenerate boundaries whose singular domain is not
-    /// `[0, 1]`; pinned v1.0.1 compares the `[0, 1]` sample fractions `dThisParam` and
-    /// `dNearBestParam` directly against `dS` (WR-57, #2209;
-    /// `plan/upstream-issues/WR-57--addendum-2026-11-01-degen-param-tiebreak.md`). Off
-    /// by default for pinned C++ parity.
-    pub degen_param_tiebreak_uses_actual_param: bool,
     /// `RemoveCoincidentNoEdgeProtoVertex` reports a miss as `false` (WR-73, #848).
     pub proto_vertex_miss_is_false: bool,
     /// `SmSurfaceCache::GetSurfaceContinuity` checks the last internal V knot (`iv + 1 < rVConts.GetSize()`) rather than skipping it (`iv + 1 < rVConts.GetSize() - 1`) (WR-42).
@@ -1062,6 +1052,12 @@ pub struct Kernel {
     /// the kernel copies an operation makes.
     #[cfg(test)]
     pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
+    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-57
+    /// substitution replay ([`crate::surface::surface::replay`]). No hook by default, and
+    /// then it changes nothing. Shared with the kernel copies an operation makes for its
+    /// caches, which call through the same seam.
+    #[cfg(feature = "wr57-replay")]
+    pub replay: crate::surface::surface::replay::ReplaySeam,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1137,6 +1133,8 @@ impl Kernel {
             profiler: crate::profile::Profiler::default(),
             #[cfg(test)]
             strip_probe: Arc::default(),
+            #[cfg(feature = "wr57-replay")]
+            replay: crate::surface::surface::replay::ReplaySeam::default(),
         }
     }
 

@@ -108,7 +108,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_exact_round_classes = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.geometric_g2_continuity = true;
-    f.degen_param_tiebreak_uses_actual_param = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
