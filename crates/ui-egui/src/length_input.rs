@@ -169,6 +169,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             lengths
         }
         D::Shell { thickness } => vec![thickness],
+        D::FingerJoint { clearance, edge_offset, .. } => vec![clearance, edge_offset],
         D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],

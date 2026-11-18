@@ -16,8 +16,8 @@ use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, s
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
-    FeatureNotice, FeatureResult, FilletParams, FilletResult, MirrorParams, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams,
-    PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
+    FeatureNotice, FeatureResult, FilletParams, FilletResult, FingerJointParams, MirrorParams, MoveParams, MoveResult, NoticeAction,
+    OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::schema::features::{PatternCircularParams, PatternPathParams, PatternRectangularParams, PatternResult};
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
@@ -48,6 +48,7 @@ const PATTERN_PATH_CONTRACT: TypedContract<PatternPathParams> = TypedContract::n
 const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
+const FINGER_JOINT_CONTRACT: TypedContract<FingerJointParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -123,6 +124,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&COMBINE_CONTRACT)
         .output(output_schema_for::<CombineResult>)
         .params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
+    CommandSpec::new("solid.finger_joint", "Finger Joint", crate::checked!("solid.finger_joint", finger_joint))
+        .at("SOLID", "MODIFY")
+        .icon("finger_joint")
+        .contract(&FINGER_JOINT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("bodies?: [2 to 32 body names] (default: selected plates, in selection order; each intersecting pair is processed in order with the same settings; failed pairs are unchanged and reported); count?: integer 1…64 (default 3; creates 2 × count + 1 segments along the joint line); clearance?: length expr (each cut expands by half the clearance on each side along and across the joint; default 0 mm; less than a finger width); inverted?: bool (default false; starts and ends with fingers instead of slots); edge_offset?: length expr (default 0 mm; adds this length to each end segment and divides the remainder equally among the other segments); name?"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", crate::checked!("solid.pattern.rectangular", pattern_rect))
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
@@ -2436,6 +2443,50 @@ pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
     Ok(Some(out))
 }
 
+fn finger_joint(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "solid.finger_joint";
+    let bodies = string_list(cmd, p, "bodies")?;
+    let bodies = if bodies.is_empty() {
+        s.selection
+            .iter()
+            .filter_map(|selection| match selection {
+                crate::Sel::Body { name } => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    } else {
+        bodies
+    };
+    if bodies.len() < 2 || bodies.len() > solidcraft_doc::MAX_FINGER_JOINT_BODIES {
+        return Err(bad(cmd, format!("`bodies` must name 2 to {} different bodies", solidcraft_doc::MAX_FINGER_JOINT_BODIES)));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    if bodies.iter().any(|name| !seen.insert(name)) {
+        return Err(bad(cmd, "`bodies` must not repeat a body"));
+    }
+    let count = match p.get("count") {
+        None | Some(Value::Null) => 3,
+        Some(value) => value
+            .as_u64()
+            .filter(|count| (1..=64).contains(count))
+            .and_then(|count| usize::try_from(count).ok())
+            .ok_or_else(|| bad(cmd, "`count` must be an integer from 1 to 64"))?,
+    };
+    for body in &bodies {
+        if s.model.state().body(body).is_none() {
+            return Err(bad(cmd, format!("body `{body}` does not exist")));
+        }
+    }
+    let clearance = expr(p, "clearance").unwrap_or_else(|| "0".into());
+    check_expr(s, &clearance, Kind::Length, cmd, "clearance")?;
+    let edge_offset = expr(p, "edge_offset");
+    if let Some(edge_offset) = &edge_offset {
+        check_expr(s, edge_offset, Kind::Length, cmd, "edge_offset")?;
+    }
+    let inverted = bool_(p, "inverted").unwrap_or(false);
+    add_feature(s, p, FeatureKind::FingerJoint { bodies: bodies.into_iter().map(BodyName).collect(), count, clearance, inverted, edge_offset })
+}
+
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     let normalized = move_matrix_params(p)?;
     let p = normalized.as_ref().unwrap_or(p);
@@ -4688,6 +4739,11 @@ mod thin_extrude_tests;
 #[cfg(test)]
 #[path = "extrude_convention_tests.rs"]
 mod extrude_convention_tests;
+
+#[cfg(test)]
+#[path = "finger_joint_tests.rs"]
+mod finger_joint_tests;
+
 /// `solid.fillet corner?: rolling|g2`: the default keeps the rolling ball's sphere corner, `g2`
 /// sets the corner back and fills it with the G2 patch (`solidcraft_kernel::fillet_g2_corners`),
 /// with `setbacks` naming its distance, and an unknown word is refused.

@@ -105,6 +105,11 @@ cone
     Height = cone.height (Length)
   expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z
 combine
+finger_joint
+  inputs:
+    Clearance = joint.clearance (Length)
+    Edge offset = joint.edge_offset (Length)
+  expressions: joint.clearance, joint.edge_offset
 pattern_rectangular
   inputs:
     Quantity = rect.count1 (Unitless)

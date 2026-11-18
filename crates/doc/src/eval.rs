@@ -3217,6 +3217,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             reads.placed_body(st, body);
             reads.placed_body(st, &tool.body);
         }
+        FeatureKind::FingerJoint { bodies, .. } => {
+            frame = bodies.first().and_then(|name| st.and_then(|st| st.body(name))).map(|b| body_world(doc, b));
+            for body in bodies {
+                reads.placed_body(st, body);
+                reads.body(doc, st, body);
+            }
+        }
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
         // frame: copies of a root block, patterned in a component, move with the component.
@@ -10975,6 +10982,348 @@ fn chamfer_with(
     })
 }
 
+type V3 = [f64; 3];
+
+fn dot3(a: V3, b: V3) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross3(a: V3, b: V3) -> V3 {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+fn unit3(a: V3) -> Option<V3> {
+    let length = dot3(a, a).sqrt();
+    (length.is_finite() && length > 1e-12).then(|| [a[0] / length, a[1] / length, a[2] / length])
+}
+
+/// The unit normal of a plate: a closed solid with two opposite parallel planar faces that
+/// are larger than any other pair. Notches, holes and any outline are fine. `Err` holds why
+/// the body is not a plate.
+fn finger_joint_plate(body: &ModelBody) -> Result<std::result::Result<V3, String>> {
+    let not_plate = |why: &str| Ok(Err(format!("`{}` {why}", body.name)));
+    if body.body.is_mesh() || !body.is_closed() || body.body.shell_count() != 1 || body.body.lumps()?.len() != 1 {
+        return not_plate("is not one closed solid");
+    }
+    let bounds = body.body.exact_bounds()?;
+    let diagonal = bounds.diagonal();
+    if !bounds.min.is_finite() || !bounds.max.is_finite() || !diagonal.is_finite() || diagonal <= 0.0 {
+        return not_plate("has no usable size");
+    }
+    let planar: Vec<(V3, f64)> = body
+        .body
+        .planar_face_areas()?
+        .into_iter()
+        .filter_map(|(normal, area)| {
+            let normal = unit3([normal.x, normal.y, normal.z])?;
+            area.is_finite().then_some((normal, area))
+        })
+        .collect();
+    let score = |normal: V3| {
+        let (mut same, mut opposite) = (0.0, 0.0);
+        for (other, area) in &planar {
+            let cosine = dot3(normal, *other);
+            if cosine > 1.0 - 1e-6 {
+                same += area;
+            } else if cosine < -1.0 + 1e-6 {
+                opposite += area;
+            }
+        }
+        same.min(opposite)
+    };
+    let Some((best, best_score)) = planar.iter().map(|(normal, _)| (*normal, score(*normal))).max_by(|a, b| a.1.total_cmp(&b.1)) else {
+        return not_plate("has no planar faces");
+    };
+    if best_score <= 0.0 {
+        return not_plate("has no two opposite parallel faces");
+    }
+    let rival = planar.iter().any(|(normal, _)| dot3(*normal, best).abs() < 1.0 - 1e-6 && score(*normal) >= best_score * (1.0 - 1e-6));
+    if rival {
+        return not_plate("has no single pair of largest parallel faces, so it is not a plate");
+    }
+    Ok(Ok(best))
+}
+
+fn finger_joint_frame(line: V3, normal: V3, origin: Vec3) -> Result<Mat> {
+    let cross = unit3(cross3(line, normal)).ok_or_else(|| DocError::Invalid("the finger-joint frame is degenerate".into()))?;
+    Ok([
+        [line[0], line[1], line[2], 0.0],
+        [normal[0], normal[1], normal[2], 0.0],
+        [cross[0], cross[1], cross[2], 0.0],
+        [origin.x, origin.y, origin.z, 1.0],
+    ])
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FingerJointInterval {
+    start: f64,
+    end: f64,
+    retained_by_first: bool,
+}
+
+/// Generate logical intervals without constructing geometry or applying allowances.
+fn finger_joint_pattern(span: (f64, f64), count: usize) -> Result<Vec<FingerJointInterval>> {
+    let slots =
+        count.checked_mul(2).and_then(|segments| segments.checked_add(1)).ok_or_else(|| DocError::Invalid("finger count is too large".into()))?;
+    let width = (span.1 - span.0) / slots as f64;
+    if !width.is_finite() || width <= 1e-6 {
+        return Err(DocError::Invalid("the overlap is too short for the requested finger count".into()));
+    }
+    Ok((0..slots)
+        .map(|slot| FingerJointInterval {
+            start: span.0 + width * slot as f64,
+            end: span.0 + width * (slot + 1) as f64,
+            retained_by_first: slot % 2 == 0,
+        })
+        .collect())
+}
+
+/// Apply edge offsets and validate clearance without changing the interval sequence.
+fn finger_joint_allowances(pattern: &mut [FingerJointInterval], span: (f64, f64), edge_offset: f64, clearance: f64) -> Result<()> {
+    let width = (span.1 - span.0 - edge_offset * 2.0) / pattern.len() as f64;
+    if !width.is_finite() || width <= 1e-6 {
+        return Err(DocError::Invalid("edge offset leaves too little overlap for the requested finger count".into()));
+    }
+    if clearance >= width {
+        return Err(DocError::Invalid("clearance must be less than a finger width".into()));
+    }
+    let slots = pattern.len();
+    for (slot, interval) in pattern.iter_mut().enumerate() {
+        interval.start = span.0 + width * slot as f64 + if slot > 0 { edge_offset } else { 0.0 };
+        interval.end = span.0 + width * (slot + 1) as f64 + edge_offset + if slot + 1 == slots { edge_offset } else { 0.0 };
+    }
+    Ok(())
+}
+
+/// Rectangular through-cuts for one contact region, in the plate's normal direction.
+fn finger_joint_tools(
+    overlap: &Body,
+    plate: &Body,
+    frame: Mat,
+    pattern: &[FingerJointInterval],
+    retain_first: bool,
+    clearance: f64,
+) -> Result<Vec<Traced>> {
+    let to_frame = crate::mat_inverse(&frame).ok_or_else(|| DocError::Invalid("the finger-joint frame is degenerate".into()))?;
+    let plate_bounds = kernel::transform_matrix(plate, to_frame)?.exact_bounds()?;
+    let bounds = kernel::transform_matrix(overlap, to_frame)?.exact_bounds()?;
+    let half_clearance = clearance * 0.5;
+    let mut tools = Vec::new();
+    for interval in pattern {
+        if interval.retained_by_first == retain_first {
+            continue;
+        }
+        let slab = kernel::box_solid(
+            Vec3::new(interval.start - half_clearance, plate_bounds.min.y - 1e-6, bounds.min.z - half_clearance),
+            Vec3::new(interval.end + half_clearance, plate_bounds.max.y + 1e-6, bounds.max.z + half_clearance),
+        )?;
+        let slab = kernel::transform_matrix(&slab, frame)?;
+        tools.push(crate::lineage::box_tool(slab));
+    }
+    if tools.len() < 2 {
+        return Ok(tools);
+    }
+    let bodies: Vec<Body> = tools.iter().map(|tool| tool.body.clone()).collect();
+    match kernel::union_apart(&bodies)? {
+        Some(united) => Ok(vec![Traced::step(united, &tools.iter().collect::<Vec<_>>())]),
+        None => Ok(tools),
+    }
+}
+
+fn finger_joint_tools_in_body_frame(tools: Vec<Traced>, body_world: Mat, feature_world: Mat) -> Result<Vec<Traced>> {
+    let inverse = crate::mat_inverse(&body_world).ok_or_else(|| DocError::Invalid("a finger-joint body has an invalid placement".into()))?;
+    let transform = crate::mat_mul(&inverse, &feature_world);
+    tools
+        .into_iter()
+        .map(|tool| {
+            let moved = kernel::transform_matrix(&tool.body, transform)?;
+            Ok(Traced::step(moved, &[&tool]))
+        })
+        .collect()
+}
+
+fn eval_finger_joint_pair(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    bodies: &[crate::BodyName],
+    count: usize,
+    clearance: &crate::Expr,
+    inverted: bool,
+    edge_offset: Option<&crate::Expr>,
+    warning: &mut Option<String>,
+) -> Result<()> {
+    if bodies.len() != 2 || bodies.first() == bodies.get(1) {
+        return Err(DocError::Invalid("a finger joint needs two different bodies".into()));
+    }
+    if !(1..=64).contains(&count) {
+        return Err(DocError::Invalid("finger count must be between 1 and 64".into()));
+    }
+    let first_name = bodies.first().map(|body| body.0.as_str()).ok_or_else(|| DocError::Invalid("a finger joint needs two bodies".into()))?;
+    let second_name = bodies.get(1).map(|body| body.0.as_str()).ok_or_else(|| DocError::Invalid("a finger joint needs two bodies".into()))?;
+    let named = [first_name, second_name];
+    let first = st.body(first_name).ok_or_else(|| DocError::Unknown(format!("body `{first_name}`")))?;
+    let second = st.body(second_name).ok_or_else(|| DocError::Unknown(format!("body `{second_name}`")))?;
+    if first.component != f.component || second.component != f.component {
+        return Err(DocError::Invalid("both finger-joint bodies must be in the feature's active component".into()));
+    }
+    let feature_world = doc.component_transform(f.component);
+    let inverse_feature =
+        crate::mat_inverse(&feature_world).ok_or_else(|| DocError::Invalid("the active component has an invalid placement".into()))?;
+    let first_world = body_world(doc, first);
+    let second_world = body_world(doc, second);
+    let first_to_feature = crate::mat_mul(&inverse_feature, &first_world);
+    let second_to_feature = crate::mat_mul(&inverse_feature, &second_world);
+    let first_geometry = kernel::transform_matrix(&first.body, first_to_feature)?;
+    let second_geometry = kernel::transform_matrix(&second.body, second_to_feature)?;
+    let first_feature = ModelBody::new(first.name.clone(), first_geometry, first.feature);
+    let second_feature = ModelBody::new(second.name.clone(), second_geometry, second.feature);
+    let skipped = |warning: &mut Option<String>, why: String| {
+        append_warning(warning, format!("finger joint left both bodies unchanged: {why}"));
+        Ok(())
+    };
+    let clearance = val(vals, clearance, Kind::Length)?;
+    let edge_offset = match edge_offset {
+        Some(edge_offset) => val(vals, edge_offset, Kind::Length)?,
+        None => 0.0,
+    };
+    if !edge_offset.is_finite() || edge_offset < 0.0 {
+        return Err(DocError::Invalid("edge offset must be a non-negative length".into()));
+    }
+    if !clearance.is_finite() || clearance < 0.0 {
+        return Err(DocError::Invalid("clearance must be a non-negative length".into()));
+    }
+    let first_normal = match finger_joint_plate(&first_feature)? {
+        Ok(normal) => normal,
+        Err(why) => return skipped(warning, why),
+    };
+    let second_normal = match finger_joint_plate(&second_feature)? {
+        Ok(normal) => normal,
+        Err(why) => return skipped(warning, why),
+    };
+    let Some(line) = unit3(cross3(first_normal, second_normal)).filter(|_| cross3(first_normal, second_normal).iter().any(|c| c.abs() > 1e-4)) else {
+        return skipped(warning, "the plates are parallel, so they do not cross".into());
+    };
+    let Some(overlap) = kernel::boolean(&first_feature.body, &second_feature.body, BoolOp::Intersect)? else {
+        return skipped(warning, "the bodies do not overlap".into());
+    };
+    let mut first_cuts = Vec::new();
+    let mut second_cuts = Vec::new();
+    for region in overlap.lumps()? {
+        let centre = region.exact_bounds()?.center();
+        let first_frame = finger_joint_frame(line, first_normal, centre)?;
+        let second_frame = finger_joint_frame(line, second_normal, centre)?;
+        let inverse = crate::mat_inverse(&first_frame).ok_or_else(|| DocError::Invalid("the finger-joint frame is degenerate".into()))?;
+        let local = kernel::transform_matrix(&region, inverse)?.exact_bounds()?;
+        let span = (local.min.x, local.max.x);
+        let mut pattern = finger_joint_pattern(span, count)?;
+        finger_joint_allowances(&mut pattern, span, edge_offset, clearance)?;
+        first_cuts.extend(finger_joint_tools(&region, &first_feature.body, first_frame, &pattern, !inverted, clearance)?);
+        second_cuts.extend(finger_joint_tools(&region, &second_feature.body, second_frame, &pattern, inverted, clearance)?);
+    }
+    let first_tools = finger_joint_tools_in_body_frame(first_cuts, first_world, feature_world)?;
+    let second_tools = finger_joint_tools_in_body_frame(second_cuts, second_world, feature_world)?;
+    if first_tools.is_empty() && second_tools.is_empty() {
+        return skipped(warning, "the pattern has no material to cut".into());
+    }
+    for (name, tools) in named.into_iter().zip([first_tools, second_tools]) {
+        if tools.is_empty() {
+            continue;
+        }
+        let name = name.to_owned();
+        apply_traced(doc, st, f, tools, Operation::Cut, &[name])?;
+    }
+    let first_result = st.body(first_name).ok_or_else(|| DocError::Unknown(format!("body `{first_name}`")))?;
+    let second_result = st.body(second_name).ok_or_else(|| DocError::Unknown(format!("body `{second_name}`")))?;
+    let first_result = kernel::transform_matrix(&first_result.body, first_to_feature)?;
+    let second_result = kernel::transform_matrix(&second_result.body, second_to_feature)?;
+    if kernel::boolean(&first_result, &second_result, BoolOp::Intersect)?.is_some() {
+        return Err(DocError::Invalid("the finger joint leaves an intersection between its bodies".into()));
+    }
+    Ok(())
+}
+
+fn eval_finger_joint(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    bodies: &[crate::BodyName],
+    count: usize,
+    clearance: &crate::Expr,
+    inverted: bool,
+    edge_offset: Option<&crate::Expr>,
+    warning: &mut Option<String>,
+) -> Result<()> {
+    if bodies.len() < 2 || bodies.len() > crate::MAX_FINGER_JOINT_BODIES {
+        return Err(DocError::Invalid(format!("a finger joint needs 2 to {} different bodies", crate::MAX_FINGER_JOINT_BODIES)));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for name in bodies {
+        if !seen.insert(&name.0) {
+            return Err(DocError::Invalid(format!("body `{name}` appears more than once in the finger joint")));
+        }
+        let body = st.body(&name.0).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+        if body.component != f.component {
+            return Err(DocError::Invalid("finger-joint bodies must be in the feature's active component".into()));
+        }
+    }
+    if bodies.len() == 2 {
+        return eval_finger_joint_pair(doc, vals, f, st, bodies, count, clearance, inverted, edge_offset, warning);
+    }
+    if !(1..=64).contains(&count) {
+        return Err(DocError::Invalid("finger count must be between 1 and 64".into()));
+    }
+    let clearance_value = val(vals, clearance, Kind::Length)?;
+    let offset_value = match edge_offset {
+        Some(offset) => val(vals, offset, Kind::Length)?,
+        None => 0.0,
+    };
+    if !clearance_value.is_finite() || clearance_value < 0.0 {
+        return Err(DocError::Invalid("clearance must be a non-negative length".into()));
+    }
+    if !offset_value.is_finite() || offset_value < 0.0 {
+        return Err(DocError::Invalid("edge offset must be a non-negative length".into()));
+    }
+    let feature_world = doc.component_transform(f.component);
+    let inverse = crate::mat_inverse(&feature_world).ok_or_else(|| DocError::Invalid("the active component has an invalid placement".into()))?;
+    let mut applied = 0usize;
+    for (index, first) in bodies.iter().enumerate() {
+        for second in bodies.iter().skip(index + 1) {
+            let pair = [first.clone(), second.clone()];
+            let result = (|| -> Result<Option<ModelState>> {
+                let a = st.body(&first.0).ok_or_else(|| DocError::Unknown(format!("body `{first}`")))?;
+                let b = st.body(&second.0).ok_or_else(|| DocError::Unknown(format!("body `{second}`")))?;
+                let a = kernel::transform_matrix(&a.body, crate::mat_mul(&inverse, &body_world(doc, a)))?;
+                let b = kernel::transform_matrix(&b.body, crate::mat_mul(&inverse, &body_world(doc, b)))?;
+                if kernel::boolean(&a, &b, BoolOp::Intersect)?.is_none() {
+                    return Ok(None);
+                }
+                let mut trial = st.clone();
+                let mut pair_warning = None;
+                eval_finger_joint_pair(doc, vals, f, &mut trial, &pair, count, clearance, inverted, edge_offset, &mut pair_warning)?;
+                if let Some(why) = pair_warning {
+                    return Err(DocError::Invalid(why));
+                }
+                Ok(Some(trial))
+            })();
+            match result {
+                Ok(Some(trial)) => {
+                    *st = trial;
+                    applied += 1;
+                }
+                Ok(None) => {}
+                Err(error) => append_warning(warning, format!("finger joint `{first}` / `{second}` was not applied: {error}")),
+            }
+        }
+    }
+    if applied == 0 && warning.is_none() {
+        append_warning(warning, "finger joint found no intersecting body pairs".into());
+    }
+    Ok(())
+}
+
 fn eval_feature(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -11916,6 +12265,9 @@ fn eval_feature_kind(
                 st.bodies.retain(|b| !tools.iter().any(|t| *t == b.name));
             }
             Ok(())
+        }
+        FeatureKind::FingerJoint { bodies, count, clearance, inverted, edge_offset } => {
+            eval_finger_joint(doc, vals, f, st, bodies, *count, clearance, *inverted, edge_offset.as_ref(), warning)
         }
         FeatureKind::Scale { bodies, origin, factor, factors } => {
             let k = match factors {
@@ -13149,6 +13501,28 @@ fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, 
 pub(crate) fn placed_plane(m: &crate::Mat, plane: &Plane) -> Result<Plane> {
     Plane::new(crate::apply_point(m, plane.origin), crate::apply_vector(m, plane.x), crate::apply_vector(m, plane.y))
         .ok_or_else(|| DocError::Invalid("a sketch plane cannot be placed: the placement is not a rigid motion".into()))
+}
+
+#[cfg(test)]
+mod finger_joint_pattern_tests {
+    use super::{finger_joint_allowances, finger_joint_pattern};
+
+    #[test]
+    fn pattern_and_allowances_keep_alternating_intervals() {
+        let span = (10.0, 60.0);
+        let mut pattern = finger_joint_pattern(span, 2).unwrap();
+        assert_eq!(
+            pattern.iter().map(|interval| (interval.start, interval.end, interval.retained_by_first)).collect::<Vec<_>>(),
+            vec![(10.0, 20.0, true), (20.0, 30.0, false), (30.0, 40.0, true), (40.0, 50.0, false), (50.0, 60.0, true)]
+        );
+        finger_joint_allowances(&mut pattern, span, 5.0, 0.2).unwrap();
+        assert_eq!(
+            pattern.iter().map(|interval| (interval.start, interval.end, interval.retained_by_first)).collect::<Vec<_>>(),
+            vec![(10.0, 23.0, true), (23.0, 31.0, false), (31.0, 39.0, true), (39.0, 47.0, false), (47.0, 60.0, true)]
+        );
+        assert!(finger_joint_allowances(&mut pattern, span, 25.0, 0.0).is_err());
+        assert!(finger_joint_allowances(&mut pattern, span, 5.0, 8.0).is_err());
+    }
 }
 
 #[cfg(test)]

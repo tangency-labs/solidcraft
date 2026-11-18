@@ -286,6 +286,16 @@ construction plane.
 - **For translators:** French uses *fonction* for a timeline feature, so "AI features" had to
   become *fonctionnalités IA*. Translate "feature" only in the timeline sense.
 
+### finger joint
+
+A connection made by alternating rectangular projections on two parts.
+
+- **In SolidCraft:** `solid.finger_joint`; the `FingerJointFeature` timeline feature and its
+  `bodies`, `count`, `clearance`, `inverted` and `edge_offset` parameters.
+- **Don't use:** dovetail joint.
+- **Elsewhere:** box joint, finger joint.
+- **For translators:** a woodworking connection, not an anatomical joint.
+
 ### folder
 
 One of the browser's fixed sections of a component: Bodies, Sketches, Construction, Joints.
@@ -688,7 +698,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
-| | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a minimum distance field | clearance | the Interference and plastic rules dialogs; `solid.finger_joint` |
 | | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
 | Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
 | | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |

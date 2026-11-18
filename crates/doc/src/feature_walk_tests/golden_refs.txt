@@ -38,6 +38,8 @@ torus
 cone
 combine
   remap_bodies: target, tools[0]
+finger_joint
+  remap_bodies: bodies[1]
 pattern_rectangular
   remap_refs: features[0]
   remap_bodies: bodies[0]
