@@ -151,10 +151,13 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
     };
     app.run("select.set", json!({"items": [{"type": "external_sketch_curve", "sketch": sketch, "id": curve}]})).unwrap();
     let items = context_menu::items(&app, &Target::Viewport);
-    // Item for item the browser row's menu, with the viewport's Clear Selection after it.
+    // Item for item the browser row's menu, after the view's Find in Browser and with its Clear
+    // Selection after it.
+    // Test change: Find in Browser now leads the view's menu for a sketch too (#18509).
     let row = context_menu::items(&app, &Target::Sketch { id: sketch });
     let labels = |v: &[Item]| v.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
-    assert_eq!(labels(&items), [labels(&row), vec![String::new(), "Clear Selection".to_string()]].concat());
+    let find_first = vec!["Find in Browser".to_string(), String::new()];
+    assert_eq!(labels(&items), [find_first, labels(&row), vec![String::new(), "Clear Selection".to_string()]].concat());
     let edit = find(&items, "Edit Sketch");
     assert_eq!(edit.id, "ui.editSketch");
     assert_eq!(edit.params, Some(json!({"sketch": sketch})));
@@ -253,6 +256,49 @@ fn face_menu_hides_and_finds_the_body() {
     assert!(matches!(app.session.selection.as_slice(), [solidcraft_engine::Sel::Feature { .. }]));
     context_menu::run_item(&mut app, &find(&items, "Show/Hide"), pos2(0.0, 0.0));
     assert_eq!(app.session.visibility.hidden_bodies, vec![b]);
+}
+
+/// #18509: Find in Browser comes near the top of the view's menu, right after Repeat, once, for
+/// every pick with a Browser row: the body of a face, an edge or a body (the last one picked, as
+/// a pick in the view finds it), a placed component picked as a component, and the sketch of a
+/// sketch curve, point or profile. Empty space and the Browser's own rows have none.
+#[test]
+fn find_in_browser_leads_the_view_menu_for_every_pick() {
+    use solidcraft_engine::Sel;
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+    app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,60,0],"body_name":"Pin"})).unwrap();
+    let part = app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    app.run("component.activate", json!({"component":0})).unwrap();
+    app.run("sketch.create", json!({"plane":"XY","name":"Outline"})).unwrap();
+    app.run("sketch.rectangle.two_point", json!({"p0":[50,0],"p1":[60,10]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("Outline").unwrap().id;
+    app.last_command = Some(("solid.box".into(), "Box".into()));
+    let face = Sel::Face { body: "Plate".into(), index: 0, point: Vec3::ZERO };
+    let picks = [
+        (vec![face], json!({"body": "Plate"})),
+        (vec![Sel::Edge { body: "Plate".into(), index: 0, point: Vec3::ZERO }], json!({"body": "Plate"})),
+        (vec![Sel::Body { name: "Plate".into() }], json!({"body": "Plate"})),
+        (vec![Sel::Body { name: "Plate".into() }, Sel::Body { name: "Pin".into() }], json!({"body": "Pin"})),
+        (vec![Sel::Occurrence { path: vec![part] }], json!({"occurrence": [part]})),
+        (vec![Sel::ExternalSketchCurve { sketch, id: "l1".into() }], json!({"sketch": sketch})),
+        (vec![Sel::ExternalSketchPoint { sketch, id: "p1".into() }], json!({"sketch": sketch})),
+        (vec![Sel::Profile { sketch, index: 0 }], json!({"sketch": sketch})),
+    ];
+    for (selection, params) in picks {
+        app.session.selection = selection.clone();
+        let items = context_menu::items(&app, &Target::Viewport);
+        let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids.get(..4), Some(&["ui.repeat", "-", "ui.findBrowser", "-"][..]), "{selection:?}: {ids:?}");
+        assert_eq!(ids.iter().filter(|id| **id == "ui.findBrowser").count(), 1, "{selection:?}: {ids:?}");
+        assert_eq!(find(&items, "Find in Browser").params, Some(params), "{selection:?}");
+    }
+    app.session.selection.clear();
+    let ids = |app: &SolveApp, target: &Target| context_menu::items(app, target).into_iter().map(|i| i.id).collect::<Vec<_>>();
+    for target in [Target::Viewport, Target::Body { name: "Plate".into() }, Target::Sketch { id: sketch }, Target::Occurrence { path: vec![part] }] {
+        assert!(!ids(&app, &target).iter().any(|id| id == "ui.findBrowser"), "{target:?}");
+    }
 }
 
 /// A curved face, or several faces, offer Press Pull where a flat face offers Create Sketch, Extrude
@@ -1308,9 +1354,11 @@ fn menus_follow_fusion_order() {
     };
     app.run("select.set", json!({"items": [{"type": "face", "body": b, "index": 0, "point": [0, 0, 0]}]})).unwrap();
     let face = context_menu::items(&app, &Target::Viewport);
+    // Test change: Find in Browser moved near the top of the menu (#18509).
     order(
         &face,
         &[
+            "Find in Browser",
             "Create Sketch",
             "Extrude",
             "Offset Plane",
@@ -1321,7 +1369,6 @@ fn menus_follow_fusion_order() {
             "Properties",
             "Delete",
             "Show/Hide",
-            "Find in Browser",
         ],
     );
     assert_eq!(find(&face, "Extrude").shortcut, "E");

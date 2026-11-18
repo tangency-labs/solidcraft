@@ -361,7 +361,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .with(json!({"bodies":[name]})),
         ],
         Target::Body { name } => {
-            let mut v = body_items(app, std::slice::from_ref(name), true);
+            let mut v = body_items(app, std::slice::from_ref(name));
             // A selected browser body hands every selected body to the mesh dialogs (#12334).
             // A row outside the selection still opens them with only the body right-clicked.
             let selected = sel_bodies(app);
@@ -685,6 +685,10 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
         return v;
     }
+    if let Some(find) = find_in_browser(app) {
+        v.push(find);
+        v.push(Item::sep());
+    }
     // A sketch curve or point in the viewport gets the sketch's own menu, the one its browser row
     // opens, with Edit Sketch among it. Solid geometry in the selection keeps the body menu: a
     // right-click on a face still offers the face's commands. The picker already prefers a sketch
@@ -738,7 +742,6 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [face] })));
         v.push(Item::sep());
-        v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature, "body": face })).on(feature.is_some()));
         v.push(Item::sep());
         if one_flat {
@@ -756,13 +759,12 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [body] })));
         v.push(Item::sep());
-        v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": body })));
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [body] })));
         v.push(Item::sep());
         v.push(act("ui.tangentChain", "Select Tangent Chain", "chain"));
         v.push(cmd(app, "inspect.measure", "Measure"));
     } else if has(|s| matches!(s, Sel::Body { .. })) {
-        v.extend(body_items(app, &sel_bodies(app), false));
+        v.extend(body_items(app, &sel_bodies(app)));
     } else if has(|s| matches!(s, Sel::Profile { .. })) {
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.revolve", "Revolve"));
@@ -812,7 +814,21 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     v
 }
 
-fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
+/// Find in Browser for the view's menu, near its top (#18509): the body of the last face, edge or
+/// body picked (as a pick the Browser follows finds it, [`crate::browser::reveal_pick`]), a placed
+/// component picked as one, or the sketch of a sketch curve, point or profile.
+fn find_in_browser(app: &SolveApp) -> Option<Item> {
+    let params = match app.session.selection.last()? {
+        Sel::Occurrence { path } => json!({ "occurrence": path }),
+        Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } | Sel::Profile { sketch, .. } => {
+            json!({ "sketch": sketch })
+        }
+        sel => json!({ "body": crate::browser::picked_body(sel)? }),
+    };
+    Some(act("ui.findBrowser", "Find in Browser", "list").with(params))
+}
+
+fn body_items(app: &SolveApp, bodies: &[String]) -> Vec<Item> {
     let names = json!(bodies);
     let all_hidden = bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
     let one = bodies.len() == 1;
@@ -857,9 +873,6 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
             v.push(cmd(app, "parts.resize", "Change Part Size").with(json!({"component":component})));
         }
         v.push(Item::sep());
-        if !browser {
-            v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": b })));
-        }
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "body": b })));
         // A part the modelling kernel refuses can be repaired.
         if crate::open_meshing::session_world(&app.session).body(&b).is_some_and(|m| m.body.smlib_refused().is_some()) {
@@ -1797,6 +1810,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 // Selected first: the rows above the body stay marked until the selection changes.
                 let _ = app.run("select.set", json!({"items": [{"type": "body", "name": b}]}));
                 crate::browser::reveal_body(app, b);
+            } else if let Some(id) = id_of(&p, "sketch") {
+                crate::browser::reveal_sketch(app, id);
+            } else if let Some(path) = p.get("occurrence").and_then(Value::as_array) {
+                // A path with anything but ids in it is no placement's, not a shorter one.
+                if let Some(path) = path.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>() {
+                    crate::browser::reveal_placement(app, &path);
+                }
             } else if let Some(f) = id_of(&p, "feature") {
                 crate::timeline::find_in_browser(app, f);
             }

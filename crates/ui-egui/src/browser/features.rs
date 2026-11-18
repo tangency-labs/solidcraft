@@ -37,6 +37,7 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     app.ui.show_browser = true;
     reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
+    app.tree.reveal_row = None;
     super::open_path(app, &path);
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     app.tree.open_row(&scope);
@@ -1484,6 +1485,107 @@ mod tests {
         });
         assert!(arrived, "the off-screen placed body row was never scrolled into view");
         assert_eq!(h.app.session.selection, [Sel::Body { name: world_body }]);
+    }
+
+    /// #18509: Find in Browser on a sketch, picked in the view (a curve or a profile) or from the
+    /// History, opens the rows down to the sketch's row in its component's Sketches folder, selects
+    /// the sketch and scrolls to its row: while rows start closed, and while the History is in the
+    /// Browser, where the Sketches folder starts closed whatever the rows do.
+    #[test]
+    fn browser_find_reveals_a_sketch_in_its_components_sketches_folder() {
+        let mut h = Harness::new();
+        let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("sketch.create", json!({"plane":"XZ","name":"PartSketch"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[5,25],"p1":[15,32]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.doc.find_feature("PartSketch").unwrap().id;
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.app.ui.show_browser = true;
+        let (placement, folder) = (occurrence_key(&[part]), format!("{}/sketches", occurrence_key(&[part])));
+        let row = format!("{placement}/s:{sketch}");
+        let listed = |h: &Harness| h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&row);
+        let finds: [(bool, bool, Box<dyn Fn(&mut SolveApp)>); 3] = [
+            (true, false, Box::new(move |app: &mut SolveApp| find_in_browser(app, Sel::ExternalSketchCurve { sketch, id: "l1".into() }))),
+            (false, true, Box::new(move |app: &mut SolveApp| find_in_browser(app, Sel::Profile { sketch, index: 0 }))),
+            (true, false, Box::new(move |app: &mut SolveApp| crate::timeline::find_in_browser(app, sketch))),
+        ];
+        for (rows_closed, history, find) in finds {
+            let case = format!("rows closed {rows_closed}, history in the Browser {history}");
+            h.app.preferences.browser_rows_start_closed = rows_closed;
+            h.app.preferences.history_in_browser = history;
+            for key in [&placement, &folder] {
+                h.app.tree.collapsed.remove(key);
+                h.app.tree.expanded.remove(key);
+                if !history {
+                    h.app.tree.collapsed.insert(key.clone());
+                }
+            }
+            // With History in the Browser the placement is open and its Sketches folder keeps its
+            // default, closed: the find must open that same folder.
+            if history {
+                h.app.tree.expanded.insert(placement.clone());
+            }
+            h.frames(2);
+            assert!(!listed(&h), "{case}: the sketch starts closed away");
+            find(&mut h.app);
+            assert_eq!(h.app.session.selection, [Sel::Feature { id: sketch }], "{case}");
+            assert!(h.app.tree.reveal_row.is_some(), "{case}");
+            h.frames(2);
+            assert!(listed(&h), "{case}: the Sketches folder opened");
+            assert!(h.app.tree.reveal_row.is_none(), "{case}: the sketch's row was drawn and scrolled to");
+        }
+    }
+
+    /// #18509: Preferences › Layout › Find in Browser places the row: at the Browser's centre (the
+    /// default, as before) or at its top.
+    #[test]
+    fn browser_find_places_the_row_at_the_centre_or_the_top() {
+        let mut h = Harness::new();
+        assert_eq!(h.app.preferences.browser_find_place, crate::prefs::BrowserFindPlace::Centre);
+        let component = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let first = component["occurrence"].as_u64().unwrap();
+        // A tree several Browsers tall, with the placement to find in its middle.
+        let mut placements = Vec::new();
+        for i in 1..=80 {
+            placements.push(
+                h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[20.0 * f64::from(i),0,0]})).unwrap()["occurrence"]
+                    .as_u64()
+                    .unwrap(),
+            );
+        }
+        let middle = placements[40];
+        let world_body = h.app.session.occurrence_bodies(&[middle], false).unwrap()[0].clone();
+        for (place, id) in [(crate::prefs::BrowserFindPlace::Centre, "centre"), (crate::prefs::BrowserFindPlace::Top, "top")] {
+            assert_eq!(h.call("ui.prefs", json!({"browser_find_place": id}))["ok"], true);
+            assert_eq!(h.app.preferences.browser_find_place, place);
+            h.app.run("browser.collapse_all", json!({})).unwrap();
+            h.frames(2);
+            find_in_browser(&mut h.app, face(&world_body));
+            // Until the row is drawn and the scroll has stopped: still for a quarter of a second,
+            // longer than the scroll animation takes to start.
+            let (mut last, mut still) = (None, 0);
+            let settled = (0..480).any(|_| {
+                h.frames(1);
+                let found = drawn_rows().into_iter().find(|(label, ..)| label == "Plate").map(|(_, rect, ..)| rect.top());
+                still = if found.is_some() && found == last { still + 1 } else { 0 };
+                last = found;
+                still >= 15 && h.app.tree.reveal.is_none()
+            });
+            assert!(settled, "{id}: the found row never came to rest");
+            let rows = drawn_rows();
+            let found = rows.iter().find(|(label, ..)| label == "Plate").unwrap().1;
+            let above = rows.iter().filter(|(_, rect, ..)| rect.center().y < found.top()).count();
+            let below = rows.iter().filter(|(_, rect, ..)| rect.center().y > found.bottom()).count();
+            match place {
+                crate::prefs::BrowserFindPlace::Centre => {
+                    assert!(above >= 3 && above.abs_diff(below) <= 2, "{id}: {above} rows above, {below} below")
+                }
+                // A row ending at the Browser's top edge still counts as drawn.
+                crate::prefs::BrowserFindPlace::Top => assert!(above <= 1 && below >= 6, "{id}: {above} rows above, {below} below"),
+            }
+        }
     }
 
     #[test]

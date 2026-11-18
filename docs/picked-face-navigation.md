@@ -2,7 +2,7 @@
 
 A face selected in the viewport uses its persistent creating feature for **Edit Feature** and **Find in Timeline**. Later holes, blends and trims do not redirect the action to the feature that originally created the whole body.
 
-**Find in Browser** finds the body, whether the menu was opened on a face, an edge or the body itself: it opens the body's folders, selects the body and scrolls its row into view.
+**Find in Browser**, near the top of the 3D view's right-click menu, finds the body, whether the menu was opened on a face, an edge or the body itself: it opens the body's folders, selects the body and scrolls its row into view. On a placed component picked while the selection filter picks components it finds the placement's row, and on a sketch curve, point or profile the sketch's row in its component's Sketches folder. The row comes to the middle of the Browser, or to its top with **Preferences › Layout › Find in Browser** set to **Top** (#18509).
 
 With **Preferences › Layout › Browser rows start closed** on (off by default), placements and folders start closed and Find in Browser opens only the rows down to the body: the placements that hold it, its Bodies folder and any group around it. The next Find in Browser closes the rows this one opened, except rows opened or closed by hand in between, and the History's Find in Browser does the same for the feature's first body. A pick in the 3D view then leaves the Browser as it is, and only the body Find in Browser found has the rows above it marked, until the selection changes.
 

@@ -1,0 +1,53 @@
+{
+  "en": {
+    "prefs.browser_find_place": "Find in Browser",
+    "prefs.browser_find_place_note": "Where the Browser scrolls the row that Find in Browser finds: to its middle, as before, or to its top.",
+    "prefs.browser_find_place_centre": "Center",
+    "prefs.browser_find_place_top": "Top"
+  },
+  "en-GB": {
+    "prefs.browser_find_place_centre": "Centre"
+  },
+  "de": {
+    "prefs.browser_find_place": "Im Browser suchen",
+    "prefs.browser_find_place_note": "Wohin der Browser die Zeile rollt, die „Im Browser suchen“ findet: in seine Mitte, wie bisher, oder an seinen oberen Rand.",
+    "prefs.browser_find_place_centre": "Mitte",
+    "prefs.browser_find_place_top": "Oben"
+  },
+  "ko": {
+    "prefs.browser_find_place": "브라우저에서 찾기",
+    "prefs.browser_find_place_note": "브라우저에서 찾기로 찾은 행을 브라우저의 어디로 스크롤할지 정합니다: 이전처럼 가운데, 또는 맨 위.",
+    "prefs.browser_find_place_centre": "가운데",
+    "prefs.browser_find_place_top": "맨 위"
+  },
+  "ar": {
+    "prefs.browser_find_place": "البحث في المستعرض",
+    "prefs.browser_find_place_note": "المكان الذي يمرّر إليه المستعرض الصف الذي يجده «البحث في المستعرض»: إلى وسطه كما كان من قبل، أو إلى أعلاه.",
+    "prefs.browser_find_place_centre": "الوسط",
+    "prefs.browser_find_place_top": "الأعلى"
+  },
+  "he": {
+    "prefs.browser_find_place": "איתור בעץ התכן",
+    "prefs.browser_find_place_note": "לאן עץ התכן גולל את השורה ש„איתור בעץ התכן” מוצא: לאמצע, כמו קודם, או לראש.",
+    "prefs.browser_find_place_centre": "מרכז",
+    "prefs.browser_find_place_top": "למעלה"
+  },
+  "ja": {
+    "prefs.browser_find_place": "ブラウザで検索",
+    "prefs.browser_find_place_note": "「ブラウザで検索」で見つけた行をブラウザーのどこへスクロールするか: 従来どおり中央、または上端。",
+    "prefs.browser_find_place_centre": "中央",
+    "prefs.browser_find_place_top": "上端"
+  },
+  "vi": {
+    "prefs.browser_find_place": "Tìm trong cây đối tượng",
+    "prefs.browser_find_place_note": "Nơi cây đối tượng cuộn tới hàng mà Tìm trong cây đối tượng tìm thấy: vào giữa như trước, hoặc lên trên cùng.",
+    "prefs.browser_find_place_centre": "Giữa",
+    "prefs.browser_find_place_top": "Trên cùng"
+  },
+  "zh": {
+    "prefs.browser_find_place": "在浏览器中查找",
+    "prefs.browser_find_place_note": "“在浏览器中查找”找到的行在浏览器中滚动到的位置：与以前一样居中，或置于顶部。",
+    "prefs.browser_find_place_centre": "居中",
+    "prefs.browser_find_place_top": "顶部"
+  }
+}
