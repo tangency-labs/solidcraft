@@ -357,6 +357,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             layout_check(
                 ui,
+                app.tr("prefs.clear_view_tabs"),
+                app.tr("prefs.clear_view_tabs.help"),
+                &mut app.preferences.clear_view_tabs,
+                "clear_view_tabs",
+            );
+            layout_check(
+                ui,
                 app.tr("prefs.design_sub_tab_sheets"),
                 app.tr("prefs.design_sub_tab_sheets_note"),
                 &mut app.preferences.design_sub_tab_sheets,
