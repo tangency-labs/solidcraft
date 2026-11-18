@@ -20,7 +20,10 @@
 //!   `MakeFaceuse` makes a face from the other operand, its edge uses get copies of the
 //!   other edge uses' UV trims where the new edge runs on `MergeEdge`'s copy of the
 //!   other edge's curve over the same interval (the fork's
-//!   `sm_CopyUVTrimCurvesOfOtherFace`). Curves have no mates here, so "a copy of its
+//!   `sm_CopyUVTrimCurvesOfOtherFace`), and only where the new edge is one `MergeEdge`
+//!   copied from the other operand's own edge (or the other trim ends at a singularity
+//!   of the surface), its tolerance is at least the other edge's, and the surface copy
+//!   keeps the other surface's parameterisation (see `copy_uv_trim_curves_of_other_face`). Curves have no mates here, so "a copy of its
 //!   curve" is checked as the same definition ([`Curve::same_definition`](crate::curve::curve::Curve::same_definition):
 //!   the same kind and equal defining data), which is the same curve at every
 //!   parameter. Points compared at some parameters cannot tell a closed curve from the
@@ -1099,11 +1102,20 @@ fn copy_uv_trim_curves_of_other_face(
             };
             let mut singular_end = false;
             for (t, from_left) in [(interval.min(), false), (interval.max(), true)] {
-                let Some(p) = trim.evaluate(k, t, 0, from_left, false)?.first().copied() else {
+                // An end the trim or the surface cannot evaluate (an error, or a failed
+                // status, which reads singular in no direction) is not a singular end: the
+                // edge keeps MakeFace's trim, as it did before this exception
+                let Some(p) = trim
+                    .evaluate(k, t, 0, from_left, false)
+                    .ok()
+                    .and_then(|v| v.first().copied())
+                else {
                     continue;
                 };
-                // (a failed evaluation reads singular in no direction: not a singularity)
-                let at = surface.is_singularity(k, Point2::new(p.x, p.y), EFF_ZERO, false)?;
+                let Ok(at) = surface.is_singularity(k, Point2::new(p.x, p.y), EFF_ZERO, false)
+                else {
+                    continue;
+                };
                 singular_end |= at.singular && at.direction != SurfParamType::Neither;
             }
             if !singular_end {

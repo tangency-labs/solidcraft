@@ -1,7 +1,9 @@
 //! #18325: every golden element the exact iso-line drop moves is CLOSER to the exact value
 //! of the ideal pipeline than main's, EQUAL to main's, or EQUAL-at-rounding: within the
 //! a-priori bound of the kernel's own float evaluation, or (19 elements, MEASURED below)
-//! within a measured bound of main's. No element is FARTHER.
+//! within a measured bound of main's. No element is FARTHER, except as a MEASURED one:
+//! two of those (a point solve's uv, 1 ulp) are farther from the exact iso line than
+//! main's and are accepted on that measured bound alone.
 //!
 //! The fix makes `drop_curve` return the iso line `(f, t)` of a B-spline surface, with
 //! ends exactly `(f, t0)` and `(f, t1)`, when the curve is that iso line, decided before the
@@ -89,7 +91,9 @@
 //! * MEASURED (19 elements; not certified): `|new − main|` is within a measured bound, the
 //!   edge curve's a-priori move ([`iso_curve_move`]) carried through a step whose
 //!   sensitivity is sampled, not enclosed: a point solve's uv (over the surface's smallest
-//!   singular value at `(f, t)`, [`solved_uv_bound`], 2 elements), `check_set`'s maximum
+//!   singular value at `(f, t)`, [`solved_uv_bound`], 2 elements, both 1 ulp farther from
+//!   the exact iso line than main's: the exact reference classes them FARTHER, and the
+//!   measured bound is used only then), `check_set`'s maximum
 //!   edge / UV-curve distance (a sampled search, 9) and a drop quality with no dumped
 //!   stations (8).
 //! * A binormal row's vertex/face-gap-cached flag (`1 → 0`): proven `0` on the replayed
@@ -1329,8 +1333,10 @@ fn iso_curve_move(srf: &Srf) -> f64 {
 
 /// MEASURED: the bound of a point solve's uv move. Its input, the edge's 3D point, moved
 /// at most [`iso_curve_move`]; the solve's uv moves by that over the surface's smallest
-/// singular value `σ` at the exact `(f, t)` (the local inverse's gain, evaluated, not
-/// enclosed), plus `8 u` of the larger value for the solver's own last-step rounding.
+/// singular value `σ` at the exact `(f, t)` (the local inverse's gain, evaluated at one
+/// point, not enclosed), plus `8 u` of the larger value. The `8 u` is a measured allowance,
+/// not a bound on the solver: its stopping tolerance is far coarser, and only the observed
+/// moves (1 ulp, after the same number of steps on both trees) justify it.
 fn solved_uv_bound(srf: &Srf, uv: [f64; 2], new: f64, main: f64) -> f64 {
     let (_, su, sv) = srf.exact(Iv::p(uv[0]), Iv::p(uv[1]));
     let (a, b, c) = (
@@ -2798,7 +2804,7 @@ fn certificates(
                 );
                 label_goc(&mut out);
             }
-            if d.drops.get(name).is_none() {
+            if !d.drops.contains_key(name) {
                 // no drop stations were dumped (the drop runs outside the iso station
                 // loop): the drop quality, a maximum over the drop's own samples of the
                 // distance from the edge curve, is 1-Lipschitz in that curve, which moved at
@@ -2806,7 +2812,7 @@ fn certificates(
                 for i in 0..2 {
                     // only where no certificate (the `goc` labels') holds the key already
                     if v[i] != main[i] && (i == 0 || name.contains("getcreate")) {
-                        out.entry(i).or_insert(Cert::Measured {
+                        out.entry(i).or_insert_with(|| Cert::Measured {
                             bound: iso_curve_move(&srf) + 8.0 * U * v[i].abs().max(main[i].abs()),
                             what: "drop quality, no station dump (sampled)",
                         });
@@ -3075,12 +3081,12 @@ fn label_iso_tangent(
     uv[iso.c] = Iv::p(iso.f);
     let (p, su, sv) = srf.exact(uv[0], uv[1]);
     let gp = gam(14 * (dx + 2 * d) + 7 * d + 3);
-    for q in 0..3 {
+    for (q, (&pq, &mq)) in p.iter().zip(&bounds.m).enumerate() {
         out.insert(
             base + q,
             Cert::Enc {
-                r: p[q],
-                e: Some(p[q].widen(up_mul(gp, bounds.m[q]))),
+                r: pq,
+                e: Some(pq.widen(up_mul(gp, mq))),
                 what: "iso B-spline point",
             },
         );
@@ -3090,12 +3096,12 @@ fn label_iso_tangent(
     }
     let r = if iso.c == 0 { sv } else { su };
     let r = r.map(|x| if opposite { x.neg() } else { x });
-    for q in 0..3 {
+    for (q, (&rq, &mq)) in r.iter().zip(&bounds.m).enumerate() {
         out.insert(
             base + 6 + q,
             Cert::Enc {
-                r: r[q],
-                e: Some(r[q].widen(up_mul(lip, up_mul(g, bounds.m[q])))),
+                r: rq,
+                e: Some(rq.widen(up_mul(lip, up_mul(g, mq)))),
                 what: "iso B-spline tangent",
             },
         );
@@ -3234,12 +3240,12 @@ fn label_iso_bspline(
     for i in 0..5u8 {
         let s = ev(lo, hi, f64::from(i) / 4.0);
         let r = ideal(s);
-        for q in 0..3 {
+        for (q, (&rq, &mq)) in r.iter().zip(&bounds.m).enumerate() {
             out.insert(
                 at + 2 + 3 * usize::from(i) + q,
                 Cert::Enc {
-                    r: r[q],
-                    e: Some(r[q].widen(up_mul(g, bounds.m[q]))),
+                    r: rq,
+                    e: Some(rq.widen(up_mul(g, mq))),
                     what: "iso B-spline sample",
                 },
             );

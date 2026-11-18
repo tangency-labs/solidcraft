@@ -31,6 +31,19 @@
 //!
 //! Elements with no reference narrower than their move are [`Ref::Open`] and listed, not
 //! classed.
+//!
+//! Seven elements are pinned FARTHER (in rows pinned mixed). Each is a gap whose reference is
+//! 0 and which is the difference of two evaluated points; each move is below one ulp of the
+//! largest coordinate of those points, the rounding of the gap's own evaluation (MEASURED;
+//! no a-priori bound is claimed here):
+//! * `topology.edgeuse_p1` `face_bss_tiny_gaps3_{0,2}_{0,1}` `state[4|5]` (4 elements):
+//!   6.562021981706704e-13 to 6.562023637809558e-13, a move of 1.7e-19 on a net whose
+//!   coordinates reach 0.003 (one ulp 4.3e-19). The gap itself, main's too, is the drop's
+//!   residual at the corner, not rounding.
+//! * `topology.vertex` `patch_sub_v1_gaps_g{0,1}` `state[16]` (2 elements): 2.8e-17 to
+//!   5.6e-17, on a net whose coordinates reach 2 (one ulp 4.4e-16).
+//! * `heal.heal_data_p2` `gen0161` `out[93]` (1 element): 4.5e-19 to 9.1e-19, a move of
+//!   4.6e-19 on a net whose `x` reaches 0.005 (one ulp 8.7e-19).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -1797,8 +1810,8 @@ fn query_edge_bounds() {
 
 /// `heal.heal_data_p1` (gen0063, gen0242): edge-edge gaps at the face's corners (ref 0;
 /// the edges are iso curves of one surface), their argmax index (a tie), and an
-/// edge-face gap ([`Ref::Cert`]). gen0242 (coordinates to 4000): the corner gaps grow from
-/// below 1 ulp to 1 ulp of 4096 (`2^-40`), FARTHER.
+/// edge-face gap ([`Ref::Cert`]). gen0242 (coordinates to 4000): the corner gaps shrink
+/// (4.5e-13 to 8.9e-15 and 1.4e-14), CLOSER.
 #[test]
 fn heal_p1_gaps() {
     let rows = vec![

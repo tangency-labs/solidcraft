@@ -712,7 +712,11 @@ volume, the same edges on the round, and every such edge on S within its own tol
   (`topology_intersector/p1.rs`, "Intersection trims").
 - A face B gives to A is built without B's own trims; they are copied over where the new edge
   runs on a copy of B's edge curve over the same interval (`merge/p2.rs`), and the other edge
-  uses get new ones.
+  uses get new ones. The copy is made only onto an edge `MergeEdge` copied from B's own edge
+  (an edge the intersection made keeps its dropped trim, unless B's trim ends at a
+  singularity of the surface, where the drop finds no parameter), only when the new edge's
+  tolerance is at least B's, never for a line edge on a plane (`Plane::drop_curve` is exact
+  there), and only when the surface copy keeps B's parameterisation.
 
 ## 8. Failure modes and refusals
 

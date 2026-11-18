@@ -559,15 +559,16 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
 /// `Fillet/bottle.smb`'s three digests are #17896's (retiring `keep_operand_uv_trims`).
 /// Its area and volume bits are main's. The digests moved only in the surface points they
 /// sample along face 15's trims (a surface of revolution); every UV trim, edge curve,
-/// tolerance and vertex of the read is bit for bit main's (MEASURED, a dump of the read on
-/// both trees). The rebuilding read refits the trims on that surface, and one UV
-/// coordinate moves by 8e-31. `CPoint::affine2` keeps a coordinate that both of its
+/// tolerance and vertex of the read is bit for bit main's, pinned by
+/// [`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]. The rebuilding
+/// read refits the trims on that surface, and one UV coordinate moves by 8e-31. `CPoint::affine2` keeps a coordinate that both of its
 /// inputs share exactly (PROVEN: a convex combination of equal values). The surface's
 /// generator is made through it (`create_generator_from_angle`,
 /// `gen_adjust_step_interval`), so its shared coordinates are now exact rather than an
-/// ulp off. The surface's net is the rotation of that generator, so 107 of its
-/// coordinates move, each by at most 1.86e-17 times its point's magnitude: below one unit
-/// roundoff of that magnitude, at rounding (MEASURED).
+/// ulp off. The surface's net is the rotation of that generator, so 105 of its control
+/// points move, each by at most 1.86e-17 times its point's magnitude: below one unit
+/// roundoff of that magnitude, at rounding (MEASURED; the same test pins the net on a grid
+/// of `2^-44` of each point's magnitude).
 const MAIN: [(&str, [u64; 5]); 28] = [
     (
         "Fillet/blade_hub_1.smb",
@@ -1741,7 +1742,9 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 /// same body and status. #17896 moved those 19 digests and entry 14's (main's were
 /// `0x30d463838d7fca03` and `0x7442b43a428ea1ca`) through the bottle's read alone (see
 /// [`MAIN`]): only the surface points sampled along face 15's trims move. Every vertex,
-/// edge, tolerance and entry 14's mass is bit for bit main's (MEASURED).
+/// edge and tolerance of the read is bit for bit main's
+/// ([`bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding`]); entry 14's mass
+/// is bit for bit main's (MEASURED).
 const FILLET_MAIN: [u64; 29] = [
     0x24f613f551b1b3ab,
     0x241377ca06fbe761,
@@ -1875,4 +1878,124 @@ fn moved_fillet_rows_keep_main_geometry_and_mass() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Feeds `c` rounded to a grid of `2^-44 * scale` (a negative zero fed as zero), or `c`
+/// itself for no `scale`.
+fn feed_on_grid(d: &mut Digest, c: f64, scale: Option<f64>) {
+    match scale {
+        Some(s) => d.f64((c / (s * 2f64.powi(-44))).round() + 0.0),
+        None => d.f64(c),
+    }
+}
+
+/// Feeds an edge use's UV trim without the surface: its interval and 17 uv points along it
+/// (`u64::MAX` for no trim or an error); with `grid`, each coordinate on the grid of
+/// [`feed_on_grid`] scaled by `max(1, |c|)`.
+fn digest_uv(d: &mut Digest, k: &Kernel, b: &Brep, eu: solidcore::topology::EdgeuseId, grid: bool) {
+    let Some(trim) = b.edgeuse(eu).unwrap().uv_trim_curve.clone() else {
+        d.u64(u64::MAX);
+        return;
+    };
+    let ivl = trim.natural_interval();
+    d.f64(ivl.min());
+    d.f64(ivl.max());
+    for i in 0..=16 {
+        match trim.evaluate_point(k, ivl.evaluate(f64::from(i) / 16.0)) {
+            Ok(p) => [p.x, p.y]
+                .into_iter()
+                .for_each(|c| feed_on_grid(d, c, grid.then(|| c.abs().max(1.0)))),
+            Err(_) => d.u64(u64::MAX),
+        }
+    }
+}
+
+/// Feeds every face's surface net, its control points' `x, y, z` on the grid of
+/// [`feed_on_grid`] scaled by the point's magnitude `|P|`, and `w` on the grid scaled by
+/// `1`. A face whose surface has no net feeds `u64::MAX`.
+fn digest_nets(d: &mut Digest, b: &Brep) {
+    use solidcore::surface::surface::p2::SurfaceKind;
+    for (_, f) in b.faces().iter() {
+        let net = f.surface.as_ref().and_then(|s| match s.kind() {
+            SurfaceKind::BSpline(x) => x.gw_nurb(),
+            SurfaceKind::Plane(x) => x.base().gw_nurb(),
+            SurfaceKind::SurfOfRevolution(x) => x.base().gw_nurb(),
+            SurfaceKind::SurfOfExtrusion(x) => x.base().gw_nurb(),
+            SurfaceKind::Cone(x) => x.rev().base().gw_nurb(),
+            SurfaceKind::Sphere(x) => x.base().base().gw_nurb(),
+            SurfaceKind::Torus(x) => x.base().base().gw_nurb(),
+            _ => None,
+        });
+        let Some(n) = net else {
+            d.u64(u64::MAX);
+            continue;
+        };
+        for row in n.cpts() {
+            for c in row {
+                let size = (c.x * c.x + c.y * c.y + c.z * c.z).sqrt();
+                for v in [c.x, c.y, c.z] {
+                    feed_on_grid(d, v, Some(size));
+                }
+                feed_on_grid(d, c.w, Some(1.0));
+            }
+        }
+    }
+}
+
+/// A corpus read's digest without the points its surfaces evaluate: the face
+/// tolerances; each edge's tolerance, interval and 17 curve points; each vertex's tolerance
+/// and point; each edge use's UV trim ([`digest_uv`], on its grid for `rebuild`), as read
+/// and again after the lazy trims are made; and the surface nets on their grid
+/// ([`digest_nets`]).
+fn read_without_surface_points(name: &str, rebuild: bool) -> u64 {
+    use solidcore::topology::edgeuse::p3 as eu3;
+    let mut k = Kernel::default();
+    let mut b = read_corpus(&mut k, name, rebuild);
+    let mut d = Digest::new();
+    for (_, f) in b.faces().iter() {
+        d.f64(f.tolerance);
+    }
+    let edges: Vec<_> = b.edges().iter().map(|(id, _)| id).collect();
+    for &e in &edges {
+        d.f64(b.edge(e).unwrap().tolerance);
+        digest_curve(&mut d, &k, &b, e);
+    }
+    for (_, v) in b.vertices().iter() {
+        d.f64(v.tolerance);
+        for c in [v.point.x, v.point.y, v.point.z] {
+            d.f64(c);
+        }
+    }
+    let eus: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
+    for &eu in &eus {
+        digest_uv(&mut d, &k, &b, eu, rebuild);
+    }
+    for &eu in &eus {
+        if b.edgeuse(eu).unwrap().edge.is_none() {
+            continue;
+        }
+        let made = eu3::get_or_create_uv_trim_curve(&k, &mut b, eu, false, false, true)
+            .map(|r| r.status.is_ok());
+        d.u64(u64::from(matches!(made, Ok(true))));
+        digest_uv(&mut d, &k, &b, eu, rebuild);
+    }
+    digest_nets(&mut d, &b);
+    d.0
+}
+
+/// #17896 moves `Fillet/bottle.smb`'s digests in [`MAIN`] only through face 15's net:
+/// every face, edge and vertex tolerance, edge curve, vertex and UV trim of the read is main
+/// f760fd440's bit for bit. The net and the rebuilding read's trims agree with main's on
+/// the grid of [`feed_on_grid`]: the rebuilt trims differ in one coordinate by 8e-31, and
+/// 105 control points of face 15 differ by at most 1.86e-17 of their magnitude (MEASURED,
+/// a dump of both nets).
+#[test]
+fn bottle_read_moves_only_face_15s_net_and_one_rebuilt_uv_at_rounding() {
+    for (rebuild, main) in [
+        (false, 0xa600_8eab_0d09_6dd5),
+        (true, 0x57fd_ee59_a641_5de8),
+    ] {
+        let got = read_without_surface_points("Fillet/bottle.smb", rebuild);
+        assert_eq!(got, main, "bottle read (rebuild {rebuild}) is not main's");
+    }
 }
