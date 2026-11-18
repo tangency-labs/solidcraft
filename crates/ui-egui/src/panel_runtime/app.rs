@@ -26,6 +26,7 @@ pub struct AppPanelRuntime {
     desktop: Option<super::native::DesktopNativeAdapter>,
     host: Option<WorkspacePanelHost>,
     last_tick_frame: Option<u64>,
+    detached_content: crate::semantic_content::Detached,
     last_error: Option<PanelError>,
     catalogue: Box<dyn commands::LayoutCatalogue>,
     adapters_set: bool,
@@ -46,6 +47,7 @@ impl AppPanelRuntime {
             desktop: None,
             host: None,
             last_tick_frame: None,
+            detached_content: Default::default(),
             last_error: None,
             catalogue: Box::<commands::InMemoryCatalogue>::default(),
             adapters_set: false,
@@ -1428,9 +1430,13 @@ pub(crate) fn prepare_pop_out_panels(
 
 pub(crate) fn paint_pop_out_panels(app: &mut crate::SolveApp, ui: &mut egui::Ui) {
     if let Some(mut integration) = app.panel_runtime.take() {
-        if let Err(reason) = integration.show_production_host(app, ui) {
-            integration.last_error = Some(reason);
-        }
+        let mut content = std::mem::take(&mut integration.detached_content);
+        content.show(app, ui, |app, ui| {
+            if let Err(reason) = integration.show_production_host(app, ui) {
+                integration.last_error = Some(reason);
+            }
+        });
+        integration.detached_content = content;
         app.panel_content_frame = None;
         app.panel_runtime = Some(integration);
     }
