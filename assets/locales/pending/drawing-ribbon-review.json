@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.drawing_ribbon.check_clean": "Check Drawing found nothing to fix.",
+    "ui.drawing_ribbon.check_found": "Check Drawing found {count} things to fix. Run drawing.check for the list.",
+    "ui.drawing_ribbon.open_drawing_first": "Open a drawing first."
+  },
+  "ar": {
+    "ui.drawing_ribbon.check_clean": "لم يجد فحص اللوحة شيئًا يحتاج إلى إصلاح.",
+    "ui.drawing_ribbon.check_found": "وجد فحص اللوحة {count} من الأمور التي تحتاج إلى إصلاح. شغّل drawing.check للحصول على القائمة.",
+    "ui.drawing_ribbon.open_drawing_first": "افتح لوحة أولًا."
+  },
+  "de": {
+    "ui.drawing_ribbon.check_clean": "Zeichnung prüfen hat nichts zu beheben gefunden.",
+    "ui.drawing_ribbon.check_found": "Zeichnung prüfen hat {count} zu behebende Punkte gefunden. Führen Sie drawing.check für die Liste aus.",
+    "ui.drawing_ribbon.open_drawing_first": "Öffnen Sie zuerst eine Zeichnung."
+  },
+  "he": {
+    "ui.drawing_ribbon.check_clean": "בדיקת השרטוט לא מצאה דבר לתיקון.",
+    "ui.drawing_ribbon.check_found": "בדיקת השרטוט מצאה {count} דברים לתיקון. יש להריץ drawing.check לקבלת הרשימה.",
+    "ui.drawing_ribbon.open_drawing_first": "יש לפתוח שרטוט תחילה."
+  },
+  "ja": {
+    "ui.drawing_ribbon.check_clean": "図面チェックで修正が必要な点は見つかりませんでした。",
+    "ui.drawing_ribbon.check_found": "図面チェックで修正が必要な点が {count} 件見つかりました。一覧は drawing.check で確認できます。",
+    "ui.drawing_ribbon.open_drawing_first": "先に図面を開いてください。"
+  },
+  "ko": {
+    "ui.drawing_ribbon.check_clean": "도면 검사에서 수정할 항목을 찾지 못했습니다.",
+    "ui.drawing_ribbon.check_found": "도면 검사에서 수정할 항목 {count}개를 찾았습니다. 목록은 drawing.check를 실행하세요.",
+    "ui.drawing_ribbon.open_drawing_first": "먼저 도면을 여세요."
+  },
+  "vi": {
+    "ui.drawing_ribbon.check_clean": "Kiểm tra bản vẽ không tìm thấy gì cần sửa.",
+    "ui.drawing_ribbon.check_found": "Kiểm tra bản vẽ tìm thấy {count} mục cần sửa. Chạy drawing.check để xem danh sách.",
+    "ui.drawing_ribbon.open_drawing_first": "Hãy mở một bản vẽ trước."
+  },
+  "zh": {
+    "ui.drawing_ribbon.check_clean": "检查图纸未发现需要修正的内容。",
+    "ui.drawing_ribbon.check_found": "检查图纸发现 {count} 处需要修正。运行 drawing.check 查看列表。",
+    "ui.drawing_ribbon.open_drawing_first": "请先打开一个图纸。"
+  }
+}
