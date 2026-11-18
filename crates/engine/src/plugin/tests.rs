@@ -171,6 +171,51 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
     assert!(!root.join("outside.sc").exists());
     std::fs::remove_dir_all(&root).unwrap();
 }
+/// A plugin reaches a command only by its exact registered id: another
+/// case, whitespace around it or a look-alike letter is not a granted command, so it can't slip
+/// past a command group, nor a manifest list a command under another spelling.
+#[test]
+fn a_command_in_another_spelling_is_never_granted() {
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        evaluation: None,
+    };
+    host.begin_transaction().unwrap();
+    for id in ["file.save_as", "file.export_step", "doc.open", "plugin.run", "plugin.list", "settings.get", "diagnostics.crash_reports", "solid.box"]
+    {
+        let mixed: String = id.chars().enumerate().map(|(i, c)| if i % 2 == 0 { c.to_ascii_uppercase() } else { c }).collect();
+        for spelled in [
+            id.to_ascii_uppercase(),
+            mixed,
+            format!(" {id}"),
+            format!("{id}\n"),
+            format!("\u{a0}{id}"),
+            id.replacen('o', "\u{043e}", 1),
+            id.replacen('.', "\u{ff0e}", 1),
+            format!("\u{200b}{id}"),
+        ]
+        .into_iter()
+        .filter(|spelled| spelled != id)
+        {
+            let refused = host.run_command(&spelled, &json!({"path": "x.sc", "length": 1, "width": 1, "height": 1}));
+            assert!(
+                matches!(&refused, Err(HostError::PermissionDenied { permission }) if permission.contains("is not granted")),
+                "{spelled:?}: {refused:?}"
+            );
+            let mut m = manifest();
+            m["runtime"]["commands"] = json!([spelled.clone()]);
+            m["runtime"]["permissions"] = json!({"command_groups": ["app", "doc", "file", "plugin"]});
+            assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_err(), "manifest lists {spelled:?}");
+        }
+    }
+    let catalog = host.command_catalog();
+    assert!(catalog.iter().all(|c| crate::find_command(&c.name).is_some_and(|spec| spec.id == c.name)), "the catalog lists registered ids");
+}
 fn s_box(host: &mut SolidCraftHost) {
     host.run_command("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
 }
