@@ -22,27 +22,36 @@
 //! a piece end already farther than the tolerance from the rib ends the search, since no
 //! finer cut can bound the span within it.
 //!
-//! Each face is enclosed as its NURBS data over every polynomial piece the box covers,
-//! hulled: across a knot line inside the box only where the face is at least `C^1` (the
-//! remainder needs `e'` continuous), and past the knots on its end piece continued (a box
-//! reaches past them only by its rounding at a domain's end).
+//! Each face is enclosed as the surface the kernel evaluates ([`Face`]): NURBS data over
+//! every polynomial piece the box covers, hulled: across a knot line inside the box only
+//! where the face is at least `C^1` (the remainder needs `e'` continuous), and past the
+//! knots on its end piece continued (a box reaches past them only by its rounding at a
+//! domain's end); a blend by its definition by the definition's enclosure
+//! ([`definition_partials_over_box`], the ball's circle of one radius between NURBS faces),
+//! so that the bound is against the definition, with nothing added for its net.
 //!
 //! The tangent end's span is graded toward it and closed by a bound without the Jacobian
 //! ([`Rib::first_span_bound`], [`Rib::near_bound`]). Every loop over pieces, grades, ring
 //! boxes and widenings polls the kernel's cancellation.
 
+use core::cell::RefCell;
+
 use crate::blend::fillet_section::certificate::{
     curve_derivs_over, knot_cuts, nurbs_partials_over_piece, nurbs_partials_over_piece_about,
     partials_hull, NurbsCurve,
 };
+use crate::blend::fillet_section::definition_box::{
+    definition_enclosable, definition_partials_over_box, gn_def_face_of, GnDefFace,
+};
 use crate::blend::fillet_section::interval::{cmax, Ivl};
 use crate::blend::fillet_section::series::{v_add, v_scale, v_sub, V3};
-use crate::blend::fillet_section::station::{knot, Nurbs, Partials};
+use crate::blend::fillet_section::station::{as_b_spline, knot, span, Nurbs, Partials};
 use crate::error::Result;
 use crate::geom::krawczyk::{
     contraction, inverse_of_columns3, krawczyk, newton, plus_c_times, Linearised,
 };
 use crate::kernel::Kernel;
+use crate::surface::surface::{Surface, SurfaceKind};
 
 /// The continuity a face needs across a knot line inside a box for its second partials:
 /// `C^1`, so that the root and the errors are `C^1` and the remainder holds with `e''`
@@ -70,6 +79,54 @@ const OP: &str = "blend::fillet_geom::tangent_end_rib::certificate";
 /// A Newton root of the rib `(alpha, u, v)` at `t` from a guess, or `None`.
 pub(super) type Solve<'a> = dyn Fn(f64, [f64; 3]) -> Result<Option<[f64; 3]>> + 'a;
 
+/// A face of the rib as the certificate encloses it: the surface the kernel evaluates.
+pub(super) enum Face<'f> {
+    /// NURBS data: a NURBS face, a face that is one (plane, cone, revolution, ...), or a
+    /// blend inside a scope that answers by its net.
+    Nurbs(Nurbs),
+    /// A blend evaluated by its definition, enclosed by the definition
+    /// ([`definition_enclosable`]); its net only seeds the enclosure's feet.
+    Definition {
+        kernel: &'f Kernel,
+        net: Nurbs,
+        def: Box<RefCell<GnDefFace<'f>>>,
+    },
+}
+
+impl<'f> Face<'f> {
+    /// The face `s` as the certificate encloses it, or `None` where it is not enclosed (a
+    /// STEP, offset, curve-bounded or in-volume face; a blend by its definition that
+    /// [`definition_enclosable`] does not take, such as one of contact order 2): the rib
+    /// is then built without a bound (the maintainer's design on #18674).
+    ///
+    /// # Errors
+    ///
+    /// Those of the face's NURBS data ([`as_b_spline`]); a cancellation.
+    pub(super) fn of(k: &'f Kernel, s: &'f Surface) -> Result<Option<Self>> {
+        let net =
+            || -> Result<Option<Nurbs>> { Ok(as_b_spline(k, s)?.and_then(|b| Nurbs::of(&b).ok())) };
+        let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+            return Ok(net()?.map(Face::Nurbs));
+        };
+        if pb.net_answers(k) {
+            return Ok(net()?.map(Face::Nurbs));
+        }
+        if !definition_enclosable(s) {
+            return Ok(None);
+        }
+        let def = match gn_def_face_of(k, s) {
+            Ok(d) => d,
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        Ok(net()?.map(|net| Face::Definition {
+            kernel: k,
+            net,
+            def: Box::new(RefCell::new(def)),
+        }))
+    }
+}
+
 /// The parts of `[lo, hi]` on the pieces of a knot vector: inside the knots cut at the
 /// knot lines strictly inside ([`knot_cuts`]), past them the end piece continued.
 fn cuts(
@@ -96,11 +153,21 @@ fn cuts(
     Some(out)
 }
 
-/// The partials `P[a][b]`, `a + b <= lk`, of `S − o` over `u x v`, enclosed: the hull over
-/// the pieces the box covers ([`nurbs_partials_over_piece_about`]: a rational face's
-/// quotient then scales with the size of `S − o`, not with its distance from the origin).
-/// `None` where a part is not enclosed.
-fn partials_about(n: &Nurbs, u: Ivl, v: Ivl, lk: usize, o: [f64; 3]) -> Option<Partials<Ivl>> {
+/// The partials `P[a][b]`, `a + b <= lk`, of `S − o` over `u x v`, enclosed: for NURBS data
+/// the hull over the pieces the box covers ([`nurbs_partials_over_piece_about`]: a rational
+/// face's quotient then scales with the size of `S − o`, not with its distance from the
+/// origin); for a definition its enclosure ([`definition_partials`]) less `o`, which is
+/// not taken about `o`. `None` where a part is not enclosed.
+fn partials_about(f: &Face<'_>, u: Ivl, v: Ivl, lk: usize, o: [f64; 3]) -> Option<Partials<Ivl>> {
+    let n = match f {
+        Face::Nurbs(n) => n,
+        Face::Definition { .. } => {
+            let mut p = definition_partials(f, u, v, lk)?;
+            let [x, y, z] = o.map(Ivl::from);
+            p.set(0, 0, v_sub(p.at(0, 0), V3 { x, y, z }));
+            return Some(p);
+        }
+    };
     let continuity = if lk >= 2 { CONTINUITY } else { 0 };
     let us = cuts(&n.u, n.p, n.nu, u.lo, u.hi, continuity)?;
     let vs = cuts(&n.v, n.q, n.nv, v.lo, v.hi, continuity)?;
@@ -117,10 +184,27 @@ fn partials_about(n: &Nurbs, u: Ivl, v: Ivl, lk: usize, o: [f64; 3]) -> Option<P
     out
 }
 
-/// A face's partials `P[a][b]`, `a + b <= lk`, over `u x v`, enclosed: those of `S − o`
-/// ([`partials_about`]) with `o` the face's point at the box's middle, `o` added back to
-/// `P[0][0]`. `None` where a part is not enclosed.
-fn partials_over(n: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Option<Partials<Ivl>> {
+/// A definition's partials `P[a][b]`, `a + b <= lk`, over `u x v`, enclosed
+/// ([`definition_partials_over_box`], its feet seeded on the net's piece at the box's
+/// middle), or `None` (also for NURBS data).
+fn definition_partials(f: &Face<'_>, u: Ivl, v: Ivl, lk: usize) -> Option<Partials<Ivl>> {
+    let Face::Definition { kernel, net, def } = f else {
+        return None;
+    };
+    let ku = span(&net.u, net.p, net.nu, u.mid());
+    let kv = span(&net.v, net.q, net.nv, v.mid());
+    let mut d = def.try_borrow_mut().ok()?;
+    definition_partials_over_box(kernel, &mut d, net, ku, kv, u.lo, u.hi, v.lo, v.hi, lk).ok()
+}
+
+/// A face's partials `P[a][b]`, `a + b <= lk`, over `u x v`, enclosed: for NURBS data those
+/// of `S − o` ([`partials_about`]) with `o` the face's point at the box's middle, `o` added
+/// back to `P[0][0]`; for a definition its enclosure. `None` where a part is not enclosed.
+fn partials_over(f: &Face<'_>, u: Ivl, v: Ivl, lk: usize) -> Option<Partials<Ivl>> {
+    let n = match f {
+        Face::Nurbs(n) => n,
+        Face::Definition { .. } => return definition_partials(f, u, v, lk),
+    };
     let (um, vm) = (u.mid(), v.mid());
     let us = cuts(&n.u, n.p, n.nu, u.lo, u.hi, 0)?;
     let vs = cuts(&n.v, n.q, n.nv, v.lo, v.hi, 0)?;
@@ -132,7 +216,7 @@ fn partials_over(n: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Option<Partials<Ivl>> 
         .ok()?
         .at(0, 0);
     let o = [o.x.mid(), o.y.mid(), o.z.mid()];
-    let mut out = partials_about(n, u, v, lk, o)?;
+    let mut out = partials_about(f, u, v, lk, o)?;
     let [x, y, z] = o.map(Ivl::from);
     out.set(0, 0, v_add(out.at(0, 0), V3 { x, y, z }));
     Some(out)
@@ -182,13 +266,13 @@ fn solve_over(cols: [V3<Ivl>; 3], b: V3<Ivl>) -> Option<[Ivl; 3]> {
 }
 
 /// The rib's definition and its three curves, for the certificate of its spans.
-pub(super) struct Rib<'a> {
-    /// The fillet surface's NURBS data.
-    pub fillet: &'a Nurbs,
+pub(super) struct Rib<'a, 'f> {
+    /// The fillet surface, enclosed.
+    pub fillet: &'a Face<'f>,
     /// The kernel, polled for a cancellation.
     pub kernel: &'a Kernel,
-    /// The end surface's NURBS data.
-    pub end: &'a Nurbs,
+    /// The end surface, enclosed.
+    pub end: &'a Face<'f>,
     /// The fillet surface's section parameter: 0 u, 1 v.
     pub section: usize,
     /// `sigma(t) = sigma0 + d_sigma t^m`, `m` 2 for an odd contact order, else 1.
@@ -212,7 +296,7 @@ struct End {
     e: [f64; 7],
 }
 
-impl Rib<'_> {
+impl Rib<'_, '_> {
     fn sigma(&self, t: Ivl) -> (Ivl, Ivl, Ivl) {
         let d = Ivl::from(self.d_sigma);
         if self.odd {

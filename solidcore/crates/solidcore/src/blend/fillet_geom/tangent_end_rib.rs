@@ -19,7 +19,6 @@ mod certificate;
 
 use crate::blend::fillet_section::certificate::NurbsCurve;
 use crate::blend::fillet_section::section::GnSectionFsg;
-use crate::blend::fillet_section::station::{as_b_spline, Nurbs};
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -34,7 +33,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p5::DropPointOptions;
-use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface::Surface;
 
 const OP_ORDER: &str = "blend::fillet_geom::tangent_end_rib::section_contact_order";
 const OP_RIB: &str = "blend::fillet_geom::tangent_end_rib::tangent_end_rib";
@@ -210,9 +209,13 @@ pub struct TangentEndRib {
     /// `rpEndUV`: its UV curve on the end surface.
     pub end_uv: BSplineCurve,
     /// Not upstream (#17744): the largest distance, certified span by span, of each curve
-    /// from the rib at the same parameter (the 3D curve's point, a UV curve's point on its
-    /// surface), at most the tolerance.
-    pub bound: f64,
+    /// from the rib of the surfaces as the kernel evaluates them, at the same parameter (the
+    /// 3D curve's point, a UV curve's point on its surface), at most the tolerance. A blend
+    /// inside a scope that answers by its net is that net; one evaluated by its definition
+    /// is the definition. `None` where a face is not enclosed (a STEP, offset,
+    /// curve-bounded or in-volume face, or a definition of contact order 2): the rib is then
+    /// built as upstream builds it, on its spans' midpoints, and makes no claim.
+    pub bound: Option<f64>,
 }
 
 /// `sm_TangentEndRib`: the end rib of a fillet at a tangent end, the fillet surface's
@@ -229,7 +232,8 @@ pub struct TangentEndRib {
 /// doubled from 8 to 1024 until each span is certified within `approx_tol` (not upstream,
 /// #17744: upstream compares the span's midpoint with the exact point there; the certificate
 /// bounds every parameter of the span, `certificate`, and the largest bound is
-/// [`TangentEndRib::bound`]). For odd `k` past 1 (the fork's tangency-labs/smlib@cd47efd) the
+/// [`TangentEndRib::bound`]; where a face is not enclosed, the span's midpoint is compared
+/// as upstream). For odd `k` past 1 (the fork's tangency-labs/smlib@cd47efd) the
 /// curves have zero speed at the tangent end: their first derivative there is zero
 /// (the first two control points coincide) and their second the exact
 /// `2 (s1 - s0) dX/ds`, `X` the fillet surface along its section, both interpolated as
@@ -245,11 +249,11 @@ pub struct TangentEndRib {
 /// # Errors
 ///
 /// `SM_ERR` when an end is off either surface, the ends are not on the fillet surface's
-/// two rails or lie on one section, the rib does not reach its other end, or a station
-/// has no exact point; [`crate::error::blend::BlendFailure::NotCertified`] (#17744) where
-/// a face has no NURBS data to enclose (a STEP, offset, curve-bounded or in-volume face, or
-/// a blend evaluated by its definition) or no station count certifies the rib within
-/// tolerance; for a zero-speed rib, when the end surface is
+/// two rails or lie on one section, the rib does not reach its other end, a station
+/// has no exact point, or (where a face is not enclosed) no station count gives the rib's
+/// midpoints within tolerance; [`crate::error::blend::BlendFailure::NotCertified`] (#17744)
+/// where both faces are enclosed and no station count certifies the rib within tolerance;
+/// for a zero-speed rib, when the end surface is
 /// singular at the tangent end, the fillet surface's section leaves its tangent plane
 /// there, or an interpolation's second control point leaves its end; a stage failure
 /// ([`crate::error::blend::BlendFailure::StageFailed`], a defect) for a `stop` off either
@@ -489,26 +493,15 @@ pub fn tangent_end_rib(
         let [a, u, v] = y;
         Ok(solve(t, a, Point2::new(u, v))?.map(|(a, e, _)| [a, e.x, e.y]))
     };
-    // the faces' NURBS data for the certificate (#17744): a blend as the net it is
-    // evaluated by here; a face without (a blend evaluated by its definition, a STEP,
-    // offset, curve-bounded or in-volume face) has nothing to enclose, and no span of the
-    // rib can be certified
-    let nurbs = |s: &Surface| -> Result<Option<Nurbs>> {
-        if let SurfaceKind::ProceduralBlend(pb) = s.kind() {
-            if !pb.net_answers(k) {
-                return Ok(None);
-            }
-        }
-        Ok(as_b_spline(k, s)?.and_then(|b| Nurbs::of(&b).ok()))
-    };
-    let not_certified = |halvings, stations| {
-        SolidError::blend(
-            OP_RIB,
-            crate::error::blend::BlendFailure::NotCertified { halvings, stations },
-        )
-    };
-    let (Some(fillet_net), Some(end_net)) = (nurbs(fillet)?, nurbs(end)?) else {
-        return Err(not_certified(0, 0));
+    // the faces as the certificate encloses them (#17744): the surfaces the kernel
+    // evaluates; where one is not enclosed, the rib is built as upstream builds it, its
+    // spans' midpoints against the exact points there, with no bound
+    let faces = match (
+        certificate::Face::of(k, fillet)?,
+        certificate::Face::of(k, end)?,
+    ) {
+        (Some(f), Some(e)) => Some((f, e)),
+        _ => None,
     };
 
     // The stations, and the exact points there. A regular rib's stations are
@@ -611,20 +604,23 @@ pub fn tangent_end_rib(
 
         // each span's certified bound (#17744); the spans not bounded within the tolerance,
         // with the exact rib point at their midpoint
-        let rib = certificate::Rib {
-            kernel: k,
-            fillet: &fillet_net,
-            end: &end_net,
-            section,
-            sigma0,
-            d_sigma: sigma1 - sigma0,
-            odd,
-            order,
-            curves: [
-                NurbsCurve::of(&c3d)?,
-                NurbsCurve::of(&c_fil)?,
-                NurbsCurve::of(&c_end)?,
-            ],
+        let rib = match &faces {
+            Some((fillet, end)) => Some(certificate::Rib {
+                kernel: k,
+                fillet,
+                end,
+                section,
+                sigma0,
+                d_sigma: sigma1 - sigma0,
+                odd,
+                order,
+                curves: [
+                    NurbsCurve::of(&c3d)?,
+                    NurbsCurve::of(&c_fil)?,
+                    NurbsCurve::of(&c_end)?,
+                ],
+            }),
+            None => None,
         };
         let mut solved = true;
         let mut off: Vec<(usize, f64, Point2, Point3)> = Vec::new();
@@ -646,23 +642,39 @@ pub fn tangent_end_rib(
             let t = 0.5 * (t0 + t1);
             let alpha = 0.5 * (a0 + a1);
             let uv = Point2::new(0.5 * (e0.x + e1.x), 0.5 * (e0.y + e1.y));
-            let ends = ((t0, [a0, e0.x, e0.y]), (t1, [a1, e1.x, e1.y]));
-            let within = if jj == 0 {
-                // the span at the tangent end, on pieces graded toward it
-                rib.first_span_bound(&rib_newton, ends.0 .1, ends.1, approx_tol)?
-            } else {
-                rib.span_bound(&rib_newton, ends.0, ends.1, approx_tol)?
-            };
-            match within {
-                Some(d) if d <= approx_tol => bound = bound.max(d),
-                _ => {
-                    let Some((alpha, uv, exact)) = solve(t, alpha, uv)? else {
-                        solved = false;
-                        break;
-                    };
-                    off.push((jj, alpha, uv, exact));
+            if let Some(rib) = &rib {
+                let ends = ((t0, [a0, e0.x, e0.y]), (t1, [a1, e1.x, e1.y]));
+                let within = if jj == 0 {
+                    // the span at the tangent end, on pieces graded toward it
+                    rib.first_span_bound(&rib_newton, ends.0 .1, ends.1, approx_tol)?
+                } else {
+                    rib.span_bound(&rib_newton, ends.0, ends.1, approx_tol)?
+                };
+                if let Some(d) = within.filter(|&d| d <= approx_tol) {
+                    bound = bound.max(d);
+                    continue;
                 }
             }
+            let Some((alpha, uv, exact)) = solve(t, alpha, uv)? else {
+                solved = false;
+                break;
+            };
+            // a face not enclosed: upstream's check, the span's midpoint against the
+            // exact rib point there
+            if rib.is_none() {
+                let on_3d = c3d.evaluate_point(t)?;
+                let on_fil_uv = c_fil.evaluate_point(t)?;
+                let on_end_uv = c_end.evaluate_point(t)?;
+                let on_fil = fillet.evaluate_point(k, Point2::new(on_fil_uv.x, on_fil_uv.y))?;
+                let on_end = end.evaluate_point(k, Point2::new(on_end_uv.x, on_end_uv.y))?;
+                let off_mid = on_3d.distance(exact) > approx_tol
+                    || on_fil.distance(exact) > approx_tol
+                    || on_end.distance(exact) > approx_tol;
+                if !off_mid {
+                    continue;
+                }
+            }
+            off.push((jj, alpha, uv, exact));
         }
 
         if solved && off.is_empty() {
@@ -678,7 +690,7 @@ pub fn tangent_end_rib(
                 curve_3d: c3d,
                 fillet_uv: c_fil,
                 end_uv: c_end,
-                bound,
+                bound: rib.is_some().then_some(bound),
             });
         }
 
@@ -707,8 +719,18 @@ pub fn tangent_end_rib(
         spans += off.len();
     }
 
-    // no station count certifies the rib within the tolerance (#17744)
-    Err(not_certified(halvings, ts.len()))
+    // no station count certifies the rib within the tolerance (#17744); upstream's check:
+    // no stations give the rib within tolerance
+    if faces.is_some() {
+        return Err(SolidError::blend(
+            OP_RIB,
+            crate::error::blend::BlendFailure::NotCertified {
+                halvings,
+                stations: ts.len(),
+            },
+        ));
+    }
+    Err(fail("no stations give the rib within the tolerance"))
 }
 
 #[cfg(test)]
@@ -810,8 +832,9 @@ mod tests {
             worst <= tol,
             "the rib is {worst:e} off a surface (tolerance {tol:e})"
         );
-        assert!(rib.bound <= tol, "{}", rib.bound);
-        assert!(worst <= rib.bound + 1e-12, "{worst:e} > {:e}", rib.bound);
+        let bound = rib.bound.unwrap();
+        assert!(bound <= tol, "{bound:e}");
+        assert!(worst <= bound + 1e-12, "{worst:e} > {bound:e}");
     }
 
     /// The farthest the rib's curves are from the surfaces, at 1001 parameters: the 3D
@@ -847,12 +870,11 @@ mod tests {
         worst
     }
 
-    /// A face with no NURBS data to enclose (#17744): the clean rib's fillet plane as an
+    /// A face the certificate does not enclose (#17744): the clean rib's fillet plane as an
     /// offset surface (0.1 off, the plane `z = c`), the rib the line `x = y − 1/2` there.
-    /// It cannot be certified, so it is refused as `NotCertified`, not accepted on samples
-    /// as `main` does.
+    /// It is built as `main` builds it, on its spans' midpoints, and claims no bound.
     #[test]
-    fn a_rib_on_a_face_without_nurbs_data_is_not_certified() {
+    fn a_rib_on_a_face_not_enclosed_is_built_without_a_bound() {
         let k = Kernel::default();
         let (plane, end) = bumped_rib_surfaces(0.0);
         let fillet = Surface::from(
@@ -867,15 +889,11 @@ mod tests {
         );
         let c = fillet.evaluate_point(&k, Point2::new(0.5, 0.5)).unwrap().z;
         let (p, q) = (Point3::new(-0.5, 0.0, c), Point3::new(0.5, 1.0, c));
-        let err = tangent_end_rib(&k, &fillet, &end, 2, p, q, None, false, 1e-5).unwrap_err();
-        assert_eq!(err.operation(), OP_RIB);
-        assert_eq!(
-            err.blend_failure(),
-            Some(&BlendFailure::NotCertified {
-                halvings: 0,
-                stations: 0
-            })
-        );
+        let tol = 1e-5;
+        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, q, None, false, tol).unwrap();
+        assert_eq!(rib.bound, None);
+        let worst = farthest_off(&k, &rib, &fillet, &end);
+        assert!(worst <= tol, "{worst:e}");
     }
 
     /// The same surfaces without the bump: the rib is the line `x = y − 1/2` on `z = 0`. It
@@ -900,8 +918,9 @@ mod tests {
             tol,
         )
         .unwrap();
-        assert!(rib.bound <= tol, "{}", rib.bound);
+        let bound = rib.bound.unwrap();
+        assert!(bound <= tol, "{bound:e}");
         let worst = farthest_off(&k, &rib, &fillet, &end);
-        assert!(worst <= rib.bound + 1e-12, "{worst:e} > {:e}", rib.bound);
+        assert!(worst <= bound + 1e-12, "{worst:e} > {bound:e}");
     }
 }
