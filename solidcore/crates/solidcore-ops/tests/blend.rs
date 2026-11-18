@@ -4883,7 +4883,8 @@ const HEX_RC: f64 = 6.845_299_461_620_161;
 /// that of the upper half ball). On main the arcs were classified as tori of major radius 0
 /// (a circle about the axis through the centres, of radius 0): at one corner the section to
 /// the next straight round came out a traced curve up to 0.61 off its meridian and 0.21 off
-/// the round's cylinder, and the round gained volume where the faces missed each other.
+/// the round's cylinder: the check finds that gap, and the volume is off where the faces
+/// miss each other (the slab lost 9.674 for 9.861; the whole part gained 5.85).
 #[test]
 fn a_hex_rim_rounded_at_its_corner_rounds_radius_is_six_ball_triangles() {
     rig_fixes();
