@@ -293,14 +293,16 @@ fn continued_line_segment(
     for (slot, p) in ts.iter_mut().zip([start, end]) {
         let t = (p - a).dot(d) / len2;
         let foot = a + d * t;
-        if !((p - foot).length() <= tol) || !t.is_finite() {
+        let off = (p - foot).length();
+        if !off.is_finite() || !t.is_finite() || off > tol {
             return Ok(None);
         }
         *slot = t;
     }
     let past_high = ts.iter().all(|&t| t >= 1.0 - reach) && ts.iter().any(|&t| t > 1.0 + reach);
     let past_low = ts.iter().all(|&t| t <= reach) && ts.iter().any(|&t| t < -reach);
-    if !(past_high || past_low) || !((end - start).length() > tol) {
+    let span = (end - start).length();
+    if !(past_high || past_low) || !span.is_finite() || span <= tol {
         return Ok(None);
     }
     Ok(Some(Curve::from(Line::from_points(start, end, 3))))
