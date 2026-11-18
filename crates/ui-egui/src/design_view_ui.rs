@@ -19,6 +19,7 @@ pub const VIEW_BESIDE: &str = "view.beside";
 pub const VIEW_NEW_WINDOW: &str = "view.new_window";
 pub const VIEW_MOVE_TO_WINDOW: &str = "view.move_to_window";
 const WINDOW_PREFIX: &str = "view.window.";
+pub const VIEW_RETURN: &str = "view.return";
 pub const VIEW_CLOSE: &str = "view.close";
 pub const VIEW_CLOSE_OTHERS: &str = "view.close_others";
 pub const VIEW_CLOSE_RIGHT: &str = "view.close_right";
@@ -43,12 +44,13 @@ pub const MOVE_TO_WINDOW_MENU: TabMenuRow<'static> = TabMenuRow::new(VIEW_MOVE_T
 
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
-pub const VIEW_MENU: [TabMenuRow<'static>; 9] = [
+pub const VIEW_MENU: [TabMenuRow<'static>; 10] = [
     TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None).for_local_view(),
     TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None).for_local_view(),
     TabMenuRow::new(VIEW_BESIDE, "Show beside", "").with_icon("tiles", None).for_local_view(),
     TabMenuRow::new("view.place", "design_view.place", "").with_icon("tiles", None).needing_others().for_local_view(),
     MOVE_TO_WINDOW_MENU,
+    TabMenuRow::new(VIEW_RETURN, "view_menu.return", "").with_icon(solidcraft_ui_kit::icons::window_icon(true), None).needing_remote_view(),
     TabMenuRow::new(VIEW_CLOSE, "Close view", "Ctrl+W").with_icon("close", None).separated(),
     TabMenuRow::new(VIEW_CLOSE_OTHERS, "Close other views", "").needing_others().for_local_view(),
     TabMenuRow::new(VIEW_CLOSE_RIGHT, "Close views to the right", "").needing_others().for_local_view(),
@@ -180,7 +182,7 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
             documents::view_rename_start(app, view);
         }
         VIEW_DUPLICATE => {
-            documents::view_duplicate(app, view);
+            return app.run("tab.view.duplicate", serde_json::json!({"id": view})).is_ok();
         }
         VIEW_BESIDE => {
             let beside = (view != app.docs.views.active().id).then_some(view);
@@ -190,14 +192,22 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
             app.docs.view_placement = Some((app.docs.active_tab(), view));
         }
         VIEW_NEW_WINDOW => move_to_window(app, view, serde_json::json!("new")),
+        VIEW_RETURN => {
+            let window = app.view_windows.current_window();
+            move_to_window(app, view, serde_json::json!(window));
+        }
+
         id if let Some(window) = window_menu_target(id) => move_to_window(app, view, serde_json::json!(window)),
         VIEW_CLOSE => {
             if !crate::view_windows::defer_close_view(app, view) {
                 documents::view_close(app, view);
             }
         }
-        VIEW_CLOSE_OTHERS => documents::view_close_others(app, view),
-        VIEW_CLOSE_RIGHT => documents::view_close_right_of(app, view),
+        VIEW_CLOSE_OTHERS | VIEW_CLOSE_RIGHT => {
+            let command = if id == VIEW_CLOSE_OTHERS { "tab.view.close_others" } else { "tab.view.close_right" };
+            let window = app.view_windows.current_window();
+            return app.run(command, serde_json::json!({"id": view, "window": window})).is_ok();
+        }
         DESIGN_CLOSE => documents::close(app, app.docs.active, false),
         _ => return false,
     }
