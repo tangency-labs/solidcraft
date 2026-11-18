@@ -3510,8 +3510,10 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     assert_eq!(work.cut, 1, "{work:?}");
     assert_eq!(model.state().bodies.len(), 1);
 
-    // A tool that reaches out of the body: the box can show it apart of the body, so
-    // it is measured.
+    // A tool that reaches out of the body but meets the box of its vertices: that box lies
+    // inside the body's exact box, so the exact box cannot show the tool apart of the body
+    // and is not measured either (a hole through a wall of a rounded spline body measured
+    // it for over a minute).
     let mut doc = Document::new("a cut through");
     block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
     let kind = FeatureKind::Box {
@@ -3526,13 +3528,36 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     let mut model = Model::new();
     let work = counted(|| model.evaluate(&doc));
     assert!(model.result(cut).is_some_and(|r| r.error.is_none()), "{:?}", model.result(cut));
-    // The tool's tight box and the body's.
-    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    // The tool's tight box, and no other.
+    assert_eq!(work.tight_boxes, 1, "{work:?}");
     assert_eq!(work.cut, 1, "{work:?}");
     let st = model.state();
     assert_eq!(st.bodies.len(), 1);
     // The tool crosses the top face: it takes 500 mm3 of the block with it.
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
+
+    // A tool clear of the box of the body's vertices: only the exact box can show it apart of
+    // the body, so it is measured, and the body is left as it was without a boolean.
+    let mut doc = Document::new("a cut beside");
+    block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::new(30.0, 5.0, 5.0)),
+        length: "10".into(),
+        width: "10".into(),
+        height: "10".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    let cut = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(cut).is_some(), "{:?}", model.result(cut));
+    // The tool's tight box and the body's.
+    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    assert_eq!(work.cut, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 8000.0).abs() < 1e-6);
 }
 
 /// The design of #4282: a cube with a hole through it along each of the three axes, all of
