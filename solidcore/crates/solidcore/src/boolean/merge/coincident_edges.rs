@@ -27,7 +27,7 @@
 //! imprint, as before. The bound is a certificate in code ([`certified_line_gap`]); its
 //! proof is in that function's doc comment. A pair whose curves bow apart by more than the
 //! tolerance is refused and imprinted as before (the `boolean_api` test
-//! `an_arc_bowing_past_a_coplanar_box_face_keeps_its_segment`).
+//! `relating_coincident_edges_needs_their_curves_within_tolerance`).
 //!
 //! #16640's guard (`proto_topology::p2`, an edge-to-edge definition whose ends lie farther
 //! apart than every tolerance makes no relation of its own) is about a stretch that ends on
