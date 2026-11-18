@@ -6446,7 +6446,7 @@
   "ui.drawing_ribbon.align": "Alinear",
   "ui.drawing_ribbon.issue_short": "Emetre rev.",
   "ui.drawing_ribbon.model_dims_short": "Cotes model",
-  "ui.drawing_ribbon.planned": "(previst)",
+  "ui.drawing_ribbon.planned": "Properament",
   "ui.drawing_ribbon.space": "Espaiar",
   "ui.drawing_ribbon.surface_texture_short": "Textura superf.",
   "ui.drawing_settings.immediate": "Els canvis del full s'apliquen de seguida. Cada edició és un pas de desfer del dibuix.",
