@@ -428,7 +428,8 @@ pub(crate) fn probe(app: &SolveApp, painter: &Painter, proj: &Proj) {
     };
     // Only the points the view shows: the cloud's filters, one playing at its range now.
     let drawn = crate::point_clouds::as_drawn(c, |k| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(c.id, k)));
-    let kept = if drawn.filters.is_empty() { Vec::new() } else { solidcraft_engine::doc::point_cloud_distribution::kept_points(&drawn, &drawn.filters) };
+    let kept =
+        if drawn.filters.is_empty() { Vec::new() } else { solidcraft_engine::doc::point_cloud_distribution::kept_points(&drawn, &drawn.filters) };
     let Some((index, k, at)) = nearest(c, &shown.report, &kept, proj, pointer) else { return };
     let (Some(d), Some(closest)) = (shown.report.distances.get(k).copied().flatten(), shown.report.closest.get(k).copied().flatten()) else {
         return;
