@@ -185,6 +185,9 @@ fn select_all_in_the_transcript_takes_the_whole_conversation() {
         [(crate::ui_kit::LayoutMode::Docked, false), (crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true)];
     for (dark, (layout, popped)) in [true, false].into_iter().flat_map(|dark| layouts.map(|l| (dark, l))) {
         let mut h = transcript_clipboard_harness(layout);
+        // Keep the transcript's historical composer layout while testing selection.
+        // The no-agent setup footer has its own dedicated regression (#18763).
+        h.app.preferences.agents.push(agents::AgentConfig { id: "test-agent".into(), name: "Test agent".into(), ..Default::default() });
         // The thought is shown open, so the test sees that it is drawn but not highlighted.
         h.app.preferences.agent_thinking_folded = false;
         h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
@@ -5939,6 +5942,9 @@ fn the_model_search_hint_says_when_an_id_can_be_typed() {
 #[test]
 fn enter_and_the_control_channel_send_the_box_with_its_pills() {
     let mut h = crate::scenario::Harness::new();
+    // This test exercises sending and its context; an agent is configured. The separate
+    // empty-installation test covers the deliberately disabled Send action (#18763).
+    h.app.preferences.agents.push(agents::AgentConfig { id: "test-agent".into(), name: "Test agent".into(), ..Default::default() });
     h.call("ui.agent_chat", json!({"open": true}));
     let sels = box_selection(&mut h.app);
     h.app.agent_chat.input = "put it ".into();

@@ -1150,6 +1150,9 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
     // An empty agent list cannot take a message. Keep typing available while setup opens, but
     // refuse Send and Enter until an agent is found (#18763).
     let no_agent = view.agents.is_empty() && chat.detecting.is_none() && !state.running();
+    // A short shared panel has room for its message and footer only if setup lives in the
+    // existing action row, instead of adding a whole line above it (#18763).
+    let compact_setup = no_agent && ui.available_height() < 400.0;
     // Enter sends (queues while the agent works); Ctrl/Cmd+Enter sends now; Esc stops. They are
     // read before the field sees them so no newline is typed.
     let focused = ui.memory(|m| m.has_focus(input_id()));
@@ -1193,7 +1196,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Focus);
                 }
                 enter = r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
-                if no_agent {
+                if no_agent && !compact_setup {
                     ui.horizontal_wrapped(|ui| {
                         let hint = ui_kit::text(ui, tr("ui.agent_chat_setup_to_send"), ui_kit::Text::Hint("setup_to_send"));
                         solidcraft_ui_registry::publish_rect("agent_chat:setup_hint", hint.rect);
@@ -1254,6 +1257,15 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                                 solidcraft_ui_registry::publish_rect("agent_chat:send", action.rect);
                                 solidcraft_ui_registry::publish_handle("agent_chat:send", action.rect.center());
                                 send_clicked = action.clicked();
+                            }
+                            if compact_setup {
+                                let setup = ui_kit::button(ui, tr("ui.ai_add_agent"), ui_kit::Button::Small)
+                                    .backing_on_hover_text(tr("ui.agent_chat_setup_to_send"));
+                                solidcraft_ui_registry::publish_rect("agent_chat:setup_hint", setup.rect);
+                                solidcraft_ui_registry::publish_handle("agent_chat:setup", setup.rect.center());
+                                if setup.clicked() {
+                                    chat.actions.push(PanelAction::AddAgent);
+                                }
                             }
                         });
                     },
