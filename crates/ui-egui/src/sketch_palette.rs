@@ -520,6 +520,12 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
             solidcraft_ui_text::tr("ui.palette_construction_mode"),
             row_types.get(1).copied().unwrap_or(false),
         );
+        // Before Canvas or Decal runs (its file still being picked, say), the frame mode is with
+        // the sketch's options, so it can be set while the sketch is open; while either runs it
+        // is in Feature Options above.
+        if !image_tool {
+            frame_image = crate::ui_kit::checkbox_row(ui, "frame_image", solidcraft_ui_text::tr("ui.palette_frame_image"), framing);
+        }
         crate::ui_kit::section(ui, "more", more, false, |ui| {
             for (key, label) in TOGGLES {
                 if !["show_constraints", "show_dimensions", "show_points", "snap"].contains(&key)
@@ -685,7 +691,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.tool = crate::tools::Tool::for_command("sketch.line");
         h.settle();
-        assert!(crate::scenario::handle_at("sketch_palette:toggle:frame_image").is_none(), "the Line tool has no image to frame");
+        assert!(crate::scenario::handle_at("sketch_palette:toggle:frame_image").is_some(), "the mode is with the sketch's options");
         for (cmd, on) in [("canvas.insert", true), ("canvas.decal", false)] {
             crate::sketch_tools::start_image_placement(&mut h.app, cmd, "picture.png".into());
             h.settle();
