@@ -631,7 +631,7 @@ pub(crate) fn off_surface_bound(
             let wmax = net_wmax.max(r.wmax);
             // (the true weight is at least `W₀ − γ W_max`)
             let low = w0 - g * wmax;
-            if !(low > 0.0) {
+            if !(low > 0.0 && low.is_finite()) {
                 return Ok(None);
             }
             // (`absolute` is a largest coordinate: a Euclidean length is under twice it)
