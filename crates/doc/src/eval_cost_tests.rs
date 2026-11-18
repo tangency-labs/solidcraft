@@ -24,7 +24,8 @@ use crate::*;
 /// go), unions run to tell the tools of a cut apart, face surfaces classified for a hole's
 /// direction, joins made of bodies that are all apart without running the kernel's union, the
 /// holes whose tools were built (not moved from another copy's), the tight boxes the kernel was
-/// asked for, and the flats of sheets made from surfaces laid out (their pieces cut).
+/// asked for, the flats of sheets made from surfaces laid out (their pieces cut), the blends the
+/// kernel was asked for, and the searches for the radius that fits.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -3429,17 +3430,14 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
 }
 
-
 /// The design of #4282: a cube with a hole through it along each of the three axes, all of
 /// them through the cube's centre, and a round on every edge of the result.
 fn holed_cube(doc: &mut Document, size: f64, hole: f64) {
     block(doc, "Cube", Vec3::new(-size / 2.0, -size / 2.0, 0.0), [size, size, size]);
     // The three holes: a hole along each axis, its axis through the cube's centre.
-    for (base, axis) in [
-        (Vec3::new(-size / 2.0, 0.0, size / 2.0), Vec3::X),
-        (Vec3::new(0.0, -size / 2.0, size / 2.0), Vec3::Y),
-        (Vec3::new(0.0, 0.0, 0.0), Vec3::Z),
-    ] {
+    for (base, axis) in
+        [(Vec3::new(-size / 2.0, 0.0, size / 2.0), Vec3::X), (Vec3::new(0.0, -size / 2.0, size / 2.0), Vec3::Y), (Vec3::new(0.0, 0.0, 0.0), Vec3::Z)]
+    {
         let kind = FeatureKind::Cylinder {
             base: point_expr(base),
             axis: Dir(axis),
@@ -3524,4 +3522,3 @@ fn a_refused_round_that_names_a_radius_to_try_searches_for_it() {
     assert_eq!(work.blends, 1, "{work:?}");
     assert_eq!(work.fit_searches, 1, "{work:?}");
 }
-
