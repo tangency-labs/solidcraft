@@ -1,6 +1,46 @@
 use super::*;
 use serde_json::{Value, json};
 
+#[test]
+fn named_tool_refusals_keep_plugin_file_and_budget_details() {
+    let session = Session::default();
+    let mut m = manifest();
+    m["runtime"]["permissions"] = json!({"files":[{"name":"project","write":true}]});
+    let manifest = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap();
+    for file in [None, Some("part.smp")] {
+        for (error, structured) in [
+            (
+                HostError::PermissionDenied { permission: "files.write:project".into() },
+                json!({"plugin":"sample","grant":"files.write:project","approve":tools::APPROVE}),
+            ),
+            (
+                HostError::PermissionDenied { permission: format!("{}write-file", craft_plugin::READ_ENTRY_IMPORT) },
+                json!({"plugin":"sample","entry":"make","refused_import":"write-file"}),
+            ),
+            (
+                HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
+                json!({"plugin":"sample","grant":"memory_mib","approve":tools::APPROVE}),
+            ),
+        ] {
+            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), error };
+            let original = failure.text();
+            let explained = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure))).to_string();
+            assert!(explained.starts_with(&original), "{explained}");
+            assert_eq!(structured_tool_error(&explained), Some(structured), "{explained}");
+        }
+        let failure = PluginFailure {
+            plugin: "Sample".into(),
+            file: file.map(String::from),
+            error: HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
+        };
+        let original = failure.text();
+        let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
+        assert!(matches!(unchanged, EngineError::PluginFailed(_)));
+        assert_eq!(unchanged.to_string(), original);
+    }
+    assert!(matches!(explain_named(&session, &manifest, "make", HostError::Cancelled.into()), EngineError::Plugin(HostError::Cancelled)));
+}
+
 fn manifest() -> Value {
     json!({"id":"sample", "name":"Sample", "version":"0.1.0", "capabilities":["commands@0.1"],"runtime":{
         "module":"plugin.wasm","entries":["make"],"commands":["solid.box"],
@@ -74,6 +114,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
@@ -103,6 +144,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     let catalog = host.command_catalog();
@@ -140,6 +182,73 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     m["runtime"]["permissions"] = json!({"command_groups":["file"]});
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
 }
+/// A read-only folder must pass the importer's scope check without granting write access.
+/// Both the user's grant and the package's manifest must allow the intended operation.
+#[test]
+fn file_scopes_require_separate_read_and_write_approvals() {
+    let folder = solidcraft_io::vfs::temp_dir().join("sc-readonly-grant-18793");
+    let approved = vec![FileGrant { name: "data".into(), folder: folder.clone(), read: true, write: false }];
+    let manifest = vec![craft_plugin::FilePermission { name: "data".into(), read: true, write: false }];
+    assert_eq!(approved_file_folders(&approved, &manifest, false), vec![folder.clone()]);
+    assert!(approved_file_folders(&approved, &manifest, true).is_empty());
+
+    let mut more_grant = approved.clone();
+    more_grant[0].write = true;
+    assert!(approved_file_folders(&more_grant, &manifest, true).is_empty(), "a grant cannot override a read-only manifest");
+    let mut more_manifest = manifest.clone();
+    more_manifest[0].write = true;
+    assert!(approved_file_folders(&approved, &more_manifest, true).is_empty(), "the manifest cannot override read-only approval");
+    assert_eq!(approved_file_folders(&more_grant, &more_manifest, true), vec![folder.clone()]);
+    assert!(approved_file_folders(&more_grant, &[], false).is_empty(), "a missing manifest declaration confers no access");
+    assert!(approved_file_folders(&[], &more_manifest, false).is_empty(), "a missing user grant confers no access");
+
+    for command in ["file.insert_step", "file.insert_mesh", "file.insert_gerber", "file.gerber_files", "sketch.insert_dxf", "sketch.insert_svg"] {
+        assert!(input_only_command(command), "{command} reads its supplied file");
+    }
+    for command in ["file.save_as", "file.copy", "file.move", "file.trash", "file.export_step", "doc.open", "doc.recovery_discard", "library.export"]
+    {
+        assert!(!input_only_command(command), "{command} needs the stricter write-capable scope");
+    }
+}
+
+/// Importing a STEP may change the design without modifying its source file. Even after this
+/// read-only command succeeds, write commands must not gain access to the same folder.
+#[test]
+fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-read-scope-{}", std::process::id()));
+    let read = root.join("read");
+    std::fs::create_dir_all(&read).unwrap();
+    let source_path = read.join("source.step");
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+    source.execute("file.export_step", &json!({"path":source_path})).unwrap();
+    assert!(source_path.is_file());
+
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: Vec::new(),
+        file_read_folders: vec![read.clone()],
+        evaluation: None,
+    };
+    host.begin_transaction().unwrap();
+    let inserted = host.run_command("file.insert_step", &json!({"path":source_path}));
+    assert!(inserted.is_ok(), "read-only insert should work: {inserted:?}");
+    let output = read.join("forbidden.sc");
+    let write = host.run_command("file.save_as", &json!({"path":output}));
+    assert!(matches!(&write, Err(HostError::CommandFailed { .. })), "the same grant cannot save files: {write:?}");
+    assert!(!output.exists(), "no file was written under a read-only grant");
+    let output = read.join("forbidden.stl");
+    assert!(host.run_command("file.export_stl", &json!({"path":output})).is_err(), "export also requires write authority");
+    assert!(!output.exists());
+    assert!(source_path.exists(), "the imported STEP is unchanged");
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees_only_its_folders() {
     let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-groups-{}", std::process::id()));
@@ -152,6 +261,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     host.begin_transaction().unwrap();
@@ -183,6 +293,7 @@ fn a_command_in_another_spelling_is_never_granted() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     host.begin_transaction().unwrap();
@@ -228,6 +339,16 @@ fn disabled_ids_survive_scratch_and_new_design() {
     assert!(s.disabled_plugins.contains("sample"));
 }
 
+#[test]
+fn a_failure_message_shows_braces_in_a_file_name_or_reason_as_they_are() {
+    let failure = |file: &str, reason: &str| PluginFailure {
+        plugin: "Sample".into(),
+        file: Some(file.into()),
+        error: craft_plugin::HostError::Unsupported { reason: reason.into() },
+    };
+    assert_eq!(failure("part{reason}.smp", "no {file} solids").text(), "Sample does not support part{reason}.smp: no {file} solids");
+    assert_eq!(failure("part.smp", "no solids").text(), "Sample does not support part.smp: no solids");
+}
 #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod native {
     use super::*;
@@ -587,7 +708,8 @@ mod native {
         assert_eq!(entry["commands"], json!(["sample.make"]));
         assert_eq!(entry["manifest"]["runtime"]["entries"][0]["input_schema"], schema);
         let description = s.execute("engine.describe", &json!({"command":"sample.make"})).unwrap();
-        assert_eq!(description["input"]["properties"]["params"], schema);
+        assert_eq!(description["input"]["properties"]["params"], craft_plugin::strict_input_schema(&schema), "as strict as the check");
+        assert_eq!(description["tool"]["input"], description["input"]["properties"]["params"], "the tool takes the inputs alone");
         assert_eq!(description["effect"], "edit");
         assert!(s.doc.features.is_empty());
         assert!(s.execute("sample.make", &json!({"params":{}})).is_err());
@@ -716,6 +838,7 @@ mod native {
                     view: None,
                     groups: BTreeSet::new(),
                     file_folders: Vec::new(),
+                    file_read_folders: Vec::new(),
                     evaluation: None,
                 };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
@@ -979,6 +1102,111 @@ mod native {
     }
 
     #[test]
+    fn named_calls_preserve_input_pass_through() {
+        let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"size":{"type":"number","minimum":1}}}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        for inputs in [json!({"colour":"red"}), json!({"size":0}), json!({"size":"large"})] {
+            let result = s.execute("sample.make", &json!({"approval":approval,"params":inputs})).unwrap();
+            assert_eq!(result["result"], inputs, "direct calls pass inputs to the plugin unchanged");
+        }
+    }
+
+    #[test]
+    fn a_scoped_fresh_session_lists_installed_commands_before_tools_are_requested() {
+        let f = Fixture::new("call $box");
+        let mut installed = Session::default();
+        f.install(&mut installed, json!({}));
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = installed.plugin_state.plugins_dir.clone();
+        assert!(s.plugin_state.packages.is_empty());
+        solidcraft_io::vfs::scoped(Some(Default::default()), || {
+            let listed = s.execute("plugin.list", &json!({})).unwrap();
+            assert_eq!(listed["plugins"].as_array().unwrap().len(), 1, "{listed}");
+            assert_eq!(listed["plugins"][0]["commands"], json!(["sample.make"]));
+        });
+    }
+
+    /// An installed plugin's entry is a tool: listed with its plugin's text and strict inputs,
+    /// called by name as one undo step, gone from the listing once turned off or removed.
+    #[test]
+    fn installed_entries_are_tools_that_run_as_one_undo_step_until_removed() {
+        let f = Fixture::new("call $box");
+        let mut m = manifest();
+        m["description"] = json!("Makes a box");
+        m["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"size":{"type":"number"}}}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        let listed = s.execute("plugin.tools", &json!({})).unwrap();
+        let tools = listed["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1, "{listed}");
+        let tool = &tools[0];
+        assert_eq!(
+            (&tool["name"], &tool["kind"], &tool["plugin"], &tool["effect"]),
+            (&json!("sample.make"), &json!("command"), &json!("sample"), &json!("edit"))
+        );
+        assert_eq!((&tool["plugin_name"], &tool["description"]), (&json!("Sample"), &json!("Makes a box")));
+        assert_eq!(tool["input_schema"]["additionalProperties"], false, "the listed inputs are as strict as the check");
+        assert!(tool.get("approval").is_none(), "a listing reads no component");
+        let approval = s.execute("plugin.tools", &json!({"name":"sample.make"})).unwrap()["tools"][0]["approval"].clone();
+        assert!(approval.is_string());
+        let undo = s.undo.len();
+        s.execute("sample.make", &json!({"approval": approval, "params": {"size": 2}})).unwrap();
+        assert_eq!((s.doc.features.len(), s.undo.len()), (1, undo + 1));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.features.is_empty(), "one undo takes back the whole call");
+        s.disabled_plugins.insert("sample".into());
+        assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"], json!([]));
+        s.disabled_plugins.clear();
+        assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"].as_array().unwrap().len(), 1);
+        s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+        assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"], json!([]));
+    }
+
+    /// Called by name, a refusal says which grant the plugin lacks and how to approve it, or
+    /// which host import a read entry was refused; nothing waits for a dialog.
+    #[test]
+    fn a_named_call_names_the_missing_grant_and_the_refused_import() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("sample/plugin.wasm"), file_component(true)).unwrap();
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let secret = f.0.join("secret.txt");
+        std::fs::write(&secret, b"original").unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        let call = |s: &mut Session| {
+            let approval = s.execute("plugin.tools", &json!({"name":"sample.make"})).unwrap()["tools"][0]["approval"].clone();
+            s.execute("sample.make", &json!({"approval": approval})).unwrap_err().to_string()
+        };
+        let missing = call(&mut s);
+        assert_eq!(
+            structured_tool_error(&missing),
+            Some(json!({"plugin":"sample","grant":"files.write:project","approve":tools::APPROVE})),
+            "{missing}"
+        );
+        // A read entry with the folder granted for writing is still refused the write.
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        f.install(&mut s, json!({"folders":[{"name":"project","path":f.0,"read":true,"write":true}]}));
+        let refused = call(&mut s);
+        assert_eq!(structured_tool_error(&refused), Some(json!({"plugin":"sample","entry":"make","refused_import":"write-file"})), "{refused}");
+        assert_eq!(std::fs::read(&secret).unwrap(), b"original");
+        assert!(s.doc.features.is_empty());
+        // The same entry run by a person (plugin.run, not by name) is refused the same write.
+        let installed = s.plugin_state.packages["sample"].clone();
+        let approval = read_package(&installed).unwrap().approval;
+        let direct = s.execute("plugin.run", &json!({"path":installed,"approval":approval,"entry":"make"})).unwrap_err();
+        assert!(direct.to_string().contains("write-file"), "{direct}");
+        assert_eq!(std::fs::read(&secret).unwrap(), b"original");
+    }
+
+    #[test]
     fn metadata_only_discovery_preserves_the_explicitly_inspected_path() {
         let f = Fixture::new("call $box");
         std::fs::write(f.0.join("sample/plugin.json"), r#"{"id":"sample","name":"Metadata","version":"1"}"#).unwrap();
@@ -1083,6 +1311,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     let catalog = host.command_catalog();
@@ -1116,6 +1345,7 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     solidcraft_io::vfs::scoped(None, || {
@@ -1191,6 +1421,38 @@ mod importers {
         assert!(s.execute("doc.open", &json!({"path": stl})).map_or(true, |r| r.get("loss_report").is_none()));
         assert_eq!(s.execute("file.import", &json!({"path": stl})).unwrap()["format"], "smp.convert");
         assert_eq!(s.execute("doc.open", &json!({"path": stl, "format": "smp.convert"})).unwrap()["bodies"], 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An agent that may use only the folder of its input file still sees and uses the installed
+    /// importer: the registry is the app's, not the agent's (finding 2 of a new-user walk). The
+    /// input file itself is still checked, and refused with the path named.
+    #[test]
+    fn an_agent_with_only_its_input_folder_lists_describes_and_uses_an_installed_importer() {
+        let (mut s, root) = installed("scoped", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &design());
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let outside = elsewhere.join("other.smp");
+        std::fs::write(&outside, design()).unwrap();
+        let scope = solidcraft_io::vfs::PathScope::new([root.join("files")]);
+        solidcraft_io::vfs::scoped(Some(scope), || {
+            let listed = s.execute("plugin.list", &json!({})).unwrap();
+            assert_eq!(listed["importers"][0]["id"], "smp.convert", "{listed}");
+            assert_eq!(listed["plugins"].as_array().unwrap().len(), 1, "{listed}");
+            let tools = s.execute("plugin.tools", &json!({})).unwrap();
+            assert_eq!(tools["tools"][0]["name"], "smp.convert", "{tools}");
+            // Described as the tool tools/list gives (finding 9): its schema, not "unknown command".
+            let described = s.execute("engine.describe", &json!({"command":"smp.convert"})).unwrap();
+            assert_eq!(described["kind"], "importer");
+            assert_eq!(described["tool"]["input"], tools["tools"][0]["input_schema"]);
+            assert_eq!(described["input"]["required"], json!(["path"]));
+            assert_eq!(s.execute("doc.open", &json!({"path": file})).unwrap()["format"], "smp.convert");
+            assert_eq!(s.execute("file.import", &json!({"path": file, "format": "smp.convert"})).unwrap()["bodies"], 1);
+            let refused = s.execute("file.import", &json!({"path": outside.to_string_lossy(), "format": "smp.convert"})).unwrap_err().to_string();
+            assert!(refused.contains("other.smp") || refused.contains("elsewhere"), "the input file's own refusal names it: {refused}");
+            assert!(!refused.contains("no installed"), "{refused}");
+        });
         std::fs::remove_dir_all(root).unwrap();
     }
 

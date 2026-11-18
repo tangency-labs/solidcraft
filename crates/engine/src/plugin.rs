@@ -3,7 +3,7 @@
 use crate::{EngineError, Result, Session};
 pub use craft_plugin::{
     API, Effect, Entry, EntryKind, FileGrant, HostError, HostLimits, Limits, LossItem, LossReport, LossSeverity, MAX_COMPONENT_BYTES, MAX_JSON_BYTES,
-    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, valid_id,
+    MAX_MANIFEST_BYTES, MAX_MEMORY_MIB, Manifest, RuntimeManifest, UiSlot, check_input, valid_id,
 };
 use craft_plugin::{CommandSchema, PluginHost};
 use serde_json::{Value, json};
@@ -98,10 +98,15 @@ impl AppState {
 
     /// Take in grants another program stored or revoked since this session last looked. Nothing
     /// to do unless this session keeps its grants in the store.
+    ///
+    /// The store is read with the app's own authority, whatever the caller's file scope: what the
+    /// user approved for a plugin applies whoever calls it, so an agent confined to its folders
+    /// runs a plugin with its approvals, not with none. Writes still need the caller's scope.
     pub fn refresh_stored(&mut self) {
         let Some(dir) = self.plugins_dir().filter(|_| self.stored.is_some()) else { return };
         if let Some(synced) = self.stored.as_mut() {
-            synced.refresh(&dir, &mut self.grants);
+            let grants = &mut self.grants;
+            solidcraft_io::vfs::scoped(None, || synced.refresh(&dir, grants));
         }
     }
 
@@ -190,6 +195,22 @@ const FILE_COMMANDS: &[&str] = &[
     "timeline.export_script",
 ];
 
+/// Only reviewed input readers can access a folder granted for read without write.
+/// A new command defaults to needing both permissions until its file effects are audited.
+fn input_only_command(id: &str) -> bool {
+    matches!(id, "file.insert_step" | "file.insert_mesh" | "file.insert_gerber" | "file.gerber_files" | "sketch.insert_dxf" | "sketch.insert_svg")
+}
+
+/// Both the manifest and the user must approve a folder for the intended access.
+/// Writers retain the existing requirement that both read and write are approved.
+fn approved_file_folders(granted: &[FileGrant], requested: &[craft_plugin::FilePermission], write: bool) -> Vec<PathBuf> {
+    granted
+        .iter()
+        .filter(|g| g.read && (!write || g.write) && requested.iter().any(|r| r.name == g.name && r.read && (!write || r.write)))
+        .map(|g| g.folder.clone())
+        .collect()
+}
+
 /// The sensitive group of a command, or `None` when it acts on the open design alone.
 pub fn command_group(id: &str) -> Option<&'static str> {
     let family = id.split_once('.').map_or(id, |(family, _)| family);
@@ -228,6 +249,20 @@ pub fn read_package(path: &str) -> Result<Package> {
         Vec::new()
     };
     Ok(Package { manifest, approval: package_hash(&bytes, &component), component })
+}
+
+/// Whether `folder` is an installed package in the app's own plugins folder (`{plugins}/<id>`).
+pub fn is_installed_folder(session: &Session, folder: &str) -> bool {
+    let path = Path::new(folder);
+    session.plugin_state.plugins_dir().is_some_and(|root| path.parent() == Some(root.as_path()))
+        && path.file_name().and_then(|n| n.to_str()).is_some_and(valid_id)
+}
+
+/// Reads an installed package with the app's authority, whatever the caller's file scope: a
+/// plugin tool call names a plugin, never a path, and the plugins folder is the app's own. Any
+/// other folder is read through the caller's scope, as `plugin.inspect` reads it.
+pub fn with_installed<T>(session: &Session, folder: &str, read: impl FnOnce() -> T) -> T {
+    if is_installed_folder(session, folder) { solidcraft_io::vfs::scoped(None, read) } else { read() }
 }
 
 /// The ceilings a package runs under: the app's, raised to the memory the user approved for this
@@ -306,15 +341,14 @@ fn run_package(session: &mut Session, package: Package, entry: &str, params: &se
             view: None,
             groups,
             file_folders: Vec::new(),
+            file_read_folders: Vec::new(),
             evaluation: None,
         };
-        let file_folders = host
-            .granted_folders()
-            .into_iter()
-            .filter(|g| g.read && g.write && rt.permissions.files.iter().any(|r| r.name == g.name && r.read && r.write))
-            .map(|g| g.folder)
-            .collect();
-        let (host, result) = craft_plugin_wasm::run(SolidCraftHost { file_folders, ..host }, &package.manifest, &package.component, entry, params);
+        let approved = host.granted_folders();
+        let file_read_folders = approved_file_folders(&approved, &rt.permissions.files, false);
+        let file_folders = approved_file_folders(&approved, &rt.permissions.files, true);
+        let (host, result) =
+            craft_plugin_wasm::run(SolidCraftHost { file_folders, file_read_folders, ..host }, &package.manifest, &package.component, entry, params);
         let value = result?;
         if !std::sync::Arc::ptr_eq(&session.doc, &host.session.doc)
             || session.active_sketch != host.session.active_sketch
@@ -349,6 +383,8 @@ pub use import::{Importer, describe as describe_importers, import_file, importer
 pub use messages::PluginFailure;
 #[cfg(test)]
 mod tests;
+mod tools;
+pub use tools::{explain_importer, explain_named, missing_grant, structured_error as structured_tool_error, tools};
 
 /// The application adapter owns a scratch transaction. Wasmtime sees only PluginHost.
 pub struct SolidCraftHost {
@@ -362,6 +398,8 @@ pub struct SolidCraftHost {
     groups: BTreeSet<String>,
     /// The file scope of a granted `file` command; every other command has none.
     file_folders: Vec<PathBuf>,
+    /// Approved folders used only by known read-only input commands.
+    file_read_folders: Vec<PathBuf>,
     /// An importer's own design, opened to check it (`evaluate@0.1`), apart from every open design.
     evaluation: Option<Box<Session>>,
 }
@@ -429,9 +467,13 @@ impl PluginHost for SolidCraftHost {
         {
             return Err(HostError::PermissionDenied { permission: format!("command {name} needs the `{group}` permission, which is not granted") });
         }
-        // Only a granted `file` or `doc` command reaches files, and only the folders granted for it.
+        // Read-only grants apply only to known input readers. File writers retain their
+        // previous read-and-write scope; unknown commands default to that stricter scope.
         let scope = match group {
-            Some("file" | "doc") => solidcraft_io::vfs::PathScope::new(self.file_folders.iter().cloned()),
+            Some("file" | "doc") => {
+                let folders = if input_only_command(name) { &self.file_read_folders } else { &self.file_folders };
+                solidcraft_io::vfs::PathScope::new(folders.iter().cloned())
+            }
             _ => Default::default(),
         };
         let s = self.transaction.as_mut().ok_or_else(|| HostError::CommandFailed { command: name.into(), reason: "no active transaction".into() })?;
@@ -550,20 +592,15 @@ pub fn resolve_call(s: &Session, id: &str, params: &Value) -> Result<Option<Valu
     }
     let approval =
         params.get("approval").and_then(Value::as_str).ok_or_else(|| crate::params::bad(id, "approval from plugin.inspect is required"))?;
-    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":params.get("params").cloned().unwrap_or(json!({}))})))
+    let inputs = params.get("params").cloned().unwrap_or(json!({}));
+    // Preserve direct calls' input pass-through; tool callers validate their listed schema.
+    // `named`: a refusal comes back in words an agent can act on (`tools::explain`).
+    Ok(Some(json!({"path":path,"approval":approval,"entry":entry,"params":inputs,"named":true})))
 }
 
+/// `engine.describe` of an installed, enabled plugin's entry: a command entry as the
+/// `<plugin>.<entry>` command, an importer as the tool that opens its files; each with the
+/// schema `tools/list` gives it. Read with the app's authority, whatever the caller's folders.
 pub fn describe_entry(s: &Session, id: &str) -> Result<Option<Value>> {
-    if crate::find_command(id).is_some() {
-        return Ok(None);
-    }
-    let Some((package, name)) = id.split_once('.') else { return Ok(None) };
-    let Some(path) = s.plugin_state.packages.get(package) else { return Ok(None) };
-    let package = read_package(path)?;
-    let Some(runtime) = package.manifest.runtime else { return Ok(None) };
-    let Some(entry) = runtime.entries.iter().find(|e| e.name == name && e.kind == EntryKind::Command) else { return Ok(None) };
-    Ok(Some(json!({"id":id,"label":name,"params":"approval, params: declared entry inputs",
-        "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
-            "approval":{"type":"string"},"params":entry.input_schema}},
-        "output":{},"effect":entry.effect,"slots":entry.slots})))
+    tools::describe(s, id)
 }
