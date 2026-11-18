@@ -73,3 +73,80 @@ pub(crate) fn forget(app: &mut SolveApp) {
 pub(crate) struct State {
     checked: Option<(String, bool)>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn put(dir: &Path, id: &str, manifest: &str, files: &[(&str, &[u8])]) {
+        let folder = dir.join(id);
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("plugin.json"), manifest).unwrap();
+        for (name, bytes) in files {
+            std::fs::write(folder.join(name), bytes).unwrap();
+        }
+    }
+
+    fn harness() -> (crate::scenario::Harness, PathBuf) {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("sky-plugins");
+        h.app.session.plugin_state.plugins_dir = Some(dir.clone());
+        (h, dir)
+    }
+
+    const GALAXY: &str = r#"{"id":"sky","name":"Sky","version":"1","description":"","capabilities":["effects@0.1"],"effects":[{"id":"stars","name":"Stars","kind":"galaxy","picture":"stars.jpg"}]}"#;
+    const BARE_GALAXY: &str = r#"{"id":"sky","name":"Sky","version":"1","description":"","capabilities":["effects@0.1"],"effects":[{"id":"stars","name":"Stars","kind":"galaxy"}]}"#;
+    const WAVE: &str = r#"{"id":"waves","name":"Waves","version":"1","description":"","capabilities":["effects@0.1"],"effects":[{"id":"rgb-wave","name":"RGB wave","kind":"hue-wave"}]}"#;
+    const NONE: &str = r#"{"id":"old","name":"Old","version":"1","description":"","capabilities":["commands@0.1"]}"#;
+
+    #[test]
+    fn a_chosen_galaxy_is_the_sky_with_the_picture_from_its_own_package() {
+        let (mut h, dir) = harness();
+        put(&dir, "sky", GALAXY, &[("stars.jpg", b"x")]);
+        assert!(sky(&mut h.app).is_none(), "nothing chosen: no sky");
+        h.app.preferences.ui_effect = "sky/stars".into();
+        let chosen = sky(&mut h.app).expect("the galaxy is chosen");
+        assert_eq!(chosen.kind, SkyKind::Galaxy);
+        assert_eq!(chosen.picture, Some(dir.join("sky").join("stars.jpg")));
+        assert!(!wave_set(&mut h.app).on, "a galaxy is not the wave");
+        h.app.preferences.disabled_plugins.insert("sky".into());
+        assert!(sky(&mut h.app).is_none(), "its plugin turned off: no sky");
+    }
+
+    #[test]
+    fn a_galaxy_with_no_picture_is_the_sky_with_none() {
+        let (mut h, dir) = harness();
+        put(&dir, "sky", BARE_GALAXY, &[]);
+        h.app.preferences.ui_effect = "sky/stars".into();
+        let chosen = sky(&mut h.app).expect("the galaxy is chosen");
+        assert_eq!((chosen.kind, chosen.picture), (SkyKind::Galaxy, None));
+    }
+
+    #[test]
+    fn a_manifest_whose_picture_leaves_the_package_is_not_read() {
+        let (mut h, dir) = harness();
+        put(&dir, "sky", &GALAXY.replace("stars.jpg", "../stars.jpg"), &[]);
+        h.app.preferences.ui_effect = "sky/stars".into();
+        assert_eq!(sky(&mut h.app), None);
+    }
+
+    /// A plugin with `effects@0.1` and a hue wave only, and one with no effects, have no sky.
+    #[test]
+    fn a_legacy_plugin_has_no_sky_and_draws_as_before() {
+        let (mut h, dir) = harness();
+        put(&dir, "waves", WAVE, &[]);
+        put(&dir, "old", NONE, &[]);
+        let ctx = crate::fonts::test_context();
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        for key in ["", "waves/rgb-wave", "old/anything"] {
+            h.app.preferences.ui_effect = key.into();
+            h.app.preferences.ui_effect_icons = true;
+            assert!(sky(&mut h.app).is_none(), "{key:?}: no sky");
+            assert_eq!(wave_set(&mut h.app).on, key == "waves/rgb-wave", "{key:?}: the wave as before");
+            let painter = ctx.layer_painter(egui::LayerId::background());
+            assert!(!crate::gpu::paint_sky(&mut h.app, &painter, rect), "{key:?}: no sky layer drawn");
+            assert!(!crate::gpu::sky_shown(&ctx), "{key:?}: glass sees no sky");
+        }
+    }
+}

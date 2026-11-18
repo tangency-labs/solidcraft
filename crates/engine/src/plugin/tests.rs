@@ -1791,6 +1791,65 @@ mod install_zip {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    fn sky_zip(picture: Option<&str>, files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut effect = json!({"id": "stars", "name": "Stars", "kind": "galaxy"});
+        if let Some(picture) = picture {
+            effect["picture"] = json!(picture);
+        }
+        let manifest =
+            serde_json::to_vec(&json!({"id": "sky", "name": "Sky", "version": "1.0.0", "capabilities": ["effects@0.1"], "effects": [effect]}))
+                .unwrap();
+        let mut all: Vec<(&str, &[u8])> = vec![("plugin.json", &manifest[..])];
+        all.extend_from_slice(files);
+        zip(&all)
+    }
+
+    #[test]
+    fn a_galaxy_plugin_installs_with_its_own_picture_or_with_none() {
+        let (mut s, root) = session("galaxy");
+        let jpeg: &[u8] = b"\xff\xd8\xff\xe0 a picture";
+        let path = put(&root, "sky.zip", &sky_zip(Some("stars.jpg"), &[("stars.jpg", jpeg)]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["effects"], json!(["sky/stars"]));
+        let package = read_package(&root.join("plugins/sky").to_string_lossy()).unwrap();
+        assert_eq!(package.manifest.effects[0].picture.as_deref(), Some("stars.jpg"));
+        assert_eq!(std::fs::read(root.join("plugins/sky/stars.jpg")).unwrap(), jpeg);
+        s.execute("plugin.remove", &json!({"id": "sky"})).unwrap();
+        let bare = put(&root, "bare.zip", &sky_zip(None, &[]));
+        s.execute("plugin.install", &json!({"path": bare})).unwrap();
+        assert_eq!(read_package(&root.join("plugins/sky").to_string_lossy()).unwrap().manifest.effects[0].picture, None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_picture_the_package_lacks_or_that_is_not_a_picture_is_refused_at_install() {
+        let (mut s, root) = session("galaxy-bad-picture");
+        let missing = put(&root, "missing.zip", &sky_zip(Some("stars.jpg"), &[]));
+        let err = s.execute("plugin.install", &json!({"path": missing})).unwrap_err().to_string();
+        assert!(err.contains("effects.stars.picture") && err.contains("stars.jpg"), "{err}");
+        let text = put(&root, "text.zip", &sky_zip(Some("stars.jpg"), &[("stars.jpg", b"not a picture")]));
+        let err = s.execute("plugin.install", &json!({"path": text})).unwrap_err().to_string();
+        assert!(err.contains("effects.stars.picture"), "{err}");
+        let outside = put(&root, "outside.zip", &sky_zip(Some("../stars.jpg"), &[]));
+        assert!(s.execute("plugin.install", &json!({"path": outside})).is_err());
+        assert!(!root.join("plugins/sky").exists(), "nothing is installed from a refused package");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_hue_wave_only_plugin_installs_and_reads_back_exactly_as_before() {
+        let (mut s, root) = session("legacy-hue-wave");
+        let manifest = serde_json::to_vec(&json!({"id": "wave", "name": "Wave", "version": "1.0.0", "capabilities": ["effects@0.1"],
+            "effects": [{"id": "rgb-wave", "name": "RGB wave", "kind": "hue-wave"}]}))
+        .unwrap();
+        let path = put(&root, "wave.zip", &zip(&[("plugin.json", &manifest[..])]));
+        let reply = s.execute("plugin.install", &json!({"path": path})).unwrap();
+        assert_eq!(reply["effects"], json!(["wave/rgb-wave"]));
+        let package = read_package(&root.join("plugins/wave").to_string_lossy()).unwrap();
+        assert_eq!(serde_json::to_value(&package.manifest.effects).unwrap(), json!([{"id": "rgb-wave", "name": "RGB wave", "kind": "hue-wave"}]));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn a_zip_replaced_after_review_is_refused_before_files_or_grants_are_written() {
         let (mut s, root) = session("swapped-after-review");

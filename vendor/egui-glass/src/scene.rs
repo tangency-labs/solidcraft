@@ -319,3 +319,17 @@ impl CallbackTrait for SceneCallback {
 
     fn paint(&self, _info: egui::PaintCallbackInfo, _pass: &mut wgpu::RenderPass<'static>, _resources: &CallbackResources) {}
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_views_part_of_a_window_sized_pyramid_stays_inside_it() {
+        let window = Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 500.0));
+        let view = Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(900.0, 450.0));
+        assert_eq!(view_part(view, window, [500, 250]), [50.0, 25.0, 400.0, 200.0]);
+        let beyond = Rect::from_min_max(egui::pos2(-40.0, -40.0), egui::pos2(1400.0, 600.0));
+        assert_eq!(view_part(beyond, window, [500, 250]), [0.0, 0.0, 500.0, 250.0]);
+    }
+}

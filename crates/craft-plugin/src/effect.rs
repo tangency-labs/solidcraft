@@ -63,7 +63,7 @@ mod tests {
     use super::*;
 
     fn effect(id: &str, kind: &str) -> EffectDecl {
-        EffectDecl { id: id.into(), name: "RGB wave".into(), kind: kind.into() }
+        EffectDecl { id: id.into(), name: "RGB wave".into(), kind: kind.into(), picture: None }
     }
 
     fn caps() -> Vec<String> {
@@ -84,7 +84,7 @@ mod tests {
         assert!(validate(&many, &caps()).is_err());
         assert!(validate(&[effect("a", "hue-wave"), effect("a", "hue-wave")], &caps()).is_err(), "ids are distinct");
         assert!(validate(&[effect("Bad Id", "hue-wave")], &caps()).is_err());
-        let blank = EffectDecl { id: "ok".into(), name: " ".into(), kind: "hue-wave".into() };
+        let blank = EffectDecl { id: "ok".into(), name: " ".into(), kind: "hue-wave".into(), picture: None };
         assert!(validate(&[blank], &caps()).is_err());
     }
 
@@ -97,5 +97,41 @@ mod tests {
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
+    }
+
+    fn with_picture(kind: &str, picture: Option<&str>) -> EffectDecl {
+        EffectDecl { picture: picture.map(str::to_string), ..effect("sky", kind) }
+    }
+
+    #[test]
+    fn a_galaxy_effect_is_accepted_with_or_without_a_picture() {
+        assert_eq!(validate(&[with_picture("galaxy", None)], &caps()), Ok(()));
+        assert_eq!(validate(&[with_picture("galaxy", Some("sky/stars.jpg"))], &caps()), Ok(()));
+        assert_eq!(validate(&[with_picture("galaxy", Some("stars.PNG"))], &caps()), Ok(()));
+    }
+
+    #[test]
+    fn a_picture_path_stays_inside_the_package_and_names_an_image() {
+        for bad in
+            ["", "/stars.jpg", "../stars.jpg", "a/../stars.jpg", "a\\stars.jpg", "C:/stars.jpg", "stars.gif", "stars", "a//b.jpg", "./stars.jpg"]
+        {
+            match validate(&[with_picture("galaxy", Some(bad))], &caps()) {
+                Err(HostError::InvalidManifest { field, .. }) => assert_eq!(field, "effects.sky.picture", "{bad:?}"),
+                other => panic!("{bad:?}: expected a refusal, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn only_a_kind_that_draws_a_picture_takes_one() {
+        assert!(validate(&[with_picture("hue-wave", Some("stars.jpg"))], &caps()).is_err());
+    }
+
+    #[test]
+    fn an_effect_without_a_picture_reads_and_writes_as_before() {
+        let text = r#"{"id":"rgb-wave","name":"RGB wave","kind":"hue-wave"}"#;
+        let parsed: EffectDecl = serde_json::from_str(text).unwrap();
+        assert_eq!(parsed.picture, None);
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), text);
     }
 }

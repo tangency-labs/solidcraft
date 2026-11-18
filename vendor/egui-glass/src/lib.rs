@@ -50,6 +50,7 @@ mod live_quality;
 mod mipgen;
 mod renderer;
 mod scene;
+mod sky;
 mod slider;
 mod style;
 mod widgets;
