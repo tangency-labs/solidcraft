@@ -4525,7 +4525,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ok = true;
         // Shift+Enter makes an Extrude a new body, whatever it would have joined or cut (#18455).
         // Only a key press does: the OK button and a rebound OK key keep the dialog's choice.
-        if (enter || canvas_enter || enter_free) && ctx.input(|i| i.modifiers.shift) && d.editing.is_none() {
+        // The Shift is the one the Enter press itself carried, not the keyboard's state when the
+        // frame is read: Shift pressed or released in the same frame must not change the answer.
+        let enter_shift = ctx.input(|i| {
+            i.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, modifiers, .. } if modifiers.shift))
+        });
+        if (enter || canvas_enter || enter_free) && enter_shift && d.editing.is_none() {
             make_new_body(&mut d);
         }
     }
