@@ -640,9 +640,9 @@ pub fn tangent_end_rib(
             let ends = ((t0, [a0, e0.x, e0.y]), (t1, [a1, e1.x, e1.y]));
             let within = match &rib {
                 // the span at the tangent end, on pieces graded toward it
-                Some(rib) if jj == 0 => rib
-                    .first_span_bound(&rib_newton, ends.0 .1, ends.1, approx_tol)?
-                    .map(|(b, _)| b),
+                Some(rib) if jj == 0 => {
+                    rib.first_span_bound(&rib_newton, ends.0 .1, ends.1, approx_tol)?
+                }
                 Some(rib) => rib.span_bound(&rib_newton, ends.0, ends.1, approx_tol)?,
                 None => None,
             };

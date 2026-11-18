@@ -35,7 +35,9 @@ use crate::blend::fillet_section::interval::{cmax, Ivl};
 use crate::blend::fillet_section::series::{v_add, v_scale, v_sub, V3};
 use crate::blend::fillet_section::station::{knot, Nurbs, Partials};
 use crate::error::Result;
-use crate::geom::krawczyk::{contraction, inverse_of_columns3, krawczyk, plus_c_times};
+use crate::geom::krawczyk::{
+    contraction, inverse_of_columns3, krawczyk, newton, plus_c_times, Linearised,
+};
 
 /// The continuity a face needs across a knot line inside a box for its second partials:
 /// `C^1`, so that the root and the errors are `C^1` and the remainder holds with `e''`
@@ -48,6 +50,13 @@ const LEVELS: u32 = 6;
 
 /// The most pieces the first span is graded into toward the tangent end.
 const GRADES: usize = 64;
+
+/// The most boxes each side of the ring about the tangent end is cut into
+/// ([`Rib::one_sign`]).
+const RING_BOXES: usize = 1 << 12;
+
+/// The most times the ring about the tangent end is widened ([`Rib::near_bound`]).
+const WIDENINGS: usize = 24;
 
 const ZERO: Ivl = Ivl::new(0.0, 0.0);
 
@@ -80,24 +89,14 @@ fn cuts(
     Some(out)
 }
 
-/// A face's partials `P[a][b]`, `a + b <= lk`, over `u x v`, enclosed: the hull over the
-/// pieces the box covers, each of `S − o` with `o` the face's point at the box's middle
-/// ([`nurbs_partials_over_piece_about`]: a rational face's quotient then scales with the
-/// box's size, not with its distance from the origin), `o` added back to `P[0][0]`. `None`
-/// where a part is not enclosed.
-fn partials_over(n: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Option<Partials<Ivl>> {
+/// The partials `P[a][b]`, `a + b <= lk`, of `S − o` over `u x v`, enclosed: the hull over
+/// the pieces the box covers ([`nurbs_partials_over_piece_about`]: a rational face's
+/// quotient then scales with the size of `S − o`, not with its distance from the origin).
+/// `None` where a part is not enclosed.
+fn partials_about(n: &Nurbs, u: Ivl, v: Ivl, lk: usize, o: [f64; 3]) -> Option<Partials<Ivl>> {
     let continuity = if lk >= 2 { CONTINUITY } else { 0 };
     let us = cuts(&n.u, n.p, n.nu, u.lo, u.hi, continuity)?;
     let vs = cuts(&n.v, n.q, n.nv, v.lo, v.hi, continuity)?;
-    let (um, vm) = (u.mid(), v.mid());
-    let (&(_, _, ku), &(_, _, kv)) = (
-        us.iter().find(|c| c.0 <= um && um <= c.1)?,
-        vs.iter().find(|c| c.0 <= vm && vm <= c.1)?,
-    );
-    let o = nurbs_partials_over_piece(n, ku, kv, um, um, vm, vm, 0)
-        .ok()?
-        .at(0, 0);
-    let o = [o.x.mid(), o.y.mid(), o.z.mid()];
     let mut out: Option<Partials<Ivl>> = None;
     for &(a0, a1, ku) in &us {
         for &(b0, b1, kv) in &vs {
@@ -108,10 +107,37 @@ fn partials_over(n: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Option<Partials<Ivl>> 
             });
         }
     }
-    let mut out = out?;
+    out
+}
+
+/// A face's partials `P[a][b]`, `a + b <= lk`, over `u x v`, enclosed: those of `S − o`
+/// ([`partials_about`]) with `o` the face's point at the box's middle, `o` added back to
+/// `P[0][0]`. `None` where a part is not enclosed.
+fn partials_over(n: &Nurbs, u: Ivl, v: Ivl, lk: usize) -> Option<Partials<Ivl>> {
+    let (um, vm) = (u.mid(), v.mid());
+    let us = cuts(&n.u, n.p, n.nu, u.lo, u.hi, 0)?;
+    let vs = cuts(&n.v, n.q, n.nv, v.lo, v.hi, 0)?;
+    let (&(_, _, ku), &(_, _, kv)) = (
+        us.iter().find(|c| c.0 <= um && um <= c.1)?,
+        vs.iter().find(|c| c.0 <= vm && vm <= c.1)?,
+    );
+    let o = nurbs_partials_over_piece(n, ku, kv, um, um, vm, vm, 0)
+        .ok()?
+        .at(0, 0);
+    let o = [o.x.mid(), o.y.mid(), o.z.mid()];
+    let mut out = partials_about(n, u, v, lk, o)?;
     let [x, y, z] = o.map(Ivl::from);
     out.set(0, 0, v_add(out.at(0, 0), V3 { x, y, z }));
     Some(out)
+}
+
+/// `c x` for the rows `c`.
+fn times(c: &[[f64; 3]; 3], x: [Ivl; 3]) -> [Ivl; 3] {
+    c.map(|row| {
+        row.iter()
+            .zip(&x)
+            .fold(ZERO, |s, (&r, &v)| s + Ivl::from(r) * v)
+    })
 }
 
 fn neg(a: V3<Ivl>) -> V3<Ivl> {
@@ -139,12 +165,7 @@ fn solve_over(cols: [V3<Ivl>; 3], b: V3<Ivl>) -> Option<[Ivl; 3]> {
         core::array::from_fn(|r| cols.map(|col| col.get(r).copied().unwrap_or(ZERO)));
     let (cm, q) = contraction(&c, &rows);
     (q < 1.0).then_some(())?;
-    let b = arr(b);
-    let cb = c.map(|row| {
-        row.iter()
-            .zip(&b)
-            .fold(ZERO, |s, (&r, &x)| s + Ivl::from(r) * x)
-    });
+    let cb = times(&c, arr(b));
     let size = cb.iter().fold(0.0_f64, |m, x| cmax(m, x.mag()));
     let r = (Ivl::from(size) / (Ivl::from(1.0) - Ivl::from(q))).hi;
     if !r.is_finite() {
@@ -201,11 +222,26 @@ impl Rib<'_> {
         alpha: Ivl,
         lk: usize,
     ) -> Option<impl Fn(usize, usize) -> V3<Ivl>> {
+        self.fillet_about(sigma, alpha, lk, None)
+    }
+
+    /// [`Self::fillet_over`] of `S − o` (`None`: of `S`).
+    fn fillet_about(
+        &self,
+        sigma: Ivl,
+        alpha: Ivl,
+        lk: usize,
+        o: Option<[f64; 3]>,
+    ) -> Option<impl Fn(usize, usize) -> V3<Ivl>> {
         let section = self.section;
-        let p = if section == 0 {
-            partials_over(self.fillet, sigma, alpha, lk)?
+        let (u, v) = if section == 0 {
+            (sigma, alpha)
         } else {
-            partials_over(self.fillet, alpha, sigma, lk)?
+            (alpha, sigma)
+        };
+        let p = match o {
+            Some(o) => partials_about(self.fillet, u, v, lk, o)?,
+            None => partials_over(self.fillet, u, v, lk)?,
         };
         Some(move |i, j| if section == 0 { p.at(i, j) } else { p.at(j, i) })
     }
@@ -527,30 +563,21 @@ impl Rib<'_> {
     }
 
     /// The certified bound of the first span `[0, t1]` (the root `y1` at `t1`, `p` at the
-    /// tangent end) down to `t*`, with `t*`, or `None` (#17744). Its pieces are graded
-    /// geometrically toward the tangent end, `[t/2, t]`, each bounded as a span
-    /// ([`Self::span_bound`]): the Jacobian is singular at the tangent end, and over
-    /// `[t/2, t]` its least singular value changes by the same factor at every depth, so
-    /// a piece needs as many halvings at every depth. The pieces go on while their roots
-    /// are certified; `t*` is the last piece's lower end, where the root's along-rail
-    /// offset from the tangent end is within `tol`. The rib over `[0, t*]` is not bounded
-    /// here.
+    /// tangent end), or `None` (#17744). Its pieces are graded geometrically toward the
+    /// tangent end, `[t/2, t]`, each bounded as a span ([`Self::span_bound`]): the Jacobian
+    /// is singular at the tangent end, and over `[t/2, t]` its least singular value changes
+    /// by the same factor at every depth, so a piece needs as many halvings at every depth.
+    /// The pieces go on while they are certified, down to `t*`, the last one's lower end;
+    /// `[0, t*]` is bounded without the Jacobian ([`Self::near_bound`]).
     pub(super) fn first_span_bound(
         &self,
         solve: &Solve<'_>,
         p: [f64; 3],
         (t1, y1): (f64, [f64; 3]),
         tol: f64,
-    ) -> Result<Option<(f64, f64)>> {
+    ) -> Result<Option<f64>> {
         // the offsets from the tangent end grow as t^m: alpha ~ s^(k/2), s ~ t or t^2
         let m = if self.odd { self.order } else { self.order / 2 }.max(1);
-        let near = |y: &[f64; 3]| {
-            let ([a, ..], [pa, ..]) = (*y, p);
-            self.fillet_over(Ivl::from(self.sigma0), Ivl::new(a.min(pa), a.max(pa)), 1)
-                .is_some_and(|s| {
-                    (Ivl::from(norm(s(0, 1))) * (Ivl::from(a) - Ivl::from(pa))).mag() <= tol
-                })
-        };
         let mut worst = 0.0_f64;
         let (mut hi_t, mut hi_y) = (t1, y1);
         for _ in 0..GRADES {
@@ -573,6 +600,255 @@ impl Rib<'_> {
                 _ => break,
             }
         }
-        Ok(near(&hi_y).then_some((worst, hi_t)))
+        Ok(self
+            .near_bound(p, (hi_t, hi_y), tol)?
+            .map(|near| worst.max(near)))
     }
+
+    /// The tangent end's frame: the fillet surface's point `S(sigma0, alpha0)` and its unit
+    /// normal there, or `None`.
+    fn frame(&self, alpha0: f64) -> Option<Frame> {
+        let s = self.fillet_over(Ivl::from(self.sigma0), Ivl::from(alpha0), 1)?;
+        let m = |a: V3<Ivl>| [a.x.mid(), a.y.mid(), a.z.mid()];
+        let (p, [ax, ay, az], [bx, by, bz]) = (m(s(0, 0)), m(s(1, 0)), m(s(0, 1)));
+        let n = [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
+        let len = n.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let n = n.map(|x| x / len);
+        n.iter().all(|x| x.is_finite()).then_some(Frame { p, n })
+    }
+
+    /// The separation's system `G = (S(sigma, alpha) − p) + lambda n − (E(u, v) − p)` in
+    /// `y = (lambda, u, v)` at a point, as numbers, for [`newton`].
+    fn separation_at(&self, f: &Frame, sigma: f64, alpha: f64, y: [f64; 3]) -> Linearised<3> {
+        let m = |a: V3<Ivl>| [a.x.mid(), a.y.mid(), a.z.mid()];
+        let s = self.fillet_about(Ivl::from(sigma), Ivl::from(alpha), 0, Some(f.p))?;
+        let e = partials_about(self.end, Ivl::from(y[1]), Ivl::from(y[2]), 1, f.p)?;
+        let ([sx, sy, sz], [ex, ey, ez]) = (m(s(0, 0)), m(e.at(0, 0)));
+        let [nx, ny, nz] = f.n;
+        let g = [
+            sx + y[0] * nx - ex,
+            sy + y[0] * ny - ey,
+            sz + y[0] * nz - ez,
+        ];
+        Some((g, [f.n, m(neg(e.at(1, 0))), m(neg(e.at(0, 1)))]))
+    }
+
+    /// The box of the separation `y = (lambda, u, v)`, `S(sigma, alpha) + lambda n =
+    /// E(u, v)`, that holds its one root for every `(sigma, alpha)` of the box, or `None`:
+    /// Krawczyk's test about the root at the box's middle (Newton's from `start`), `G` at it
+    /// enclosed by its mean-value form, `G(mid) + S_sigma (sigma − sigma_m) + S_alpha
+    /// (alpha − alpha_m)`. `G(mid)` is taken less `p`, so that it carries the rounding of
+    /// the faces' distances from the tangent end, not from the origin (generic-blend.md
+    /// §2.4, as the nets are). The test runs on `C G`, `C` the inverse of `G`'s partials at
+    /// the middle; a box it proves holds `C G = 0`, and `C` is then regular (Krawczyk's
+    /// strict inclusion proves `C` and every `G′` over the box regular), so `G = 0`.
+    fn separation_over(
+        &self,
+        f: &Frame,
+        sigma: Ivl,
+        alpha: Ivl,
+        start: [f64; 3],
+    ) -> Result<Option<[Ivl; 3]>> {
+        let (sm, am) = (sigma.mid(), alpha.mid());
+        let Some(mid) = newton(
+            start,
+            &|y| Ok(self.separation_at(f, sm, am, y)),
+            &inverse_of_columns3,
+        )?
+        else {
+            return Ok(None);
+        };
+        let n = V3 {
+            x: Ivl::from(f.n[0]),
+            y: Ivl::from(f.n[1]),
+            z: Ivl::from(f.n[2]),
+        };
+        let raw = |y: [Ivl; 3]| {
+            partials_over(self.end, y[1], y[2], 1)
+                .map(|e| [arr(n), arr(neg(e.at(1, 0))), arr(neg(e.at(0, 1)))])
+        };
+        let Some(j) = raw(mid.map(Ivl::from)) else {
+            return Ok(None);
+        };
+        let Some(c) = inverse_of_columns3(&j.map(|col| col.map(Ivl::mid))) else {
+            return Ok(None);
+        };
+        // the system preconditioned, `C G`: `C S_sigma` and `C S_alpha` are formed before
+        // they are scaled, so that lambda's row keeps their cancellation (its slope is
+        // `Δκ a`, not `|S_alpha|`)
+        let value = |_: [Ivl; 3]| -> Result<Option<[Ivl; 3]>> {
+            let at = Ivl::from;
+            let (Some(s0), Some(s), Some(e0)) = (
+                self.fillet_about(at(sm), at(am), 0, Some(f.p)),
+                self.fillet_over(sigma, alpha, 1),
+                partials_about(self.end, at(mid[1]), at(mid[2]), 0, f.p),
+            ) else {
+                return Ok(None);
+            };
+            let g = v_add(v_sub(s0(0, 0), e0.at(0, 0)), v_scale(n, at(mid[0])));
+            let [g, ds, da] = [g, s(1, 0), s(0, 1)].map(|x| times(&c, arr(x)));
+            let (hs, ha) = (sigma - at(sm), alpha - at(am));
+            Ok(Some(core::array::from_fn(|i| {
+                let pick = |x: [Ivl; 3]| x.get(i).copied().unwrap_or(ZERO);
+                pick(g) + pick(ds) * hs + pick(da) * ha
+            })))
+        };
+        let columns = |y: [Ivl; 3]| -> Result<Option<[[Ivl; 3]; 3]>> {
+            Ok(raw(y).map(|cols| cols.map(|col| times(&c, col))))
+        };
+        let one = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        krawczyk(mid, one, &value, &columns)
+    }
+
+    /// Whether the separation keeps one sign over `sigma x alpha`: the box, cut across its
+    /// longer side on the faces while the separation's enclosure holds 0, at most
+    /// [`RING_BOXES`] boxes.
+    fn one_sign(&self, f: &Frame, sigma: Ivl, alpha: Ivl, start: [f64; 3]) -> Result<bool> {
+        let Some(s) = self.fillet_over(sigma, alpha, 1) else {
+            return Ok(false);
+        };
+        let (ls, la) = (norm(s(1, 0)), norm(s(0, 1)));
+        let mut boxes = vec![(sigma, alpha)];
+        let mut seen = 0;
+        while let Some((s, a)) = boxes.pop() {
+            seen += 1;
+            if seen > RING_BOXES {
+                return Ok(false);
+            }
+            if let Some([lambda, ..]) = self.separation_over(f, s, a, start)? {
+                if lambda.lo > 0.0 || lambda.hi < 0.0 {
+                    continue;
+                }
+            }
+            let (sm, am) = (s.mid(), a.mid());
+            if (s.hi - s.lo) * ls >= (a.hi - a.lo) * la {
+                if !(s.lo < sm && sm < s.hi) {
+                    return Ok(false);
+                }
+                boxes.push((Ivl::new(s.lo, sm), a));
+                boxes.push((Ivl::new(sm, s.hi), a));
+            } else {
+                if !(a.lo < am && am < a.hi) {
+                    return Ok(false);
+                }
+                boxes.push((s, Ivl::new(a.lo, am)));
+                boxes.push((s, Ivl::new(am, a.hi)));
+            }
+        }
+        Ok(true)
+    }
+
+    /// The certified bound of the rib over `[0, t*]` (the root `ys` at `t*`, `p` at the
+    /// tangent end), or `None` (#17744, the maintainer's design on #18674). The Jacobian
+    /// is singular at the tangent end, so the root is not enclosed there; instead:
+    ///
+    /// - **The rib stays near the tangent end.** With `A` twice the root's offset in alpha
+    ///   at `t*` (Krawczyk's box there), the separation `lambda` of the end surface from
+    ///   the section `S(sigma, alpha)` along the tangent end's normal ([`Self::frame`],
+    ///   [`Self::separation_over`]) keeps one sign over `sigma(0..t*)` and `A <= |alpha −
+    ///   alpha0| <= 2A` ([`Self::one_sign`]). The rib's root is continuous in `t`, lies
+    ///   within `A/2` at `t*` and has `lambda = 0`, so it never crosses that ring: `|alpha −
+    ///   alpha0| < A` over `[0, t*]`. Where the ring holds a sign change, `A` is doubled
+    ///   (the gap `½ Δκ (A² − a(t*)²) − θ A` grows with it), at most [`WIDENINGS`] times,
+    ///   while `|S_alpha| A` is within `tol`; where `Δκ` vanishes it never clears, and the
+    ///   span is refused.
+    /// - **The curves against known functions** ([`Self::near_errors`]): each curve's 3D
+    ///   image against `S(sigma(t), alpha0)` at the same `t`, plus `|S_alpha| A`. No unknown
+    ///   is enclosed and no Jacobian is inverted there.
+    fn near_bound(&self, p: [f64; 3], (ts, ys): (f64, [f64; 3]), tol: f64) -> Result<Option<f64>> {
+        let [a0, u0, v0] = p;
+        let start = [0.0, u0, v0];
+        let Some(f) = self.frame(a0) else {
+            return Ok(None);
+        };
+        let Some(b) = self.root_at(ts, ys)? else {
+            return Ok(None);
+        };
+        let t = Ivl::new(0.0, ts);
+        let sigma = self.sigma(t).0;
+        let at = Ivl::from;
+        let mut big_a = 2.0 * (b[0] - at(a0)).mag();
+        for _ in 0..WIDENINGS {
+            let alpha = at(a0) + Ivl::new(-big_a, big_a);
+            let Some(s) = self.fillet_over(sigma, alpha, 1) else {
+                return Ok(None);
+            };
+            // past the tolerance the bound cannot clear it
+            if !big_a.is_finite() || big_a <= 0.0 || norm(s(0, 1)) * big_a > tol {
+                return Ok(None);
+            }
+            let ring = |lo: f64, hi: f64| at(a0) + Ivl::new(lo, hi);
+            if self.one_sign(&f, sigma, ring(big_a, 2.0 * big_a), start)?
+                && self.one_sign(&f, sigma, ring(-2.0 * big_a, -big_a), start)?
+            {
+                return Ok(self.near_errors(t, alpha, big_a, a0));
+            }
+            big_a *= 2.0;
+        }
+        Ok(None)
+    }
+
+    /// The bound of [`Self::near_bound`] over `t` (`[0, t*]`), the root's alpha within
+    /// `big_a` of `alpha0`: each curve's 3D image `X(t)` (the 3D curve; a UV curve's point on
+    /// its surface) against the rib's point `S(sigma(t), alpha(t))`, which lies in
+    /// `S(sigma(t), alpha0) + S_alpha [−A, A]`. `X(t) − S(sigma(t), alpha0)` is bounded by its
+    /// mean-value form from `t = 0`, `X(0) − S(sigma0, alpha0) + t (X′ − S_sigma sigma′)`, with
+    /// `X′` enclosed over the curve's box on its surface (a face's knot line there is one it
+    /// is continuous across, [`partials_over`], so `X` is continuous and smooth piecewise).
+    fn near_errors(&self, t: Ivl, alpha: Ivl, big_a: f64, a0: f64) -> Option<f64> {
+        let at = Ivl::from;
+        let (sigma, ds, _) = self.sigma(t);
+        let s = self.fillet_over(sigma, alpha, 1)?;
+        let s_0 = self.fillet_over(sigma, at(a0), 1)?;
+        let s_p = self.fillet_over(at(self.sigma0), at(a0), 0)?;
+        let off = v_scale(s(0, 1), Ivl::new(-big_a, big_a));
+        let known = v_scale(s_0(1, 0), ds);
+        let pick = |c: V3<Ivl>| {
+            if self.section == 0 {
+                (c.x, c.y)
+            } else {
+                (c.y, c.x)
+            }
+        };
+        // each curve's image at t = 0 and its derivative over t
+        let mut images = Vec::with_capacity(3);
+        for (i, c) in self.curves.iter().enumerate() {
+            let c0 = *curve_derivs_over(c, at(0.0), 0, None).ok()?.first()?;
+            let ct = curve_derivs_over(c, t, 1, None).ok()?;
+            let (&range, &d1) = (ct.first()?, ct.get(1)?);
+            images.push(match i {
+                0 => (c0, d1),
+                1 => {
+                    let ((fs, fa), (rs, ra), (ds1, da1)) = (pick(c0), pick(range), pick(d1));
+                    let f0 = self.fillet_over(fs, fa, 0)?;
+                    let f = self.fillet_over(rs, ra, 1)?;
+                    (
+                        f0(0, 0),
+                        v_add(v_scale(f(1, 0), ds1), v_scale(f(0, 1), da1)),
+                    )
+                }
+                _ => {
+                    let e0 = partials_over(self.end, c0.x, c0.y, 0)?;
+                    let e = partials_over(self.end, range.x, range.y, 1)?;
+                    let d = v_add(v_scale(e.at(1, 0), d1.x), v_scale(e.at(0, 1), d1.y));
+                    (e0.at(0, 0), d)
+                }
+            });
+        }
+        let mut worst = 0.0_f64;
+        for (x0, x1) in images {
+            let e = v_add(
+                v_add(v_sub(x0, s_p(0, 0)), v_scale(v_sub(x1, known), t)),
+                off,
+            );
+            worst = worst.max(norm(e));
+        }
+        worst.is_finite().then_some(worst)
+    }
+}
+
+/// The tangent end's point and unit normal (on the fillet surface), as numbers.
+struct Frame {
+    p: [f64; 3],
+    n: [f64; 3],
 }
