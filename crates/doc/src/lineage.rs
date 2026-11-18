@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
-use solidcraft_kernel::history::{BodyHistory, Change, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::history::{BodyHistory, FaceOrigin, History};
 
 use crate::SolvedSketch;
 
@@ -115,10 +115,11 @@ impl Lineage {
             .collect()
     }
 
-    /// A tool of `faces` faces and no edges (a mesh's triangles) whose faces have no role.
-    pub(crate) fn unnamed_faces(faces: usize) -> Lineage {
-        let faces = (0..faces).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
-        Lineage { history: History { operands: 1, faces, edges: Vec::new() }, operands: vec![Arc::new(Operand::Made(Vec::new()))] }
+    /// `tool`, a body the feature built whose faces have no role, with its faces and its edges: a
+    /// cut by it reports where its edges went, and a lineage without them could not take that in,
+    /// leaving the whole result to be named from geometry (a modelled Thread, #18460).
+    pub(crate) fn unnamed(tool: &Body) -> Lineage {
+        Lineage::of(tool, Operand::Made(vec![Vec::new(); tool.face_count()]))
     }
 
     /// The lineages of `pieces`, the lumps of `whole` (whose lineage is `lineage`): their faces
@@ -220,6 +221,9 @@ pub(crate) struct ProfileRoles<'a> {
     pub region: Option<&'a Region2>,
     /// The start and end caps' roles (`None`: not known).
     pub caps: [Option<String>; 2],
+    /// A second name each cap answers to (`None`: none), so a reference picked under the name the
+    /// cap had before the extrude's direction changed still finds it.
+    pub cap_synonyms: [Option<String>; 2],
     /// A thin wall: its sides lie off the sketch curves, and are named by the curve they run
     /// beside.
     pub thin: Option<&'a ThinWallRoles>,
@@ -265,7 +269,12 @@ impl<'a> ProfileRoles<'a> {
                 for origin in &face.origins {
                     let found = match *origin {
                         FaceOrigin::Profile { segment } => curve(segment),
-                        FaceOrigin::Cap { end } => self.caps.get(usize::from(end)).cloned().flatten().into_iter().collect(),
+                        FaceOrigin::Cap { end } => {
+                            let k = usize::from(end);
+                            let name = self.caps.get(k).cloned().flatten();
+                            // A cap with no name stays unknown; one with a name also answers to its synonym.
+                            name.into_iter().chain(self.cap_synonyms.get(k).cloned().flatten()).collect()
+                        }
                         _ => Vec::new(),
                     };
                     // One unknown origin leaves the face unknown: never a partial guess.
@@ -287,7 +296,7 @@ impl<'a> ProfileRoles<'a> {
     /// A body swept from a profile (revolve, sweep, loft): its sides named by the sketch curves,
     /// its caps `start` and `end`.
     pub fn swept(sketch: Option<&'a SolvedSketch>, region: Option<&'a Region2>) -> ProfileRoles<'a> {
-        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())], thin: None }
+        ProfileRoles { sketch, region, caps: [Some("start".into()), Some("end".into())], cap_synonyms: [None, None], thin: None }
     }
 
     /// A tool built from the profile (and then moved, from `built`, when given), its faces named

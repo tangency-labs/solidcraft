@@ -89,6 +89,10 @@ start or end offsets or a From Object input, the target also sets the stored dis
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
 existing picks. With the setting off, picks only add profiles.
 
+**To Object** and **From Object** also take a point that isn't on the model: hover a sketch line
+or an edge and click one of the points that light up, its ends or its middle (a hole's centre
+too), the way Move's points are picked. So an extrude can end where two sketch lines meet.
+
 Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
 such as the far side of the block a cut goes into: once the arrow's tip comes within a few
 screen points of such a face, the distance becomes exactly that face's and the face is
@@ -229,7 +233,7 @@ a left-handed groove crossing, as on a reversing screw). Scripts use `hand: "lef
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
-ball). See the roadmap's known limitations for the rest.
+ball). See the roadmap's [known limitations](https://github.com/tangency-labs/solidcraft/blob/main/docs/roadmap-detail.md#known-limitations) for the rest.
 
 **Curvature continuous** (G2) in the Fillet dialog's **Type** blends straight edges between two
 planar faces with an exact quintic section. The tangent plane and curvature match each side
@@ -265,6 +269,49 @@ and 0.5 places the plane halfway along its length. The plane is perpendicular to
 local segment. Preview does not change the design; OK creates one editable timeline feature.
 The plane follows later path edits. Curved paths use their sampled polyline; absolute distance,
 reference-object placement and multi-curve chains are not yet available in this dialog.
+
+## Section Analysis
+
+Section Analysis cuts the view, not the design: what lies beyond the section's planes is hidden
+and the cut faces are hatched (Hatch off draws them in each body's own colour). It changes no
+geometry and is not saved with the design, but each change to it is a step in the undo history:
+Undo brings back the section as it was. A section has up to six planes, and each hides what lies
+beyond it: the view keeps only what every plane keeps, so two planes square to each other cut an
+L-shaped piece away and keep a quarter, and three keep an eighth. As on a drawing, each plane's cut faces are hatched their own way, by the plane's number:
+45° on Section 1, 135° on Section 2, then 30°, 60°, 120° and 150°, measured on the plane as seen
+from the side it cuts away (upright on a wall, along X on a floor), so where two planes' cut faces
+meet each keeps its own. A plane added after one is removed takes the lowest free number, so no
+two planes share an angle. Hiding one plane leaves the others' hatch as it is. With **Section hatch** set to **By part** in Preferences (the default),
+each cut body is also hatched its own way, in a colour of its own and with the plane's stripes
+turned a quarter round where needed, so bodies whose cuts touch never look alike.
+
+- The toolbar's **Section Analysis** starts a new section on a plane or planar face; its arrow
+  and **Distance** move the cut. A positive distance cuts more away: into the part from a face,
+  against the normal of a plane (below XY, for instance). A negative one moves the cut the other
+  way. **Flip** hides the other side of the plane being edited and leaves it where it is.
+  With a section on show, the toolbar button turns the section off instead (unless
+  Preferences › Interface › **Show viewport section status** is off).
+- While a plane is on show, the view's status shows the section: the first plane on show and
+  whether it is hatched. Click it to edit that plane; its × removes every plane.
+- Right-click a planar face and choose **Section View**: the dialog starts on the face's plane,
+  so dragging the arrow inward cuts into the part. With a section on, the face's plane joins it
+  as another plane, cutting the same way: at distance 0 it hides nothing more, so the cut on show
+  stays as it is, and dragged in it cuts its own side away as well.
+- Right-click a cut face and choose **Edit Section View** to move or flip its plane (the others
+  stay as they are), or **Turn Off Section View** to take that plane out; the last one turns the
+  section off.
+- The browser's **Analysis** folder lists each plane as **Section 1**, **Section 2** and so on,
+  by the plane's number. Its eye hides and shows that plane, a double-click edits it, and Delete
+  in its menu removes it. The folder's own eye hides the planes on show and brings them back;
+  while it is hidden, a plane's eye says only whether that plane comes back with it, and a plane
+  added or moved shows the folder again, with them. **Turn Off Section View** in the folder's
+  menu removes every plane, hidden ones too.
+
+Scripts use `inspect.section`: a `plane` replaces the section, `add: true` adds the plane to it,
+`replace` moves one plane by its id, `remove` takes a plane out by its id, `hide` and `show` take
+plane ids, `folder: false` and `folder: true` hide and show the Analysis folder, and `clear: true`
+removes them all. `offset` moves the cut against the plane's normal,
+so a positive offset cuts more away; `at` is a world coordinate on a named plane's axis.
 
 ## Comparing two bodies
 

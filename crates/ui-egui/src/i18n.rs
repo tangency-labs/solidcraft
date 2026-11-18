@@ -188,6 +188,9 @@ impl LocaleNames for Locale {
         if let Some(count) = text.strip_prefix("Parameters (").and_then(|s| s.strip_suffix(')')) {
             return self.format("browser.parameters", &[("count", count)]);
         }
+        if let Some(number) = text.strip_prefix("Section ").filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
+            return self.format("browser.section_plane", &[("number", number)]);
+        }
         if let Some(count) = text.strip_suffix(" degrees of freedom")
             && !count.is_empty()
             && count.chars().all(|c| c.is_ascii_digit())
@@ -316,6 +319,22 @@ mod tests {
         for language in ["en", "de", "ja", "unknown"] {
             assert_eq!(super::panel_direction(language), Direction::Ltr);
         }
+    }
+
+    #[test]
+    fn a_plugin_failure_is_worded_from_the_catalog_and_the_cli_english_matches_it() {
+        use solidcraft_engine::plugin::{PluginFailure, messages::MESSAGES};
+        install();
+        for (id, english) in MESSAGES {
+            assert_eq!(Locale::for_language("en").text(id), *english, "{id}: the engine's English is the catalog's");
+        }
+        let failure = PluginFailure {
+            plugin: "Dutchman".into(),
+            file: Some("cube.f3d".into()),
+            error: solidcraft_engine::plugin::HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
+        };
+        let _scope = scope("de");
+        assert!(failure.text().starts_with("Dutchman konnte cube.f3d nicht öffnen: Es verlangt 2048 MiB Arbeitsspeicher, Plugins dürfen 128 MiB"));
     }
 
     #[test]
@@ -1213,6 +1232,8 @@ mod tests {
         assert_eq!(ja.dynamic("Precision: 3"), "精度: 3");
         assert_eq!(ja.dynamic("Parameters (5)"), "パラメータ (5)");
         assert_eq!(ja.dynamic("4 degrees of freedom"), "自由度 4");
+        assert_eq!(ja.dynamic("Section 2"), "断面 2");
+        assert_eq!(ja.dynamic("Section View"), ja.label("Section View"), "a label, not a numbered section plane");
         assert_eq!(ja.dynamic("Sketch of bracket"), "Sketch of bracket");
         assert_eq!(Locale::for_language("en").dynamic("Sketch1"), "Sketch1");
     }

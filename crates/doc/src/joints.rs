@@ -936,6 +936,9 @@ pub struct Assembly {
     /// rigid joint per placement (`rigid-groups`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rigid_groups: Vec<RigidGroup>,
+    /// The bill of materials views numbered, with their saved item numbers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item_numbers: Vec<crate::bom::ItemNumbers>,
 }
 
 impl Assembly {
@@ -1011,6 +1014,7 @@ impl Assembly {
             && self.traces.is_empty()
             && self.exploded.is_empty()
             && self.rigid_groups.is_empty()
+            && self.item_numbers.is_empty()
     }
 }
 
@@ -2917,7 +2921,7 @@ impl Document {
 pub mod cam;
 
 #[path = "joints_edge.rs"]
-mod edge;
+pub(crate) mod edge;
 pub use edge::{edge_axis, edge_snap};
 
 #[path = "joints_reach.rs"]
@@ -3273,6 +3277,7 @@ mod tests {
             name: format!("O{id}"),
             transform: IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         };
         // Component 1 sits at the root twice (its first occurrence is the frame its children sit
@@ -3310,6 +3315,7 @@ mod tests {
             transform: IDENTITY,
             grounded: false,
             expressed_moves: Vec::new(),
+            bom_type: None,
         };
         // Component 3 sits in component 2, which sits in component 1: the deeper the occurrence,
         // the lower its id.

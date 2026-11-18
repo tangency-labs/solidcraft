@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_view_projection_for": "Projected View at Point"
+  },
+  "ar": {
+    "cmd.drawing_view_projection_for": "العرض المُسقط عند نقطة"
+  },
+  "de": {
+    "cmd.drawing_view_projection_for": "Projizierte Ansicht an einem Punkt"
+  },
+  "he": {
+    "cmd.drawing_view_projection_for": "תצוגה מוטלת בנקודה"
+  },
+  "ja": {
+    "cmd.drawing_view_projection_for": "点での投影ビュー"
+  },
+  "ko": {
+    "cmd.drawing_view_projection_for": "점에서의 투영 뷰"
+  },
+  "vi": {
+    "cmd.drawing_view_projection_for": "Chế độ xem chiếu tại điểm"
+  },
+  "zh": {
+    "cmd.drawing_view_projection_for": "点处的投影视图"
+  }
+}
