@@ -147,6 +147,8 @@ fn aged_surface(original:Triangle,point:vec3<f32>,outward:vec3<f32>)->Triangle {
         result.parameters.y=mix(result.parameters.y,layer.color.w,mask.x);
         // Authored contamination/abrasion covers or removes the original clear coat.
         result.coat.x*=1.0-mask.x;
+        // It covers the paint flakes the same way.
+        result.flake.w*=1.0-mask.x;
     }
     return result;
 }

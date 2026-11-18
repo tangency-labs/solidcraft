@@ -83,6 +83,27 @@ sampling uses the same random numbers as before.
   coat.
 - The denoiser never replaces a flaked point by an ideal mirror.
 
+## GPU path tracing
+
+The GPU path tracer repeats the model in `flakes.wgsl` and finds the flake last as
+well, after maps and aging, from the final shading normal. A job holds at most 64
+distinct flake layers, in a table of the shader's parameters (64 bytes each, 4 KiB
+in all; memory estimates count the device and upload copies). Each triangle carries
+its layer's table entry above the existing flag bits, so a triangle's material is no
+larger and a scene without flakes uploads the same bytes as before.
+
+The shader receives positions relative to the camera target. Each table entry
+carries the camera target in that layer's cells, split into whole cells modulo the
+65536-cell period and a fraction. The shader adds the fraction to its local point,
+finds the nearest cell there and adds the whole cells in wrapping 32-bit arithmetic,
+which is exact modulo the period, so it hashes the same world cells as the CPU. A
+point within single-precision rounding of a cell boundary can land in the
+neighbouring cell.
+
+Aging covers the flakes as on the CPU. Flakes and transmission cannot share a
+surface. Tests on a GPU compare the lookup with a far camera target, the BRDF, the
+density and the drawn directions on a tilted flake against the f64 model.
+
 ## Checks
 
 The tests check admission of every parameter, that the covered share matches
