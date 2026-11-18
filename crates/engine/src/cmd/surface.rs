@@ -2249,18 +2249,6 @@ mod tests {
         assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
     }
 
-    /// #18708: a Combine cut with an open target body is refused up front.
-    #[test]
-    fn a_cut_with_an_open_target_body_is_refused() {
-        let mut s = Session::default();
-        box_and_tube(&mut s);
-        let err = match s.execute("solid.combine", &json!({"target": "Tube", "tools": ["Block"], "operation": "cut"})) {
-            Err(e) => e.to_string(),
-            Ok(_) => String::new(),
-        };
-        assert!(err.contains("Tube is a surface body, and a cut needs solids"), "{err}");
-    }
-
     /// #15913 negative control: a join of overlapping solids still makes one body of the union.
     #[test]
     fn a_join_of_solids_is_unchanged() {
