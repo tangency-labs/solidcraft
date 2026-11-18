@@ -9,8 +9,8 @@ use crate::params::bad;
 use crate::schema::TypedContract;
 use crate::schema::output_schema_for;
 use crate::schema::tab_views::{
-    MAX_NAME, TabViewActivateParams, TabViewBesideParams, TabViewEdge, TabViewIdParams, TabViewLayoutParams, TabViewLinkParams, TabViewMoveParams,
-    TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
+    MAX_NAME, TabViewActivateParams, TabViewBesideParams, TabViewCloseGroupParams, TabViewEdge, TabViewIdParams, TabViewLayoutParams,
+    TabViewLinkParams, TabViewMoveParams, TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
 };
 use crate::schema::tab_windows::{
     TabViewMoveToWindowParams, TabWindowCleanParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply,
@@ -20,6 +20,7 @@ use crate::{Result, Session};
 
 const OPEN_CONTRACT: TypedContract<TabViewOpenParams> = TypedContract::new();
 const ID_CONTRACT: TypedContract<TabViewIdParams> = TypedContract::new();
+const CLOSE_GROUP_CONTRACT: TypedContract<TabViewCloseGroupParams> = TypedContract::new();
 const ACTIVATE_CONTRACT: TypedContract<TabViewActivateParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TabViewRenameParams> = TypedContract::new();
 const MOVE_CONTRACT: TypedContract<TabViewMoveParams> = TypedContract::new();
@@ -40,6 +41,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("tab.view.close", "Close View", crate::checked!("tab.view.close", close))
         .icon("close").noundo().doc_only().contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the view (default: the active one) → id; closes it, which Reopen Closed View undoes; the last view of a design never closes (an error); never opens a dialog"),
+    CommandSpec::new("tab.view.close_others", "Close Other Views", crate::checked!("tab.view.close_others", close_others))
+        .icon("close").noundo().doc_only().contract(&CLOSE_GROUP_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .params("id?: the view to keep (default: active); window?: id (default: the named view's window or last focused) → id, window; closes the other views in that window"),
+    CommandSpec::new("tab.view.close_right", "Close Views to the Right", crate::checked!("tab.view.close_right", close_right))
+        .icon("close").noundo().doc_only().contract(&CLOSE_GROUP_CONTRACT).output(output_schema_for::<TabViewReply>)
+        .params("id?: the view to keep (default: active); window?: id (default: the named view's window or last focused) → id, window; closes the views to the right of that view in that window"),
     CommandSpec::new("tab.view.pop_out", "Open View in New Window", crate::checked!("tab.view.pop_out", pop_out))
         .icon("panel_popout").noundo().doc_only().key("Ctrl+Alt+O").contract(&ID_CONTRACT).output(output_schema_for::<TabViewReply>)
         .params("id?: the view (default: the active view) → id; moves the view to another desktop window of the live design; never opens a dialog"),
@@ -116,6 +123,19 @@ fn open(_s: &mut Session, p: &Value) -> Result<Value> {
 fn close(_s: &mut Session, p: &Value) -> Result<Value> {
     let request: TabViewIdParams = parse("tab.view.close", p)?;
     reply("tab.view.close", TabViewReply { id: request.id, ..Default::default() })
+}
+
+fn close_others(_s: &mut Session, p: &Value) -> Result<Value> {
+    close_group("tab.view.close_others", p)
+}
+
+fn close_right(_s: &mut Session, p: &Value) -> Result<Value> {
+    close_group("tab.view.close_right", p)
+}
+
+fn close_group(cmd: &str, p: &Value) -> Result<Value> {
+    let request: TabViewCloseGroupParams = parse(cmd, p)?;
+    reply(cmd, TabViewReply { id: request.id, window: request.window, ..Default::default() })
 }
 
 fn pop_out(_s: &mut Session, p: &Value) -> Result<Value> {

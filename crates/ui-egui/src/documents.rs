@@ -1544,9 +1544,24 @@ pub(crate) fn view_picture_window_owners(app: &SolveApp) -> std::collections::Ha
 pub(crate) fn view_command(app: &mut SolveApp, command: &str, v: Value) -> Result<Value, String> {
     if matches!(
         command,
-        "tab.view.layout" | "tab.view.beside" | "tab.view.open" | "tab.view.equal_sizes" | "tab.view.link" | "tab.view.reset_cameras"
+        "tab.view.layout"
+            | "tab.view.beside"
+            | "tab.view.open"
+            | "tab.view.equal_sizes"
+            | "tab.view.link"
+            | "tab.view.reset_cameras"
+            | "tab.view.close_others"
+            | "tab.view.close_right"
     ) {
-        let requested = v.get("window").and_then(Value::as_u64).and_then(|id| u32::try_from(id).ok());
+        let requested = v.get("window").and_then(Value::as_u64).and_then(|id| u32::try_from(id).ok()).or_else(|| {
+            if matches!(command, "tab.view.close_others" | "tab.view.close_right") {
+                v.get("id")
+                    .and_then(Value::as_u64)
+                    .and_then(|id| app.docs.views.window_of(id).map(|window| if window == 0 { app.view_windows.current_window() } else { window }))
+            } else {
+                None
+            }
+        });
         return crate::view_windows::with_strip(app, requested, |app| view_command_local(app, command, v));
     }
     view_command_local(app, command, v)
@@ -1570,6 +1585,18 @@ fn view_command_local(app: &mut SolveApp, command: &str, mut v: Value) -> Result
             if !view_close(app, asked) {
                 return Err("the last view of a design stays open".into());
             }
+            Some(asked)
+        }
+        "tab.view.close_others" | "tab.view.close_right" => {
+            if app.docs.views.get(asked).is_none() {
+                return Err(format!("there is no view {asked} in this window"));
+            }
+            if command == "tab.view.close_others" {
+                view_close_others(app, asked);
+            } else {
+                view_close_right_of(app, asked);
+            }
+            v["window"] = json!(app.view_windows.current_window());
             Some(asked)
         }
         "tab.view.reopen" => Some(view_reopen(app).ok_or("there is no closed view to reopen")?),
@@ -4867,6 +4894,25 @@ mod tests {
         let mut one = app();
         cycle(&mut one, true);
         assert_eq!((one.docs.active, one.docs.count()), (0, 1), "a single design: nothing to go to");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn close_view_groups_stay_in_the_requested_window_and_keep_the_anchor() {
+        let mut app = app();
+        let root = app.docs.views.active().id;
+        let second = app.run("tab.view.open", json!({"kind": "model"})).unwrap()["id"].as_u64().unwrap();
+        let third = app.run("tab.view.open", json!({"kind": "model"})).unwrap()["id"].as_u64().unwrap();
+        let remote = app.run("tab.view.open", json!({"kind": "model"})).unwrap()["id"].as_u64().unwrap();
+        let window = app.run("tab.view.move_to_window", json!({"view": remote, "window": "new"})).unwrap()["window"].as_u64().unwrap();
+
+        assert!(app.run("tab.view.close_right", json!({"id": second, "window": 0})).is_ok());
+        assert_eq!(app.docs.views.ids().collect::<Vec<_>>(), [root, second]);
+        assert!(app.docs.views.get(third).is_none());
+        assert!(app.run("tab.view.close_others", json!({"id": second, "window": window})).is_err());
+        assert!(app.run("tab.view.close_others", json!({"id": second})).is_ok());
+        assert_eq!(app.docs.views.ids().collect::<Vec<_>>(), [second]);
+        assert_eq!(app.docs.views.window_of(remote), u32::try_from(window).ok());
     }
 
     /// A design's views: `tab.view.*` open, show, rename, move, close and reopen them (never the
