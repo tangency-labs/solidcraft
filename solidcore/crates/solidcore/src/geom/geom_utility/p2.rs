@@ -1490,6 +1490,13 @@ mod tests {
 
         // the same curve: C2
         assert_eq!(c(&up, &up), ContinuityType::C1C2);
+
+        // a straight join whose second derivatives are rounding noise (1e-9, opposite
+        // sides): both curvatures are zero at the gap tolerance, so they have no normal
+        // to compare, and the join is C2 (`nurbs.b_spline_curve_p1` curve0's knots)
+        let noise_up = ev(v(1.0, 0.0, 0.0), v(0.0, 1e-9, 0.0));
+        let noise_down = ev(v(1.0, 0.0, 0.0), v(0.0, -1e-9, 0.0));
+        assert_eq!(c(&noise_up, &noise_down), ContinuityType::C1C2);
     }
 
     /// WR-10: an oblique collinear set is Linear with the line tangent (pinned v1.0.1:
