@@ -2753,6 +2753,7 @@ fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
 /// and holds every section of the ball between z -2 and 0, so the join adds
 /// ∫₋₂⁰ π((6 + off)² - (36 - z²)) dz to 4/3·π·6³: 288π + 8π/3 + 2π·off·(12 + off).
 #[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and closed form, not ops geometry
 fn a_ring_turned_about_an_axis_within_tolerance_of_a_balls_centre_joins_it() {
     all_fixes();
     let end = (1.0_f64 / 3.0).asin();
