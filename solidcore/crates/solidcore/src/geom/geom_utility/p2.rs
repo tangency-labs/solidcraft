@@ -1399,8 +1399,12 @@ mod tests {
         assert_eq!(c(p, Vec3::ZERO, k).unwrap(), ContinuityType::C0);
         assert_eq!(c(p, v(0.0, 1.0, 0.0), k).unwrap(), ContinuityType::C0);
         assert_eq!(c(p, t * 2.0, k * 3.0).unwrap(), ContinuityType::G1);
-        assert_eq!(c(p, t * 2.0, k).unwrap(), ContinuityType::G1G2);
-        assert_eq!(c(p, t, v(0.0, -2.0, 0.0)).unwrap(), ContinuityType::C1G2);
+        // twice the speed: the same curvature needs four times the second derivative
+        assert_eq!(c(p, t * 2.0, k).unwrap(), ContinuityType::G1);
+        assert_eq!(c(p, t * 2.0, k * 4.0).unwrap(), ContinuityType::G1G2);
+        // the same curvature with a tangential part: C1G2; the mirrored normal: C1
+        assert_eq!(c(p, t, k + t).unwrap(), ContinuityType::C1G2);
+        assert_eq!(c(p, t, v(0.0, -2.0, 0.0)).unwrap(), ContinuityType::C1);
         assert_eq!(c(p, t, k).unwrap(), ContinuityType::C1C2);
         let third = Some(v(0.0, 0.0, 1.0));
         assert!(evaluate_curve_continuity(&ev(p, t, k, third), &ev(p, t, k, third), 1.0).is_ok());
