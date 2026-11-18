@@ -338,6 +338,15 @@ impl ExecutiveAccess<Handle> for Access {
             .ok_or_else(missing_error)?;
         orient_brep(k, b, outward, maybe_not_solid, just_unify, faces_to_swap_uv)
     }
+    fn keeps_open_result(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &SolidError,
+    ) -> SolidResult<bool> {
+        // never asked: this harness does not stitch (`do_stitching` is missing)
+        missing()
+    }
     fn do_stitching(
         &mut self,
         _: &mut Kernel,

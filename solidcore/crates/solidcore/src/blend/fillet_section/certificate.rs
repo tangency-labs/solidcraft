@@ -281,6 +281,38 @@ pub fn curve_derivs_over(
     ld: usize,
     piece: Option<usize>,
 ) -> Result<Vec<V3<Ivl>>> {
+    derivs_over(cn, s, ld, piece, None)
+}
+
+/// [`curve_derivs_over`] of the curve moved by `−about`: the derivatives of `C − about`,
+/// the homogeneous curve's point derivatives taken less `about` times the weight's, in
+/// intervals, before the quotient. The derivatives of order above 0 are those of `C`;
+/// enclosed about a point near `s` they are far narrower where the weights vary (the
+/// quotient's `w_i C` terms are of the size of `C − about`, not of `C`'s distance from the
+/// origin), as [`nurbs_partials_over_piece_about`] encloses a surface's partials.
+///
+/// # Errors
+///
+/// As [`curve_derivs_over`].
+pub fn curve_derivs_over_about(
+    cn: &NurbsCurve,
+    s: Ivl,
+    ld: usize,
+    piece: Option<usize>,
+    about: [f64; 3],
+) -> Result<Vec<V3<Ivl>>> {
+    derivs_over(cn, s, ld, piece, Some(about))
+}
+
+/// [`curve_derivs_over`], of the curve moved by `−about` where given
+/// ([`curve_derivs_over_about`]).
+fn derivs_over(
+    cn: &NurbsCurve,
+    s: Ivl,
+    ld: usize,
+    piece: Option<usize>,
+    about: Option<[f64; 3]>,
+) -> Result<Vec<V3<Ivl>>> {
     let k0 = piece.unwrap_or_else(|| span(&cn.u, cn.p, cn.n, s.lo));
     let k1 = piece.unwrap_or_else(|| span(&cn.u, cn.p, cn.n, s.hi));
     let fixed = piece.is_some();
@@ -325,6 +357,12 @@ pub fn curve_derivs_over(
                 y = y + nj * Ivl::from(pw_at(&cn.pw, li + 1));
                 z = z + nj * Ivl::from(pw_at(&cn.pw, li + 2));
                 w = w + nj * Ivl::from(pw_at(&cn.pw, li + 3));
+            }
+            if let Some([ox, oy, oz]) = about {
+                // (A − o w): the homogeneous form of C − o
+                x = x - Ivl::from(ox) * w;
+                y = y - Ivl::from(oy) * w;
+                z = z - Ivl::from(oz) * w;
             }
             if let (Some(ad), Some(wd)) = (am.get_mut(d), wm.get_mut(d)) {
                 *ad = V3 { x, y, z };
@@ -413,7 +451,7 @@ pub fn nurbs_partials_over_piece(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, None)
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Shift::None)
 }
 
 /// [`nurbs_partials_over_piece`] of the surface moved by `−about`: the partials of
@@ -438,7 +476,35 @@ pub fn nurbs_partials_over_piece_about(
     lk: usize,
     about: [f64; 3],
 ) -> Result<Partials<Ivl>> {
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Some(about))
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Shift::About(about))
+}
+
+/// The piece's control weights' range where the box lies inside its closed knot span (the
+/// weight there is a convex combination of them), else `None`.
+#[allow(clippy::too_many_arguments)]
+fn span_weights(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+) -> Option<Ivl> {
+    let inside = |u: &[f64], k: usize, a: f64, b: f64| {
+        knot(u, k as isize) <= a && b <= knot(u, k as isize + 1)
+    };
+    if !(inside(&cn.u, ku, ua, ub) && inside(&cn.v, kv, va, vb)) {
+        return None;
+    }
+    let mut h: Option<Ivl> = None;
+    for i in (ku + 1).saturating_sub(cn.p + 1)..=ku {
+        for j in (kv + 1).saturating_sub(cn.q + 1)..=kv {
+            let w = Ivl::from(pw_at(&cn.pw, 4 * (i * cn.nv + j) + 3));
+            h = Some(h.map_or(w, |x| x.hull(w)));
+        }
+    }
+    h
 }
 
 /// [`nurbs_partials_over_piece`] for a box inside the piece's closed knot span (not the
@@ -462,26 +528,67 @@ pub fn nurbs_partials_within_span(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    let inside = |u: &[f64], k: usize, a: f64, b: f64| {
-        knot(u, k as isize) <= a && b <= knot(u, k as isize + 1)
-    };
-    let hull = if inside(&cn.u, ku, ua, ub) && inside(&cn.v, kv, va, vb) {
-        let mut h: Option<Ivl> = None;
-        for i in (ku + 1).saturating_sub(cn.p + 1)..=ku {
-            for j in (kv + 1).saturating_sub(cn.q + 1)..=kv {
-                let w = Ivl::from(pw_at(&cn.pw, 4 * (i * cn.nv + j) + 3));
-                h = Some(h.map_or(w, |x| x.hull(w)));
-            }
-        }
-        h
-    } else {
-        None
-    };
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, None)
+    let hull = span_weights(cn, ku, kv, ua, ub, va, vb);
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, Shift::None)
 }
 
-/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given, of
-/// the surface moved by `−about` where given ([`nurbs_partials_over_piece_about`]).
+/// [`nurbs_partials_within_span`], the quotient taken about the box's middle point: the
+/// partials of `S` itself, enclosed as `(S − o) + o` with `o` the surface's point at the
+/// box's middle (rounded to doubles).
+///
+/// The partials of order above 0 of `S − o` and `S` are the same functions, and `P[0][0]`
+/// is `S − o` plus the constant `o`, so the result encloses exactly what
+/// [`nurbs_partials_within_span`] encloses. It is an enclosure for any finite `o`: the
+/// homogeneous net of `S − o` is `(w_i (P_i − o), w_i)`, so its point derivatives are the
+/// net's `A − o w`, taken in rounded interval arithmetic ([`Ivl`]'s products and
+/// differences round outward) and then put through the same quotient, and the last `+ o`
+/// rounds outward too. Only the width depends on `o`: the quotient's `w_ij P[a−i][b−j]`
+/// terms are of the size of `S − o` over the box, not of `S`'s distance from the origin,
+/// so on a rational face far from the origin every partial is far narrower. A box that is
+/// one point, and a box where `o` is not finite (the weight's middle value 0 or not
+/// finite), are enclosed as [`nurbs_partials_within_span`] encloses them, bit for bit: at
+/// a point every term is of rounding's size whatever `o` is, and the shift would only add
+/// its own two roundings.
+///
+/// # Errors
+///
+/// As [`nurbs_partials_over_piece`].
+#[allow(clippy::too_many_arguments)]
+pub fn nurbs_partials_within_span_centred(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+) -> Result<Partials<Ivl>> {
+    let hull = span_weights(cn, ku, kv, ua, ub, va, vb);
+    // a point has no Taylor terms over the box to narrow: the shift would only add its
+    // two roundings to P[0][0]
+    let shift = if ua == ub && va == vb {
+        Shift::None
+    } else {
+        Shift::Middle
+    };
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, shift)
+}
+
+/// The point the rational quotient of [`partials_over_piece`] is taken about.
+#[derive(Clone, Copy)]
+enum Shift {
+    /// The origin: the partials of `S`.
+    None,
+    /// `about`: the partials of `S − about` ([`nurbs_partials_over_piece_about`]).
+    About([f64; 3]),
+    /// The surface's point at the box's middle `o`, added back: the partials of `S`
+    /// ([`nurbs_partials_within_span_centred`]).
+    Middle,
+}
+
+/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given, the
+/// quotient taken about the point `shift` names.
 #[allow(clippy::too_many_arguments)]
 fn partials_over_piece(
     cn: &Nurbs,
@@ -493,7 +600,7 @@ fn partials_over_piece(
     vb: f64,
     lk: usize,
     weights: Option<Ivl>,
-    about: Option<[f64; 3]>,
+    shift: Shift,
 ) -> Result<Partials<Ivl>> {
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);
@@ -515,14 +622,32 @@ fn partials_over_piece(
                     }
                 }
             }
-            if let Some(o) = about {
+            *hab = h;
+        }
+    }
+    // the point the quotient is taken about, and whether it is added back to P[0][0]
+    let (about, add_back) = match shift {
+        Shift::None => (None, false),
+        Shift::About(o) => (Some(o), false),
+        Shift::Middle => {
+            // the surface's point at the middle, as doubles: any finite point is sound,
+            // this one makes S − o smallest over the box
+            let h = at2(&hm, 0, 0, [IZ; 4]);
+            let w = h[3].mid();
+            let o = [h[0].mid() / w, h[1].mid() / w, h[2].mid() / w];
+            let finite = o.iter().all(|x| x.is_finite());
+            (finite.then_some(o), finite)
+        }
+    };
+    if let Some(o) = about {
+        for row in &mut hm {
+            for h in row.iter_mut() {
                 // (A − o w): the homogeneous form of S − o
                 let w = h[3];
                 for (he, &oe) in h.iter_mut().zip(&o) {
                     *he = *he - Ivl::from(oe) * w;
                 }
             }
-            *hab = h;
         }
     }
     let du = Ivl::new(ua, ub) - Ivl::from(um);
@@ -616,6 +741,19 @@ fn partials_over_piece(
                 },
             );
         }
+    }
+    if let (true, Some(o)) = (add_back, about) {
+        // S = (S − o) + o, rounded outward
+        let p = out.at(0, 0);
+        out.set(
+            0,
+            0,
+            V3 {
+                x: p.x + Ivl::from(o[0]),
+                y: p.y + Ivl::from(o[1]),
+                z: p.z + Ivl::from(o[2]),
+            },
+        );
     }
     Ok(out)
 }
@@ -7288,5 +7426,73 @@ mod tests {
             SolidError::blend_failed(OP, "no piece covers the parameter")
         );
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// A quarter circle r 0.2 about (−300, 0, 1), the rational quadratic: over a piece of
+    /// width 2.4e-4, its derivatives enclosed about the point at the piece's middle are of
+    /// the circle's size, where enclosed about the origin they are of 300's (the quotient's
+    /// `w' C` terms); both meet the derivatives enclosed at points of the piece, and so
+    /// does the moved point plus `about` the point.
+    #[test]
+    fn a_rational_curve_far_from_the_origin_is_enclosed_about_a_near_point() {
+        let (r, w) = (0.2, core::f64::consts::FRAC_1_SQRT_2);
+        let points = [(-300.0 + r, 0.0, 1.0), (-300.0 + r, r, w), (-300.0, r, 1.0)];
+        let mut pw = Vec::new();
+        for (x, y, weight) in points {
+            pw.extend_from_slice(&[x * weight, y * weight, weight, weight]);
+        }
+        let cn = NurbsCurve {
+            p: 2,
+            n: 3,
+            u: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            pw,
+        };
+        let s = Ivl::new(0.5, 0.5 + 2.44e-4);
+        let middle = curve_derivs_over(&cn, Ivl::from(s.mid()), 0, None).unwrap();
+        let about = [middle[0].x.mid(), middle[0].y.mid(), middle[0].z.mid()];
+        let plain = curve_derivs_over(&cn, s, 2, None).unwrap();
+        let near = curve_derivs_over_about(&cn, s, 2, None, about).unwrap();
+        let width = |i: Ivl| i.hi - i.lo;
+        assert!(
+            width(plain[1].x) > 100.0 * width(near[1].x),
+            "{:?} against {:?}",
+            plain[1].x,
+            near[1].x
+        );
+        for d in 1..=2 {
+            for i in [near[d].x, near[d].y, near[d].z] {
+                assert!(width(i) < 1e-3, "order {d}: {i:?}");
+            }
+        }
+        // at its start the quarter's middle: (−300 + r/√2, r/√2, 1), along (−1, 1)
+        let half = r * core::f64::consts::FRAC_1_SQRT_2;
+        let near_value = |i: Ivl, v: f64| i.lo <= v + 1e-12 && v - 1e-12 <= i.hi;
+        assert!(near_value(near[0].x + Ivl::from(about[0]), -300.0 + half));
+        assert!(near_value(near[0].y + Ivl::from(about[1]), half));
+        assert!(near_value(near[0].z + Ivl::from(about[2]), 1.0));
+        let along = near[1].x + near[1].y;
+        assert!(along.lo <= 0.0 && 0.0 <= along.hi, "{along:?}");
+        for t in [s.lo, s.mid(), s.hi] {
+            let at = curve_derivs_over(&cn, Ivl::from(t), 2, None).unwrap();
+            // both hold the derivative at t
+            let holds = |a: Ivl, b: Ivl| a.lo <= b.hi && b.lo <= a.hi;
+            for d in 1..=2 {
+                for (a, b) in [
+                    (near[d].x, at[d].x),
+                    (near[d].y, at[d].y),
+                    (near[d].z, at[d].z),
+                ] {
+                    assert!(holds(a, b), "order {d} at {t}: {b:?} apart from {a:?}");
+                }
+            }
+            let point = [
+                near[0].x + Ivl::from(about[0]),
+                near[0].y + Ivl::from(about[1]),
+                near[0].z + Ivl::from(about[2]),
+            ];
+            for (a, b) in point.into_iter().zip([at[0].x, at[0].y, at[0].z]) {
+                assert!(holds(a, b), "point at {t}: {b:?} apart from {a:?}");
+            }
+        }
     }
 }
