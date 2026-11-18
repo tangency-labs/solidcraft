@@ -3832,32 +3832,24 @@ fn delete_face_without_healing_leaves_an_open_surface_body() {
     crate::dialogs::cancel(&mut h.app);
 }
 
-/// #4510: In Surface tab, Delete Face defaults to heal: false so faces are removed without attempting to close solids.
-/// In Solid tab (and context menu / tool search started from it), it defaults to heal: true.
+/// #18645, #4510: Delete Face dialog has a Heal toggle that starts enabled (heal: true)
+/// across all tabs (preserving previous default solid behavior without changing defaults),
+/// and can be unchecked to delete faces without healing leaving open surface bodies.
 #[test]
-fn delete_face_in_surface_tab_defaults_to_heal_false() {
+fn delete_face_defaults_to_heal_true() {
     let mut h = crate::scenario::Harness::new();
     h.app.preferences.remember_dialog_values = false;
 
-    // Solid tab default
-    h.app.ui.tab = "SOLID".into();
-    h.app.start("face.delete");
-    h.frames(1);
-    assert!(
-        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: true })),
-        "Delete Face in Solid tab defaults to heal: true"
-    );
-    crate::dialogs::cancel(&mut h.app);
-
-    // Surface tab default
-    h.app.ui.tab = "SURFACE".into();
-    h.app.start("face.delete");
-    h.frames(1);
-    assert!(
-        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: false })),
-        "Delete Face in Surface tab defaults to heal: false (#4510)"
-    );
-    crate::dialogs::cancel(&mut h.app);
+    for tab in ["SOLID", "SURFACE"] {
+        h.app.ui.tab = tab.into();
+        h.app.start("face.delete");
+        h.frames(1);
+        assert!(
+            matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: true })),
+            "Delete Face in {tab} tab defaults to heal: true"
+        );
+        crate::dialogs::cancel(&mut h.app);
+    }
 
     // Context menu / command search path started while in Surface tab
     h.app.ui.tab = "SURFACE".into();
@@ -3865,8 +3857,8 @@ fn delete_face_in_surface_tab_defaults_to_heal_false() {
     h.app.start("face.delete");
     h.frames(1);
     assert!(
-        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: false })),
-        "Delete Face started from search/context menu in Surface tab defaults to heal: false"
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: true })),
+        "Delete Face started from search/context menu in Surface tab defaults to heal: true"
     );
     crate::dialogs::cancel(&mut h.app);
 }

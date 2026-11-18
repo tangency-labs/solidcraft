@@ -1018,11 +1018,7 @@ impl Dialog {
                 Kind::ReplaceFace,
                 vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
             ),
-            "face.delete" => {
-                let in_surface = app.ui.tab == "SURFACE" || app.command_tab_before_start.as_deref() == Some("SURFACE");
-                let heal = !in_surface;
-                Dialog::new(Kind::DeleteFaces { heal }, vec![SelInput::new("Faces", FACES, true)])
-            }
+            "face.delete" => Dialog::new(Kind::DeleteFaces { heal: true }, vec![SelInput::new("Faces", FACES, true)]),
             "solid.boundary_fill" => {
                 Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", BODIES, true)])
             }
