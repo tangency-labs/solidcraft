@@ -3270,7 +3270,7 @@ fn pattern_face(s: &mut Session, p: &Value) -> Result<Value> {
         anchor,
         attract,
     };
-    let reply = finish_pattern(s, p, Vec::new(), pattern, bodies)?;
+    let reply = finish_pattern(s, p, Vec::new(), pattern, (bodies, Vec::new()))?;
     // The copies go into a group of the browser's Bodies folder, named after the feature, unless
     // `group` is false. Done in this command, so it is the same undo step. A redefinition, whose
     // copies are in a group already, makes no second one.
