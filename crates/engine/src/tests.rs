@@ -1111,6 +1111,7 @@ fn hostile_params_never_panic() {
         "distance",
         "profiles",
         "direction",
+        "parallel_to",
         "distance2",
         "start_offset",
         "operation",
@@ -1225,7 +1226,6 @@ fn hostile_params_never_panic() {
         "depth",
         "dot_grid",
         "turn",
-        "parallel_to",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
