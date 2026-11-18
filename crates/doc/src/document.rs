@@ -3750,8 +3750,9 @@ pub struct Document {
     pub drawings: Vec<std::sync::Arc<crate::drawing::Drawing>>,
     /// Plugin data, by `<plugin-id>/<path>`, base64: kept and saved back untouched, plugin or no
     /// plugin ([`crate::plugin_data`]). A container keeps each under `plugins/` beside the design.
+    /// Shared, so an edit that copies the design does not copy a plugin's large files.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty", deserialize_with = "crate::plugin_data::deserialize")]
-    pub plugin_data: std::collections::BTreeMap<String, String>,
+    pub plugin_data: std::collections::BTreeMap<String, std::sync::Arc<str>>,
 }
 
 /// The browser's view of a design: items and folders hidden or shown, sketch profiles and
