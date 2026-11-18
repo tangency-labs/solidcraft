@@ -363,7 +363,8 @@ beside the built-in tools, so an agent can find and use what a plugin offers wit
   instructions to follow.
 - **The assistant asks first.** In the assistant chat a plugin tool call goes through the same
   approval as every other tool call, and it always asks, whatever the permission mode or an earlier
-  **Always allow**: running a plugin's code needs your go each time.
+  **Always allow**: running a plugin's code needs your go each time. An importer tool, and any
+`file.import` or `doc.open` that would run an importer plugin, asks the same way.
 
 - **Described like commands.** `engine.describe` (MCP `describe_command`) of `<plugin>.<entry>`
   returns the entry with the same schema as `tools/list` (`tool.input`): a command entry as the
