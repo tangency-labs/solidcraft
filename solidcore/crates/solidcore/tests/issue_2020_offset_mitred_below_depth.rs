@@ -269,8 +269,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
-    k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.uv_trim_corner_end_points_only = true;
 }

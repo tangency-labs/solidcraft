@@ -1403,6 +1403,10 @@ preference_settings! {
     /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
     /// its solids as one Import feature, as before.
     freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");
+    /// Import with cadmpeg: a FreeCAD or Rhino file's solids are read from cadmpeg's model straight
+    /// into B-rep records, instead of restated as STEP by cadmpeg's STEP writer and read by
+    /// SolidCraft's own STEP reader. Off (the default) keeps that STEP route, as before.
+    cadmpeg_import: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_import");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
