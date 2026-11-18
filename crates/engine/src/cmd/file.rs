@@ -1703,6 +1703,31 @@ fn write_file(
     write_bytes(s, path, format, compression, preview, cache, sign, signing_key)
 }
 
+/// Report a requested model cache missing from the file just written. Inspecting the
+/// container directory avoids decoding the large model a second time (#18815).
+fn missing_save_cache(s: &Session, format: &str, cache: bool, bytes: &[u8]) -> Option<String> {
+    if !cache || format != "container" || s.doc.features.is_empty() {
+        return None;
+    }
+    let present = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).ok()?.has_model_cache();
+    if present {
+        return None;
+    }
+    let reason = if let Some(result) = s.model.results.iter().find(|r| r.error.is_some()) {
+        let feature = s.doc.feature(result.id).map_or("a timeline feature", |f| f.name.as_str());
+        format!("feature {feature} has an error")
+    } else if s.active_sketch.is_some() {
+        "a sketch is being edited".into()
+    } else if !s.pending_moves.is_empty() {
+        "temporary component placements are active (for example an exploded view)".into()
+    } else if s.model.state().bodies.is_empty() {
+        "there are no evaluated bodies to cache".into()
+    } else {
+        "the cache could not fit or be encoded within the design file budget".into()
+    };
+    Some(format!("Model cache not saved: {reason}; opening this design will rebuild its model."))
+}
+
 fn write_bytes(
     s: &mut Session,
     path: &str,
@@ -1748,6 +1773,7 @@ fn write_bytes(
             _ => return Err(bad("file.save", "format must be container or json")),
         }
     };
+    let cache_not_saved = missing_save_cache(s, format, cache, &bytes);
     // Cancelled while the design was being prepared (a watched save): nothing is written.
     if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
         return Err(EngineError::Other(format!("{path}: save cancelled")));
@@ -1766,7 +1792,8 @@ fn write_bytes(
         bytes: bytes.len(),
         name: s.doc.name.clone(),
         kept_format: None,
-        warnings: None,
+        warnings: cache_not_saved.as_ref().map(|message| vec![message.clone()]),
+        cache_not_saved,
         not_kept: None,
         param_warnings: Vec::new(),
         signature,
@@ -1780,7 +1807,7 @@ fn write_bytes(
         }
         out.kept_format = Some(s.doc.format.clone());
         if !lost.is_empty() {
-            out.warnings = Some(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect());
+            out.warnings.get_or_insert_with(Vec::new).extend(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")));
             out.not_kept = Some(lost);
         }
     }
@@ -3546,7 +3573,11 @@ mod tests {
         s.execute("file.save", &json!({})).unwrap();
         s.execute("explode.show", &json!({"view": "Apart"})).unwrap();
         assert!(!s.pending_moves.is_empty() && !s.is_dirty(), "an exploded view shown");
-        s.execute("file.save", &json!({})).unwrap();
+        let saved = s.execute("file.save", &json!({})).unwrap();
+        let notice = saved["cache_not_saved"].as_str().expect("temporary placements omit the model cache");
+        assert!(notice.contains("temporary component placements"), "{notice}");
+        assert!(!notice.contains("design file budget"), "do not misdiagnose an eligible-model encoding failure: {notice}");
+        assert_eq!(saved["warnings"][0], notice);
         s.execute("occurrence.move", &json!({"occurrence": arm, "translate": [5, 0, 0], "capture": false})).unwrap();
         assert!(s.is_dirty());
         assert!(s.execute("file.save", &json!({})).is_err());
@@ -3678,6 +3709,53 @@ mod tests {
         assert!(editing.active_sketch.is_some());
         assert!(saved_preview(&editing).is_none());
         assert!(saved_geometry(&editing, &editing.doc).is_none());
+    }
+
+    /// A save with a failing feature succeeds but explains that its missing model cache will
+    /// make the next open rebuild the timeline. Plain JSON and explicit cache:false are
+    /// unchanged; an ordinary cache is still silent (#18815).
+    #[test]
+    fn saving_a_failed_feature_reports_missing_cache_without_losing_the_design() {
+        let path = std::env::temp_dir().join(format!("solidcraft-cache-error-{}.sc", std::process::id()));
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"name":"Block"})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,0,15],"operation":"cut","name":"Pocket"})).unwrap();
+        s.execute("solid.fillet", &json!({"edges":[[2.5,5,15]],"radius":1,"name":"Round"})).unwrap();
+        s.execute("timeline.suppress", &json!({"feature":"Pocket","suppressed":true})).unwrap();
+        assert!(s.model.results.iter().any(|r| r.error.is_some()), "the suppressed Pocket leaves Round invalid");
+        let saved = s.execute("file.save", &json!({"path":path})).unwrap();
+        let notice = saved["cache_not_saved"].as_str().expect("a failing feature must be reported");
+        assert!(notice.contains("Round") && notice.contains("error"), "{notice}");
+        assert_eq!(saved["warnings"][0], notice);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().has_model_cache());
+        assert_eq!(solidcraft_io::read_design(&bytes).unwrap().to_json(), s.doc.to_json(), "the authoritative design is saved");
+
+        let disabled = s.execute("file.save", &json!({"cache":false})).unwrap();
+        assert!(disabled.get("cache_not_saved").is_none());
+        assert!(disabled.get("warnings").is_none(), "deliberately omitting the cache is not a warning");
+        let json_path = path.with_extension("json");
+        let plain = s.execute("file.save_as", &json!({"path":json_path})).unwrap();
+        assert!(plain.get("cache_not_saved").is_none(), "JSON cannot contain a native model cache");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&json_path);
+        let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+    }
+
+    /// A valid model with no cache in a container gets the budget/encoding warning; a real
+    /// cached container does not. No model decode is needed for this diagnosis.
+    #[test]
+    fn saved_model_cache_presence_is_detected_without_recomputing_bodies() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+        let omitted = s.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap();
+        let notice = missing_save_cache(&s, "container", true, &omitted).unwrap();
+        assert!(notice.contains("design file budget"), "{notice}");
+        assert!(missing_save_cache(&s, "container", false, &omitted).is_none());
+        assert!(missing_save_cache(&s, "json", true, &omitted).is_none());
+        let included = s.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        assert!(missing_save_cache(&s, "container", true, &included).is_none());
     }
 
     #[test]

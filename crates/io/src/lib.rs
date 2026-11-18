@@ -370,7 +370,7 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
         name,
         body_names,
         invisible,
-        kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip },
+        kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: text.into(), components: imp.tree.clone(), skip, records: None },
         warnings: iges_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
         import: imp,
     })
@@ -1894,6 +1894,7 @@ mod tests {
                 setbacks: Vec::new(),
                 turn: Default::default(),
                 tangent_chain: true,
+                edge_radii: Vec::new(),
             },
             None,
         )
@@ -2140,6 +2141,7 @@ mod tests {
                 setbacks: Vec::new(),
                 turn: Default::default(),
                 tangent_chain: true,
+                edge_radii: Vec::new(),
             },
             None,
         )

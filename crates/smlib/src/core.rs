@@ -88,7 +88,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.analytic_copy_keeps_parameterization = true;
     f.offset_extension_from_base = true;
     f.fillet_cleanup_keeps_target_faces = true;
-    f.ssi_trace_tangent_curves_once = true;
     f.found_torus_sphere_keep_tested_nurb = true;
     f.shell_edges_on_analytics_exact = true;
     f.fillet_patch_keeps_fillet_edges = true;
@@ -101,7 +100,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_loop_normal_from_area = true;
     // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
     f.offset_extension_as_itself = true;
-    f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;
     f.ssi_proto_topology_statuses_pass_on = true;
@@ -114,10 +112,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
-    f.cone_iso_circle_at_axial_height = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
-    f.cone_unbounded_parameterized_as_nurb = true;
     f.keep_exact_pcurves = true;
     f.closed_smooth_pole_tangent_limit = true;
     // Held back: see `HELD_BACK`.

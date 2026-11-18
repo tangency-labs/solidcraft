@@ -116,7 +116,7 @@ fn exhausted(limit: &str, allowed: u64) -> String {
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
 pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
@@ -124,6 +124,9 @@ pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("
 pub const WIT_VERSIONS: &[&str] = &["0.2.0", "0.1.0"];
 /// `craft:plugin@0.1.0`, unchanged, for plugins built before 0.2.
 pub const WIT_0_1: &str = include_str!("../wit-0.1/plugin.wit");
+
+/// The highest data format number a plugin may declare (`runtime.data_format`).
+pub const MAX_DATA_FORMAT: u32 = 1_000_000;
 
 fn capability_version(text: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
@@ -512,6 +515,12 @@ pub struct RuntimeManifest {
     pub limits: Limits,
     #[serde(default)]
     pub permissions: Permissions,
+    /// The format number of the data the plugin keeps in a design (capability `storage@0.1`),
+    /// 1 or more. The app stamps it on what the plugin saves; data saved with a higher number
+    /// (by a newer version of the plugin) is read-only to this version, and a lower one tells the
+    /// plugin to migrate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_format: Option<u32>,
 }
 impl RuntimeManifest {
     /// Whether this runtime is an importer (world `importer-plugin`). A runtime's entries are all
@@ -700,6 +709,33 @@ fn plain(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.chars().count() <= max && !value.chars().any(char::is_control)
 }
 
+/// A plugin that keeps data in designs asks for `storage@0.1` and says its data's format number;
+/// only a command plugin does: an importer makes a new design and keeps nothing in the open one.
+fn check_storage(manifest: &Manifest) -> Result<()> {
+    let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
+    let runtime = manifest.runtime.as_ref();
+    let format = runtime.and_then(|runtime| runtime.data_format);
+    if !storage {
+        if format.is_some() {
+            return Err(invalid(
+                "runtime.data_format",
+                "only a plugin that keeps data in designs has a data format: add \"storage@0.1\" to capabilities",
+            ));
+        }
+        return Ok(());
+    }
+    if runtime.is_none_or(RuntimeManifest::is_importer) {
+        return Err(invalid(
+            "capabilities",
+            "storage keeps a command plugin's data in the open design; an importer or a plugin without a runtime has none",
+        ));
+    }
+    if !format.is_some_and(|format| (1..=MAX_DATA_FORMAT).contains(&format)) {
+        return Err(invalid("runtime.data_format", "a plugin with storage says its data's format number, 1 to 1000000, e.g. \"data_format\": 1"));
+    }
+    Ok(())
+}
+
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
     parse_manifest_for(text, folder, "the app")
 }
@@ -751,6 +787,7 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         }
         runtime.validate()?;
     }
+    check_storage(&manifest)?;
     Ok(manifest)
 }
 

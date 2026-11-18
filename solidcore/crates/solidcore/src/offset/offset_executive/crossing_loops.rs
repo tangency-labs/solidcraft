@@ -1159,8 +1159,15 @@ impl OffsetExecutive {
                     .orientations
                     .push(eu::orientation(b, stretch.edgeuse)?);
             }
-            // a point inside the region, just off it on the side the cavity would lie on
-            if !self.floor_is_cavity(kernel, original, b, f, &stretches, chain)? {
+            // (not in the fork, solidcore#3329) of an offset that opens faces (a shell), only a
+            // region under an opening can be the cavity's floor; then a point inside the
+            // region, just off it on the side the cavity would lie on. An offset that opens
+            // nothing (a draft's local operation, solidcraft#18374) has no opening to ask
+            // about: the point alone says.
+            let opens = !self.shell_faces().is_empty();
+            if (opens && !self.under_an_opening(original, b, &stretches, chain)?)
+                || !self.floor_is_cavity(kernel, original, b, f, &stretches, chain)?
+            {
                 continue;
             }
             input.curves_3d = Some(curves_3d);
@@ -1585,6 +1592,48 @@ impl OffsetExecutive {
         } else {
             -1.0
         }))
+    }
+
+    /// (not in the fork, solidcore#3329) Whether the region of an offset face that the
+    /// stretches `chain` wind round the other way lies under an opening: one of its
+    /// stretches is the offset of an edge of a face the shell opens. Such a stretch does
+    /// not move with the wall across it (there is none: the opening), so the loop it is on
+    /// can run past the other loop's moved side with the cavity reaching through between
+    /// them (fork 1b016ca's floor). Where every stretch bounds an offset wall, the loops
+    /// cross because those walls pass through each other (the merge cuts them where they
+    /// do), and the region they wind round the other way lies within one of the walls: not
+    /// cavity. [`Self::floor_is_cavity`]'s point just off such a region can miss the wall
+    /// it lies within, whose face ends at the region's own level (a concave round's offset
+    /// running past the moved outer wall below it, solidcore#3329), and the region was kept
+    /// as a fold-back sliver of floor.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries.
+    fn under_an_opening(
+        &self,
+        original: &Brep,
+        b: &Brep,
+        stretches: &[LoopStretch],
+        chain: &[usize],
+    ) -> Result<bool> {
+        let open = self.shell_faces();
+        for &ss in chain {
+            let edgeuse = at(stretches, ss)?.edgeuse;
+            for offset_use in [Some(edgeuse), eu::mate(b, edgeuse)?].into_iter().flatten() {
+                for source in self.edgeuse_to_edgeuses.firsts(offset_use) {
+                    let Some(e) = eu::edge(original, source)? else {
+                        continue;
+                    };
+                    for across in edge::edgeuses(original, e, None, None)? {
+                        if eu::face(original, across)?.is_some_and(|g| open.contains(&g)) {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// `sm_FloorIsCavity` (fork 1b016ca): whether the region of offset face `f` that the
