@@ -513,7 +513,7 @@ fn cones_keep_their_pinned_volumes() {
 
 /// The round beside the cone pit is a B-spline face whose trims cross three of its surface's v
 /// knot lines, where the trims' images have derivatives that are not smooth. The face's own
-/// trim pieces and its tolerant edges' closure strips (#16735) both integrate along those
+/// trim pieces and its tolerant edges' gap-closure strips both integrate along those
 /// trims, and both end each piece at the crossings. So the volume at the default accuracy 1e-7
 /// equals the volume at 1e-12, to within the rounding bound of the volume's sum (as in
 /// `transposed_pins_lie_within_their_sums_rounding_of_the_references`).

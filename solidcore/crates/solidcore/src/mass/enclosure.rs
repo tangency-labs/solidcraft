@@ -267,7 +267,9 @@ pub fn enclose_quantity(
 
 /// An enclosure of the total area of the faces `faces` of `b` at most `width` wide, as
 /// [`enclose_quantity`] refines [`Quantity::Area`] (an area is its faces' alone, so any set
-/// of faces has one; a face listed twice counts twice).
+/// of faces has one; a face listed twice counts twice). A sheet's face, void on both sides,
+/// counts from its upward use, so its share may be its area negated: enclose such a face
+/// alone and take the enclosure's magnitude.
 ///
 /// # Errors
 ///
@@ -1243,13 +1245,16 @@ impl<'a> Work<'a> {
             }
         };
         let (mu, mm) = (material(up)?, material(mate)?);
-        if mu == mm {
+        // a sheet's face (void on both sides) has an area but bounds no material: its
+        // area is measured from its upward use, signed by that use's orientation
+        let sheet_area = self.weight.is_area() && !mu && !mm;
+        if mu == mm && !sheet_area {
             return Err(SolidError::invalid_input(
                 OP,
                 "a face whose sides are not one material region and one void",
             ));
         }
-        let fu = if mu { up } else { mate };
+        let fu = if mu || sheet_area { up } else { mate };
         let sign = if b.faceuse(fu)?.orientation == OrientType::Same {
             -1.0
         } else {
@@ -2491,6 +2496,35 @@ mod tests {
         assert!(!done(Ivl::new(1.0, f64::INFINITY)));
         assert!(!done(Ivl::new(f64::NEG_INFINITY, -1.0)));
         assert!(!done(Ivl::new(f64::NAN, 1.0)));
+    }
+
+    /// A sheet's face, void on both sides, has an area enclosure (its magnitude holds the
+    /// area) though it has no volume, and its volume is still refused.
+    #[test]
+    fn a_sheet_face_has_an_area_enclosure() {
+        use crate::primitive::api_curves::create_line_segment;
+        let mut k = Kernel::default();
+        let pts = [[0.0, 0.0], [3.0, 0.0], [3.0, 2.0], [0.0, 2.0]];
+        let curves: Vec<crate::curve::curve::Curve> = (0..4)
+            .map(|i| {
+                let (a, c) = (pts[i], pts[(i + 1) % 4]);
+                create_line_segment(Point3::new(a[0], a[1], 0.0), Point3::new(c[0], c[1], 0.0))
+                    .unwrap()
+                    .into()
+            })
+            .collect();
+        let mut b = crate::primitive::api_trim_ops::create_planar_faces(&mut k, &curves).unwrap();
+        let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 1);
+        let e = enclose_face_area_relative(&k, &mut b, &faces, 1e-9).unwrap();
+        let (lo, hi) = if e.lo < 0.0 {
+            (-e.hi, -e.lo)
+        } else {
+            (e.lo, e.hi)
+        };
+        assert!(lo <= 6.0 && 6.0 <= hi, "[{lo}, {hi}]");
+        assert!(hi - lo <= 1e-8 * 6.0, "[{lo}, {hi}]");
+        assert!(enclose_volume(&k, &mut b, 1e-6).is_err());
     }
 
     /// The cylinder r 2, h 5, its side moved along x by `shift`.
