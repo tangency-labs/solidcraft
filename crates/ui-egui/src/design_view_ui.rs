@@ -153,7 +153,8 @@ pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bo
             }
         }
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
-        TabAction::PlusMenu { id } | TabAction::LayoutMenu { id } => return plus_row(app, &id),
+        TabAction::PlusMenu { id } => return plus_row(app, &id),
+        TabAction::LayoutMenu { id } => return layout_action(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
         TabAction::TearOff(i) => {
             if !app.file_picker_busy() {
@@ -199,6 +200,79 @@ fn view_menu(app: &mut SolveApp, index: usize, id: &str) -> bool {
     true
 }
 
+pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_menu::LayoutMenu {
+    use solidcraft_ui_kit::view_layout_menu::{LayoutMenu, LayoutView, LayoutWindow};
+    use solidcraft_views::CameraLinkMode;
+
+    let choices = crate::view_windows::window_choices(app);
+    let views = crate::view_windows::layout_views(app);
+    let windows = choices
+        .iter()
+        .map(|choice| LayoutWindow {
+            id: choice.id,
+            name: choice.name.clone(),
+            display: choice.display_label.clone(),
+            views: views
+                .iter()
+                .filter(|(owner, _)| *owner == choice.id)
+                .map(|(_, view)| LayoutView {
+                    id: view.id,
+                    name: crate::i18n::tr_name(&view.name),
+                    kind: view.kind.key().to_owned(),
+                    accent: crate::workspace::view_icon_colour(documents::kind_word(view.kind), solidcraft_theme::is_dark()),
+                })
+                .collect(),
+        })
+        .collect();
+    let visible = documents::visible_view_ids(app);
+    let models = visible.iter().filter(|id| app.docs.views.get(**id).is_some_and(|view| view.kind == ViewKind::Model)).count();
+    let link = match app.docs.views.camera_link() {
+        CameraLinkMode::Off => "off",
+        CameraLinkMode::Orientation => "orientation",
+        CameraLinkMode::Zoom => "zoom",
+        CameraLinkMode::Both => "both",
+    };
+    LayoutMenu {
+        design: crate::i18n::tr_name(&documents::tab_name(app, &app.session)),
+        window: app.view_windows.current_window(),
+        native: crate::view_windows::supports_pop_out(app) && crate::view_windows::can_create(app),
+        visible: visible.len(),
+        link: link.to_owned(),
+        can_link: models >= 2,
+        clean: crate::view_windows::is_clean(app),
+        windows,
+    }
+}
+
+fn layout_action(app: &mut SolveApp, id: &str) -> bool {
+    use serde_json::json;
+    let window = app.view_windows.current_window();
+    let (command, args) = match id {
+        "layout.equal" => ("tab.view.equal_sizes", json!({"window": window})),
+        "layout.reset" => ("tab.view.reset_cameras", json!({"window": window})),
+        "layout.clean" => ("tab.window.clean", json!({"window": window})),
+        _ if let Some(mode) = id.strip_prefix("layout.link.") => ("tab.view.link", json!({"window": window, "mode": mode})),
+        _ if let Some(target) = id.strip_prefix("win.focus.").and_then(|value| value.parse::<u32>().ok()) => {
+            ("tab.window.focus", json!({"window": target}))
+        }
+        _ if let Some(source) = id.strip_prefix("win.bring.").and_then(|value| value.parse::<u32>().ok()) => {
+            if let Err(reason) = crate::view_windows::bring_views(app, source) {
+                show_move_error(app, reason);
+            }
+            return true;
+        }
+        _ if let Some(view) = id.strip_prefix("win.detach.").and_then(|value| value.parse::<u64>().ok()) => {
+            move_to_window(app, view, json!("new"));
+            return true;
+        }
+        _ => return plus_row(app, id),
+    };
+    if let Err(reason) = app.run(command, args) {
+        show_move_error(app, reason);
+    }
+    true
+}
+
 fn plus_row(app: &mut SolveApp, id: &str) -> bool {
     if let Some(kind) = id.strip_prefix("plus.").and_then(ViewKind::from_key) {
         // A Model view is another angle on the design, so "+ Model" always opens a new one; the
@@ -212,7 +286,10 @@ fn plus_row(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     if let Some(preset) = id.strip_prefix(LAYOUT_PREFIX).and_then(solidcraft_views::Preset::from_key) {
-        documents::view_layout(app, preset);
+        let window = app.view_windows.current_window();
+        if let Err(reason) = app.run("tab.view.layout", serde_json::json!({"layout": preset.key(), "window": window})) {
+            show_move_error(app, reason);
+        }
         return true;
     }
     match id {
