@@ -111,6 +111,7 @@ pub mod fill;
 #[path = "drawing_scene_kept.rs"]
 mod kept;
 use kept::{Kept, KeptDimension, KeptFill, KeptLines, KeptSketch, KeptView};
+use solidcraft_io::SheetLines;
 pub mod sketch;
 
 /// The command the sheet scene answers for, in its errors.
@@ -519,6 +520,17 @@ pub struct LineHit {
 pub fn line_at(s: &mut Session, sheet: u64, point_mm: Vec2, band_mm: f64) -> Result<Option<LineHit>> {
     let d = s.drawing(CMD)?.clone();
     extract(s, sheet)?;
+    // Lines read from the design's file name no body: those of this sheet are drawn again first.
+    let read: Vec<u64> = views_on(&d, sheet)?
+        .into_iter()
+        .filter(|(id, ..)| {
+            s.drawing_scenes.views.get(id).is_some_and(|e| e.view.flat.is_none() && e.drawn.group.is_some() && e.drawn.owners.is_none())
+        })
+        .map(|(id, ..)| id)
+        .collect();
+    for id in read {
+        s.drawing_scenes.redraw(id);
+    }
     settle(s, &d);
     let answer = extract(s, sheet)?;
     let views: Vec<SheetObject> = answer.objects.iter().filter(|o| o.kind == ObjectKind::View).copied().collect();
@@ -763,6 +775,9 @@ struct Drawn {
     boundary: Option<Aabb2>,
     /// The frame its lines were drawn through, for its dimensions.
     frame: Option<ViewFrame>,
+    /// The point of the view's plane its frame puts at the view's centre (the middle of the model's
+    /// box): with the view's plane and scale, the frame again, for lines kept in the design's file.
+    centre: Vec2,
     /// What drew each item of `group`, for [`line_at`].
     owners: Option<Arc<Owners>>,
     /// What it says beside its lines ([`ViewState::why`]).
@@ -900,7 +915,17 @@ fn draw(
         (Some(state), Some(uncut)) => Some(format!("{state}; {uncut}")),
         (state, uncut) => state.or(uncut),
     };
-    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone(), hatches: Vec::new() };
+    let none = |status| Drawn {
+        group: None,
+        status,
+        stats: None,
+        boundary,
+        frame: None,
+        centre: Vec2::ZERO,
+        owners: None,
+        why: why.clone(),
+        hatches: Vec::new(),
+    };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
     let not_drawable = not_drawable.or_else(|| crate::drawing_view::not_cut_yet(view));
@@ -976,6 +1001,7 @@ fn draw(
                 stats: Some(lines.stats),
                 boundary,
                 frame: Some(frame),
+                centre: extents.model.center(),
                 owners,
                 why: says,
                 hatches,
@@ -1000,7 +1026,8 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
     let flat = crate::drawing_view::flat(s, of, CMD);
     let placing = crate::drawing_view::flat_measured(&flat);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: None, hatches: Vec::new() };
+    let none =
+        |status| Drawn { group: None, status, stats: None, boundary, frame: None, centre: Vec2::ZERO, owners: None, why: None, hatches: Vec::new() };
     if let Some(why) = crate::drawing_view::not_drawable_flat(view) {
         return none(Status::Failed(why.into()));
     }
@@ -1022,6 +1049,7 @@ fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
         stats: None,
         boundary,
         frame: Some(frame),
+        centre: flat.model.center(),
         owners: None,
         why: None,
         hatches: Vec::new(),
@@ -1794,6 +1822,12 @@ pub struct Cache {
     serial: u64,
     /// The views' lines of each drawing closed, for when it opens again. They outlive the rest.
     kept: KeptLines,
+    /// Each drawing's lines its design's file kept, unread: taken up when it opens
+    /// ([`Self::take_kept`]), and saved again as they came until then. They outlive the rest too.
+    pub(crate) filed: BTreeMap<u64, Arc<[u8]>>,
+    /// What a copy of the session made to save it saves ([`Session::scratch_for_save`]): the
+    /// session's lines, as [`sheet_lines`] collected them. The copy has none of its own.
+    pub(crate) saving: Option<Arc<Vec<(u64, SheetLines)>>>,
     /// The latest view asked of [`begin`]: the one result [`finish`] may take.
     requested: Option<u64>,
     /// The bodies pictures are drawn from, for the last world state and design they were read for.
@@ -2103,13 +2137,24 @@ impl Cache {
         }
     }
 
+    /// An empty cache whose file keeps `lines` ([`sheet_lines`]): the copy a save runs on.
+    pub(crate) fn saving(lines: Arc<Vec<(u64, SheetLines)>>) -> Cache {
+        Cache { saving: Some(lines), ..Cache::default() }
+    }
+
     /// Drawing `drawing`'s lines kept when it closed, as its views' and dimensions' entries: from a
     /// world state that has gone, so each view is out of date until [`keep_what_shows_the_same`] finds
     /// it shows the same, and each dimension is read again once its view is up to date. A held
     /// drawing draws neither, so it shows them as they were.
-    fn take_kept(&mut self, drawing: u64) {
+    /// Lines none kept in this session since it opened come from the design's file, if it kept any
+    /// ([`kept::from_file`]).
+    fn take_kept(&mut self, d: &Drawing) {
         let gone: Arc<ModelState> = Arc::default();
-        let kept = self.kept.take(drawing);
+        let filed = self.filed.remove(&d.id);
+        let kept = match filed {
+            Some(bytes) if self.kept.of(d.id).is_none() => kept::from_file(d, &bytes),
+            _ => self.kept.take(d.id),
+        };
         for (id, kept) in kept.views {
             self.serial += 1;
             let entry =
@@ -2878,7 +2923,7 @@ fn by_their_jobs(s: &Session, on: &[(u64, ResolvedView, Vec2)]) -> BTreeSet<u64>
 fn catch_up(s: &mut Session, d: &Drawing, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
     let cache = &mut s.drawing_scenes;
     if cache.drawing != Some(d.id) {
-        cache.take_kept(d.id);
+        cache.take_kept(d);
         cache.drawing = Some(d.id);
     }
     keep_what_shows_the_same(s, on, state);
@@ -2917,44 +2962,32 @@ fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView
 /// Each view of `on` drawn from another world state that showed what `state` shows takes `state`:
 /// drawn as it draws now, it is then up to date ([`Cache::fresh`]) and draws nothing. What a view
 /// shows is what it draws: the design as it places its parts, whose shown set is worked out once and
-/// kept for [`step`] to draw from, or its exploded view's (#13048), one for each exploded view behind.
-/// Each is worked out only when a view drawing it is behind. A view of another configuration is left
-/// behind: its copy evaluates the design, which only its job does ([`Job::run`]).
+/// kept for [`step`] to draw from, or its exploded view's (#13048), one for each exploded view behind
+/// ([`shows_now`]). Each is worked out only when a view drawing it is behind. A view of another
+/// configuration is left behind: its copy evaluates the design, which only its job does ([`Job::run`]).
 fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
+    // What each state of the design shows, by its key: the design's own kept for `state` once worked out.
+    let mut shown = BTreeMap::new();
+    if let Some((_, set)) = s.drawing_scenes.shown.take_if(|(was, _)| Arc::ptr_eq(was, state)) {
+        shown.insert(Choice::default(), set);
+    }
     // Each with what it says now: a joint deleted may leave its picture as it was. A view whose row
     // fails to build features is of another configuration, which is left behind.
     let says = |view: &ResolvedView| crate::drawing_view::state_reason(s, view, &[]);
-    // Each by the key of the session it draws from, so a view of the active row is the design's.
-    let behind: Vec<(u64, Choice, Option<String>)> = {
-        let sessions = ViewSessions::new(s);
-        on.filter_map(|id| {
+    let mut sessions = ViewSessions::new(s);
+    let behind: Vec<(u64, Option<Arc<SourceKey>>, Option<String>)> = on
+        .filter_map(|id| {
             let entry = s.drawing_scenes.views.get(&id).filter(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))?;
-            Some((id, sessions.choice(&entry.view), says(&entry.view)))
+            Some((id, shows_now(&mut sessions, &mut shown, &entry.view), says(&entry.view)))
         })
-        .collect()
-    };
-    let mut now: BTreeMap<Choice, Option<Arc<SourceKey>>> = BTreeMap::new();
-    if behind.iter().any(|(_, choice, _)| choice.is_placed()) {
-        let shown = match s.drawing_scenes.shown.take() {
-            Some((was, shown)) if Arc::ptr_eq(&was, state) => shown,
-            _ => crate::drawing_view::shown(s),
-        };
-        now.insert(Choice::default(), SourceKey::of(&shown));
-        s.drawing_scenes.shown = Some((state.clone(), shown));
-    }
-    {
-        let mut sessions = ViewSessions::new(s);
-        for (_, choice, _) in &behind {
-            if !now.contains_key(choice) && !choice.evaluates() {
-                let shown = sessions.drawing(choice).and_then(|(from, _)| crate::drawing_view::shown(from));
-                now.insert(choice.clone(), SourceKey::of(&shown));
-            }
-        }
+        .collect();
+    if let Some(set) = shown.remove(&Choice::default()) {
+        s.drawing_scenes.shown = Some((state.clone(), set));
     }
     let cache = &mut s.drawing_scenes;
-    for (id, choice, why) in behind {
-        let Some(Some(now)) = now.get(&choice) else { continue };
-        if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, now)) {
+    for (id, now, why) in behind {
+        let Some(now) = now else { continue };
+        if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, &now)) {
             entry.state = state.clone();
             // A new reason is a new drawing of the view, so the sheet is assembled again.
             if entry.drawn.why != why {
@@ -3217,6 +3250,58 @@ fn sheet_pictures(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)]
     (pictures.into(), waiting)
 }
 
+/// What view `view` shows now: what the session it draws from shows ([`ViewSessions::choice`]), the
+/// design as it places its parts or its copy in an exploded view, a position or a study step, each
+/// worked out once in `shown`. None for a view of another configuration: its copy evaluates the
+/// design, which only its view's job does ([`Choice::evaluates`]). The one rule a view's lines are
+/// current by, kept by the provider ([`keep_what_shows_the_same`]) and in the design's file
+/// ([`sheet_lines`]).
+fn shows_now(
+    sessions: &mut ViewSessions,
+    shown: &mut BTreeMap<Choice, std::result::Result<ShownSet, Unmeasured>>,
+    view: &ResolvedView,
+) -> Option<Arc<SourceKey>> {
+    let choice = sessions.choice(view);
+    if choice.evaluates() {
+        return None;
+    }
+    SourceKey::of(shown.entry(choice).or_insert_with_key(|choice| sessions.drawing(choice).and_then(|(from, _)| crate::drawing_view::shown(from))))
+}
+
+/// Each drawing's lines for the design's file to keep ([`solidcraft_io::SheetLines`]): the views of
+/// the drawing open and of those closed that are current ([`kept::saved`]), and, for a drawing not
+/// opened since the design was, the lines its file kept, as they came. Nothing is drawn: a view not
+/// up to date is left out. A copy made to save the session has the session's ([`Cache::saving`]).
+pub(crate) fn sheet_lines(s: &Session) -> Arc<Vec<(u64, SheetLines)>> {
+    let cache = &s.drawing_scenes;
+    if let Some(saving) = &cache.saving {
+        return saving.clone();
+    }
+    // What each state of the design a view draws shows now ([`shows_now`]), worked out once each, and
+    // only for a drawing with lines to check.
+    let mut sessions = ViewSessions::new(s);
+    let mut shown = BTreeMap::new();
+    let mut lines = Vec::new();
+    for d in &s.doc.drawings {
+        let views: Vec<(u64, &ResolvedView, &Drawn, Option<&SourceKey>)> = if cache.drawing == Some(d.id) {
+            cache.views.iter().map(|(id, e)| (*id, &e.view, &e.drawn, e.shows.as_deref())).collect()
+        } else if let Some(kept) = cache.kept.of(d.id) {
+            kept.views.iter().map(|(id, k)| (*id, &k.view, &k.drawn, k.shows.as_deref())).collect()
+        } else {
+            if let Some(bytes) = cache.filed.get(&d.id) {
+                lines.push((d.id, SheetLines::Kept(bytes.clone())));
+            }
+            continue;
+        };
+        let saved = views.into_iter().filter_map(|(id, view, drawn, shows)| {
+            let now = shows_now(&mut sessions, &mut shown, view)?;
+            kept::saved(d, id, view, drawn, shows, &now)
+        });
+        lines.push((d.id, SheetLines::Views(saved.collect())));
+    }
+    Arc::new(lines)
+}
+
 /// Drops the cache once its drawing isn't the one open: closing a drawing (or opening another) ends
 /// its scenes, and the world states they hold. Its views' and dimensions' lines are kept, for when
 /// it opens again, and forgotten with the drawing. [`Session::execute`] calls it after every command.
@@ -3237,9 +3322,11 @@ pub(crate) fn forget_closed(s: &mut Session) {
             .into_iter()
             .map(|(id, entry)| (id, KeptFill { source: entry.source, context: entry.context, drawn: entry.drawn }));
         kept.keep(drawing, Kept { views: views.collect(), dimensions: dimensions.collect(), sketches: sketches.collect(), fills: fills.collect() });
-        *cache = Cache { kept, ..Cache::default() };
+        let filed = std::mem::take(&mut cache.filed);
+        *cache = Cache { kept, filed, ..Cache::default() };
     }
     cache.kept.retain(|drawing| s.doc.drawings.iter().any(|d| d.id == drawing));
+    cache.filed.retain(|drawing, _| s.doc.drawings.iter().any(|d| d.id == *drawing));
 }
 
 #[cfg(test)]

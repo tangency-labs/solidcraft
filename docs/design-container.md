@@ -315,3 +315,29 @@ Desktop thumbnail reads seek within the file. The browser VFS supplies a bounded
 in-memory buffer instead; it avoids geometry reconstruction but does not provide
 range-based OPFS reads. IO checks the PNG header and hashes, while the consuming
 UI performs the full bounded PNG decode.
+
+## Sheet cache
+
+A save with `cache` (the default) may add `cache/drawings/<drawing id>.json` for each
+drawing: its views' last lines, so the drawing opens showing them (#3890). One entry
+per drawing, deflated, at most 64 MiB expanded, written after the model cache and the
+preview only where the file has room; a drawing whose lines don't fit has no entry.
+The entry records `solidcraft-sheet-cache/1` and the build that wrote it. Each view
+keeps its id, a number for its settings as it drew (the build's own), what it showed
+(each body's occurrence path, body name, reference flag, geometry key and cosmetic
+threads), its paper-scene group, its boundary, the model point its frame was centred
+on, and what it says beside its lines.
+
+Only the build that wrote an entry reads it: a view's lines come from the projection
+code as well as the model. A view is kept when it still draws with the settings it
+drew with; its lines are current when the model the design opens with shows what it
+showed, the rule a drawing closed and opened again in one session already follows.
+Other views show the kept lines out of date until they are drawn again. Their lines
+name no body, so picking a line draws the view again first. Dimensions are read again.
+
+Saving never draws a view: only views up to date are kept, and a drawing not opened
+since the design was keeps its entry as it came. Recovery, plain JSON, browser
+downloads and `cache: false` omit the cache; a signed save keeps none and a signed
+file's is never read. An entry of another build or format, one that doesn't read, or
+a view whose lines fail the paper scene's checks is a miss, never a failed open. An
+older build saving the design drops the entries.
