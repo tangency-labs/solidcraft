@@ -1171,7 +1171,6 @@ mod tests {
         h.app.ui.tab = "SURFACE".into();
         let before = h.app.session.doc.clone();
         let revision = h.app.session.revision;
-        h.app.preferences.drawings_preview = true;
         h.call("ui.workspace", json!({"workspace":"drawing"}));
         h.frames(4);
         assert_eq!(visible_tabs(&h.app), DRAWING_TABS);
@@ -1232,7 +1231,6 @@ mod tests {
     fn drawing_search_and_panels_work_from_the_keyboard() {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         h.call("ui.workspace", json!({"workspace":"drawing"}));
         h.app.run("drawing.create", json!({})).unwrap();
         h.app.run("drawing.sheet.add", json!({"name":"Second sheet"})).unwrap();

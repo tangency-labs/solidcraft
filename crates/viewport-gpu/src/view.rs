@@ -1422,6 +1422,9 @@ enum SharedGpu {
     Indexed { vertices: wgpu::Buffer, indices: wgpu::Buffer, count: u32 },
     /// Too large for one buffer: unshared, in as many buffers as it takes.
     Unshared(Batch),
+    /// In the indirect draws' arena ([`indirect::Arena`]), `count` indices from `first_index`,
+    /// not uploaded a second time.
+    InArena { vertices: wgpu::Buffer, indices: wgpu::Buffer, first_index: u32, count: u32, base_vertex: i32 },
 }
 
 impl SharedGpu {
@@ -1576,6 +1579,12 @@ impl LevelDraw {
                 pass.set_vertex_buffer(0, vertices.slice(..));
                 pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*count, 0, 0..self.count);
+                tally.triangles(*count, self.count);
+            }
+            SharedGpu::InArena { vertices, indices, first_index, count, base_vertex } => {
+                pass.set_vertex_buffer(0, vertices.slice(..));
+                pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(*first_index..first_index.saturating_add(*count), *base_vertex, 0..self.count);
                 tally.triangles(*count, self.count);
             }
             SharedGpu::Unshared(batch) => {
@@ -2039,6 +2048,9 @@ struct Batches {
     instanced: Vec<InstancedDraw>,
     /// `instanced` drawn by indirect draws, where the device can ([`indirect`]).
     indirect: Option<indirect::Indirect>,
+    /// The instanced meshes' triangles in one pair of buffers, where the device draws them
+    /// indirectly: each mesh uploaded once, kept from scene to scene ([`indirect::Arena`]).
+    arena: Option<Arc<indirect::Arena>>,
     /// Whole highlighted bodies redrawn from `planned` (the scene's own plans are not used).
     hover_planned: Vec<Arc<solidcore_tess::TessPlan>>,
     selected_planned: Vec<Arc<solidcore_tess::TessPlan>>,
@@ -2151,16 +2163,34 @@ impl Batches {
                 Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned, donor.as_deref_mut()),
                 None => Vec::new(),
             };
-            self.instanced = self.instanced(device, &sc.instanced, donor.as_deref());
-            self.indirect = if indirect::supported(device) { indirect::Indirect::new(device, &self.instanced, self.indirect.as_ref()) } else { None };
+            // On a device that draws them indirectly, the meshes go into the arena (only those it
+            // lacks are uploaded) and are drawn from it, even one at a time: none is uploaded twice.
+            self.arena = if indirect::supported(device) {
+                let meshes: Vec<Arc<SharedTris>> = sc
+                    .instanced
+                    .iter()
+                    .filter(|m| m.count() > 0)
+                    .flat_map(|m| std::iter::once(&m.tris).chain(m.levels.iter().map(|(t, _)| t)))
+                    .cloned()
+                    .collect();
+                indirect::Arena::holding(device, queue, &meshes, self.arena.as_ref()).map(|(arena, uploaded)| {
+                    self.uploads.geometry += uploaded;
+                    arena
+                })
+            } else {
+                None
+            };
+            let arena = self.arena.clone();
+            self.instanced = self.instanced(device, &sc.instanced, donor.as_deref(), arena.as_deref());
+            self.indirect = arena.clone().and_then(|a| indirect::Indirect::new(device, &self.instanced, a));
             self.hover_planned = sc.hover_planned.clone();
             self.selected_planned = sc.selected_planned.clone();
             self.hover_blocks = sc.hover_blocks.clone();
             self.selected_blocks = sc.selected_blocks.clone();
             self.recoloured = sc.recoloured.clone();
             self.lit_edges = sc.lit_edges.clone();
-            self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref());
-            self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref());
+            self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref(), arena.as_deref());
+            self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref(), arena.as_deref());
             let mut kept = std::mem::take(&mut self.blocks);
             let mut order = Vec::with_capacity(sc.blocks.len());
             let mut geometry = 0;
@@ -2260,9 +2290,16 @@ impl Batches {
         }
     }
 
-    /// The instanced meshes on the GPU: triangles uploaded once per key (kept while the key comes
-    /// back with the same bytes), placements every time.
-    fn instanced(&mut self, device: &wgpu::Device, meshes: &[InstancedMesh], donor: Option<&Batches>) -> Vec<InstancedDraw> {
+    /// The instanced meshes on the GPU: triangles drawn from `arena` where it holds them, else
+    /// uploaded once per key (kept while the key comes back with the same bytes); placements
+    /// every time.
+    fn instanced(
+        &mut self,
+        device: &wgpu::Device,
+        meshes: &[InstancedMesh],
+        donor: Option<&Batches>,
+        arena: Option<&indirect::Arena>,
+    ) -> Vec<InstancedDraw> {
         let mut kept = std::mem::take(&mut self.instanced_tris);
         let mut out = Vec::with_capacity(meshes.len());
         for m in meshes {
@@ -2275,15 +2312,21 @@ impl Batches {
             for (i, (tris, error)) in std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().map(|(t, e)| (t, *e))).enumerate() {
                 let key = Arc::as_ptr(tris) as usize;
                 let shared = || donor?.instanced_tris.get(&key).filter(|(b, _)| Arc::ptr_eq(b, tris)).cloned();
-                let gpu = match kept.remove(&key).or_else(|| self.instanced_tris.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)).or_else(shared) {
-                    Some(t) => t,
-                    None => match SharedGpu::new(device, tris) {
-                        Some(g) => {
-                            self.uploads.geometry += (tris.vertices.len() + tris.indices.len() * 4) as u64;
-                            (tris.clone(), Arc::new(g))
+                let in_arena = arena.and_then(|a| a.place(tris));
+                let gpu = match in_arena {
+                    Some(g) => (tris.clone(), Arc::new(g)),
+                    None => {
+                        match kept.remove(&key).or_else(|| self.instanced_tris.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)).or_else(shared) {
+                            Some(t) => t,
+                            None => match SharedGpu::new(device, tris) {
+                                Some(g) => {
+                                    self.uploads.geometry += (tris.vertices.len() + tris.indices.len() * 4) as u64;
+                                    (tris.clone(), Arc::new(g))
+                                }
+                                None => continue,
+                            },
                         }
-                        None => continue,
-                    },
+                    }
                 };
                 // Until the first cull, every placement is drawn in full.
                 let Some(instances) = buffer_init(device, "sc_instances", &placements, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST)
@@ -2293,7 +2336,10 @@ impl Batches {
                 self.uploads.placements += placements.len() as u64;
                 let count = if i == 0 { count } else { 0 };
                 levels.push(LevelDraw { tris: gpu.1.clone(), src: tris.clone(), flat: tris.flat, error, instances, count });
-                self.instanced_tris.insert(key, gpu);
+                // A mesh in the arena is drawn from there: it keeps no buffers of its own.
+                if !matches!(*gpu.1, SharedGpu::InArena { .. }) {
+                    self.instanced_tris.insert(key, gpu);
+                }
             }
             if !levels.is_empty() {
                 out.push(InstancedDraw { look: m.look, closed: m.closed, levels, bounds: m.tris.bounds, placements, shown: None });

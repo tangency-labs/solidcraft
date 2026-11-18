@@ -2274,7 +2274,7 @@ pub enum FeatureKind {
         skip: Vec<u64>,
         /// The import kept as B-rep records instead of STEP text (a FreeCAD or Rhino file read
         /// through cadmpeg's neutral model), `step` then empty; shared like `step`. Designs
-        /// from before `format/pending/import-records.rs` have none.
+        /// from before `format/v60/import-records.rs` have none.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
     },
