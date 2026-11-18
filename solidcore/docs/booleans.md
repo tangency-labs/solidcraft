@@ -439,8 +439,11 @@ tolerance is at least twice the distance from its point to the end of each curve
 a distance between two computed points, exact to rounding, whatever the points lie on (a
 construction's bound, §8 there). After the imprint each vertex a definition made is given that
 tolerance (`certified_vertex_gaps`, `topology_intersector/p1.rs`), and only while its ball stays
-clear of the far vertex of each of its edges, that vertex taken at its own grown tolerance: a
-vertex cannot stand for both ends of an edge. For a definition placed exactly (each source a
+clear of the far vertex of each of its edges, that vertex taken at its own grown tolerance (or at
+the tolerance a growing edge of it passes on to its ends, whichever is larger): a vertex cannot
+stand for both ends of an edge. The two operands' vertices of one definition become one, which
+takes the larger tolerance of the two, so each ball is judged at that one, about its own point,
+and the two are covered together or not at all. For a definition placed exactly (each source a
 vertex, a line edge or a plane face) the gap is all there is to cover, so its edges grow to their
 own ends' gaps too and a ball that is not clear is refused (`MergedVertexReaches`). Any other
 vertex keeps its tolerance where its ball is not clear (`covers_staying_clear`): the points of
@@ -468,7 +471,9 @@ the merges before (a sheet shelled by exactly two tolerances lost one of its fou
 A vertex's tolerance grows the same way, as the curves that end at it are imprinted, so each of the
 two vertices is read with the ball that covers the asked curve's own end there, twice its distance
 from the vertex's point (what the vertex has once that curve is an edge: "What a vertex stands
-for"), where that is more than its stored tolerance. `SmEdgeDefinition::Imprint` then takes the
+for"), where that is more than its stored tolerance and the ball stays clear of the vertex's far
+vertices, the curve's other end among them (two balls that hold a whole edge between them would
+prove any curve along it). A curve the proof cannot enclose (a composite curve) is no edge. `SmEdgeDefinition::Imprint` then takes the
 edge and makes no second one beside it, in either operand (`face_edge_proved_to_be`,
 `proto_topology/p2.rs`; `find_edge_proved_along`, `geom/tools.rs`). The proof is an enclosure, never
 samples (`Curve::proved_together`, `curve/proximity.rs`): each curve is cut into pieces, a piece is
@@ -491,6 +496,24 @@ lies in the vertex's ball (4.3e-5) or within 1.6e-5 of its half of the edge, and
 Read with the tolerance the vertex had when the circle was asked (1e-5), the two halves were
 second edges and the two slivers of the box face between them (5.5e-10 each) faces of the
 intersection and the difference, whose edges the face check takes for coincident.
+
+**An edge in a face, off it by more than the zone tolerance.** An edge of one operand can lie in
+a face of the other within its own tolerance but further than the system zone tolerance from it:
+a revolved tool's rim (radius 2.1000073) in a 2.1 mm hole's wall, the revolve axis 1.2e-5 off the
+hole's, so the rim is 4.6e-6 to 1.9e-5 from the wall (#17527). Both of the tool's faces at the rim
+meet the wall along it, each in a curve of its own (the disc's plane in the wall's circle, the
+cone's in a marched curve), and their proto edges overlap. `ResolveOverlappingProtoEdges` replaces
+the overlapping ones with the rim's own curve classified against the wall. Upstream classifies it
+within the proto topology's tolerance, half the zone tolerance, where the rim lies in the wall
+nowhere: the overlapping pieces were deleted, nothing replaced them, and the cut failed in
+`make_faceuse`. The rim is now classified within its own tolerance where that is the larger, as
+the face pairs classified it. The replacement then holds every piece of the rim in the wall, so
+a piece of the same rim and wall that the overlap test (ends dropped within the zone tolerance)
+did not find goes with the group too; left beside its replacement, it was imprinted twice and the
+rim was related to both copies ("another entity is already related to the other one";
+`absorb_pieces_of_edge_in_face`, `proto_topology/p3.rs`). A rim further off than its tolerance
+somewhere is still not one edge with the wall: with the axis 1.3e-5 off, the cut leaves a sliver
+face that fails the check.
 
 **Seams and poles.** A tolerance band says where a boundary of material may lie. A seam (an edge
 with the same face on both sides: `face_on_both_sides`, `topology/edge.rs`) and a pole (a vertex
@@ -529,6 +552,15 @@ reach counts: the seam edge that then stands for the curve has to hold it within
 A classification reads the reach of its two surfaces (`SetIntersectData`) the first time it meets
 a seam or a pole (`source_reach_in`); the face intersection sets it for its curves
 (`intersection_curve_reach`, `topology/face/p3.rs`).
+
+A face without a seam has no pole either: a pole's edges are all seams of the face. The face
+intersection finds once whether each face has a seam edge (`face_has_seam`, `query/face/p2.rs`)
+and keeps the answer while the face's B-rep is unchanged (`FaceIntersectCaches`); on a face
+without one, its curves' classifications ask no edge whether it is a seam and no vertex whether
+it is a pole (`face_known_seam_free`, `intersect/curve_class/p1.rs`). Asking for every curve
+grew with the curves times the face's edges, the square of a face that meets as many faces as it
+has edges (`WorkCounters::seam_tests`, counted in
+`a_plate_joined_onto_its_top_tests_each_face_for_a_seam_once`).
 
 A stretch of the curve along a seam is what the curve/edge intersector finds within the reach. It
 reports a stretch only where all of it lies within the distance it is given, and the seam's end is

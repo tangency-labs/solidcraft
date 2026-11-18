@@ -6090,6 +6090,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-develop"
+version = "0.45.0-rc.3"
+dependencies = [
+ "solidcore-ops",
+ "solidcore-record",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft-display-units"
 version = "0.45.0-rc.3"
 
@@ -6106,6 +6115,7 @@ dependencies = [
  "solidcore-tess",
  "solidcraft-color",
  "solidcraft-derive",
+ "solidcraft-develop",
  "solidcraft-format",
  "solidcraft-geom",
  "solidcraft-kernel",
@@ -6147,6 +6157,7 @@ dependencies = [
  "solidcore-record",
  "solidcraft-color",
  "solidcraft-control",
+ "solidcraft-develop",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",
@@ -6351,6 +6362,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-ops",
  "solidcore-record",
  "solidcraft-geom",
  "thiserror 2.0.21",
@@ -8551,6 +8563,7 @@ dependencies = [
  "sha2 0.10.9",
  "syn 2.0.119",
  "toml",
+ "wit-component",
  "zip",
 ]
 
