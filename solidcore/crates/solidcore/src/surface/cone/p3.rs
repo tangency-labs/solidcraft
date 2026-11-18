@@ -37,6 +37,8 @@
 //! face's sweep, else its crossings are tested; bare surfaces keep upstream's test.
 //! WR-787 (#15429): parallel cylinders that both bound faces and overlap past touching by
 //! less than [`contact_tol_3d`] touch along one line; bare surfaces keep two crossings.
+//! Two cylinders with axes that are not parallel, other than equal ones whose axes meet,
+//! are solved by [`super::skew_cylinders`] instead of the general intersector (#3350).
 //! No input-driven recursion is introduced.
 
 use super::{Cone, ConeStepInversion};
@@ -824,15 +826,27 @@ impl Cone {
                 }
             }
         } else {
-            if !self.is_cylinder()
-                || !other.is_cylinder()
-                || (self.top_radius() - other.top_radius()).abs() > tol
-            {
+            if !self.is_cylinder() || !other.is_cylinder() {
                 return Ok(true);
             }
-            let points = segment_segment_intersect(bottom, top, other_bottom, other_top, tol)?;
+            // Equal cylinders whose axes meet: two ellipses. Every other pair of cylinders
+            // is solved in closed form by its discriminant (`skew_cylinders`), which hands
+            // a node or a touch back to the general intersector.
+            let points = if (self.top_radius() - other.top_radius()).abs() > tol {
+                Vec::new()
+            } else {
+                segment_segment_intersect(bottom, top, other_bottom, other_top, tol)?
+            };
             let [point] = points.as_slice() else {
-                return Ok(true);
+                return super::skew_cylinders::intersect_skew_cylinders(
+                    k,
+                    self,
+                    domain,
+                    other,
+                    other_domain,
+                    tol,
+                    out,
+                );
             };
             let (vec1, vec2) = parallelogram_cross_vectors(
                 axis,
@@ -1695,5 +1709,81 @@ mod tests {
         assert_eq!(out.surface2_uv_curves.len(), 1);
         assert_eq!(out.curve_types.len(), 1);
         assert_eq!(out.deviations.len(), 1);
+    }
+
+    /// Two cylinders of radii 4 and `rb` crossing at right angles: A along y through
+    /// (-10, *, `delta`), B along x through (*, -10, 0), both 42 long, over their whole faces.
+    fn crossed(k: &Kernel, delta: f64, rb: f64) -> (Cone, Cone, SurfaceIntersection) {
+        let mut a = Cone::new_cylinder_bounded(Vec3::new(-10.0, -21.0, delta), Vec3::Z, Vec3::X, 4.0, 0.0, 360.0, 42.0, false, false, false);
+        let mut b = Cone::new_cylinder_bounded(Vec3::new(-21.0, -10.0, 0.0), Vec3::Y, Vec3::Z, rb, 0.0, 360.0, 42.0, false, false, false);
+        a.make_nurb(k).unwrap();
+        b.make_nurb(k).unwrap();
+        let (da, db) = (a.rev().base().natural_uv_domain(), b.rev().base().natural_uv_domain());
+        let (more, out) = a.intersect_with_cone(k, &da, &b, &db, None).unwrap();
+        assert!(!more, "delta {delta}, rb {rb}: solved in closed form");
+        (a, b, out)
+    }
+
+    /// Points along every curve, and each one's largest distance from the two cylinders.
+    fn on_both(k: &Kernel, a: &Cone, b: &Cone, out: &SurfaceIntersection) -> Vec<Point3> {
+        let off = |c: &Cone, p: Point3| {
+            let o = c.rev().position().origin();
+            let z = c.rev().position().z_axis();
+            let d = p - o;
+            ((d - z * d.dot(z)).length() - c.bot_radius()).abs()
+        };
+        let mut pts = Vec::new();
+        for (curve, dev) in out.curves_3d.iter().zip(&out.deviations) {
+            let ivl = curve.natural_interval();
+            for i in 0..=4000 {
+                let p = curve.evaluate_point(k, ivl.min() + ivl.length() * f64::from(i) / 4000.0).unwrap();
+                let d = off(a, p).max(off(b, p));
+                assert!(d <= dev + 1e-12 && d < 5e-6, "{p:?} is {d:e} off a cylinder (deviation {dev:e})");
+                pts.push(p);
+            }
+        }
+        pts
+    }
+
+    fn nearest(pts: &[Point3], q: Point3) -> f64 {
+        pts.iter().map(|p| p.distance(q)).fold(f64::INFINITY, f64::min)
+    }
+
+    /// #3350 (the cad acid tests' acid-4, stage 3): equal cylinders whose axes pass `delta`
+    /// apart meet in one closed loop. With s = sqrt(8 delta - delta^2) it folds on B's top at
+    /// (-10 +- s, -10, 4) and passes A's bottom on both sides of the near-node, at
+    /// (-10, -10 +- s, delta - 4), never through (-10, -10, delta - 4); the tracer stepped
+    /// across that gap and returned the crossing ellipses of meeting axes.
+    #[test]
+    fn equal_cylinders_with_axes_a_hair_apart_meet_in_one_loop() {
+        let k = Kernel::default();
+        for delta in [6e-6, 1e-5, 1.5e-5, 2e-5, 1e-3, 0.5] {
+            let (a, b, out) = crossed(&k, delta, 4.0);
+            assert_eq!(out.curves_3d.len(), 1, "delta {delta}");
+            let pts = on_both(&k, &a, &b, &out);
+            let s = (8.0 * delta - delta * delta).sqrt();
+            for q in [
+                Point3::new(-10.0 + s, -10.0, 4.0),
+                Point3::new(-10.0 - s, -10.0, 4.0),
+                Point3::new(-10.0, -10.0 + s, delta - 4.0),
+                Point3::new(-10.0, -10.0 - s, delta - 4.0),
+            ] {
+                assert!(nearest(&pts, q) < 0.05 * s, "delta {delta}: the loop misses {q:?}");
+            }
+            let gap = nearest(&pts, Point3::new(-10.0, -10.0, delta - 4.0));
+            assert!(gap > 0.9 * s, "delta {delta}: the loop crosses the near-node ({gap:e} from it)");
+        }
+    }
+
+    /// A Ø6 cylinder through a Ø8 one at right angles, axes 0.5 apart: two closed curves, one
+    /// where it enters and one where it leaves, each on both cylinders.
+    #[test]
+    fn a_thin_cylinder_through_a_wide_one_meets_it_in_two_curves() {
+        let k = Kernel::default();
+        let (a, b, out) = crossed(&k, 0.5, 3.0);
+        // B (r 3) is the thin one here: it passes through A (r 4) along x
+        let pts = on_both(&k, &a, &b, &out);
+        assert_eq!(out.curves_3d.len(), 2);
+        assert!(pts.iter().any(|p| p.x < -10.0) && pts.iter().any(|p| p.x > -10.0));
     }
 }
