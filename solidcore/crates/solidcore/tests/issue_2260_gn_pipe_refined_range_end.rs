@@ -51,7 +51,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "classify_edge_interval",
     "corner_patch_face_side_twist",
     "curve_loop_normal_from_area",
-    "degen_param_tiebreak_uses_actual_param",
     "edgeuse_convexity_propagates_step_off_failure",
     "fillet_chamfer_cone_on_arc",
     "fillet_cleanup_keeps_target_faces",

@@ -376,42 +376,63 @@ impl<'a> Builder<'_, 'a, '_> {
         };
         let made = match curve {
             Some(carrier) => {
-                let interval = edge.param_range().map(|r| r.get()).ok_or_else(|| {
-                    format!("edge {id}: not supported yet: an edge without a parameter range")
-                })?;
-                let (curve, interval) = match carrier {
-                    geometry::Carrier::Curve {
-                        curve,
-                        periodic: false,
-                    } => (curve, interval),
-                    geometry::Carrier::Curve {
-                        curve,
-                        periodic: true,
-                    } => periodic_edge(curve, interval).map_err(|m| format!("edge {id}: {m}"))?,
-                    geometry::Carrier::Parabola {
-                        vertex,
-                        axis,
-                        reference,
-                        focal,
-                    } => (
+                let ends = [start, end];
+                let made = match (carrier, edge.param_range().map(|r| r.get())) {
+                    (
+                        geometry::Carrier::Curve {
+                            curve,
+                            periodic: false,
+                        },
+                        Some(interval),
+                    ) => self.asm.add_edge(origin, curve, interval, ends),
+                    (
+                        geometry::Carrier::Curve {
+                            curve,
+                            periodic: true,
+                        },
+                        Some(interval),
+                    ) => periodic_edge(curve, interval).and_then(|(curve, interval)| {
+                        self.asm.add_edge(origin, curve, interval, ends)
+                    }),
+                    (
+                        geometry::Carrier::Parabola {
+                            vertex,
+                            axis,
+                            reference,
+                            focal,
+                        },
+                        Some(interval),
+                    ) => self.asm.add_edge(
+                        origin,
                         parabola_curve(vertex, axis, reference, focal, interval),
                         interval,
+                        ends,
                     ),
-                    geometry::Carrier::Hyperbola {
-                        center,
-                        axis,
-                        reference,
-                        radii,
-                    } => (
+                    (
+                        geometry::Carrier::Hyperbola {
+                            center,
+                            axis,
+                            reference,
+                            radii,
+                        },
+                        Some(interval),
+                    ) => self.asm.add_edge(
+                        origin,
                         hyperbola_curve(center, axis, reference, radii, interval),
                         interval,
+                        ends,
+                    ),
+                    // An edge with no interval (a STEP file's, bounded by its vertices alone) is
+                    // where its vertices lie on its curve.
+                    (geometry::Carrier::Curve { curve, .. }, None) => {
+                        self.asm.add_edge_on(origin, curve, ends)
+                    }
+                    (_, None) => Err(
+                        "not supported yet: a parabola or hyperbola edge without a parameter range"
+                            .into(),
                     ),
                 };
-                Ok(self
-                    .asm
-                    .add_edge(origin, curve, interval, [start, end])
-                    .map_err(|m| format!("edge {id}: {m}"))?
-                    .0)
+                Ok(made.map_err(|m| format!("edge {id}: {m}"))?.0)
             }
             // Collapsed to a point: its vertices are one ([`Builder::join_collapsed`]).
             None if start == end => Err(start),
