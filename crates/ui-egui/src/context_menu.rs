@@ -1429,7 +1429,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
-    v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
+    v.push(cmd(app, "sketch.move", "Move/Copy"));
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
     if !curves.is_empty() {
         v.push(cmd(app, "sketch.construction", "Normal / Construction").with(json!({ "curves": curves })));
