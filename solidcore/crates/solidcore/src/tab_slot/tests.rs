@@ -231,7 +231,11 @@ fn random_finite_inputs_never_panic() {
         state ^= state >> 7;
         state ^= state << 17;
         let x = f64::from_bits(state);
-        if x.is_finite() { x } else { 1.0 }
+        if x.is_finite() {
+            x
+        } else {
+            1.0
+        }
     };
     for _ in 0..20_000 {
         let (a, b, w, e, g, q) = (next(), next(), next(), next(), next(), next());
