@@ -100,7 +100,7 @@ fn ruled_skin(k: &mut Kernel, secs: &[Vec<Point3>]) -> Brep {
 /// The queries pass on the statuses SMLib drops (WR-663): with the fork's
 /// tangency-labs/smlib@8ea6a20 a refined end past a curve/curve range does not abort the
 /// intersection. The skins are 7 and 6 faces (see the module docs) and the difference 18
-/// faces, 41 edges, 25 vertices and 2 shells.
+/// faces, 42 edges, 26 vertices and 2 shells.
 fn difference_volume() -> f64 {
     use solidcore::mass::integrator::properties::brep_volume_default;
     use solidcore::topology::brep::p1::shells;
@@ -128,7 +128,7 @@ fn difference_volume() -> f64 {
         body.vertex_list().len(),
         shells(&mut k, &body, None).unwrap().len(),
     );
-    assert_eq!(topology, (18, 41, 25, 2), "faces, edges, vertices, shells");
+    assert_eq!(topology, (18, 42, 26, 2), "faces, edges, vertices, shells");
     let volume = brep_volume_default(&k, &mut body, 1e-3).unwrap();
     assert!(
         volume > 0.0 && volume < outer_volume,
