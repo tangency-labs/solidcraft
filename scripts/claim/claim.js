@@ -139,10 +139,10 @@ function holdingPulls(timeline, context, number, claimant) {
 }
 
 // The issue as it is right before a release, or null if it no longer needs one: closed, gone, or
-// the label already off (another run released it). With `who`, also null unless the assignees are
-// none or exactly `who`: someone else took it, or a maintainer reassigned it. A run that releases
-// between this read and ours can still double up; the window is one API round trip.
-async function freshForRelease(github, context, number, who) {
+// the label already off (another run released it). For a closed PR, also verify the recorded
+// claim and any continuing PRs: an unassigned claimant can still have taken over meanwhile.
+// GitHub offers no atomic read-and-release, so a change after these reads can still race us.
+async function freshForRelease(github, context, number, recorded) {
   let issue;
   try {
     ({ data: issue } = await github.rest.issues.get({ ...repoArgs(context), issue_number: number }));
@@ -150,10 +150,17 @@ async function freshForRelease(github, context, number, who) {
     if (e.status === 404 || e.status === 410) return null;
     throw e;
   }
-  if (issue.state === 'closed' || !hasLabel(issue)) return null;
-  if (who !== undefined) {
+  if (issue.state === 'closed' || issue.locked || !hasLabel(issue)) return null;
+  if (recorded) {
     const assignees = (issue.assignees || []).map((a) => a.login);
-    if (assignees.length > 1 || (assignees.length === 1 && assignees[0] !== who)) return null;
+    if (assignees.length > 1 || (assignees.length === 1 && assignees[0] !== recorded.who)) return null;
+    for (const a of assignees) {
+      if (await isMaintainer(github, context, a)) return null;
+    }
+    const timeline = await getTimeline(github, context, number);
+    const latest = recordedClaim(timeline);
+    if (!latest || latest.who !== recorded.who || latest.pr !== recorded.pr) return null;
+    if (holdingPulls(timeline, context, number, recorded.who).some((p) => p.number !== recorded.pr)) return null;
   }
   return issue;
 }
@@ -251,7 +258,7 @@ async function claim(github, context, now) {
   const user = context.payload.comment.user.login;
   const n = issue.number;
   const cache = new Map();
-  const assignees = (issue.assignees || []).map((a) => a.login);
+  let assignees = (issue.assignees || []).map((a) => a.login);
 
   if (assignees.includes(user)) {
     await react(github, context, '+1'); // already theirs
@@ -266,7 +273,16 @@ async function claim(github, context, now) {
     for (const a of assignees) maintained = maintained || (await isMaintainer(github, context, a, cache));
     if (!maintained) {
       status = await claimStatus(github, context, issue, now);
-      if (status.release) held = false;
+      if (status.release) {
+        if (!status.pr) held = false;
+        else {
+          const fresh = await freshForRelease(github, context, n, status);
+          if (fresh) {
+            assignees = (fresh.assignees || []).map((a) => a.login);
+            held = false;
+          } else status = null; // A newer claim or assignment has no deadline from the old PR.
+        }
+      }
     }
     if (held) {
       await react(github, context, 'eyes');
@@ -476,7 +492,7 @@ async function handlePullClosed({ github, context }) {
     let maintained = false;
     for (const a of assignees) maintained = maintained || (await isMaintainer(github, context, a, cache));
     if (maintained) continue;
-    const fresh = await freshForRelease(github, context, n, recorded.who);
+    const fresh = await freshForRelease(github, context, n, recorded);
     if (!fresh) continue;
     await release(github, context, fresh, (fresh.assignees || []).map((a) => a.login));
     await github.rest.issues.createComment({
@@ -507,10 +523,13 @@ async function sweep({ github, context, now = Date.now() }) {
     if (skip) continue;
     const status = await claimStatus(github, context, issue, now);
     if (!status.release) continue;
-    // For a closed PR's claim, the live assignee must still be the recorded claimant.
-    const fresh = await freshForRelease(github, context, issue.number, status.who);
+    // For a closed PR's claim, both the assignment and the bot's record must still match.
+    const fresh = await freshForRelease(github, context, issue.number, status.pr ? status : undefined);
     if (!fresh) continue;
-    await release(github, context, issue, assignees);
+    const freshAssignees = (fresh.assignees || []).map((a) => a.login);
+    // Do not release an assignment made after the sweep listed this expired claim.
+    if (freshAssignees.some((a) => !assignees.includes(a))) continue;
+    await release(github, context, fresh, freshAssignees);
     await github.rest.issues.createComment({
       ...repoArgs(context),
       issue_number: issue.number,

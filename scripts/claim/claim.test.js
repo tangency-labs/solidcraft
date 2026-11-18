@@ -47,7 +47,7 @@ function fake(world = {}) {
           if (!found) throw Object.assign(new Error('nf'), { status: 404 });
           return { data: found };
         },
-        listEventsForTimeline: async () => ({ data: world.timeline || [] }),
+        listEventsForTimeline: async () => ({ data: world.timelines?.shift() || world.timeline || [] }),
       },
     },
   };
@@ -502,6 +502,20 @@ test('the sweep does not comment on an issue another run released meanwhile', as
   assert.equal(find(w.calls, 'comment'), undefined);
 });
 
+test('the sweep preserves an assignment made after it listed an expired claim', async () => {
+  for (const permission of ['write', 'read']) {
+    const w = fake({
+      issues: [issue(7)],
+      timeline: [labeled(ago(80 * H))],
+      gets: { 7: [openIssue(7, ['carol'], ['in progress'])] },
+      perms: { carol: permission },
+    });
+    assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), []);
+    assert.equal(find(w.calls, 'removeAssignees'), undefined);
+    assert.equal(find(w.calls, 'removeLabel'), undefined);
+  }
+});
+
 test('a closing keyword in a merged PR\'s title is left to GitHub too', async () => {
   const { github, calls } = fake({ byNumber: { 7: openIssue(7, ['alice'], ['in progress']) }, timeline: claimedThrough50 });
   assert.deepEqual(await claim.handlePullClosed({ github, context: closedCtx('Fixes #7: tight box', 'The whole thing.', true) }), []);
@@ -552,4 +566,75 @@ test('sweep does not free a closed PR\'s claim once the issue was reassigned', a
   });
   assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), []);
   assert.equal(find(w.calls, 'removeLabel'), undefined);
+});
+
+test('/claim cannot take a reassigned issue through the previous claimant\'s closed PR', async () => {
+  const w = fake({
+    byNumber: { 7: openIssue(7, ['dave'], ['in progress']) },
+    timeline: claimedThrough50,
+    pulls: { 50: { state: 'closed', merged: true } },
+  });
+  await claim.handleComment({ github: w.github, context: ctx('/claim', { user: 'eve', assignees: ['dave'], labels: ['in progress'] }), now: NOW });
+  assert.equal(find(w.calls, 'removeAssignees'), undefined);
+  assert.equal(find(w.calls, 'addAssignees'), undefined);
+  assert.equal(find(w.calls, 'react')[1].content, 'eyes');
+  assert.doesNotMatch(find(w.calls, 'comment')[1].body, /claim lapses on/);
+});
+
+test('/claim can take an unchanged claim whose recorded PR closed', async () => {
+  const w = fake({
+    byNumber: { 7: openIssue(7, ['alice'], ['in progress']) },
+    timeline: claimedThrough50,
+    pulls: { 50: { state: 'closed', merged: false } },
+  });
+  await claim.handleComment({ github: w.github, context: ctx('/claim', { user: 'eve', assignees: ['alice'], labels: ['in progress'] }), now: NOW });
+  assert.deepEqual(find(w.calls, 'removeAssignees')[1].assignees, ['alice']);
+  assert.deepEqual(find(w.calls, 'addAssignees')[1].assignees, ['eve']);
+});
+
+test('/claim uses the refreshed assignees and preserves a maintainer assigned since its event', async () => {
+  for (const permission of ['read', 'write']) {
+    const w = fake({
+      byNumber: { 7: openIssue(7, ['alice'], ['in progress']) },
+      timeline: claimedThrough50,
+      pulls: { 50: { state: 'closed', merged: false } },
+      perms: { alice: permission },
+    });
+    await claim.handleComment({ github: w.github, context: ctx('/claim', { user: 'eve', labels: ['in progress'] }), now: NOW });
+    if (permission === 'read') {
+      assert.deepEqual(find(w.calls, 'removeAssignees')?.[1].assignees, ['alice']);
+      assert.deepEqual(find(w.calls, 'addAssignees')?.[1].assignees, ['eve']);
+    } else {
+      assert.equal(find(w.calls, 'removeAssignees'), undefined);
+      assert.equal(find(w.calls, 'addAssignees'), undefined);
+    }
+  }
+});
+
+test('closed-PR releases preserve a newer unassigned claim and a new continuing PR', async () => {
+  const changedTimelines = [
+    [...claimedThrough50, { event: 'unlabeled', label: { name: 'in progress' } }, labeled(ago(H)), said('Claimed by @bob.')],
+    [...claimedThrough50, pr(61, 'alice', 'open', { title: 'The other half', body: 'Part of #7' })],
+  ];
+  for (const latest of changedTimelines) {
+    for (const route of ['closed event', 'sweep', 'comment']) {
+      const current = openIssue(7, [], ['in progress']);
+      const w = fake({
+        byNumber: { 7: current },
+        issues: [current],
+        timelines: [claimedThrough50, latest],
+        pulls: { 50: { state: 'closed', merged: true } },
+      });
+      if (route === 'closed event') {
+        assert.deepEqual(await claim.handlePullClosed({ github: w.github, context: closedCtx('Half', 'Part of #7', true) }), []);
+      } else if (route === 'sweep') {
+        assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), []);
+      } else {
+        await claim.handleComment({ github: w.github, context: ctx('/claim', { user: 'eve', labels: ['in progress'] }), now: NOW });
+      }
+      assert.equal(find(w.calls, 'removeLabel'), undefined, route);
+      assert.equal(find(w.calls, 'removeAssignees'), undefined, route);
+      assert.equal(find(w.calls, 'addAssignees'), undefined, route);
+    }
+  }
 });
