@@ -606,6 +606,7 @@ fn urdf_warns_when_placements_are_cut_off() {
             name: format!("C{k}:1"),
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         });
     }
@@ -622,6 +623,7 @@ fn urdf_warns_when_placements_are_cut_off() {
             name: name.into(),
             transform: solidcraft_doc::IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         };
         doc.occurrences.insert(0, o);

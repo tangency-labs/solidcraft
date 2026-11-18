@@ -1,7 +1,7 @@
 //! Stage counters shared by the export worker and its bounded computation workers.
 use std::sync::{Arc, Mutex};
 
-pub(super) const CANCELLED: &str = "DXF export cancelled";
+use super::Refused;
 
 pub(crate) struct Stage {
     watch: Option<Arc<dyn solidcraft_kernel::watch::Watch>>,
@@ -18,15 +18,15 @@ impl Stage {
         }
         stage
     }
-    pub fn check(&self) -> Result<(), &'static str> {
-        if self.watch.as_ref().is_some_and(|w| w.cancelled()) { Err(CANCELLED) } else { Ok(()) }
+    pub fn check(&self) -> Result<(), Refused> {
+        if self.watch.as_ref().is_some_and(|w| w.cancelled()) { Err(Refused::Cancelled) } else { Ok(()) }
     }
-    pub fn advance(&self, count: usize) -> Result<(), &'static str> {
+    pub fn advance(&self, count: usize) -> Result<(), Refused> {
         self.check()?;
         if let Some(watch) = &self.watch {
             // Serialize reports as well as increments: eight workers must not report a
             // smaller completed count after a larger one.
-            let mut done = self.done.lock().map_err(|_| "export progress unavailable")?;
+            let mut done = self.done.lock().map_err(|_| Refused::Invalid("progress unavailable"))?;
             *done = done.saturating_add(count).min(self.total);
             watch.progress(self.name, *done, self.total);
         }

@@ -655,13 +655,14 @@ fn snapshot_runs_its_script_on_the_in_design() {
     }
 }
 
-/// An unknown command's error suggests the id that was meant.
+/// An unknown command's error suggests the id that was meant first; other close ids (such as
+/// `drawing.open`) may follow it.
 #[test]
 fn unknown_command_suggests_the_closest_id() {
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`, `panel.open` or `tab.view.open`?"),
+        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`, `panel.open` or `drawing.open`?"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -974,7 +975,10 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
     let run = json!({"path":package,"approval":inspected["approval"],"entry":"make"}).to_string();
     let refused = cli().args(["exec", "plugin.run", &run]).output().unwrap();
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("user host limits"));
+    // The refusal names the plugin, gives both numbers and the CLI setting that raises the ceiling.
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("Sample: it asks for 200000000000 fuel, and plugins may use 100000000000."), "{stderr}");
+    assert!(stderr.contains("max_fuel in the --plugin-limits file"), "{stderr}");
     let policy = scratch.0.join("limits.json");
     std::fs::write(&policy, json!({"max_fuel":u64::MAX,"max_memory_mib":512}).to_string()).unwrap();
     let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Align drawing views</title>
+  <path d="M10.5 24L23.5 24A2.5 2.5 0 0 1 26 26.5L26 43.5A2.5 2.5 0 0 1 23.5 46L10.5 46A2.5 2.5 0 0 1 8 43.5L8 26.5A2.5 2.5 0 0 1 10.5 24Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M39.5 12L52.5 12A2.5 2.5 0 0 1 55 14.5L55 43.5A2.5 2.5 0 0 1 52.5 46L39.5 46A2.5 2.5 0 0 1 37 43.5L37 14.5A2.5 2.5 0 0 1 39.5 12Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 52L58 52" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17 29L17 40M46 18L46 39" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
