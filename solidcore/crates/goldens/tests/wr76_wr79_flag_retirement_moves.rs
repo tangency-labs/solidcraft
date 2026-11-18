@@ -39,9 +39,13 @@
 //!   segment `curves[0]` on both planes. Only the `flush` output moves. Each old and new 3D
 //!   curve is a B-spline whose control points (so, by the convex hull property, every point)
 //!   lie within the tolerance of that segment's line, of its span and of both planes: every
-//!   old curve is a retrace of the found curve. The new curves span a sub-interval of the
-//!   segment the old ones span, strictly shorter (or no curve), so the trace retraces less of
-//!   a curve already found; the planes cross along a line (`planes_cross`: `sin^2` of their
+//!   old curve is a retrace of the found curve. The new curves' refined control hulls
+//!   (`hull_span`: an upper bound on the range they attain along the segment) are strictly
+//!   shorter than the range one old curve attains between its known points (`attained_span`:
+//!   its ends and its Bezier piece ends, a lower bound, the curve being continuous) and reach
+//!   at most the tolerance past it along the segment, or there is no new curve, so the trace
+//!   retraces less of a curve already found (control hulls alone bound only from above, so
+//!   comparing two hulls would not show this); the planes cross along a line (`planes_cross`: `sin^2` of their
 //!   angle has a positive certified lower bound), so they touch nowhere, no new curve is a
 //!   touching point, and every new curve type is one the old flush gave.
 //!   (In `gen0153` the new curve's control hull still spans 1.7e-4 of the segment, 118
@@ -405,9 +409,10 @@ impl PlaneOf {
 }
 
 /// The computed parameter range `(t0, t1)` (over the segment `a -> b`) of `curves`' control
-/// points and the largest rounding bound `e` of a `t` among them (the exact range lies in
-/// `[t0 - e, t1 + e]` and covers `[t0 + e, t1 - e]`), after requiring every control point
-/// within `tol` of the segment's line, of its span and of both planes, rounding counted.
+/// points and the largest rounding bound `e` of a `t` among them, after requiring every control
+/// point within `tol` of the segment's line, of its span and of both planes, rounding counted.
+/// By the convex hull property every point of the curves projects into `[t0 - e, t1 + e]`: an
+/// upper bound on the range they attain, not a lower one (a hull can be wider than its curve).
 fn on_found_segment(
     curves: &[Spline],
     seg: &Segment,
@@ -433,6 +438,71 @@ fn on_found_segment(
                 assert!(v + e <= tol, "a control point off a plane");
             }
             let e = pl.along_err / len;
+            range = Some(match range {
+                None => (pl.t, pl.t, e),
+                Some((lo, hi, m)) => (lo.min(pl.t), hi.max(pl.t), m.max(e)),
+            });
+        }
+    }
+    range
+}
+
+/// A lower bound on the range one of `curves` attains along the segment: `(t0, t1, e)` for the
+/// curve whose known points lie farthest apart, `t0 <= t1` the least and greatest computed
+/// parameter of those points and `e` the largest bound of a parameter's error. A curve's known
+/// points are its ends (clamped, so its end control points) and, for a cubic, the ends of its
+/// Bezier pieces ([`bezier_pieces`]), each within the refinement bound of a point of the curve
+/// (that bound over the segment's length adds to the parameter's rounding bound). The curve is
+/// continuous, so its projection attains every parameter between those of two of its points,
+/// so all of `[t0 + e, t1 - e]`.
+fn attained_span(curves: &[Spline], seg: &Segment) -> Option<(f64, f64, f64)> {
+    let len = seg.len;
+    let mut best: Option<(f64, f64, f64)> = None;
+    for c in curves {
+        c.check_plain();
+        let cps = c.points();
+        let (pts, pe) = if c.deg == 3 {
+            let (pieces, pe) = bezier_pieces(c);
+            let mut pts: Vec<P3> = pieces.iter().map(|q| q[0]).collect();
+            pts.push(pieces.last().unwrap()[3]);
+            (pts, pe)
+        } else {
+            (vec![cps[0], *cps.last().unwrap()], 0.0)
+        };
+        let (mut t0, mut t1, mut e) = (f64::INFINITY, f64::NEG_INFINITY, 0.0f64);
+        for p in pts {
+            let pl = seg.place(p);
+            t0 = t0.min(pl.t);
+            t1 = t1.max(pl.t);
+            e = e.max((pl.along_err + pe) / len);
+        }
+        if best.is_none_or(|(b0, b1, be)| t1 - t0 - 2.0 * e > b1 - b0 - 2.0 * be) {
+            best = Some((t0, t1, e));
+        }
+    }
+    best
+}
+
+/// An upper bound on the range `curves` attain along the segment: `(t0, t1, e)`, the least and
+/// greatest computed parameter of their control points and the largest bound of a parameter's
+/// error. For a cubic the control points are those of its Bezier pieces ([`bezier_pieces`],
+/// whose hulls are tighter), each within the refinement bound of the exact refined point (that
+/// bound over the segment's length adds to the parameter's rounding bound). By the convex hull
+/// property every point of the curves projects into `[t0 - e, t1 + e]`.
+fn hull_span(curves: &[Spline], seg: &Segment) -> Option<(f64, f64, f64)> {
+    let len = seg.len;
+    let mut range: Option<(f64, f64, f64)> = None;
+    for c in curves {
+        c.check_plain();
+        let (pts, pe) = if c.deg == 3 {
+            let (pieces, pe) = bezier_pieces(c);
+            (pieces.into_iter().flatten().collect(), pe)
+        } else {
+            (c.points(), 0.0)
+        };
+        for p in pts {
+            let pl = seg.place(p);
+            let e = (pl.along_err + pe) / len;
             range = Some(match range {
                 None => (pl.t, pl.t, e),
                 Some((lo, hi, m)) => (lo.min(pl.t), hi.max(pl.t), m.max(e)),
@@ -581,15 +651,27 @@ fn check_p4(inputs: &Value, old: &Output, new: &Output) -> String {
         "new types {ntypes:?} not among the old {otypes:?}"
     );
     let len = seg.len;
-    // the new curves' exact range (widened by its rounding bound) lies within the old one's
-    // and is strictly shorter than the old curves' exact range (narrowed by its own)
-    let (o0, o1, eo) = on_found_segment(&oc, &seg, &planes, tol).expect("an old curve");
-    let new_len = match on_found_segment(&nc, &seg, &planes, tol) {
+    // every old curve retraces the found segment (control points on it); the new curves'
+    // range (an upper bound: their refined control hulls, widened by their error bound) is
+    // strictly shorter than the range one old curve attains (a lower bound: between its
+    // known points, narrowed by theirs) and reaches no more than the tolerance past it along
+    // the segment (in gen0153 both curves bulge past start point 0 alike: the bounds of
+    // their least parameters differ by about 3e-8 along the segment, under 0.03 tolerances,
+    // so containment cannot be certified without that slack)
+    on_found_segment(&oc, &seg, &planes, tol).expect("an old curve");
+    let (o0, o1, eo) = attained_span(&oc, &seg).expect("an old curve");
+    let slack = tol / len;
+    let new_len = match on_found_segment(&nc, &seg, &planes, tol).and_then(|_| hull_span(&nc, &seg))
+    {
         None => 0.0,
         Some((n0, n1, en)) => {
             assert!(
-                n0 - en >= o0 - eo && n1 + en <= o1 + eo,
-                "new spans more of the found curve"
+                n0 - en >= o0 + eo - slack && n1 + en <= o1 - eo + slack,
+                "new may span past what old attains: new hull [{}, {}], old attains [{}, {}]",
+                n0 - en,
+                n1 + en,
+                o0 + eo,
+                o1 - eo
             );
             n1 - n0 + 2.0 * en
         }
@@ -600,7 +682,7 @@ fn check_p4(inputs: &Value, old: &Output, new: &Output) -> String {
     );
     let cps = |cs: &[Spline]| cs.iter().map(|c| c.cps.len()).collect::<Vec<_>>();
     format!(
-        "planes cross (sin^2 >= {sin2:.3e}); {} old curve(s) {otypes:?} ({:?} control points) retrace {:.3e} of the found segment, {} new {ntypes:?} ({:?}) retrace {:.3e} (tol {tol:.3e})",
+        "planes cross (sin^2 >= {sin2:.3e}); {} old curve(s) {otypes:?} ({:?} control points) retrace >= {:.3e} of the found segment, {} new {ntypes:?} ({:?}) retrace <= {:.3e} (tol {tol:.3e})",
         oc.len(),
         cps(&oc),
         (o1 - o0) * len,
