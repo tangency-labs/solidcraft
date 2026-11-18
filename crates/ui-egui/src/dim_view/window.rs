@@ -428,7 +428,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                         r.request_focus();
                     }
                     None
-                } else if app.preferences.dimension_accept_outside_click && e.live.is_none() && lost_or_outside_press && left_click_outside {
+                } else if e.live.is_none() && lost_or_outside_press && left_click_outside {
                     if !ui.input(|i| i.pointer.primary_clicked()) {
                         super::CONSUMED_OUTSIDE_PRESS.set(true);
                     }

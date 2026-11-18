@@ -2681,17 +2681,6 @@ pub(crate) fn paint_snap_badges(
     labels: &[&'static str],
     publish_hint: bool,
 ) {
-    if !app.preferences.sketch_snap_icons {
-        if let Some(&label) = labels.first().filter(|_| publish_hint) {
-            let tk = solidcraft_theme::Tokens::get();
-            let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
-            let r = crate::tool_cursor::clear_of_badge(app, painter, view_rect, r);
-            crate::scenario::publish_rect("viewport:snap_hint", r);
-            painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
-            painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(tk.font_micro), tk.text);
-        }
-        return;
-    }
     let items: Vec<(&'static str, Option<&'static str>)> = labels.iter().map(|&label| (label, snap_icon(label))).collect();
     paint_badge_row(app, painter, view_rect, sp, &items, if publish_hint { "viewport:snap_hint" } else { "viewport:drag_snap_badge" });
 }
@@ -2699,9 +2688,6 @@ pub(crate) fn paint_snap_badges(
 /// Paint the active constraint/dimension operator icon beside the cursor using the exact same
 /// style and glyph-scale sizing as line placement's constraint previews.
 pub(crate) fn paint_constraint_cursor(app: &SolveApp, painter: &egui::Painter, proj: &Proj, at: Option<egui::Pos2>, shift: bool) {
-    if !app.preferences.sketch_snap_icons {
-        return;
-    }
     let (Some(at), Some(tool)) = (at, app.tool.as_ref()) else { return };
     let Some(icon) = crate::tools::constraint_cursor_icon(app, tool, proj, at, shift) else { return };
     paint_badge_row(app, painter, proj.rect, at, &[("", Some(icon))], "viewport:constraint_cursor");

@@ -3090,20 +3090,18 @@ impl SolveApp {
                 }
                 return;
             }
-            if self.preferences.sketch_constraint_preselection {
-                if id == "sketch.dimension" {
-                    if tools::seed_dimension_preselection(self, &mut t) {
-                        t.preselected = true;
-                        let _ = self.session.execute("select.clear", &json!({}));
-                    } else if !self.session.selection.is_empty() {
-                        let _ = self.session.execute("select.clear", &json!({}));
-                    }
-                } else if tools::seed_constraint_preselection(self, &mut t) {
+            if id == "sketch.dimension" {
+                if tools::seed_dimension_preselection(self, &mut t) {
                     t.preselected = true;
                     let _ = self.session.execute("select.clear", &json!({}));
-                } else if tools::is_constraint_pick_tool(&t) && !self.session.selection.is_empty() {
+                } else if !self.session.selection.is_empty() {
                     let _ = self.session.execute("select.clear", &json!({}));
                 }
+            } else if tools::seed_constraint_preselection(self, &mut t) {
+                t.preselected = true;
+                let _ = self.session.execute("select.clear", &json!({}));
+            } else if tools::is_constraint_pick_tool(&t) && !self.session.selection.is_empty() {
+                let _ = self.session.execute("select.clear", &json!({}));
             }
             if !self.session.selection.is_empty() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));

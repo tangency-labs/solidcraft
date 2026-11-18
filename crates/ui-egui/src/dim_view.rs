@@ -245,9 +245,6 @@ pub fn accept_outside_click(app: &mut SolveApp) -> bool {
     if CONSUMED_OUTSIDE_PRESS.replace(false) {
         return true;
     }
-    if !app.preferences.dimension_accept_outside_click {
-        return false;
-    }
     let ready = EDIT.with(|edit| edit.borrow().as_ref().is_some_and(|e| e.live.is_none()));
     if !ready {
         return false;
@@ -1613,7 +1610,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                         if !r.has_focus() {
                             r.request_focus();
                         }
-                    } else if app.preferences.dimension_accept_outside_click && e.live.is_none() && lost_or_outside_press && left_click_outside {
+                    } else if e.live.is_none() && lost_or_outside_press && left_click_outside {
                         done = Some(true);
                         if !ui.input(|i| i.pointer.primary_clicked()) {
                             CONSUMED_OUTSIDE_PRESS.set(true);
@@ -1696,8 +1693,7 @@ fn clear_picks(app: &mut SolveApp) {
 
 /// Complete a dimension edit: clear pending picks and drop the tool if it started from preselection.
 fn finish_dimension(app: &mut SolveApp) {
-    let drop_tool =
-        app.preferences.sketch_constraint_preselection && app.tool.as_ref().is_some_and(|t| t.kind == crate::tools::Kind::Dimension && t.preselected);
+    let drop_tool = app.tool.as_ref().is_some_and(|t| t.kind == crate::tools::Kind::Dimension && t.preselected);
     clear_picks(app);
     if drop_tool {
         app.tool = None;

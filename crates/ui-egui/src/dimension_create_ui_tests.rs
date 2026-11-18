@@ -2602,7 +2602,7 @@ fn shown_dimensions_in_a_conflict_take_the_conflict_colour() {
 }
 
 #[test]
-fn reference_pick_slight_drag_outside_and_pref_gate_work_on_dimension_editor() {
+fn reference_pick_and_slight_drag_outside_work_on_dimension_editor() {
     crate::dim_view::cancel();
     let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[40,0]]})), ("sketch.line", json!({"points":[[0,15],[20,15]]}))], [20., 7.5]);
     let p1 = h.app.run("sketch.dimension", json!({"entities":["l1"],"value":40,"text_at":[20,-6]})).unwrap()["param"].as_str().unwrap().to_string();
@@ -2639,18 +2639,5 @@ fn reference_pick_slight_drag_outside_and_pref_gate_work_on_dimension_editor() {
     assert!(h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty()), "slight drag release must not pick in Dimension tool");
     let d2_val = h.app.session.doc.eval(&p2, solidcraft_engine::doc::expr::Kind::Length).unwrap();
     assert!((d2_val - 25.0).abs() < 1e-6, "expected accepted value 25, got {d2_val}");
-
-    // When `dimension_accept_outside_click` is off, clicking outside restores cancel semantics.
-    h.app.tool = None;
-    h.app.preferences.dimension_accept_outside_click = false;
-    crate::dim_view::edit_param(&h.app, &p2);
-    h.frames(5);
-    assert!(crate::dim_view::editing());
-    type_value(&mut h, "33");
-    h.step(&json!({"click":start})).unwrap();
-    h.frames(2);
-    assert!(!crate::dim_view::editing());
-    let d2_after = h.app.session.doc.eval(&p2, solidcraft_engine::doc::expr::Kind::Length).unwrap();
-    assert!((d2_after - 25.0).abs() < 1e-6, "turning off preference restores outside-click cancel, got {d2_after}");
     crate::dim_view::cancel();
 }

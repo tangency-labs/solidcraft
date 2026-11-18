@@ -18,9 +18,6 @@ macro_rules! sketch_preferences {
             /// Length box, and the Sketch Palette's Line Type icons leave these tools alone. Off (the
             /// default): those icons set the tools' line type.
             construction_line_classic: bool = false, PAGE_SKETCH;
-            /// Accept an open sketch dimension box/window when left-clicking outside it in the viewport
-            /// (#17330). Off restores legacy outside-click cancellation.
-            dimension_accept_outside_click: bool = true, PAGE_SKETCH;
             /// The colour a sketch dimension draws its lines, arrows and value in, or `None` for the
             /// theme's dimension colours (Preferences › Sketch › Dimension color, #14121). Selection, hover
             /// and conflicts keep their own colours.
@@ -122,9 +119,6 @@ macro_rules! sketch_preferences {
             /// holds, and its glyph or dimension, are drawn in `sketch_conflict` (#7244). Off: only the
             /// glyphs and dimensions are red, in `error`, as before.
             sketch_conflict_colour: bool = true, PAGE_SKETCH;
-            /// Clear incompatible selections, keep compatible preselected geometry, and auto-exit after
-            /// committing a preselected sketch constraint or dimension (#17330). Off keeps prior tool-entry selection behaviour.
-            sketch_constraint_preselection: bool = true, PAGE_SKETCH;
             /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
             sketch_construction_lines: bool = true, PAGE_SKETCH;
             /// In an open sketch with no tool running, the pointer's sketch coordinates beside it (#11070).
@@ -147,10 +141,6 @@ macro_rules! sketch_preferences {
             /// Snap a drawing point to where the two most recent centre or midpoint guides cross.
             /// Off: the guides stay visual and the cursor does not move (#8694).
             sketch_recent_snap: bool = false, PAGE_SKETCH;
-            /// Draw sketch snap hints, drag-snap hints, and active constraint/dimension cursor tools with
-            /// constraint icons instead of plain text badges (`Pt`, `Mid`, `On`) (#17330).
-            /// Off preserves the legacy text badges, drag-snap target ring, and suppresses the constraint cursor badge.
-            sketch_snap_icons: bool = true, PAGE_SKETCH;
             /// A point snaps to the crossings of the lines the grid draws, and to the finer lattice
             /// between them. Off: the point snaps to the finer lattice only.
             sketch_snap_to_visible_grid: bool = true, PAGE_SKETCH;
