@@ -879,6 +879,17 @@ mod native {
         assert!(h.app.preview.active, "the moved box is drawn: {:?}", h.app.preview.error);
         let b = h.app.preview.bounds;
         assert_eq!((b.min.x.round(), b.max.x.round()), (100.0, 110.0), "where the run moved it, not on the origin");
+        // The triangles the preview draws are the box there, not only the bounds it reports.
+        let (_, id, cmds) = preview_commands(&h.app).expect("the dialog is previewed");
+        let mut scratch = h.app.session.scratch();
+        dry_run(&mut scratch, &id);
+        let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
+        let built = crate::preview::compute(&scratch, &cmds, colors).unwrap();
+        let (vertices, rest) = built.scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
+        assert!(rest.is_empty() && !vertices.is_empty(), "the box is drawn");
+        let xs = vertices.iter().map(|v| f32::from_le_bytes([v[0], v[1], v[2], v[3]]));
+        let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        assert_eq!((lo.round(), hi.round()), (100.0, 110.0), "drawn where the run moved it");
         // Run leaves it there too.
         run(&mut h.app).unwrap();
         settle(&mut h);
