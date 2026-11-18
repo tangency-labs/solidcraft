@@ -496,6 +496,9 @@ pub struct AgentChat {
     reads_files: bool,
     /// The chat said that sending by path turns those tools on ([`warn_reads`]).
     reads_warned: bool,
+    /// The session is being opened again with Claude Code's read tools on ([`submit`]): New chat
+    /// replaces it, or its reply would bring back the conversation New chat cleared.
+    reads_reopening: bool,
     /// Files still being read for the next message.
     pub(crate) loading: Vec<Loading>,
     /// Where the chat was drawn last frame (the panel, or its folded strip), for drops; `None`
@@ -705,15 +708,18 @@ impl AgentChat {
         self.attachments.insert(at, file);
         name
     }
-    /// The files and folders of a message being sent that go by their path join [`Self::by_path`],
-    /// resolved through links, so a read that leads elsewhere doesn't match. The most recent
-    /// [`MAX_BY_PATH`] are kept.
-    fn send_by_path(&mut self, files: &[attach::Attachment]) {
+    /// The files and folders of a message being sent that go by their path, and that its text
+    /// (`sent`) names, join [`Self::by_path`], resolved through links, so a read that leads
+    /// elsewhere doesn't match. The most recent [`MAX_BY_PATH`] are kept.
+    fn send_by_path(&mut self, files: &[attach::Attachment], sent: &str) {
         for f in files {
             let path = match &f.content {
                 attach::Content::Reference { path, .. } | attach::Content::Folder { path } | attach::Content::Pdf { path, .. } => path,
                 _ => continue,
             };
+            if !sent.contains(&format!("at {})", path.display())) {
+                continue;
+            }
             if let Ok(real) = std::fs::canonicalize(path)
                 && !self.by_path.contains(&real)
             {
@@ -911,6 +917,7 @@ impl AgentChat {
                 self.agent = agent;
                 self.images = images;
                 self.state = Some(State::Ready);
+                self.reads_reopening = false;
                 self.picking = Some(false);
                 // Keep the mode across a new chat.
                 if self.config_options.is_none()
@@ -1290,6 +1297,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
         Ok(mut b) => {
             b.set_instructions(&app.preferences.agent_instructions);
             b.set_reads_files(chat.reads_files);
+            chat.reads_reopening = false;
             app.preferences.agent_last = entry.id.clone();
             chat.backend = Some(b);
             chat.argv = entry.argv.clone();
@@ -1791,6 +1799,7 @@ fn submit(app: &mut SolveApp, ctx: &egui::Context, text: String, image: bool, co
         if restarting && app.agent_chat.state() == State::Ready {
             app.agent_chat.restore_mode = Some(app.agent_chat.mode.clone()).filter(|m| !m.is_empty());
             app.agent_chat.state = Some(State::Starting);
+            app.agent_chat.reads_reopening = true;
         }
     }
     match app.agent_chat.state() {
@@ -1904,7 +1913,9 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.seen = None;
     chat.discard_end = running;
     chat.model_revert = None;
-    if matches!(chat.state(), State::Ready | State::Busy) {
+    // A session being opened again with the read tools on is replaced as a ready one is.
+    let reopening = std::mem::take(&mut chat.reads_reopening) && chat.state() == State::Starting;
+    if matches!(chat.state(), State::Ready | State::Busy) || reopening {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
         if let Some(b) = chat.backend.as_mut() {
@@ -1960,10 +1971,15 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     let changed = seen.and_then(|seen| changed_note(&seen, &app.session.doc));
     let notes: Vec<&str> = note.into_iter().chain(changed.as_deref()).collect();
     let lead = if notes.is_empty() { text.clone() } else { format!("{}\n\n{text}", notes.join("\n")) };
-    // The whole message stays within the cap: the files' text gets what the words leave.
-    let budget = MAX_PROMPT.saturating_sub(lead.chars().count() + FILE_NAMES_ROOM);
+    // The whole message stays within the cap: the files' text gets what the words and the lines
+    // naming files by their path leave.
+    let by_path = attach::note(&files.iter().filter(|f| f.by_place()).cloned().collect::<Vec<_>>(), pictures, documents, 0);
+    let budget = MAX_PROMPT.saturating_sub(lead.chars().count() + by_path.chars().count() + FILE_NAMES_ROOM);
     let about_files = attach::note(&files, pictures, documents, budget);
     let sent: String = format!("{lead}{about_files}").chars().take(MAX_PROMPT).collect();
+    // What goes by path may be read by the agent's own read tools without asking (see
+    // `on_permission`), once the message names it: a line cut off by the cap doesn't count.
+    app.agent_chat.send_by_path(&files, &sent);
     let mut parts = vec![PromptPart::Text(sent)];
     if image {
         match crate::control::view_png(app, VIEW_IMAGE.0, VIEW_IMAGE.1) {
@@ -1975,8 +1991,6 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         }
     }
     parts.extend(attach::parts(&files, pictures, documents));
-    // What goes by path may be read by the agent's own read tools without asking (see `on_permission`).
-    app.agent_chat.send_by_path(&files);
     // The undo step is named after the message, or its first file when it has no words.
     let first_line = text.lines().find(|l| !l.trim().is_empty()).or_else(|| files.first().map(|f| f.name.as_str())).unwrap_or("");
     let label: String = first_line.chars().take(48).collect();

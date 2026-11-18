@@ -106,7 +106,9 @@ impl AcpBackend {
 
     fn new_session(&mut self) {
         self.config_pending = None;
-        self.pending.retain(|_, request| *request != Pending::SetConfig);
+        // A session still being opened (or opened again with the read tools) is dropped too: its
+        // late reply must not bring back the conversation New chat cleared.
+        self.pending.retain(|_, request| !matches!(request, Pending::SetConfig | Pending::SessionNew | Pending::SessionResume));
         let mut params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &self.note);
         if self.reads_files {
             acp::turn_on_reads(&mut params, None);
@@ -495,6 +497,24 @@ mod tests {
         starting.handle(Incoming::Reply { id: starting.next_id, result: Ok(json!({"sessionId":"s1"})) }, &mut events);
         assert!(matches!(events.last(), Some(Event::Ready { .. })), "{events:?}");
         starting.shutdown(true);
+
+        // New chat while the session is being opened again: that opening's late reply is
+        // dropped, so the old conversation can't come back, and the new session has them off.
+        let mut cleared = ready_backend().unwrap();
+        cleared.prompt(&[PromptPart::Text("hello".into())]);
+        let mut events = Vec::new();
+        cleared.handle(Incoming::Reply { id: cleared.next_id, result: Ok(json!({"stopReason":"end_turn"})) }, &mut events);
+        assert!(cleared.set_reads_files(true));
+        let resume = cleared.next_id;
+        cleared.set_reads_files(false);
+        ChatBackend::new_session(&mut cleared);
+        events.clear();
+        cleared.handle(Incoming::Reply { id: resume, result: Ok(json!({"sessionId":"old"})) }, &mut events);
+        assert!(events.is_empty(), "the reopened session's reply is dropped: {events:?}");
+        cleared.handle(Incoming::Reply { id: cleared.next_id, result: Ok(json!({"sessionId":"new"})) }, &mut events);
+        assert!(matches!(events.last(), Some(Event::Ready { .. })), "{events:?}");
+        assert_eq!((cleared.session.as_deref(), cleared.session_reads), (Some("new"), false));
+        cleared.shutdown(true);
     }
 
     #[test]

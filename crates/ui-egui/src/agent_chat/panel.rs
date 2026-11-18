@@ -2414,9 +2414,9 @@ fn files_line<'a>(ui: &mut egui::Ui, names: impl Iterator<Item = &'a str>) {
 
 /// The widest a file chip gets; a narrower chat makes them narrower.
 const CHIP_W: f32 = 170.0;
-/// The tallest the file chips get, about three and a half rows: more scroll, and the half row shows
-/// that there are more. A message holds up to 200 files, which would otherwise push the
-/// conversation out of the panel.
+/// The tallest the file chips get past eight files, about three and a half rows: more scroll, and
+/// the half row shows that there are more. A message to a coding agent holds up to 200 files,
+/// which would otherwise push the conversation out of the panel; eight or fewer show whole.
 pub(super) const CHIPS_MAX_HEIGHT: f32 = 112.0;
 
 /// The items of a message that are not pills in its text (those of Attach selection, or all of them
@@ -2585,7 +2585,7 @@ fn pill_input(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, focused
 /// The files for the next message, as chips in rows that fit the chat: a picture's thumbnail (or
 /// a file mark), the name cut to fit, and a × that takes the file off. Laid out by hand: egui
 /// wraps plain widgets, not framed groups, and one row wider than the chat widens all below it.
-/// Past [`CHIPS_MAX_HEIGHT`] the rows scroll.
+/// Past eight files and [`CHIPS_MAX_HEIGHT`], the rows scroll.
 #[cfg(not(target_arch = "wasm32"))]
 fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     // Thumbnails of files no longer on the message are let go.
@@ -2598,7 +2598,8 @@ fn attachment_chips(chat: &mut AgentChat, ui: &mut egui::Ui) {
     // The files read, then those still being read (each takes its place once it is done).
     let read = chat.attachments.len();
     let indices: Vec<usize> = (0..chat.files()).collect();
-    egui::ScrollArea::vertical().id_salt("sc_agent_chat_chips").max_height(CHIPS_MAX_HEIGHT).auto_shrink([false, true]).show(ui, |ui| {
+    let most = if chat.files() > attach::MAX_FILES { CHIPS_MAX_HEIGHT } else { f32::INFINITY };
+    egui::ScrollArea::vertical().id_salt("sc_agent_chat_chips").max_height(most).auto_shrink([false, true]).show(ui, |ui| {
         let gap = ui.spacing().item_spacing.x;
         let avail = ui.available_width().max(1.0);
         let w = CHIP_W.min(avail);

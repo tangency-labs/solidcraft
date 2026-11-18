@@ -855,6 +855,48 @@ fn the_first_message_sent_by_path_turns_the_read_tools_on() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// New chat while the session is being opened again with Claude Code's read tools on replaces it
+/// too, with them off, so that opening's reply can't bring back the conversation (Review: the
+/// chat waits in Starting then, which New chat used to leave to the agent).
+#[test]
+fn new_chat_while_the_read_tools_come_on_starts_afresh() {
+    let d = attachable("reads-new-chat");
+    let (mut app, script, ctx) = app_with_script();
+    with_coding_agent(&mut app);
+    script.reopens_for_reads.store(true, std::sync::atomic::Ordering::Relaxed);
+    attach_path(&mut app, &d.to_string_lossy()).unwrap();
+    send(&mut app, &ctx, "look in this folder".into());
+    assert_eq!(app.agent_chat.state(), State::Starting, "the session is being opened again");
+    new_chat(&mut app);
+    let calls = script.calls();
+    assert!(calls.ends_with(&["reads: false".to_string(), "new_session".to_string()]), "{calls:?}");
+    assert!(app.agent_chat.pending.is_empty() && app.agent_chat.items.is_empty());
+    script.report(Event::Ready { agent: "Test".into(), images: true });
+    poll(&mut app, &ctx);
+    assert!(script.prompts().is_empty(), "the cleared message isn't sent");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// A file whose line the message's cap cut off was never named to the agent, so its reads still
+/// ask (Review: every file sent by path was taken as named).
+#[test]
+fn a_path_cut_off_by_the_cap_is_not_read_without_asking() {
+    let d = attachable("cut-path");
+    let (mut app, script, ctx) = app_with_script();
+    with_coding_agent(&mut app);
+    attach_path(&mut app, &at(&d, "brief.md")).unwrap();
+    send(&mut app, &ctx, "x".repeat(MAX_PROMPT));
+    assert!(!text_of(&script.prompts()[0]).contains("brief.md"), "cut off by the cap");
+    assert!(!app.agent_chat.attached_by_path(&d.join("brief.md")));
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    attach_path(&mut app, &at(&d, "brief.md")).unwrap();
+    send(&mut app, &ctx, "now this".into());
+    assert!(text_of(&script.prompts()[1]).contains("brief.md"));
+    assert!(app.agent_chat.attached_by_path(&d.join("brief.md")));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// The first file or folder attached in a chat with Claude Code makes the chat say once that
 /// sending it turns Claude Code's read tools on; other agents' own tools are theirs, so nothing is
 /// said for them.
@@ -3673,14 +3715,21 @@ fn assert_inside_the_panel(chips: usize) {
 }
 
 /// Many files on a message (to a coding agent, up to 200) scroll in a strip of chips about three
-/// rows high, so the text box stays in the panel.
+/// rows high, so the text box stays in the panel; eight or fewer show whole, as before.
 #[test]
 fn many_files_scroll_in_a_strip_of_chips() {
     use solidcraft_ui_registry::rect_of;
     let d = attachable("many-chips");
     let mut h = narrow_chat();
     with_coding_agent(&mut h.app);
-    for _ in 0..40 {
+    for _ in 0..attach::MAX_FILES {
+        attach_path(&mut h.app, &at(&d, "brief.md")).unwrap();
+    }
+    h.frames(3);
+    let last = rect_of(&format!("agent_chat:file:{}", attach::MAX_FILES - 1)).expect("the eighth chip");
+    let input = rect_of("agent_chat:input").expect("the text box");
+    assert!(last.bottom() <= input.top(), "eight chips show whole: the eighth {last:?}, text box {input:?}");
+    for _ in attach::MAX_FILES..40 {
         attach_path(&mut h.app, &at(&d, "brief.md")).unwrap();
     }
     h.frames(3);
