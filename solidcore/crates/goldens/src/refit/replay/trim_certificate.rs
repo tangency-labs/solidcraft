@@ -25,6 +25,10 @@
 //! The trims are of degree 1: their vertices are their control points, read, not evaluated,
 //! and the surface along each segment is the line between them in (u, v), the form
 //! [`span_bound`] takes.
+//!
+//! A second test bounds every trim on a found face of the 9 files the retirement changes,
+//! on both sides, so that the other moved rows reading those trims rest on a certificate
+//! too: [`wr493_trims_on_found_faces_are_bounded_on_both_nurbs`].
 
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::vector2d::Point2;
@@ -91,10 +95,16 @@ fn polyline(c: &Curve) -> Vec<(f64, Point2)> {
 
 /// The certified bound of the distance between the face's surface along the edge use's trim
 /// and the edge's 3D curve over its interval, and the edge's tolerance. The correspondence
-/// is linear between the trim's vertices and the edge's interval, in either orientation
-/// ([`span_bound`] halves a piece above the tolerance at the rail's middle); each orientation
-/// is a correspondence, so each bound it gives holds, and the least is taken (one that
-/// cannot be bounded gives none).
+/// is linear between the trim's vertices and the edge's interval, in either orientation;
+/// each orientation is a correspondence, so each bound it gives holds, and the least is
+/// taken (one that cannot be bounded gives none).
+///
+/// [`span_bound`] is given an infinite tolerance, so it never halves a piece: a halving's
+/// new node is the rail's middle projected onto the surface, a point off the trim, and the
+/// bound would then be of another path. Its only test, `bound > tol`, is false for every
+/// bound against `f64::INFINITY`. Its remaining cuts, at the surface's patch lines and the
+/// rail's knots, split a segment at a point of the segment (linear in `(u, v)` and `t`), so
+/// the path bounded is the trim's own segments, each with a linear `t`.
 fn trim_bound(k: &Kernel, b: &Brep, eu: EdgeuseId) -> (f64, f64) {
     let f = eu1::face(b, eu).unwrap().unwrap();
     let surf = face::p2::surface(b, f).unwrap().unwrap();
@@ -126,7 +136,8 @@ fn trim_bound(k: &Kernel, b: &Brep, eu: EdgeuseId) -> (f64, f64) {
                 t: t_at(w[1].0),
                 uv: w[1].1,
             };
-            let d = span_bound(k, surf, rail, &spans, p, a, z, tol).unwrap_or(f64::INFINITY);
+            let d =
+                span_bound(k, surf, rail, &spans, p, a, z, f64::INFINITY).unwrap_or(f64::INFINITY);
             worst = worst.max(d);
         }
         best = best.min(worst);
@@ -186,16 +197,28 @@ fn wr493_rebuilt_trims_are_within_the_edge_tolerance_on_both_nurbs() {
         let case = &all[name];
         let mut reported = Vec::new();
         for refit in [false, true] {
-            if refit {
-                state::set(Some(Refit::default()));
-            }
-            let out = u.run_rust(case).unwrap();
-            let before = brep(unit_id, case, false);
-            let after = brep(unit_id, case, true);
-            if refit {
-                let r = state::take().expect("refit lost");
-                assert!(r.replaced > 0 && r.failures.is_empty(), "{name}: {r:?}");
-            }
+            // each of the three builds under its own refit state: each, on main's side,
+            // replaced a found sphere's file NURB by the fitted one
+            let build = |what: &str, f: &mut dyn FnMut()| {
+                if refit {
+                    state::set(Some(Refit::default()));
+                }
+                f();
+                if refit {
+                    let r = state::take().expect("refit lost");
+                    assert!(
+                        r.replaced > 0 && r.failures.is_empty(),
+                        "{name} {what}: {r:?}"
+                    );
+                }
+            };
+            let mut out = None;
+            build("run", &mut || out = Some(u.run_rust(case).unwrap()));
+            let mut before = None;
+            build("before", &mut || before = Some(brep(unit_id, case, false)));
+            let mut after = None;
+            build("after", &mut || after = Some(brep(unit_id, case, true)));
+            let (out, before, after) = (out.unwrap(), before.unwrap(), after.unwrap());
             let side = ["new", "main"][usize::from(refit)];
             reported.push(tied(&k, &after.0, after.1, &out));
             let (d, tol) = trim_bound(&k, &before.0, before.1);
@@ -218,4 +241,240 @@ fn wr493_rebuilt_trims_are_within_the_edge_tolerance_on_both_nurbs() {
         assert_ne!(reported[0], reported[1], "{name}: the trims are the same");
     }
     eprintln!("{}", report.join("\n"));
+}
+
+// ---- every trim on a found face, both sides -------------------------------------------------
+
+/// The files the retirement changes a found sphere or torus in
+/// (`solidcore/tests/wr493_class_proofs.rs`, `found_spheres_and_tori_keep_the_file_nurb_and_trims`).
+const FILES: [&str; 9] = [
+    "Fillet/box_w_slot.smb",
+    "Fillet/sphere_diff_3cylinders.smb",
+    "Fillet/sphere_plane.smb",
+    "Solids/nurb_fillet.smb",
+    "Solids/revolution_360.smb",
+    "Solids/revolution_mold.smb",
+    "Solids/sphere.smb",
+    "sphere.smb",
+    "surf_sphere150.smb",
+];
+
+/// Uniform samples for a lower bound of a trim's largest gap.
+const SAMPLES: usize = 20_000;
+
+/// One edge use's trim on a found face: its certified upper bound and its encoding.
+struct Gap {
+    /// The edge's tolerance.
+    tol: f64,
+    /// The certified upper bound of `sup |C(t) - S(W(t))|` ([`curve_uv_gap_bound`]).
+    hi: f64,
+    /// The trim's encoding (`put_trim_curve`), bit for bit.
+    bits: Vec<u64>,
+    /// Whether the trim is one of the file's UV curves, bit for bit.
+    file: bool,
+    /// Computes a lower bound of the same supremum (below).
+    lo: Box<dyn Fn() -> f64>,
+}
+
+/// A trim's encoding, bit for bit.
+fn encoding(k: &Kernel, c: &Curve) -> Vec<u64> {
+    let mut enc = Vec::new();
+    put_trim_curve(k, &mut enc, Some(c)).unwrap();
+    enc.iter().map(|x| x.to_bits()).collect()
+}
+
+/// The file read as the runners read it (`own_reader::read_file`), on this branch or, with
+/// the refit seam, as main built it; with every trim on a found face (a sphere or torus)
+/// fetched or made (`get_or_create_uv_trim_curve`), and each such edge use's [`Gap`].
+fn gaps(name: &str, refit: bool) -> std::collections::BTreeMap<u32, Gap> {
+    use solidcore::query::curve_surface_gap::curve_uv_gap_bound;
+    use solidcore::surface::surface::SurfaceKind;
+    use solidcore::topology::brep_data::BrepData;
+    use solidcore::topology::database_io::FileType;
+    use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
+
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(crate::fixtures::UPSTREAM_TEST_FILES)
+        .join(name);
+    let mut k = crate::runner_kernel();
+    let data =
+        BrepData::read_from_file(&k, std::fs::read(&path).unwrap(), FileType::Ascii).unwrap();
+    let file: Vec<Vec<u64>> = data
+        .uv_curves
+        .iter()
+        .map(|c| encoding(&k, &c.object))
+        .collect();
+    if refit {
+        state::set(Some(Refit::default()));
+    }
+    let mut b = crate::own_reader::read_file(&mut k, path.to_str().unwrap())
+        .unwrap()
+        .unwrap();
+    if refit {
+        let r = state::take().expect("refit lost");
+        assert!(r.replaced > 0 && r.failures.is_empty(), "{name}: {r:?}");
+    }
+    let found = |b: &Brep, eu: EdgeuseId| {
+        eu1::face(b, eu).unwrap().is_some_and(|f| {
+            face::p2::surface(b, f)
+                .unwrap()
+                .is_some_and(|s| matches!(s.kind(), SurfaceKind::Sphere(_) | SurfaceKind::Torus(_)))
+        })
+    };
+    let ids: Vec<EdgeuseId> = b
+        .edgeuses()
+        .iter()
+        .map(|(id, _)| id)
+        .filter(|&id| found(&b, id))
+        .collect();
+    let mut out = std::collections::BTreeMap::new();
+    for id in ids {
+        get_or_create_uv_trim_curve(&k, &mut b, id, false, false, true).unwrap();
+        let (Some(t), owner) = eu1::uv_trim_curve(&b, id).unwrap() else {
+            panic!("{name} {id:?}: no trim");
+        };
+        let owner = owner.unwrap_or(id);
+        let f = eu1::face(&b, owner).unwrap().unwrap();
+        let s = face::p2::surface(&b, f).unwrap().unwrap().clone();
+        let w = match t.kind() {
+            CurveKind::BSpline(x) => x.clone_exact(),
+            CurveKind::Line(l) => l.base_with_nurb().unwrap().into_owned(),
+            _ => panic!("{name} {id:?}: a trim neither a B-spline nor a line"),
+        };
+        let e = eu1::edge(&b, id).unwrap().unwrap();
+        let tol = edge::tolerance(&b, e).unwrap();
+        let i = edge::interval(&b, e).unwrap();
+        let rail = edge::curve(&b, e).unwrap().unwrap().clone();
+        let CurveKind::BSpline(c) = rail.kind() else {
+            panic!("{name} {id:?}: an edge curve not a B-spline");
+        };
+        let range = [i.min(), i.max()];
+        let hi = curve_uv_gap_bound(&k, c, &w, &s, range, tol / 100.0)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{name} {id:?}: the gap is not enclosed"));
+        let bits = encoding(&k, t);
+        let lo_k = crate::runner_kernel();
+        // A lower bound: the largest gap at uniform parameters, each less a margin above
+        // its evaluation's rounding (1e-9 of the points' size, against rounding near 1e-15
+        // of it): the supremum is at least every gap at a parameter.
+        let lo = Box::new(move || {
+            (0..=SAMPLES)
+                .map(|j| {
+                    let t = range[0] + (range[1] - range[0]) * j as f64 / SAMPLES as f64;
+                    let q = w.evaluate_point(t).unwrap();
+                    let sp = s.evaluate_point(&lo_k, Point2::new(q.x, q.y)).unwrap();
+                    let cp = rail.evaluate_point(&lo_k, t).unwrap();
+                    (sp - cp).length() - 1e-9 * (sp.length() + cp.length())
+                })
+                .fold(0.0_f64, f64::max)
+        });
+        out.insert(
+            id.index(),
+            Gap {
+                tol,
+                hi,
+                file: file.contains(&bits),
+                bits,
+                lo,
+            },
+        );
+    }
+    out
+}
+
+/// Every trim on a found face of the 9 files, on this branch (the file's NURB) and as main
+/// built it (the fitted NURB, refit seam), by a certified upper bound of how far the face's
+/// surface along the trim strays from the edge's curve at the same parameter
+/// ([`curve_uv_gap_bound`]: interval Taylor models with bisection, every rounding
+/// included). A trim within its edge's tolerance on both sides is PROVEN. The others are
+/// pinned below, each ranked between the sides by the certified upper bound of one against
+/// a lower bound of the other (the largest gap at [`SAMPLES`] parameters less a rounding
+/// margin; a lower bound of a supremum needs no enclosure):
+/// - the same file trim on both sides, out of tolerance by the same amount (the two
+///   enclosures `[lo, hi]` overlap): the file's own data, kept by main too;
+/// - CLOSER: within tolerance here, out on main (`hi` here below `lo` on main);
+/// - FARTHER: out here, `lo` here above `hi` on main.
+///
+/// Every trim out of tolerance on this branch is one of the file's UV curves, bit for bit.
+#[test]
+fn wr493_trims_on_found_faces_are_bounded_on_both_nurbs() {
+    // (file, edge use, class)
+    let want: &[(&str, u32, &str)] = &[
+        ("Fillet/sphere_diff_3cylinders.smb", 0, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 1, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 8, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 9, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 16, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 17, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 18, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 19, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 20, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 21, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 28, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 29, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 30, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 31, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 38, "same file trim"),
+        ("Fillet/sphere_diff_3cylinders.smb", 39, "same file trim"),
+        ("Fillet/sphere_plane.smb", 0, "CLOSER"),
+        ("Fillet/sphere_plane.smb", 1, "CLOSER"),
+        ("Fillet/sphere_plane.smb", 4, "CLOSER"),
+        ("Fillet/sphere_plane.smb", 5, "CLOSER"),
+        ("Fillet/sphere_plane.smb", 8, "FARTHER"),
+        ("Fillet/sphere_plane.smb", 9, "FARTHER"),
+        ("Solids/nurb_fillet.smb", 60, "same file trim"),
+        ("Solids/nurb_fillet.smb", 61, "same file trim"),
+        ("Solids/nurb_fillet.smb", 66, "same file trim"),
+        ("Solids/nurb_fillet.smb", 67, "same file trim"),
+        ("Solids/nurb_fillet.smb", 70, "same file trim"),
+        ("Solids/nurb_fillet.smb", 71, "same file trim"),
+    ];
+    let mut got = Vec::new();
+    let mut report = Vec::new();
+    let mut proven = 0;
+    for name in FILES {
+        let new = gaps(name, false);
+        let main = gaps(name, true);
+        assert_eq!(
+            new.keys().collect::<Vec<_>>(),
+            main.keys().collect::<Vec<_>>(),
+            "{name}: not the same edge uses on found faces"
+        );
+        for (eu, n) in &new {
+            let m = &main[eu];
+            if n.hi <= n.tol && m.hi <= m.tol {
+                proven += 1;
+                continue;
+            }
+            let (nlo, mlo) = ((n.lo)(), (m.lo)());
+            let class = if n.hi <= n.tol {
+                assert!(mlo > m.tol, "{name} {eu}: main's out only by its bound");
+                assert!(n.hi < mlo, "{name} {eu}: not ranked");
+                "CLOSER"
+            } else {
+                assert!(nlo > n.tol, "{name} {eu}: out only by its bound");
+                assert!(n.file, "{name} {eu}: out of tolerance and not a file trim");
+                if nlo > m.hi {
+                    "FARTHER"
+                } else {
+                    assert!(
+                        n.bits == m.bits && m.file && n.hi >= mlo && m.hi >= nlo,
+                        "{name} {eu}: neither the same file trim nor ranked"
+                    );
+                    "same file trim"
+                }
+            };
+            report.push(format!(
+                "{name} eu {eu} {class}: new [{nlo:e}, {:e}] tol {:e}; main [{mlo:e}, {:e}] tol {:e}",
+                n.hi, n.tol, m.hi, m.tol
+            ));
+            got.push((name, *eu, class));
+        }
+    }
+    eprintln!(
+        "{proven} trims within tolerance on both sides\n{}",
+        report.join("\n")
+    );
+    assert_eq!(got, want);
 }

@@ -1018,6 +1018,30 @@ fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<OwnBrep>, Harness
 /// A Rust B-rep, the inexactly held face surface subclass and its entity counts.
 type OwnBrep = (Brep, Option<i64>, [usize; 10]);
 
+/// What a `Gaps` case computes, for the convex hull certificate of the vertex row
+/// `surf_sphere150_rebuild_v3_gaps` (`refit::replay::vertex_gap`): the B-rep the case builds, the vertex, the largest gap it holds and
+/// every gap it lists, made as [`run_rust`] makes them (on [`crate::runner_kernel`]s).
+///
+/// # Panics
+///
+/// When the case is not a `Gaps` case or its build or query fails.
+#[cfg(test)]
+pub(crate) fn wr57_gaps(case: &Case) -> (Brep, VertexId, Option<vx::HeldGap>, Vec<vx::HeldGap>) {
+    let i: Inputs = case.parse().expect("the inputs");
+    let Ok((mut b, _, c)) = own_brep(&i).expect("the B-rep") else {
+        panic!("{}: the build failed", case.name);
+    };
+    let Ok(OpIn::Gaps { v, has_tol, tol, .. }) = resolve(&i.op, c, &b) else {
+        panic!("{}: not a gaps case", case.name);
+    };
+    let k = crate::runner_kernel();
+    let v = VertexId::from_index(v as u32);
+    let t = has_tol.then_some(solidcore::geom::tol::tol3d(tol));
+    let mut list = Vec::new();
+    let max = vx::max_up_dim_gap_3d(&k, &mut b, v, Some(&mut list), t).expect("the gaps");
+    (b, v, max, list)
+}
+
 /// A chain segment's B-spline curve, as the shim's `read_curve` makes it.
 fn chain_curve(c: &CrvIn) -> Result<SmCurve, HarnessError> {
     let c: super::topology_edgeuse_p1::CrvIn = serde_json::to_value(c)

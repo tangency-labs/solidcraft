@@ -54,8 +54,9 @@
 //! surfaces the 28 sphere rows of `blend.fillet_standard_solver_p1`, `topology.edgeuse_p1`,
 //! `edgeuse_p2`, `edgeuse_p3`, `topology.vertex` and `topology.vertexuse` make their calls
 //! on, so their calls are no longer main's; 24 of them are then main's rows without the
-//! tape. Their entries are deleted, and with them the vertex row's convex hull
-//! certificate; the ten left still replay.
+//! tape. Their entries are deleted; the ten left still replay. The vertex row's convex hull
+//! certificate moved to `refit::replay::vertex_gap`, which runs it on this branch and as
+//! main built it.
 //!
 //! [`Surface::find_degen_param_for_direction`]: solidcore::surface::surface::Surface::find_degen_param_for_direction
 //! [`Surface::invert_point_near_singularity`]: solidcore::surface::surface::Surface::invert_point_near_singularity

@@ -40,6 +40,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::geom::tol::zone_tol3d;
 use solidcore::intersect::point_class::PointClassType;
+use solidcore::mass::enclosure::{enclose_face_area_relative, enclose_volume};
 use solidcore::mass::integrator::properties::face_properties;
 use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
@@ -403,9 +404,12 @@ fn loop_area(k: &Kernel, b: &Brep, centre: Vec3, radius: f64, inside: Vec3, n: u
 
 /// `corpus.parity` `ss_plane_sph1..4`: the sphere face's row moved from 25.21534728577917
 /// (refit sphere, trims rebuilt) to 25.14456696301113 (sph1, sph4) and 25.144566963011123
-/// (sph2, sph3): the area the face's UV trims bound (Green's theorem in UV, to 1e-12).
-/// The face's edge loop bounds 25.1445668449 on the sphere (Gauss-Bonnet along the
-/// edges), 4.7e-9 relative off, the trims' gap to their edges. The plane
+/// (sph2, sph3). PROVEN CLOSER: the face's area is certified
+/// ([`enclose_face_area_relative`], 1e-10 of itself wide, about 2.5e-9): the new row is in
+/// the enclosure and the old row is more than 1e3 widths outside it. Cross-checks (not the
+/// proof): the area the face's UV trims bound (Green's theorem in UV) is the row to 1e-12,
+/// and the face's edge loop bounds 25.1445668449 on the sphere (Gauss-Bonnet along the
+/// edges, n = 16 against 32), 4.7e-9 relative off, the trims' gap to their edges. The plane
 /// face's row moved from 25.000000000000004 to 25, the area of its square of side 5.
 #[test]
 fn ss_plane_sph_area_is_the_area_its_edges_bound() {
@@ -429,6 +433,19 @@ fn ss_plane_sph_area_is_the_area_its_edges_bound() {
         let faces = bl::faces(b, None).unwrap();
         assert_eq!(faces.len(), 1, "{name}");
         let f = faces[0];
+        // the certified area, on a fresh read (the enclosure makes any missing trims)
+        let mut fresh = read_part(&mut k, name);
+        let e = enclose_face_area_relative(&k, &mut fresh[0], &[f], 1e-10).unwrap();
+        let width = e.hi - e.lo;
+        assert!(
+            e.lo <= area && area <= e.hi,
+            "{name}: row {area} off [{}, {}]",
+            e.lo,
+            e.hi
+        );
+        for old in [25.215_347_285_779_17, 25.215_347_285_779_21] {
+            assert!(old - e.hi > 1e3 * width, "{name}: old {old} not ranked");
+        }
         let s = b.face(f).unwrap().surface.as_ref().unwrap();
         let SurfaceKind::Sphere(sp) = s.kind() else {
             panic!("{name}: sphere not found")
@@ -828,6 +845,11 @@ fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize, origin: Vec3
 /// converged at n = 24 against n = 32), is matched by the integrator to 2e-9 relative; the
 /// old per-face areas, taken on a refit sphere with rebuilt trims, were 5.5e-9 to 2.9e-8
 /// off. On the sum the new area is 2e-11 off the trims' area, the old one 9.5e-8.
+///
+/// PROVEN CLOSER (both rows): the body's area is certified ([`enclose_face_area_relative`]
+/// over every face, 1e-10 of itself wide, about 5.9e-10); both new rows are in the
+/// enclosure and both old rows more than 100 widths outside it. The quadrature references
+/// above (n = 24 against 32, no remainder bound) are cross-checks, not the proof.
 #[test]
 fn box_w_slot_sphere_corners_are_the_area_their_trims_bound() {
     // the old per-face areas (refit sphere, rebuilt trims), faces 18..=25
@@ -901,6 +923,23 @@ fn box_w_slot_sphere_corners_are_the_area_their_trims_bound() {
         (old_row - reference).abs() > 1e3 * (total - reference).abs(),
         "old {old_row}, new {total}, trims bound {reference}"
     );
+    // the certified area: corpus.parity's row and fillet_executive_p3's (`brep_mass_properties`
+    // at 1e-4), new in, old out
+    let mut eb = read(&mut k, name);
+    let e = enclose_face_area_relative(&k, &mut eb, &faces, 1e-10).unwrap();
+    let width = e.hi - e.lo;
+    for (new, old) in [
+        (total, old_row),
+        (5.914_390_008_549_578, 5.914_389_912_975_9),
+    ] {
+        assert!(
+            e.lo <= new && new <= e.hi,
+            "new {new} off [{}, {}]",
+            e.lo,
+            e.hi
+        );
+        assert!(e.lo - old > 100.0 * width, "old {old} not ranked");
+    }
 }
 
 /// The integrator's share of the sphere face `f` in the volume group and area, about
@@ -977,6 +1016,14 @@ fn sphere_face_shares(
 /// shares over their own trims ([`sphere_face_trim_area`]: line integrals on the file's own
 /// NURB and trims); the rest of each row (the other faces and the edge gap closures) is
 /// the integrator's on both sides.
+///
+/// The ranking against that reference is ARGUED, not proved: its line integrals converge
+/// (n = 24 against 32, Stokes against Green) but carry no remainder bound. A certified
+/// bound is out of reach for the ranking: the rows differ by 1.4e-10 of the volume, and
+/// the volume enclosure ([`enclose_volume`]) spends its cell budget near 2e-4 of it wide.
+/// What is PROVEN is EQUAL: both volume rows lie in the certified enclosure asked 1e-5 of
+/// the volume wide (asserted here); the mass rows are held EQUAL to the body's certified
+/// enclosure by `goldens/tests/wr493_moved_rows_are_classified`.
 #[test]
 fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     use solidcore::mass::integrator::properties::{
@@ -1018,7 +1065,18 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     }
     let reference = row - delta;
     let old_row = 0.680_748_106_510_291_7;
-    // CLOSER: the new row is the reference to the bit, the old row 9.8e-11 off (the
+    // EQUAL, certified: both rows in the volume's enclosure
+    let mut ev = read(&mut k, name);
+    let e = enclose_volume(&k, &mut ev, 1e-5 * row).unwrap();
+    for r in [row, old_row] {
+        assert!(
+            e.lo <= r && r <= e.hi,
+            "volume {r} off [{}, {}]",
+            e.lo,
+            e.hi
+        );
+    }
+    // ARGUED CLOSER: the new row is the reference to the bit, the old row 9.8e-11 off (the
     // reference is good to 8 * 2e-13, the Stokes/Green agreement above).
     assert!((row - reference).abs() * 10.0 < (old_row - reference).abs());
     assert!((row - reference).abs() <= 1e-11 * reference.abs());

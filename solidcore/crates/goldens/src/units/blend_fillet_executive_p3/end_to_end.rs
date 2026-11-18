@@ -3142,8 +3142,11 @@ mod wr493_certificates {
     ///   samples, the sphere face's samples (the same fractions of the same domain of
     ///   the file's NURB here, of upstream's fitted NURB on #18230's tree), and the
     ///   two round vertices: the one on the sphere is closer to its exact contact circle
-    ///   (proved), the one on the plane is `4.3e-15` from its circle where #18230's was
-    ///   `1.4e-15` (both a few units in the last place of `sqrt(8)`; proved and pinned).
+    ///   (proved). The one on the plane is FARTHER (proved): `4.3e-15` from its circle
+    ///   where #18230's was `1.4e-15`, both a few units in the last place of `sqrt(8)`.
+    ///   It is the end of the contact edge on the plane, whose curve is proved closer
+    ///   above; the certified upper bound of its distance, `4.4e-15`, is pinned, and is far
+    ///   inside the vertex's tolerance (`4e-5`), which is asserted.
     #[test]
     fn the_round_is_closer_to_its_torus() {
         let (_, old) = round(true);
@@ -3263,7 +3266,9 @@ mod wr493_certificates {
             off_circle(point(&vn[2]), -4.0, 1.0, 8.0, 1.0),
         );
         eprintln!("{NAME}: plane vertex {now:?} off its circle, #18230 {before:?}");
+        // FARTHER, by rounding: pinned, and within the vertex's tolerance
         assert!(now.lo > before.hi && now.hi < 4.4e-15, "{NAME}: plane vertex {now:?}, #18230 {before:?}");
+        assert!(now.hi <= vn[2][3], "{NAME}: plane vertex {now:?} beyond its tolerance");
         let (before, now) = (
             off_circle(point(&vo[3]), -35.0, 9.0, 800.0, 81.0),
             off_circle(point(&vn[3]), -35.0, 9.0, 800.0, 81.0),

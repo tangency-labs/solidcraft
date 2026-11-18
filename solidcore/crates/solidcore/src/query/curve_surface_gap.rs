@@ -434,7 +434,7 @@ fn kinks(cn: &NurbsCurve, lo: f64, hi: f64) -> Vec<f64> {
 /// # Errors
 ///
 /// The kernel's unported and cancelled statuses.
-pub(crate) fn curve_uv_gap_bound(
+pub fn curve_uv_gap_bound(
     k: &Kernel,
     curve: &BSplineCurve,
     uv: &BSplineCurve,

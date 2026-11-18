@@ -587,9 +587,9 @@ fn sphere_point_rows_are_closer_to_the_sphere() {
 ///   `heal_edge_tolerance_covers_edge_face_gap.rs`;
 /// - `ss_plane_sph1..4`: the plane face is the square of side 5, area 25 exactly: the row
 ///   is 25 (CLOSER: main's is 25.000000000000004); the sphere face's row,
-///   25.14456696301113 (sph1, sph4) and 25.144566963011123 (sph2, sph3), is the value
-///   `wr493_class_proofs`' `ss_plane_sph_area_is_the_area_its_edges_bound` holds to the
-///   area the face's edge loop bounds.
+///   25.14456696301113 (sph1, sph4) and 25.144566963011123 (sph2, sph3), is in the face
+///   area's certified enclosure and main's is outside it (CLOSER, proved by
+///   `wr493_class_proofs`' `ss_plane_sph_area_is_the_area_its_edges_bound`).
 #[test]
 fn corpus_parity_rows_are_closer() {
     use crate::units::corpus_parity::{run_in_process, Runner};

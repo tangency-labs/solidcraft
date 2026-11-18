@@ -23,11 +23,12 @@
 //! `unit<TAB>case` list, and `TOLSUB_OUT`), diffed read by read.
 //!
 //! The WR-493 retirement (found spheres keep the NURB they tested) moves some of these
-//! rows too: [`WR493_REFIT`] lists those replayed with the fitted NURB put back as well.
-//! Two rows it moves by less than the goldens' comparator (`corpus.parity`'s
-//! `Solids__revolution_mold.smb`, `topology.brep_p10`'s `read_Fillet_sphere_plane`) keep
-//! the committed line the substitution was checked against before it, which their run is
-//! no longer to the bit, so they were taken out of [`DATA`].
+//! rows too: [`WR493_REFIT`] lists those replayed with the fitted NURB put back as well
+//! (step 1 then reproduces main's row bit for bit). Two of them it moves by less than the
+//! goldens' comparator ([`WITHIN_COMPARATOR`]: `corpus.parity`'s
+//! `Solids__revolution_mold.smb`, `topology.brep_p10`'s `read_Fillet_sphere_plane`): their
+//! committed line stays main's, so for them step 2 asserts the run agrees with it under the
+//! comparator the goldens gate with (`golden::diff`, the unit's floors), not to the bit.
 
 use std::collections::BTreeMap;
 
@@ -35,7 +36,7 @@ use serde_json::Value;
 
 use super::state::{self, Mode, Sub};
 use crate::case::{repo_root, Case, CaseContext};
-use crate::golden::{default_dir, encode, read};
+use crate::golden::{default_dir, diff, encode, read};
 use crate::rng::fnv1a64;
 use crate::units::corpus_parity::run_in_process;
 use crate::UnitDiff;
@@ -162,7 +163,19 @@ fn replay(unit_id: &str) -> usize {
             failures.push(format!("{name}: substituted row is not main's row"));
         }
         let line = run(u.as_ref(), case);
-        if golden.get(name) != Some(&line) {
+        let committed = golden.get(name);
+        if WITHIN_COMPARATOR.contains(&(unit_id, name)) {
+            // (the committed line is main's: the run agrees with it, not to the bit)
+            match committed {
+                Some(g) if g == &line => {
+                    failures.push(format!("{name}: the run is the committed line to the bit"));
+                }
+                Some(g) if diff(g, &line, u.abs_floors()).is_none() => {}
+                _ => failures.push(format!(
+                    "{name}: the row does not agree with the committed golden line"
+                )),
+            }
+        } else if committed != Some(&line) {
             failures.push(format!("{name}: the row is not the committed golden line"));
         }
     }
@@ -182,11 +195,20 @@ const WR493_REFIT: &[(&str, &str)] = &[
         "heal.stitch_p2",
         "file_revolution_mold.smb_stitchfaces_0.005",
     ),
+    ("corpus.parity", "Solids__revolution_mold.smb"),
+    ("topology.brep_p10", "read_Fillet_sphere_plane"),
     ("topology.brep_p10", "read_Solids_revolution_mold"),
     ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu21"),
     ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu33"),
     ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu45"),
     ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu9"),
+];
+
+/// The [`WR493_REFIT`] rows the retirement moves by less than the goldens' comparator:
+/// their committed line is main's, which the run agrees with but is not to the bit.
+const WITHIN_COMPARATOR: &[(&str, &str)] = &[
+    ("corpus.parity", "Solids__revolution_mold.smb"),
+    ("topology.brep_p10", "read_Fillet_sphere_plane"),
 ];
 
 macro_rules! replay_tests {
@@ -202,10 +224,10 @@ replay_tests! {
     feature_executive_rows_move_only_through_the_read_tolerances: "blend.feature_executive", 1;
     fillet_executive_p3_rows_move_only_through_the_read_tolerances: "blend.fillet_executive_p3", 30;
     fillet_removal_rows_move_only_through_the_read_tolerances: "blend.fillet_removal", 4;
-    corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 25;
+    corpus_parity_rows_move_only_through_the_read_tolerances: "corpus.parity", 26;
     stitch_p1_rows_move_only_through_the_read_tolerances: "heal.stitch_p1", 2;
     stitch_p2_rows_move_only_through_the_read_tolerances: "heal.stitch_p2", 4;
-    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 38;
+    brep_p10_rows_move_only_through_the_read_tolerances: "topology.brep_p10", 39;
     edgeuse_p3_rows_move_only_through_the_read_tolerances: "topology.edgeuse_p3", 14;
     face_p3_rows_move_only_through_the_read_tolerances: "topology.face_p3", 48;
 }
