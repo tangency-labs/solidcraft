@@ -254,6 +254,8 @@ mod plugin_images;
 pub mod plugin_install;
 pub(crate) mod plugin_menu;
 mod plugin_slots;
+#[cfg(test)]
+mod plugin_themes_tests;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;
