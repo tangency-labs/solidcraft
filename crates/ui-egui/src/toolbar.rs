@@ -1051,6 +1051,50 @@ struct RibbonShape {
     folded: bool,
 }
 
+const POP_OUT_RIBBON: &str = "sc_pop_out_ribbon";
+
+fn pop_out_ribbon_id(ctx: &egui::Context) -> egui::Id {
+    egui::Id::unique((POP_OUT_RIBBON, ctx.viewport_id()))
+}
+
+pub(crate) fn pop_out_ribbon_focus(ctx: &egui::Context) -> bool {
+    ctx.memory(|m| m.focused())
+        .and_then(|id| ctx.read_response(id))
+        .is_some_and(|response| response.layer_id == egui::LayerId::new(egui::Order::Middle, pop_out_ribbon_id(ctx)))
+}
+
+/// The usual full ribbon, painted in its own clipped layer. Its bounding box is an
+/// input shield, never an anchored shell card or an obstacle for fit.
+pub(crate) fn pop_out_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, fraction: f32, keyboard: bool) {
+    use crate::ui_kit::LayoutMode;
+    if fraction <= 0.0 || !content.is_positive() {
+        app.shell.ribbon_overlay = None;
+        return;
+    }
+    crate::workspace::sync_context(app);
+    let t = Tokens::get();
+    let height = ribbon_height(app.preferences.ribbon_labels);
+    let r = Rect::from_min_size(content.min - vec2(0.0, height * (1.0 - fraction)), vec2(content.width(), height));
+    let visible = content.intersect(r);
+    let cards = crate::ui_kit::Cards::new(r, LayoutMode::Docked, height, WORKSPACE_WIDTH);
+    let ws = Rect::from_min_size(r.min, vec2(WORKSPACE_WIDTH.min(r.width()), height - 1.0));
+    let host = Container::for_layout(LayoutMode::Docked, Surface::Chrome);
+    let previous_cards = std::mem::take(&mut app.shell.cards);
+    host.area(pop_out_ribbon_id(ui.ctx())).fixed_pos(visible.min).constrain(false).show(ui.ctx(), |ui| {
+        ui.set_min_size(visible.size());
+        ui.set_clip_rect(ui.clip_rect().intersect(content));
+        let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
+        Container::paint_frame(ui.painter(), frame, r);
+        if keyboard && ui.is_visible() && !ui.is_sizing_pass() {
+            ui.memory_mut(|memory| memory.request_focus(ui.scope_id().with("workspace_switcher")));
+        }
+        ribbon_contents(app, ui, RibbonShape { floating: false, cards, r, ws, folded: false });
+    });
+    app.shell.cards = previous_cards;
+    app.shell.ribbon_overlay = Some(visible);
+    crate::scenario::publish_rect("ribbon:pop_out", visible);
+}
+
 pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     crate::workspace::sync_context(app);
@@ -5452,6 +5496,26 @@ mod fill_width_tests {
     /// width it has. No blank run wider than one button while something is hidden, every panel
     /// on the toolbar shows its icons, the » menu only when even one button a panel won't fit,
     /// and neither the tab row nor the title bar's own controls run into each other.
+    #[test]
+    fn pop_out_ribbon_overlays_without_changing_view_bounds() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.shell.cards.clear();
+        let rect = Rect::from_min_size(pos2(0.0, 42.0), vec2(900.0, 650.0));
+        let expected = crate::shell::panel_bounds(&h.app, rect);
+        for fraction in [0.0, 0.2, 1.0, 0.0] {
+            let _ = h.ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_max(egui::Pos2::ZERO, rect.max)), ..Default::default() }, |ui| {
+                pop_out_ribbon(&mut h.app, ui, rect, fraction, false);
+                assert_eq!(crate::shell::panel_bounds(&h.app, rect), expected);
+                assert_eq!(h.app.shell.ribbon_overlay.is_some(), fraction > 0.0);
+                if let Some(overlay) = h.app.shell.ribbon_overlay {
+                    assert_eq!(overlay.top(), rect.top());
+                    assert!(crate::shell::covered(&h.app, overlay.center()));
+                }
+            });
+        }
+    }
+
     #[test]
     fn toolbar_fills_its_width_from_wide_to_narrow_windows() {
         // Either header layout: the ribbon fits the same way with search in the bar.

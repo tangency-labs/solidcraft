@@ -1,10 +1,10 @@
 //! Draws the small window shown at the top of the pop-out options menu.
 
-use crate::window_options_menu::CardHeaders;
+use crate::window_options_menu::{CardHeaders, WindowMenu};
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 
-pub(crate) fn show(ui: &mut Ui, headers: CardHeaders, max_height: f32) {
+pub(crate) fn show(ui: &mut Ui, menu: &WindowMenu<'_>, max_height: f32) {
     let width = (ui.available_width() - 16.0).max(0.0);
     let height = (width * 0.65).min(max_height);
     if height <= 0.0 || width <= 0.0 {
@@ -25,7 +25,7 @@ pub(crate) fn show(ui: &mut Ui, headers: CardHeaders, max_height: f32) {
         painter.rect_filled(window.translate(vec2(0.0, 5.0 * scale)).expand(5.0 * scale), radius, t.figure_shadow);
         painter.rect(window, radius, t.figure_ground, Stroke::new(3.0 * scale, t.border), StrokeKind::Inside);
         let preview = Painter::with_clip_rect(&painter, window);
-        miniature(&preview, window, scale, headers, t);
+        miniature(&preview, window, scale, menu, t);
     });
 }
 
@@ -55,7 +55,7 @@ fn desktop(painter: &Painter, rect: Rect, start: Color32, end: Color32) {
     painter.add(Shape::mesh(mesh));
 }
 
-fn miniature(painter: &Painter, window: Rect, scale: f32, headers: CardHeaders, t: Tokens) {
+fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>, t: Tokens) {
     let point = |x, y| window.min + vec2(x, y) * scale;
     let region = |x, y, w, h| Rect::from_min_size(point(x, y), vec2(w, h) * scale);
     let bar = region(3.0, 3.0, 894.0, 44.0);
@@ -74,7 +74,7 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, headers: CardHeaders, 
     painter.rect_filled(card.translate(vec2(0.0, 8.0 * scale)), 3, t.figure_shadow);
     painter.rect(card, 3, t.figure_card, Stroke::new(3.0 * scale, t.accent), StrokeKind::Inside);
     let header = region(636.0, 371.0, 247.0, 25.0);
-    match headers {
+    match menu.card_headers {
         CardHeaders::Always => {
             painter.rect_filled(header, 2, t.panel_header);
             painter.line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(3.0 * scale, t.border));
@@ -93,6 +93,25 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, headers: CardHeaders, 
     }
     let top = Rect::from_center_size(card.center() + vec2(0.0, 6.0 * scale), vec2(78.0, 78.0) * scale);
     painter.rect(top, 0, t.figure_face_top, Stroke::new(3.0 * scale, t.figure_line), StrokeKind::Inside);
+    if menu.ribbon {
+        let ribbon = region(3.0, 47.0, 894.0, 84.0);
+        if menu.ribbon_auto_hide {
+            painter.rect_filled(ribbon, 0, t.toolbar.gamma_multiply(0.62));
+            painter.extend(crate::dashed_line(
+                &[ribbon.left_top(), ribbon.right_top(), ribbon.right_bottom(), ribbon.left_bottom(), ribbon.left_top()],
+                window,
+                Stroke::new(3.0 * scale, t.accent),
+                14.0 * scale,
+                8.0 * scale,
+            ));
+        } else {
+            painter.rect(ribbon, 0, t.toolbar, Stroke::new(3.0 * scale, t.border), StrokeKind::Inside);
+        }
+        for x in (26..850).step_by(86) {
+            painter.rect_filled(region(x as f32, 71.0, 26.0, 29.0), 1, t.text_dim.gamma_multiply(0.40));
+            painter.rect_filled(region(x as f32 - 5.0, 110.0, 36.0, 4.0), 1, t.text_dim.gamma_multiply(0.48));
+        }
+    }
 }
 
 /// The three faces of the cube in the Layout preferences schematic share the projected

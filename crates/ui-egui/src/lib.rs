@@ -2758,6 +2758,7 @@ impl SolveApp {
             if d.wants_picks() && !self.session.selection.is_empty() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
+            self.view_windows.start_tool_panel(self.docs.current_tab());
             self.dialog = Some(d);
             return;
         }
@@ -2834,6 +2835,7 @@ impl SolveApp {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
             let extrude = matches!(d.kind, dialogs::Kind::Extrude { .. });
+            self.view_windows.start_tool_panel(self.docs.current_tab());
             self.dialog = Some(d);
             if extrude {
                 self.turn_for_extrude();
@@ -4335,8 +4337,12 @@ impl SolveApp {
         self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
         viewport::refresh_layout(self, ui.ctx());
         // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
-        view_confirm::show(self, ui.ctx());
-        dialogs::show(self, ui.ctx());
+        if self.view_windows.child_tool_owner(self.docs.current_tab()).is_none() {
+            view_confirm::show(self, ui.ctx());
+            dialogs::show(self, ui.ctx());
+        } else {
+            self.viewport.host_confirm = None;
+        }
         issue_report::CadInput::block(self, ui, report_input);
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());

@@ -102,6 +102,10 @@ pub struct TabWindowSetOptionsParams {
     pub card_headers: Option<CardHeaders>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_on_top: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ribbon: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ribbon_auto_hide: Option<bool>,
 }
 
 /// The checked request from the engine or the current state from its host.

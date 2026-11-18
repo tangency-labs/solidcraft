@@ -78,6 +78,7 @@ mod preferences_small;
 mod radial;
 pub mod recent_colors;
 mod reports;
+pub mod reveal;
 mod review;
 mod search;
 pub mod settings_search;

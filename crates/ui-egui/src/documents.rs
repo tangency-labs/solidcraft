@@ -3378,9 +3378,17 @@ mod tests {
         let third = view_duplicate(&mut app, second).unwrap();
         assert!(view_rename(&mut app, third, "Original angle"));
         let window = app.run("tab.view.move_to_window", json!({"view":third})).unwrap()["window"].clone();
+        let migrated = crate::prefs::lenient(&json!({"pop_out_window_defaults":{"card_headers":"hover","keep_on_top":true}}));
+        assert!(migrated.pop_out_window_defaults.ribbon && migrated.pop_out_window_defaults.ribbon_auto_hide);
+        assert_eq!(migrated.pop_out_window_defaults.card_headers, solidcraft_views::CardHeaders::Hover);
         let options = app.run("tab.window.options", json!({"window":window})).unwrap()["options"].clone();
-        assert_eq!(options, json!({"card_headers":"always","keep_on_top":false}));
-        let edited = app.run("tab.window.set_options", json!({"window":window, "card_headers":"hidden","keep_on_top":true})).unwrap();
+        assert_eq!(options, json!({"card_headers":"always","keep_on_top":false,"ribbon":true,"ribbon_auto_hide":true}));
+        let edited = app
+            .run(
+                "tab.window.set_options",
+                json!({"window":window,"card_headers":"hidden","keep_on_top":true,"ribbon":false,"ribbon_auto_hide":false}),
+            )
+            .unwrap();
         app.run("window.options.use_as_default", json!({"window":window})).unwrap();
         assert_eq!(serde_json::to_value(app.preferences.pop_out_window_defaults).unwrap(), edited["options"]);
         app.run("tab.view.layout", json!({"window":0,"layout":"side_by_side"})).unwrap();
