@@ -803,3 +803,105 @@ mod open_view_preference {
         assert_eq!(app.settled_cam(), before);
     }
 }
+
+/// A sketch can optionally reopen at the camera where its edit ended (#18998). This is
+/// per-design view state in the running app, never an edit to the sketch's saved geometry.
+mod remembered_sketch_views {
+    use super::*;
+    use crate::prefs::SketchOpenView;
+    use crate::scenario::Harness;
+    use solidcraft_engine::Session;
+
+    #[test]
+    fn three_modes_keep_the_old_default_and_distinguish_finish_from_cancel() {
+        assert_eq!(crate::prefs::Prefs::default().sketch_open_view, SketchOpenView::Face);
+        let mut h = Harness::new();
+        h.app = sample_app();
+        h.app.home.open = false;
+        let id = first_sketch(&h.app);
+        h.app.preferences.sketch_open_view = SketchOpenView::LastFinished;
+
+        // The first edit of this sketch still faces the sketch: it has no saved camera.
+        h.app.edit_sketch(id);
+        assert!(h.app.cam_anim.is_some(), "first edit takes the existing look-at path");
+        h.app.cam = h.app.settled_cam();
+        h.app.cam_anim = None;
+        h.app.cam.orbit(32.0, -17.0);
+        h.app.cam.pan(17.0, -7.0, 800.0);
+        let finished = h.app.cam;
+        h.app.finish_sketch();
+        h.settle();
+        assert_eq!(h.app.sketch_last_views.finished.get(&id), Some(&finished));
+        assert_eq!(h.app.sketch_last_views.last.get(&id), Some(&finished));
+
+        // A later edit opens exactly at the camera left by Finish, not at its face.
+        h.app.cam.orbit(-70.0, 25.0);
+        h.app.edit_sketch(id);
+        assert_eq!(h.app.settled_cam(), finished);
+        h.app.cam = h.app.settled_cam();
+        h.app.cam_anim = None;
+        h.app.cam.orbit(43.0, 19.0);
+        let cancelled = h.app.cam;
+        h.app.cancel_sketch();
+        h.settle();
+        assert_eq!(h.app.sketch_last_views.last.get(&id), Some(&cancelled));
+        assert_eq!(h.app.sketch_last_views.finished.get(&id), Some(&finished), "Cancel never replaces a finished view");
+
+        // Last uses a cancelled edit's camera; LastFinished ignores it.
+        h.app.preferences.sketch_open_view = SketchOpenView::Last;
+        h.app.edit_sketch(id);
+        assert_eq!(h.app.settled_cam(), cancelled);
+        h.app.cancel_sketch();
+        h.settle();
+        h.app.preferences.sketch_open_view = SketchOpenView::LastFinished;
+        h.app.edit_sketch(id);
+        assert_eq!(h.app.settled_cam(), finished);
+        h.app.finish_sketch();
+        h.settle();
+
+        // The current default can be chosen again and still faces the plane.
+        h.app.preferences.sketch_open_view = SketchOpenView::Face;
+        h.app.edit_sketch(id);
+        assert_ne!(h.app.settled_cam(), finished);
+        h.app.finish_sketch();
+        h.settle();
+    }
+
+    #[test]
+    fn one_sketchs_last_view_is_private_to_its_design_tab() {
+        let mut h = Harness::new();
+        h.app = sample_app();
+        h.app.home.open = false;
+        h.app.preferences.sketch_open_view = SketchOpenView::Last;
+        let id = first_sketch(&h.app);
+        h.app.edit_sketch(id);
+        h.app.cam = h.app.settled_cam();
+        h.app.cam_anim = None;
+        h.app.cam.orbit(25.0, 9.0);
+        let saved = h.app.cam;
+        h.app.finish_sketch();
+        h.settle();
+
+        crate::documents::open_tab(&mut h.app, Session::default()).unwrap();
+        assert!(h.app.sketch_last_views.last.is_empty(), "another design has no remembered views");
+        crate::documents::switch(&mut h.app, 0);
+        assert_eq!(h.app.sketch_last_views.last.get(&id), Some(&saved), "returning to the tab restores its own history");
+    }
+
+    #[test]
+    fn the_open_view_choice_is_a_saved_preference_and_refuses_unknown_modes() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        assert_eq!(serde_json::to_value(SketchOpenView::Face).unwrap(), json!("face"));
+        assert_eq!(serde_json::to_value(SketchOpenView::Last).unwrap(), json!("last"));
+        assert_eq!(serde_json::to_value(SketchOpenView::LastFinished).unwrap(), json!("last_finished"));
+        for choice in ["last", "last_finished", "face"] {
+            let changed = h.call("ui.prefs", json!({"sketch_open_view":choice}));
+            assert_eq!(changed["ok"], true, "{changed}");
+            assert_eq!(serde_json::to_value(h.app.preferences.sketch_open_view).unwrap(), json!(choice));
+        }
+        let refused = h.call("ui.prefs", json!({"sketch_open_view":"never"}));
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(h.app.preferences.sketch_open_view, SketchOpenView::Face);
+    }
+}

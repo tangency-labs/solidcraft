@@ -583,6 +583,33 @@ pub struct PreSketchView {
     pub facing: Camera,
 }
 
+/// Cameras left by each sketch in the active design tab. Kept in that design's slot on tab
+/// switches, never shared with a different design's same-numbered feature (#18998).
+#[derive(Default)]
+pub(crate) struct SketchLastViews {
+    /// Most recent exit, including Cancel.
+    last: std::collections::BTreeMap<u64, Camera>,
+    /// Most recent Finish: cancelling a later edit must not replace this camera.
+    finished: std::collections::BTreeMap<u64, Camera>,
+}
+
+impl SketchLastViews {
+    fn to_open(&self, sketch: u64, mode: prefs::SketchOpenView) -> Option<Camera> {
+        match mode {
+            prefs::SketchOpenView::Face => None,
+            prefs::SketchOpenView::Last => self.last.get(&sketch).copied(),
+            prefs::SketchOpenView::LastFinished => self.finished.get(&sketch).copied(),
+        }
+    }
+
+    fn closed(&mut self, sketch: u64, cam: Camera, finished: bool) {
+        self.last.insert(sketch, cam);
+        if finished {
+            self.finished.insert(sketch, cam);
+        }
+    }
+}
+
 /// The active component (and placement) before a sketch opened inside another one (#8127), and
 /// the component the sketch opened in.
 #[derive(Clone, Debug, PartialEq)]
@@ -652,6 +679,8 @@ pub struct SolveApp {
     /// The views around opening the open sketch. Leaving it goes back to the earlier one as the
     /// "When a sketch ends" preference says (#7038).
     pub pre_sketch_cam: Option<PreSketchView>,
+    /// Per-sketch last and last-finished views of this design tab (not saved into the model).
+    pub(crate) sketch_last_views: SketchLastViews,
     /// The view from before Extrude turned it to isometric (#9176); the view goes back to it when
     /// the dialog closes, as the "and back when it closes" preference says.
     pub pre_extrude_cam: Option<Camera>,
@@ -1038,6 +1067,7 @@ impl SolveApp {
             view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_cam: None,
+            sketch_last_views: Default::default(),
             pre_extrude_cam: None,
             pre_command_cam: None,
             pre_sketch_component: None,
@@ -1699,7 +1729,7 @@ impl SolveApp {
                 self.plugin_inspection_versions.insert((self.session.uid, id.to_owned()), control_job::next_plugin_inspection());
             }
             match id {
-                "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
+                "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64), id == "sketch.finish"),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
                 "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
                     if let Some(tool) = self.tool.as_mut() {
@@ -3063,10 +3093,18 @@ impl SolveApp {
     /// opens" preference is off, and remember the view from `before` it and the one facing it for
     /// when the sketch ends (#7038). Returns whether the view turned.
     pub(crate) fn look_at_opened_sketch(&mut self, before: Camera) -> bool {
-        let turn = self.preferences.sketch_open_look_at;
-        if turn {
+        // A new sketch has no saved view; it still uses the existing Look At preference.
+        // Editing an existing sketch can opt into the camera it was last left with (#18998).
+        let remembered = self.session.active_sketch.and_then(|sketch| self.sketch_last_views.to_open(sketch, self.preferences.sketch_open_view));
+        let turn = if let Some(to) = remembered {
+            self.animate_to(to);
+            true
+        } else if self.preferences.sketch_open_look_at {
             dialogs::look_at_sketch(self);
-        }
+            true
+        } else {
+            false
+        };
         self.pre_sketch_cam = self.session.active_sketch.map(|sketch| PreSketchView { sketch, before, facing: self.settled_cam() });
         turn
     }
@@ -3150,7 +3188,13 @@ impl SolveApp {
     }
 
     /// Successful UI and programmatic exits share the same window cleanup.
-    fn sketch_closed(&mut self, open: Option<u64>) {
+    fn sketch_closed(&mut self, open: Option<u64>, finished: bool) {
+        // Only a successful exit supplies the sketch id. A cancelled brand-new sketch no
+        // longer exists and must not leave a camera for an unrelated later feature.
+        if let Some(id) = open.filter(|id| self.session.doc.feature(*id).is_some()) {
+            let cam = self.settled_cam();
+            self.sketch_last_views.closed(id, cam, finished);
+        }
         self.take_sketch_exit();
         self.tool = None;
         dim_view::cancel();
