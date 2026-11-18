@@ -272,11 +272,18 @@ fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::c
         let run: Vec<usize> = (i..j).map(|x| (r + x) % n).collect();
         let plain: Vec<Seg2> = run.iter().filter_map(|x| segs.get(*x).copied()).collect();
         let full = k0.and_then(|(ci, k, fwd)| exact.get(&ci).and_then(|e| e.get(k)).map(|s| if fwd { *s } else { s.reversed() }));
+        // A run over every piece in order is the whole segment only from end to end: one that
+        // starts or stops at a crossing inside its first or last piece (a split piece keeps its
+        // tag) has as many pieces but is a part of it (#17462).
         let whole = match (full, tags.get(run[0]).copied().flatten()) {
-            (Some(_), Some(((_, _, _, cnt), fwd))) if run.len() == cnt => {
+            (Some(seg), Some(((_, _, _, cnt), fwd))) if run.len() == cnt => {
                 let order: Vec<usize> = run.iter().filter_map(|x| tags.get(*x).copied().flatten().map(|((_, _, p, _), _)| p)).collect();
                 let want: Vec<usize> = if fwd { (0..cnt).collect() } else { (0..cnt).rev().collect() };
-                order == want
+                let ends = match (plain.first(), plain.last()) {
+                    (Some(a), Some(b)) => a.start().dist(seg.start()) < MERGE_TOL && b.end().dist(seg.end()) < MERGE_TOL,
+                    _ => false,
+                };
+                order == want && ends
             }
             _ => false,
         };
@@ -1675,8 +1682,12 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
                 let mut ps = vec![a];
                 ps.extend(ts.iter().map(|t| sh.point(*t)));
                 ps.push(b);
-                // Pieces split by other curves no longer stand for their whole piece.
-                let tag = if ts.is_empty() { tags.get(k).copied().flatten() } else { None };
+                // Pieces split by other curves keep their free-form segment's tag, so a loop that
+                // turns at the crossing gets the exact sub-segment up to the true crossing
+                // ([`restore_exact`]) rather than the polyline chord to it (#17462). A run that
+                // starts or stops at such a crossing is never the whole segment there: it does not
+                // run from the segment's start to its end.
+                let tag = tags.get(k).copied().flatten();
                 for (piece, w) in ps.windows(2).enumerate() {
                     let (p, q) = (w[0], w[1]);
                     if p.dist(q) > MERGE_TOL {
@@ -2735,6 +2746,70 @@ mod tests {
         let inside = profiles.iter().find(|p| !p.outer_curves.contains(&bulge)).unwrap();
         assert!(lens.area > 0.1 && lens.area < inside.area * 0.2, "{} of {}", lens.area, inside.area);
         assert!(lens.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-6), "{:?}", lens.region.outer.segs);
+    }
+
+    /// #17462: a spline crossing a circle bounds both regions with its exact sub-curve up to the
+    /// true crossings. The polyline pieces the circle splits lost their spline's tag, so each
+    /// loop bridged from the last whole piece to the crossing with a straight chord, a sliver
+    /// face on the extruded wall that a fillet along the spline then ran into.
+    #[test]
+    fn a_spline_crossing_a_circle_keeps_its_exact_curve_to_the_crossings() {
+        let mut sk = Sketch::new();
+        let circle = sk.add_circle(Vec2::new(0.0, 0.0), 5.0, None, None).unwrap();
+        let controls = [(0.5, -8.0), (6.0, -3.0), (6.5, 3.5), (1.0, 8.0)];
+        let pts = controls.into_iter().map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
+        let spline =
+            sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+        let (circle, spline) = (sk.curves[circle].id.clone(), sk.curves[spline].id.clone());
+        let profiles = find_profiles(&sk);
+        assert_eq!(profiles.len(), 2, "the lens outside the spline and the rest of the disc: {profiles:?}");
+        // Together they are the disc: neither loop takes more or less of the spline.
+        let area: f64 = profiles.iter().map(|p| p.area).sum();
+        assert!((area - 25.0 * std::f64::consts::PI).abs() < 1e-6, "{area}");
+        for p in &profiles {
+            assert!(p.outer_curves.contains(&circle) && p.outer_curves.contains(&spline), "{:?}", p.outer_curves);
+            let segs = &p.region.outer.segs;
+            assert!(!segs.iter().any(|s| matches!(s, Seg2::Line { .. })), "no chord stands in for the spline: {segs:?}");
+            assert!(p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "{segs:?}");
+            for s in segs.iter().filter(|s| matches!(s, Seg2::Cubic { .. })) {
+                for end in [s.start(), s.end()] {
+                    assert!((end.len() - 5.0).abs() < 1e-9, "the spline's ends in the loop are its crossings: {end:?}");
+                }
+            }
+        }
+    }
+
+    /// #17462: a split piece keeps its free-form tag, so a loop that enters a spline at a
+    /// crossing inside its first piece and leaves it at one inside its last has as many
+    /// pieces, in order, as the whole spline. It is still only the part between the crossings:
+    /// the regions either side of a line cut close to the spline's ends add up to the uncut
+    /// region.
+    #[test]
+    fn a_loop_between_crossings_in_a_splines_end_pieces_takes_only_the_part_between_them() {
+        let lens = |cut: bool| {
+            let mut sk = Sketch::new();
+            let (a, b) = (sk.add_point(Vec2::new(0.0, 0.0), None).unwrap(), sk.add_point(Vec2::new(10.0, 0.0), None).unwrap());
+            let (c, d) = (sk.add_point(Vec2::new(0.0, 6.0), None).unwrap(), sk.add_point(Vec2::new(10.0, 6.0), None).unwrap());
+            sk.add_curve(
+                CurveKind::Spline { pts: vec![a, c, d, b], control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() },
+                None,
+            )
+            .unwrap();
+            sk.add_line_pts(a, b, None).unwrap();
+            if cut {
+                // y = 0.1 meets the spline at t ~ 0.0056 and 0.9944, inside its first and last
+                // polyline pieces (about 0.011 of t each): the arch above it is the spline from
+                // the one crossing to the other, as many pieces in order as the whole spline.
+                sk.add_line(Vec2::new(-1.0, 0.1), Vec2::new(11.0, 0.1), None, None, None).unwrap();
+            }
+            find_profiles(&sk)
+        };
+        let whole = lens(false);
+        assert_eq!(whole.len(), 1, "{whole:?}");
+        let cut = lens(true);
+        assert_eq!(cut.len(), 2, "{cut:?}");
+        let sum: f64 = cut.iter().map(|p| p.area).sum();
+        assert!((sum - whole[0].area).abs() < 1e-9 * whole[0].area, "{sum} vs {}", whole[0].area);
     }
 
     /// #6896: past the edge limit, the old single search dropped profiles silently. The limit

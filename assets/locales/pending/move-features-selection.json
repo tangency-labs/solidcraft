@@ -1,0 +1,20 @@
+{
+  "en": {
+    "ui.move_features_needs_features": "Select the features to move in the Browser or the History first, then Move Features to Component moves them into the active component."
+  },
+  "ar": {
+    "ui.move_features_needs_features": "حدّد أولاً الميزات المراد نقلها في المستعرض أو السجل، ثم ينقلها «نقل الميزات إلى مكوّن» إلى المكوّن النشط."
+  },
+  "he": {
+    "ui.move_features_needs_features": "בחרו קודם את הפיצ'רים להעברה בעץ התכן או בציר הזמן, ואז \"העברת פיצ'רים לרכיב\" מעבירה אותם לרכיב הפעיל."
+  },
+  "ja": {
+    "ui.move_features_needs_features": "まずブラウザまたは履歴で移動するフィーチャーを選択してください。「フィーチャーをコンポーネントに移動」でアクティブなコンポーネントに移動します。"
+  },
+  "vi": {
+    "ui.move_features_needs_features": "Trước tiên hãy chọn các tính năng cần di chuyển trong Trình duyệt hoặc Lịch sử, sau đó Di chuyển các tính năng vào cụm chi tiết sẽ đưa chúng vào cụm chi tiết đang hoạt động."
+  },
+  "zh": {
+    "ui.move_features_needs_features": "请先在浏览器或历史中选择要移动的特征，然后“将特征移至组件”会将它们移入活动组件。"
+  }
+}

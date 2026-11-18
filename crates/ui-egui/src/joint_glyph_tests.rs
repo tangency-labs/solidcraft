@@ -106,3 +106,26 @@ fn piled_up_glyphs_fade_but_a_picked_one_does_not() {
     assert_eq!(picked[0].id, glue);
     assert!(!glyph(&picked, glue).faded && glyph(&picked, hinge).faded, "{picked:?}");
 }
+
+/// Pointer motion over a still view that lights up nothing new needs no frame, but reaching a
+/// joint glyph does: its tooltip names the joint at the pointer. A frame with the pointer on a
+/// glyph is not quiet either, so leaving the glyph hides the tooltip.
+#[test]
+fn moving_onto_a_glyph_needs_a_frame_for_its_tooltip() {
+    let mut h = harness();
+    let plan = plan_at(&mut h, 120.0);
+    // A glyph on a face (the hinge's sits on a corner, which lights up alone).
+    let (on_glyph, near) = plan
+        .iter()
+        .map(|g| (g.centre, crate::test_support::lit_alike_around(&h, g.centre, |p| joint_glyph_at(&plan, p).is_some())))
+        .find(|(_, near)| near.len() >= 2)
+        .expect("a glyph on something larger than it");
+    h.frame_with(vec![egui::Event::PointerMoved(near[0])]);
+    h.frames(2);
+    assert!(h.app.viewport.quiet_motion.is_some(), "a still view, only hovered");
+    assert!(crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, near[1]), "the same item, off every glyph");
+    assert!(!crate::viewport::follow_pointer_without_frame(&mut h.app, &h.ctx, on_glyph), "onto the glyph");
+    h.frame_with(vec![egui::Event::PointerMoved(on_glyph)]);
+    h.frames(2);
+    assert!(h.app.viewport.quiet_motion.is_none(), "the pointer on a glyph: its tooltip follows it");
+}

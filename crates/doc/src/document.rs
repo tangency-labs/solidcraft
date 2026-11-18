@@ -906,6 +906,12 @@ pub enum FeatureKind {
         /// smoothly at its ends, as far as they go), or only the picked edges.
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         tangent_chain: bool,
+        /// Each picked edge's own radius, in the order of `edges`, all rounded in one blend
+        /// (`radius` is then the first edge's). Empty, the default: every edge takes `radius`.
+        /// A constant-radius, exact, rolling-corner, mitred fillet of the picked edges alone.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = |_i: usize, _n: usize| "Edge radius")]
+        edge_radii: Vec<Expr>,
     },
     Chamfer {
         edges: Vec<Position>,
@@ -2249,8 +2255,9 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         copy_frames: Vec<crate::Mat>,
     },
-    /// A non-parametric base feature: bodies imported from a STEP file. The STEP text is kept
-    /// in the design (it is the B-rep), so the design reopens without the original file.
+    /// A non-parametric base feature: bodies imported from a STEP file, or from a file read
+    /// through cadmpeg as B-rep records. The STEP text or the records are kept in the design
+    /// (they are the B-rep), so the design reopens without the original file.
     Import {
         /// Source file name (display only).
         file: String,
@@ -2265,6 +2272,11 @@ pub enum FeatureKind {
         /// component (#1386). Empty in designs from before format 22: every body is built.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skip: Vec<u64>,
+        /// The import kept as B-rep records instead of STEP text (a FreeCAD or Rhino file read
+        /// through cadmpeg's neutral model), `step` then empty; shared like `step`. Designs
+        /// from before `format/pending/import-records.rs` have none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        records: Option<std::sync::Arc<solidcraft_kernel::ImportRecords>>,
     },
     /// Rebuild an upstream mesh as a solid: analytic planar/cylindrical faces for a
     /// constant-section part, planar facets for any other closed mesh.
@@ -2337,6 +2349,12 @@ pub enum FilletTurn {
 /// constant rounds of one radius, at its own corners only.
 pub const SWEPT_TAKES: &str = "a swept corner turns two constant rounds of one radius: `turn: swept` takes `type: constant`, \
 `corner: rolling`, no `setbacks` and `fit: exact` or `reduce`";
+
+/// Why per-edge radii are refused with a fillet's other options: the kernel rounds each picked
+/// edge at its own constant radius, exactly, rolling and mitred at the corners, and the radii
+/// follow the picks one for one.
+pub const EDGE_RADII_TAKE: &str = "each edge at its own radius (`edge_radii`) is a constant round of the picked edges alone: \
+it takes `type: constant`, `fit: exact`, `corner: rolling`, no `setbacks`, `turn: mitre` and `tangent_chain: false`";
 
 impl FilletTurn {
     pub fn is_mitre(&self) -> bool {

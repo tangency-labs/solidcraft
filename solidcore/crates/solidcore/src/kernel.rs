@@ -645,34 +645,6 @@ pub struct UpstreamFixes {
     /// `sm_IsInterior`, `sm_AreOverlapping`, `sm_WhichPVToCombine`) (WR-662, #2009 group
     /// C; tangency-labs/smlib bcc6f01). Off by default for pinned parity.
     pub ssi_proto_topology_statuses_pass_on: bool,
-    /// `SmCone::CreateIsoCircleFromPoint` as the SolidCraft fork has it (WR-704;
-    /// tangency-labs/smlib 1279539, with 672a437's `SER` on the NURB conversion): the
-    /// circle's STEP height is the reference point's projection onto the axis clamped to
-    /// the cone's height interval, instead of the height an inversion of the point moved
-    /// onto the cone finds, and a failed NURB conversion is returned instead of read.
-    /// Past the apex end of a cone whose apex is an end (within the tolerance the call
-    /// accepts), that point is on the far nappe: the inversion mirrors it through the
-    /// apex and comes back with a height outside the cone, and the circle fails with
-    /// `SM_ERR`, failing `SmSphere::IntersectWithCone` for a sphere crossing the cone's
-    /// line just past its apex. Other points within the tolerance past an end also get
-    /// that end's circle. On an unbounded cone of negative semi-angle the fork's circle
-    /// is at the point's axial height over the cosine of the semi-angle, not at that
-    /// height; the WR record lists the cases this flag changes. Off by default for
-    /// pinned parity.
-    pub cone_iso_circle_at_axial_height: bool,
-    /// Unbounded `SmCone`s are parameterised as their NURB is (WR-713, #2313). The
-    /// unbounded constructor rotates the generator by a negative semi-angle too, not only
-    /// a positive one, and a cone of negative semi-angle runs from `-SM_INFINITE_PARAMETER`
-    /// up to its apex (above the origin) instead of from the apex up, so it is the cone
-    /// through its base circle, not a cylinder of the base radius cut off above the apex.
-    /// `ConvertUVFromSTEPToNURBS` and `ConvertUVFromNURBSToSTEP` map the height of an
-    /// inside-out unbounded cone onto its NURB's reversed height interval, as for a
-    /// bounded cone, instead of negating it: the NURB runs over the STEP heights
-    /// reversed, not over their negatives. Upstream's iso circle through a point at
-    /// height 1 on an inside-out unbounded cone is then near `SM_INFINITE_PARAMETER`,
-    /// its NURB-parameter points disagree with its NURB, and a negative-angle unbounded
-    /// cone holds none of its points below the apex. Off by default for pinned parity.
-    pub cone_unbounded_parameterized_as_nurb: bool,
     /// A boolean vertex takes its position from the intersection curve that crosses its edge most steeply (WR-410, #1059).
     pub boolean_vertex_by_best_crossing: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057). Curved pieces only: a straight interval along a straight edge is always classified, by a certificate on its two ends (the distance is affine along it), with or without this flag.
@@ -699,10 +671,6 @@ pub struct UpstreamFixes {
     pub fillet_trace_reaches_rails: bool,
     /// `SmFilletGeom::TrimRailCurves` trims a rail at its own knot next to the parameter its end vertex drops to, inside the trim, when the rail between the two is no longer than the target B-rep's zone tolerance (`sm_SnapRailEndToKnot`): a trim there left an end span shorter than the tolerance with coincident control points, an internal point singularity of the rail and of the face curves trimmed with it, which the body check refuses. It happens where the rail stands still at a face's boundary past its end and where the section's other rail crosses its side edge there (WR-664; the fork's tangency-labs/smlib@7d79866).
     pub fillet_rail_trim_at_near_knot: bool,
-    /// `SmAdvSurfaceIntersector::FindInteriorCurves` traces a start point whose surface normals are within 5 degrees (guess) or 2 degrees (solution) on probation instead of skipping it, keeping the trace only when it closes into a crossing loop whose box diagonal exceeds twice the tolerance; starts below `2 tol / model size` radians are still skipped and rejected traces (and their start points) are remembered so neighbouring starts are not retraced. A small loop between nearly tangent surfaces (a plane just above a NURBS paraboloid's apex) was otherwise never found (WR-79 part 2, #396; the fork's tangency-labs/smlib@1f5c0f7 (was 30d25bf)).
-    pub ssi_low_angle_start_on_probation: bool,
-    /// `SmSurfaceIntersector` traces an open tangent curve once: `AddStartPoint` keeps one start point per cluster of tangent boundary start points (`IsSameTangentCluster`), a finished trace removes the clusters at its ends (`DoIntersection`), `TraceCurve` runs its "already traced" test on a first step that snapped onto another start point, and a near-tangent trace stops at the free end of a curve already found instead of running over it (WR-76, #392; the SolidCraft fork's tangency-labs/smlib@920da20 (was 0ce09f2)).
-    pub ssi_trace_tangent_curves_once: bool,
     /// `DoIntersection` traces the tangential intersection curves the marcher cannot follow (the surfaces touch along them, `n1 x n2 = 0`), and the crossing branches through the contact points where crossing curves meet, which it reports as touching points (WR-75; tangency-labs/smlib ef4ab25, e9fde8f, d8c61db, 1693c9d). `FindInteriorCurves` keeps the node pairs it skips for parallel normals as seeds. A crossing branch the marcher's curve covers except inside the band where the surfaces are within tolerance of each other is dropped, not traced on along a tangency past that curve's end (#2089).
     pub ssi_tangent_curve_tracer: bool,
     /// `SmPointClassification::GetGap3d(pOptSurface)` returns `Err(SM_ERR)` (and propagates
@@ -781,7 +749,8 @@ pub struct UpstreamFixes {
     pub brep_ray_classifies_current_trims: bool,
     /// A vertex that ends a seam edge (an edge one face use runs along twice,
     /// [`crate::topology::vertex::seam_edge`]) stays on its seam through a boolean. A
-    /// vertex definition on it is put onto the seam at the seam's point under the
+    /// vertex definition on it, or on a seam edge it will split (an edge crossing the seam
+    /// within tolerance, #18689), is put onto the seam at the seam's point under the
     /// position `SmVertexDefinition::Resolve` works out, and when
     /// `GlueCoincidentBrepVertices` merges the vertices of one proto vertex it keeps the
     /// operand's own seam vertex over another's. Upstream moves a seam's vertex towards
@@ -1075,6 +1044,14 @@ pub struct Kernel {
     /// ([`crate::blend::definition_check`]), for the check that every blend face is a
     /// definition. `None` (the default) marks and keeps nothing; it changes no result.
     pub blend_face_log: Option<crate::blend::definition_check::BlendFaceLog>,
+    /// Not upstream; diagnostic, tests only: while `Some`, each Coons corner patch made
+    /// tangent to its sides appends the record of its refinement (every candidate, its
+    /// stations and side angles, and the one kept), for tests that replay the choice.
+    /// No library code reads it. `None` (the default)
+    /// keeps nothing; it changes no result. A [`RefCell`] so the corner blend can append
+    /// through the `&Kernel` it takes (the kernel stays `Send`).
+    pub coons_tangency_log:
+        RefCell<Option<Vec<crate::nurbs::b_spline_surface_n_lib::p2::CoonsTangencyLog>>>,
     /// Not upstream: the profiler of the operations run on this kernel (feature
     /// `profile`; [`crate::profile`]). It only observes: no result reads it. Shared with
     /// the kernel copies an operation makes for its caches, which record into the same
@@ -1120,6 +1097,7 @@ impl Kernel {
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
+            coons_tangency_log: RefCell::new(None),
             #[cfg(feature = "profile")]
             profiler: crate::profile::Profiler::default(),
         }

@@ -20,6 +20,9 @@ pub mod browser;
 pub mod browser_canvas;
 mod browser_defects;
 pub mod browser_prompts;
+pub mod browser_search;
+#[cfg(test)]
+mod browser_search_tests;
 pub mod canvas;
 pub mod cli_link;
 #[cfg(test)]
@@ -2809,6 +2812,20 @@ impl SolveApp {
             let _ = self.run_heavy(id, json!({}));
             return;
         }
+        // Move Features to Component takes the features selected in the Browser or the History,
+        // into the active component; started with none, it says so instead of the command's
+        // "`features` must list 1...1000 features" (#18702).
+        if id == "component.move_features" {
+            let features = timeline::selected_feature_ids(self);
+            if features.is_empty() {
+                let hint = self.tr("ui.move_features_needs_features").to_owned();
+                self.set_status(hint, true);
+                self.restore_command_tab();
+            } else if self.run(id, json!({ "features": features })).is_err() {
+                self.restore_command_tab();
+            }
+            return;
+        }
         // Change Part Size with no standard part selected (its dialog had nothing to open on).
         if id == "parts.resize" {
             dialogs_part_size::needs_a_part(self);
@@ -3976,6 +3993,11 @@ impl SolveApp {
         finite_input(raw);
         self.hold_click_after_typing(raw);
         issue_report::hold_input(self, raw);
+        // Over a quiet view, pointer motion asks egui for no frame after this one: the window
+        // asked for this one only if the motion lit up something new
+        // (`viewport::follow_pointer_without_frame`). Queued control-channel input keeps the frames
+        // coming as before, one pointer event a frame.
+        raw.repaint_on_pointer_move = self.viewport.quiet_motion.is_none() || !self.synthetic.is_empty() || !self.held_click.is_empty();
     }
 
     /// A pointer button after typing in the same frame (a slow frame) waits for the next frame,
