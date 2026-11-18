@@ -48,7 +48,7 @@ fn assert_strict_keeps_todays_errors(cases: &[(&str, Value)]) {
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<TrimParams>(), &["at", "curve", "sketch"]);
     assert_keys(input_schema_for::<TrimPathParams>(), &["dry_run", "points", "sketch"]);
-    assert_keys(input_schema_for::<BreakParams>(), &["at", "curve", "points", "sketch"]);
+    assert_keys(input_schema_for::<BreakParams>(), &["at", "at_intersections", "curve", "points", "sketch"]);
     assert_keys(input_schema_for::<ExtendParams>(), &["at", "curve", "curves", "sketch"]);
     assert_keys(input_schema_for::<FilletParams>(), &["a", "b", "point", "points", "radius", "sketch"]);
     assert_keys(input_schema_for::<ChamferEqualParams>(), &["a", "b", "distance", "point", "points", "sketch"]);
@@ -285,6 +285,8 @@ fn the_types_read_each_key_as_the_handler_does() {
     assert_eq!(warnings("sketch.break", json!({"curve": "l1", "points": [[0, 1]]})), none);
     assert_eq!(warnings("sketch.break", json!({"curve": "l1", "points": [[0, 1]], "at": 5})), none);
     assert_eq!(warnings("sketch.break", json!({"curve": "l1", "at": [0, 1]})), none);
+    assert_eq!(warnings("sketch.break", json!({"curve": "l1", "at": [0, 1], "at_intersections": false})), none);
+    assert_eq!(warnings("sketch.break", json!({"curve": "l1", "at": [0, 1], "at_intersections": 5})), ["`at_intersections` must be true or false"]);
     assert_eq!(warnings("sketch.break", json!({"curve": "l1", "at": 5})), ["`at` must be a point [x, y]"]);
     assert_eq!(warnings("sketch.break", json!({"curve": "l1", "points": null, "at": [0, 1]})), ["`points` must be a list of points"]);
     assert_eq!(warnings("sketch.break", json!({"curve": "l1", "points": [5]})), ["`points` must contain [x, y] points"]);

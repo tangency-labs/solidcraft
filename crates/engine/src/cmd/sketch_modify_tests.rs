@@ -692,14 +692,15 @@ fn trimming_at_a_held_midpoint_on_an_unrelated_line_adds_no_hold_to_that_line() 
 /// centre point, which stays where the diagonals cross.
 #[test]
 fn breaking_a_center_rectangle_diagonal_at_its_centre_keeps_one_centre() {
-    for (diagonal, at) in [(0, [7.5, 4.25]), (1, [7.5, -0.25])] {
+    // A click directly on the centre must reuse the same point as a break at the surrounding intersections.
+    for (diagonal, at, at_intersections) in [(0, [7.5, 4.25], true), (1, [7.5, -0.25], true), (0, [3.0, 2.0], false), (1, [3.0, 2.0], false)] {
         let mut s = new_sketch();
         run(&mut s, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [12, 6.5]}));
         let sk = sketch(&s);
         let diagonals: Vec<String> = sk.curves.iter().filter(|c| c.construction).map(|c| c.id.clone()).collect();
         assert_eq!(diagonals.len(), 2, "{diagonals:?}");
         let (cut, other) = (diagonals[diagonal].clone(), diagonals[1 - diagonal].clone());
-        run(&mut s, "sketch.break", json!({"curve": cut, "at": at}));
+        run(&mut s, "sketch.break", json!({"curve": cut, "at": at, "at_intersections": at_intersections}));
         let sk = sketch(&s);
         let at_centre = sk.points.iter().filter(|p| p.pos.dist(Vec2::new(3.0, 2.0)) < 1e-7).count();
         assert_eq!(at_centre, 1, "diagonal {cut}: {} points at the centre", at_centre);

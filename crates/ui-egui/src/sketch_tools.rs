@@ -1340,11 +1340,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
         Mode::CurveAt => {
             let curve = active_sketch(app).and_then(|active| {
                 hits.iter().find_map(|hit| match hit {
-                    Hit::SketchCurve { sketch, id, .. } if *sketch == active => Some(id.clone()),
+                    Hit::SketchCurve { sketch, id, straight, .. } if *sketch == active => Some((id.clone(), *straight)),
                     _ => None,
                 })
             });
-            if let (Some(id), Some((p, _))) = (curve, at) {
+            if let (Some((id, straight)), Some((p, _))) = (curve, at) {
                 if cmd == "sketch.extend" && EXTEND_PAIR.with(Cell::get) {
                     // The pair chord picks the two curves to extend to where they meet: the first
                     // click remembers its curve and point (in point_picks, which nothing draws for
@@ -1371,7 +1371,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 } else {
                     tool.picks.clear();
                     tool.point_picks.clear();
-                    let _ = app.run(cmd, json!({"curve": id, "at": xy(p)}));
+                    let mut params = json!({"curve": id, "at": xy(p)});
+                    if cmd == "sketch.break" && straight {
+                        params["at_intersections"] = json!(false);
+                    }
+                    let _ = app.run(cmd, params);
                 }
             }
         }

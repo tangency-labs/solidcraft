@@ -379,10 +379,14 @@ pub struct BreakParams {
     #[schemars(with = "String")]
     pub curve: Option<String>,
     /// A point near the place to break, in mm: the curve is split at the crossings either side
-    /// of it. Used when `points` is not given.
+    /// of it by default. Used when `points` is not given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Point2")]
     pub at: Option<Vec2>,
+    /// With `at`, split at the surrounding intersections (default: true). When false, split
+    /// once at the projected position. A shared endpoint still detaches.
+    #[serde(default)]
+    pub at_intersections: Option<bool>,
     /// Positions to break at, 1 to 1000, in mm, projected onto the curve; duplicates are
     /// merged. When this key is there, `at` is not used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -407,7 +411,8 @@ impl BreakParams {
         let sketch = sketch_of(p)?;
         let curve = text(p, "curve", "`curve` must be a curve id")?;
         let at = if points.is_some() { None } else { point(p, "at", "`at` must be a point [x, y]")? };
-        Ok(BreakParams { curve, at, points, sketch })
+        let at_intersections = if points.is_some() { None } else { flag(p, "at_intersections")? };
+        Ok(BreakParams { curve, at, at_intersections, points, sketch })
     }
 }
 

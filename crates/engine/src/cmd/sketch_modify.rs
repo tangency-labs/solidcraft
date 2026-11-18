@@ -130,7 +130,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_break")
         .enabled(in_sketch)
-        .params(concat!("curve: id, at: [x,y] (split at intersections; at a point where the curve ends and another curve meets, the curve gets its own end there and the two are no longer joined) | points: [[x,y]…] (1…1000 positions projected onto the curve; duplicates are merged)", created_doc!())),
+        .params(concat!("curve: id, at: [x,y], at_intersections?: bool (default true: split at surrounding crossings; false: split once at the projected point; at a point where the curve ends and another curve meets, the curve gets its own end there and the two are no longer joined) | points: [[x,y]…] (1…1000 positions projected onto the curve; duplicates are merged)", created_doc!())),
     CommandSpec::new("sketch.scale", "Sketch Scale", crate::checked!("sketch.scale", scale))
         .in_sketch_part()
         .contract(&SCALE_CONTRACT)
@@ -1063,6 +1063,7 @@ const BREAK_GAP: f64 = 1e-6;
 fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.break";
     let points = if p.get("points").is_some() { Some(vec2_list(cmd, p, "points", MAX_BREAK_POINTS)?) } else { None };
+    let at_intersections = bool_(p, "at_intersections").unwrap_or(true);
     let model_edit = s.open_drawing.is_none();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
@@ -1078,7 +1079,11 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
                 super::sketch_freeform::break_at_points(sk, ci, points, cmd)?
             } else {
                 let at = req_vec2(cmd, p, "at")?;
-                super::sketch_freeform::trim_or_break(sk, ci, at, false, cmd)?
+                if at_intersections {
+                    super::sketch_freeform::trim_or_break(sk, ci, at, false, cmd)?
+                } else {
+                    super::sketch_freeform::break_at_points(sk, ci, &[at], cmd)?
+                }
             };
             if model_edit {
                 doc.prune_model_params();
@@ -1098,8 +1103,18 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
             (v, vec![None; n])
         } else {
             let at = req_vec2(cmd, p, "at")?;
-            let (cuts, _) = bracket(sk, ci, sh.param(sh.project(at)));
-            (cuts.iter().map(|c| c.0).collect(), cuts.iter().map(|c| Some(c.2)).collect())
+            let q = sh.project(at);
+            let t = sh.param(q);
+            if at_intersections {
+                let (cuts, _) = bracket(sk, ci, t);
+                (cuts.iter().map(|c| c.0).collect(), cuts.iter().map(|c| Some(c.2)).collect())
+            } else {
+                // A pick on a crossing keeps its point attached to that cutter. Elsewhere
+                // the two pieces meet at the picked position with no tie to a nearby curve.
+                let cut = cut_points(sk, ci).into_iter().find(|(_, crossing, _)| crossing.dist(q) < BREAK_GAP);
+                let (t, cutter) = cut.map_or((t, None), |(t, _, cutter)| (t, Some(cutter)));
+                (vec![t], vec![cutter])
+            }
         };
         let (t0, t1) = sh.range();
         if ts.is_empty() || (!sh.is_full() && ts.iter().any(|t| *t <= t0 || *t >= t1)) {

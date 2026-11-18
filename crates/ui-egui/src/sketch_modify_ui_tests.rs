@@ -9,6 +9,7 @@
 //! spacing.
 
 use serde_json::json;
+use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 
@@ -16,6 +17,41 @@ use crate::dialogs::{Kind, apply_commands};
 use crate::scenario::Harness;
 use crate::selection::{AXES, CURVES, POINTS, SelInput};
 use crate::sketch_modify_ui::{Mod, commands};
+
+/// Break once between crossings, on an isolated line, and on a crossing itself. The
+/// selected line keeps its first piece and undo restores the entire sketch in one step.
+#[test]
+fn break_click_splits_the_line_at_the_picked_point() {
+    for (crossings, pick) in [(true, 50.0), (false, 50.0), (true, 40.0)] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0,0], [100,0]], "ids": ["target"], "infer": false})).unwrap();
+        if crossings {
+            for x in [20, 40, 70] {
+                h.app.run("sketch.line", json!({"points": [[x,-10], [x,10]], "infer": false})).unwrap();
+            }
+        }
+        h.call("ui.view", json!({"view": "top"}));
+        h.call("ui.view", json!({"view": "fit"}));
+        h.settle();
+        let sid = h.app.session.active_sketch.unwrap();
+        let before = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+        h.step(&json!({"start": "sketch.break"})).unwrap();
+        h.step(&json!({"click": {"sketch": [pick,0]}})).unwrap();
+        let state = h.app.session.model.state();
+        let after = &state.sketch(sid).unwrap().sketch;
+        assert_eq!(after.curves.len(), before.curves.len() + 1, "one split at {pick}, crossings={crossings}");
+        let target = after.curve_index("target").unwrap();
+        let (start, split) = after.curves[target].kind.ends().unwrap();
+        let (other_start, end) = after.curves.last().unwrap().kind.ends().unwrap();
+        assert_eq!(split, other_start);
+        assert!(after.point(split).unwrap().dist(Vec2::new(pick, 0.0)) < 1e-6);
+        assert_eq!((start, end), before.curves[target].kind.ends().unwrap());
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.model.state().sketch(sid).unwrap().sketch, before);
+    }
+}
 
 #[test]
 fn existing_patterns_reopen_from_menu_and_badge_and_edit_without_changing_surviving_ids() {
