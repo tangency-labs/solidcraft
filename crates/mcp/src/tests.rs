@@ -4695,12 +4695,93 @@ fn execute_forwards_a_screw_head_to_a_hole_and_describes_it() {
     assert!(rel(volume(&mut s), want) < 1e-6, "a refused hole changes nothing");
 }
 
+#[test]
+fn ordinary_tool_calls_do_not_look_up_plugin_tools() {
+    let (addr, seen) = scripted_app(|req| {
+        assert_ne!(req["params"]["command"], "plugin.tools", "an ordinary call must not query plugins");
+        json!({"ok": true, "result": {"plugin_tools": true}})
+    });
+    let remote = crate::Remote::new(&addr, Some("0123456789abcdef0123456789abcdef"));
+    let mut s = Server::new(Box::new(remote));
+    tool(&mut s, "save", json!({"path": "part.solidcraft"}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}));
+    tool(&mut s, "new_design", json!({}));
+    let unknown = raw_tool(&mut s, "no_such_tool", json!({}));
+    assert_eq!(unknown["error"]["code"], -32602, "{unknown}");
+    assert_eq!(seen.lock().unwrap().1, ["mcp.options", "engine.execute file.save", "engine.execute solid.box", "engine.execute file.new"]);
+}
+
+#[test]
+fn plugin_listing_without_an_advertised_capability_keeps_the_session_working() {
+    for capabilities in [
+        json!({"ok": true, "result": {}}),
+        json!({"ok": true, "result": {"plugin_tools": false}}),
+        json!({"ok": false, "error": "unknown method `control.capabilities`"}),
+    ] {
+        let (addr, seen) = scripted_app(move |req| {
+            assert_ne!(req["params"]["command"], "plugin.tools", "an unsupported command could close the connection");
+            if req["method"] == "control.capabilities" { capabilities.clone() } else { json!({"ok": true, "result": {}}) }
+        });
+        let remote = crate::Remote::new(&addr, Some("0123456789abcdef0123456789abcdef"));
+        let mut s = Server::new(Box::new(remote));
+        for _ in 0..2 {
+            let listed = call(&mut s, 1, "tools/list", json!({}));
+            assert!(listed["result"]["tools"].as_array().unwrap().iter().all(|t| t["plugin"].is_null()));
+        }
+        let unknown = raw_tool(&mut s, "fixture.entry", json!({}));
+        assert_eq!(unknown["error"]["code"], -32602, "{unknown}");
+        tool(&mut s, "new_design", json!({}));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.0, 1, "the same connection remains usable");
+        assert_eq!(seen.1, ["mcp.options", "control.capabilities", "engine.execute file.new"]);
+    }
+}
+
+#[test]
+fn advertised_remote_plugin_tools_are_read_afresh_for_listings_and_calls() {
+    let enabled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let installed = enabled.clone();
+    let (addr, seen) = scripted_app(move |req| {
+        let result = if req["method"] == "control.capabilities" {
+            json!({"plugin_tools": true})
+        } else if req["params"]["command"] == "plugin.tools" {
+            let tools = if installed.load(std::sync::atomic::Ordering::SeqCst) {
+                vec![json!({"name":"fixture.entry","plugin":"fixture","entry":"entry","kind":"command",
+                    "effect":"read","approval":"approved","input_schema":{"type":"object","properties":{}}})]
+            } else {
+                Vec::new()
+            };
+            json!({"tools": tools})
+        } else {
+            json!({})
+        };
+        json!({"ok": true, "result": result})
+    });
+    let remote = crate::Remote::new(&addr, Some("0123456789abcdef0123456789abcdef"));
+    let mut s = Server::new(Box::new(remote));
+    for _ in 0..2 {
+        let listed = call(&mut s, 1, "tools/list", json!({}));
+        assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t["name"] == "fixture.entry"));
+    }
+    tool(&mut s, "fixture.entry", json!({}));
+    enabled.store(false, std::sync::atomic::Ordering::SeqCst);
+    let removed = raw_tool(&mut s, "fixture.entry", json!({}));
+    assert_eq!(removed["error"]["code"], -32602, "{removed}");
+    let sent = seen.lock().unwrap();
+    assert_eq!(sent.1.iter().filter(|s| *s == "control.capabilities").count(), 1);
+    assert_eq!(sent.1.iter().filter(|s| *s == "engine.execute plugin.tools").count(), 5);
+    assert_eq!(sent.1.iter().filter(|s| *s == "engine.execute fixture.entry").count(), 1);
+}
+
 struct PluginToolsBackend {
     entries: usize,
     calls: Vec<(String, Value)>,
 }
 
 impl crate::Backend for PluginToolsBackend {
+    fn supports_plugin_tools(&mut self) -> bool {
+        true
+    }
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
         self.calls.push((method.into(), params.clone()));
         if method == "engine.execute" && params["command"] == "plugin.tools" {

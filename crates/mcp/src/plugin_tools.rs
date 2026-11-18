@@ -25,6 +25,9 @@ pub fn is_plugin_tool(name: &str) -> bool {
 /// The installed, enabled plugins' tools as `plugin.tools` lists them; none when the app or
 /// session answering has no such command (an older app) or no plugins.
 fn listed(b: &mut dyn Backend, name: Option<&str>) -> Result<Vec<Value>, String> {
+    if !b.supports_plugin_tools() {
+        return Ok(Vec::new());
+    }
     let params = match name {
         Some(name) => json!({"name": name}),
         None => json!({}),
@@ -95,6 +98,11 @@ fn definition(t: &Value) -> Option<Value> {
 /// The plugin tools for `tools/list`, after the built-in ones.
 pub fn definitions(b: &mut dyn Backend) -> Vec<Value> {
     listed(b, None).unwrap_or_default().iter().filter_map(definition).collect()
+}
+
+/// A plugin tool's current definition, without listing unrelated tools.
+pub fn definition_for(b: &mut dyn Backend, name: &str) -> Option<Value> {
+    listed(b, Some(name)).ok()?.iter().find(|t| t["name"].as_str() == Some(name)).and_then(definition)
 }
 
 /// Run plugin tool `name`: its arguments checked against the entry's declared schema, then the

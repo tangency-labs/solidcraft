@@ -356,6 +356,10 @@ checked as strictly as a command's; a missing grant or a `read` entry's refused 
 naming it, also as `structuredContent.plugin_error`. See [Plugins as tools for
 agents](plugins.md#plugins-as-tools-for-agents).
 
+Ordinary tool calls do not query plugin tools. A bridge queries `plugin.tools` only when the
+app advertises `plugin_tools: true` in `control.capabilities`; older apps keep their built-in
+tools without a plugin query. Plugin listings and plugin calls read the entries afresh.
+
 **`expect`** on `batch` and `execute` turns the verify step into part of the build. An agent
 computes the volume, body count or bounding box a stage should produce before building it;
 instead of a `measure` call and a comparison by hand after every stage, it gives them to the

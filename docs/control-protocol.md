@@ -578,7 +578,9 @@ connection's own request. `{"running": []}` when the app is idle.
 version has, so a client can find out before it relies on it: `{"param_check": ["off", "warn",
 "strict"]}`, the levels a request's own `param_check` takes (below). It is answered at once, like
 `control.running`, also on a `busy` connection. An app older than it answers ``unknown method
-`control.capabilities` ``; a feature added later is listed here too.
+`control.capabilities` ``; a feature added later is listed here too. `plugin_tools: true`
+advertises the `plugin.tools` command. Clients query that command only when advertised;
+an absent or false flag means there are no plugin tools to list or call.
 
 Any request's `params` may carry `allow_paths: ["/abs/folder", …]`: every file that request
 reads, writes or deletes (command paths such as `file.export`'s `path` or `doc.recovery_*`'s

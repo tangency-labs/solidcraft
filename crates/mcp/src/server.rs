@@ -147,6 +147,15 @@ impl Tools for Agent {
         tools
     }
 
+    fn definition(&mut self, name: &str) -> Option<Value> {
+        self.listed = self.options();
+        if crate::plugin_tools::is_plugin_tool(name) {
+            crate::plugin_tools::definition_for(self.backend.as_mut(), name)
+        } else {
+            tool_definitions_with(self.listed).into_iter().find(|t| t["name"].as_str() == Some(name))
+        }
+    }
+
     fn call(&mut self, name: &str, args: &Value) -> Value {
         let options = self.listed;
         // The open design's folder counts, and goes on counting for the rest of this run when a
