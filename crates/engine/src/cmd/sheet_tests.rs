@@ -3955,22 +3955,22 @@ fn flanges_go_on_a_curved_outline_folded_across_its_straight_part() {
     assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "volume {v} vs the flat's {}: {f}", t2_volume_from_flat(&f));
 }
 
-/// A sharp corner in the zone stays refused, by name: the material beside it wouldn't hang from
-/// anything. A fold clear of it, on the same outline, folds. Where the lines run smoothly into the
-/// arc is no corner.
+/// A stepped end wraps its corners onto the bend; the remote arc stays exact in the flat.
 #[test]
-fn a_corner_of_a_curved_outline_in_the_zone_is_named() {
+fn a_corner_of_a_curved_outline_in_the_zone_folds() {
     let stepped = vec![
         ("sketch.line", json!({"points": [[0, 50], [-20, 50], [-20, 30], [-60, 30], [-60, -30], [-20, -30], [-20, -50], [0, -50]]})),
         ("sketch.arc.three_point", json!({"start": [0, -50], "through": [50, 0], "end": [0, 50]})),
     ];
-    let mut s = Session::default();
-    t2_curved_blank(&mut s, &stepped, "0.4");
-    match s.execute("sheet.fold", &json!({"points": [[-20, -200, 2], [-20, 200, 2]], "fixed": [40, 0, 2]})) {
-        Ok(v) => panic!("the zone holds the corners at x = -20: {v}"),
-        Err(e) => assert!(e.to_string().contains("corner of the sheet's outline"), "{e}"),
+    for x in [-20, 0] {
+        let mut s = Session::default();
+        t2_curved_blank(&mut s, &stepped, "0.5");
+        let flat_volume = volume(&mut s);
+        run(&mut s, "sheet.fold", json!({"points": [[x, -200, 2], [x, 200, 2]], "fixed": [40, 0, 2]}));
+        assert!(rel(volume(&mut s), flat_volume) < 3e-4);
+        run(&mut s, "sheet.unfold", json!({}));
+        assert!(rel(volume(&mut s), flat_volume) < 3e-4);
     }
-    run(&mut s, "sheet.fold", json!({"points": [[0, -200, 2], [0, 200, 2]], "fixed": [40, 0, 2]}));
 }
 
 /// A circle or an ellipse cut out across a fold that crosses slanted edges, before the fold or in

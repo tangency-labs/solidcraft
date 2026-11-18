@@ -1502,7 +1502,7 @@ struct CurvedFold {
 
 /// `outline` cut into the side short of the zone between the lines at `s0` and `s0 + ba` along `n`,
 /// the zone, and the side past it. It must run from one side through the zone to the other and
-/// back through the zone, once: a notch, several tabs on the line or a zone that reaches the
+/// back through the zone, once: several tabs on the line or a zone that reaches the
 /// outline's tip is `None`. Both of the zone's ends count as torn: their edges aren't square across.
 fn curved_fold(outline: &Loop2, n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<CurvedFold> {
     const ON_LINE: f64 = 1e-6;
@@ -5630,7 +5630,7 @@ impl SheetBody {
     /// flange the side toward its own bend does. `flip` folds the other way. A `fixed` point that
     /// touches no material still picks the side it lies on, and sets `warning` (see
     /// [`FOLD_FIXED_OFF_SHEET`]). The outline may cross the zone on straight slanted edges or on
-    /// any curve; a sharp corner in the zone is refused, by name.
+    /// any curve, including chains of straight edges with corners inside the zone.
     #[allow(clippy::too_many_arguments)]
     pub fn add_fold(
         &mut self,
@@ -5777,7 +5777,7 @@ impl SheetBody {
             return self.fold_tabs(panel, (&pts, &outline), (n, d), (s0, ba), span, (angle, radius), &strips);
         }
         // The bend zone is a rectangle across the panel, or straight edges of the sheet slant
-        // across it, or curved ones do. Those ends fold to helices and curves, as torn ends and
+        // across it, or chains of edges do. Those ends fold to helices and curves, as torn ends and
         // cut-outs across a bend do.
         let us: Vec<f64> = strip.iter().map(|q| q.dot(d)).collect();
         let (u0, u1) = (us.iter().cloned().fold(f64::MAX, f64::min), us.iter().cloned().fold(f64::MIN, f64::max));
@@ -5785,16 +5785,19 @@ impl SheetBody {
         let mut zone_shape = None;
         // An outline with curves is cut exactly, wherever the curves are, so they stay as drawn in
         // the flat pattern; a cut that doesn't come out whole falls back on the chords.
-        let cut = if outline.segs.iter().all(|e| matches!(e, Seg2::Line { .. })) { None } else { curved_fold(&outline, n, d, s0, ba) };
+        let mut cut = if outline.segs.iter().all(|e| matches!(e, Seg2::Line { .. })) { None } else { curved_fold(&outline, n, d, s0, ba) };
         if ((u1 - u0) * ba - signed_area(&strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
             if let Some(slanted) = slanted_zone(&strip, n, d, s0, ba) {
                 ends = slanted;
             } else {
-                // A corner of the outline inside the zone (e.g. a fold right at a tab's root): name
-                // it and how far the line has to move to clear it.
+                cut = cut.or_else(|| curved_fold(&outline, n, d, s0, ba));
+                // If the outline cannot be split into two panels and one zone, name the corner
+                // and how far the line has to move to clear it.
                 let corners: Vec<(Vec2, f64)> =
                     outline_corners(&outline).into_iter().map(|q| (q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
-                if let Some(&(c, _)) = corners.first() {
+                if cut.is_none()
+                    && let Some(&(c, _)) = corners.first()
+                {
                     let on = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(*s));
                     let back = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(ba - *s));
                     let w = apply_point(&self.world(panel), Vec3::new(c.x, c.y, self.t));
@@ -7842,6 +7845,41 @@ mod tests {
             ("spline", Loop2 { segs: spline }),
             ("D", Loop2 { segs: d_shape }),
         ]
+    }
+
+    #[test]
+    fn a_fold_wraps_an_outline_notch_inside_its_bend_zone() {
+        let v = |x, y| Vec2::new(x, y);
+        let outline =
+            Loop2::polygon(&[v(0.0, 0.0), v(40.0, 0.0), v(40.0, 20.0), v(21.0, 20.0), v(21.0, 16.0), v(19.0, 16.0), v(19.0, 20.0), v(0.0, 20.0)]);
+        for deg in [72.0_f64, 90.0, 108.0] {
+            for flip in [false, true] {
+                let mut s = base_flange("Body1", "AL2", &alu(), Plane::XY, Region2 { outer: outline.clone(), holes: vec![] });
+                s.add_fold(
+                    Vec3::new(20.0, -1.0, 2.0),
+                    Vec3::new(20.0, 21.0, 2.0),
+                    deg.to_radians(),
+                    1.0,
+                    "centerline",
+                    flip,
+                    Some(Vec3::new(0.0, 10.0, 2.0)),
+                    &mut None,
+                )
+                .unwrap();
+                let body = s.solid().unwrap();
+                assert!(body.validity().is_empty(), "{deg}°, flip {flip}: {:?}", body.validity());
+                assert_eq!(body.shell_count(), 1);
+                // A 40 × 20 plate less a 2 × 4 notch, 2 mm thick, K = 0.5.
+                assert!((vol(&body) / (792.0 * 2.0) - 1.0).abs() < 1e-4, "{deg}°, flip {flip}: {}", vol(&body));
+                let flat = s.flat_regions().unwrap();
+                assert_eq!(flat.len(), 1);
+                assert!(flat[0].holes.is_empty());
+                assert!((flat[0].area() - 792.0).abs() < 1e-6);
+                for (a, b) in [(&outline, &flat[0].outer), (&flat[0].outer, &outline)] {
+                    assert!(loop_lies_on(a, &b.segs));
+                }
+            }
+        }
     }
 
     #[test]
