@@ -1424,6 +1424,76 @@ pub fn views_info(app: &SolveApp, design: usize) -> Vec<(DesignView, bool)> {
     views_of(app, design).map(|set| set.views().iter().map(|view| (view.clone(), view.id == set.active().id)).collect()).unwrap_or_default()
 }
 
+pub(crate) fn visible_view_ids(app: &SolveApp) -> Vec<u64> {
+    let views = &app.docs.views;
+    views.tiles().filter(|_| views.is_tiled()).map_or_else(|| vec![views.active().id], solidcraft_views::Tiles::views)
+}
+
+/// Copy only the linked components to other visible Model cameras in this window.
+pub(crate) fn link_visible_cameras(app: &mut SolveApp, source: u64, camera: Camera, before: Option<Camera>) {
+    use solidcraft_views::CameraLinkMode::{Both, Orientation, Zoom};
+    let mode = app.docs.views.camera_link();
+    let orientation = matches!(mode, Both | Orientation)
+        && before.is_none_or(|before| (before.yaw, before.pitch, before.roll) != (camera.yaw, camera.pitch, camera.roll));
+    let zoom = matches!(mode, Both | Zoom) && before.is_none_or(|before| (before.half_height() - camera.half_height()).abs() > 1e-9);
+    if !(orientation || zoom)
+        || !app.docs.views.is_tiled()
+        || !camera.is_valid()
+        || !app.docs.views.get(source).is_some_and(|view| view.kind == ViewKind::Model)
+    {
+        return;
+    }
+    let active = app.docs.views.active().id;
+    for id in visible_view_ids(app).into_iter().filter(|id| *id != source) {
+        let Some(view) = app.docs.views.get(id).filter(|view| view.kind == ViewKind::Model) else { continue };
+        let mut to = if id == active { app.cam } else { view.spec.map_or(app.cam, |spec| spec.camera) };
+        if orientation {
+            (to.yaw, to.pitch, to.roll) = (camera.yaw, camera.pitch, camera.roll);
+        }
+        if zoom {
+            let scale = to.half_height() / to.distance;
+            if scale.is_finite() && scale > 0.0 {
+                to.distance = (camera.half_height() / scale).clamp(1e-3, 1e7);
+            }
+        }
+        if id == active {
+            app.cam = to;
+            app.cam_anim = None;
+            app.pending_fit = None;
+        } else if let Some(look) = app.docs.navigation.get_mut(&id) {
+            look.motion.cam_anim = None;
+            look.motion.pending_fit = None;
+        }
+        app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(to));
+    }
+}
+
+pub(crate) fn align_linked_cameras(app: &mut SolveApp) {
+    let view = app.docs.views.active();
+    let source = if view.kind == ViewKind::Model {
+        Some((view.id, app.cam))
+    } else {
+        visible_view_ids(app).into_iter().find_map(|id| {
+            let view = app.docs.views.get(id)?;
+            (view.kind == ViewKind::Model).then(|| (id, view.spec.map_or(app.cam, |spec| spec.camera)))
+        })
+    };
+    if let Some((id, camera)) = source {
+        link_visible_cameras(app, id, camera, None);
+    }
+}
+
+pub(crate) fn sync_linked_active(app: &mut SolveApp) {
+    let view = app.docs.views.active();
+    if view.kind != ViewKind::Model || !app.docs.views.is_tiled() || app.docs.views.camera_link() == solidcraft_views::CameraLinkMode::Off {
+        return;
+    }
+    let id = view.id;
+    let before = view.spec.map(|spec| spec.camera);
+    link_visible_cameras(app, id, app.cam, before);
+    app.docs.views.set_spec(id, solidcraft_viewport::ViewSpec::new(app.cam));
+}
+
 /// How many views each design has, in tab order (the count badge of a tab with more than one).
 pub fn view_counts(app: &SolveApp) -> Vec<usize> {
     (0..app.docs.count()).map(|design| views_of(app, design).map_or(1, ViewSet::len)).collect()
@@ -1472,7 +1542,10 @@ pub(crate) fn view_picture_window_owners(app: &SolveApp) -> std::collections::Ha
 /// Carry out a checked `tab.view.*` command (`v`: the engine's echo of its parameters) on the
 /// shown design, and return the reply with what was done filled in: the engine holds no views.
 pub(crate) fn view_command(app: &mut SolveApp, command: &str, v: Value) -> Result<Value, String> {
-    if matches!(command, "tab.view.layout" | "tab.view.beside" | "tab.view.open") {
+    if matches!(
+        command,
+        "tab.view.layout" | "tab.view.beside" | "tab.view.open" | "tab.view.equal_sizes" | "tab.view.link" | "tab.view.reset_cameras"
+    ) {
         let requested = v.get("window").and_then(Value::as_u64).and_then(|id| u32::try_from(id).ok());
         return crate::view_windows::with_strip(app, requested, |app| view_command_local(app, command, v));
     }
@@ -1522,7 +1595,24 @@ fn view_command_local(app: &mut SolveApp, command: &str, mut v: Value) -> Result
         "tab.view.layout" => {
             let preset = v.get("layout").and_then(Value::as_str).and_then(solidcraft_views::Preset::from_key).ok_or("unknown layout")?;
             let shown = view_layout(app, preset);
+            align_linked_cameras(app);
             v["shown"] = json!(shown);
+            None
+        }
+        "tab.view.equal_sizes" => {
+            app.docs.views.equal_sizes();
+            v["shown"] = json!(visible_view_ids(app).len());
+            None
+        }
+        "tab.view.link" => {
+            let params = serde_json::from_value::<solidcraft_engine::schema::tab_views::TabViewLinkParams>(v).map_err(|error| error.to_string())?;
+            app.docs.views.set_camera_link(params.mode.into());
+            align_linked_cameras(app);
+            return serde_json::to_value(params).map_err(|error| error.to_string());
+        }
+        "tab.view.reset_cameras" => {
+            crate::view_tiles::reset_cameras(app);
+            v["shown"] = json!(visible_view_ids(app).len());
             None
         }
         "tab.view.beside" => {
@@ -2512,7 +2602,7 @@ const SWITCHER_MENU: [crate::app_bar::TabMenuRow<'static>; 4] = [
 ];
 
 /// A view's name for [`crate::workspace::view_icon_colour`] and [`crate::workspace::view_accent_tab`].
-fn kind_word(kind: ViewKind) -> &'static str {
+pub(crate) fn kind_word(kind: ViewKind) -> &'static str {
     match kind {
         ViewKind::Model => "Model",
         ViewKind::Sketch => "Sketch",
@@ -2673,6 +2763,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         .map(|row| if row.id == crate::design_view_ui::MOVE_TO_WINDOW_MENU.id { row.with_children(&window_rows) } else { row })
         .collect();
     let layout_menu = crate::design_view_ui::layout_menu();
+    let view_layout = app.preferences.clear_view_tabs.then(|| crate::design_view_ui::window_layout(app));
     let layout_current = if app.docs.views.is_tiled() {
         match app.docs.views.tiles().and_then(solidcraft_views::Tiles::preset_kind) {
             Some(solidcraft_views::Preset::SideBySide) => "layout.side_by_side",
@@ -2736,6 +2827,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .map(|(r, place)| (place, crate::app_bar::TabRename { text: &mut r.text, focused: &mut r.focused, max: solidcraft_views::MAX_NAME })),
             plus_menu: &plus_menu,
             layout_menu: &layout_menu,
+            view_layout: view_layout.as_ref(),
             layout_current,
             layout_tip: solidcraft_ui_text::tr_label("Show views together"),
             layout_fill: app.docs.layout_fill.key(),
@@ -3313,6 +3405,56 @@ mod tests {
         assert_eq!(moved["window"], 0);
         assert_eq!(app.docs.views.active().id, second);
         assert!(app.docs.views.check());
+    }
+
+    #[test]
+    fn layout_menu_commands_link_visible_cameras_without_changing_their_projection() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.run("tab.view.layout", json!({"layout":"side_by_side","window":0})).unwrap();
+        let active = app.docs.views.active().id;
+        let other = visible_view_ids(&app).into_iter().find(|id| *id != active).unwrap();
+        let mut perspective = app.docs.views.get(other).unwrap().spec.unwrap().camera;
+        perspective.fov = 0.5;
+        app.docs.views.set_spec(other, solidcraft_viewport::ViewSpec::new(perspective));
+        let initial_angle = perspective.yaw;
+        let hidden = view_duplicate(&mut app, active).unwrap();
+        assert!(focus_view(&mut app, active));
+        let hidden_spec = app.docs.views.get(hidden).unwrap().spec;
+
+        app.cam.set_view(solidcraft_viewport::StandardView::Left);
+        app.run("tab.view.link", json!({"window":0,"mode":"orientation"})).unwrap();
+        let changed = app.docs.views.get(other).unwrap().spec.unwrap().camera;
+        assert_ne!(changed.yaw, initial_angle);
+        assert_eq!((changed.yaw, changed.pitch), (app.cam.yaw, app.cam.pitch));
+        assert_eq!(changed.distance, perspective.distance);
+        assert_eq!(changed.fov, perspective.fov);
+        assert_eq!(app.docs.views.get(hidden).unwrap().spec, hidden_spec);
+
+        app.run("tab.view.link", json!({"window":0,"mode":"zoom"})).unwrap();
+        app.cam.set_view(solidcraft_viewport::StandardView::Top);
+        app.cam.zoom_at(0.5, None);
+        sync_linked_active(&mut app);
+        let zoomed = app.docs.views.get(other).unwrap().spec.unwrap().camera;
+        assert_eq!(zoomed.yaw, changed.yaw);
+        assert_eq!(zoomed.fov, perspective.fov);
+        assert!((zoomed.half_height() - app.cam.half_height()).abs() < 1e-9);
+        assert_eq!(app.run("tab.view.equal_sizes", json!({"window":0})).unwrap()["shown"], 2);
+        assert_eq!(app.run("tab.view.reset_cameras", json!({"window":0})).unwrap()["shown"], 2);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn clean_window_only_changes_the_requested_window() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let main = app.docs.views.active().id;
+        let other = view_duplicate(&mut app, main).unwrap();
+        let child = app.run("tab.view.move_to_window", json!({"view":other})).unwrap()["window"].clone();
+        assert_eq!(app.run("tab.window.clean", json!({"window":child,"on":true})).unwrap()["on"], true);
+        let levels = app.run("tab.window.list", json!({})).unwrap();
+        assert_eq!(levels["windows"][0]["level"], "full");
+        assert_eq!(levels["windows"][1]["level"], "clean");
+        assert_eq!(app.run("tab.window.clean", json!({"window":child})).unwrap()["on"], false);
+        assert_eq!(app.run("tab.window.list", json!({})).unwrap()["windows"][1]["level"], "views_only");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

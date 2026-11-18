@@ -105,6 +105,46 @@ pub struct TabViewLayoutParams {
     pub window: Option<u32>,
 }
 
+/// `tab.view.equal_sizes` and `tab.view.reset_cameras` act on the tiles in one window.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabViewWindowParams {
+    /// The target window. Defaults to the last focused window.
+    #[serde(default)]
+    pub window: Option<u32>,
+}
+
+/// Which camera components are linked across the visible Model views.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TabViewLinkMode {
+    Off,
+    Orientation,
+    Zoom,
+    Both,
+}
+
+impl From<TabViewLinkMode> for solidcraft_views::CameraLinkMode {
+    fn from(mode: TabViewLinkMode) -> Self {
+        match mode {
+            TabViewLinkMode::Off => Self::Off,
+            TabViewLinkMode::Orientation => Self::Orientation,
+            TabViewLinkMode::Zoom => Self::Zoom,
+            TabViewLinkMode::Both => Self::Both,
+        }
+    }
+}
+
+/// `tab.view.link`: choose which camera components the visible Model views share.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TabViewLinkParams {
+    /// The target window. Defaults to the last focused window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<u32>,
+    pub mode: TabViewLinkMode,
+}
+
 /// `tab.view.beside`: show another view beside the active one.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
