@@ -315,3 +315,42 @@ fn issue_18801_closed_shell_absorbs_square_bosses() {
     let got = volume(&k, &mut result).unwrap();
     assert!((got - want).abs() <= 1e-6 * want, "{got} vs {want}");
 }
+
+/// A short, wide boss still contains cavity above the inset block: its artificial
+/// attachment plane is not an exposed face and must not be offset as a bottom.
+/// With wall 2, the block cavity is 36*26*16. A 3-wide branch contributes nothing;
+/// an 8-by-8 branch contributes (8-4)*(8-4)*height, even at height 0.5.
+/// A second 3-by-10-by-5 boss on the same support always contributes no cavity;
+/// closing its footprint must preserve the wider boss's neighboring footprint.
+#[test]
+fn issue_18801_branch_extinction_requires_crossed_exposed_planes() {
+    for (width, depth, height, extra_cavity) in [
+        (3.0, 10.0, 5.0, 0.0),
+        (8.0, 8.0, 0.5, 4.0 * 4.0 * 0.5),
+        (8.0, 8.0, 5.0, 4.0 * 4.0 * 5.0),
+    ] {
+        let mut k = Kernel::default();
+        let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+        let boss = create_box(&mut k, Point3::new(16.0, 10.0, 20.0), width, depth, height).unwrap();
+        let body = boolean_union(&mut k, block, boss).unwrap();
+        let narrow = create_box(&mut k, Point3::new(3.0, 10.0, 20.0), 3.0, 10.0, 5.0).unwrap();
+        let body = boolean_union(&mut k, body, narrow).unwrap();
+        let want = 40.0 * 30.0 * 20.0 + 3.0 * 10.0 * 5.0 + width * depth * height
+            - (36.0 * 26.0 * 16.0 + extra_cavity);
+        let mut result = shell(&mut k, body, -2.0, &[])
+            .unwrap_or_else(|e| panic!("boss {width} x {depth} x {height}: {e:?}"));
+        solidcore::topology::integrity::check(&result).unwrap();
+        assert!(brep_is_manifold_solid(&result).unwrap());
+        let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+        assert!(
+            check.is_valid(),
+            "boss {width} x {depth} x {height}: {:?}",
+            check.failures().collect::<Vec<_>>()
+        );
+        let got = volume(&k, &mut result).unwrap();
+        assert!(
+            (got - want).abs() <= 1e-6 * want,
+            "boss {width} x {depth} x {height}: {got} vs {want}"
+        );
+    }
+}
