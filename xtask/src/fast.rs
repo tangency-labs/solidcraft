@@ -15,8 +15,12 @@
 //! 4. `cargo clippy --workspace --all-targets --profile ci -- -D warnings`, as `cargo xtask ci`
 //!    runs it (and reusing its build), so a change that breaks a dependent crate still fails.
 //! 5. The selected packages' tests, with nextest's `ci` profile (no heavy tests).
-//! 6. For changed solidcore/ crates: their clippy and tests and solidcore's wasm check
-//!    (solidcore/AGENTS.md §4).
+//! 6. When solidcore/ code changed, as solidcore/AGENTS.md §4 asks: clippy over the whole
+//!    solidcore workspace; the tests of every solidcore crate except `goldens` and
+//!    `solidcore-ops` (the slow ones), which are tested only when the change touches them (a
+//!    break often shows in a crate the change did not touch); solidcore's wasm check; and, for
+//!    a kernel change, the goldens of the units named with `--units` (a hint when none are).
+//!    The kernel rig and the publish dry run are left to CI.
 //!
 //! Every step runs even when one fails: all failures are listed at the end.
 
@@ -25,13 +29,27 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-const USAGE: &str = "usage: cargo xtask fast [--base REF] [-p PACKAGE]... [--no-tests] [--list] [-- TEST ARGS]";
+const USAGE: &str = "usage: cargo xtask fast [--base REF] [-p PACKAGE]... [--units ID,...] [--no-tests] [--list] [-- TEST ARGS]";
+
+/// nextest's options for the workspace tests: CI's for a pull request. The `ci` profile's default
+/// filter leaves out the heavy tests, and `-E` the action matrix sample, which pull requests leave
+/// to the merge queue too (.github/workflows/ci.yml, "Run tests").
+const WORKSPACE_NEXTEST: [&str; 6] = ["--cargo-profile", "ci", "--profile", "ci", "-E", "not (binary(action_matrix) & test(=action_matrix_sample))"];
+
+/// solidcore crates whose tests are slow (the goldens crate's own tests are about three quarters of
+/// the suite's time, solidcore-ops' about a tenth): tested only when the change touches them.
+const SOLIDCORE_SLOW: [&str; 2] = ["goldens", "solidcore-ops"];
+
+/// solidcore crates that no goldens run reads: a change to only these is not a kernel change.
+const SOLIDCORE_TOOLS: [&str; 2] = ["diagnostics", "xtask"];
 
 /// The parsed command line.
 #[derive(Debug, Default, PartialEq)]
 struct Options {
     base: Option<String>,
     packages: Vec<String>,
+    /// The kernel units whose goldens to run (the PR's `Units:` line).
+    units: Vec<String>,
     no_tests: bool,
     /// Print what would be checked and tested, and stop.
     list: bool,
@@ -45,6 +63,15 @@ fn parse(args: &[&str]) -> Result<Options, String> {
         match *a {
             "--base" => o.base = Some(it.next().ok_or(USAGE)?.to_string()),
             "-p" | "--package" => o.packages.push(it.next().ok_or(USAGE)?.to_string()),
+            "--units" => {
+                let list = it.next().ok_or(USAGE)?;
+                for id in list.split(',').map(str::trim) {
+                    if id.is_empty() {
+                        return Err(format!("--units takes unit ids separated by commas, got `{list}`\n{USAGE}"));
+                    }
+                    o.units.push(id.to_string());
+                }
+            }
             "--no-tests" => o.no_tests = true,
             "--list" => o.list = true,
             "--" => {
@@ -87,7 +114,10 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
         // solidcore/AGENTS.md §4 tests solidcore itself for any kernel change.
         sel.solidcore.insert("solidcore".into());
     }
-    report(&paths, &sel);
+    let sc_names: BTreeSet<String> = sc_dirs.iter().map(|(_, n)| n.clone()).collect();
+    let sc_tests = if o.packages.is_empty() { solidcore_suite(&sc_names, &sel.solidcore) } else { sel.solidcore.clone() };
+    let kernel = kernel_changed(&sel);
+    report(&paths, &sel, &sc_tests, kernel, &o.units);
     if o.list {
         for p in &paths {
             println!("  {p}");
@@ -138,10 +168,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     if o.no_tests {
         println!("fast: --no-tests: tests skipped");
     } else if !sel.packages.is_empty() {
-        step(
-            "tests",
-            run_tests(crate::cargo(), "", nextest, &["--cargo-profile", "ci", "--profile", "ci"], &["--profile", "ci"], &sel.packages, &o.test_args),
-        );
+        step("tests", run_tests(crate::cargo(), "", nextest, &WORKSPACE_NEXTEST, &["--profile", "ci"], &sel.packages, &o.test_args));
     }
     if sel.full && !o.no_tests {
         println!("fast: the change can also affect packages whose files did not change: CI tests them all; name some with -p");
@@ -149,10 +176,8 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
 
     if !sel.solidcore.is_empty() {
         let mut c = solidcore_cargo(&sc_root);
-        c.args(["clippy", "--all-targets"]);
-        add_packages(&mut c, &sel.solidcore);
-        c.args(["--", "-D", "warnings"]);
-        step("solidcore clippy", crate::run(c, &format!("(solidcore) cargo clippy {} --all-targets -- -D warnings", flags(&sel.solidcore))));
+        c.args(["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]);
+        step("solidcore clippy", crate::run(c, "(solidcore) cargo clippy --workspace --all-targets -- -D warnings"));
         if !o.no_tests {
             // CI's profile for solidcore's tests: optimised, with debug assertions.
             let nextest = has_nextest(solidcore_cargo(&sc_root));
@@ -164,7 +189,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
                     nextest,
                     &["--cargo-profile", "goldens"],
                     &["--profile", "goldens"],
-                    &sel.solidcore,
+                    &sc_tests,
                     &o.test_args,
                 ),
             );
@@ -172,10 +197,13 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
         let mut c = solidcore_cargo(&sc_root);
         c.args(["check", "-p", "solidcore", "--target", "wasm32-unknown-unknown"]);
         step("solidcore wasm", crate::run(c, "(solidcore) cargo check -p solidcore --target wasm32-unknown-unknown"));
-        println!(
-            "fast: for a kernel change, also run the goldens of each unit you touched (solidcore/AGENTS.md §4):\n  \
-             cd solidcore && cargo run --profile goldens -p goldens -- --unit <id> --goldens"
-        );
+    }
+    if !o.units.is_empty() && !o.no_tests {
+        let mut c = solidcore_cargo(&sc_root);
+        c.args(goldens_args(&o.units));
+        step("solidcore goldens", crate::run(c, &format!("(solidcore) cargo {}", goldens_args(&o.units).join(" "))));
+    } else if kernel && o.units.is_empty() {
+        println!("{}", units_hint());
     }
 
     if failed.is_empty() {
@@ -186,7 +214,7 @@ pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
     }
 }
 
-fn report(paths: &[String], sel: &Selection) {
+fn report(paths: &[String], sel: &Selection, sc_tests: &BTreeSet<String>, kernel: bool, units: &[String]) {
     let list = |s: &BTreeSet<String>| if s.is_empty() { "none".to_string() } else { s.iter().cloned().collect::<Vec<_>>().join(" ") };
     println!("fast: {} changed file(s)", paths.len());
     if sel.full {
@@ -194,8 +222,48 @@ fn report(paths: &[String], sel: &Selection) {
     }
     println!("fast: workspace packages to test: {}", list(&sel.packages));
     if !sel.solidcore.is_empty() {
-        println!("fast: solidcore crates to check and test: {}", list(&sel.solidcore));
+        println!("fast: solidcore crates changed: {}", list(&sel.solidcore));
+        println!("fast: solidcore: clippy --workspace, wasm check, and the tests of: {}", list(sc_tests));
     }
+    if !units.is_empty() {
+        println!("fast: solidcore goldens of the units: {}", units.join(" "));
+    } else if kernel {
+        println!("{}", units_hint());
+    }
+}
+
+/// The solidcore crates to test: every crate of its workspace except the slow ones
+/// ([`SOLIDCORE_SLOW`]), which are tested only when they changed.
+fn solidcore_suite(all: &BTreeSet<String>, changed: &BTreeSet<String>) -> BTreeSet<String> {
+    if changed.is_empty() {
+        return BTreeSet::new();
+    }
+    all.iter().filter(|c| !SOLIDCORE_SLOW.contains(&c.as_str()) || changed.contains(*c)).cloned().collect()
+}
+
+/// Whether the change is a kernel change, one whose goldens solidcore/AGENTS.md §4 asks for: a
+/// solidcore crate other than its tools changed, or a code file outside its crates (manifest,
+/// lockfile, unit statuses, fixtures).
+fn kernel_changed(sel: &Selection) -> bool {
+    sel.solidcore_other || sel.solidcore.iter().any(|c| !SOLIDCORE_TOOLS.contains(&c.as_str()))
+}
+
+/// `cargo` arguments, in solidcore/, that check the goldens of `units` (one run for all of them).
+fn goldens_args(units: &[String]) -> Vec<String> {
+    let mut a: Vec<String> = ["run", "--profile", "goldens", "-p", "goldens", "--"].iter().map(|s| s.to_string()).collect();
+    for u in units {
+        a.push("--unit".into());
+        a.push(u.clone());
+    }
+    a.push("--goldens".into());
+    a
+}
+
+fn units_hint() -> String {
+    "fast: kernel files changed, but no --units, so no goldens run: name the units you touched (your PR's `Units:` line) with\n  \
+     cargo xtask fast --units <id,...>\n\
+     fast: solidcore/AGENTS.md §4 asks for the goldens of every unit you touched; CI runs them all."
+        .to_string()
 }
 
 /// The changed files, relative to the repository root: the commits since the merge base with
@@ -349,6 +417,11 @@ fn run_tests(
     packages: &BTreeSet<String>,
     extra: &[String],
 ) -> Result<(), String> {
+    // The 8 MiB test stack `cargo xtask test` gives (ui-egui's tests need it on Windows), unless
+    // the caller set one.
+    if let Some(stack) = crate::test::stack_env(std::env::var_os("RUST_MIN_STACK").as_deref()) {
+        c.env("RUST_MIN_STACK", stack);
+    }
     let what = if nextest {
         c.args(["nextest", "run", "--no-tests=pass"]).args(nextest_args);
         format!("{label}cargo nextest run {} {}", nextest_args.join(" "), flags(packages))
@@ -374,13 +447,33 @@ mod tests {
 
     #[test]
     fn parses_packages_base_and_test_arguments() {
-        let o = parse(&["--base", "upstream/main", "-p", "a", "--package", "b", "--no-tests", "--list", "--", "name", "--exact"]).unwrap();
+        let o = parse(&[
+            "--base",
+            "upstream/main",
+            "-p",
+            "a",
+            "--package",
+            "b",
+            "--units",
+            "u1, u2",
+            "--units",
+            "u3",
+            "--no-tests",
+            "--list",
+            "--",
+            "name",
+            "--exact",
+        ])
+        .unwrap();
+        assert_eq!(o.units, vec!["u1", "u2", "u3"]);
         assert_eq!(o.base.as_deref(), Some("upstream/main"));
         assert_eq!(o.packages, vec!["a", "b"]);
         assert!(o.no_tests && o.list);
         assert_eq!(o.test_args, vec!["name", "--exact"]);
         assert!(parse(&["--full"]).is_err());
         assert!(parse(&["-p"]).is_err());
+        assert!(parse(&["--units"]).is_err());
+        assert!(parse(&["--units", "a,,b"]).is_err());
     }
 
     #[test]
@@ -404,6 +497,43 @@ mod tests {
         let (crates, other) = solidcore_owners(&dirs, &paths(&["solidcore/Cargo.lock", "solidcore/plan/units/z.toml"]));
         assert!(crates.is_empty());
         assert!(other);
+    }
+
+    #[test]
+    fn solidcore_tests_every_crate_but_the_slow_ones_unless_they_changed() {
+        let all = set(&["goldens", "solidcore", "solidcore-convert", "solidcore-ops", "ssi", "xtask"]);
+        // A change to one small crate tests the others too (a break often shows elsewhere).
+        assert_eq!(solidcore_suite(&all, &set(&["ssi"])), set(&["solidcore", "solidcore-convert", "ssi", "xtask"]));
+        assert_eq!(solidcore_suite(&all, &set(&["solidcore-ops"])), set(&["solidcore", "solidcore-convert", "solidcore-ops", "ssi", "xtask"]));
+        assert_eq!(solidcore_suite(&all, &set(&["goldens", "solidcore-ops"])), all);
+        assert!(solidcore_suite(&all, &set(&[])).is_empty());
+    }
+
+    #[test]
+    fn a_kernel_change_wants_goldens_and_a_tool_change_does_not() {
+        let sel = |crates: &[&str], other: bool| Selection { solidcore: set(crates), solidcore_other: other, ..Selection::default() };
+        assert!(kernel_changed(&sel(&["solidcore"], false)));
+        assert!(kernel_changed(&sel(&["xtask", "solidcore-ops"], false)));
+        assert!(kernel_changed(&sel(&[], true)));
+        assert!(!kernel_changed(&sel(&["xtask", "diagnostics"], false)));
+        assert!(!kernel_changed(&sel(&[], false)));
+        assert!(units_hint().contains("--units"));
+    }
+
+    #[test]
+    fn workspace_tests_leave_out_what_pull_request_ci_leaves_out() {
+        assert_eq!(&WORKSPACE_NEXTEST[..4], ["--cargo-profile", "ci", "--profile", "ci"]);
+        let ci = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../.github/workflows/ci.yml")).unwrap();
+        // The expression pull requests add to `default()` in ci.yml's "Run tests" step.
+        assert!(ci.contains(&format!("base='default() & {}'", WORKSPACE_NEXTEST[5])), "ci.yml no longer filters `{}`", WORKSPACE_NEXTEST[5]);
+    }
+
+    #[test]
+    fn goldens_run_once_for_every_unit() {
+        assert_eq!(
+            goldens_args(&["a".into(), "b*".into()]),
+            vec!["run", "--profile", "goldens", "-p", "goldens", "--", "--unit", "a", "--unit", "b*", "--goldens"]
+        );
     }
 
     #[test]

@@ -144,15 +144,17 @@ commands:
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
-  fast [--base REF] [-p PACKAGE]... [--no-tests] [--list] [-- TEST ARGS]
+  fast [--base REF] [-p PACKAGE]... [--units ID,...] [--no-tests] [--list] [-- TEST ARGS]
                   the check before a commit and a push: what the change touches, against REF
                   (default origin/main; committed, uncommitted and untracked files). Formats,
                   runs the quick checks of ci, workspace clippy, and the tests of the packages
-                  whose files changed (scripts/ci/affected.py --owners; heavy tests skipped);
-                  for solidcore/ crates that changed, their clippy and tests and solidcore's
-                  wasm check. -p names the packages to test instead; --list only prints what
-                  would be tested. Every step runs; the failures are listed at the end. CI runs
-                  the full gate
+                  whose files changed (scripts/ci/affected.py --owners; heavy tests skipped).
+                  When solidcore/ code changed: clippy of the whole solidcore workspace, the
+                  tests of all its crates but goldens and solidcore-ops (those only when
+                  changed) and solidcore's wasm check; --units runs the goldens of those kernel
+                  units (a kernel change without it prints a hint). -p names the packages to
+                  test instead; --list only prints what would run. Every step runs; the failures
+                  are listed at the end. CI runs the full gate
   ci              fmt --check, assets, icons, licences --check, lists, skills, layers, shared,
                   ui-containers, mesh-decisions, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed

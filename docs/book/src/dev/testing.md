@@ -15,15 +15,26 @@ uncommitted and untracked files, and:
   `cargo xtask ci`, so a change that breaks another crate still fails;
 - tests only the packages whose files changed, as `scripts/ci/affected.py --owners` maps them,
   with nextest's `ci` profile (no heavy tests);
-- for changed crates in `solidcore/`, its own workspace: their clippy and tests and the
-  `solidcore` wasm check. It reminds you to run the goldens of the units you touched
-  (solidcore/AGENTS.md §4).
+- when code in `solidcore/` changed, checks its own workspace as solidcore/AGENTS.md §4 asks:
+  `cargo clippy --workspace --all-targets -- -D warnings`; the tests of every solidcore crate
+  except `goldens` and `solidcore-ops`, which are tested only when the change touches them (a
+  break often shows in a crate the change did not touch); and the `solidcore` wasm check;
+- for a kernel change, runs the goldens of the units named with `--units` (the ids on your pull
+  request's `Units:` line, separated by commas: `cargo xtask fast --units <id,...>`); without
+  `--units` it prints a reminder instead. The kernel rig and the publish dry run are left to CI.
 
-`-p PACKAGE` (repeatable) picks the packages to test instead, `--list` only prints what would be
-tested, and arguments after `--` go to the test runner (`cargo xtask fast -- sketch`). Every step runs even after one fails, and the
-failures are listed at the end: check each against `main` before blaming your change. It
-skips the wasm build of the application crates, the doc tests, web-offline-test and the tests
-of the packages that depend on yours. CI runs those on the pull request.
+`-p PACKAGE` (repeatable) picks the packages to test instead, `--list` only prints what would
+run, and arguments after `--` go to the test runner (`cargo xtask fast -- sketch`). Every step
+runs even after one fails, and the failures are listed at the end: check each against `main`
+before blaming your change. With cargo-nextest installed it runs the tests as pull-request CI
+does: without the heavy tests and the action matrix sample. Without it the tests fall back to
+`cargo test`, which runs the heavy tests and the doc tests too and takes much longer: install it
+first (`cargo install --locked cargo-nextest`, https://nexte.st).
+
+CI checks the rest. On the pull request it tests the packages that depend on yours and runs
+web-offline-test; the merge queue (and `main`) adds the wasm build of the application crates,
+the doc tests, the heavy tests and the action matrix sample, so a green pull request run does
+not show that those pass.
 
 | Harness | Where | What it catches |
 |---|---|---|
