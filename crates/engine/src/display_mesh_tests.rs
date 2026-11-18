@@ -76,9 +76,9 @@ fn a_large_sheet_shows_its_small_bends_and_holes_round() {
         let (steps, widest) = steps_around(&m, face, origin, *axis);
         assert!(widest <= DISPLAY_ANGLE * 1.001, "radius {radius}: a facet spans {} degrees", widest.to_degrees());
         if (radius - 2.0).abs() < 1e-6 {
-            // Half of a hole's wall.
+            // A whole hole wall.
             walls += 1;
-            assert!(steps >= (TAU / 2.0 / DISPLAY_ANGLE).ceil() as usize, "{steps} facets around half a hole");
+            assert!(steps + 1 >= (TAU / DISPLAY_ANGLE).ceil() as usize, "{steps} facets around a hole");
         } else {
             // A bend's inner (1 mm) or outer (3 mm) side: a quarter turn.
             bends += 1;
@@ -86,7 +86,7 @@ fn a_large_sheet_shows_its_small_bends_and_holes_round() {
             assert!(steps >= (FRAC_PI_2 / DISPLAY_ANGLE).ceil() as usize, "radius {radius}: {steps} facets across the bend");
         }
     }
-    assert_eq!((bends, walls), (4, 8));
+    assert_eq!((bends, walls), (4, 4));
     // The edges the viewport draws: every hole's rim is round, on both sides of the sheet.
     for [x, y] in HOLES {
         for z in [0.0, 2.0] {
@@ -140,13 +140,14 @@ fn what_reads_the_display_mesh_of_a_large_sheet_answers_as_before() {
         let corners: Vec<Vec3> =
             m.triangles.iter().zip(&m.tri_face).filter(|(_, f)| **f as usize == face).flat_map(|(t, _)| t.map(|k| m.positions[k as usize])).collect();
         let middle = corners.iter().fold(Vec3::ZERO, |a, p| a + *p) / corners.len() as f64;
-        // The middle of the face's corners, pushed out onto the cylinder.
+        // A whole hole averages onto its axis; pick its +X side. A bend uses its arc's middle.
         let along = origin + axis * (middle - origin).dot(axis);
-        let p = along + (middle - along).normalized().unwrap() * radius;
+        let radial = if (radius - 2.0).abs() < 1e-6 { Vec3::X } else { (middle - along).normalized().unwrap() };
+        let p = along + radial * radius;
         assert_eq!(solidcraft_doc::appearance::face_index_at(b, p), Some(face), "radius {radius} at {p:?}");
         round += 1;
     }
-    assert_eq!(round, 12);
+    assert_eq!(round, 8);
     let top = solidcraft_doc::appearance::face_index_at(b, Vec3::new(1500.0, 500.0, 2.0)).unwrap();
     assert!(matches!(face_surface(&b.body, top), Some(FaceSurface::Plane { normal, .. }) if normal.dist(Vec3::Z) < 1e-9));
     // Inside and outside: in the sheet, in a flange's wall, in a hole and above the sheet.

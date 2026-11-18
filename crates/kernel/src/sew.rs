@@ -41,6 +41,12 @@ pub enum EdgeSpec {
         b: Vec3,
         mid: Vec3,
     },
+    /// A whole circle starting and ending at `start`, counter-clockwise about `normal`.
+    Circle {
+        center: Vec3,
+        normal: Vec3,
+        start: Vec3,
+    },
     /// A chain of Bézier pieces of degree `degree` (1…[`MAX_CHAIN_DEGREE`]): `degree`·n + 1
     /// control points (n ≥ 1); the curve passes through `ctrl[0]`, `ctrl[degree]`, …
     /// `ctrl[degree·n]`. For curves with no exact line, arc or conic form, such as a font's
@@ -55,6 +61,7 @@ impl EdgeSpec {
     fn ends(&self) -> (Vec3, Vec3) {
         match self {
             EdgeSpec::Line { a, b } | EdgeSpec::Arc { a, b, .. } => (*a, *b),
+            EdgeSpec::Circle { start, .. } => (*start, *start),
             EdgeSpec::Chain { ctrl, .. } => (ctrl.first().copied().unwrap_or(Vec3::ZERO), ctrl.last().copied().unwrap_or(Vec3::ZERO)),
         }
     }
@@ -63,6 +70,7 @@ impl EdgeSpec {
     fn start_dir(&self) -> Option<Vec3> {
         let d = match self {
             EdgeSpec::Line { a, b } => *b - *a,
+            EdgeSpec::Circle { center, normal, start } => normal.cross(*start - *center),
             // The circle through a, mid and b, inverted about a, is the line through the images
             // of mid and b, which runs along the circle's tangent at a.
             EdgeSpec::Arc { a, b, mid } => {
@@ -82,15 +90,20 @@ impl EdgeSpec {
         match self {
             EdgeSpec::Line { a, b } => EdgeSpec::Line { a: *b, b: *a },
             EdgeSpec::Arc { a, b, mid } => EdgeSpec::Arc { a: *b, b: *a, mid: *mid },
+            EdgeSpec::Circle { center, normal, start } => EdgeSpec::Circle { center: *center, normal: *normal * -1.0, start: *start },
             EdgeSpec::Chain { degree, ctrl } => EdgeSpec::Chain { degree: *degree, ctrl: ctrl.iter().rev().copied().collect() },
         }
     }
 
     /// A point telling apart edges with the same ends, whichever way they run.
-    fn mid_key(&self) -> Option<Key> {
+    fn mid_key(&self) -> Option<CurveKey> {
         match self {
             EdgeSpec::Line { .. } => None,
-            EdgeSpec::Arc { mid, .. } => Some(key(*mid)),
+            EdgeSpec::Arc { mid, .. } => Some((key(*mid), None)),
+            EdgeSpec::Circle { center, normal, start } => {
+                let quarter = normal.normalized()?.cross(*start - *center);
+                Some((key(*center), Some(key(*center + quarter).min(key(*center - quarter)))))
+            }
             EdgeSpec::Chain { ctrl, .. } => {
                 // Summed in pairs from both ends, so that the chain run either way gives the very
                 // same point: a font's control points are simple fractions, whose mean can fall
@@ -102,7 +115,7 @@ impl EdgeSpec {
                     (Some(p), _) => s + *p,
                     _ => s,
                 });
-                Some(key(sum * (1.0 / n.max(1) as f64)))
+                Some((key(sum * (1.0 / n.max(1) as f64)), None))
             }
         }
     }
@@ -111,6 +124,15 @@ impl EdgeSpec {
         match self {
             EdgeSpec::Line { a, b } => a.is_finite() && b.is_finite(),
             EdgeSpec::Arc { a, b, mid } => a.is_finite() && b.is_finite() && mid.is_finite(),
+            EdgeSpec::Circle { center, normal, start } => {
+                let radius = *start - *center;
+                center.is_finite()
+                    && start.is_finite()
+                    && normal.is_finite()
+                    && radius.len() > 1e-9
+                    && normal.len() > 1e-12
+                    && radius.dot(*normal).abs() <= 1e-9 * radius.len() * normal.len()
+            }
             EdgeSpec::Chain { degree, ctrl } => {
                 (1..=MAX_CHAIN_DEGREE).contains(degree)
                     && ctrl.len() > *degree
@@ -146,6 +168,7 @@ pub struct FaceSpec {
 }
 
 type Key = (i64, i64, i64);
+type CurveKey = (Key, Option<Key>);
 
 fn key(p: Vec3) -> Key {
     let q = |x: f64| (x * 1e6).round() as i64;
@@ -201,6 +224,7 @@ fn welded(faces: &[FaceSpec]) -> Option<Vec<FaceSpec>> {
     let edge = |e: &EdgeSpec| match e {
         EdgeSpec::Line { a, b } => EdgeSpec::Line { a: weld(*a), b: weld(*b) },
         EdgeSpec::Arc { a, b, mid } => EdgeSpec::Arc { a: weld(*a), b: weld(*b), mid: *mid },
+        EdgeSpec::Circle { center, normal, start } => EdgeSpec::Circle { center: *center, normal: *normal, start: weld(*start) },
         EdgeSpec::Chain { degree, ctrl } => {
             let mut ctrl = ctrl.to_vec();
             let n = ctrl.len();
@@ -242,7 +266,7 @@ struct Builder {
     /// Vertices by point and fan (see [`corner_fans`]).
     verts: HashMap<(Key, usize), u32>,
     edges: Vec<PartEdge>,
-    by_key: HashMap<(Key, usize, Key, usize, Option<Key>, usize), u32>,
+    by_key: HashMap<(Key, usize, Key, usize, Option<CurveKey>, usize), u32>,
 }
 
 impl Builder {
@@ -272,7 +296,13 @@ impl Builder {
         let mid = e.mid_key();
         let (ka, kb) = (key(a), key(b));
         if let Some(found) = self.by_key.get(&(ka, fa, kb, fb, mid, sheet)) {
-            return Ok((*found, true));
+            let forward = match (e, self.edges.get(*found as usize)) {
+                (EdgeSpec::Circle { normal, .. }, Some(PartEdge { curve: b::Curve::Circle { frame, .. }, .. })) => {
+                    v3(frame.x_axis).cross(v3(frame.y_axis)).dot(*normal) > 0.0
+                }
+                _ => true,
+            };
+            return Ok((*found, forward));
         }
         if let Some(found) = self.by_key.get(&(kb, fb, ka, fa, mid, sheet)) {
             return Ok((*found, false));
@@ -282,6 +312,12 @@ impl Builder {
         let (curve, interval) = match e {
             EdgeSpec::Line { .. } => (b::Curve::Line { start: arr(pa), end: arr(pb) }, [0.0, 1.0]),
             EdgeSpec::Arc { mid, .. } => arc_curve(pa, pb, *mid)?,
+            EdgeSpec::Circle { center, normal, .. } => {
+                let x = (pa - *center).normalized().ok_or_else(|| KernelError::Invalid("sew: a circle of no radius".into()))?;
+                let z = normal.normalized().ok_or_else(|| KernelError::Invalid("sew: a circle of no normal".into()))?;
+                let frame = b::Frame { origin: arr(*center), x_axis: arr(x), y_axis: arr(z.cross(x)) };
+                (b::Curve::Circle { frame, radius: pa.dist(*center) }, [0.0, std::f64::consts::TAU])
+            }
             EdgeSpec::Chain { .. } => {
                 let (knots, points) = chain(e, pa, pb)?;
                 let n = knots.last().copied().unwrap_or(1.0);
@@ -634,6 +670,10 @@ fn plane_of(f: &FaceSpec) -> Option<b::Surface> {
         match e {
             EdgeSpec::Line { a, b } => vec![*a, *b],
             EdgeSpec::Arc { a, b, mid } => vec![*a, *mid, *b],
+            EdgeSpec::Circle { center, normal, start } => {
+                let quarter = normal.cross(*start - *center);
+                vec![*start, *center + quarter, *center * 2.0 - *start, *center - quarter, *start]
+            }
             EdgeSpec::Chain { ctrl, .. } => ctrl.to_vec(),
         }
     };
@@ -913,6 +953,7 @@ fn plane_normal(face: &FaceSpec) -> Option<Vec3> {
     let n = face.loops.first()?.iter().fold(Vec3::ZERO, |n, e| match e {
         EdgeSpec::Line { a, b } => n + a.cross(*b),
         EdgeSpec::Arc { a, b, mid } => n + a.cross(*mid) + mid.cross(*b),
+        EdgeSpec::Circle { center, normal, start } => n + (*start - *center).cross(normal.cross(*start - *center)) * 4.0,
         EdgeSpec::Chain { ctrl, .. } => ctrl.iter().zip(ctrl.iter().skip(1)).fold(n, |n, (p, q)| n + p.cross(*q)),
     });
     n.normalized()
@@ -938,7 +979,7 @@ type Corner = (usize, usize, usize);
 /// first (corners not listed are in fan 0). Each fan gets its own vertex, so that pieces of
 /// material touching at a point share no vertex.
 fn corner_fans(faces: &[FaceSpec], sheets: &HashMap<EdgeUse, usize>) -> HashMap<Corner, usize> {
-    type EdgeId = (Key, Key, Option<Key>, usize);
+    type EdgeId = (Key, Key, Option<CurveKey>, usize);
     let id = |fi: usize, li: usize, ei: usize, e: &EdgeSpec| -> EdgeId {
         let (a, b) = e.ends();
         let (ka, kb) = (key(a), key(b));
@@ -1131,8 +1172,8 @@ fn split_vertex_fans(vertices: &mut Vec<[f64; 3]>, edges: &mut [PartEdge], faces
 }
 
 fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::FaceSource>]>) -> Result<(Body, Option<Vec<usize>>)> {
-    if faces.len() < 4 || faces.len() > 200_000 {
-        return Err(KernelError::Invalid("a solid needs 4…200000 faces".into()));
+    if faces.len() < 3 || faces.len() > 200_000 {
+        return Err(KernelError::Invalid("a solid needs 3…200000 faces".into()));
     }
     let mut edge_uses = 0usize;
     for f in faces {
@@ -1154,8 +1195,8 @@ fn sew_impl(faces: &[FaceSpec], touching: bool, sources: Option<&[Option<crate::
             }
             for e in l {
                 let (a, b) = e.ends();
-                // Ends that weld to one vertex make an edge of no length.
-                if !e.valid() || !a.is_finite() || !b.is_finite() || a.dist(b) < 1e-9 || key(a) == key(b) {
+                // Only a periodic circle may start and end at the same vertex.
+                if !e.valid() || (!matches!(e, EdgeSpec::Circle { .. }) && (a.dist(b) < 1e-9 || key(a) == key(b))) {
                     return Err(KernelError::Invalid("sew: a degenerate edge".into()));
                 }
                 lo = lo.min(a).min(b);
