@@ -23,6 +23,8 @@
 //!   `pick_if = cond`: a face pick when `cond` holds, else a position;
 //! - `placement`: a primitive's placement point, or an optional one (its X, Y and Z expressions
 //!   are not inputs);
+//! - `direction`: a primitive's axis as unitless expressions (a `DirExpr`; its X, Y and Z are
+//!   not inputs either), which turns with the feature but never moves;
 //! - `profiles_of = sketch_field`, optionally with `when = cond`: a profile selection;
 //! - `after = field`: visit this field right after `field` instead of in declaration order (where
 //!   the parameter names already given need it);
@@ -53,6 +55,7 @@ enum Geo {
     Points(&'static str),
     PickIf(Expr),
     Placement,
+    Direction,
     Profiles { sketch: Ident, when: Option<Expr> },
 }
 
@@ -84,6 +87,7 @@ fn roles(field: &syn::Field) -> syn::Result<Roles> {
             match name.as_str() {
                 "pinned" => r.geo = Some(Geo::Points("Pinned")),
                 "placement" => r.geo = Some(Geo::Placement),
+                "direction" => r.geo = Some(Geo::Direction),
                 "pick_if" => r.geo = Some(Geo::PickIf(meta.value()?.parse()?)),
                 "profiles_of" => sketch = Some(meta.value()?.parse::<Ident>()?),
                 "when" => when = Some(meta.value()?.parse::<Expr>()?),
@@ -148,6 +152,9 @@ fn walk_field(b: &Ident, r: &Roles, which: Which, mutable: bool) -> Tokens {
                 (None, Some(Geo::Placement)) => quote! {
                     #w::ExprField::#each(#b, &mut |i, n, e| f((#w::Label::at(&["X", "Y", "Z"], i, n), e, #w::Kind::Length, #w::ExprRole::Placement)));
                 },
+                (None, Some(Geo::Direction)) => quote! {
+                    #w::ExprField::#each(#b, &mut |i, n, e| f((#w::Label::at(&["Axis X", "Axis Y", "Axis Z"], i, n), e, #w::Kind::Unitless, #w::ExprRole::Placement)));
+                },
                 _ => quote!(),
             }
         }
@@ -165,6 +172,7 @@ fn walk_field(b: &Ident, r: &Roles, which: Which, mutable: bool) -> Tokens {
             }
             // A point or an optional one (a hole's `at`, #1678).
             Some(Geo::Placement) => quote! { #w::Each::<crate::PointExpr>::#each(#b, &mut |p| f(#w::Geo::Placement(p))); },
+            Some(Geo::Direction) => quote! { #w::Each::<crate::DirExpr>::#each(#b, &mut |d| f(#w::Geo::DirExpr(d))); },
             Some(Geo::Profiles { .. }) => {
                 let (id, when) = (pre(b, "sketch"), pre(b, "when"));
                 quote! {

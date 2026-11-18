@@ -271,7 +271,8 @@ fn marker_stands_a_new_cylinder_on_the_face_through_its_face_input() {
     let (name, kind) = last(&h);
     let FeatureKind::Cylinder { base, axis, .. } = &kind else { panic!("a Cylinder: {kind:?}") };
     assert!(point(&h, base).dist(Vec3::new(40.0, 25.0, 10.0)) < 0.5, "stands where it was dropped: {:?}", point(&h, base));
-    assert!(axis.0.dist(Vec3::Z) < 1e-9, "along the face normal: {:?}", axis.0);
+    let axis = solidcraft_engine::doc::literal_dir(axis);
+    assert!(axis.is_some_and(|a| a.dist(Vec3::Z) < 1e-9), "along the face normal: {axis:?}");
     reopened_at(&mut h, &name, [40.0, 25.0, 10.0]);
 }
 

@@ -41,6 +41,8 @@ pub(crate) enum Geo<V, P, G, E, S> {
     Construct(G),
     /// A primitive's placement point (length expressions).
     Placement(E),
+    /// A primitive's axis (unitless expressions): it turns with the feature, and never moves.
+    DirExpr(E),
     /// A profile selection, with its sketch.
     Profiles(u64, S),
 }

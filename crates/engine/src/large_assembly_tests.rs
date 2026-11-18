@@ -41,7 +41,7 @@ fn generated_assembly(parts: usize) -> Document {
         for (k, x) in [2.0, 9.0, 16.0].into_iter().enumerate() {
             let pin = FeatureKind::Cylinder {
                 base: point_expr(o + Vec3::new(x, 20.0, 0.0)),
-                axis: solidcraft_doc::Dir(Vec3::Z),
+                axis: solidcraft_doc::dir_expr(Vec3::Z),
                 radius: mm(1.5),
                 height: mm(4.0 + k as f64),
                 operation: Operation::NewBody,

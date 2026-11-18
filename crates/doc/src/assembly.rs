@@ -459,6 +459,12 @@ fn map_geo_ref(m: &Mat, g: &mut crate::construct::GeoRef) {
 /// Map a point given as expressions by `m`: numbers stay numbers; a coordinate that is an
 /// expression stays one (`m · (x, y, z) + t`, written out), so it still follows its parameters.
 pub fn map_point_expr(m: &Mat, p: &mut crate::PointExpr) {
+    map_exprs(m, p, " mm");
+}
+
+/// [`map_point_expr`] for coordinates read with `unit` after a bare number (" mm" for lengths, ""
+/// for the unitless components of a direction).
+fn map_exprs(m: &Mat, p: &mut crate::PointExpr, unit: &str) {
     let num = |e: &crate::Expr| e.trim().parse::<f64>().ok().filter(|v| v.is_finite());
     if let [Some(x), Some(y), Some(z)] = [num(&p[0]), num(&p[1]), num(&p[2])] {
         *p = crate::point_expr(apply_point(m, Vec3::new(x, y, z)));
@@ -481,9 +487,9 @@ pub fn map_point_expr(m: &Mat, p: &mut crate::PointExpr) {
         }
         let mut e = terms.join(" + ");
         if terms.is_empty() {
-            e = format!("{constant} mm");
+            e = format!("{constant}{unit}");
         } else if constant.abs() >= 1e-12 {
-            e = format!("{e} {} {} mm", if constant < 0.0 { '-' } else { '+' }, constant.abs());
+            e = format!("{e} {} {}{unit}", if constant < 0.0 { '-' } else { '+' }, constant.abs());
         }
         *out = e.into();
     }
@@ -497,6 +503,14 @@ pub fn map_vector_expr(m: &Mat, v: &mut crate::PointExpr) {
     map_point_expr(&rotation, v);
 }
 
+/// Map a direction given as unitless expressions (a primitive's axis) by `m`'s rotation, keeping
+/// its parameter dependencies; the frame's translation doesn't move it.
+pub fn map_dir_expr(m: &Mat, d: &mut crate::DirExpr) {
+    let mut rotation = *m;
+    rotation[3] = [0.0, 0.0, 0.0, 1.0];
+    map_exprs(&rotation, d, "");
+}
+
 impl FeatureKind {
     /// Map the feature's world geometry (points, directions, explicit planes) by `m`.
     pub fn transform_geometry(&mut self, m: &Mat) {
@@ -508,6 +522,7 @@ impl FeatureKind {
             Geo::Plane(p) => map_plane_ref(m, p),
             Geo::Construct(r) => map_geo_ref(m, r),
             Geo::Placement(e) => map_point_expr(m, e),
+            Geo::DirExpr(d) => map_dir_expr(m, d),
             // An Emboss cylinder is picked in its component's frame (`EmbossFace`).
             Geo::Pinned(_) | Geo::Profiles(..) => {}
         });

@@ -8313,7 +8313,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 refs: Default::default(),
             };
             d.extra.insert("base".into(), pt_expr(base));
-            d.extra.insert("axis".into(), pt3(axis.0));
+            d.extra.insert("axis".into(), pt_expr(axis));
             // Standing on a flat face (a base of numbers there, square to it): placed there, so it
             // can take reference edges of that face (#6380), with its own picked again. Not the
             // picks a selection made when the window opened.
@@ -8322,10 +8322,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let (Some(x), Some(y), Some(z)) = (x, y, z)
                 && let Some(face @ Sel::Face { .. }) = face_sel(s, Vec3::new(x, y, z))
                 && let Sel::Face { body, index, .. } = &face
-                && planar_face(s, body, *index).is_some_and(|(_, n)| n.dot(axis.0) > 1.0 - 1e-9)
+                && let Some(axis) = solidcraft_engine::doc::literal_dir(axis)
+                && planar_face(s, body, *index).is_some_and(|(_, n)| n.dot(axis) > 1.0 - 1e-9)
                 && let Kind::Primitive { at, .. } = &mut d.kind
             {
-                *at = Some((Vec3::new(x, y, z), Some(axis.0)));
+                *at = Some((Vec3::new(x, y, z), Some(axis)));
                 if let Some(inp) = d.inputs.first_mut() {
                     inp.items = vec![face];
                 }
