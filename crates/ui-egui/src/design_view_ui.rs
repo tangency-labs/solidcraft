@@ -44,7 +44,7 @@ pub const MOVE_TO_WINDOW_MENU: TabMenuRow<'static> = TabMenuRow::new(VIEW_MOVE_T
 
 /// A view's right-click menu in three groups set apart by lines: rename, copy and move; close
 /// views; close the design.
-pub const VIEW_MENU: [TabMenuRow<'static>; 11] = [
+pub const VIEW_MENU: &[TabMenuRow<'static>] = &[
     TabMenuRow::new(VIEW_RENAME, "Rename view", "F2").with_icon("rename", None).for_local_view(),
     TabMenuRow::new(VIEW_DUPLICATE, "Duplicate view", "").with_icon("duplicate", None).for_local_view(),
     TabMenuRow::new("view.compass", "view_compass.visibility", "").separated().for_local_view(),
@@ -86,7 +86,8 @@ pub(crate) fn view_menu_rows<'a>(app: &SolveApp, window_rows: &'a [TabMenuRow<'a
     let pop_out = app.view_windows.is_child();
     let can_move = crate::view_windows::supports_pop_out(app);
     VIEW_MENU
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|row| (row.id != VIEW_MOVE_TO_WINDOW || can_move) && (row.id != DESIGN_CLOSE || !pop_out))
         .map(|row| if row.id == VIEW_MOVE_TO_WINDOW { row.with_children(window_rows) } else { row })
         .collect()
