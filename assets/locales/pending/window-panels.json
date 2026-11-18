@@ -1,0 +1,34 @@
+{
+  "en": {
+    "window_panels.other_panels": "Other panels",
+    "window_panels.workspace_panels": "Whatever panels the workspace uses"
+  },
+  "ar": {
+    "window_panels.other_panels": "لوحات أخرى",
+    "window_panels.workspace_panels": "اللوحات التي تستخدمها مساحة العمل"
+  },
+  "de": {
+    "window_panels.other_panels": "Weitere Bereiche",
+    "window_panels.workspace_panels": "Die von der Arbeitsumgebung verwendeten Bereiche"
+  },
+  "he": {
+    "window_panels.other_panels": "חלוניות נוספות",
+    "window_panels.workspace_panels": "החלוניות שבשימוש סביבת העבודה"
+  },
+  "ja": {
+    "window_panels.other_panels": "その他のパネル",
+    "window_panels.workspace_panels": "ワークスペースで使うパネル"
+  },
+  "ko": {
+    "window_panels.other_panels": "기타 패널",
+    "window_panels.workspace_panels": "작업 공간에서 사용하는 패널"
+  },
+  "vi": {
+    "window_panels.other_panels": "Bảng khác",
+    "window_panels.workspace_panels": "Các bảng mà không gian làm việc sử dụng"
+  },
+  "zh": {
+    "window_panels.other_panels": "其他面板",
+    "window_panels.workspace_panels": "工作区使用的面板"
+  }
+}

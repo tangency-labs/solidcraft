@@ -346,6 +346,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "pop_out_ribbon_auto_hide",
                 );
             });
+            layout_check(
+                ui,
+                app.tr("window_panels.other_panels"),
+                app.tr("window_panels.workspace_panels"),
+                &mut app.preferences.pop_out_window_defaults.panels,
+                "pop_out_other_panels",
+            );
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
                 use solidcraft_views::CardHeaders;
                 let labels = [app.tr("window_options.always"), app.tr("window_options.on_hover"), app.tr("window_options.hidden")];

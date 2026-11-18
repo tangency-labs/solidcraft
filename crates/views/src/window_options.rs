@@ -22,13 +22,14 @@ impl CardHeaders {
 pub struct WindowOptions {
     pub card_headers: CardHeaders,
     pub keep_on_top: bool,
+    pub panels: bool,
     pub ribbon: bool,
     pub ribbon_auto_hide: bool,
 }
 
 impl Default for WindowOptions {
     fn default() -> Self {
-        Self { card_headers: CardHeaders::Always, keep_on_top: false, ribbon: false, ribbon_auto_hide: true }
+        Self { card_headers: CardHeaders::Always, keep_on_top: false, panels: false, ribbon: false, ribbon_auto_hide: true }
     }
 }
 
