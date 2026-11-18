@@ -86,6 +86,7 @@ fn read_bytes(k: &mut Kernel, bytes: Vec<u8>, rebuild: bool) -> SolidResult<Brep
     // Record the geometry owners under arena identities, as a kernel-built B-rep
     // does, so `GetFace` / `GetEdge` on that geometry resolve to the owning topology.
     body.use_arena_naming()?;
+    crate::tolsub::after_read(&mut body);
     Ok(body)
 }
 

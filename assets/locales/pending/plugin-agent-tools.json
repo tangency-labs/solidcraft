@@ -1,0 +1,11 @@
+{
+  "en": { "cmd.plugin.tools": "List Plugin Tools" },
+  "ar": { "cmd.plugin.tools": "عرض أدوات الإضافات" },
+  "de": { "cmd.plugin.tools": "Plugin-Werkzeuge auflisten" },
+  "es": { "cmd.plugin.tools": "Listar herramientas de complementos" },
+  "he": { "cmd.plugin.tools": "הצגת כלי התוספים" },
+  "ja": { "cmd.plugin.tools": "プラグインツールを一覧表示" },
+  "ko": { "cmd.plugin.tools": "플러그인 도구 목록" },
+  "vi": { "cmd.plugin.tools": "Liệt kê công cụ plugin" },
+  "zh": { "cmd.plugin.tools": "列出插件工具" }
+}

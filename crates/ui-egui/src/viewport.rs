@@ -316,6 +316,8 @@ pub struct ViewportState {
     pub(crate) ss_view: (u64, f64),
     /// The right-click menu, open at this screen position.
     pub context_menu: Option<Pos2>,
+    /// The last frame's view could answer pointer motion without a frame: see [`QuietMotion`].
+    pub quiet_motion: Option<QuietMotion>,
     /// Select Other: its list, a press being held, and click cycling.
     pub select_other: crate::select_other::State,
     /// A sketch point or curve being dragged (its id, the undo depth when the drag began: the
@@ -5084,7 +5086,7 @@ fn reference_line(sc: &mut GpuScene, a: [f32; 3], b: [f32; 3], col: [u8; 4], wid
 /// highlight (a whole scanned mesh is one face) is not built again, and the cached scene not
 /// drawn again, at every move of the pointer across it. An edge keeps its `mid`, which picks the
 /// part of a split edge that is lit (`edge_of`); a vertex or a sketch point is its position.
-fn hover_drawn(hover: &Option<Hit>) -> String {
+pub(crate) fn hover_drawn(hover: &Option<Hit>) -> String {
     match hover {
         Some(Hit::Face { body, index, .. }) => format!("face {body:?} {index}"),
         Some(Hit::Plane { name, .. }) => format!("plane {name:?}"),
@@ -6469,6 +6471,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // The Fillet and Chamfer window resolves its own corners: the nearest sketch point to a
     // corner drawn from the origin is the fixed origin, which ends no two curves.
     let corner = hover.filter(|_| inside && !navigating).and_then(|p| crate::sketch_modify_ui::corner_hit(app, &proj, p));
+    let corner_hovered = corner.is_some();
     let cand = if app.tool.is_some() {
         tool_hover(app, &hits).map(|h| (h, None))
     } else if let Some((hit, sel)) = corner {
@@ -6497,6 +6500,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
     list_hover(app);
+    let still = inside
+        && !navigating
+        && !hover_frozen
+        && !joint_handle_pointer
+        && !dragging_layer
+        && !layered
+        && !held
+        && !flat
+        && !corner_hovered
+        && !manipulator_dragging;
+    app.viewport.quiet_motion = still.then(|| QuietMotion::record(app, ui, &resp, rect, axes, proj)).flatten();
     let painter = ui.painter_at(rect);
     solidcraft_viewport_egui::paint_background(&painter, rect, t.viewport_top, t.viewport_bottom);
     crate::gpu::paint_background_picture(app, &painter, rect);
@@ -8417,6 +8431,114 @@ const WOKEN_CENTRE_PX: f32 = 16.0;
 /// awake: a fifth more than the circle or arc's own radius, so the pointer can cross the whole
 /// circle to reach the other side of it, but not wander off and leave the cross behind (#16346).
 const WOKEN_CENTRE_FAR: f64 = 1.2;
+
+/// What the last frame's view needs to tell, without a frame, that moving the pointer changes
+/// nothing on screen ([`follow_pointer_without_frame`]): the window then skips the frame that pointer
+/// motion asks for, instead of drawing the same picture again at every move.
+///
+/// Kept only while the view is still and the pointer only hovers it: no tool, dialog, sketch,
+/// drag, held button, open menu, woken snap point or view movement, all of which follow the
+/// pointer itself. What remains is the hover highlight, which is the same while the pointer
+/// stays over the same face, edge, vertex or plane, or over nothing.
+#[derive(Clone)]
+pub struct QuietMotion {
+    /// Where the pointer reaches the model: the view, less the axis view and its readout.
+    rect: Rect,
+    excluded: [Rect; 2],
+    proj: Proj,
+    /// The widgets egui found under the pointer, back to front, and the ones its click and drag
+    /// went to: the pointer reached no other widget while these stay the same.
+    widgets: Vec<egui::Id>,
+    click: Option<egui::Id>,
+    drag: Option<egui::Id>,
+    /// What the hover highlight draws ([`hover_drawn`]).
+    hover: String,
+    /// The joint glyphs drawn: one names its joint in a tooltip while the pointer is on it.
+    glyphs: Vec<crate::dialogs_assembly::JointGlyph>,
+}
+
+impl QuietMotion {
+    fn record(app: &SolveApp, ui: &egui::Ui, resp: &egui::Response, rect: Rect, axes: Rect, proj: Proj) -> Option<Self> {
+        let busy = app.tool.is_some()
+            || app.dialog.is_some()
+            || app.session.active_sketch.is_some()
+            || crate::sketch3d::active(app)
+            || crate::render_workspace::active(app)
+            || app.cam_anim.is_some()
+            || app.viewport.spin
+            || app.viewport.axis_drag.is_some()
+            || app.viewport.primary_nav.is_some()
+            || app.viewport.boxsel.is_some()
+            || app.viewport.context_menu.is_some()
+            || app.viewport.point_drag.is_some()
+            || app.viewport.tool_click
+            || app.viewport.woken_centre.is_some()
+            || app.viewport.woken.item.is_some()
+            || !app.viewport.woken.points.is_empty()
+            || crate::select_other::is_open(app)
+            || crate::joint_drag::active(app)
+            || crate::joint_handles::active(app)
+            || crate::occurrence_drag::active(app)
+            || crate::frame::dock_dragging(ui.ctx())
+            || !ui.is_enabled()
+            || ui.input(|i| i.pointer.any_down() || i.pointer.any_released() || i.pointer.any_pressed());
+        if busy {
+            return None;
+        }
+        let (widgets, click, drag) = ui
+            .ctx()
+            .viewport(|v| (v.hits.contains_pointer.iter().map(|w| w.id).collect::<Vec<_>>(), v.hits.click.map(|w| w.id), v.hits.drag.map(|w| w.id)));
+        // The pointer is on the view itself, not on a widget over it.
+        if click != Some(resp.id) || drag != Some(resp.id) {
+            return None;
+        }
+        // A joint glyph under the pointer shows its tooltip at the pointer, which follows it.
+        let glyphs = if crate::joint_handles::visible(app) { Vec::new() } else { crate::dialogs_assembly::joint_glyph_plan(app, &proj) };
+        if ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| crate::dialogs_assembly::joint_glyph_at(&glyphs, p).is_some()) {
+            return None;
+        }
+        let readout = crate::view_angles::readout_rect(ui.ctx(), rect).filter(|_| app.preferences.show_view_angles).unwrap_or(Rect::NOTHING);
+        Some(Self { rect, excluded: [axes, readout], proj, widgets, click, drag, hover: hover_drawn(&app.viewport.hover), glyphs })
+    }
+}
+
+/// Answer a pointer move to `pos` (in points) without a frame when it changes nothing the last
+/// frame drew: the view was quiet ([`QuietMotion`]), the pointer stays on it with no other widget,
+/// joint glyph or Joint Move handle reached, and what is under it lights up the same. The model is picked again here, as the frame
+/// would; nothing else of a frame runs. `ctx` is the window's: its last pass's widgets are
+/// hit-tested at `pos`.
+///
+/// When the move needs no frame (true), the hover and the pointer are brought up to date as the
+/// frame would have left them: the same item, picked at `pos` (a face's or an edge's point under
+/// the pointer moves along it). What reads them between frames (`ui.inspect`, the agents) then
+/// sees where the pointer is, not where the hover last changed. False changes nothing.
+pub fn follow_pointer_without_frame(app: &mut SolveApp, ctx: &egui::Context, pos: Pos2) -> bool {
+    let Some(q) = &app.viewport.quiet_motion else {
+        return false;
+    };
+    if !pos.is_finite() || !q.rect.contains(pos) || q.excluded.iter().any(|r| r.contains(pos)) || crate::shell::covered(app, pos) {
+        return false;
+    }
+    // A joint glyph's tooltip and a Joint Move handle's brightening are drawn by a frame.
+    if crate::dialogs_assembly::joint_glyph_at(&q.glyphs, pos).is_some() || crate::joint_handles::owns_pointer(app, &q.proj, pos) {
+        return false;
+    }
+    let hits = ctx.widget_hits_at(pos);
+    if hits.click.map(|w| w.id) != q.click
+        || hits.drag.map(|w| w.id) != q.drag
+        || !hits.contains_pointer.iter().map(|w| w.id).eq(q.widgets.iter().copied())
+    {
+        return false;
+    }
+    let picks = pick_with_sketch_points(app, &q.proj, pos, false);
+    let hover = candidate(app, &picks).map(|(hit, _)| hit);
+    if hover_drawn(&hover) != q.hover {
+        return false;
+    }
+    app.viewport.hover = hover;
+    app.viewport.mouse = Some(pos);
+    true
+}
 
 /// Hovering a circle's or an arc's edge in the sketch being edited wakes its centre: drawn, and
 /// picked from further away, so a line or a dimension is easily taken to it, and it stays awake
@@ -13423,6 +13545,60 @@ mod tests {
         let plane = highlight_key(&app);
         app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::X });
         assert_eq!(highlight_key(&app), plane, "the same plane, another point");
+    }
+
+    /// Pointer motion over a still view is answered without a frame when what lights up stays
+    /// the same (`follow_pointer_without_frame`): moving across one face, or across the empty
+    /// background. The hover then follows the pointer along the face, as a frame would leave it.
+    /// Reaching another face or the background, or holding a button, needs a frame (and changes
+    /// nothing); a frame at each place lights up what the answer said.
+    #[test]
+    fn pointer_motion_that_lights_up_nothing_new_needs_no_frame() {
+        let ctx = crate::fonts::test_context();
+        let mut app = cylinder_app();
+        assert!(app.session.active_sketch.is_none(), "a part, not a sketch");
+        let moved = |at: Pos2| vec![egui::Event::PointerMoved(at)];
+        for _ in 0..3 {
+            hover_frame(&mut app, &ctx, moved(pos2(5.0, 5.0)));
+        }
+        // What lights up across the view, from the frame's own projection.
+        let proj = display_proj(&app);
+        let lit = |app: &SolveApp, at: Pos2| hover_drawn(&candidate(app, &pick(app, &proj, at)).map(|(h, _)| h));
+        let rect = proj.rect.shrink(60.0);
+        let grid: Vec<Pos2> = (0..20)
+            .flat_map(|i| (0..20).map(move |j| pos2(rect.left() + rect.width() * i as f32 / 19.0, rect.top() + rect.height() * j as f32 / 19.0)))
+            .collect();
+        let nothing = lit(&app, pos2(-1.0, -1.0));
+        let on_face: Vec<Pos2> = grid.iter().copied().filter(|p| lit(&app, *p).starts_with("face")).collect();
+        let face = *on_face.first().expect("the cylinder is in view");
+        let same_face = *on_face.iter().rev().find(|p| lit(&app, **p) == lit(&app, face) && **p != face).expect("two points on one face");
+        let empty: Vec<Pos2> = grid.iter().copied().filter(|p| lit(&app, *p) == nothing).collect();
+        assert!(empty.len() >= 2, "background around the cylinder");
+
+        hover_frame(&mut app, &ctx, moved(face));
+        assert!(app.viewport.quiet_motion.is_some(), "a still view, only hovered");
+        let lit_now = hover_drawn(&app.viewport.hover);
+        let at_face = app.viewport.hover.clone();
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, empty[0]), "off the face");
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, pos2(f32::NAN, 1.0)), "not a position");
+        assert_eq!(app.viewport.hover, at_face, "a move that needs a frame leaves the hover to it");
+        assert!(follow_pointer_without_frame(&mut app, &ctx, same_face), "the same face");
+        let followed = app.viewport.hover.clone();
+        assert_eq!(hover_drawn(&followed), lit_now, "the same face stays lit");
+        assert_ne!(followed, at_face, "the hover's point follows the pointer along the face");
+        assert_eq!(app.viewport.mouse, Some(same_face));
+        hover_frame(&mut app, &ctx, moved(same_face));
+        assert_eq!(app.viewport.hover, followed, "the frame leaves the hover as the answer did");
+
+        hover_frame(&mut app, &ctx, moved(empty[0]));
+        assert_eq!(hover_drawn(&app.viewport.hover), nothing);
+        assert!(follow_pointer_without_frame(&mut app, &ctx, empty[1]), "the background, still nothing lit");
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, face), "onto the face");
+
+        let press = egui::Event::PointerButton { pos: empty[0], button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() };
+        hover_frame(&mut app, &ctx, vec![press]);
+        assert!(app.viewport.quiet_motion.is_none(), "a held button follows the pointer");
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, empty[1]));
     }
 
     #[test]
