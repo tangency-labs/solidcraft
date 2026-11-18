@@ -422,7 +422,7 @@ pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Op
     match sel {
         Sel::Feature { id } => Some(*id),
         Sel::Plane { .. } | Sel::Axis { .. } | Sel::ConstructionPoint { .. } => {
-            doc.features.iter().find(|f| f.kind.is_construction() && crate::browser::construction_sel(f) == *sel).map(|f| f.id)
+            doc.features.iter().find(|f| f.kind.is_construction() && solidcraft_engine::browser_find::construction_sel(f) == *sel).map(|f| f.id)
         }
         _ => None,
     }
@@ -431,7 +431,7 @@ pub(crate) fn feature_of_sel(doc: &Document, sel: &solidcraft_engine::Sel) -> Op
 /// What the 3D view lights for a selected construction feature: the plane, axis or point
 /// itself, picked by name. `None` for any other feature.
 pub(crate) fn viewport_sel_of_feature(doc: &Document, id: u64) -> Option<solidcraft_engine::Sel> {
-    doc.feature(id).filter(|f| f.kind.is_construction()).map(crate::browser::construction_sel)
+    doc.feature(id).filter(|f| f.kind.is_construction()).map(solidcraft_engine::browser_find::construction_sel)
 }
 
 /// The selected timeline features, in timeline order.

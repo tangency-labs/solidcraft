@@ -10,6 +10,7 @@
 mod checks;
 pub mod p21;
 mod parallel;
+pub mod records;
 mod tessellated;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -1450,13 +1451,16 @@ const KEEP_SMALL_BYTES: usize = 1 << 20;
 /// ([`ImportReport::checks`]). [`step_import`] waits for them instead.
 pub fn step_import_shared(text: &str) -> Result<std::sync::Arc<StepImport>> {
     let (key, heal) = (text_key(text), crate::heals_tolerance_defects());
-    if let Ok(cache) = RECENT.lock()
-        && let Some(imp) = cache.iter().filter(|r| r.key == key && r.heal == heal).find_map(|r| r.import.upgrade())
-    {
+    if let Some(imp) = recent(key, heal) {
         return Ok(imp);
     }
     let _span = solidcraft_profile::span("import", "step.import");
     StepReading::new(text)?.finish_shared()
+}
+
+/// The import the recent imports still hold for `key`, read healing its parts or not (`heal`).
+fn recent(key: (u64, usize), heal: bool) -> Option<Arc<StepImport>> {
+    RECENT.lock().ok()?.iter().filter(|r| r.key == key && r.heal == heal).find_map(|r| r.import.upgrade())
 }
 
 /// The cache key of a STEP text: its hash and length.
