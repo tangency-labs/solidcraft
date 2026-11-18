@@ -246,9 +246,7 @@ mod tests {
         let part = f.design("Part.solidcraft");
         let mut s = session();
         s.path = Some(f.0.join("Assembly.solidcraft").to_string_lossy().into_owned());
-        for (id, path) in
-            [(1, r"\\server\share\part.sc"), (2, "//server/share/part.sc"), (3, r"\\?\UNC\server\share\p.sc"), (4, r"\\.\pipe\p.sc")]
-        {
+        for (id, path) in [(1, r"\\server\share\part.sc"), (2, "//server/share/part.sc"), (3, r"\\?\UNC\server\share\p.sc"), (4, r"\\.\pipe\p.sc")] {
             s.doc_mut().links.insert(id, solidcraft_doc::DesignLink { path: path.into(), feature: 1, ..Default::default() });
         }
         let calls = solidcraft_io::vfs::file_calls();
