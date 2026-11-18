@@ -186,6 +186,34 @@ fn a_component_for_another_api_version_is_refused_in_plain_words() {
     assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
 }
 #[test]
+fn a_component_is_checked_against_its_world_without_running_it() {
+    let check = |manifest: &Manifest, bytes: &[u8]| crate::check_component(manifest, bytes);
+    // `unreachable` would trap if any code ran.
+    check(&manifest(), &component("unreachable")).unwrap();
+    check(&importer_manifest(false), &importer_component()).unwrap();
+    // Each world needs its own export: a command component is no importer, and back.
+    for (manifest, bytes) in [(importer_manifest(false), component("call $box")), (manifest(), importer_component())] {
+        let failure = check(&manifest, &bytes).unwrap_err();
+        assert!(matches!(&failure, HostError::InvalidInput { field, .. } if field == "component"), "{failure}");
+    }
+    let core = wat::parse_str("(module)").unwrap();
+    assert!(matches!(check(&manifest(), &core), Err(HostError::InvalidInput { reason, .. }) if reason.contains("core WebAssembly module")));
+    let (package, version) = API.split_once('@').unwrap();
+    let source = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
+    let (prefix, _) = source.rsplit_once(')').unwrap();
+    let with_import = |interface: &str| wat::parse_str(format!("{prefix}\n(import \"{interface}\" (instance (export \"get\" (func))))\n)")).unwrap();
+    let wasi = check(&manifest(), &with_import("wasi:cli/environment@0.2.0")).unwrap_err();
+    assert!(matches!(&wasi, HostError::InvalidInput { reason, .. } if reason.contains("wasi:cli/environment")), "{wasi}");
+    assert_eq!(
+        check(&manifest(), &with_import("wasi:http/types@0.2.0")).unwrap_err(),
+        HostError::PermissionDenied { permission: "network import is forbidden: wasi:http/types@0.2.0".into() }
+    );
+    assert!(matches!(check(&manifest(), &with_import(&format!("{package}/storage@0.2.0"))), Err(HostError::UnsupportedCapability { .. })));
+    let mut net = manifest();
+    net.runtime.as_mut().unwrap().permissions.net = true;
+    assert_eq!(check(&net, &component("call $box")).unwrap_err(), HostError::PermissionDenied { permission: "net".into() });
+}
+#[test]
 fn cancellation_prevents_running_plugin_code() {
     let mut app = App { cancelled: true, ..Default::default() };
     assert_eq!(run(&mut app, &manifest(), &component("(loop br 0)"), "make", &json!({})).unwrap_err(), HostError::Cancelled);
@@ -204,8 +232,10 @@ fn state<H: PluginHost>(app: H) -> State<H> {
         limits: StoreLimitsBuilder::new().build(),
         failed: None,
         calls: 0,
+        max_calls: MAX_CALLS,
         log_bytes: 0,
         deadline: Instant::now() + Duration::from_secs(5),
+        import: None,
     }
 }
 #[test]
@@ -277,7 +307,7 @@ fn epoch_interrupt_is_distinct_from_fuel_exhaustion_in_diagnostics() {
     let engine = wasmtime::Engine::new(&config).unwrap();
     let module = wasmtime::Module::from_binary(&engine, &wat::parse_str(r#"(module (func (export "run") (loop br 0)))"#).unwrap()).unwrap();
     let mut store = wasmtime::Store::new(&engine, ());
-    let limits = Limits { fuel: 100_000, memory_mib: 1, deadline_ms: 5000 };
+    let limits = Limits { fuel: 100_000, memory_mib: 1, deadline_ms: 5000, stack_kib: None };
     store.set_fuel(limits.fuel).unwrap();
     store.set_epoch_deadline(1);
     let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
@@ -297,16 +327,36 @@ fn files_component(write: bool, swallow_error: bool) -> Vec<u8> {
 }
 
 fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u8> {
+    files_component_calls(&[write], swallow_error, after)
+}
+
+/// An entry that makes these file calls in order (`true`: write "changed" to `secret.txt` of the
+/// grant `project`; `false`: read it), ignoring what each returns unless it is the last.
+fn files_component_calls(writes: &[bool], swallow_error: bool, after: &str) -> Vec<u8> {
     let (package, version) = API.split_once('@').unwrap();
     let template = include_str!("../fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version);
     // Keep exactly the shared WIT types, then exercise the real files interface.
     let (types, _) = template.split_once(&format!("  (type $ty-{package}/commands@{version}")).unwrap();
-    let (operation, result, parameters, arguments) = if write {
-        ("write-file", "(result (error $error))", "(param \"data\" (list u8))", "i32.const 128 i32.const 7")
-    } else {
-        ("read-file", "(result (list u8) (error $error))", "", "")
-    };
-    let core_parameters = if write { "i32 i32 i32 i32 i32 i32 i32" } else { "i32 i32 i32 i32 i32" };
+    let (mut exports, mut aliases, mut lowered, mut host, mut imports, mut calls) =
+        (String::new(), String::new(), String::new(), String::new(), String::new(), String::new());
+    for write in [false, true].into_iter().filter(|write| writes.contains(write)) {
+        let (id, operation, result, parameters, core_parameters) = if write {
+            ("write", "write-file", "(result (error $error))", "(param \"data\" (list u8))", "i32 i32 i32 i32 i32 i32 i32")
+        } else {
+            ("read", "read-file", "(result (list u8) (error $error))", "", "i32 i32 i32 i32 i32")
+        };
+        exports += &format!(
+            "(type ${id}-result {result})\n(type ${id}-type (func (param \"grant\" string) (param \"path\" string) {parameters} (result ${id}-result)))\n(export \"{operation}\" (func (type ${id}-type)))\n"
+        );
+        aliases += &format!("  (alias export $files \"{operation}\" (func ${id}))\n");
+        lowered += &format!("  (core func ${id}-core (canon lower (func ${id}) (memory $memory) (realloc $realloc)))\n");
+        host += &format!("(export \"{id}\" (func ${id}-core)) ");
+        imports += &format!("(import \"host\" \"{id}\" (func ${id} (param {core_parameters})))\n");
+    }
+    for write in writes {
+        let (id, arguments) = if *write { ("write", "i32.const 128 i32.const 7") } else { ("read", "") };
+        calls += &format!("  i32.const 64 i32.const 7 i32.const 96 i32.const 10 {arguments} i32.const 0 call ${id}\n");
+    }
     let reply =
         if swallow_error { "i32.const 0 i32.const 0 i32.store i32.const 4 i32.const 160 i32.store i32.const 8 i32.const 2 i32.store" } else { "" };
     let source = format!(
@@ -314,13 +364,9 @@ fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u
   (type $files-type (instance
 (alias outer 1 $plugin-error (type $error))
 (export "plugin-error" (type (eq $error)))
-(type $file-result {result})
-(type $operation (func (param "grant" string) (param "path" string) {parameters} (result $file-result)))
-(export "{operation}" (func (type $operation)))
-  ))
+{exports}  ))
   (import "{package}/files@{version}" (instance $files (type $files-type)))
-  (alias export $files "{operation}" (func $file))
-  (core module $allocation
+{aliases}  (core module $allocation
 (memory (export "memory") 1)
 (global $heap (mut i32) i32.const 4096)
 (func (export "realloc") (param i32 i32 i32 i32) (result i32)
@@ -330,18 +376,15 @@ fn files_component_after(write: bool, swallow_error: bool, after: &str) -> Vec<u
   (core instance $allocation (instantiate $allocation))
   (alias core export $allocation "memory" (core memory $memory))
   (alias core export $allocation "realloc" (core func $realloc))
-  (core func $file (canon lower (func $file) (memory $memory) (realloc $realloc)))
-  (core instance $imports (export "file" (func $file)) (export "memory" (memory $memory)))
+{lowered}  (core instance $imports {host}(export "memory" (memory $memory)))
   (core module $main
-(import "host" "file" (func $file (param {core_parameters})))
-(import "host" "memory" (memory 1))
+{imports}(import "host" "memory" (memory 1))
 (data (i32.const 64) "project")
 (data (i32.const 96) "secret.txt")
 (data (i32.const 128) "changed")
 (data (i32.const 160) "{{}}")
 (func (export "execute") (param i32 i32 i32 i32) (result i32)
-  i32.const 64 i32.const 7 i32.const 96 i32.const 10 {arguments} i32.const 0 call $file
-  {reply}
+{calls}  {reply}
   {after}
   i32.const 0)
   )
@@ -421,6 +464,55 @@ fn staged_file_writes_publish_after_commit_and_disappear_after_traps_or_commit_f
         assert_eq!((app.commits, app.rollbacks), if succeeds { (1, 0) } else { (0, 1) });
         assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "staged files must be removed");
     }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reading_a_missing_file_is_an_answer_and_the_entry_can_then_write_it() {
+    // #17899: the first run of a plugin that keeps a file of its own has no file yet.
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-missing-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(root.join("folder")).unwrap();
+    let mut state = state(App::default());
+    state.folders.insert(
+        "data".into(),
+        Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: true },
+    );
+    for path in ["jobs.json", "none/jobs.json"] {
+        let missing = state.read_file("data".into(), path.into()).unwrap_err();
+        assert!(
+            matches!(&missing, PluginError::InvalidInput(types::FieldFailure { field, reason }) if field == "path" && reason == "no such file"),
+            "{missing:?}"
+        );
+        assert_eq!(state.failed, None, "{path}");
+    }
+    state.write_file("data".into(), "jobs.json".into(), b"[]".to_vec()).unwrap();
+    assert_eq!(state.read_file("data".into(), "jobs.json".into()).unwrap(), b"[]");
+    assert_eq!(state.failed, None);
+    // What was refused before still ends the run: a folder is not a file, and a path outside the grant.
+    assert!(matches!(state.read_file("data".into(), "folder".into()), Err(PluginError::PermissionDenied(_))));
+    assert!(matches!(state.failed.take(), Some(HostError::PermissionDenied { .. })));
+    assert!(matches!(state.read_file("data".into(), "../jobs.json".into()), Err(PluginError::PermissionDenied(_))));
+    assert_eq!(state.failed, Some(HostError::PermissionDenied { permission: "files.read:data".into() }));
+    state.discard_writes();
+    drop(state);
+
+    // A whole entry: it reads the file that is not there, writes it, and the run publishes it.
+    let target = root.join("secret.txt");
+    let mut manifest = manifest();
+    manifest.runtime.as_mut().unwrap().permissions.files.push(FilePermission { name: "project".into(), read: true, write: true });
+    let component = files_component_calls(&[false, true], true, "");
+    let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }], ..Default::default() };
+    assert_eq!(run(&mut app, &manifest, &component, "make", &json!({})).unwrap(), json!({}));
+    assert_eq!(std::fs::read(&target).unwrap(), b"changed");
+    assert_eq!((app.commits, app.rollbacks), (1, 0));
+    // The same entry with no read access still fails its run, and writes nothing.
+    std::fs::remove_file(&target).unwrap();
+    let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: false, write: true }], ..Default::default() };
+    let failure = run(&mut app, &manifest, &component, "make", &json!({})).unwrap_err();
+    assert_eq!(failure, HostError::PermissionDenied { permission: "files.read:project".into() });
+    assert!(!target.exists());
+    assert_eq!((app.commits, app.rollbacks), (0, 1));
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -553,5 +645,70 @@ fn file_access_authorizes_the_complete_path_for_reads_and_writes() {
         state.discard_writes();
     }
     assert_eq!(std::fs::read(root.join("denied.txt")).unwrap(), b"original");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn importer_manifest(input_folder: bool) -> Manifest {
+    craft_plugin::parse_manifest(
+        json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{
+            "module":"sample.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}],
+            "limits":{"fuel":10000000,"memory_mib":2,"deadline_ms":2000},"permissions":{"input_folder":input_folder}
+        }})
+        .to_string()
+        .as_bytes(),
+        "sample",
+    )
+    .unwrap()
+}
+fn importer_component() -> Vec<u8> {
+    let (package, version) = API.split_once('@').unwrap();
+    wat::parse_str(include_str!("../importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap()
+}
+fn import(manifest: &Manifest, path: PathBuf, input_folder: bool) -> Result<crate::Imported> {
+    let request = crate::ImportRequest { path, input_folder };
+    crate::run_import(App::default(), manifest, &importer_component(), "convert", &json!({}), &request).1
+}
+fn import_folder(files: &[(&str, &[u8])]) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("craft-plugin-import-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    for (name, bytes) in files {
+        std::fs::write(root.join(name), bytes).unwrap();
+    }
+    root
+}
+#[test]
+fn an_importer_streams_its_file_into_a_design_and_returns_its_loss_report() {
+    let root = import_folder(&[("bracket.smp", b"design bytes")]);
+    let imported = import(&importer_manifest(false), root.join("bracket.smp"), false).unwrap();
+    assert_eq!(imported.design, b"design bytes");
+    assert_eq!(imported.report.summary, "Copied the file");
+    assert_eq!(imported.report.items.len(), 1);
+    assert_eq!(imported.report.items[0].severity, craft_plugin::LossSeverity::Dropped);
+    // A command runtime cannot be run as an importer, nor an importer as a command.
+    assert!(matches!(import(&manifest(), root.join("bracket.smp"), false), Err(HostError::InvalidInput { .. })));
+    let mut app = App::default();
+    assert!(matches!(run(&mut app, &importer_manifest(false), &importer_component(), "convert", &json!({})), Err(HostError::InvalidInput { .. })));
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn reading_beside_the_file_needs_the_input_folder_permission_both_asked_and_granted() {
+    let root = import_folder(&[("assembly.smp", b"S"), ("part.bin", b"part bytes"), (".hidden.smp", b"x")]);
+    for (asked, granted) in [(false, true), (true, false)] {
+        let failure = import(&importer_manifest(asked), root.join("assembly.smp"), granted).unwrap_err();
+        assert!(matches!(&failure, HostError::PermissionDenied { permission } if permission.contains("input_folder")), "{failure}");
+    }
+    assert_eq!(import(&importer_manifest(true), root.join("assembly.smp"), true).unwrap().design, b"part bytes");
+    // A hidden file is never imported.
+    assert!(matches!(import(&importer_manifest(true), root.join(".hidden.smp"), true), Err(HostError::InvalidInput { .. })));
+    std::fs::remove_dir_all(root).unwrap();
+}
+#[test]
+fn an_importer_trap_or_runaway_loop_fails_that_one_call_and_the_next_call_works() {
+    let root = import_folder(&[("trap.smp", b"T"), ("loop.smp", b"L"), ("fine.smp", b"fine")]);
+    let manifest = importer_manifest(false);
+    let failure = import(&manifest, root.join("trap.smp"), false).unwrap_err();
+    assert!(matches!(&failure, HostError::Trap { reason } if reason.contains("UnreachableCodeReached")), "{failure}");
+    assert!(matches!(import(&manifest, root.join("loop.smp"), false), Err(HostError::LimitExceeded { .. })));
+    assert_eq!(import(&manifest, root.join("fine.smp"), false).unwrap().design, b"fine");
     std::fs::remove_dir_all(root).unwrap();
 }

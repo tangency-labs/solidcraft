@@ -8,8 +8,10 @@
 //!   exact up to rounding) mapped into the frame, each control point at the curve's level within
 //!   the tolerance. A line is proposed by the ends and proved by every span: control points
 //!   within the tolerance of the chord, and `W T' - T W'` positive (an oriented traversal, not a
-//!   retracing). A circle is proposed by the curve's label (a circle kind's centre and radius)
-//!   or by three of its points, and proved by every span: the Bernstein coefficients of
+//!   retracing); a rational piece whose control points leave the chord by more than the zone
+//!   tolerance is the arc it is proved on, and the line only when it is no arc. A circle is
+//!   proposed by the curve's label (a circle kind's centre and radius) or by three of its
+//!   points, and proved by every span: the Bernstein coefficients of
 //!   `x^2 + y^2 - r^2 w^2` within the rounding of computing them and the tolerance, the angular
 //!   determinant of one sign, the span in one open half plane about the centre (split in halves
 //!   up to twelve times where needed). Else the one span is the free-form segment it is (a
@@ -408,22 +410,32 @@ pub fn planar_pieces(
     if !joins || first.distance(a) + error > tol || last.distance(b) + error > tol {
         return None;
     }
-    if a.distance(b) > tol
-        && spans
-            .iter()
-            .all(|s| line_span(s, a, b, tol, error).is_some())
-    {
-        return Some(vec![Seg2::Line { a, b }]);
-    }
     let label = circle_label(run.curve).and_then(|(c, n, r)| {
         let nl = n.dot(Vec3::new(0.0, 0.0, 0.0) + super::profile::axes(frame).3);
         // the label's plane parallel to the frame's, within the tolerance over the radius
         let tilt = r * n.cross(super::profile::axes(frame).3).length();
         (nl.is_finite() && tilt <= tol).then(|| (to_local(frame, c), r))
     });
-    let candidate = label.or_else(|| through_three(k, run, (ts, te), frame, a, tol));
-    candidate
-        .and_then(|(center, radius)| arc(&spans, center, radius, a, b, tol, error, work))
+    let proved = |work: &mut usize| {
+        label
+            .or_else(|| through_three(k, run, (ts, te), frame, a, tol))
+            .and_then(|(center, radius)| arc(&spans, center, radius, a, b, tol, error, work))
+    };
+    if a.distance(b) > tol
+        && spans
+            .iter()
+            .all(|s| line_span(s, a, b, tol, error).is_some())
+    {
+        // Within `tol` of its chord the piece is that line, unless `arc_before_line` says it
+        // is the arc it is proved on within `tol`; one that is no arc stays the line.
+        let found = if arc_before_line(&spans, k.tolerances.zone_tol_3d) {
+            proved(work)
+        } else {
+            None
+        };
+        return Some(found.unwrap_or_else(|| vec![Seg2::Line { a, b }]));
+    }
+    proved(work)
         .or_else(|| free_form(&spans, a, b, tol))
         .or_else(|| {
             if each_span {
@@ -574,6 +586,27 @@ fn span_by_span(spans: &[Vec<H2>], a: Point2, b: Point2, tol: f64) -> Option<Vec
         start = end;
     }
     Some(out)
+}
+
+/// Whether a piece within the reading tolerance of the chord between its ends is read as the
+/// arc it is proved on before that line: its Bézier `spans` (homogeneous, in the frame) are
+/// rational (a circle's or a conic's: the weights of a span differ by more than their rounding)
+/// and their control points leave the chord by more than `zone`, the zone tolerance an edge keeps
+/// to its face. The piece lies in the hull of its control points, so only then can the line lie
+/// farther than `zone` off it. Read as the line, a few hundredths of a millimetre of a circle made
+/// a flat prism side 1e-5 off its cylinder.
+#[must_use]
+pub fn arc_before_line(spans: &[Vec<H2>], zone: f64) -> bool {
+    let rational = spans.iter().any(|s| {
+        let (lo, hi) = s
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+                (lo.min(p[2]), hi.max(p[2]))
+            });
+        hi - lo > lo.abs().max(hi.abs()) * f64::EPSILON * 64.0
+    });
+    let pts: Vec<Point2> = spans.iter().flatten().map(|p| point_of(*p)).collect();
+    rational && off_chord(&pts) > zone
 }
 
 /// How far the points lie off the chord between the first and the last.

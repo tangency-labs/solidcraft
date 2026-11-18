@@ -28,6 +28,8 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/volume_leak.rs"]
+mod volume_leak;
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -211,20 +213,34 @@ fn the_neighbours_keep_their_rounds() {
             0.214_601_836_334_623 + 2.0 * RUN_ON,
             2e-6,
         ),
-        ([0.0, -25.0, 2.0], 7.958_672_926_831_696, 1e-10),
+        // the fork's 7.958672926831696 (pinned here, to 1e-10, until #16735) leaks through
+        // the round's tolerant edges as this integrator did; checked below. Since the trim
+        // pieces integrate by Gauss-Kronrod (#14460): forced to accuracy 1e-12 Gauss-Kronrod
+        // gives 7.958672911836857 (4.6e-13 above this) and the earlier Runge-Kutta trim pieces
+        // 7.958672911830945; with Runge-Kutta trim pieces it was 7.958672912139264, 3.0e-10
+        // above
+        ([0.0, -25.0, 2.0], 7.958_672_911_836_402, 1e-10),
     ] {
         let mut k = kernel();
         let mut b = plate(&mut k);
         let before = fine_volume(&k, &mut b);
+        let mut part = b.clone_standing_for_self().unwrap();
         let e = pick(&k, &b, at);
         fillet_edges(&mut k, &mut b, &[e], RADIUS, 1, 1, 1.0).unwrap();
         b.refresh_cached_topology();
         let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
         assert!(check.is_valid(), "{at:?}: {:?}", check.lines());
-        let removed = before - fine_volume(&k, &mut b);
+        let after = fine_volume(&k, &mut b);
+        let removed = before - after;
         assert!(
             (removed - removed_by_fork).abs() <= tol,
             "{at:?}: {removed}"
         );
+        if at[1] == -25.0 {
+            let was = 7.958_672_926_831_696;
+            volume_leak::assert_difference_moved_by_the_old_leak(
+                &k, &mut part, &mut b, was, removed, 1e-10,
+            );
+        }
     }
 }

@@ -337,6 +337,21 @@ fn point_at_a_vertex() {
     assert!(near(point(&s, "P"), Vec3::new(40.0, 30.0, 20.0)));
 }
 
+/// A vertex named by its edges is where every one of them ends. The bottom front edge and the
+/// uprights at both its ends don't all meet anywhere, so their names give no vertex and the pick
+/// decides: the top front corner, not an end of the first edge.
+#[test]
+fn a_vertex_is_where_every_named_edge_ends() {
+    let mut s = part();
+    let state = s.model.state();
+    let b = state.body("Box").unwrap_or_else(|| panic!("no Box"));
+    let at = [Vec3::new(20.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 10.0), Vec3::new(40.0, 0.0, 10.0)];
+    let edges = solidcraft_doc::naming::edge_names_at(b, &at);
+    assert!(edges.iter().all(|n| !n.is_empty()), "{edges:?}");
+    run(&mut s, "construct.point.vertex", json!({"point": {"type": "vertex", "at": [0, 0, 20], "edges": edges}, "name": "P"}));
+    assert!(near(point(&s, "P"), Vec3::new(0.0, 0.0, 20.0)), "{:?}", point(&s, "P"));
+}
+
 #[test]
 fn point_through_two_edges() {
     let mut s = part();
@@ -722,7 +737,7 @@ fn ambiguous_plane_aliases_refuse_without_document_or_history_changes() {
             assert!(error.to_string().contains(&format!("use `{other}` for the origin plane")), "{error}");
             assert_eq!(s.doc.to_json(), before);
             assert_eq!(s.undo.len(), history);
-            assert!(s.section.is_none());
+            assert!(s.section.is_empty());
         }
         run(&mut s, "sketch.create", json!({"plane":id}));
         let inspected = run(&mut s, "sketch.inspect", json!({}));
@@ -828,6 +843,20 @@ fn plane_at_angle_direction_only_projects_the_axis_and_pivots() {
     assert!(error.contains("square to the plane") || error.contains("no direction"), "{error}");
     assert_eq!(s.doc.to_json(), before);
 
+    // The origin is unused with the option, so a parameter in it is refused rather than kept as
+    // a dependency the plane never reads.
+    run(&mut s, "parameters.add", json!({"name": "unused_r", "expression": "12 mm"}));
+    let before = s.doc.to_json();
+    let error = s
+        .execute(
+            "construct.plane.at_angle",
+            &json!({"base": "XY", "axis": {"origin": ["unused_r", 0, 0], "dir": [0, 1, 0]}, "angle": "10 deg", "direction_only": true}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("direction_only") && error.contains("pivot"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
     // A pivot without the option is refused.
     let error = s
         .execute("construct.plane.at_angle", &json!({"base": "XY", "axis": "Y", "angle": "10 deg", "pivot": {"point": [1, 0, 0]}}))
@@ -840,6 +869,44 @@ fn plane_at_angle_direction_only_projects_the_axis_and_pivots() {
     let saved = s.doc.to_json();
     let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
     assert!(near(plane(&reopened, "Pivoted").origin, Vec3::new(5.0, 0.0, 5.0)));
+}
+
+/// Plane at Angle about `{origin, dir}` with length expressions in the origin: the plane is where
+/// the same numbers put it, and it follows the parameters as they change, are renamed and reopen.
+#[test]
+fn plane_at_angle_axis_origin_expressions_follow_their_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "r", "expression": "12 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "5 mm"}));
+    let axis = |origin: Value| json!({"origin": origin, "dir": [0, 1, 0]});
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": axis(json!(["r", "0 mm", "h"])), "angle": "30 deg", "name": "Expr"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": axis(json!([12, 0, 5])), "angle": "30 deg", "name": "Numbers"}));
+    let same = |a: Plane, b: Plane| near(a.origin, b.origin) && near(a.x, b.x) && near(a.y, b.y);
+    assert!(same(plane(&s, "Expr"), plane(&s, "Numbers")), "{:?} {:?}", plane(&s, "Expr"), plane(&s, "Numbers"));
+    // XY turned 30 deg about the line through (r, 0, h) along Y: its origin, which is (-r, 0, -h)
+    // from that point, turns about the line.
+    let expected = |r: f64, h: f64| {
+        let (c, sn) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        // Turning (x, z) counterclockwise about +Y: x' = x cos + z sin, z' = -x sin + z cos.
+        Vec3::new(r + (-r * c + -h * sn), 0.0, h + (r * sn + -h * c))
+    };
+    assert!(near(plane(&s, "Expr").origin, expected(12.0, 5.0)), "{:?}", plane(&s, "Expr"));
+    // The saved origin keeps the expressions; plain numbers stay numbers.
+    let saved = |s: &Session, name: &str| {
+        let f = s.doc.features.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no {name}"));
+        serde_json::to_value(&f.kind).unwrap()["plane"]["axis_origin"].clone()
+    };
+    assert_eq!(saved(&s, "Expr"), json!(["r", "0 mm", "h"]));
+    assert_eq!(saved(&s, "Numbers"), json!([12.0, 0.0, 5.0]));
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "20 mm"}));
+    assert!(near(plane(&s, "Expr").origin, expected(20.0, 5.0)), "{:?}", plane(&s, "Expr"));
+    assert!(near(plane(&s, "Numbers").origin, expected(12.0, 5.0)), "{:?}", plane(&s, "Numbers"));
+    run(&mut s, "parameters.rename", json!({"name": "h", "new_name": "height"}));
+    run(&mut s, "parameters.change", json!({"name": "height", "expression": "8 mm"}));
+    assert!(near(plane(&s, "Expr").origin, expected(20.0, 8.0)), "{:?}", plane(&s, "Expr"));
+    assert_eq!(saved(&s, "Expr"), json!(["r", "0 mm", "height"]));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(near(plane(&reopened, "Expr").origin, expected(20.0, 8.0)), "{:?}", plane(&reopened, "Expr"));
 }
 
 /// A construction plane named like an origin plane, as an older saved design can hold.
@@ -920,6 +987,32 @@ fn offset_plane_through_a_point_follows_the_point() {
     assert!(near(plane(&cold, "Side").origin, plane(&s, "Side").origin));
     // A distance and a point at once is refused.
     assert!(s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 5, "through": {"vertex": [0, 0, 0]}})).is_err());
+}
+
+#[test]
+fn offset_plane_redefine_maps_world_geometry_into_its_owning_component() {
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part","grounded":false}));
+    run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","translate":[20,30,40],"axis":[0,1,0],"angle":"90 deg"}));
+    let base = json!({"origin":[0,0,0],"x_dir":[0,1,0],"y_dir":[0,0,1]});
+    let made = run(&mut s, "construct.plane.offset", json!({"base":base,"offset":5,"name":"Side"}));
+    let id = made["feature"].as_u64().unwrap();
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base: saved, .. } } = s.doc.feature(id).unwrap().kind.clone() else {
+        panic!("offset plane");
+    };
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "timeline.redefine", json!({"feature":id,"command":"CONSTRUCT.PLANE.OFFSET","params":{"base":base,"offset":9}}));
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { base: edited, .. } } = &s.doc.feature(id).unwrap().kind else {
+        panic!("offset plane");
+    };
+    assert_eq!(edited, &saved, "the explicit base returns to the feature's local frame");
+    assert!(near(plane(&s, "Side").origin, Vec3::X * 9.));
+    assert!(near(plane(&s, "Side").normal(), Vec3::X));
+    run(&mut s, "timeline.redefine", json!({"feature":id,"command":"construct.plane.offset","params":{"base":base,"through":{"point":[17,20,30]}}}));
+    assert!(near(plane(&s, "Side").origin, Vec3::X * 17.));
+    assert!(near(plane(&s, "Side").normal(), Vec3::X));
+    assert_eq!(s.active_component, 0);
 }
 
 /// Hiding the placement a component is shown at hides its construction geometry too, as it

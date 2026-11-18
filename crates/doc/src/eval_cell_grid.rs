@@ -31,6 +31,8 @@ pub(crate) fn tools(
         angle,
         anchor,
         clip,
+        keepout_clip,
+        snap_inset,
         margin,
         depth,
         through_all,
@@ -81,6 +83,20 @@ pub(crate) fn tools(
         },
         anchor,
         clip: *clip,
+        keepout_clip: *keepout_clip,
+        snap_inset: match snap_inset {
+            Some(e) => {
+                let n = val(vals, e, Kind::Unitless)?;
+                if !(n.is_finite() && n.fract() == 0.0 && (0.0..=f64::from(crate::CELL_GRID_MAX_SNAP_INSET)).contains(&n)) {
+                    return Err(DocError::Invalid(format!(
+                        "the snap inset is a whole number of lattice lines from 0 to {}, not {n}",
+                        crate::CELL_GRID_MAX_SNAP_INSET
+                    )));
+                }
+                n as u32
+            }
+            None => 0,
+        },
         margin: match margin {
             Some(e) => val(vals, e, Kind::Length)?,
             None => 0.0,
@@ -127,7 +143,7 @@ pub(crate) fn tools(
     for cell in &plan.cells {
         let pieces = solidcore_ops::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?;
         for region in &pieces {
-            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false)?);
+            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false, None)?);
         }
     }
     // The cells lie apart by the web, so the kernel's own check of their boxes (which a

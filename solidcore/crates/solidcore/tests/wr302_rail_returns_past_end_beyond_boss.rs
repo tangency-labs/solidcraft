@@ -1,12 +1,13 @@
-//! WR-302 (`fillet_refuse_rails_leaving_faces`) and the fork's tangency-labs/smlib@d6a6d53:
+//! WR-302 (the refusal of rails leaving their faces) and the fork's tangency-labs/smlib@d6a6d53:
 //! a box's top edge ends on a boss's wall rising from the box. Its rail on the top crosses
 //! the boss's base arc just past the edge's end and comes back onto the top beyond the
 //! boss. The fork judged only the first and last off-face runs past an end, so it built
 //! this blend as a cliff overflow and refused it. The port already skips a middle run
 //! that leaves and comes back past an end (#1580). That rule is looser than d6a6d53's,
 //! which also wants both crossings on the same end's side edge, and it keeps #1580's spur,
-//! which returns across another edge. So this case builds with or without the fork's flags,
-//! and both bodies are the same.
+//! which returns across another edge. So this case builds with or without
+//! `fillet_trace_reaches_rails` (the one fork flag of the four this test once toggled that
+//! is still a flag), and both bodies are the same.
 //!
 //! The 40 x 20 x 10 box united with a cylinder of radius 5 and height 20 on (30, 0):
 //! the front top edge runs (0, 0, 10) to (25, 0, 10), and a chamfer or round of 2 has
@@ -38,13 +39,10 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 }
 
 /// The material removed by a blend of 2 (`xsect` 0 chamfer, 1 round) on the front top
-/// edge, with the fork's refusal and cliff-overflow flags or without.
+/// edge, with `fillet_trace_reaches_rails` or without.
 fn removed(fork_flags: bool, xsect: u32) -> f64 {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = fork_flags;
-    k.fixes.fillet_cliff_overflow = fork_flags;
     k.fixes.fillet_trace_reaches_rails = fork_flags;
-    k.fixes.fillet_rail_end_on_continued_surface = fork_flags;
     let bx = create_box(&mut k, Vec3::ZERO, 40.0, 20.0, 10.0).unwrap();
     let boss = create_cylinder(&mut k, Point3::new(30.0, 0.0, 0.0), 5.0, 20.0).unwrap();
     let mut b = boolean_union(&mut k, bx, boss).unwrap();

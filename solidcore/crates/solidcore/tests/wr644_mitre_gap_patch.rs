@@ -1,5 +1,5 @@
-//! WR-644 (the fork's tangency-labs/smlib@2223108): with `fillet_mitre_gap_patch`, two rounds
-//! mitred at a face's concave corner (`fillet_mitre_concave_face_corners`, WR-642) whose walls
+//! WR-644 (the fork's tangency-labs/smlib@2223108; once the opt-in `fillet_mitre_gap_patch`): two rounds
+//! mitred at a face's concave corner (WR-642) whose walls
 //! lean differently, so that their rails meet the corner edge at two places, fill the gap past
 //! the corner edge with a patch on the side wall's continuation. The fork's case: a sloped
 //! basin's rim rounded r 0.5 (SolidCraft's `1080-fillet-sloped-basin-1-mm-rim-r0-5-4-edges`).
@@ -25,14 +25,9 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
 
-fn kernel(gap: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
-    k.fixes.fillet_mitre_gap_patch = gap;
     k
 }
 
@@ -146,13 +141,12 @@ const EQUAL_SLOPE_BASIN: Basin = Basin {
 
 /// Rounds `edges` of `basin` by `r`, or chamfers them with legs `r` (`chamfer`): faces and volume, or the refusal.
 fn blend(
-    gap: bool,
     basin: Basin,
     edges: &[(Point3, Point3)],
     r: f64,
     chamfer: bool,
 ) -> Result<(usize, f64), String> {
-    let mut k = kernel(gap);
+    let mut k = kernel();
     let mut b = basin.build(&mut k);
     let ids: Vec<EdgeId> = edges
         .iter()
@@ -209,11 +203,11 @@ fn sloped_basin_rim_rounds_fill_the_mitre_gap() {
     let rim = FORK_BASIN.rim();
     // the front and right rim edges: the fork 13 faces 144532.187340 against the closed
     // form 144532.187336
-    let (n, v) = blend(true, FORK_BASIN, &rim[..2], 0.5, false).unwrap();
+    let (n, v) = blend(FORK_BASIN, &rim[..2], 0.5, false).unwrap();
     assert_eq!(n, 13);
     assert!((v - 144_532.187_336).abs() < 1e-4, "two edges: {v}");
     // all four: the fork 15 faces 144530.427946 against 144530.427909
-    let (n, v) = blend(true, FORK_BASIN, &rim, 0.5, false).unwrap();
+    let (n, v) = blend(FORK_BASIN, &rim, 0.5, false).unwrap();
     assert_eq!(n, 15);
     assert!((v - 144_530.427_909).abs() < 2e-4, "four edges: {v}");
 }
@@ -222,9 +216,8 @@ fn sloped_basin_rim_rounds_fill_the_mitre_gap() {
 fn sloped_basin_rim_chamfers_fill_the_mitre_gap() {
     // SolidCraft's 1080-fillet-sloped-basin-4-mm-rim-2-2-edges (5835): 145957.3269
     let rim = RIM4_BASIN.rim();
-    let (_, v) = blend(true, RIM4_BASIN, &rim[..2], 2.0, true).unwrap();
+    let (_, v) = blend(RIM4_BASIN, &rim[..2], 2.0, true).unwrap();
     assert!((v - 145_957.326_9).abs() < 1e-3, "4 mm rim: {v}");
-    assert!(blend(false, RIM4_BASIN, &rim[..2], 2.0, true).is_err());
     // 1080-fillet-sloped-basin-1-mm-rim-2-two-edges: 144372.0542, its front leg running off
     // the 1 mm rim over the slab's front (a cliff overflow)
     let basin = Basin {
@@ -232,19 +225,16 @@ fn sloped_basin_rim_chamfers_fill_the_mitre_gap() {
         ..FORK_BASIN
     };
     let rim = basin.rim();
-    let (_, v) = blend(true, basin, &rim[..2], 2.0, true).unwrap();
+    let (_, v) = blend(basin, &rim[..2], 2.0, true).unwrap();
     assert!((v - 144_372.054_2).abs() < 1e-3, "1 mm rim: {v}");
-    assert!(blend(false, basin, &rim[..2], 2.0, true).is_err());
 }
 
 #[test]
 fn an_equal_slope_basin_needs_no_gap() {
     // 1080-fillet-equal-slope-basin-1-mm-rim-loop-0-5: 140329.8156, the rails meeting the
-    // corner edge at one place: the mitre alone (WR-642), with or without the gap patch
+    // corner edge at one place: the mitre alone (WR-642), no gap patch
     let rim = EQUAL_SLOPE_BASIN.rim();
-    for gap in [false, true] {
-        let (n, v) = blend(gap, EQUAL_SLOPE_BASIN, &rim, 0.5, false).unwrap();
-        assert_eq!(n, 15);
-        assert!((v - 140_329.815_6).abs() < 1e-3, "equal slope: {v}");
-    }
+    let (n, v) = blend(EQUAL_SLOPE_BASIN, &rim, 0.5, false).unwrap();
+    assert_eq!(n, 15);
+    assert!((v - 140_329.815_6).abs() < 1e-3, "equal slope: {v}");
 }

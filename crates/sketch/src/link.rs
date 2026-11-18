@@ -6,8 +6,10 @@
 //! Linked points are fixed and linked circles keep their radius, so the solver treats them as
 //! constants; they still bound profiles and take constraints and dimensions like any curve.
 
+use std::f64::consts::TAU;
+
 use serde::{Deserialize, Serialize};
-use solidcore_record::{Vec2, Vec3};
+use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
 
@@ -51,6 +53,15 @@ pub enum LinkSource {
     Body { body: String },
     /// A body vertex at `at`.
     Vertex { body: String, at: Vec3 },
+    /// A model edge as a drawing view draws it, named as the drawing names edges (its fields are
+    /// the drawing's edge reference): only in that view's sketch.
+    ViewEdge {
+        body: String,
+        origin_feature: u64,
+        name: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path: Vec<u64>,
+    },
     /// A curve of another sketch.
     SketchCurve { sketch: u64, curve: String },
     /// A point of another sketch.
@@ -144,6 +155,7 @@ impl LinkSource {
             LinkSource::Face { body, .. } => of_body("face", body),
             LinkSource::Body { body } => body.clone(),
             LinkSource::Vertex { body, .. } => of_body("vertex", body),
+            LinkSource::ViewEdge { body, .. } => of_body("edge", body),
             LinkSource::SketchCurve { curve, .. } => format!("sketch curve {curve}"),
             LinkSource::SketchPoint { point, .. } => format!("sketch point {point}"),
             LinkSource::Origin => "origin".into(),
@@ -168,7 +180,8 @@ impl LinkSource {
             | LinkSource::Vertex { body, .. }
             | LinkSource::OnSurface { body, .. }
             | LinkSource::Iso { body, .. }
-            | LinkSource::Spun { body, .. } => vec![body.as_str()],
+            | LinkSource::Spun { body, .. }
+            | LinkSource::ViewEdge { body, .. } => vec![body.as_str()],
             LinkSource::Intersection { a, b } => {
                 let mut bodies = a.bodies();
                 bodies.extend(b.bodies());
@@ -206,6 +219,15 @@ pub fn sketch_axis_geom(name: &str) -> Option<LinkGeom> {
     Some(LinkGeom::Line(Vec2::ZERO - u * SKETCH_AXIS_HALF, u * SKETCH_AXIS_HALF))
 }
 
+/// A source sketch's component frame relative to the author when a link was made.
+/// The document keeps source geometry live while assembly motion leaves this relationship fixed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SketchPlacement {
+    pub sketch: u64,
+    pub placement: [[f64; 4]; 4],
+}
+
 /// One link and its state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Link {
@@ -213,6 +235,8 @@ pub struct Link {
     #[serde(default)]
     pub kind: LinkKind,
     pub source: LinkSource,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketch_placements: Vec<SketchPlacement>,
     /// Persistent model face identity, resolved by the document before geometry refresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub face_name: Option<String>,
@@ -230,6 +254,11 @@ pub struct Link {
     /// The reference could not be found on the last recompute; the geometry is the last good one.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lost: bool,
+    /// The design dropped the vertex or edge name this link saved as it opened, a name an older
+    /// build guessed (#17229): the link is found by its point, and the session stores the name
+    /// of what it was found on, as an edit of its sketch would, then clears this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub name_dropped: bool,
 }
 
 /// Geometry a link produces, in sketch coordinates.
@@ -269,6 +298,26 @@ pub enum LinkGeom {
 }
 
 impl LinkGeom {
+    /// A boundary segment as the link geometry of the same curve: an arc counter-clockwise
+    /// whichever way it was swept, a conic of weight `w` as rho `w / (1 + w)`, a Bézier as its
+    /// control spline. `None` for a Bézier whose degree is past its control points.
+    pub fn from_seg(s: &Seg2) -> Option<LinkGeom> {
+        Some(match *s {
+            Seg2::Line { a, b } => LinkGeom::Line(a, b),
+            Seg2::Arc { center, radius, sweep, .. } if sweep.abs() >= TAU - 1e-9 => LinkGeom::Circle(center, radius),
+            Seg2::Arc { center, radius, start, sweep } => {
+                let at = |t: f64| center + Vec2::new(t.cos(), t.sin()) * radius;
+                let (a, b) = if sweep > 0. { (at(start), at(start + sweep)) } else { (at(start + sweep), at(start)) };
+                LinkGeom::Arc { c: center, a, b }
+            }
+            Seg2::Conic { a, apex, b, w } => LinkGeom::Conic { a, apex, b, rho: w / (1. + w) },
+            Seg2::Cubic { p0, p1, p2, p3 } => LinkGeom::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: false, nurbs: None },
+            Seg2::Bezier { n, p } => {
+                LinkGeom::Spline { pts: p.get(..=usize::from(n))?.to_vec(), control: true, degree: n, periodic: false, nurbs: None }
+            }
+        })
+    }
+
     fn finite(&self) -> bool {
         let ok = |p: &Vec2| in_range(*p);
         match self {
@@ -442,21 +491,27 @@ fn same_nurbs(a: Option<&crate::Nurbs>, b: Option<&crate::Nurbs>, close: impl Fn
     }
 }
 
+/// Whether two readings of a linked point are the same point: within [`same_geometry`]'s tolerance.
+fn near_point(p: Vec2, q: Vec2) -> bool {
+    p.dist(q) <= SAME_TOL * (1.0 + p.len().max(q.len()))
+}
+
+/// How far (relative) a re-read link may move and still be the same geometry.
+const SAME_TOL: f64 = 1e-6;
+
 /// Do two curve sets describe the same geometry, regardless of the order the curves come in or
 /// the direction a loop was walked? Lines match with either end first; circles by centre and
 /// radius; arcs by centre and their (start, end) pair; conics by all their points and rho.
 fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
-    const TOL: f64 = 1e-6;
-    let near = |p: Vec2, q: Vec2| p.dist(q) <= TOL * (1.0 + p.len().max(q.len()));
-    let close = |x: f64, y: f64| (x - y).abs() <= TOL * (1.0 + x.abs().max(y.abs()));
+    let close = |x: f64, y: f64| (x - y).abs() <= SAME_TOL * (1.0 + x.abs().max(y.abs()));
     let matches = |(ca, pa): &(LCurve, Vec<Vec2>), (cb, pb): &(LCurve, Vec<Vec2>)| -> bool {
         if pa.len() != pb.len() {
             return false;
         }
-        let all = || pa.iter().zip(pb).all(|(p, q)| near(*p, *q));
+        let all = || pa.iter().zip(pb).all(|(p, q)| near_point(*p, *q));
         match (ca, cb) {
             (LCurve::Line(..), LCurve::Line(..)) => {
-                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near(*a0, *b1) && near(*a1, *b0))
+                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near_point(*a0, *b1) && near_point(*a1, *b0))
             }
             (LCurve::Circle(_, ra), LCurve::Circle(_, rb)) => all() && close(*ra, *rb),
             (LCurve::Arc(..), LCurve::Arc(..)) => all(),
@@ -606,6 +661,7 @@ impl Sketch {
             .flatten()
             .chain(self.points.iter().filter_map(|p| p.exprs.as_deref()).flat_map(crate::PointExprs::list))
             .chain(self.equations.iter().flat_map(crate::EquationCurve::list))
+            .chain(self.wire_point_exprs())
             .collect()
     }
 
@@ -643,6 +699,15 @@ impl Sketch {
             })
             .flatten()
             .chain(self.points.iter_mut().filter_map(|p| p.exprs.as_deref_mut()).flat_map(crate::PointExprs::list_mut))
+            .chain(
+                self.wire_constraints
+                    .iter_mut()
+                    .filter_map(|c| match &mut c.kind {
+                        crate::WireConstraintKind::Fix { exprs: Some(e), .. } => Some(e.list_mut()),
+                        _ => None,
+                    })
+                    .flatten(),
+            )
             .collect()
     }
 
@@ -758,7 +823,18 @@ impl Sketch {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("j")?;
-        self.links.push(Link { id: id.clone(), kind, source, face_name: None, edge_name: None, vertex_name: None, auto_face: false, lost: false });
+        self.links.push(Link {
+            sketch_placements: Vec::new(),
+            id: id.clone(),
+            kind,
+            source,
+            face_name: None,
+            edge_name: None,
+            vertex_name: None,
+            auto_face: false,
+            lost: false,
+            name_dropped: false,
+        });
         self.build_link(&id, &lay)?;
         Ok(id)
     }
@@ -816,6 +892,77 @@ impl Sketch {
         Ok(idx)
     }
 
+    /// `geom` with each whole circle that link `id` holds as arcs given back as those arcs,
+    /// split where they were. A closed circular edge was once projected as its two halves and
+    /// a fresh projection gives one circle now (#17175). A saved sketch's halves are named by
+    /// id from outside the link: an offset's sources, a feature's profile loop. Folding them
+    /// into one circle loses the second half and everything built on it (#18250), so a saved
+    /// link keeps its halves. `None` when no circle is kept in pieces.
+    fn saved_halves(&self, id: &str, geom: &[LinkGeom]) -> Option<Vec<LinkGeom>> {
+        // The link's arcs by centre point and radius: (centre, centre at, radius, arcs as
+        // (from, to), total sweep).
+        let mut groups: Vec<(usize, Vec2, f64, Vec<(Vec2, Vec2)>, f64)> = Vec::new();
+        for ci in self.link_curves(id) {
+            let Some(curve) = self.curves.get(ci) else { continue };
+            let CurveKind::Arc { c, a, b } = curve.kind else { continue };
+            let (Some(cp), Some(ap), Some(bp)) = (self.point(c), self.point(a), self.point(b)) else { continue };
+            let (r, sweep) = (cp.dist(ap), ((bp - cp).angle() - (ap - cp).angle()).rem_euclid(std::f64::consts::TAU));
+            match groups.iter_mut().find(|g| g.0 == c && (g.2 - r).abs() <= 1e-6 * (1.0 + r)) {
+                Some(g) => {
+                    g.3.push((ap, bp));
+                    g.4 += sweep;
+                }
+                None => groups.push((c, cp, r, vec![(ap, bp)], sweep)),
+            }
+        }
+        // Only arcs that close into one whole circle, of the same radius throughout.
+        groups.retain(|g| {
+            let tol = 1e-6 * (1.0 + g.2);
+            g.3.len() >= 2
+                && (g.4 - std::f64::consts::TAU).abs() <= 1e-6
+                && g.3.iter().all(|(a, b)| (g.1.dist(*a) - g.2).abs() <= tol && (g.1.dist(*b) - g.2).abs() <= tol)
+        });
+        if groups.is_empty() {
+            return None;
+        }
+        let circles: Vec<usize> = geom.iter().enumerate().filter(|(_, g)| matches!(g, LinkGeom::Circle(..))).map(|(i, _)| i).collect();
+        let mut pieces: std::collections::BTreeMap<usize, Vec<LinkGeom>> = std::collections::BTreeMap::new();
+        for g in &groups {
+            let tol = 1e-6 * (1.0 + g.2);
+            let free: Vec<(usize, Vec2, f64)> = circles
+                .iter()
+                .filter(|i| !pieces.contains_key(*i))
+                .filter_map(|i| match geom.get(*i) {
+                    Some(&LinkGeom::Circle(c, r)) => Some((*i, c, r)),
+                    _ => None,
+                })
+                .collect();
+            let one = |hits: Vec<usize>| if let [i] = hits[..] { Some(i) } else { None };
+            // The circle where it was; else the one about the same centre, nearest in size (a
+            // hole made larger); else the only one of the same size (a hole moved); else the
+            // one circle an edge link is.
+            let same_centre = free.iter().filter(|(_, c, _)| c.dist(g.1) <= tol);
+            let at = free
+                .iter()
+                .find(|(_, c, r)| c.dist(g.1) <= tol && (r - g.2).abs() <= tol)
+                .or_else(|| same_centre.min_by(|x, y| (x.2 - g.2).abs().total_cmp(&(y.2 - g.2).abs())))
+                .map(|x| x.0)
+                .or_else(|| one(free.iter().filter(|(_, _, r)| (r - g.2).abs() <= tol).map(|x| x.0).collect()))
+                .or_else(|| if geom.len() == 1 && groups.len() == 1 { circles.first().copied() } else { None });
+            let Some(at) = at else { continue };
+            let Some(&LinkGeom::Circle(c, r)) = geom.get(at) else { continue };
+            let on = |p: Vec2| (p - g.1).normalized().map(|d| c + d * r);
+            let arcs: Option<Vec<LinkGeom>> = g.3.iter().map(|(a, b)| Some(LinkGeom::Arc { c, a: on(*a)?, b: on(*b)? })).collect();
+            if let Some(arcs) = arcs {
+                pieces.entry(at).or_insert(arcs);
+            }
+        }
+        if pieces.is_empty() {
+            return None;
+        }
+        Some(geom.iter().enumerate().flat_map(|(i, g)| pieces.remove(&i).unwrap_or_else(|| vec![g.clone()])).collect())
+    }
+
     /// Replace a link's geometry with a newly resolved one. When the shape is the same (same
     /// curve kinds sharing the same points) the entities keep their ids and only move, so
     /// constraints and dimensions on them survive; otherwise the link is rebuilt, and the
@@ -825,6 +972,8 @@ impl Sketch {
         let Some(kind) = self.link(id).map(|l| l.kind) else {
             return Err(SketchError::Unknown(id.into()));
         };
+        let halves = self.saved_halves(id, geom);
+        let geom = halves.as_deref().unwrap_or(geom);
         let lay = layout(geom, kind)?;
         // A projected face boundary is a closed loop: crossings and touching points make its
         // identity ambiguous, and the link keeps the geometry it had. A face taken with
@@ -972,6 +1121,29 @@ impl Sketch {
                 && lone_old.len() == points.len()
                 && (points.len() == lay.pts.len() && same_geometry(&old, &fresh) || only_stations_gone(&old, &fresh))
             {
+                // Read with the same curves in the same order, each point where it was: the
+                // fresh reading is the same entities where the model puts them now, which a
+                // saved projection fitted near its curve (#12920: a hole's rim 1.3e-6 off) takes.
+                if same && points.len() == lay.pts.len() && points.len() == order.len() {
+                    let fresh_pos: Option<Vec<Vec2>> = order.iter().map(|li| lay.pts.get(*li).copied()).collect();
+                    if let Some(fresh_pos) = fresh_pos
+                        && points.iter().zip(&fresh_pos).all(|(pi, q)| self.points.get(*pi).is_some_and(|p| near_point(p.pos, *q)))
+                    {
+                        for (pi, q) in points.iter().zip(fresh_pos) {
+                            if let Some(p) = self.points.get_mut(*pi) {
+                                p.pos = q;
+                            }
+                        }
+                        for (ci, c) in curves.iter().zip(&lay.curves) {
+                            match (self.curves.get_mut(*ci).map(|c| &mut c.kind), c) {
+                                (Some(CurveKind::Circle { r, .. }), LCurve::Circle(_, value))
+                                | (Some(CurveKind::Ellipse { r, .. }), LCurve::Ellipse(.., value)) => *r = *value,
+                                (Some(CurveKind::Conic { rho, .. }), LCurve::Conic(.., value)) => *rho = *value,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
                 return Ok(false);
             }
         }
@@ -1209,7 +1381,8 @@ impl Sketch {
     /// Where this sketch's points were in `stored`, the same sketch before its links were
     /// moved to where their sources are now ([`Sketch::update_link`]): point by point, as
     /// [`crate::solve_after_edit`] takes them. Points are matched by id (a rebuilt link has
-    /// new ones); a point `stored` does not have is where it is now. `None` when none moved.
+    /// new ones where no old one matches); a point `stored` does not have is where it is now.
+    /// `None` when none moved.
     pub fn positions_in(&self, stored: &Sketch) -> Option<Vec<Vec2>> {
         let aligned = self.points.len() == stored.points.len() && self.points.iter().zip(&stored.points).all(|(p, q)| p.id == q.id);
         let was: Vec<Vec2> = if aligned {
@@ -1272,6 +1445,105 @@ impl Sketch {
             }
         }
         Some(out)
+    }
+
+    /// Whether a text of this sketch has other words, place, height or angle than `stored`
+    /// has for it (they follow parameters).
+    pub fn texts_follow_other_values(&self, stored: &Sketch) -> bool {
+        self.links.iter().filter(|l| matches!(l.source, LinkSource::Text { .. })).any(|l| stored.link(&l.id).is_some_and(|d| d.source != l.source))
+    }
+
+    /// Take from `solved` what the texts of this stored sketch came to since: a text's words,
+    /// place, height and angle that follow parameters (its source), and its outlines where
+    /// other words made other points and curves. Nothing else is taken. `false` where that
+    /// cannot be done entity by entity (the sketches differ in more than texts).
+    pub fn adopt_texts(&mut self, solved: &Sketch) -> bool {
+        let changed: Vec<usize> = self
+            .links
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| matches!(l.source, LinkSource::Text { .. }))
+            .filter(|(_, l)| solved.link(&l.id).is_some_and(|d| d.source != l.source))
+            .map(|(i, _)| i)
+            .collect();
+        if changed.is_empty() {
+            return true;
+        }
+        let same = self.points.len() == solved.points.len()
+            && self.curves.len() == solved.curves.len()
+            && self.points.iter().zip(&solved.points).all(|(p, q)| p.id == q.id)
+            && self.curves.iter().zip(&solved.curves).all(|(c, d)| c.id == d.id);
+        let texts: Vec<&str> = changed.iter().filter_map(|i| self.links.get(*i)).map(|l| l.id.as_str()).collect();
+        let in_text = |link: &Option<String>| link.as_deref().is_some_and(|l| texts.contains(&l));
+        // Other words are other outlines, with other points and curves. An offset that follows
+        // one of them would lose it: only then is the sketch not adopted.
+        if !same {
+            let text_curves: std::collections::HashSet<&str> = self.curves.iter().filter(|c| in_text(&c.link)).map(|c| c.id.as_str()).collect();
+            let text_points: std::collections::HashSet<&str> = self.points.iter().filter(|p| in_text(&p.link)).map(|p| p.id.as_str()).collect();
+            let curve = |id: &String| text_curves.contains(id.as_str());
+            let point = |id: &String| text_points.contains(id.as_str());
+            if self.offsets.iter().any(|o| {
+                o.sources.iter().any(|(id, _)| curve(id))
+                    || o.outputs.iter().any(curve)
+                    || o.topology.as_ref().is_some_and(|t| t.roles.iter().any(|r| curve(&r.output) || point(&r.start) || point(&r.end)))
+            }) || self.freeform_offsets.iter().any(|o| curve(&o.source) || curve(&o.output))
+            {
+                return false;
+            }
+        }
+        // The constraints are then the solved sketch's, with the values stored.
+        let constraints = if same { None } else { Some(solved.stored_with_rebuilt_texts(self).map(|rebuilt| rebuilt.constraints)) };
+        // The texts' entities come from the solved sketch, every other one stays as stored,
+        // its curves' points renumbered to where the adopted points have them (by id).
+        let stored_points: std::collections::HashMap<&str, &crate::model::SPoint> = self.points.iter().map(|p| (p.id.as_str(), p)).collect();
+        let stored_curves: std::collections::HashMap<&str, &Curve> = self.curves.iter().map(|c| (c.id.as_str(), c)).collect();
+        let adopted_at: std::collections::HashMap<&str, usize> = solved.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
+        let points: Option<Vec<_>> = solved
+            .points
+            .iter()
+            .map(|q| if in_text(&q.link) { Some(q.clone()) } else { stored_points.get(q.id.as_str()).map(|p| (*p).clone()) })
+            .collect();
+        let unmapped = std::cell::Cell::new(false);
+        let renumber = |i: usize| match self.points.get(i).and_then(|p| adopted_at.get(p.id.as_str())) {
+            Some(n) => *n,
+            None => {
+                unmapped.set(true);
+                0
+            }
+        };
+        let curves: Option<Vec<_>> = solved
+            .curves
+            .iter()
+            .map(|d| {
+                if in_text(&d.link) {
+                    return Some(d.clone());
+                }
+                let mut c = (*stored_curves.get(d.id.as_str())?).clone();
+                c.kind.map_points(&renumber);
+                Some(c)
+            })
+            .collect();
+        let (Some(points), Some(curves)) = (points, curves) else { return false };
+        let constraints = match constraints {
+            None => None,
+            Some(Some(c)) => Some(c),
+            Some(None) => return false,
+        };
+        if unmapped.get() {
+            return false;
+        }
+        self.points = points;
+        self.curves = curves;
+        if let Some(c) = constraints {
+            self.constraints = c;
+        }
+        for i in changed {
+            let Some(source) = self.links.get(i).and_then(|l| solved.link(&l.id)).map(|d| d.source.clone()) else { continue };
+            if let Some(l) = self.links.get_mut(i) {
+                l.source = source;
+            }
+        }
+        true
     }
 
     /// Mark a link as lost (its reference was not found); its geometry stays as it was.

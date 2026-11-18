@@ -169,11 +169,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<MaterialListResult>)
         .params("→ built-in and design-owned materials (user: true, look, optional physical_card/physical_validation/density_comparison). Read-only; candidate engineering records do not certify sources or supply a solver"),
     CommandSpec::new("engine.commands", "List Commands", crate::checked!("engine.commands", commands))
+        .any_part()
         .icon("list")
         .noundo()
         .contract(&COMMANDS_CONTRACT)
         .output(output_schema_for::<Vec<CommandEntry>>),
-    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe))
+    CommandSpec::new("engine.describe", "Describe Command", crate::checked!("engine.describe", describe)).any_part()
         .icon("list")
         .noundo()
         .doc_only()
@@ -298,17 +299,7 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b.density_g_cm3 = Some(rho);
             b.mass_g = Some(v * rho / 1000.0);
         }
-        // Only Measure exposes sheet boundary counts; document.inspect keeps kernel counts.
-        if let Some(sheet) = definitions.sheets.iter().find(|sheet| sheet.body == source) {
-            let (df, de, dv) = sheet.round_hole_correction();
-            match &mut b.measurement.outcome {
-                BodyOutcome::Measured(f) => {
-                    f.faces = count(f.kernel.faces) + df;
-                    f.edges = count(f.kernel.edges) + de;
-                    f.vertices = count(f.kernel.vertices) + dv;
-                }
-                BodyOutcome::Failed(x) => (x.faces, x.edges, x.vertices) = (Some(df), Some(de), Some(dv)),
-            }
+        if definitions.sheets.iter().any(|sheet| sheet.body == source) {
             b.sheet_metal = Some(true);
         }
         bodies.push(b);
@@ -500,11 +491,34 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
     Some(SketchInspected {
         id,
         name: ss.name.clone(),
-        plane: serde_json::to_value(ss.plane).unwrap_or_default(),
+        plane: ss.plane.into(),
+        world_plane: plane.into(),
         status: ss.report.status.into(),
-        dof: ss.report.dof,
-        fully_constrained: ss.report.fully_constrained(),
+        dof: ss.report.shown_dof(),
+        fully_constrained: ss.report.shown_dof() == 0,
+        planar_dof: ss.report.dof,
         failing: ss.report.failing.clone(),
+        // The 3D constraints' solve (#10608): its freedoms are in `dof`, its failures here.
+        wires_solve: serde_json::to_value(&ss.report.wires).unwrap_or_default(),
+        // As the planar constraints are listed: a dimension's parameter expression, and an angle in
+        // degrees beside the stored radians.
+        wire_constraints: Value::Array(
+            sk.wire_constraints
+                .iter()
+                .map(|c| {
+                    let mut v = serde_json::to_value(c).unwrap_or_default();
+                    if let Some(o) = v.as_object_mut() {
+                        if let Some(p) = &c.param {
+                            o.insert("expression".into(), json!(s.doc.param(p).map(|x| x.expr.clone())));
+                        }
+                        if let (true, Some(value)) = (c.kind.is_angle(), c.kind.value()) {
+                            o.insert("degrees".into(), json!(value.to_degrees()));
+                        }
+                    }
+                    v
+                })
+                .collect(),
+        ),
         curves,
         points,
         constraints,
@@ -663,8 +677,9 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             let mut v = DocumentSketch {
                 id: ss.feature,
                 name: ss.name.clone(),
-                dof: ss.report.dof,
+                dof: ss.report.shown_dof(),
                 status: ss.report.status.into(),
+                wires_ok: ss.report.wires_ok(),
                 curves: ss.sketch.curves.len(),
                 profiles: ss.profiles.len(),
                 visible: crate::view::sketch_shown(s, ss.feature),

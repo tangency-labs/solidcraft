@@ -301,6 +301,23 @@ pub enum Error {
         /// The least radius that rounds it.
         smallest: f64,
     },
+    /// A control-point edit that moves a point on edge `edge` (its record index), whose two
+    /// faces' boundary rows along it are not one curve's control polygon (the kernel's
+    /// `seam_twins`): moving the point on one face would open the seam, and the faces are not
+    /// rebuilt to make the rows match. Why, as the kernel names it.
+    SeamMismatch {
+        /// The edge's record index.
+        edge: usize,
+        /// Why its two rows are not one curve's.
+        why: crate::surface_cvs::SeamMismatch,
+    },
+    /// A control-point edit that moves a vertex ending edge `edge` (its record index), which
+    /// cannot follow it: it is not a line between planar faces the edit keeps, so moving its end
+    /// would leave a gap at the vertex.
+    EdgeLeftBehind {
+        /// The edge's record index.
+        edge: usize,
+    },
     /// A corner's setback too short for the corner: it stops short of where the rails of the
     /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
     /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
@@ -383,6 +400,15 @@ pub enum OffsetRefusal {
         /// The radius of curvature the face attains on the displaced side.
         radius: f64,
     },
+    /// The wall reaches half the width between two opposite planar faces (a square boss inset
+    /// by half its width): the material between them has no offset left. `largest` is half
+    /// the narrowest such width, the largest wall that fits.
+    WallsMeetAcross {
+        /// The offset distance asked for (signed).
+        distance: f64,
+        /// The largest wall that fits.
+        largest: f64,
+    },
     /// Loops of the face's offset cross in a way the offset does not resolve: how.
     LoopsCross {
         /// How they cross.
@@ -449,6 +475,11 @@ impl std::fmt::Display for OffsetRefusal {
             OffsetRefusal::Collapses { distance, radius } => write!(
                 f,
                 "its offset by {distance} collapses (a radius of curvature {radius})"
+            ),
+            OffsetRefusal::WallsMeetAcross { largest, .. } => write!(
+                f,
+                "the wall reaches half the width between two opposite faces of a boss; the \
+                 largest wall that fits is {largest}"
             ),
             OffsetRefusal::LoopsCross { crossing } => write!(
                 f,
@@ -673,6 +704,26 @@ impl RoomReason {
             }
         }
     }
+
+    /// The reason in words for a blend whose size is `kind`: a chamfer (a distance or a scale)
+    /// has no rolling ball, so its reasons speak of its offset instead (#12128); a round's are
+    /// [`RoomReason::words`].
+    #[must_use]
+    pub const fn words_for(self, kind: FitKind) -> &'static str {
+        if !matches!(kind, FitKind::Distance | FitKind::Scale) {
+            return self.words();
+        }
+        match self {
+            RoomReason::BallDoesNotFit => "the chamfer's offset does not fit a face it runs along",
+            RoomReason::RailLeavesFace => "the chamfer's contact line leaves the face it runs along",
+            RoomReason::FaceConsumed => "the chamfers take the whole of a face they run along",
+            RoomReason::BallsFold => "the chamfer's offsets fold over each other along the edge",
+            RoomReason::OffsetCollapses => {
+                "the offset is as wide as a face it runs along, so the chamfer cannot end at the edge's end"
+            }
+            other => other.words(),
+        }
+    }
 }
 
 impl FitKind {
@@ -838,6 +889,14 @@ impl std::fmt::Display for Error {
             Error::RoundTooSmall { edge, smallest, .. } => write!(
                 f,
                 "the round of edge {edge} is too small to change the part: the smallest is {smallest}"
+            ),
+            Error::SeamMismatch { edge, why } => write!(
+                f,
+                "edge {edge} is not one curve on its two faces, so its points cannot move together: {why}"
+            ),
+            Error::EdgeLeftBehind { edge } => write!(
+                f,
+                "edge {edge} cannot follow its moved end: it is not a line between planar faces"
             ),
             Error::SetbackTooShort {
                 vertex: Some(vertex),

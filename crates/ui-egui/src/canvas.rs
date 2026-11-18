@@ -24,7 +24,7 @@ use solidcraft_theme::Tokens;
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = crate::open_meshing::session_world(&app.session);
     let item = anchor_item(app, d);
-    let Some(first) = &item else { return section_plane(d) };
+    let Some(first) = &item else { return stored_plane(d) };
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
@@ -81,18 +81,26 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         // made, as a body sits at the middle of its box.
         Sel::Feature { id } => (crate::viewport::feature_bounds(app, *id)?.center(), None),
         Sel::Plane { name } => {
-            let pl = solidcore_record::Plane::named(name).or_else(|| {
-                solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl)
-            })?;
+            let pl = solidcore_record::Plane::named(name)
+                .or_else(|| solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl))
+                .or_else(|| {
+                    // A component origin remains a valid Offset Plane input when its folder is hidden.
+                    if matches!(d.kind, Kind::OffsetPlane { .. }) && app.session.doc.find_feature(name).is_none() {
+                        app.session.origin_plane(name)
+                    } else {
+                        None
+                    }
+                })?;
             (pl.origin, Some(pl.normal()))
         }
         _ => return None,
     };
     Some(match &d.kind {
-        Kind::Extrude { start, .. } => {
+        Kind::Extrude { start, all, taper, .. } => {
             let n = normal?;
             let plane = solidcore_record::Plane::from_normal(at, n)?;
-            let from = reference_height(app, d, "From Object", &plane, at).unwrap_or(0.0);
+            let from =
+                from_slope_height(app, d, &plane, at, *all, taper).or_else(|| reference_height(app, d, "From Object", &plane, at)).unwrap_or(0.0);
             let offset = if start.trim().is_empty() { 0.0 } else { crate::length_input::eval(&app.session.doc, start, ValueKind::Length).ok()? };
             (at + n * (from + offset), Some(n))
         }
@@ -121,7 +129,9 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         }
         // A curved face offsets along its outward normal where it was picked.
         Kind::OffsetFaces { .. } => (at, normal.or_else(|| solidcraft_engine::doc::hole_direction_at(&st, at, &[]).map(|d| -d))),
-        Kind::Section { .. } | Kind::OffsetPlane { .. } => (at, normal),
+        // A section's distance runs against the plane's normal, into the part from a face.
+        Kind::Section { .. } => (at, normal.map(|n| -n)),
+        Kind::OffsetPlane { .. } => (at, normal),
         // Fillet radii and chamfer distances grow the way `blend_grow_dir` gives (into the body
         // on an outside edge, into the open corner on an inside one); shell thickness grows into
         // the body.
@@ -207,6 +217,27 @@ pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcore_rec
     )
 }
 
+/// Where an extrude From a flat face at a slant starts above `centre`, on the face, when the
+/// build starts it there ([`solidcraft_engine::doc::from_slope_height`]): not with To Object,
+/// Through All (`all`) or a nonzero `taper`, nor for an edited extrude kept on its old start
+/// at the face's level (`from_level`). `None` otherwise, so the arrow starts at
+/// [`reference_height`] as before.
+fn from_slope_height(app: &SolveApp, d: &Dialog, plane: &solidcore_record::Plane, centre: Vec3, all: bool, taper: &str) -> Option<f64> {
+    let to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+    let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
+    let kept_level = d
+        .editing
+        .and_then(|(id, _)| app.session.doc.feature(id))
+        .is_some_and(|f| matches!(&f.kind, solidcraft_engine::doc::FeatureKind::Extrude { extent, .. } if extent.from_level));
+    if to || all || tapered || kept_level {
+        return None;
+    }
+    let point = crate::dialogs::object_point(&d.inputs, "From Object")?;
+    let p = point.as_array()?;
+    let p = Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?);
+    solidcraft_engine::doc::from_slope_height(&crate::open_meshing::session_world(&app.session), plane, centre, p)
+}
+
 fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcore_record::Plane, centre: Vec3) -> Option<f64> {
     let point = crate::dialogs::object_point(&d.inputs, label)?;
     let p = point.as_array()?;
@@ -256,16 +287,20 @@ pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     Some(if edge_concave(m, index, p).unwrap_or(false) { n } else { -n })
 }
 
-/// A Section Analysis dialog reopened from its section's own geometry (Show viewport section
-/// status): the plane it keeps as numbers when nothing is picked, so its arrow stands there as on
-/// a picked plane (#11423).
-fn section_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
-    if !matches!(d.kind, Kind::Section { .. }) {
-        return None;
-    }
-    let plane = d.extra.get("plane")?;
+/// A reopened section or Offset Plane can keep a fixed plane without a selection item. Its
+/// arrow uses that saved world plane, just as it would a picked plane.
+fn stored_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
+    let key = match d.kind {
+        Kind::Section { .. } => "plane",
+        Kind::OffsetPlane { .. } => "base",
+        _ => return None,
+    };
+    let plane = d.extra.get(key)?;
     let point = |key: &str| serde_json::from_value::<[f64; 3]>(plane.get(key)?.clone()).ok().map(|[x, y, z]| Vec3::new(x, y, z));
-    Some((point("origin")?, Some(point("normal")?.normalized()?)))
+    let normal = point("normal").or_else(|| Some(point("x_dir")?.cross(point("y_dir")?)))?.normalized()?;
+    // A section's distance runs against the plane's normal, into the part from a face.
+    let toward = if matches!(d.kind, Kind::Section { .. }) { -normal } else { normal };
+    Some((point("origin")?, Some(toward)))
 }
 
 /// The pick the dialog's arrow sits on: the first, or for a fillet or chamfer reopened from a
@@ -333,9 +368,6 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
             .and_then(|d| move_rotation(app, d, proj))
             .and_then(|r| proj.to_screen(r.point(r.angle)))
             .is_some_and(|end| egui::Rect::from_center_size(end, vec2(20.0, 20.0)).contains(p))
-        || (app.dialog.is_none()
-            && app.tool.is_none()
-            && crate::browser::occurrence_triad_model(app).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p)))
         || crate::place_gizmo::contains_pointer(app, p)
         || app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, Kind::Measure { labels, .. } if labels.contains(p)))
 }
@@ -346,9 +378,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // While OK computes, the inputs hold what it computes: no arrow to drag, no box to type in.
     if app.applying.is_some() {
         return;
-    }
-    if app.dialog.is_none() && app.tool.is_none() {
-        crate::browser::occurrence_triad(app, ui, painter, proj);
     }
     let Some(mut d) = app.dialog.take() else { return };
     if matches!(d.kind, Kind::Assembly(_)) {
@@ -844,6 +873,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         Some(n) if ui.ctx().is_being_dragged(arrow_id) => crate::extrude_face_snap::stops(app, d, base, n * sign),
         _ => Vec::new(),
     };
+    let section = matches!(d.kind, Kind::Section { .. });
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
@@ -856,6 +886,10 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let mut box_at = bs + vec2(16.0, -30.0);
     // Where the box hangs from: the arrow's tip, or the base when there is no arrow.
     let mut anchor = bs;
+    let mut reverse = false;
+    // A section's box goes past the arrow's tip, clear of where a press takes the arrow: the
+    // arrow is what a section is mostly moved with.
+    let mut past_tip = None;
     if let (Some(n), Some(l)) = (dir, len.filter(|_| kind == ValueKind::Length)) {
         let n = n * sign;
         let baseline = to_span.map(f64::abs).unwrap_or(0.0);
@@ -876,11 +910,12 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             decimals,
             dragged,
         );
-        if let Some((_, Some(stop))) = &drawn {
+        if let Some((_, Some(stop), _)) = &drawn {
             crate::extrude_face_snap::outline(app, painter, proj, stop);
         }
-        crate::extrude_face_snap::set(drawn.as_ref().and_then(|(_, stop)| stop.clone()));
-        if let Some((ts, _)) = drawn {
+        crate::extrude_face_snap::set(drawn.as_ref().and_then(|(_, stop, _)| stop.clone()));
+        reverse = matches!(drawn, Some((_, _, true)));
+        if let Some((ts, _, _)) = drawn {
             if (to_span.is_some() || symmetric_scale != 1.0)
                 && shown_value != original_shown
                 && let Ok(v) = crate::length_input::eval(&app.session.doc, &shown_value, ValueKind::Length)
@@ -896,21 +931,41 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
             box_at = ts + vec2(14.0, -12.0);
             anchor = ts;
+            if section {
+                past_tip = Some((bs, ts));
+            }
         }
     }
     let note = crate::drag_extrude::step_note(app);
     // Also without an arrow (the value does not evaluate yet): the box still keeps off the handles.
     // Clear of the command window first, then off the placement handles: the handles have the
     // last word, as a box over a grip takes the press meant for it (#6608).
-    let place = box_place(app, proj);
+    let mut place = box_place(app, proj);
     let size = box_size(ui, egui::Id::unique("sc_canvas_area"), label, note.as_deref());
-    let box_at = clear_of_dialog(rect_at(box_at, egui::Align2::LEFT_TOP, size), place).min;
+    let rect = match past_tip {
+        Some((from, ts)) => {
+            place.handles = Some(arrow_grab(from, ts));
+            keep_in_view(past_arrow(from, ts, size), place.view)
+        }
+        None => rect_at(box_at, egui::Align2::LEFT_TOP, size),
+    };
+    let box_at = clear_of_dialog(rect, place).min;
     let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);
     value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref(), BoxPlace { dialog: None, ..place });
     if *value != before
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
+    }
+    // Double-clicking the arrow reverses the direction, as the window's Reverse Direction does
+    // (#17402). Symmetric has no direction to reverse.
+    if reverse
+        && let Kind::Extrude { direction, smart, auto_op, .. } = &mut d.kind
+        && let Some(reversed) = reversed_direction(*direction)
+    {
+        *direction = reversed;
+        smart.manual_dir = true;
+        *auto_op = false;
     }
 }
 
@@ -1148,6 +1203,52 @@ fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> e
 /// How far (logical points) from an arrow's stem a press still takes the arrow.
 const ARROW_STEM_REACH: f32 = 6.0;
 
+/// An extrude direction turned the other way: One Side and Two Sides swap with their reversed
+/// forms; Symmetric has none.
+fn reversed_direction(direction: usize) -> Option<usize> {
+    match direction {
+        0 => Some(1),
+        1 => Some(0),
+        crate::dialogs::TWO_SIDES => Some(crate::dialogs::TWO_SIDES_REVERSED),
+        crate::dialogs::TWO_SIDES_REVERSED => Some(crate::dialogs::TWO_SIDES),
+        _ => None,
+    }
+}
+
+/// The square about an arrow's tip a press takes the arrow in (logical points).
+const ARROW_TIP: f32 = 20.0;
+
+/// The room a value box placed past an arrow leaves around where a press takes the arrow.
+const ARROW_BOX_GAP: f32 = 12.0;
+
+/// Where a press takes the arrow from `from` to its tip `ts`: the tip's square and the stem's
+/// reach, as one rectangle.
+fn arrow_grab(from: Pos2, ts: Pos2) -> egui::Rect {
+    egui::Rect::from_center_size(ts, vec2(ARROW_TIP, ARROW_TIP)).union(egui::Rect::from_two_pos(from, ts).expand(ARROW_STEM_REACH))
+}
+
+/// Where a value box of `size` goes past the tip of the arrow from `from` to `ts`: beyond the
+/// end the arrow points at, centred on its line, and [`ARROW_BOX_GAP`] clear of
+/// [`arrow_grab`].
+fn past_arrow(from: Pos2, ts: Pos2, size: egui::Vec2) -> egui::Rect {
+    let u = Some((ts - from).normalized()).filter(|u| u.is_finite() && u.length() > 0.5).unwrap_or(vec2(0.0, -1.0));
+    let pivot = match (u.x.abs() > u.y.abs(), u.x > 0.0, u.y > 0.0) {
+        (true, true, _) => egui::Align2::LEFT_CENTER,
+        (true, false, _) => egui::Align2::RIGHT_CENTER,
+        (false, _, true) => egui::Align2::CENTER_TOP,
+        (false, _, false) => egui::Align2::CENTER_BOTTOM,
+    };
+    let grab = arrow_grab(from, ts).expand(ARROW_BOX_GAP);
+    let mut rect = rect_at(ts + u * (ARROW_TIP * 0.5 + ARROW_BOX_GAP), pivot, size);
+    for _ in 0..16 {
+        if !rect.intersects(grab) {
+            break;
+        }
+        rect = rect.translate(u * 4.0);
+    }
+    rect
+}
+
 /// The distance from `p` to the segment from `a` to `b` on screen.
 fn to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let v = b - a;
@@ -1179,7 +1280,7 @@ fn drag_arrow(
     value: &mut String,
 ) -> Option<Pos2> {
     let line = ArrowLine { base, bs, n, l, signed, clear_px };
-    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _)| ts)
+    drag_arrow_to(doc, ui, painter, proj, line, id, half_height, &[], decimals, value).map(|(ts, _, _)| ts)
 }
 
 /// Where a drag arrow stands: from `base` (on screen `bs`) along `n`, showing `l`; `signed` lets
@@ -1195,8 +1296,8 @@ struct ArrowLine {
 }
 
 /// [`drag_arrow`] that also stops at `stops` (#2398): a drag whose tip comes near a stop's
-/// plane takes its distance exactly instead of a round step. Returns the tip's screen position
-/// and the stop it took this frame.
+/// plane takes its distance exactly instead of a round step. Returns the tip's screen position,
+/// the stop it took this frame and whether the arrow was double-clicked.
 #[allow(clippy::too_many_arguments)]
 fn drag_arrow_to(
     doc: &solidcraft_engine::doc::Document,
@@ -1209,7 +1310,7 @@ fn drag_arrow_to(
     stops: &[crate::extrude_face_snap::Stop],
     decimals: u8,
     value: &mut String,
-) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>)> {
+) -> Option<(Pos2, Option<crate::extrude_face_snap::Stop>, bool)> {
     let ArrowLine { base, bs, n, l, signed, clear_px } = line;
     let mut stopped = None;
     let t = Tokens::get();
@@ -1221,7 +1322,7 @@ fn drag_arrow_to(
     let mut ts = tip(l)?;
     // Where the drawn arrow starts: the base, or past the cleared marker.
     let start = |ts: Pos2| if clear_px > 0.0 && (ts - bs).length() > clear_px { bs + (ts - bs).normalized() * clear_px } else { bs };
-    let at_tip = egui::Rect::from_center_size(ts, vec2(20.0, 20.0));
+    let at_tip = egui::Rect::from_center_size(ts, vec2(ARROW_TIP, ARROW_TIP));
     // Over the stem, the arrow answers where the pointer is. A placement handle the arrow crosses
     // (the turn ring's grip) keeps the pointer: the arrow then answers nowhere.
     let hover = ui.input(|i| i.pointer.hover_pos());
@@ -1233,6 +1334,7 @@ fn drag_arrow_to(
         on_stem.map_or(at_tip, |p| egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)))
     };
     let r = ui.interact(area, id, egui::Sense::drag());
+    let double = r.contains_pointer() && ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
     // How far along the arrow the press was short of its end: the drag keeps that gap.
     let grab = id.with("stem grab");
     if r.drag_started() {
@@ -1276,7 +1378,7 @@ fn drag_arrow_to(
         painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    Some((ts, stopped))
+    Some((ts, stopped, double))
 }
 
 /// A fillet's radius spline on each of its edges (a spline fillet, or the splines a taper gave
@@ -2347,6 +2449,51 @@ mod tests {
                 h.ctx.memory(|m| m.layer_id_at(box_rect.center())).is_some_and(|l| l.id == egui::Id::unique("sc_prefs")),
                 "Preferences covers the Distance box where they overlap"
             );
+        }
+    }
+
+    /// A box placed past an arrow keeps clear of where a press takes the arrow, whichever way the
+    /// arrow points on screen, however long it is.
+    #[test]
+    fn a_box_past_an_arrow_keeps_clear_of_its_grab() {
+        let size = vec2(132.0, 24.0);
+        let ts = egui::pos2(500.0, 400.0);
+        for k in 0..32 {
+            let a = k as f32 * std::f32::consts::TAU / 32.0;
+            for len in [0.0, 40.0, 120.0] {
+                let from = ts - vec2(a.cos(), a.sin()) * len;
+                let rect = past_arrow(from, ts, size);
+                assert!((rect.size() - size).length() < 1e-3, "{rect:?}");
+                let grab = arrow_grab(from, ts).expand(ARROW_BOX_GAP - 0.5);
+                assert!(!rect.intersects(grab), "angle {a}, length {len}: the box {rect:?} meets the arrow's grab {grab:?}");
+            }
+        }
+    }
+
+    /// #8717: Section Analysis's distance box sits clear of its arrow, so a press meant for the
+    /// arrow takes the arrow: at close, typical and far zooms, from the side and at a slant.
+    #[test]
+    fn the_section_box_keeps_clear_of_its_arrow() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.session.selection = vec![Sel::Plane { name: "XY".into() }];
+        h.app.start("inspect.section");
+        for view in
+            [solidcore_record::Vec3::new(1.0, -1.0, 1.0), solidcore_record::Vec3::new(0.0, -1.0, 0.0), solidcore_record::Vec3::new(-1.0, -0.3, 0.4)]
+        {
+            for distance in [60.0, 150.0, 400.0, 1200.0] {
+                let mut cam = h.app.cam.looking_from(view);
+                cam.target = solidcore_record::Vec3::ZERO;
+                cam.distance = distance;
+                h.app.cam = cam;
+                h.frames(4);
+                let tip = crate::scenario::handle_at("arrow").expect("the section's arrow");
+                let base = h.at(&serde_json::json!({"world": [0, 0, 0]})).map(|p| egui::pos2(p[0] as f32, p[1] as f32)).unwrap();
+                let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).expect("the distance box");
+                let grab = arrow_grab(base, tip);
+                assert!(!field.intersects(grab.expand(ARROW_STEM_REACH)), "view {view:?} at {distance}: the box {field:?} meets the arrow {grab:?}");
+            }
         }
     }
 

@@ -604,6 +604,10 @@ pub struct Joint {
     /// Distance from A's frame to B's along z, and a turn about it (radians).
     #[serde(default)]
     pub offset: f64,
+    /// Offsets along A's frame x and y, applied before the joint's motion.
+    /// Older designs keep their saved A frame and have no additional lateral offset.
+    #[serde(default)]
+    pub offset_xy: [f64; 2],
     #[serde(default)]
     pub angle: f64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -626,6 +630,18 @@ impl Joint {
     /// further than the joint needs: a relation, or any joint made as an assembly constraint.
     pub fn starts_where_it_is(&self) -> bool {
         self.kind.is_relation() || self.constraint.is_some()
+    }
+
+    /// A's attachment frame with its lateral offsets, in the frame's coordinate space.
+    /// Applying the offset here keeps its origin fixed while a revolute joint turns.
+    pub fn offset_frame_a(&self, frame: Mat) -> Mat {
+        if self.offset_xy == [0.0; 2] {
+            return frame;
+        }
+        let mut offset = IDENTITY;
+        offset[3][0] = self.offset_xy[0];
+        offset[3][1] = self.offset_xy[1];
+        mat_mul(&frame, &offset)
     }
 }
 
@@ -916,6 +932,9 @@ pub struct Assembly {
     pub traces: Vec<crate::motion::MotionTrace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
+    /// The bill of materials views numbered, with their saved item numbers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item_numbers: Vec<crate::bom::ItemNumbers>,
 }
 
 impl Assembly {
@@ -990,6 +1009,7 @@ impl Assembly {
             && self.studies.is_empty()
             && self.traces.is_empty()
             && self.exploded.is_empty()
+            && self.item_numbers.is_empty()
     }
 }
 
@@ -1186,6 +1206,45 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
         let on_part = resolve_origin(doc, st, &JointOrigin::new(o.part(), o.snap.clone()))?;
         return Ok(mat_mul(&inside_transform(doc, o)?, &on_part));
     }
+    // A face, edge or round face is found by searching the bodies' triangles, and its frame does
+    // not depend on the joint's values: kept for as long as the component's bodies are the same.
+    if matches!(o.snap, Snap::FaceCenter { .. } | Snap::Edge { .. } | Snap::CircleCenter { .. }) {
+        let kept = origin_key(doc, st, o);
+        if let Some((key, bodies)) = &kept
+            && let Some(found) = st.origin_frames.get(key, bodies)
+        {
+            return Ok(found);
+        }
+        let made = resolve_snap(doc, st, o)?;
+        st.origin_frames.note_resolved();
+        if let Some((key, bodies)) = kept {
+            st.origin_frames.put(key, made, bodies);
+        }
+        return Ok(made);
+    }
+    resolve_snap(doc, st, o)
+}
+
+/// What [`ModelState::origin_frames`] keys an origin by: its definition, its component, and each
+/// body of the component's identity and offset, with the bodies themselves to check a hit
+/// against. `None` when a body has no identity to key by.
+fn origin_key(doc: &Document, st: &ModelState, o: &JointOrigin) -> Option<((String, u64, Vec<u64>), Vec<solidcraft_kernel::Body>)> {
+    use std::hash::{Hash, Hasher};
+    let comp = component_of(doc, o.part()).ok()?;
+    let (mut bodies, mut kept) = (Vec::new(), Vec::new());
+    for b in component_bodies(doc, st, comp) {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        b.name.hash(&mut h);
+        doc.model_body_offset(b).iter().flat_map(|m| m.iter().flatten()).for_each(|v| v.to_bits().hash(&mut h));
+        bodies.push(b.geometry_key()?);
+        bodies.push(h.finish());
+        kept.push(b.body.clone());
+    }
+    Some(((format!("{:?}", o.snap), comp, bodies), kept))
+}
+
+/// [`resolve_origin`] of an origin on one part, from the bodies.
+fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
     let bad = || DocError::Invalid("joint origin: degenerate frame".into());
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
@@ -1218,7 +1277,7 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
             // planes, a placement's datum) and is mapped into the side's frame — through the
             // side's exact occurrence, not `resolve_datum_in`'s first-placement mapping.
             let pl = match plane.as_ref() {
-                PlaneRef::Construction { feature } => {
+                PlaneRef::Construction { feature, .. } => {
                     if doc.feature(feature.0).map(|f| f.component) != Some(comp) {
                         return Err(DocError::Unknown(format!("construction plane is not on this component (occurrence {})", o.occurrence)));
                     }
@@ -2592,6 +2651,10 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
     };
     let params = Params::new(doc);
     for j in &joints {
+        if !j.offset_xy.iter().all(|v| v.is_finite() && v.abs() < MAX_EXPR_VALUE) {
+            sol.errors.push((j.id, j.name.clone(), "joint lateral offsets must be finite and smaller than 1e9 mm".into()));
+            continue;
+        }
         // A joint whose expressions can't be worked out (a parameter gone) is left out rather
         // than placed by numbers that no longer say what it was defined by.
         if !j.exprs.is_empty()
@@ -2602,7 +2665,7 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
         }
         match (resolve(&j.a), resolve(&j.b)) {
             (Ok(fa), Ok(fb)) => {
-                frames.insert(j.id, JointFrames::new(fa, fb));
+                frames.insert(j.id, JointFrames::new(j.offset_frame_a(fa), fb));
             }
             (Err(e), _) | (_, Err(e)) => {
                 sol.errors.push((j.id, j.name.clone(), e.to_string()));
@@ -2788,7 +2851,22 @@ impl Document {
             occurrence_at.entry(o.id).or_insert(i);
             first_of.entry(o.component).or_insert(i);
         }
-        for (occ, world) in &sol.world {
+        // Outer occurrences first: each one is stored in its parent's frame as this loop has left
+        // it, so a parent the solution also moves must be moved before the parts inside it. In id
+        // order, a part with a lower id than its parent was stored in the frame the parent was
+        // leaving, and then moved again with the parent (#17305).
+        let depth = |occ: u64| {
+            let (mut c, mut d) = (parents.get(&occ).copied().unwrap_or(0), 0usize);
+            while c != 0 && d < 1000 {
+                d += 1;
+                c = first_of.get(&c).and_then(|&i| self.occurrences.get(i)).map_or(0, |o| o.parent);
+            }
+            d
+        };
+        let mut order: Vec<(usize, u64, &Mat)> = sol.world.iter().map(|(occ, world)| (depth(*occ), *occ, world)).collect();
+        order.sort_by_key(|&(d, occ, _)| (d, occ));
+        for (_, occ, world) in order {
+            let occ = &occ;
             let parent = parents.get(occ).copied().unwrap_or(0);
             // Through the transforms as this loop has left them, as `component_transform` reads.
             let occurrences = &self.occurrences;
@@ -2836,7 +2914,7 @@ impl Document {
 pub mod cam;
 
 #[path = "joints_edge.rs"]
-mod edge;
+pub(crate) mod edge;
 pub use edge::{edge_axis, edge_snap};
 
 #[path = "joints_reach.rs"]
@@ -2856,6 +2934,7 @@ pub use relations::relation_values;
 /// 0, spin B a half turn about their shared normal.
 pub fn least_turn_angle(doc: &Document, st: &ModelState, j: &Joint) -> f64 {
     let (Ok(fa), Ok(fb)) = (resolve_origin(doc, st, &j.a), resolve_origin(doc, st, &j.b)) else { return 0.0 };
+    let fa = j.offset_frame_a(fa);
     let (ta, tb) = (occurrence_world(doc, j.a.occurrence), occurrence_world(doc, j.b.occurrence));
     let mut q = j.values.clone();
     q.resize(j.kind.dofs().len(), 0.0);
@@ -3058,6 +3137,7 @@ mod tests {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                offset_xy: [0.0; 2],
                 captured: None,
                 constraint: None,
             })
@@ -3186,6 +3266,7 @@ mod tests {
             name: format!("O{id}"),
             transform: IDENTITY,
             grounded: false,
+            bom_type: None,
             expressed_moves: Vec::new(),
         };
         // Component 1 sits at the root twice (its first occurrence is the frame its children sit
@@ -3207,6 +3288,37 @@ mod tests {
         assert!(close(&doc.occurrences[1].transform, &IDENTITY), "only the occurrence the solution names moves");
         let values: Vec<_> = doc.assembly.joints.iter().map(|j| j.values.clone()).collect();
         assert_eq!(values, vec![vec![0.0], vec![0.75]]);
+        assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
+    }
+
+    /// A part nested in a component the same solution moves lands where the solution puts it,
+    /// also when its occurrence has a lower id than its parent's (#17305): it is stored in the
+    /// parent's moved frame, not in the frame the parent leaves, which moved it twice.
+    #[test]
+    fn a_solution_places_a_nested_occurrence_with_a_lower_id_than_its_parent() {
+        let occurrence = |id, component, parent| crate::Occurrence {
+            id,
+            component,
+            parent,
+            name: format!("O{id}"),
+            transform: IDENTITY,
+            grounded: false,
+            expressed_moves: Vec::new(),
+            bom_type: None,
+        };
+        // Component 3 sits in component 2, which sits in component 1: the deeper the occurrence,
+        // the lower its id.
+        let mut doc = Document { occurrences: vec![occurrence(5, 3, 2), occurrence(7, 2, 1), occurrence(10, 1, 0)], ..Document::default() };
+        // The slider moves the outer part 10 mm along X; the inner parts ride on it and turn.
+        let w10 = shift(10.0, 0.0, 0.0);
+        let w7 = mat_mul(&w10, &rot_z(0.4));
+        let w5 = mat_mul(&w7, &mat_mul(&shift(0.0, 3.0, 0.0), &rot_x(0.2)));
+        let world = BTreeMap::from([(5, w5), (7, w7), (10, w10)]);
+        assert!(doc.apply_joint_solution(&Solution { world: world.clone(), ..Solution::default() }));
+        for (component, w) in [(1, w10), (2, w7), (3, w5)] {
+            let at = doc.component_transform(component);
+            assert!(close(&at, &w), "component {component}: at x {:.3}, wanted {:.3}", at[3][0], w[3][0]);
+        }
         assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
     }
 
@@ -3259,8 +3371,10 @@ mod tests {
         // 3. Construction plane by feature (PlaneRef::Construction: the name-overload of
         //    PlaneRef::Origin is gone — a construction plane is a feature, bound to its
         //    component).
-        let o_wp =
-            JointOrigin::new(0, Snap::Plane { plane: Box::new(PlaneRef::Construction { feature: plane_feature.into() }), pick: None, x: None });
+        let o_wp = JointOrigin::new(
+            0,
+            Snap::Plane { plane: Box::new(PlaneRef::Construction { feature: plane_feature.into(), placement: None }), pick: None, x: None },
+        );
         let m_wp = resolve_origin(&doc, &st, &o_wp).unwrap();
         assert_eq!(apply_point(&m_wp, Vec3::ZERO), Vec3::new(0.0, 0.0, 15.0));
         assert_eq!(apply_vector(&m_wp, Vec3::Z), Vec3::Z);

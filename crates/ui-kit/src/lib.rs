@@ -41,6 +41,8 @@ mod drag;
 mod fields;
 pub mod file_view;
 mod framing;
+mod grid;
+mod grid_tsv;
 mod history;
 mod history_group;
 pub mod icons;
@@ -108,6 +110,8 @@ pub use fields::{Expressions, cell_editor, install_expressions, wide_cell_editor
 pub use file_view::Icon;
 pub use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
 pub use framing::*;
+pub use grid::{CellEditor, CellKind, Edit, Gesture, Grid, GridColumn, GridOutput, GridSource, RowRef};
+pub use grid_tsv::{read_tsv, write_tsv};
 pub use history::*;
 pub use history_group::*;
 pub use keyboard_focus::*;
@@ -122,8 +126,8 @@ pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub use navigation_menu::*;
 pub use navigation_settings::*;
 pub use panel::{
-    ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
-    within,
+    ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, StackCard, StackSlot, WindowPage, WorkspaceOptions,
+    inspector_header, panel_header_hover, within,
 };
 pub use panel::{DialogButtons, Window};
 #[cfg(any(test, feature = "test-support"))]

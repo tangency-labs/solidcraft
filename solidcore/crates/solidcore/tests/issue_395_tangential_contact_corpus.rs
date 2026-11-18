@@ -489,23 +489,20 @@ fn intersect(
     b: &Surface,
 ) -> Result<SurfaceIntersection, solidcore::SolidError> {
     let mut k = Kernel::default();
-    k.fixes.ssi_tangent_curve_tracer = fixes != Fixes::Upstream;
-    k.fixes.ssi_tangent_contact_points = fixes == Fixes::TracerAndPoints;
+    k.fixes.ssi_tangent_curve_tracer = fixes == Fixes::Tracer;
     let d1 = a.natural_uv_domain_with_nurb(&k)?;
     let d2 = b.natural_uv_domain_with_nurb(&k)?;
     let tol = approx_tol3d(&k, 1e-6);
     a.global_surface_intersect(&k, &d1, b, &d2, [true, true], Some(tol), None)
 }
 
-/// The opt-in fixes a run turns on.
+/// Whether a run turns the tracer on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Fixes {
-    /// None: upstream behaviour (difftest holds it at parity with the C++).
-    Upstream,
+    /// The default kernel, without the tracer.
+    NoTracer,
     /// `ssi_tangent_curve_tracer` (WR-75, this issue).
     Tracer,
-    /// `ssi_tangent_curve_tracer` and `ssi_tangent_contact_points` (WR-74, #394).
-    TracerAndPoints,
 }
 
 fn run(p: &Pair, swapped: bool, fixes: Fixes) -> Measure {
@@ -519,7 +516,7 @@ fn run(p: &Pair, swapped: bool, fixes: Fixes) -> Measure {
 fn issue_395_survey() {
     for p in corpus() {
         for swapped in [false, true] {
-            for fixes in [Fixes::Upstream, Fixes::Tracer, Fixes::TracerAndPoints] {
+            for fixes in [Fixes::NoTracer, Fixes::Tracer] {
                 let m = run(&p, swapped, fixes);
                 eprintln!(
                     "{:<36} {:<8} {:<16} err={:?} covered={:?} points={:?} off={:.1e} types={:?}",
@@ -563,23 +560,23 @@ fn issue_395_tracer_covers_every_contact_curve() {
     }
 }
 
-/// Upstream (the default kernel, at parity with the C++ in difftest's
+/// Without the tracer (the default kernel; upstream does the same, as in the goldens'
 /// `tc_quartic_plane_circle`, `tc_cubic_plane_line` and `tc_quartic_ridge_plane_line`):
 /// the closed tangent circle of the quartic is missed, and the 3rd and 4th order
 /// tangent lines collapse to their two end points. The tracer traces each as one
 /// `Tangent` curve.
 #[test]
-fn issue_395_upstream_misses_or_collapses_high_order_contact() {
+fn issue_395_without_the_tracer_high_order_contact_is_missed_or_collapsed() {
     for swapped in [false, true] {
         let circle = pair("quartic_plane_circle");
-        let m = run(&circle, swapped, Fixes::Upstream);
+        let m = run(&circle, swapped, Fixes::NoTracer);
         assert!(m.types.is_empty() && m.covered == [0.0], "{swapped}: {m:?}");
         let m = run(&circle, swapped, Fixes::Tracer);
         assert_eq!(m.types, [TsectCurveType::Tangent], "{swapped}");
 
         for name in ["cubic_plane_line", "quartic_ridge_plane_line"] {
             let line = pair(name);
-            let m = run(&line, swapped, Fixes::Upstream);
+            let m = run(&line, swapped, Fixes::NoTracer);
             assert_eq!(
                 m.types,
                 [TsectCurveType::Touching, TsectCurveType::Touching],
@@ -593,10 +590,10 @@ fn issue_395_upstream_misses_or_collapses_high_order_contact() {
 }
 
 /// The second-order line and circle contacts of the corpus (cylinder, parabolic
-/// cylinder, parallel cylinders, torus, sphere in a cylinder) are traced upstream
-/// already, as one `Tangent` curve; the tracer leaves them as they are.
+/// cylinder, parallel cylinders, torus, sphere in a cylinder) are traced without the
+/// tracer already, as one `Tangent` curve; the tracer leaves them as they are.
 #[test]
-fn issue_395_second_order_contacts_traced_upstream_and_unchanged() {
+fn issue_395_second_order_contacts_traced_without_the_tracer_and_unchanged() {
     for name in [
         "cylinder_plane_line",
         "parabolic_cylinder_plane_line",
@@ -607,12 +604,12 @@ fn issue_395_second_order_contacts_traced_upstream_and_unchanged() {
     ] {
         let p = pair(name);
         for swapped in [false, true] {
-            let up = run(&p, swapped, Fixes::Upstream);
-            assert_eq!(up.types, [TsectCurveType::Tangent], "{name} {swapped}");
-            assert!(up.covered.iter().all(|&c| c >= 0.995), "{name} {swapped}");
+            let base = run(&p, swapped, Fixes::NoTracer);
+            assert_eq!(base.types, [TsectCurveType::Tangent], "{name} {swapped}");
+            assert!(base.covered.iter().all(|&c| c >= 0.995), "{name} {swapped}");
             let fixed = run(&p, swapped, Fixes::Tracer);
-            assert_eq!(fixed.types, up.types, "{name} {swapped}");
-            assert_eq!(fixed.covered, up.covered, "{name} {swapped}");
+            assert_eq!(fixed.types, base.types, "{name} {swapped}");
+            assert_eq!(fixed.covered, base.covered, "{name} {swapped}");
         }
     }
 }
@@ -629,8 +626,8 @@ fn issue_395_steinmetz_nodes_with_the_tracer() {
                 .filter(|&&t| t == TsectCurveType::Touching)
                 .count()
         };
-        let up = run(&p, swapped, Fixes::Upstream);
-        assert_eq!(touching(&up), 0, "{swapped}: {up:?}");
+        let base = run(&p, swapped, Fixes::NoTracer);
+        assert_eq!(touching(&base), 0, "{swapped}: {base:?}");
         let fixed = run(&p, swapped, Fixes::Tracer);
         assert_eq!(touching(&fixed), 2, "{swapped}: {fixed:?}");
         assert!(
@@ -641,20 +638,22 @@ fn issue_395_steinmetz_nodes_with_the_tracer() {
 }
 
 /// Isolated tangential contact points (sphere or paraboloid on a plane) are not this
-/// issue's tracer's: upstream and the tracer return nothing; WR-74's
-/// `ssi_tangent_contact_points` (#394) finds the touching point.
+/// issue's tracer's: WR-74's contact point search (#394), which the kernel always runs,
+/// finds the touching point with the tracer and without it.
 #[test]
-fn issue_395_point_contacts_need_wr74() {
+fn issue_395_point_contacts_found_by_wr74() {
     for name in ["sphere_plane_point", "paraboloid_plane_point"] {
         let p = pair(name);
         for swapped in [false, true] {
-            for fixes in [Fixes::Upstream, Fixes::Tracer] {
+            for fixes in [Fixes::NoTracer, Fixes::Tracer] {
                 let m = run(&p, swapped, fixes);
-                assert!(m.types.is_empty(), "{name} {swapped} {fixes:?}: {m:?}");
+                assert_eq!(
+                    m.types,
+                    [TsectCurveType::Touching],
+                    "{name} {swapped} {fixes:?}"
+                );
+                assert_eq!(m.points_found, [true], "{name} {swapped} {fixes:?}");
             }
-            let m = run(&p, swapped, Fixes::TracerAndPoints);
-            assert_eq!(m.types, [TsectCurveType::Touching], "{name} {swapped}");
-            assert_eq!(m.points_found, [true], "{name} {swapped}");
         }
     }
 }

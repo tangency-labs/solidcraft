@@ -579,6 +579,63 @@ fn sketch_inspect_replies_match_its_schema() {
     }
 }
 
+#[test]
+fn sketch_inspect_world_plane_follows_occurrence_context() {
+    use solidcraft_geom::prelude::*;
+
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let parent = run(&mut s, "component.create", json!({"name": "Assembly", "grounded": false}));
+    let leaf = run(&mut s, "component.create", json!({"name": "Carrier", "grounded": false}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Mount"}))["sketch"].clone();
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 20], "radius": 1, "id": "mount"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "occurrence.move", json!({"occurrence": leaf["occurrence"], "translate": [5, 0, 0]}));
+    let copy = run(&mut s, "occurrence.copy", json!({"component": parent["component"], "parent": 0}));
+    run(
+        &mut s,
+        "occurrence.move",
+        json!({"occurrence": copy["occurrence"], "to_matrix": [[0, 0, 1, 100], [0, 1, 0, 50], [-1, 0, 0, 30]], "capture": false}),
+    );
+    let local = json!({"origin": [0.0, 0.0, 0.0], "x_dir": [1.0, 0.0, 0.0], "y_dir": [0.0, 1.0, 0.0]});
+    for (activation, origin, x_dir, normal, center) in [
+        (
+            json!({"component": leaf["component"], "occurrence": leaf["occurrence"], "path": [copy["occurrence"], leaf["occurrence"]]}),
+            [100.0, 50.0, 25.0],
+            [0.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0],
+            [100.0, 70.0, 15.0],
+        ),
+        (json!({"component": leaf["component"]}), [5.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [15.0, 20.0, 0.0]),
+        // Inspecting another component's repeated sketch uses its first placement too.
+        (json!({"component": 0}), [5.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [15.0, 20.0, 0.0]),
+    ] {
+        run(&mut s, "component.activate", activation);
+        let context = (s.active_component, s.active_occurrence_path.clone(), s.active_sketch, s.revision, s.pending_moves.clone());
+        let doc = s.doc.clone();
+        let model = s.model.state();
+        let inspected = run(&mut s, "sketch.inspect", json!({"sketch": sketch}));
+        assert_eq!(
+            (s.active_component, s.active_occurrence_path.clone(), s.active_sketch, s.revision, s.pending_moves.clone()),
+            context,
+            "inspection leaves authoring context and pending moves unchanged"
+        );
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &doc), "inspection does not change the document");
+        assert!(std::sync::Arc::ptr_eq(&s.model.state(), &model), "inspection does not rebuild the model");
+        matches::<SketchInspected>("sketch.inspect", &inspected, false);
+        assert_eq!(inspected["plane"], local, "the evaluated plane keeps its component-local frame");
+        assert_eq!(inspected["world_plane"], json!({"origin": origin, "x_dir": x_dir, "y_dir": [0.0, 1.0, 0.0]}));
+        let plane: solidcore_record::Plane = serde_json::from_value(inspected["world_plane"].clone()).unwrap();
+        assert_eq!(<[f64; 3]>::from(plane.normal()), normal);
+        let point = inspected["points"].as_array().unwrap().iter().find(|p| p["id"] == "mount.center").unwrap();
+        assert_eq!(point["world"], json!(center));
+        assert_eq!(<[f64; 3]>::from(plane.to_world(solidcore_record::Vec2::new(10.0, 20.0))), center);
+        let schema = output_schema_for::<SketchInspected>();
+        let mut missing = inspected.clone();
+        missing.as_object_mut().unwrap().remove("world_plane");
+        assert!(!conforms(schema.as_value(), schema.as_value(), &missing), "world_plane must always be present");
+    }
+}
+
 /// `material.assign` (a name, a list, the default material) and `material.list` (built-in
 /// materials and the design's, with and without a look) in Warn without warnings.
 #[test]
@@ -661,8 +718,8 @@ fn a_misspelt_key_is_reported_in_warn() {
     }
 }
 
-/// Shapes the real designs above don't reach: a body whose measurement failed (a sheet metal
-/// one carries its corrected counts) and the null coordinates of two planes that meet.
+/// Shapes the real designs above don't reach: a body whose measurement failed with a partial
+/// count, and the null coordinates of two planes that meet.
 #[test]
 fn rare_reply_shapes_serialize_as_before_and_match_the_schema() {
     use super::{BodyFailure, BodyMeasurement, BodyOutcome, Measured, MeasuredItems};

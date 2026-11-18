@@ -38,6 +38,7 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
         mutate(&mut m);
         assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_err(), "{m}");
     }
+    assert_eq!(MAX_MANIFEST_BYTES, 64 * 1024);
     assert!(parse_manifest(&vec![b' '; MAX_MANIFEST_BYTES + 1], "sample").is_err());
 }
 #[test]
@@ -65,13 +66,44 @@ fn capability_refusals_are_plain_and_name_solidcraft() {
     assert!(old.contains("was built for solidcraft:plugin@1.0.0") && old.contains("update the plugin"), "{old}");
 }
 #[test]
+fn an_importer_checks_its_own_design_apart_from_the_open_one() {
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        evaluation: None,
+    };
+    let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
+    made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+    host.evaluate_open(&solidcraft_io::write_design(&made.doc)).unwrap();
+    let measured = host.evaluate_run("inspect.measure", &json!({})).unwrap();
+    assert_eq!(measured["bodies"].as_array().map(Vec::len), Some(1), "{measured}");
+    assert!(host.evaluate_run("document.inspect", &json!({})).unwrap()["timeline"].is_array());
+    // A command that fails is an answer; a command outside the list is refused.
+    let missing = host.evaluate_run("model.edges", &json!({"body":"No such body"})).unwrap();
+    assert!(missing["error"].is_string(), "{missing}");
+    for refused in ["solid.box", "file.export_stl", "doc.open", "plugin.install"] {
+        assert!(matches!(host.evaluate_run(refused, &json!({})), Err(HostError::PermissionDenied { .. })), "{refused}");
+    }
+    assert!(host.session.doc.features.is_empty(), "the open design is untouched");
+    host.evaluate_close();
+    assert!(host.evaluate_run("inspect.measure", &json!({})).is_err(), "nothing stays open");
+    assert!(matches!(host.evaluate_open(b"not a design"), Err(HostError::InvalidInput { .. })));
+}
+
+#[test]
 fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     let host = SolidCraftHost {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        evaluation: None,
     };
     let catalog = host.command_catalog();
     let built = crate::command_specs().into_iter().filter(|c| c.planned.is_none()).count();
@@ -117,8 +149,10 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        evaluation: None,
     };
     host.begin_transaction().unwrap();
     s_box(&mut host);
@@ -615,6 +649,7 @@ mod native {
                         command_groups: BTreeSet::new(),
                         folders: s.plugin_state.file_grants.clone(),
                         memory_mib: None,
+                        input_folder: false,
                     },
                 );
                 let scope = solidcraft_io::vfs::PathScope::default().with_design_folder(&f.0);
@@ -626,8 +661,15 @@ mod native {
                     });
                     assert_eq!(std::fs::read(&target).unwrap(), b"private contents");
                 }
-                let host =
-                    SolidCraftHost { session: s, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+                let host = SolidCraftHost {
+                    session: s,
+                    transaction: None,
+                    sketch_exits: Vec::new(),
+                    view: None,
+                    groups: BTreeSet::new(),
+                    file_folders: Vec::new(),
+                    evaluation: None,
+                };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
                     assert!(host.authorize_file_path(&target, write).is_ok(), "explicit scope grants hidden access");
                 });
@@ -687,6 +729,78 @@ mod native {
         s.plugin_state.grants.remove("sample");
         assert!(matches!(f.run(&mut s), Err(EngineError::Plugin(HostError::PermissionDenied { .. }))));
         assert!(s.doc.features.is_empty());
+    }
+
+    /// `plugin.check` finds what Install and a call would refuse, with a fix for each, and runs
+    /// no plugin code: the fixture's component would trap if it ran.
+    #[test]
+    fn check_reports_each_refusal_with_its_fix_and_runs_nothing() {
+        let f = Fixture::new("unreachable");
+        let mut s = Session::default();
+        let check = |s: &mut Session, path: &str| s.execute("plugin.check", &json!({"path":path})).unwrap();
+        let good = check(&mut s, &f.path());
+        assert_eq!((good["ok"].as_bool(), good["kind"].as_str()), (Some(true), Some("command")), "{good}");
+        assert_eq!(good["problems"], json!([]));
+        assert_eq!(good["approval"], s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"], "one hash for one package");
+        // The package as it ships: a .zip, checked by the installer's own reader.
+        let component = std::fs::read(f.0.join("sample/plugin.wasm")).unwrap();
+        let zip = |manifest: &Value, component: &[u8]| {
+            let path = f.0.join("package.zip");
+            let manifest = serde_json::to_vec(manifest).unwrap();
+            std::fs::write(&path, solidcraft_io::safe_zip::write(&[("plugin.json", &manifest), ("plugin.wasm", component)]).unwrap()).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let zipped = check(&mut s, &zip(&manifest(), &component));
+        assert_eq!((zipped["ok"].as_bool(), &zipped["approval"]), (Some(true), &good["approval"]));
+        // Hidden files and the tests folder stay out of a package folder's check.
+        std::fs::create_dir_all(f.0.join("sample/tests")).unwrap();
+        std::fs::write(f.0.join("sample/tests/big.bin"), vec![0u8; 17 << 20]).unwrap();
+        std::fs::write(f.0.join("sample/.notes"), b"x").unwrap();
+        assert_eq!(check(&mut s, &f.path())["problems"], json!([]));
+        let fields = |reply: &Value| -> Vec<(String, String)> {
+            reply["problems"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| (p["severity"].as_str().unwrap().into(), p["field"].as_str().unwrap().into()))
+                .collect()
+        };
+        for (mutate, field) in [
+            ((|m: &mut Value| m["runtime"]["permissions"] = json!({"net": true})) as fn(&mut Value), "runtime.permissions.net"),
+            (|m: &mut Value| m["id"] = json!("Sample"), "id"),
+            (|m: &mut Value| m["capabilities"] = json!(["commands@0.2"]), "capabilities"),
+            (|m: &mut Value| m["runtime"]["commands"] = json!(["file.export"]), "runtime.commands"),
+            (|m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(60_000), "runtime.limits.deadline_ms"),
+            (|m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(200_000_000_000_u64), "runtime.limits.fuel"),
+            (|m: &mut Value| m["runtime"]["module"] = json!("missing.wasm"), "runtime.module"),
+            (|m: &mut Value| m["surprise"] = json!(true), "manifest"),
+        ] {
+            let mut m = manifest();
+            mutate(&mut m);
+            let reply = check(&mut s, &zip(&m, &component));
+            assert_eq!(reply["ok"], false, "{m}");
+            assert_eq!(fields(&reply).first(), Some(&("error".to_string(), field.to_string())), "{reply}");
+            assert!(reply["problems"].as_array().unwrap().iter().all(|p| !p["fix"].as_str().unwrap().is_empty()), "{reply}");
+        }
+        // Memory over the ceiling installs once the user approves it: a warning.
+        let mut m = manifest();
+        m["runtime"]["limits"]["memory_mib"] = json!(512);
+        let reply = check(&mut s, &zip(&m, &component));
+        assert_eq!((reply["ok"].as_bool(), fields(&reply)), (Some(true), vec![("warning".to_string(), "runtime.limits.memory_mib".to_string())]));
+        // A core module, and a command component declared as an importer, do not link.
+        let core = wat::parse_str("(module)").unwrap();
+        let reply = check(&mut s, &zip(&manifest(), &core));
+        assert!(reply["problems"][0]["fix"].as_str().unwrap().contains("wasm-tools component new"), "{reply}");
+        let importer = json!({"id":"sample","name":"Sample","version":"1","capabilities":["formats@0.1"],"runtime":{"module":"plugin.wasm",
+            "commands":[],"entries":[{"name":"convert","kind":"importer","extensions":["smp"]}]}});
+        assert_eq!(fields(&check(&mut s, &zip(&importer, &component))), vec![("error".to_string(), "component".to_string())]);
+        // A folder named apart from its id still checks, with a note.
+        std::fs::rename(f.0.join("sample"), f.0.join("sample-src")).unwrap();
+        let renamed = check(&mut s, &f.0.join("sample-src").to_string_lossy());
+        assert_eq!((renamed["ok"].as_bool(), fields(&renamed)), (Some(true), vec![("warning".to_string(), "id".to_string())]));
+        std::fs::rename(f.0.join("sample-src"), f.0.join("sample")).unwrap();
+        assert!(s.doc.features.is_empty() && s.undo.is_empty(), "checking changes nothing");
+        assert!(!f.0.join("installed").exists(), "and installs nothing");
     }
 
     #[test]
@@ -905,8 +1019,10 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        evaluation: None,
     };
     let catalog = host.command_catalog();
     for command in ["sketch.edit", "sketch.finish", "sketch.cancel", "solid.box", "sketch.export_dxf"] {
@@ -932,7 +1048,15 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true },
         FileGrant { name: "hidden".into(), folder: root.join(".hidden"), read: true, write: false },
     ];
-    let host = SolidCraftHost { session, transaction: None, sketch_exits: Vec::new(), groups: BTreeSet::new(), file_folders: Vec::new() };
+    let host = SolidCraftHost {
+        session,
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::new(),
+        file_folders: Vec::new(),
+        evaluation: None,
+    };
     solidcraft_io::vfs::scoped(None, || {
         for write in [false, true] {
             assert!(host.authorize_file_path(&root.join("public.txt"), write).is_ok());
@@ -943,6 +1067,194 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), false).is_ok());
         assert!(host.authorize_file_path(&root.join(".hidden/public.txt"), true).is_err());
     });
+}
+
+/// Importer plugins: an installed importer opens the files it claims as new, unsaved designs.
+#[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
+mod importers {
+    use super::*;
+
+    fn importer_manifest(id: &str, extensions: &[&str], input_folder: bool) -> Value {
+        json!({"id":id,"name":"Sample Importer","version":"1","capabilities":["formats@0.1"],"runtime":{
+            "module":"importer.wasm","commands":[],"entries":[{"name":"convert","kind":"importer","extensions":extensions}],
+            "limits":{"fuel":10_000_000,"memory_mib":2,"deadline_ms":5000,"stack_kib":16384},"permissions":{"input_folder":input_folder}}})
+    }
+    /// A session whose plugins folder holds the original importer fixture as `id`, and a folder of
+    /// files to open. The fixture copies the start of the file it imports into the design.
+    fn installed(name: &str, plugins: &[(&str, &[&str], bool)]) -> (Session, std::path::PathBuf) {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-importer-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (package, version) = API.split_once('@').unwrap();
+        let component = wat::parse_str(include_str!("importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        for (id, extensions, input_folder) in plugins {
+            let dir = root.join("plugins").join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("plugin.json"), importer_manifest(id, extensions, *input_folder).to_string()).unwrap();
+            std::fs::write(dir.join("importer.wasm"), &component).unwrap();
+        }
+        std::fs::create_dir_all(root.join("files")).unwrap();
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(root.join("plugins"));
+        (s, root)
+    }
+    /// A small design's file bytes: what the fixture hands back as the imported design.
+    fn design() -> Vec<u8> {
+        let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
+        made.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+        solidcraft_io::write_design(&made.doc)
+    }
+    fn put(root: &Path, name: &str, bytes: &[u8]) -> String {
+        let path = root.join("files").join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_claimed_file_opens_as_a_new_unsaved_design_with_its_loss_report() {
+        let (mut s, root) = installed("open", &[("smp", &["smp", "stl"], false)]);
+        let listed = s.execute("plugin.list", &json!({})).unwrap();
+        assert_eq!(listed["importers"][0]["id"], "smp.convert");
+        assert_eq!(listed["plugins"][0]["commands"], json!([]), "an importer is not a command");
+        assert_eq!(listed["plugins"][0]["manifest"]["runtime"]["entries"][0]["effect"], "open", "it opens a new design, it does not edit");
+        let opened = s.execute("doc.open", &json!({"path": put(&root, "bracket.smp", &design())})).unwrap();
+        assert_eq!(
+            (opened["format"].as_str(), opened["plugin"].as_str(), opened["bodies"].as_u64()),
+            (Some("smp.convert"), Some("Sample Importer"), Some(1))
+        );
+        assert_eq!(opened["loss_report"]["summary"], "Copied the file");
+        assert_eq!(opened["loss_report"]["items"][0]["severity"], "dropped");
+        assert_eq!(s.doc.name, "Bracket");
+        assert!(s.path.is_none() && s.is_dirty() && s.undo.is_empty(), "a new design, not saved anywhere yet");
+        // SolidCraft reads .stl itself: doc.open keeps its own reader, file.import uses the plugin.
+        let stl = put(&root, "part.stl", &design());
+        assert!(s.execute("doc.open", &json!({"path": stl})).map_or(true, |r| r.get("loss_report").is_none()));
+        assert_eq!(s.execute("file.import", &json!({"path": stl})).unwrap()["format"], "smp.convert");
+        assert_eq!(s.execute("doc.open", &json!({"path": stl, "format": "smp.convert"})).unwrap()["bodies"], 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_trap_fails_that_one_import_and_a_disabled_or_ambiguous_importer_opens_nothing() {
+        let (mut s, root) = installed("trap", &[("smp", &["smp"], false)]);
+        s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        let before = s.doc.to_json();
+        let failure = s.execute("doc.open", &json!({"path": put(&root, "broken.smp", b"T")})).unwrap_err().to_string();
+        assert!(failure.contains("Sample Importer failed on broken.smp") && failure.contains("UnreachableCodeReached"), "{failure}");
+        assert_eq!(s.doc.to_json(), before, "the open design is untouched");
+        assert_eq!(s.execute("doc.open", &json!({"path": put(&root, "good.smp", &design())})).unwrap()["bodies"], 1);
+        s.disabled_plugins.insert("smp".into());
+        assert!(s.execute("file.import", &json!({"path": put(&root, "off.smp", &design())})).is_err());
+        let (mut two, root2) = installed("two", &[("smp", &["smp"], false), ("other", &["smp"], false)]);
+        let ambiguous = two.execute("doc.open", &json!({"path": put(&root2, "x.smp", &design())})).unwrap_err().to_string();
+        assert!(ambiguous.contains("other.convert, smp.convert"), "{ambiguous}");
+        assert!(two.execute("doc.open", &json!({"path": put(&root2, "x.smp", &design()), "format": "other.convert"})).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(root2).unwrap();
+    }
+
+    #[test]
+    fn an_assembly_reads_the_files_beside_it_only_when_asked_and_granted_at_install() {
+        for (asked, granted) in [(false, false), (true, false), (true, true)] {
+            let (mut s, root) = installed(&format!("folder-{asked}-{granted}"), &[("smp", &["smp"], asked)]);
+            let package = read_package(&root.join("plugins/smp").to_string_lossy()).unwrap();
+            if granted {
+                s.plugin_state
+                    .grants
+                    .insert("smp".into(), Grants { package_hash: Some(package.approval.clone()), input_folder: true, ..Default::default() });
+            }
+            put(&root, "part.bin", &design());
+            let reply = s.execute("doc.open", &json!({"path": put(&root, "assembly.smp", b"S")}));
+            match granted {
+                false => assert!(reply.unwrap_err().to_string().contains("input_folder"), "asked {asked}"),
+                true => assert_eq!(reply.unwrap()["bodies"], 1),
+            }
+            // Approving the folder for an importer that doesn't ask for it is refused.
+            let approval = Grants { input_folder: true, ..Default::default() };
+            assert_eq!(validate_grants(&package.manifest, &approval).is_ok(), asked);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    /// A session that keeps its grants in the store of `plugins`, as the command line's do.
+    fn stored_session(plugins: &Path) -> Session {
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(plugins.to_path_buf());
+        s.plugin_state.stored = Some(Default::default());
+        s
+    }
+
+    #[test]
+    fn an_import_uses_approvals_from_an_earlier_session_until_the_component_changes_or_is_revoked() {
+        let (_, root) = installed("stored", &[]);
+        let plugins = root.join("plugins");
+        let (package, version) = API.split_once('@').unwrap();
+        let component = wat::parse_str(include_str!("importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        let manifest = importer_manifest("smp", &["smp"], true).to_string();
+        let zip = |component: &[u8]| solidcraft_io::safe_zip::write(&[("plugin.json", manifest.as_bytes()), ("importer.wasm", component)]).unwrap();
+        let original = put(&root, "smp.zip", &zip(&component));
+        put(&root, "part.bin", &design());
+        let assembly = put(&root, "assembly.smp", b"S");
+        let open = |s: &mut Session| s.execute("doc.open", &json!({"path": assembly}));
+
+        // Installed and approved in one session, used by the next.
+        stored_session(&plugins).execute("plugin.install", &json!({"path": original, "approve": {"input_folder": true}})).unwrap();
+        assert!(plugins.join(".grants/smp.json").is_file());
+        let mut later = stored_session(&plugins);
+        assert_eq!(open(&mut later).unwrap()["bodies"], 1);
+        let listed = later.execute("plugin.grants", &json!({})).unwrap();
+        assert_eq!((listed["grants"][0]["id"].as_str(), listed["grants"][0]["status"].as_str()), (Some("smp"), Some("current")));
+        assert_eq!(listed["grants"][0]["input_folder"], true);
+        // A session that does not keep grants between runs gets nothing from the store.
+        let mut session_only = Session::default();
+        session_only.plugin_state.plugins_dir = Some(plugins.clone());
+        assert!(open(&mut session_only).unwrap_err().to_string().contains("input_folder"));
+
+        // The installed component changes: refused until it is installed and approved again.
+        let mut changed = component.clone();
+        changed.extend([0, 4, 3, b'n', b'e', b'w']);
+        std::fs::write(plugins.join("smp/importer.wasm"), &changed).unwrap();
+        let mut after_change = stored_session(&plugins);
+        assert!(open(&mut after_change).unwrap_err().to_string().contains("re-approval"));
+        assert_eq!(after_change.execute("plugin.grants", &json!({})).unwrap()["grants"][0]["status"], "changed");
+        let reviewed = put(&root, "changed.zip", &zip(&changed));
+        after_change.execute("plugin.install", &json!({"path": reviewed, "replace": true, "approve": {"input_folder": true}})).unwrap();
+        assert_eq!(open(&mut stored_session(&plugins)).unwrap()["bodies"], 1);
+
+        // Revoked in one session: the next runs it with nothing granted.
+        let revoked = stored_session(&plugins).execute("plugin.revoke", &json!({"id": "smp"})).unwrap();
+        assert_eq!(revoked["revoked"], true);
+        assert!(!plugins.join(".grants/smp.json").exists());
+        let mut after_revoke = stored_session(&plugins);
+        assert_eq!(after_revoke.execute("plugin.grants", &json!({})).unwrap()["grants"], json!([]));
+        assert!(open(&mut after_revoke).unwrap_err().to_string().contains("input_folder"));
+        assert_eq!(after_revoke.execute("doc.open", &json!({"path": put(&root, "one.smp", &design())})).unwrap()["bodies"], 1);
+        assert_eq!(after_revoke.execute("plugin.revoke", &json!({"id": "smp"})).unwrap()["revoked"], false);
+        assert!(after_revoke.execute("plugin.revoke", &json!({"id": "../smp"})).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_removal_whose_approvals_cannot_be_taken_back_keeps_the_package_installed() {
+        let (_, root) = installed("stored-remove", &[]);
+        let plugins = root.join("plugins");
+        let (package, version) = API.split_once('@').unwrap();
+        let component = wat::parse_str(include_str!("importer_fixture.wat").replace("__PACKAGE__", package).replace("__VERSION__", version)).unwrap();
+        let manifest = importer_manifest("smp", &["smp"], true).to_string();
+        let zip = solidcraft_io::safe_zip::write(&[("plugin.json", manifest.as_bytes()), ("importer.wasm", &component)]).unwrap();
+        let original = put(&root, "smp.zip", &zip);
+        stored_session(&plugins).execute("plugin.install", &json!({"path": original, "approve": {"input_folder": true}})).unwrap();
+        let record = plugins.join(".grants/smp.json");
+        // A file scope that reaches the package but not the grant store: the record cannot be
+        // deleted, so nothing is removed and the error says why.
+        let mut s = stored_session(&plugins);
+        let scope = solidcraft_io::vfs::PathScope::new([plugins.join("smp")]);
+        let refused = solidcraft_io::vfs::scoped(Some(scope), || s.execute("plugin.remove", &json!({"id": "smp"})));
+        assert!(refused.unwrap_err().to_string().contains("approvals"));
+        assert!(record.is_file() && plugins.join("smp/plugin.json").is_file());
+        s.execute("plugin.remove", &json!({"id": "smp"})).unwrap();
+        assert!(!record.exists() && !plugins.join("smp").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 mod install_zip {
@@ -1236,14 +1548,18 @@ mod install_zip {
         assert!(matches!(slip, InstallError::Archive(safe_zip::Error::UnsafeEntry { .. })), "{slip}");
         let absolute = unpack(&zip(&[("/plugin.json", good)])).unwrap_err();
         assert!(matches!(absolute, InstallError::Archive(safe_zip::Error::UnsafeEntry { .. })), "{absolute}");
-        let huge = vec![0u8; MAX_COMPONENT_BYTES + 1];
+        let huge = vec![0u8; craft_plugin::MAX_IMPORTER_COMPONENT_BYTES + 1];
         let bomb = unpack(&zip(&[("plugin.json", good), ("plugin.wasm", &huge[..])])).unwrap_err();
         assert!(matches!(bomb, InstallError::Archive(safe_zip::Error::EntryTooLarge { .. })), "{bomb}");
+        // A command plugin's component stays within 16 MiB; only an importer's may be larger.
+        let big = vec![0u8; MAX_COMPONENT_BYTES + 1];
+        let command = unpack(&zip(&[("plugin.json", good), ("plugin.wasm", &big[..])])).unwrap_err();
+        assert!(matches!(command, InstallError::Manifest(HostError::LimitExceeded { .. })), "{command}");
         let chunk = vec![0u8; 15 << 20];
-        let many: Vec<String> = (0..5).map(|i| format!("data/{i}.bin")).collect();
+        let many: Vec<String> = (0..6).map(|i| format!("data/{i}.bin")).collect();
         let mut files: Vec<(&str, &[u8])> = vec![("plugin.json", good), ("plugin.wasm", b"x")];
         files.extend(many.iter().map(|n| (n.as_str(), chunk.as_slice())));
-        assert_eq!(unpack(&zip(&files)).unwrap_err(), InstallError::Archive(safe_zip::Error::TooLarge { limit: 64 << 20 }));
+        assert_eq!(unpack(&zip(&files)).unwrap_err(), InstallError::Archive(safe_zip::Error::TooLarge { limit: 80 << 20 }));
         assert_eq!(unpack(&zip(&[("plugin.wasm", b"x")])).unwrap_err(), InstallError::MissingManifest);
         assert_eq!(unpack(&zip(&[("plugin.json", good)])).unwrap_err(), InstallError::MissingModule("plugin.wasm".into()));
         // GitHub's "Source code" archive of a release: one folder with the manifest and the
@@ -1270,5 +1586,96 @@ mod install_zip {
         assert!(matches!(error, crate::EngineError::Plugin(HostError::UnsupportedCapability { .. })), "{error}");
         assert!(!root.join("plugins").exists() && !root.join("evil").exists());
         let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+/// The grant store the desktop app, the command line and headless MCP share.
+#[cfg(not(target_arch = "wasm32"))]
+mod stored_grants {
+    use super::*;
+    use crate::plugin::grant_store::{self, Synced};
+
+    fn root(name: &str) -> PathBuf {
+        let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-grant-store-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+    fn approved(groups: &[&str]) -> Grants {
+        Grants { package_hash: Some("a".repeat(64)), command_groups: groups.iter().map(|g| g.to_string()).collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn hostile_records_are_ignored_and_grant_nothing() {
+        let plugins = root("hostile");
+        grant_store::write(&plugins, "good", &approved(&["file"])).unwrap();
+        let dir = grant_store::folder(&plugins);
+        let record = |grants: Value| serde_json::to_vec(&grants).unwrap();
+        for (name, bytes) in [
+            ("broken.json", b"{".to_vec()),
+            ("unknown.json", record(json!({"command_groups":["file"],"net":true}))),
+            ("group.json", record(json!({"command_groups":["everything"]}))),
+            ("memory.json", record(json!({"memory_mib":1_000_000}))),
+            ("hash.json", record(json!({"package_hash":"not a hash"}))),
+            ("relative.json", record(json!({"folders":[{"name":"out","folder":"out","read":true,"write":true}]}))),
+            ("Bad_Id.json", record(json!({}))),
+            ("large.json", vec![b' '; 70 << 10]),
+            ("notes.txt", record(json!({}))),
+        ] {
+            std::fs::write(dir.join(name), bytes).unwrap();
+        }
+        std::fs::create_dir(dir.join("folder.json")).unwrap();
+        assert_eq!(grant_store::read_all(&plugins), BTreeMap::from([("good".to_string(), approved(&["file"]))]));
+        assert!(grant_store::write(&plugins, "../evil", &approved(&[])).is_err() && grant_store::delete(&plugins, "../evil").is_err());
+        assert!(grant_store::write(&plugins, "bad", &approved(&["everything"])).is_err());
+        assert!(!plugins.join("evil.json").exists() && !dir.join("bad.json").exists());
+        grant_store::delete(&plugins, "absent").unwrap();
+        std::fs::remove_dir_all(plugins).unwrap();
+    }
+
+    #[test]
+    fn a_store_outside_the_file_scope_is_neither_read_nor_written() {
+        let (plugins, elsewhere) = (root("scope"), root("scope-elsewhere"));
+        grant_store::write(&plugins, "gears", &approved(&["file"])).unwrap();
+        let (mut synced, mut working) = (Synced::default(), BTreeMap::new());
+        synced.refresh(&plugins, &mut working);
+        solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([elsewhere.clone()])), || {
+            assert!(grant_store::read_all(&plugins).is_empty());
+            assert!(grant_store::write(&plugins, "bolts", &approved(&[])).is_err());
+            assert!(grant_store::delete(&plugins, "gears").is_err());
+            synced.refresh(&plugins, &mut working);
+        });
+        assert_eq!(working.keys().collect::<Vec<_>>(), ["gears"], "a store out of reach is no revocation");
+        assert_eq!(grant_store::read_all(&plugins).keys().collect::<Vec<_>>(), ["gears"]);
+        std::fs::remove_dir_all(plugins).unwrap();
+        std::fs::remove_dir_all(elsewhere).unwrap();
+    }
+
+    #[test]
+    fn each_host_writes_its_own_changes_and_takes_in_the_others() {
+        let plugins = root("sync");
+        let (mut desktop, mut cli) = (Synced::default(), Synced::default());
+        let mut desktop_grants = BTreeMap::from([("gears".to_string(), approved(&["file"]))]);
+        // No store yet: the desktop's grants move to it.
+        desktop.adopt(&plugins, &mut desktop_grants).unwrap();
+        assert_eq!(grant_store::read_all(&plugins), desktop_grants);
+        let mut cli_grants = BTreeMap::new();
+        cli.refresh(&plugins, &mut cli_grants);
+        assert_eq!(cli_grants, desktop_grants);
+        // The command line approves another plugin and revokes the desktop's.
+        cli_grants.insert("bolts".into(), approved(&["doc"]));
+        cli_grants.remove("gears");
+        cli.persist(&plugins, &cli_grants).unwrap();
+        // The desktop changed nothing of either meanwhile, so it takes both in.
+        desktop_grants.insert("nuts".into(), approved(&[]));
+        desktop.persist(&plugins, &desktop_grants).unwrap();
+        desktop.refresh(&plugins, &mut desktop_grants);
+        assert_eq!(desktop_grants.keys().collect::<Vec<_>>(), ["bolts", "nuts"]);
+        assert_eq!(grant_store::read_all(&plugins), desktop_grants);
+        // Once the store exists it is the whole truth: an old desktop record is not brought back.
+        let mut restarted = BTreeMap::from([("gears".to_string(), approved(&["file"]))]);
+        Synced::default().adopt(&plugins, &mut restarted).unwrap();
+        assert_eq!(restarted, desktop_grants);
+        std::fs::remove_dir_all(plugins).unwrap();
     }
 }
