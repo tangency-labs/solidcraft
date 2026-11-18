@@ -889,6 +889,60 @@ mod remembered_sketch_views {
     }
 
     #[test]
+    fn reopening_ignores_a_camera_with_an_incompatible_up_axis() {
+        use solidcraft_viewport::UpAxis;
+        let mut h = Harness::new();
+        h.app = sample_app();
+        h.app.home.open = false;
+        let id = first_sketch(&h.app);
+        h.app.preferences.sketch_open_view = SketchOpenView::Last;
+        h.app.preferences.sketch_open_look_at = false;
+        let before = h.app.settled_cam();
+        let mut stale = before;
+        stale.up = if before.up == UpAxis::Z { UpAxis::Y } else { UpAxis::Z };
+        stale.orbit(26.0, -13.0);
+        h.app.sketch_last_views.closed(id, stale, true);
+
+        h.app.edit_sketch(id);
+        assert_eq!(h.app.settled_cam(), before, "incompatible history follows the Look At-off preference");
+        assert_eq!(h.app.sketch_last_views.last.get(&id), Some(&stale), "the saved view is retained for its original up axis");
+    }
+
+    #[test]
+    fn replacing_a_design_clears_its_remembered_sketch_cameras() {
+        use serde_json::json;
+        let mut h = Harness::new();
+        h.app = sample_app();
+        h.app.home.open = false;
+        let id = first_sketch(&h.app);
+        let cam = h.app.cam;
+        h.app.sketch_last_views.closed(id, cam, true);
+        h.app.run("file.new", json!({})).unwrap();
+        assert!(h.app.sketch_last_views.last.is_empty());
+        assert!(h.app.sketch_last_views.finished.is_empty());
+    }
+
+    #[test]
+    fn undo_removes_camera_history_for_deleted_sketch_ids() {
+        use serde_json::json;
+        let (mut h, ids) = super::two_finished_sketches();
+        let id = ids[1];
+        let cam = h.app.cam;
+        h.app.sketch_last_views.closed(id, cam, true);
+        for _ in 0..6 {
+            if h.app.session.doc.feature(id).is_none() {
+                break;
+            }
+            h.app.run("edit.undo", json!({})).unwrap();
+        }
+        assert!(h.app.session.doc.feature(id).is_none(), "undo removed the second sketch");
+        assert!(!h.app.sketch_last_views.last.contains_key(&id));
+        assert!(!h.app.sketch_last_views.finished.contains_key(&id));
+        let _ = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        assert!(!h.app.sketch_last_views.last.contains_key(&id), "a recreated ID cannot inherit a stale camera");
+    }
+
+    #[test]
     fn the_open_view_choice_is_a_saved_preference_and_refuses_unknown_modes() {
         use serde_json::json;
         let mut h = Harness::new();

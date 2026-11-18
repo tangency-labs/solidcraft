@@ -608,6 +608,16 @@ impl SketchLastViews {
             self.finished.insert(sketch, cam);
         }
     }
+
+    fn forget(&mut self, sketch: u64) {
+        self.last.remove(&sketch);
+        self.finished.remove(&sketch);
+    }
+
+    fn retain_existing(&mut self, exists: impl Fn(u64) -> bool) {
+        self.last.retain(|id, _| exists(*id));
+        self.finished.retain(|id, _| exists(*id));
+    }
 }
 
 /// The active component (and placement) before a sketch opened inside another one (#8127), and
@@ -1723,6 +1733,17 @@ impl SolveApp {
             r => r,
         };
         if let Ok(v) = &r {
+            // A sketch id can be reused after undo or deletion. Its predecessor's view
+            // must never become the starting camera of the newly created sketch.
+            if id == "sketch.create"
+                && let Some(sketch) = v.get("sketch").and_then(Value::as_u64)
+            {
+                self.sketch_last_views.forget(sketch);
+            }
+            if matches!(id, "edit.undo" | "edit.redo" | "timeline.delete") {
+                let doc = &self.session.doc;
+                self.sketch_last_views.retain_existing(|sketch| doc.feature(sketch).is_some());
+            }
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -1966,6 +1987,9 @@ impl SolveApp {
                     prefs::apply_new_design(self);
                 }
                 if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                    // Commands can replace the document inside this tab without switching
+                    // tabs. Its feature ids must not inherit views from the old design.
+                    self.sketch_last_views = Default::default();
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -3095,7 +3119,13 @@ impl SolveApp {
     pub(crate) fn look_at_opened_sketch(&mut self, before: Camera) -> bool {
         // A new sketch has no saved view; it still uses the existing Look At preference.
         // Editing an existing sketch can opt into the camera it was last left with (#18998).
-        let remembered = self.session.active_sketch.and_then(|sketch| self.sketch_last_views.to_open(sketch, self.preferences.sketch_open_view));
+        let remembered = self
+            .session
+            .active_sketch
+            .and_then(|sketch| self.sketch_last_views.to_open(sketch, self.preferences.sketch_open_view))
+            // The render loop resets a camera with a stale up axis. Fall back to the
+            // current Look At preference instead of briefly restoring that camera.
+            .filter(|to| to.up == self.ui.up_axis);
         let turn = if let Some(to) = remembered {
             self.animate_to(to);
             true
