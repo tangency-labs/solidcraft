@@ -4961,8 +4961,14 @@ const MAX_CLOSE_TOOL_PAIRS: usize = 4096;
 
 /// Whether no two of `bodies` meet or touch, decided on their exact shapes. Only pairs whose
 /// exact boxes, grown by twice the bodies' tolerances (as [`kernel::apart`] grows them), meet
-/// are tested, by [`apart_by_union`]. `false` whenever that cannot be shown: a mesh body, a body
-/// without an exact box, too many pairs to test, a union that fails.
+/// are tested. All of the bodies of those pairs are tested together: their union comes out with
+/// as many material regions as there are bodies of them, and no two of those regions meet.
+/// Crossing and nested bodies come out in one piece, touching ones in one or in two that share
+/// an edge or a face.
+/// One union of all of them replaces a union for every pair of them: a pattern of fifty copies
+/// of a coil cut took a union for each of its pairs, and minutes (#17632).
+/// `false` whenever that cannot be shown: a mesh body, a body without an exact box, too many
+/// pairs to test, a union that fails.
 fn tools_clearly_apart(bodies: &[Body]) -> bool {
     if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
         return false;
@@ -4987,13 +4993,35 @@ fn tools_clearly_apart(bodies: &[Body]) -> bool {
             close.push((i, j));
         }
     }
-    close.into_iter().all(|(i, j)| matches!((bodies.get(i), bodies.get(j)), (Some(a), Some(b)) if apart_by_union(a, b)))
+    if close.is_empty() {
+        // No two of them meet: they are apart.
+        return true;
+    }
+    // The bodies of those pairs: the union of all of them says whether they are apart.
+    let mut in_pair = vec![false; bodies.len()];
+    for &(i, j) in &close {
+        in_pair[i] = true;
+        in_pair[j] = true;
+    }
+    let group: Vec<&Body> = (0..bodies.len()).filter(|&i| in_pair[i]).map(|i| &bodies[i]).collect();
+    #[cfg(test)]
+    cost_tests::count(|c| c.apart_unions += 1);
+    match kernel::union_all(&group) {
+        // One union of all of them: it comes out with a piece for each of them when no two of
+        // them meet or touch.
+        Ok(one) => one.record().material_regions().len() == group.len() && one.region_contacts().is_ok_and(|c| c.is_empty()),
+        // The union of all of them failed: each pair is tried on its own, as before.
+        Err(_) => close.iter().all(|&(i, j)| matches!((bodies.get(i), bodies.get(j)), (Some(a), Some(b)) if apart_by_union(a, b))),
+    }
 }
 
 /// Whether the exact union of `a` and `b` comes out in two pieces that share no face, edge or
 /// vertex. Crossing and nested bodies come out in one piece, touching ones in one or in two that
-/// share an edge or a face.
+/// share an edge or a face. The fallback of [`tools_clearly_apart`], for a union of all the
+/// bodies that failed.
 fn apart_by_union(a: &Body, b: &Body) -> bool {
+    #[cfg(test)]
+    cost_tests::count(|c| c.apart_unions += 1);
     match kernel::boolean(a, b, BoolOp::Union) {
         Ok(Some(u)) => u.record().material_regions().len() == 2 && u.region_contacts().is_ok_and(|c| c.is_empty()),
         _ => false,
@@ -5321,6 +5349,10 @@ fn apply_traced_with(
             // boolean: in a design of many bodies that was most of a hole's time (#10225). A body
             // whose exact box lies clear of every tool's is left as it is. A body shown in another
             // frame, and a mesh body, are cut as before; an intersect removes the bodies it misses.
+            // The exact box of the body is measured only when it can show a tool apart of it: a
+            // tool inside the body is not apart from it, and measuring the box of a body with
+            // many faces costs the kernel minutes (#18821: 347 s for the cup of the report,
+            // against 30 s for the cut the box was measured for).
             let reach: Option<Vec<Option<solidcraft_geom::Aabb3>>> =
                 (op == Operation::Cut && !tools.iter().any(|t| t.body.is_mesh())).then(|| tools.iter().map(|t| more::exact_box(&t.body)).collect());
             for &ti in &target_idx {
@@ -5331,6 +5363,7 @@ fn apply_traced_with(
                     && into.is_none()
                     && !reach.is_empty()
                     && !target.body.is_mesh()
+                    && !more::tools_inside(target, reach)
                     && let Some(tb) = more::exact_box(&target.body)
                     && reach.iter().all(|tool| more::boxes_apart(&Some(tb), tool))
                 {
@@ -9823,7 +9856,16 @@ fn replay(
                         }
                         // A copy of a fillet with per-edge radii pairs each copied edge with its radius.
                         (FeatureKind::Fillet { turn, .. }, None) if each_r.is_some() => {
+                            // Before its fillet has run (a pattern placed ahead of it): the radii
+                            // pair with the picks, so their count is checked as the fillet checks it.
                             let all = each_r.as_deref().unwrap_or(&[]);
+                            if all.len() != edges.len() {
+                                return Err(DocError::Invalid(format!(
+                                    "`edge_radii` gives {} radii for {} picked edges: one per edge, in the order of `edges`",
+                                    all.len(),
+                                    edges.len()
+                                )));
+                            }
                             let used: Vec<f64> = idx.iter().map(|i| all.get(*i).copied().unwrap_or(r)).collect();
                             mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
                         }
@@ -11685,11 +11727,12 @@ fn eval_feature_kind(
                 _ => false,
             };
             let mut picks = Vec::with_capacity(groups.len());
-            // Per-edge radii: each resolved edge point keyed (exactly) to its pick and radius. The
-            // smooth-edge filter below only drops picks, so the keys survive it.
-            let key = |p: &Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
-            let mut radius_of: BTreeMap<[u64; 3], (usize, f64)> = BTreeMap::new();
-            let mut by_pick: Vec<(usize, Vec3)> = Vec::new();
+            // Per-edge radii: each resolved edge point, on its body, keyed (exactly) to its pick and
+            // radius. The smooth-edge filter below only drops picks, so the keys survive it.
+            let key = |ti: usize, p: &Vec3| (ti, [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+            let mut radius_of: BTreeMap<(usize, [u64; 3]), (usize, f64)> = BTreeMap::new();
+            // (pick, the blended edge's middle, its radius), for pattern and mirror copies.
+            let mut by_pick: Vec<(usize, Vec3, f64)> = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
@@ -11701,7 +11744,7 @@ fn eval_feature_kind(
                         ));
                     }
                     for (p, i) in resolved.iter().zip(idx) {
-                        radius_of.insert(key(p), (*i, all.get(*i).copied().unwrap_or(r)));
+                        radius_of.insert(key(*ti, p), (*i, all.get(*i).copied().unwrap_or(r)));
                     }
                 }
                 picks.push((*ti, resolved));
@@ -11717,7 +11760,8 @@ fn eval_feature_kind(
                 let mut note = None;
                 let propagated = edges.len() > picked;
                 // This body's edges' own radii, found by their resolved points.
-                let each: Option<Vec<f64>> = each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(e)).map_or(r, |(_, x)| *x)).collect());
+                let each: Option<Vec<f64>> =
+                    each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(ti, e)).map_or(r, |(_, x)| *x)).collect());
                 let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
                     .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
                 if let Some(n) = note {
@@ -11726,21 +11770,26 @@ fn eval_feature_kind(
                 reduced |= used.is_some();
                 fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
                 tapered_all.extend(tapered);
-                if each.is_some() {
-                    // Per-edge radii: each blended edge with its pick, so a pattern's copies pair each with its radius.
-                    by_pick.extend(edges.iter().filter_map(|e| radius_of.get(&key(e)).map(|(i, _)| (*i, *e))));
-                }
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
                 // never the pick, which at a vertex two edges share finds either on a copy (#16934).
-                found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
+                let middles = kernel::blend_edge_middles(&mb.body, &edges)?;
+                if each.is_some() {
+                    // Per-edge radii: each blended edge's middle with its pick and radius.
+                    by_pick.extend(edges.iter().zip(&middles).filter_map(|(e, m)| radius_of.get(&key(ti, e)).map(|(i, x)| (*i, *m, *x))));
+                }
+                found.extend(middles);
                 blended.push((ti, nb));
             }
             if !notes.is_empty() {
                 *warning = Some(notes.join("; "));
             }
             if each_r.is_some() {
-                by_pick.sort_by_key(|(i, _)| *i);
-                found = by_pick.into_iter().map(|(_, p)| p).collect();
+                // The blended edges in pick order, each with its own radius: pattern and mirror
+                // copies read the radius at the same index as the edge (as a fitted fillet's).
+                by_pick.sort_by_key(|(i, _, _)| *i);
+                found = by_pick.iter().map(|(_, m, _)| *m).collect();
+                fitted = by_pick.iter().map(|(_, _, x)| *x).collect();
+                reduced = true;
             }
             st.blend_edges.insert(f.id, found);
             if reduced {
@@ -11853,14 +11902,33 @@ fn eval_feature_kind(
                 return Ok(()); // the pieces were all joined back into the body they are part of
             }
             let op = if *operation == Operation::NewBody { Operation::Join } else { *operation };
-            // #15913: a join of a surface body fails deep in the kernel or swallows the surface; refuse it here, by name.
-            if op == Operation::Join {
-                let surface = std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).is_some_and(|b| b.is_surface()));
-                if let Some(name) = surface {
-                    return Err(DocError::Invalid(format!(
-                        "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
-                    )));
+            // #15913, #18708: booleans require closed solids: an open tool body (or open target in join)
+            // fails deep in kernel export with cryptic errors or swallows surfaces. Refuse it here,
+            // naming the offending body in user terms before attempting the boolean.
+            match op {
+                Operation::Join => {
+                    let surface = std::iter::once(target).chain(tools.iter()).find(|n| st.body(n).is_some_and(|b| b.is_surface()));
+                    if let Some(name) = surface {
+                        return Err(DocError::Invalid(format!(
+                            "{name} is a surface body, and a join needs solids: Thicken it first, or Stitch closed surfaces with Surface › Stitch"
+                        )));
+                    }
                 }
+                Operation::Cut => {
+                    if let Some(name) = tools.iter().find(|n| st.body(n).is_some_and(|b| !b.is_closed())) {
+                        return Err(DocError::Invalid(format!(
+                            "\"{name}\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
+                        )));
+                    }
+                }
+                Operation::Intersect => {
+                    if let Some(name) = tools.iter().find(|n| st.body(n).is_some_and(|b| !b.is_closed())) {
+                        return Err(DocError::Invalid(format!(
+                            "\"{name}\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
+                        )));
+                    }
+                }
+                _ => {}
             }
             apply_traced(doc, st, f, tb, op, std::slice::from_ref(&target.0))?;
             if !keep_tools {

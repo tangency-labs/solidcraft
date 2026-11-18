@@ -22,9 +22,10 @@ fn kept(text: &str) -> ImportRecords {
             color: None,
             hidden: false,
             placement: None,
-            brep: s.brep,
+            brep: Some(s.brep),
             face_origin: s.face_origin,
             sheet: s.sheet,
+            copy_of: None,
         })
         .collect();
     let tree = vec![StepNode {
@@ -71,6 +72,25 @@ fn a_record_placed_moves_its_body() {
     assert!((b.centroid.x - a.centroid.x - 5.0).abs() < 1e-9 && (b.volume - a.volume).abs() < 1e-9, "{a:?} {b:?}");
 }
 
+/// A stored tree's left-out solids are kept at their places among the node's solids, and a body
+/// left out now takes the place it had between them: with a solid left out first (item 42), the
+/// broken record after it is at place 1 and the good one, at place 2, comes in.
+#[test]
+fn a_stored_trees_left_out_solids_are_kept_where_they_are() {
+    use super::super::LeftOut;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut r = kept(&std::fs::read_to_string(dir.join("cone_point.step")).unwrap());
+    let mut broken = r.bodies[0].clone();
+    broken.face_origin.pop();
+    r.bodies.insert(0, broken);
+    r.tree[0].bodies = vec![0, 1];
+    r.tree[0].left_out = vec![LeftOut { at: 0, item: 42 }];
+    let imp = records_import(&r).unwrap();
+    assert_eq!(imp.bodies.len(), 1);
+    assert_eq!(imp.tree[0].bodies, vec![0]);
+    assert_eq!(imp.tree[0].left_out, vec![LeftOut { at: 0, item: 42 }, LeftOut { at: 1, item: 0 }]);
+}
+
 #[test]
 fn a_broken_record_is_left_out_with_the_reason_and_the_others_still_come_in() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
@@ -93,7 +113,7 @@ fn a_broken_record_is_left_out_with_the_reason_and_the_others_still_come_in() {
         })
         .contains("face origins")
     );
-    assert!(with_broken(&|b| b.brep.edges[0].vertices[0] = 999).contains("invalid"));
+    assert!(with_broken(&|b| b.brep.as_mut().unwrap().edges[0].vertices[0] = 999).contains("invalid"));
     assert!(with_broken(&|b| b.placement = Some([[f64::NAN; 4]; 4])).contains("not finite"));
     // A face origin that cannot be numbered from 1 (hostile: the file's own faces never reach it).
     assert!(with_broken(&|b| b.face_origin[0] = u64::MAX).contains("face origin out of range"));
@@ -146,9 +166,75 @@ const SQUARE_SHEET: &str = "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((''),'2;1')
 #[test]
 fn an_open_record_marked_closed_is_still_open() {
     let mut r = kept(SQUARE_SHEET);
-    assert!(r.bodies[0].sheet && r.bodies[0].brep.regions.len() == 1, "the reader reads the square as a sheet");
+    assert!(r.bodies[0].sheet && r.bodies[0].brep.as_ref().unwrap().regions.len() == 1, "the reader reads the square as a sheet");
     r.bodies[0].sheet = false;
     let imp = records_import(&r).unwrap();
     assert!(!imp.bodies[0].closed);
     assert_eq!(imp.report.solids, 0);
+}
+
+/// A copy of a record body is that body's part placed again: the same faces and volume where its
+/// own placement puts it, and the same file item and face sources, so the design knows both as one
+/// part, and the import's report counts it once. The copy carries no record of its own.
+#[test]
+fn a_copy_is_the_same_part_placed_again() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut records = kept(&std::fs::read_to_string(dir.join("washer.step")).unwrap());
+    let mut copy = records.bodies[0].clone();
+    copy.brep = None;
+    copy.face_origin = Vec::new();
+    copy.copy_of = Some(0);
+    copy.placement = Some([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 40.0, 0.0, 1.0]]);
+    records.bodies.push(copy);
+    if let Some(root) = records.tree.first_mut() {
+        root.bodies = vec![0, 1];
+    }
+    let imp = records_import(&records).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let (a, b) = (&imp.bodies[0], &imp.bodies[1]);
+    assert_eq!(a.source_item, b.source_item);
+    assert_eq!(a.face_origin, b.face_origin);
+    assert_eq!(a.body.face_sources(), b.body.face_sources());
+    let (ma, mb) = (measure(&a.body).unwrap(), measure(&b.body).unwrap());
+    assert!((mb.centroid.y - ma.centroid.y - 40.0).abs() < 1e-9 && (mb.volume - ma.volume).abs() < 1e-9, "{ma:?} {mb:?}");
+    assert_eq!(ma.faces, mb.faces);
+    assert_eq!((imp.report.parts, imp.report.solids), (1, 1), "one part, placed twice");
+}
+
+/// A copy of a body that comes after it, of itself, or of another copy is left out with the
+/// reason, and the original still comes in. Records from a file are hostile.
+#[test]
+fn a_copy_of_nothing_it_can_use_is_left_out_with_why() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let records = kept(&std::fs::read_to_string(dir.join("washer.step")).unwrap());
+    let copy = |of: usize| RecordBody { brep: None, face_origin: Vec::new(), copy_of: Some(of), ..records.bodies[0].clone() };
+    for (bodies, why) in [
+        (vec![copy(1), records.bodies[0].clone()], "does not come before it"),
+        (vec![records.bodies[0].clone(), copy(1)], "does not come before it"),
+        (vec![records.bodies[0].clone(), copy(0), copy(1)], "itself a copy"),
+        (vec![records.bodies[0].clone(), copy(usize::MAX)], "does not come before it"),
+    ] {
+        let n = bodies.len();
+        let r = ImportRecords { bodies, tree: Vec::new(), ..records.clone() };
+        let imp = records_import(&r).unwrap();
+        assert!(imp.warnings.iter().any(|w| w.contains(why)), "{why}: {:?}", imp.warnings);
+        assert!(!imp.bodies.is_empty() && imp.bodies.len() < n, "{why}: {}", imp.bodies.len());
+    }
+    // A copy whose original was refused is refused too.
+    let mut broken = records.bodies[0].clone();
+    if let Some(b) = broken.brep.as_mut() {
+        b.edges.clear();
+    }
+    let r = ImportRecords { bodies: vec![broken, copy(0)], tree: Vec::new(), ..records.clone() };
+    let imp = records_import(&r).unwrap();
+    assert!(imp.bodies.is_empty() && imp.warnings.iter().any(|w| w.contains("was not imported")), "{:?}", imp.warnings);
+    // A copy of an original whose own placement is refused still comes in where it is placed,
+    // the part counted once.
+    let mut unplaced = records.bodies[0].clone();
+    unplaced.placement = Some([[f64::NAN; 4]; 4]);
+    let r = ImportRecords { bodies: vec![unplaced, copy(0)], tree: Vec::new(), ..records.clone() };
+    let imp = records_import(&r).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("not finite")), "{:?}", imp.warnings);
+    assert_eq!((imp.report.parts, imp.report.solids), (1, 1));
 }

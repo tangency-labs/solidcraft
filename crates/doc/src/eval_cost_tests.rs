@@ -21,9 +21,10 @@ use crate::*;
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
 /// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
-/// go), face surfaces classified for a hole's direction, joins made of bodies that are all apart
-/// without running the kernel's union, and the holes whose tools were built (not moved from
-/// another copy's).
+/// go), unions run to tell the tools of a cut apart, face surfaces classified for a hole's
+/// direction, joins made of bodies that are all apart without running the kernel's union, and the
+/// holes whose tools were built (not moved from another copy's), and the tight boxes the kernel
+/// was asked for.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -39,6 +40,7 @@ pub(super) struct Counts {
     pub tapped_wall: usize,
     pub miss_intersects: usize,
     pub cut_tools: usize,
+    pub apart_unions: usize,
     pub surfaces: usize,
     pub joined_apart: usize,
     pub kept_checks: usize,
@@ -47,6 +49,7 @@ pub(super) struct Counts {
     pub thread_cuts: usize,
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
+    pub tight_boxes: usize,
 }
 
 thread_local! {
@@ -65,6 +68,7 @@ thread_local! {
             tapped_wall: 0,
             miss_intersects: 0,
             cut_tools: 0,
+            apart_unions: 0,
             surfaces: 0,
             joined_apart: 0,
             kept_checks: 0,
@@ -73,6 +77,7 @@ thread_local! {
             thread_cuts: 0,
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
+            tight_boxes: 0,
         })
     };
 }
@@ -2578,6 +2583,62 @@ fn copies_that_notch_the_same_round_face_cut_at_once_leave_the_faces_of_one_by_o
     assert_eq!(work.cut_tools, 1, "{work:?}");
 }
 
+/// A shaft (10 mm radius, 40 mm high) with a helical groove cut into its wall, and the groove
+/// in a circular pattern of `count` about Z: the shaft's volume and the work the pattern cost.
+fn shaft_with_coil_pattern(doc: &mut Document, count: Option<usize>) -> (f64, Counts) {
+    let shaft = FeatureKind::Cylinder {
+        base: point_expr(Vec3::ZERO),
+        axis: Dir(Vec3::Z),
+        radius: "10".into(),
+        height: "40".into(),
+        operation: Operation::NewBody,
+        references: Vec::new(),
+    };
+    doc.add_feature(shaft, Some("Shaft")).unwrap();
+    // A groove that climbs 120 mm a turn around the shaft's wall: over the shaft's height it
+    // runs a third of a turn, and the copies of it round the shaft are a twelfth of a turn
+    // apart.
+    let groove: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "coil", "base": [0, 0, 0], "axis": [0, 0, 1], "diameter": "20", "pitch": "120",
+        "turns": "1", "section_size": "0.5", "section": "circular", "operation": "cut",
+    }))
+    .unwrap();
+    let groove = doc.add_feature(groove, Some("Groove")).unwrap();
+    if let Some(count) = count {
+        let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": "pattern", "features": [groove],
+            "pattern": {"type": "circular", "origin": [0, 0, 0], "axis": [0, 0, 1], "count": count.to_string(), "angle": "360 deg"},
+        }))
+        .unwrap();
+        doc.add_feature(pattern, Some("Grooves")).unwrap();
+    }
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    (disc_volume(&model), work)
+}
+
+/// A circular pattern of a coil cut (#17632): the copies of a helical groove are told apart
+/// with one union of all of them, not with a union for every pair of them, and they are cut in
+/// one go.
+#[test]
+fn a_circular_pattern_of_a_coil_cut_cuts_its_copies_at_once() {
+    // The groove wraps round the shaft, so every copy's box is the whole cylinder and the
+    // copies' boxes meet: their exact shapes decide whether they are apart. Telling the
+    // forty-nine copies of a pattern of fifty apart took a union for each of their 1176 pairs,
+    // and minutes on the design of #17632. The copies are cut in two groups, and each group is
+    // told apart with one union.
+    let mut doc = Document::new("grooved shaft");
+    let (volume, work) = shaft_with_coil_pattern(&mut doc, Some(50));
+    assert_eq!((work.cut_tools, work.apart_unions), (2, 2), "{work:?}");
+    // The shaft less fifty grooves: fifty times what one groove takes away.
+    let mut doc = Document::new("one groove");
+    let (one, _) = shaft_with_coil_pattern(&mut doc, None);
+    let shaft = std::f64::consts::PI * 100.0 * 40.0;
+    let taken = shaft - volume;
+    assert!((taken - 50.0 * (shaft - one)).abs() < 0.02 * taken, "{taken} against {}", 50.0 * (shaft - one));
+}
+
 /// A 100 x 100 x 2 plate with a 3 mm hole at (5, 5) drilled from its top, in a 10 x 9 grid on a
 /// 10 mm pitch: the plate's volume, the holes' and the work.
 fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
@@ -3040,4 +3101,57 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert_eq!(st.bodies.len(), 1);
     assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 1);
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
+}
+
+/// A cut measures the tight box of its tool, and the body's only when the box can show
+/// the tool apart of it (#18821): the kernel takes minutes to work out the tight box of
+/// a body with many faces (347 s for the cup of the report), against 30 s for the cut
+/// the box was measured for. A tool inside the body is not apart from it.
+#[test]
+fn a_cut_measures_the_tight_box_of_its_tool_only() {
+    // A tool inside the body: the body's tight box cannot show it apart of the body,
+    // so it is not measured, and the cut is made all the same.
+    let mut doc = Document::new("a cut inside");
+    block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::new(5.0, 5.0, 5.0)),
+        length: "10".into(),
+        width: "10".into(),
+        height: "10".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    let cut = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(cut).is_some_and(|r| r.error.is_none()), "{:?}", model.result(cut));
+    // The tool's tight box, and no other.
+    assert_eq!(work.tight_boxes, 1, "{work:?}");
+    // The cut is made all the same.
+    assert_eq!(work.cut, 1, "{work:?}");
+    assert_eq!(model.state().bodies.len(), 1);
+
+    // A tool that reaches out of the body: the box can show it apart of the body, so
+    // it is measured.
+    let mut doc = Document::new("a cut through");
+    block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::new(5.0, 5.0, 15.0)),
+        length: "10".into(),
+        width: "10".into(),
+        height: "10".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    let cut = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(cut).is_some_and(|r| r.error.is_none()), "{:?}", model.result(cut));
+    // The tool's tight box and the body's.
+    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    assert_eq!(work.cut, 1, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    // The tool crosses the top face: it takes 500 mm3 of the block with it.
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
 }
