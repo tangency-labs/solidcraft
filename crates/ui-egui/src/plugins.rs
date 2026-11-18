@@ -737,6 +737,8 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
                 &mut on,
                 &labels,
                 |ui| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    plugin_settings(app, ui, plugin, was_on);
                     ui.add_space(solidcraft_theme::Tokens::get().space_8);
                     ui_kit::icon_label_button(ui, &remove_label, "delete", can_remove, false)
                 },
@@ -774,8 +776,6 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
             app.preferences.disabled_plugins.insert(plugin.id.clone());
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    plugin_settings(app, ui, plugin, on);
     crate::scenario::publish_target(&format!("prefs:plugin:{}:remove", plugin.id), remove.rect);
     if remove.clicked() {
         app.prefs_window.plugin_remove = Some((plugin.id.clone(), plugin.name.clone()));
@@ -790,7 +790,7 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     }
 }
 
-/// The plugin's own settings, under its card. A background (`shaders@0.1`) has a switch; one
+/// The plugin's own settings, inside its card above Remove. A background (`shaders@0.1`) has a switch; one
 /// background is on at a time, and only while its plugin is on.
 #[cfg(not(target_arch = "wasm32"))]
 fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: bool) {
