@@ -21,15 +21,30 @@ pub enum SkyView {
     /// as long as half the window's width and height are at a distance of one.
     Round { right: [f32; 3], up: [f32; 3], forward: [f32; 3] },
     /// A flat picture behind a frosted window with rain on it, `time` seconds in; `amount` is how
-    /// hard it rains, 0 to 1 ([`RAIN_AMOUNT`] when nothing says otherwise).
-    Rain { min: [f32; 2], max: [f32; 2], time: f32, amount: f32 },
+    /// hard it rains, 0 to 1 ([`RAIN_AMOUNT`] when nothing says otherwise); `brightness` is how
+    /// bright the picture and the fog are, 0 to 1 ([`RAIN_BRIGHTNESS`]).
+    Rain { min: [f32; 2], max: [f32; 2], time: f32, amount: f32, brightness: f32 },
 }
+
+impl SkyView {
+    /// What the shader multiplies the sky's colour by: only rain is dimmed.
+    pub fn gain(&self) -> f32 {
+        match self {
+            SkyView::Rain { brightness, .. } => 0.12 + 0.88 * brightness.clamp(0.0, 1.0).powi(2),
+            _ => 1.0,
+        }
+    }
+}
+
+/// How bright the rain's picture is when nothing says otherwise: a dark night, about a quarter of
+/// the picture's own light.
+pub const RAIN_BRIGHTNESS: f32 = 0.4;
 
 /// How hard it rains when nothing says otherwise: about three times the first tuning's rate.
 pub const RAIN_AMOUNT: f32 = DEFAULT_AMOUNT;
 
 const SHADER: &str = r"
-struct Params { right: vec4<f32>, up: vec4<f32>, forward: vec4<f32>, flat_uv: vec4<f32>, lod: f32, round: f32, pad: vec2<f32> }
+struct Params { right: vec4<f32>, up: vec4<f32>, forward: vec4<f32>, flat_uv: vec4<f32>, lod: f32, round: f32, pad: vec2<f32>, gain: f32 }
 @group(0) @binding(0) var src: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var<uniform> p: Params;
@@ -131,7 +146,7 @@ fn rain(uv: vec2<f32>, window: vec2<f32>) -> vec3<f32> {
     c3 += vec3<f32>(0.5, 0.48, 0.44) * crescent * crescent * drop * 0.5;
     let shine = 1.0 - smoothstep(0.0, 0.25, length(bend + vec2<f32>(0.25, 0.4)));
     c3 += vec3<f32>(0.5, 0.52, 0.58) * shine * drop;
-    return c3;
+    return c3 * p.gain;
 }
 @fragment
 fn fs_main(in: VOut) -> @location(0) vec4<f32> {
@@ -430,6 +445,7 @@ pub fn draw_sky(render_state: &RenderState, size: [u32; 2], view: SkyView) -> Op
     params[17] = round;
     params[18] = time;
     params[19] = w as f32 / h as f32;
+    params[20] = view.gain();
     // The window's pixels, for the rain's grain.
     params[3] = w as f32;
     params[7] = h as f32;
@@ -478,8 +494,20 @@ mod tests {
 
     #[test]
     fn rain_is_drawn_from_the_whole_picture() {
-        let rain = SkyView::Rain { min: [0.0, 0.0], max: [1.0, 1.0], time: 3.0, amount: RAIN_AMOUNT };
+        let rain = SkyView::Rain { min: [0.0, 0.0], max: [1.0, 1.0], time: 3.0, amount: RAIN_AMOUNT, brightness: RAIN_BRIGHTNESS };
         assert_eq!(level(&rain, [4096, 2048], [400, 200]), 0.0);
         assert_eq!(RAIN_AMOUNT, 0.6);
+    }
+
+    /// The background is dark by default, and the brightness setting is what the shader is given.
+    #[test]
+    fn the_rain_background_is_dark_by_default_and_the_brightness_is_applied() {
+        let at = |brightness: f32| SkyView::Rain { min: [0.0, 0.0], max: [1.0, 1.0], time: 0.0, amount: RAIN_AMOUNT, brightness };
+        assert!(at(RAIN_BRIGHTNESS).gain() < 0.4, "{}", at(RAIN_BRIGHTNESS).gain());
+        assert!(at(0.0).gain() < at(RAIN_BRIGHTNESS).gain() && at(RAIN_BRIGHTNESS).gain() < at(0.7).gain());
+        assert!((at(1.0).gain() - 1.0).abs() < 1e-6, "full brightness is the picture as it is");
+        assert!(at(0.2) != at(0.4), "a new brightness is drawn again");
+        let flat = SkyView::Flat { min: [0.0, 0.0], max: [1.0, 1.0] };
+        assert_eq!(flat.gain(), 1.0);
     }
 }

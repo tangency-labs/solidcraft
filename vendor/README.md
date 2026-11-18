@@ -226,8 +226,12 @@ Glass surfaces (blur, refraction, tint, bevel) for glass themes, from commit
 - `src/scene.rs`: `scene_backdrop_over_sky` and the `fs_over` pipelines, which draw the 3D view
   over the sky (a view with no model shows the sky), and `view_part`, which takes the part of the
   window-sized sky a view covers.
-- `src/lib.rs`: exports `SkyView`, `set_sky_image`, `draw_sky`, `guarded` and
-  `scene_backdrop_over_sky`.
+- `src/rain.rs` (new): the drops on a rainy window, simulated on the CPU (land, merge, slide, leave
+  a wiped trail) and uploaded each frame to `sky.rs`'s shader as small data textures; `SkyView::Rain`
+  draws the picture behind frosted glass with the drops refracting it, at a rain amount from a
+  drizzle to a downpour and a brightness. A drop keeps its size until it merges.
+- `src/lib.rs`: exports `SkyView`, `set_sky_image`, `draw_sky`, `guarded`,
+  `scene_backdrop_over_sky`, `RAIN_AMOUNT` and `RAIN_BRIGHTNESS`.
 - `src/glass.wgsl`: the lens is a smooth ramp instead of a circular falloff (whose bend ended in a
   sharp line at the rim), and the blur grows from 0.65× in the middle to 1.35× at the rim.
 - `src/style.rs`, `src/renderer.rs`, `src/glass.wgsl`: `GlassStyle::reach` (in the uniform's

@@ -132,6 +132,7 @@ pub(crate) fn paint_sky(app: &mut crate::SolveApp, painter: &egui::Painter, rect
             max: uv.max.into(),
             time: rain_time(ctx.input(|i| i.time)),
             amount: app.preferences.rain_amount,
+            brightness: app.preferences.rain_brightness,
         }
     } else if crate::sky_picture::is_panorama(size) {
         round_view(&app.cam, window.size())

@@ -796,7 +796,10 @@ fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: b
                     app.preferences.ui_effect = if value { key.clone() } else { String::new() };
                 }
                 if active && crate::plugin_effects::sky(app).is_some_and(|sky| sky.kind == crate::plugin_effects::SkyKind::Rain) {
-                    ui.indent(("effect_settings", key), |ui| crate::prefs::setting::rain_amount(app, ui));
+                    ui.indent(("effect_settings", key), |ui| {
+                        crate::prefs::setting::rain_amount(app, ui);
+                        crate::prefs::setting::rain_brightness(app, ui);
+                    });
                 }
                 if active && crate::plugin_effects::wave_set(app).on {
                     ui.indent(("effect_settings", key), |ui| {

@@ -219,6 +219,17 @@ mod tests {
         assert_eq!(h.app.preferences.rain_amount, 0.25, "a refused value changes nothing");
     }
 
+    #[test]
+    fn the_rain_brightness_defaults_dark_and_stays_between_none_and_full() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(h.app.preferences.rain_brightness < 0.5, "dark by default");
+        assert_eq!(h.app.preferences.rain_brightness, egui_glass::RAIN_BRIGHTNESS);
+        crate::prefs::control(&mut h.app, &serde_json::json!({"rain_brightness": 0.8})).unwrap();
+        assert_eq!(h.app.preferences.rain_brightness, 0.8);
+        assert!(crate::prefs::control(&mut h.app, &serde_json::json!({"rain_brightness": 1.5})).is_err());
+        assert_eq!(h.app.preferences.rain_brightness, 0.8, "a refused value changes nothing");
+    }
+
     /// A hue-wave-only plugin and one with no effects are not made rainy by the rain setting.
     #[test]
     fn a_legacy_plugin_has_no_rain_whatever_the_rain_amount() {

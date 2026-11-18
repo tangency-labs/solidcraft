@@ -1,26 +1,34 @@
 {
   "en": {
-    "prefs.rain_amount": "Rain amount"
+    "prefs.rain_amount": "Rain amount",
+    "prefs.rain_brightness": "Rain brightness"
   },
   "ar": {
-    "prefs.rain_amount": "كمية المطر"
+    "prefs.rain_amount": "كمية المطر",
+    "prefs.rain_brightness": "سطوع المطر"
   },
   "de": {
-    "prefs.rain_amount": "Regenmenge"
+    "prefs.rain_amount": "Regenmenge",
+    "prefs.rain_brightness": "Helligkeit des Regens"
   },
   "he": {
-    "prefs.rain_amount": "כמות גשם"
+    "prefs.rain_amount": "כמות גשם",
+    "prefs.rain_brightness": "בהירות הגשם"
   },
   "ja": {
-    "prefs.rain_amount": "雨の量"
+    "prefs.rain_amount": "雨の量",
+    "prefs.rain_brightness": "雨の明るさ"
   },
   "ko": {
-    "prefs.rain_amount": "비의 양"
+    "prefs.rain_amount": "비의 양",
+    "prefs.rain_brightness": "비 배경 밝기"
   },
   "vi": {
-    "prefs.rain_amount": "Lượng mưa"
+    "prefs.rain_amount": "Lượng mưa",
+    "prefs.rain_brightness": "Độ sáng của mưa"
   },
   "zh": {
-    "prefs.rain_amount": "雨量"
+    "prefs.rain_amount": "雨量",
+    "prefs.rain_brightness": "雨景亮度"
   }
 }

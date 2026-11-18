@@ -65,7 +65,12 @@ panels see the rain too.
 
 While it is chosen, its settings show under the switch:
 
-- `rain_amount` (0 to 1, default 0.6, "Rain amount"): how hard it rains; 0 lets no new drops fall.
+- `rain_amount` (0 to 1, default 0.6, "Rain amount"): how hard it rains: none at 0, a drizzle (about
+  3 drops a second) just above it, and a downpour (about 400 a second) at 1.
+- `rain_brightness` (0 to 1, default 0.4, "Rain brightness"): how bright the picture and the fog are;
+  the default is a dark night, 1 is the picture as it is.
+
+A drop keeps its size for as long as it lives; it changes only in a merge, in one step.
 
 The rain redraws about 30 times a second while the window is focused and 10 when it is not.
 
