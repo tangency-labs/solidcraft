@@ -2748,12 +2748,13 @@ fn a_notch_passing_within_a_tolerance_outside_a_balls_seam_corner_cuts_it() {
 /// so the revolve turns the arc into a sphere centred on the axis, the ball's own sphere
 /// moved by `off`. With the axis 3e-9 to 1e-7 off, within tolerance, the join was refused
 /// ("Face Near missing Seam", face test 36); at 0 and 1e-6 it joined. Every offset is one
-/// valid solid with the faces, edges and vertices of the join about the centre, and the
-/// ball's volume plus the ring's outside it, 4/3·π·6³ + π·∫₋₂⁰ z² dz = 288π + 8π/3.
+/// valid solid with the faces, edges and vertices of the join about the centre. Its volume is
+/// the ball's plus the ring's outside it: the ring's wall has radius 6 + `off` about the axis
+/// and holds every section of the ball between z -2 and 0, so the join adds
+/// ∫₋₂⁰ π((6 + off)² - (36 - z²)) dz to 4/3·π·6³: 288π + 8π/3 + 2π·off·(12 + off).
 #[test]
 fn a_ring_turned_about_an_axis_within_tolerance_of_a_balls_centre_joins_it() {
     all_fixes();
-    let want = 288.0 * PI + 8.0 * PI / 3.0;
     let end = (1.0_f64 / 3.0).asin();
     let (rim, corner) = ([0.0, -6.0 * end.cos(), -2.0], [0.0, -6.0, -2.0]);
     let profile = [
@@ -2788,7 +2789,8 @@ fn a_ring_turned_about_an_axis_within_tolerance_of_a_balls_centre_joins_it() {
         assert_eq!(r.solid_count().unwrap(), 1, "off {off}");
         let counts = r.counts().unwrap();
         assert_eq!(counts, *about_the_centre.get_or_insert(counts), "off {off}");
+        let want = 288.0 * PI + 8.0 * PI / 3.0 + 2.0 * PI * off * (12.0 + off);
         let v = volume(&r);
-        assert!((v - want).abs() <= 1e-8 * want, "off {off}: {v} vs {want}");
+        assert!((v - want).abs() <= 1e-9 * want, "off {off}: {v} vs {want}");
     }
 }
