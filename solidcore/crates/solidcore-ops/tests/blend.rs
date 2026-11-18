@@ -9,6 +9,9 @@
     clippy::expect_used
 )] // test helpers
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use common::*;
@@ -230,6 +233,93 @@ fn blends_turn_round_a_shallow_sharp_corner() {
             }
         }
     }
+}
+
+/// A plate `t` thick whose top face, through the origin, is tilted `tilt` degrees about y,
+/// bounded outside by two upright walls that meet in a shallow concave crease: the plane
+/// y = -46 for x < 0, and that plane turned `crease` degrees about the upright line through
+/// (0, -46) for x > 0. Inside it is bounded by y = -38, and it ends at x = +-30. The top meets the
+/// walls at 90 degrees and at 90 - atan(sin(tilt) tan(crease)) degrees. Made as solidcraft-cli
+/// makes it: boxes, turned and combined.
+fn crease_plate(t: f64, tilt: f64, crease: f64) -> (Body, [usize; 2]) {
+    let (d, c, l) = (46.0, 38.0, 30.0);
+    let (a, k) = (tilt.to_radians(), crease.to_radians());
+    // p' = p A + t: rows the images of x, y, z, then the translation
+    let about_z = |th: f64, at: [f64; 3]| {
+        let (cs, sn) = (th.cos(), th.sin());
+        let m = [[cs, sn, 0.0], [-sn, cs, 0.0], [0.0, 0.0, 1.0]];
+        let tr = [0, 1, 2].map(|j| at[j] - (0..3).map(|i| at[i] * m[i][j]).sum::<f64>());
+        [
+            [m[0][0], m[0][1], m[0][2], 0.0],
+            [m[1][0], m[1][1], m[1][2], 0.0],
+            [m[2][0], m[2][1], m[2][2], 0.0],
+            [tr[0], tr[1], tr[2], 1.0],
+        ]
+    };
+    let outer = make_box([-l, -d, -200.0], [2.0 * l, d - c, 400.0]).unwrap();
+    let turned = make_box([0.0, -d, -200.0], [2.0 * l, d - c + 10.0, 400.0]).unwrap();
+    turned.transform(&about_z(-k, [0.0, -d, 0.0])).unwrap();
+    let outer = solidcore_ops::boolean::boolean(outer, turned, solidcore_ops::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let keep = make_box([-l, -d - 40.0, -200.0], [2.0 * l, d + 40.0 - c, 400.0]).unwrap();
+    let outer = solidcore_ops::boolean::boolean(outer, keep, solidcore_ops::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let slab = make_box([-271.5, -271.5, -t], [543.0, 543.0, t]).unwrap();
+    slab.transform(&[
+        [a.cos(), 0.0, -a.sin(), 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [a.sin(), 0.0, a.cos(), 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    let b = solidcore_ops::boolean::boolean(slab, outer, solidcore_ops::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let top = |x: f64| -x * a.tan();
+    let (xl, xr) = (-l / 2.0, l / 2.0 * k.cos());
+    let edges = [
+        edge_at(&b, [xl, -d, top(xl)]),
+        edge_at(&b, [xr, -d - l / 2.0 * k.sin(), top(xr)]),
+    ];
+    (b, edges)
+}
+
+/// The removed volume of [`crease_plate`]'s two top edges rounded `r`, as the prisms of their
+/// sections mitred on the crease's bisector plane: each section the wedge of the top and its
+/// wall less the ball's disc, cut off at the plate's bottom, in closed form; each prism measured
+/// along its centroid line between its end plane and the bisector plane (exact for a prism cut
+/// by planes). The corner's own construction departs from that mitre only within the ball
+/// about the corner, so the removed volume lies within that ball's eighth, `pi r^3 / 6`, of it.
+/// Values for the radii the test uses (the case's derivation, by hand).
+const CREASE_PLATE_MITRE: [(f64, f64); 3] = [(3.0, 148.6327), (3.5, 201.0834), (4.0, 258.7033)];
+
+/// A round wider than the plate's walls are tall (it overflows them, runs on past the plate's
+/// bottom and is trimmed there), on two edges meeting at a shallow concave crease between the
+/// walls. At the crease's corner the round's piece along the crease line ran past the crease
+/// edge's lower end; the piece was the crease edge trimmed to its points' drops, both clamped
+/// to that end, so it had no length and the corner's loop did not close ("Corner Geometry
+/// Computation Failure"). The piece is now the crease line continued: the rounds build valid
+/// at the full check, within the corner ball's eighth of the mitred prisms. Run under the
+/// application's fix set (every fix less `kernel_cases/held_back.json`).
+#[test]
+fn rounds_overflowing_a_shallow_concave_crease_build() {
+    for (r, mitre) in CREASE_PLATE_MITRE {
+        rig_fixes();
+        let (b, edges) = crease_plate(3.0, 25.0, 15.0);
+        let before = volume(&b);
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("r {r}: {e:?}"));
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
+        let off = before - volume(&b);
+        let bound = PI * r * r * r / 6.0;
+        assert!(
+            (off - mitre).abs() <= bound,
+            "r {r}: {off} off, mitre {mitre}, bound {bound}"
+        );
+    }
+    all_fixes();
 }
 
 /// Asserts that the faces of [`shallow_corner_plate`]`(kink, convex)` rounded r 1 that are not
@@ -2254,14 +2344,10 @@ fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
     ));
 }
 
-/// The kernel rig's fix set (`fixes.json`), as the rig runs its entries.
+/// The kernel rig's fix set (SolidCraft's preset, `solidcraft_fixes.rs`), as the rig runs its
+/// entries.
 fn rig_fixes() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../solidcore/tests/kernel_cases/fixes.json"
-    );
-    let fixes: Vec<String> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-    solidcore_ops::session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 /// The ledge of the kernel case `10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5`:
@@ -2593,10 +2679,13 @@ fn rolled_volume(r1: f64, r2: f64) -> f64 {
 }
 
 /// The kernel's certified enclosure of `b`'s volume holds `want`, and is narrower than
-/// `width` (so that it decides `want` against a nearby value).
+/// `width` (so that it decides `want` against a nearby value). The enclosure is asked for
+/// `width` itself: refinement stops as soon as it is that narrow, and a tighter ask only
+/// refines further, past what is asserted (on the ledge, into strips that settle at 7.4e-4
+/// and spend the cell budget).
 fn enclosure_holds(b: &Body, want: f64, width: f64) {
     let (k, mut brep) = kernel_copy(b);
-    let e = solidcore::mass::enclosure::enclose_volume(&k, &mut brep, width / 4.0).unwrap();
+    let e = solidcore::mass::enclosure::enclose_volume(&k, &mut brep, width).unwrap();
     assert!(e.lo <= want && want <= e.hi, "{} {want} {}", e.lo, e.hi);
     assert!(e.hi - e.lo <= width, "{} {}", e.lo, e.hi);
 }
@@ -3802,21 +3891,9 @@ fn issue_13911_rails(
 /// stand `reach` off the loop at the two heights).
 #[test]
 fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
-    let mut fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    // SolidCraft's fix set when it traced the case (the corpus list lags it by these)
-    for f in [
-        "brep_ray_classifies_current_trims",
-        "closed_smooth_pole_tangent_limit",
-        "fillet_chamfer_corner",
-    ] {
-        if !fixes.iter().any(|x| x == f) {
-            fixes.push(f.to_owned());
-        }
-    }
-    solidcore_ops::session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    // SolidCraft's fix set when it traced the case: its preset, which has every flag on but the
+    // held-back ones
+    solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let (input, _) = issue_13911_body();
     let before = input.check(CheckLevel::All).unwrap();
     let known = before.to_string();

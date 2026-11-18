@@ -5,6 +5,56 @@ use solidcraft_geom::tess::EvaluateMesh as _;
 use super::*;
 use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, revolve, sphere, step_export, torus};
 
+/// An opening design may hold five or more STEP imports. A four-item strong cache cap
+/// must not evict the weak lookup for an import still owned by that opening (#18814).
+#[test]
+fn recent_step_lookups_survive_more_than_four_live_imports() {
+    let empty = || {
+        Arc::new(StepImport {
+            bodies: Vec::new(),
+            tree: Vec::new(),
+            warnings: Vec::new(),
+            report: ImportReport::default(),
+            schema: String::new(),
+            system: String::new(),
+            preprocessor: String::new(),
+            description: String::new(),
+        })
+    };
+    let mut cache = Vec::new();
+    let mut held = Vec::new();
+    for i in 0..6 {
+        let imp = empty();
+        remember_in(&mut cache, (i, 200), &imp, false);
+        held.push(imp);
+    }
+    assert_eq!(cache.len(), 6, "all six externally owned imports remain findable");
+    for (i, imp) in held.iter().enumerate() {
+        assert!(cache.iter().any(|r| r.key.0 == i as u64 && r.import.upgrade().is_some_and(|found| Arc::ptr_eq(&found, imp))));
+    }
+    drop(held);
+    let next = empty();
+    remember_in(&mut cache, (6, 200), &next, false);
+    assert_eq!(cache.len(), 1, "dead weak entries are removed on the next import");
+
+    let mut held = Vec::new();
+    let mut small_cache = Vec::new();
+    for i in 0..6 {
+        let imp = empty();
+        remember_in(&mut small_cache, (i, 100), &imp, true);
+        held.push(imp);
+    }
+    assert_eq!(small_cache.len(), 6, "small imports still owned externally retain their lookups");
+    assert_eq!(small_cache.iter().filter(|r| r._small.is_some()).count(), 4, "only four small imports are retained by the cache itself");
+    drop(held);
+    assert!(small_cache[..2].iter().all(|r| r.import.upgrade().is_none()), "the oldest small imports are released");
+    assert!(small_cache[2..].iter().all(|r| r.import.upgrade().is_some()), "the four newest small imports remain cached");
+    let seventh = empty();
+    remember_in(&mut small_cache, (6, 100), &seventh, true);
+    assert_eq!(small_cache.len(), 4, "a new import prunes dead lookups and caps the retained small imports");
+    assert_eq!(small_cache.iter().filter(|r| r._small.is_some()).count(), 4);
+}
+
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-9)
 }
@@ -1983,8 +2033,29 @@ fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
     t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-5)");
     t += TAIL;
     let (volume, area) = pin_with_cylinder(major, minor);
-    // SMLib's check fails the part as the reader makes it (#17706): the import says so.
-    assert_closed_measures(&t, volume, area, &[], true);
+    // The part passes SMLib's check (#17706, fixed by #17856: the check measured the apex
+    // against the far pole).
+    assert_closed_measures(&t, volume, area, &[], false);
+    // The check's verdict is backed by proved gaps: each meridian lies on both torus halves within
+    // a certified 1e-8 (edge tolerance 5e-6), and the apex's exact distance to the torus,
+    // √(major² + minor²) − minor = 3.62e-5, is inside its vertex tolerance.
+    let imp = step_import(&t).unwrap();
+    let body = &imp.bodies[0].body;
+    let (rec, sm) = (body.record(), body.smlib().unwrap());
+    // Record order: faces 0 plane, 1 cylinder, 2 and 3 the torus halves (their surface is held as a NURBS).
+    let torus = [2usize, 3];
+    let apex = rec.vertices.iter().position(|v| v.point == [0.0, 0.0, minor]).unwrap();
+    let meridians: Vec<usize> = (0..rec.edges.len()).filter(|&e| rec.edges[e].vertices.contains(&(apex as u32))).collect();
+    assert_eq!(meridians.len(), 2);
+    for &e in &meridians {
+        let edge = &rec.edges[e];
+        for &f in &torus {
+            let b = sm.curve_face_gap_bound(edge.nurbs.as_ref().unwrap_or(&edge.curve), edge.interval, f, 1e-9).unwrap().unwrap();
+            assert!(b < 1e-8 && b < edge.tolerance, "edge {e} face {f}: {b}");
+        }
+    }
+    let gap = (major * major + minor * minor).sqrt() - minor; // exact to ~1e-17
+    assert!((gap - 3.62299817e-5).abs() < 1e-12 && rec.vertices[apex].tolerance > gap * (1.0 + 1e-9));
 }
 
 /// The lemon of a spindle torus (the tube's part across the axis: a closed surface with a pole

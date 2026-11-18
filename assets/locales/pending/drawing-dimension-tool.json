@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "ui.drawing_dimension_tool.pick": "انقر لاختيار حافة من المسقط.",
+    "ui.drawing_dimension_tool.place": "انقر على الورقة لوضع البُعد."
+  },
+  "de": {
+    "ui.drawing_dimension_tool.pick": "Klicken Sie auf eine Kante in der Ansicht.",
+    "ui.drawing_dimension_tool.place": "Klicken Sie auf das Blatt, um das Maß zu platzieren."
+  },
+  "en": {
+    "ui.drawing_dimension_tool.pick": "Click an edge in a drawing view.",
+    "ui.drawing_dimension_tool.place": "Click the sheet to place the dimension."
+  },
+  "he": {
+    "ui.drawing_dimension_tool.pick": "לחצו על קצה בתצוגת השרטוט.",
+    "ui.drawing_dimension_tool.place": "לחצו על הגיליון כדי למקם את המידה."
+  },
+  "ja": {
+    "ui.drawing_dimension_tool.pick": "図面ビューのエッジをクリックします。",
+    "ui.drawing_dimension_tool.place": "シートをクリックして寸法を配置します。"
+  },
+  "ko": {
+    "ui.drawing_dimension_tool.pick": "도면 뷰에서 모서리를 클릭하세요.",
+    "ui.drawing_dimension_tool.place": "시트를 클릭하여 치수를 배치하세요."
+  },
+  "vi": {
+    "ui.drawing_dimension_tool.pick": "Bấm vào một cạnh trong hình chiếu.",
+    "ui.drawing_dimension_tool.place": "Bấm vào tờ bản vẽ để đặt kích thước."
+  },
+  "zh": {
+    "ui.drawing_dimension_tool.pick": "点击工程图视图中的边。",
+    "ui.drawing_dimension_tool.place": "点击图纸以放置尺寸。"
+  }
+}
