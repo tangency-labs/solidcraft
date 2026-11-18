@@ -3118,6 +3118,56 @@ mod tests {
         eprintln!("crossing node: complete branches y=±x; enclosed residual {worst:e} <= {tol:e}");
     }
 
+    /// Two surfaces that coincide over a region touch there everywhere, not along a curve
+    /// (#18930). With the tangent curve tracer on, two of upstream's coincident pairs keep
+    /// the curves the marcher finds: the boundaries of the coincident region (and, for the
+    /// two surfaces of revolution, the crossing where they part), and no tangent curve.
+    /// The tracer's seeds on these pairs lie on domain edges and corners, the ends of the
+    /// region's boundary curves, where at most half of its probe circle is inside the domains.
+    #[test]
+    fn coincident_surfaces_get_no_tangent_curve_from_the_tracer() {
+        use sp2::TsectCurveType::{Coincident, Crossing};
+        for (name, want) in [
+            ("ssi_adv_ssi_rev_rev_coin_f0_f0", vec![Coincident, Coincident, Crossing]),
+            ("ssi_adv_ssi_coincident_torii_f0_f0", vec![Coincident; 4]),
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let input: Inputs = case.parse().unwrap();
+            let mut first = this_surface(input.this.as_ref().unwrap()).unwrap().unwrap();
+            let OpIn::Gssi {
+                dom,
+                other,
+                other_dom,
+                tol,
+                translate,
+            } = input.op
+            else {
+                panic!("intersection case");
+            };
+            let mut second = Surface::from(bss_of(&other).unwrap());
+            let mut k = Kernel::default();
+            k.fixes.ssi_tangent_curve_tracer = true;
+            if let Some(t) = translate {
+                let mut ax = Axis2Placement::default();
+                ax.translate(v3(t));
+                first.transform(&k, &ax, None).unwrap();
+                second.transform(&k, &ax, None).unwrap();
+            }
+            let result = first
+                .global_surface_intersect(
+                    &k,
+                    &dom_of(dom),
+                    &second,
+                    &dom_of(other_dom),
+                    [true, true],
+                    tol,
+                    None,
+                )
+                .unwrap();
+            assert_eq!(result.curve_types, want, "{name}");
+        }
+    }
+
     /// The generators reach the ops with successful outcomes on the Rust side.
     #[test]
     fn generated_cases_cover_ops() {
