@@ -614,7 +614,7 @@
       "abs_mm": 1e-06
     },
     "volume_mm3": 7931.916688312,
-    "what": "a block whose top slopes at 45 degrees, a shallow r3 groove down the slope with 1 mm rounds on its edges, and a square slot whose back wall (the plane y = -7.28) reaches from the flat slope across one round into the groove; the back wall's top edge, a tangent chain of a line, the round's curve and the groove's curve, chamfered 0.2: control for the 0.4 case, which builds on main too"
+    "what": "a block whose top slopes at 45 degrees, a shallow r3 groove down the slope with 1 mm rounds on its edges, and a square slot whose back wall (the plane y = -7.28) reaches from the flat slope across one round into the groove; the back wall's top edge, a tangent chain of a line, the round's curve and the groove's curve, chamfered 0.2: the 0.2 mm chamfer builds on main too, a control for the 0.4 mm chamfer, which main refuses"
   },
   "expressible": true,
   "operation_expressible": true,
@@ -678,7 +678,7 @@
     "blend_dropping"
   ],
   "ungraded": [],
-  "what": "a block whose top slopes at 45 degrees, a shallow r3 groove down the slope with 1 mm rounds on its edges, and a square slot whose back wall (the plane y = -7.28) reaches from the flat slope across one round into the groove; the back wall's top edge, a tangent chain of a line, the round's curve and the groove's curve, chamfered 0.2: control for the 0.4 case, which builds on main too",
+  "what": "a block whose top slopes at 45 degrees, a shallow r3 groove down the slope with 1 mm rounds on its edges, and a square slot whose back wall (the plane y = -7.28) reaches from the flat slope across one round into the groove; the back wall's top edge, a tangent chain of a line, the round's curve and the groove's curve, chamfered 0.2: the 0.2 mm chamfer builds on main too, a control for the 0.4 mm chamfer, which main refuses",
   "why_not": [],
   "records": "chamfer-slot-back-wall-across-a-rounded-groove-0-2-fits.bodies.json.gz"
 }
