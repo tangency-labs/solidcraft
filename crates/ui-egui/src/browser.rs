@@ -1247,6 +1247,8 @@ enum Thing {
     Body(String),
     /// A sketch, by feature id.
     Sketch(u64),
+    /// A feature, by feature id.
+    Feature(u64),
     /// An origin or construction plane, by name.
     Plane(String),
     /// An origin or construction axis.
@@ -1314,7 +1316,13 @@ impl Lit {
                     }
                     continue;
                 }
-                Sel::Feature { id } => Thing::Sketch(*id),
+                Sel::Feature { id } => {
+                    if app.session.doc.features.iter().any(|f| f.id == *id && matches!(f.kind, FeatureKind::Sketch { .. })) {
+                        Thing::Sketch(*id)
+                    } else {
+                        Thing::Feature(*id)
+                    }
+                }
                 Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
                     Thing::Sketch(*sketch)
                 }
@@ -1345,15 +1353,23 @@ impl Lit {
             Some(Hit::ConstructionPoint { name }) => Some(Thing::Point(name.clone())),
             Some(Hit::PointCloudPoint { .. }) => None,
             Some(Hit::MemberEnd { .. } | Hit::Centreline { .. }) => None,
-            None => app.viewport.hover_feature.and_then(|id| {
-                app.session.doc.feature(id).and_then(|f| match &f.kind {
-                    FeatureKind::Sketch { .. } => Some(Thing::Sketch(id)),
-                    FeatureKind::ConstructionPlane { .. } => Some(Thing::Plane(f.name.clone())),
-                    FeatureKind::ConstructionAxis { .. } => Some(Thing::Axis(f.name.clone())),
-                    FeatureKind::ConstructionPoint { .. } => Some(Thing::Point(f.name.clone())),
-                    _ => None,
-                })
-            }),
+            None => {
+                app.viewport
+                    .hover_feature
+                    .and_then(|id| {
+                        app.session.doc.feature(id).map(|f| match &f.kind {
+                            FeatureKind::Sketch { .. } => Thing::Sketch(id),
+                            FeatureKind::ConstructionPlane { .. } => Thing::Plane(f.name.clone()),
+                            FeatureKind::ConstructionAxis { .. } => Thing::Axis(f.name.clone()),
+                            FeatureKind::ConstructionPoint { .. } => Thing::Point(f.name.clone()),
+                            _ => Thing::Feature(id),
+                        })
+                    })
+                    .or_else(|| {
+                        if app.viewport.hover_bodies.len() == 1 { app.viewport.hover_bodies.first().map(|b| Thing::Body(b.clone())) } else { None }
+                    })
+                    .or_else(|| app.viewport.hover_plane.as_ref().map(|p| Thing::Plane(p.clone())))
+            }
         };
         // Unless the Browser follows the 3D view, a body's placement is not looked up for the rows
         // above it (that names every placement again after each edit): only the one Find in
@@ -1374,9 +1390,7 @@ impl Lit {
                 Thing::Body(b) => {
                     paths.extend(app.tree.found.as_ref().filter(|found| found.body == *b && !found.path.is_empty()).map(|found| found.path.clone()));
                 }
-                Thing::Sketch(id) => {
-                    components.extend(doc.features.iter().find(|f| f.id == *id && matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.component))
-                }
+                Thing::Sketch(id) | Thing::Feature(id) => components.extend(doc.features.iter().find(|f| f.id == *id).map(|f| f.component)),
                 Thing::Plane(name) | Thing::Axis(name) | Thing::Point(name) => components.extend(
                     doc.features
                         .iter()
@@ -3573,6 +3587,19 @@ fn entry_row(
     }
     if r.hovered
         && let Thing::Sketch(id) = &e.thing
+    {
+        acts.hover_feature = Some(*id);
+        acts.hovered = true;
+    }
+    if r.hovered
+        && matches!(&e.thing, Thing::Axis(_) | Thing::Point(_))
+        && let Ok(id) = e.key.parse()
+    {
+        acts.hover_feature = Some(id);
+        acts.hovered = true;
+    }
+    if r.hovered
+        && let Thing::Feature(id) = &e.thing
     {
         acts.hover_feature = Some(*id);
         acts.hovered = true;
