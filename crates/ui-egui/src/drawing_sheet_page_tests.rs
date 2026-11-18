@@ -563,12 +563,61 @@ fn a_stale_picture_shows_over_its_own_grid_until_the_new_one_comes() {
     assert!((width(&pictures) - 200.0).abs() < 1e-3, "a stale one shows whole, over its own grid");
 }
 
+/// A view moved on its sheet keeps its picture's pixels (the same rows) and the engine moves their
+/// grid: the page paints them at the new place, past the old one, with no new upload.
+#[test]
+fn a_moved_views_picture_follows_it_without_a_new_upload() {
+    let ctx = egui::Context::default();
+    let mut pictures = PictureTextures::default();
+    let first = hand_picture(7, 10, 10, true, None);
+    pictures.sync(&ctx, std::slice::from_ref(&first), 2048);
+    let moved = SheetPicture { grid: PixelGrid { x0: 50.0, ..first.grid }, ..first.clone() };
+    pictures.sync(&ctx, std::slice::from_ref(&moved), 2048);
+    assert_eq!(pictures.uploads, 1, "the same pixels upload once");
+    let rect = Aabb2 { min: Vec2::new(50.0, 0.0), max: Vec2::new(60.0, 10.0) };
+    let meshes = textured(&painted(&ctx, &Marks::of(&picture_scene(7, rect, 1.0, None), 1, 0.01), &pictures));
+    assert_eq!(meshes.len(), 1, "drawn at its new place");
+    // 10 points a millimetre: 500 to 600 points.
+    assert!((meshes[0].1.min.x - 500.0).abs() < 1e-3 && (meshes[0].1.max.x - 600.0).abs() < 1e-3, "{:?}", meshes[0].1);
+}
+
+/// The page paints in the scene's order: a fill before a picture lies under it, one after it on it.
+#[test]
+fn fills_and_pictures_paint_in_the_scenes_order() {
+    // Whether each mesh in `shapes` is textured (a picture's) or not (a fill's), in paint order.
+    fn meshes(shapes: &[egui::epaint::ClippedShape]) -> Vec<bool> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<bool>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+                egui::Shape::Mesh(mesh) if !mesh.vertices.is_empty() => out.push(mesh.texture_id != egui::TextureId::default()),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        shapes.iter().for_each(|s| walk(&s.shape, &mut out));
+        out
+    }
+    let ctx = egui::Context::default();
+    let mut pictures = PictureTextures::default();
+    pictures.sync(&ctx, &[hand_picture(7, 10, 10, true, None)], 2048);
+    let rect = Aabb2 { min: Vec2::ZERO, max: Vec2::new(10.0, 10.0) };
+    let fill = Item::Fill { region: Region2 { outer: square(Vec2::new(2.0, 2.0), 5.0), holes: Vec::new() } };
+    let picture = Item::Picture(solidcraft_engine::geom::paper::Picture { source: 7, rect, opacity: 1.0 });
+    for (items, expected) in [(vec![fill.clone(), picture.clone()], [false, true]), (vec![picture, fill], [true, false])] {
+        let groups = vec![Group { object: 1, kind: ObjectKind::View, items }];
+        let scene = Scene { size_mm: Vec2::new(100.0, 100.0), groups, fonts: Vec::new(), clips: Vec::new() };
+        assert_eq!(meshes(&painted(&ctx, &Marks::of(&scene, 1, 0.01), &pictures)), expected);
+    }
+}
+
 /// How long making a sheet picture's textures takes on the window thread: 16 Mpx (the provider's
 /// largest) and a view at 300 dpi on A3. Ignored: a measure, not a check (`cargo test -- --ignored`).
 #[test]
 #[ignore]
 fn picture_upload_timing() {
     let ctx = egui::Context::default();
+    // A desktop GPU's largest side, so the 16 Mpx picture is one texture, as `sync` is told.
+    let _ = ctx.run_ui(egui::RawInput { max_texture_side: Some(16_384), ..Default::default() }, |_| {});
     for (w, h) in [(4096u32, 4096u32), (1181, 945)] {
         let p = hand_picture(1, w, h, true, None);
         let start = std::time::Instant::now();

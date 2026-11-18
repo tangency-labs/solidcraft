@@ -891,6 +891,8 @@ impl Marks {
                     }
                 }
                 Mark::Picture { source, rect, opacity, clip, within } => {
+                    // The fills before it lie under it, as in the scene; those after it, on it.
+                    flush(painter, &mut mesh);
                     let uploaded = pictures.get(*source);
                     match uploaded.filter(|u| !u.tiles.is_empty()) {
                         Some(u) => {
@@ -928,9 +930,14 @@ impl Marks {
                 }
             }
         }
-        if !mesh.is_empty() {
-            painter.add(egui::Shape::mesh(mesh));
-        }
+        flush(painter, &mut mesh);
+    }
+}
+
+/// Paints the fills gathered so far into `mesh`, and empties it.
+fn flush(painter: &egui::Painter, mesh: &mut egui::Mesh) {
+    if !mesh.is_empty() {
+        painter.add(egui::Shape::mesh(std::mem::take(mesh)));
     }
 }
 
@@ -971,7 +978,8 @@ impl PictureTextures {
             if let Some(u) = self.pictures.get_mut(&p.source)
                 && same_rows(&u.rows, &p.rows)
             {
-                (u.stale, u.why) = (p.stale, p.why.clone());
+                // The same pixels; the engine moves their grid with their view, stale or not.
+                (u.grid, u.stale, u.why) = (p.grid, p.stale, p.why.clone());
                 continue;
             }
             let tiles = p.rows.as_ref().map(|rows| tiles(ctx, p.source, &p.grid, rows, max_side)).unwrap_or_default();
@@ -985,7 +993,8 @@ impl PictureTextures {
         self.pictures.get(&source)
     }
 
-    /// Each picture, for `ui.inspect`: shown as its pixels, its frame (not drawn yet) or failed (with why).
+    /// Each picture, for `ui.inspect`: how it shows where it is on screen, as its pixels, its frame (not
+    /// drawn yet) or failed (with why). Off screen, none of them is painted.
     fn inspect(&self) -> Vec<Value> {
         let mut out: Vec<(u64, Value)> = self
             .pictures
@@ -1023,7 +1032,8 @@ fn tiles(ctx: &egui::Context, source: u64, grid: &PixelGrid, rows: &[u8], max_si
     if max_side == 0 || width.checked_mul(height).and_then(|n| n.checked_mul(4)) != Some(rows.len()) {
         return Vec::new();
     }
-    // Zoomed out, mipmaps keep a picture smooth rather than speckled.
+    // Zoomed out, mipmaps keep a picture smooth rather than speckled where the renderer makes them
+    // (egui_glow); egui-wgpu makes one level only, so there it is filtered linearly (H5-F4).
     let options = egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR };
     let mut out = Vec::new();
     for y0 in (0..height).step_by(max_side) {
