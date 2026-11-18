@@ -20,6 +20,8 @@
 //! again that 0.30.1 saved as a numbered piece (`F2:side#2`) or under a later index
 //! (`F4:bore:side:1`): see [`locate_thread_face_on_body`] (#16602).
 
+use std::sync::Arc;
+
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
@@ -53,6 +55,63 @@ pub struct EdgeHit {
     pub verified: bool,
     /// Whether the reference's point still lies on the edge.
     pub on_point: bool,
+}
+
+/// A body's edge names and face names, worked out once for every edge name looked up on it.
+pub(crate) struct BodyEdges {
+    pub(crate) mesh: Arc<Mesh>,
+    names: Vec<String>,
+    faces: Arc<Names>,
+}
+
+/// The edges of a body a stored edge name matches, before a picked point decides between them.
+pub(crate) enum EdgeMatch {
+    /// The edge with that name, or the one edge between the faces it names.
+    Edge(usize),
+    /// Pieces of it: the faces it names meet along several edges now, or only a piece of one of
+    /// them is left.
+    Pieces(Vec<usize>),
+}
+
+impl BodyEdges {
+    pub(crate) fn new(b: &ModelBody) -> BodyEdges {
+        BodyEdges { mesh: b.mesh(), names: edge_names(b), faces: naming::names(b) }
+    }
+
+    /// Whether edge `i`'s name follows exact history: the faces it separates do, and it isn't one
+    /// of several edges between them, numbered by where they lie.
+    /// Edge `i`'s persistent name.
+    pub(crate) fn name(&self, i: usize) -> Option<&str> {
+        self.names.get(i).map(String::as_str)
+    }
+
+    pub(crate) fn verified(&self, i: usize) -> bool {
+        self.mesh.edge_faces.get(i).is_some_and(|fs| fs.iter().all(|f| self.faces.verified(*f as usize)))
+            && self.names.get(i).is_some_and(|n| strip_edge_number(n).len() == n.len())
+    }
+
+    /// What the stored edge name `name` matches: the edge with that name; else the one edge
+    /// between the faces it names (followed through splits and merges of those faces); else the
+    /// pieces of it. `None` when nothing does.
+    pub(crate) fn matching(&self, name: &str) -> Option<EdgeMatch> {
+        if let Some(i) = self.names.iter().position(|n| n == name) {
+            return Some(EdgeMatch::Edge(i));
+        }
+        // By the faces it separates: the best way any edge matches.
+        let wanted = strip_edge_number(name);
+        let mut best: Option<(Match, Vec<usize>)> = None;
+        for (i, fs) in self.mesh.edge_faces.iter().enumerate() {
+            let [fa, fb] = fs.as_slice() else { continue };
+            let Some(level) = edge_match(&self.faces, *fa as usize, *fb as usize, wanted) else { continue };
+            keep_best(&mut best, level, i);
+        }
+        let (level, cands) = best?;
+        let one = match cands.as_slice() {
+            [i] if level >= Match::Piece => Some(*i),
+            _ => None,
+        };
+        Some(one.map_or(EdgeMatch::Pieces(cands), EdgeMatch::Edge))
+    }
 }
 
 /// The edge of a body a stored edge name finds: the edge with that name; else the one edge
@@ -119,10 +178,51 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
 /// the edge of a fillet or chamfer (#16535). Older designs can name the edge between
 /// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
 /// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
-/// point lies on it, and its name is exact. Other edge references still require the stored
-/// name as picked.
+/// point lies on it, and its name is exact. A name that ends with the number of the edge a blend
+/// replaced is found at its point too (see [`recover_blend_numbered_edge`]). Other edge references
+/// still require the stored name as picked.
 pub(crate) fn locate_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
-    locate_edge(b, name, near).or_else(|miss| recover_numbered_projected_edge(b, name, near).ok_or(miss))
+    locate_edge(b, name, near)
+        .or_else(|miss| recover_numbered_projected_edge(b, name, near).or_else(|| recover_blend_numbered_edge(b, name, near)).ok_or(miss))
+}
+
+/// Find a saved edge between a face and a fillet's or chamfer's face whose name, in the older
+/// form, ends with the number of the edge the blend replaced: 0.30.1 saved the top edge of a round
+/// that replaced the second of two edges between the same faces as
+/// `F2:top|F3:blend:F2:side:c1|F2:side:l1~2` (#14479). The older form reads a trailing `~k` as the
+/// whole edge's number, so the name finds no edge as read. Read with `~k` on the blend's edge
+/// (`F2:top|F3:blend(F2:side:c1|F2:side:l1~2)`), it can still answer to several faces alike: a
+/// blend of several edges between the same two faces names each of its faces after all of them,
+/// told apart by a number only. So the saved point decides: the one edge between the other face
+/// and a face answering to the blend's name that the point lies on.
+fn recover_blend_numbered_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    use crate::persistent_name::{Base, EdgeName, Rounds};
+    if b.body.is_mesh() || !near.is_finite() || !crate::persistent_name::in_old_form(name) {
+        return None;
+    }
+    let read = EdgeName::parse(name).ok()?;
+    let [face, blend] = read.faces.as_slice() else { return None };
+    let (Some(tie), Base::Blend { feature, rounds: Rounds::Edge(edge) }) = (read.tie, &blend.base) else { return None };
+    if !blend.suffixes.is_empty() || edge.tie.is_some() {
+        return None;
+    }
+    let rounds = Rounds::Edge(Box::new(EdgeName { faces: edge.faces.clone(), tie: Some(tie) }));
+    let blend = crate::persistent_name::FaceName { base: Base::Blend { feature: *feature, rounds }, suffixes: Vec::new() };
+    let (face, blend) = (face.to_string(), blend.to_string());
+    let faces = naming::names(b);
+    // The face exactly (see [`exactly`]); the blend face by its name, a piece of it, or a name
+    // merged into it.
+    let level = |f: u32, x: &str| crate::history_names::matches(&faces, f as usize, x);
+    let between = |p: u32, q: u32| level(p, &face).is_some_and(exactly) && level(q, &blend).is_some_and(|l| l >= Match::Piece);
+    let reach = pick_reach(b);
+    // Of the B-rep's edges between those faces, the one whose exact curve the point lies on.
+    let mut on = b.body.record().edges.iter().enumerate().filter(|(i, e)| {
+        let [p, q] = e.uses.as_slice() else { return false };
+        (between(p.face, q.face) || between(q.face, p.face))
+            && solidcraft_kernel::edge_distance(&b.body, *i, near).ok().flatten().is_some_and(|d| d <= reach)
+    });
+    let edge = on.next().filter(|_| on.next().is_none())?.0;
+    Some(EdgeHit { edge, point: near, verified: false, on_point: true })
 }
 
 fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
@@ -1036,6 +1136,12 @@ fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &st
 /// name saved before format 14 names no face.
 pub fn face_has_name(b: &ModelBody, index: usize, name: &str) -> bool {
     legacy_name(name).is_none() && crate::history_names::matches(&naming::names(b), index, name).is_some_and(exactly)
+}
+
+/// Whether some face of a body is exactly the face a stored name names (see [`face_has_name`]).
+pub(crate) fn body_has_face_named(b: &ModelBody, name: &str) -> bool {
+    let names = naming::names(b);
+    legacy_name(name).is_none() && (0..face_names(b).len()).any(|i| crate::history_names::matches(&names, i, name).is_some_and(exactly))
 }
 
 /// The faces of a body that are the stored name's face or pieces of it (by stem). A name saved

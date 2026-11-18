@@ -28,8 +28,7 @@
 mod offset_fixture;
 
 use offset_fixture::Notifications;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::object::ObjectRef;
+use solidcore::geom::attribute::AttributeStore;
 use solidcore::mass::integrator::properties::{brep_volume_default, face_area, face_centroid};
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::knots::Side;
@@ -43,7 +42,7 @@ use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p2 as face_ops;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::FaceId;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, CancelToken, Kernel};
 
 /// The upstream test file `Solids/<name>`, or `None` without the upstream checkout.
 fn solid(k: &mut Kernel, name: &str) -> Option<Brep> {
@@ -62,10 +61,7 @@ fn solid(k: &mut Kernel, name: &str) -> Option<Brep> {
     let mut b = Brep::new_with_infinite_region().unwrap();
     let mut records = NotifyRecords::new();
     let mut attributes = AttributeStore::default();
-    let key = |_: EntityRef| ObjectRef {
-        key: ObjectKey(0),
-        type_code: 0,
-    };
+    let key = solidcore::topology::loopuse::notify_ref;
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -333,6 +329,38 @@ fn two_curved_nets_given_tilted_planes_are_sound_or_refused_unchanged() {
             ],
         ),
     ]);
+}
+
+/// `fc0006`: face 13 given its own tangent plane, which is the plane it lies on: the local
+/// operation moves nothing and hands back the body it was given, a manifold solid of the
+/// input's volume. WR-531's point caps (a sphere about a vertex with one edge) belong to
+/// shells and offsets; built here they made the operation fail (`SM_ERR`, 1001, from
+/// `CreateArcFromPoints`), whatever plane it was given (`fc0000`, `fc0008`, `fc0025`).
+#[test]
+fn a_flat_face_given_its_own_plane_leaves_the_body_unchanged() {
+    let mut k = Kernel::default();
+    let Some(mut b) = solid(&mut k, "nurb_fillet.smb") else {
+        return;
+    };
+    let before = (
+        volume(&mut k, &mut b).unwrap(),
+        bp1::faces(&b, None).unwrap().len(),
+        b.edge_list().len(),
+        b.vertex_list().len(),
+    );
+    moved(&mut k, &mut b, &[(13, 0.0, [0.0; 3])]).unwrap();
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let after = (
+        volume(&mut k, &mut b).unwrap(),
+        bp1::faces(&b, None).unwrap().len(),
+        b.edge_list().len(),
+        b.vertex_list().len(),
+    );
+    assert_eq!((after.1, after.2, after.3), (before.1, before.2, before.3));
+    assert!(
+        (after.0 - before.0).abs() <= AGREE * before.0,
+        "{after:?} vs {before:?}"
+    );
 }
 
 /// Sam-47515301's quarter revolution on #13722, as SolidCraft built it: the profile
@@ -685,26 +713,73 @@ fn three_revolution_faces_given_planes_build_a_sound_solid() {
     );
 }
 
-/// `gen0012`: one revolution face given two planes and another a tilted one, refused with
-/// the input unchanged (past the reach, an edge vanishes: `SM_ERR_OFFSET_EDGE_VANISHES`).
+/// `gen0012`'s moves: one revolution face given two planes and another a tilted one.
+const GEN0012: [(usize, f64, [f64; 3]); 3] = [
+    (2, -0.536_542_413_140_470_6, [0.0; 3]),
+    (2, -1.250_163_666_404_037_9, [0.0; 3]),
+    (
+        1,
+        0.0,
+        [
+            0.019_211_488_598_403_77,
+            0.247_784_794_496_732_8,
+            0.166_922_271_536_784_85,
+        ],
+    ),
+];
+
+/// `gen0012`: refused with the input unchanged (past the reach, an edge vanishes:
+/// `SM_ERR_OFFSET_EDGE_VANISHES`).
 #[test]
 fn a_revolution_face_given_two_planes_is_refused_unchanged() {
-    revolution_built_sound_or_refused_unchanged(
-        &[
-            (2, -0.536_542_413_140_470_6, [0.0; 3]),
-            (2, -1.250_163_666_404_037_9, [0.0; 3]),
-            (
-                1,
-                0.0,
-                [
-                    0.019_211_488_598_403_77,
-                    0.247_784_794_496_732_8,
-                    0.166_922_271_536_784_85,
-                ],
-            ),
-        ],
-        false,
-    );
+    revolution_built_sound_or_refused_unchanged(&GEN0012, false);
+}
+
+/// The polls at the end of `gen0012`'s local operation that
+/// [`a_revolution_refusal_cancelled_late_comes_back_cancelled`] cancels at.
+const LAST_POLLS: u64 = 64;
+
+/// `gen0012`'s local operation cancelled at each of its last [`LAST_POLLS`] polls
+/// (`CancelToken::after_polls`) comes back cancelled every time: a gap pass cancelled after
+/// an edge closed to a point is never turned into the refusal of that edge
+/// (`SM_ERR_OFFSET_EDGE_VANISHES`). The loop gaps are closed at the end of the operation,
+/// just before its refusal: of its 5914 polls, the one at 5912 is inside a gap pass after
+/// a squeeze. Swept over every poll (about 14 minutes), every one comes back cancelled.
+#[test]
+fn a_revolution_refusal_cancelled_late_comes_back_cancelled() {
+    let run = |token: CancelToken| -> Option<solidcore::Result<()>> {
+        let mut k = Kernel::default();
+        let mut b = solid(&mut k, "revolution.smb")?;
+        let (faces, planes): (Vec<FaceId>, Vec<(Point3, Vec3)>) = GEN0012
+            .iter()
+            .map(|&(i, offset, tilt)| plane_for(&k, &b, i, offset, tilt))
+            .unzip();
+        let surfaces = planes
+            .iter()
+            .map(|&(o, n)| Surface::from(Plane::from_normal(o, n)))
+            .collect();
+        k.set_cancel_token(token);
+        let mut notifications = Notifications::new(&mut b);
+        Some(local_operation(
+            &mut k,
+            &mut b,
+            &faces,
+            surfaces,
+            &mut notifications.context(),
+        ))
+    };
+    let counter = CancelToken::after_polls(u64::MAX);
+    let Some(uncancelled) = run(counter.clone()) else {
+        return;
+    };
+    let e = uncancelled.unwrap_err();
+    assert!(e.is_offset_edge_vanishes(), "{e:?}");
+    let polls = counter.polls().unwrap();
+    assert!(polls > 0, "the operation polls for cancellation");
+    for n in polls.saturating_sub(LAST_POLLS - 1).max(1)..=polls {
+        let e = run(CancelToken::after_polls(n)).unwrap().unwrap_err();
+        assert!(e.is_cancelled(), "cancelled at poll {n} of {polls}: {e:?}");
+    }
 }
 
 /// `gen0050`: two neighbouring revolution faces given planes, moved out, built.
@@ -717,4 +792,127 @@ fn two_revolution_faces_given_planes_build_a_sound_solid() {
         ],
         true,
     );
+}
+
+/// The closed C2 cubic through `points` (taken round, each chord's parameter length its
+/// length over the first's), as Bézier spans joined at knots of multiplicity 3, in z = 0:
+/// the periodic fit spline a sketch makes. Each span is the Hermite cubic of its chord and
+/// the second derivatives `m` solving the cyclic system
+/// `h_(i−1) m_(i−1) + 2 (h_(i−1) + h_i) m_i + h_i m_(i+1) = 6 (Δ_i / h_i − Δ_(i−1) / h_(i−1))`.
+fn closed_fit_spline(points: &[(f64, f64)]) -> solidcore::curve::curve::Curve {
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    use solidcore::nurbs::crv_basic::Curve as NurbCurve;
+    use solidcore::nurbs::math::CPoint;
+    let n = points.len();
+    let at = |i: usize| points[i % n];
+    let h: Vec<f64> = (0..n)
+        .map(|i| {
+            let (a, b) = (at(i), at(i + 1));
+            (b.0 - a.0).hypot(b.1 - a.1)
+        })
+        .collect();
+    // the cyclic system, x and y as two right-hand sides, by Gaussian elimination
+    let mut rows: Vec<Vec<f64>> = (0..n)
+        .map(|i| {
+            let p = (i + n - 1) % n;
+            let mut row = vec![0.0; n + 2];
+            row[p] += h[p];
+            row[i] += 2.0 * (h[p] + h[i]);
+            row[(i + 1) % n] += h[i];
+            let (a, b, c) = (at(p), at(i), at(i + 1));
+            row[n] = 6.0 * ((c.0 - b.0) / h[i] - (b.0 - a.0) / h[p]);
+            row[n + 1] = 6.0 * ((c.1 - b.1) / h[i] - (b.1 - a.1) / h[p]);
+            row
+        })
+        .collect();
+    for c in 0..n {
+        let pivot = rows[c].clone();
+        for row in rows.iter_mut().skip(c + 1) {
+            let f = row[c] / pivot[c];
+            for (x, p) in row.iter_mut().zip(&pivot) {
+                *x -= f * p;
+            }
+        }
+    }
+    let mut m = vec![(0.0, 0.0); n];
+    for r in (0..n).rev() {
+        let row = &rows[r];
+        let (mut x, mut y) = (row[n], row[n + 1]);
+        for (a, mj) in row.iter().zip(&m).skip(r + 1).take(n - r - 1) {
+            x -= a * mj.0;
+            y -= a * mj.1;
+        }
+        m[r] = (x / row[r], y / row[r]);
+    }
+    let mut pw = Vec::new();
+    let mut knots = vec![0.0; 4];
+    let mut t = 0.0;
+    for i in 0..n {
+        let (a, b, (ma, mb)) = (at(i), at(i + 1), (m[i], m[(i + 1) % n]));
+        let s = h[i] * h[i] / 6.0;
+        let chord = (b.0 - a.0, b.1 - a.1);
+        let t0 = (
+            chord.0 - (2.0 * ma.0 + mb.0) * s,
+            chord.1 - (2.0 * ma.1 + mb.1) * s,
+        );
+        let t1 = (
+            chord.0 + (ma.0 + 2.0 * mb.0) * s,
+            chord.1 + (ma.1 + 2.0 * mb.1) * s,
+        );
+        if i == 0 {
+            pw.push(CPoint::new(a.0, a.1, 0.0, 1.0));
+        }
+        pw.push(CPoint::new(a.0 + t0.0 / 3.0, a.1 + t0.1 / 3.0, 0.0, 1.0));
+        pw.push(CPoint::new(b.0 - t1.0 / 3.0, b.1 - t1.1 / 3.0, 0.0, 1.0));
+        pw.push(CPoint::new(b.0, b.1, 0.0, 1.0));
+        t += h[i] / h[0];
+        knots.extend(std::iter::repeat_n(t, if i + 1 == n { 4 } else { 3 }));
+    }
+    solidcore::curve::curve::Curve::from(BSplineCurve::from_nurb(
+        NurbCurve::new(pw, 3, knots).unwrap(),
+        3,
+        false,
+    ))
+}
+
+/// tangency-labs/solidcraft#18510: the top of a 1 mm extrusion of a closed fit spline
+/// through eight points, 1000 wide, offset up 0.4. The wall is the spline's extrusion, a
+/// net closed round its seam; the top's reach beside it is the plane's trace meeting it,
+/// proved by Krawczyk's boxes. Near the seam Newton's root, carried from piece to piece,
+/// lands on the net's parameters a period or more off the knots: a box there was not
+/// enclosed at all (or, wholly past an end, from the seam all the way to it), and the top
+/// was refused for want of a certified bound. It builds the prism 1.4 tall: 1.4 times the
+/// volume, sound.
+#[test]
+fn a_closed_spline_extrusions_top_offsets_beside_its_seam() {
+    use solidcore::offset::offset_faces::OffsetFacesExecutive;
+    let points = [
+        (500.0, 0.0),
+        (379.0, 75.7),
+        (0.0, 90.0),
+        (-379.0, 75.7),
+        (-500.0, 0.0),
+        (-329.0, -65.7),
+        (0.0, -110.0),
+        (329.0, -65.7),
+    ];
+    let mut k = Kernel::default();
+    let outline = closed_fit_spline(&points);
+    let mut b = solidcore::sweep::api_brep::create_linear_sweep(
+        &mut k,
+        &[Some(&outline)],
+        Vec3::Z,
+        1.0,
+        true,
+    )
+    .unwrap();
+    let before = volume(&mut k, &mut b).unwrap();
+    let top = cap_at(&k, &b, 1.0);
+    let mut ex = OffsetFacesExecutive::new();
+    let r = ex.offset_faces(&mut k, &mut b, &[top], 0.4);
+    assert!(r.is_ok(), "{r:?}: {:?} {}", ex.refusal(), ex.reason());
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let after = volume(&mut k, &mut b).unwrap();
+    let want = 1.4 * before;
+    assert!((after - want).abs() <= AGREE * want, "{after} vs {want}");
 }

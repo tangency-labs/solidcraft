@@ -21,8 +21,7 @@
 //! Not upstream (WR-406, tangency-labs/solidcore#891): a UV trim's turn at its
 //! ends is judged on its face's surface, so the check no longer straightens a
 //! circle's exact trim on a face whose parameters run at different speeds.
-//! Not upstream (WR-446, opt-in `Kernel::fixes.validation_does_not_make_uv_trims`):
-//! `sm_CheckEdgeuseGeometry` evaluates the clockwise neighbour with
+//! Not upstream (WR-446): `sm_CheckEdgeuseGeometry` evaluates the clockwise neighbour with
 //! `ok_to_make_uv_trim_curve = FALSE`, so the `const` validation no longer stores a
 //! new UV trim curve on a neighbour that had none. The 3D evaluation, its drop onto
 //! the existing face and every status are kept.
@@ -41,7 +40,7 @@ use crate::math::{Point2, Vec3, EFF_ZERO, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{BrepFaceServices, FaceCaches};
-use crate::surface::surface::{p5::DropPointOptions, Surface};
+use crate::surface::surface::{p5::DropPointOptions, Surface, SurfaceKind};
 use crate::topology::brep::p1;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
@@ -1219,10 +1218,23 @@ fn box_distance(bbox: &Extent3d, p: Vec3) -> f64 {
 /// as reaching).
 const CLEARANCE_BOXES: usize = 512;
 
+/// A box that provably holds `surface` over `cell`, or `None` when none is known: a plane's is
+/// that of the cell's corners ([`plane_cell_box`]), any other surface's the box of its own piece
+/// over the cell ([`Surface::certified_bounding_box`]).
+fn surface_cell_box(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<Extent3d>> {
+    Ok(match surface.kind() {
+        SurfaceKind::Plane(_) => plane_cell_box(k, surface, cell)?,
+        _ => exclusion_probe(surface.certified_bounding_box(k, cell))?.flatten(),
+    }
+    .filter(Extent3d::is_defined))
+}
+
 /// Whether every point of `surface` over `domain` is at least `radius` from `point`, proven by
-/// bounding boxes: a cell whose box (grown by the zone) is that far away is clear, any other is
-/// split in four. Running out of boxes, a failed box or a domain that cannot be split proves
-/// nothing, so the answer is false.
+/// bounding boxes. The surface's own box comes first; it is the whole control net's, whatever
+/// the domain ([`Surface::calculate_bounding_box`]), so where it is not clear the proof goes on
+/// cell by cell from `domain`: a cell whose box ([`surface_cell_box`], grown by the zone) is
+/// `radius` away is clear, any other is split in four. Running out of boxes, a cell with no box
+/// or a domain that cannot be split proves nothing, so the answer is false.
 fn surface_clears(
     k: &Kernel,
     surface: &Surface,
@@ -1232,23 +1244,32 @@ fn surface_clears(
     radius: f64,
 ) -> Result<bool> {
     let zone = tol::zone_tol3d(k, face_tolerance);
+    let clear = |mut bounds: Extent3d| {
+        bounds.expand_absolute(zone);
+        box_distance(&bounds, point) >= radius
+    };
+    let Some(whole) =
+        exclusion_probe(surface.calculate_bounding_box(k, domain, [true, false, false], true))?
+            .and_then(|boxes| boxes.normal_box)
+            .filter(Extent3d::is_defined)
+    else {
+        return Ok(false);
+    };
+    if clear(whole) {
+        return Ok(true);
+    }
     let mut cells = vec![*domain];
-    let mut asked = 0_usize;
+    let mut asked = 1_usize;
     while let Some(cell) = cells.pop() {
         k.check_cancelled("topology::brep::validation::vertex_exclusion")?;
         if asked >= CLEARANCE_BOXES {
             return Ok(false);
         }
         asked += 1;
-        let Some(mut cell_box) =
-            exclusion_probe(surface.calculate_bounding_box(k, &cell, [true, false, false], true))?
-                .and_then(|boxes| boxes.normal_box)
-                .filter(Extent3d::is_defined)
-        else {
+        let Some(cell_box) = surface_cell_box(k, surface, &cell)? else {
             return Ok(false);
         };
-        cell_box.expand_absolute(zone);
-        if box_distance(&cell_box, point) >= radius {
+        if clear(cell_box) {
             continue;
         }
         let (lo, hi) = (cell.min(), cell.max());
@@ -1308,6 +1329,279 @@ fn curve_clears(
         cells.push(Extent1d::from_min_max(mid, hi));
     }
     Ok(true)
+}
+
+/// Whether the ball of vertex `v` (its stored tolerance) may reach topology the vertex does not
+/// bound: the clearance half of Test #82 ([`check_vertex_clearance`]) run for this one vertex,
+/// whatever its tolerance. A proof by boxes decides it; a query that cannot be proven counts as
+/// reaching. Used by the stitch scope of the tolerance pass (`assert_valid::brep`).
+///
+/// # Errors
+///
+/// Those of the geometric queries that are not findings (cancelled, unported) and a missing entity.
+pub fn vertex_ball_reaches(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<bool> {
+    let mut r = Reports {
+        array: None,
+        level: 0,
+        failed: false,
+    };
+    check_vertex_clearance(k, b, &mut r, &[v])?;
+    Ok(r.failed)
+}
+
+/// How many pairs of boxes a tube clearance proof may ask for, per entity, before it gives up
+/// (and the tube counts as reaching).
+const TUBE_PAIRS: usize = 2048;
+
+/// A piece of an entity that a box can bound: a surface cell or a curve interval.
+#[derive(Clone, Copy)]
+enum Cell {
+    Surface(Extent2d),
+    Curve(Extent1d),
+}
+
+/// One entity a tube must clear: its geometry, the zone its box is grown by.
+enum Obstacle<'a> {
+    Face {
+        surface: &'a Surface,
+        domain: Extent2d,
+        zone: f64,
+    },
+    Edge {
+        curve: &'a Curve,
+        interval: Extent1d,
+        zone: f64,
+    },
+}
+
+impl Obstacle<'_> {
+    fn root(&self) -> Cell {
+        match self {
+            Self::Face { domain, .. } => Cell::Surface(*domain),
+            Self::Edge { interval, .. } => Cell::Curve(*interval),
+        }
+    }
+
+    /// A box bounding the entity over `cell`, grown by its zone; `None` proves nothing.
+    fn cell_box(&self, k: &Kernel, cell: &Cell) -> Result<Option<Extent3d>> {
+        let (found, zone) = match (self, cell) {
+            (Self::Face { surface, zone, .. }, Cell::Surface(c)) => (
+                match surface.kind() {
+                    // A plane's box over a cell is the hull of the cell's corners (the plane is
+                    // affine); its own bounding box is the whole plane.
+                    SurfaceKind::Plane(_) => plane_cell_box(k, surface, c)?,
+                    _ => exclusion_probe(surface.calculate_bounding_box(
+                        k,
+                        c,
+                        [true, false, false],
+                        true,
+                    ))?
+                    .and_then(|boxes| boxes.normal_box),
+                },
+                *zone,
+            ),
+            (Self::Edge { curve, zone, .. }, Cell::Curve(c)) => (
+                exclusion_probe(curve.certified_bounding_box(k, c))?.flatten(),
+                *zone,
+            ),
+            _ => (None, 0.0),
+        };
+        Ok(found.filter(Extent3d::is_defined).map(|mut found| {
+            found.expand_absolute(zone);
+            found
+        }))
+    }
+}
+
+/// The box of the corners of `cell` on a plane, grown by a few ulps for the rounding of the
+/// evaluations; `None` when a corner cannot be had.
+fn plane_cell_box(k: &Kernel, surface: &Surface, cell: &Extent2d) -> Result<Option<Extent3d>> {
+    let (lo, hi) = (cell.min(), cell.max());
+    let mut corners = Vec::with_capacity(4);
+    for uv in [
+        Point2::new(lo.x, lo.y),
+        Point2::new(hi.x, lo.y),
+        Point2::new(lo.x, hi.y),
+        Point2::new(hi.x, hi.y),
+    ] {
+        match exclusion_probe(surface.evaluate_point(k, uv))? {
+            Some(p) if p.x.is_finite() && p.y.is_finite() && p.z.is_finite() => corners.push(p),
+            _ => return Ok(None),
+        }
+    }
+    let mut found =
+        Extent3d::from_point(corners.first().copied().unwrap_or(Vec3::new(0.0, 0.0, 0.0)));
+    for p in corners.iter().skip(1) {
+        found.add_point(*p);
+    }
+    let scale = corners.iter().fold(1.0_f64, |m, p| {
+        m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs())
+    });
+    found.expand_absolute(scale * 1e-12);
+    Ok(Some(found))
+}
+
+/// The two halves of a cell (four quarters of a surface cell), or none when it cannot be split.
+fn split_cell(cell: &Cell) -> Vec<Cell> {
+    match cell {
+        Cell::Curve(c) => {
+            let (lo, hi) = (c.min(), c.max());
+            let mid = 0.5 * (lo + hi);
+            if lo.is_finite() && hi.is_finite() && lo < mid && mid < hi {
+                vec![
+                    Cell::Curve(Extent1d::from_min_max(lo, mid)),
+                    Cell::Curve(Extent1d::from_min_max(mid, hi)),
+                ]
+            } else {
+                Vec::new()
+            }
+        }
+        Cell::Surface(c) => {
+            let (lo, hi) = (c.min(), c.max());
+            let mid = Point2::new(0.5 * (lo.x + hi.x), 0.5 * (lo.y + hi.y));
+            let finite = [lo.x, lo.y, hi.x, hi.y, mid.x, mid.y]
+                .iter()
+                .all(|v| v.is_finite());
+            if finite && lo.x < mid.x && mid.x < hi.x && lo.y < mid.y && mid.y < hi.y {
+                let mut out = Vec::with_capacity(4);
+                for (u0, u1) in [(lo.x, mid.x), (mid.x, hi.x)] {
+                    for (v0, v1) in [(lo.y, mid.y), (mid.y, hi.y)] {
+                        out.push(Cell::Surface(Extent2d::from_bounds(u0, v0, u1, v1)));
+                    }
+                }
+                out
+            } else {
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// Whether the tube of radius `radius` round the edge's curve stays clear of `obstacle`, proven
+/// by boxes over pairs of pieces (the curve's, the entity's, each split in turn where its box is
+/// the larger): a pair whose boxes, the entity's grown by its zone, are `radius` apart is clear.
+/// A box that cannot be had, a piece that cannot be split or too many pairs prove nothing: false.
+fn tube_clears(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    obstacle: &Obstacle<'_>,
+    radius: f64,
+) -> Result<bool> {
+    let tube = Obstacle::Edge {
+        curve,
+        interval: *interval,
+        zone: 0.0,
+    };
+    let mut pairs = vec![(tube.root(), obstacle.root())];
+    let mut asked = 0_usize;
+    while let Some((a, o)) = pairs.pop() {
+        k.check_cancelled("topology::brep::validation::tube_clearance")?;
+        if asked >= TUBE_PAIRS {
+            return Ok(false);
+        }
+        asked += 1;
+        let (Some(box_a), Some(box_o)) = (tube.cell_box(k, &a)?, obstacle.cell_box(k, &o)?) else {
+            return Ok(false);
+        };
+        if box_a.min_distance(&box_o) >= radius {
+            continue;
+        }
+        // split the piece with the larger box; when it cannot be split, the other one
+        let prefer_a = box_a.size().length() >= box_o.size().length();
+        let (halves_a, halves_o) = (split_cell(&a), split_cell(&o));
+        if prefer_a && !halves_a.is_empty() || halves_o.is_empty() && !halves_a.is_empty() {
+            pairs.extend(halves_a.into_iter().map(|h| (h, o)));
+        } else if !halves_o.is_empty() {
+            pairs.extend(halves_o.into_iter().map(|h| (a, h)));
+        } else {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Whether the tolerance tube of edge `e` (radius its stored tolerance) may reach an entity it
+/// does not bound, as the vertex ball is held to the same ([`vertex_ball_reaches`]): every face
+/// and edge that is not `e`, a face of `e`, or incident to an end vertex of `e` (which meet its
+/// ends legitimately) must be proven at least the tube's radius away, by boxes. A curve with no
+/// certified box, a missing surface or a proof that runs out of boxes counts as reaching.
+///
+/// # Errors
+///
+/// As [`vertex_ball_reaches`].
+pub fn edge_tube_reaches(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<bool> {
+    let data = b.edge(e)?;
+    let (radius, interval) = (data.tolerance, data.interval);
+    let Some(curve) = data.curve.clone() else {
+        return Ok(true);
+    };
+    let first = edge::vertex(b, e)?;
+    let last = edge::other_vertex(b, e, first)?;
+    let ends: Vec<VertexId> = [first, last].into_iter().flatten().collect();
+    let faces_of_e: BTreeSet<FaceId> = {
+        let mut faces = BTreeSet::new();
+        for eu in b.edge(e)?.edgeuses.clone() {
+            if let Some(f) = eu1::face(b, eu)? {
+                faces.insert(f);
+            }
+        }
+        faces
+    };
+    for f in b.face_list().to_vec() {
+        k.check_cancelled("topology::brep::validation::tube_clearance")?;
+        if faces_of_e.contains(&f) {
+            continue;
+        }
+        let incident = crate::topology::face::p4::vertices(b, f, None, false, None)?;
+        if ends.iter().any(|v| incident.contains(v)) {
+            continue;
+        }
+        let face = b.face(f)?;
+        let (domain, zone) = (face.uv_domain, tol::zone_tol3d(k, face.tolerance));
+        let Some(surface) = face.surface.as_ref() else {
+            return Ok(true);
+        };
+        let Some(surface) = exclusion_probe(surface.clone_for_evaluation())? else {
+            return Ok(true);
+        };
+        let obstacle = Obstacle::Face {
+            surface: &surface,
+            domain,
+            zone,
+        };
+        if !tube_clears(k, &curve, &interval, &obstacle, radius)? {
+            return Ok(true);
+        }
+    }
+    for other in b.edge_list().to_vec() {
+        k.check_cancelled("topology::brep::validation::tube_clearance")?;
+        if other == e {
+            continue;
+        }
+        let first = edge::vertex(b, other)?;
+        let last = edge::other_vertex(b, other, first)?;
+        if [first, last]
+            .into_iter()
+            .flatten()
+            .any(|v| ends.contains(&v))
+        {
+            continue;
+        }
+        let data = b.edge(other)?;
+        let Some(c) = data.curve.as_ref() else {
+            return Ok(true);
+        };
+        let obstacle = Obstacle::Edge {
+            curve: c,
+            interval: data.interval,
+            zone: tol::zone_tol3d(k, data.tolerance),
+        };
+        if !tube_clears(k, &curve, &interval, &obstacle, radius)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 enum FaceContact {
@@ -1618,20 +1912,11 @@ fn check_edgeuse_geometry(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<()>
     let cw = required(b.edgeuse(eu)?.cw)?;
     let uv = eu3::normalized_evaluate(k, b, eu, 0.0, true, false, true)?.point;
     // The self UV evaluation above already had a trim. The neighbour evaluation below
-    // can create one (`ok_to_make_uv_trim_curve`), which
-    // `validation_does_not_make_uv_trims` disables (WR-446). These evaluations can
-    // also fail even though the following distance tests only issue warnings in the
-    // release reference.
+    // makes none (`ok_to_make_uv_trim_curve = FALSE`, WR-446; upstream's makes one).
+    // These evaluations can also fail even though the following distance tests only
+    // issue warnings in the release reference.
     eu3::normalized_evaluate(k, b, eu, 0.0, false, false, true)?;
-    eu3::normalized_evaluate(
-        k,
-        b,
-        cw,
-        1.0,
-        true,
-        false,
-        !k.fixes.validation_does_not_make_uv_trims,
-    )?;
+    eu3::normalized_evaluate(k, b, cw, 1.0, true, false, false)?;
     eu3::normalized_evaluate(k, b, cw, 1.0, false, false, true)?;
     let point =
         required(b.face(f)?.surface.as_ref())?.evaluate_point(k, Point2::new(uv.x, uv.y))?;
@@ -2440,12 +2725,91 @@ mod issue_891_tests {
         assert!(!curve_clears(&k, &curve, &interval, 1e-5, far, 0.1).unwrap());
     }
 
+    /// The wall of a cylinder of radius 2 from z = 0 to 3, and its top rim with its interval.
+    fn cylinder_wall_and_top_rim(k: &mut Kernel) -> (Surface, Extent2d, Curve, Extent1d) {
+        let b = crate::primitive::api_primitives::create_cylinder(k, Vec3::ZERO, 2.0, 3.0).unwrap();
+        let wall = b
+            .face_list()
+            .iter()
+            .map(|&f| b.face(f).unwrap())
+            .find(|face| !matches!(face.surface.as_ref().unwrap().kind(), SurfaceKind::Plane(_)))
+            .unwrap();
+        let surface = wall
+            .surface
+            .as_ref()
+            .unwrap()
+            .clone_for_evaluation()
+            .unwrap();
+        let rim = b
+            .edge_list()
+            .iter()
+            .map(|&e| b.edge(e).unwrap())
+            .find(|edge| {
+                let curve = edge.curve.as_ref().unwrap();
+                matches!(curve.kind(), CurveKind::Ellipse(_))
+                    && curve.evaluate_point(k, edge.interval.min()).unwrap().z == 3.0
+            })
+            .unwrap();
+        (
+            surface,
+            wall.uv_domain,
+            rim.curve.clone().unwrap(),
+            rim.interval,
+        )
+    }
+
+    /// A point on a cylinder's axis lies inside the box of the wall's control net, 2 from the
+    /// wall: the proof by boxes reaches the answer by splitting the wall, clear for a ball of
+    /// radius 1, not clear for one of 2.1 (which does reach it).
+    #[test]
+    fn a_ball_on_the_axis_of_a_round_wall_is_proved_clear_of_the_wall() {
+        let mut k = Kernel::default();
+        let (wall, domain, _, _) = cylinder_wall_and_top_rim(&mut k);
+        let on_axis = Vec3::new(0.0, 0.0, 1.5);
+        let whole = wall
+            .calculate_bounding_box(&k, &domain, [true, false, false], true)
+            .unwrap()
+            .normal_box
+            .unwrap();
+        assert_eq!(box_distance(&whole, on_axis), 0.0);
+        assert!(surface_clears(&k, &wall, &domain, 1e-5, on_axis, 1.0).unwrap());
+        assert!(!surface_clears(&k, &wall, &domain, 1e-5, on_axis, 2.1).unwrap());
+    }
+
+    /// The same for a circle: its centre is a corner of the box of each quarter's control
+    /// points, 2 from the circle. A ball there of radius 1.9 is clear of the rim, one of 2.1 is
+    /// not.
+    #[test]
+    fn a_ball_at_the_centre_of_a_rim_is_proved_clear_of_the_rim() {
+        let mut k = Kernel::default();
+        let (_, _, rim, interval) = cylinder_wall_and_top_rim(&mut k);
+        let centre = Vec3::new(0.0, 0.0, 3.0);
+        let whole = rim.certified_bounding_box(&k, &interval).unwrap().unwrap();
+        assert_eq!(box_distance(&whole, centre), 0.0);
+        assert!(curve_clears(&k, &rim, &interval, 1e-5, centre, 1.9).unwrap());
+        assert!(!curve_clears(&k, &rim, &interval, 1e-5, centre, 2.1).unwrap());
+    }
+
+    /// A surface kind with no certified box of a cell (here an offset surface, which is not its
+    /// base's control net) is proved clear by its own box or not at all.
+    #[test]
+    fn a_surface_without_a_cell_box_is_clear_only_by_its_whole_box() {
+        let mut k = Kernel::default();
+        let (wall, domain, _, _) = cylinder_wall_and_top_rim(&mut k);
+        let offset =
+            crate::surface::surface::p1::base_create_offset_surface(&k, &wall, 0.5).unwrap();
+        assert_eq!(offset.certified_bounding_box(&k, &domain).unwrap(), None);
+        let on_axis = Vec3::new(0.0, 0.0, 1.5);
+        assert!(!surface_clears(&k, &offset, &domain, 1e-5, on_axis, 1.0).unwrap());
+        let far = Vec3::new(100.0, 100.0, 100.0);
+        assert!(surface_clears(&k, &offset, &domain, 1e-5, far, 1.0).unwrap());
+    }
+
     /// WR-446 (`plan/upstream-issues/WR-446--brepconstructor-endshell-validatepointers-makes-uv-trim-curves.md`):
     /// the public `validate_pointers` must not make UV trim curves. [`half_disc`]
-    /// starts with only the arc's exact trim, so the default check evaluates the
-    /// clockwise chord edge use in UV space and creates its trim.
-    /// `fixes.validation_does_not_make_uv_trims` stops that creation while keeping the
-    /// status, the reports and the existing arc trims as they were.
+    /// starts with only the arc's exact trim, so upstream's check evaluates the
+    /// clockwise chord edge use in UV space and creates its trim. The port makes none,
+    /// keeping the status, the reports and the existing arc trims as they were.
     mod wr446_tests {
         use super::*;
 
@@ -2510,9 +2874,8 @@ mod issue_891_tests {
         }
 
         /// One `validate_pointers` run on a fresh [`half_disc`].
-        fn run(no_new: bool) -> Run {
+        fn run() -> Run {
             let mut k = Kernel::default();
-            k.fixes.validation_does_not_make_uv_trims = no_new;
             let mut b = half_disc(&mut k);
             let before = trimmed_edgeuses(&b);
             let arc_before = before
@@ -2552,30 +2915,18 @@ mod issue_891_tests {
                 );
             }
 
-            let made = run(false);
-            let no_new = run(true);
+            let no_new = run();
+            assert_eq!(no_new.status, SUCCESS);
 
-            for r in [&made, &no_new] {
-                assert_eq!(r.status, SUCCESS);
-            }
-
-            // The default check creates at least one UV trim on the chord.
-            assert!(
-                made.after.iter().any(|id| chord.contains(id)),
-                "the default check created no UV trim on the chord"
-            );
-
-            // With the fix no chord trim is made, and nothing present is removed.
+            // No chord trim is made, and nothing present is removed.
             assert_eq!(
                 no_new.before, no_new.after,
-                "the fix created or removed a UV trim"
+                "the check created or removed a UV trim"
             );
             assert!(no_new.after.iter().all(|id| !chord.contains(id)));
 
-            // The new flag leaves the existing arc trims as they are.
-            assert_eq!(made.arc_after, no_new.arc_after);
-            // And it does not change the trims present before the check.
-            assert_eq!(made.arc_before, no_new.arc_before);
+            // The existing arc trims are left as they were.
+            assert_eq!(no_new.arc_before, no_new.arc_after);
         }
 
         /// Provide every edge use's trim through the public evaluator once, as setup.
@@ -2588,9 +2939,8 @@ mod issue_891_tests {
             }
         }
 
-        fn all_present_run(no_new: bool) -> ReversalRun {
+        fn all_present_run() -> ReversalRun {
             let mut k = Kernel::default();
-            k.fixes.validation_does_not_make_uv_trims = no_new;
             let mut b = half_disc(&mut k);
             give_every_edgeuse_a_trim(&k, &mut b);
             let all: Vec<_> = b.edgeuses().iter().map(|(id, _)| id).collect();
@@ -2598,52 +2948,56 @@ mod issue_891_tests {
                 assert!(has_trim(&b, *eu), "edge use {eu:?} has no trim");
             }
             let raw_before = trimmed_edgeuses(&b);
+            let geometry_before: Vec<_> = raw_before
+                .iter()
+                .map(|&eu| (eu, trim_samples(&k, &b, eu)))
+                .collect();
             let mut reports = AssertArray::new();
             let status = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
             assert!(reports.is_empty(), "{:?}", reports.reports());
             let after_ids = trimmed_edgeuses(&b);
             assert_eq!(after_ids, raw_before, "the check changed the stored trims");
-            let after = after_ids
+            let after: Vec<_> = after_ids
                 .iter()
                 .map(|&eu| (eu, trim_samples(&k, &b, eu)))
                 .collect();
+            assert_eq!(
+                after, geometry_before,
+                "the check changed the trim geometry"
+            );
             (status, after_ids, after)
         }
 
-        /// With every edge use already trimmed the flag changes nothing: the check has
-        /// no missing neighbour trim to make, so status, topology and trim geometry
-        /// match.
+        /// With every edge use already trimmed the check has no missing neighbour trim
+        /// to make: it succeeds and keeps the stored trims and their geometry (asserted
+        /// in the run). Two runs give the same status, topology and trim geometry.
         #[test]
         fn wr446_all_trims_present_is_inert() {
-            let (s0, t0, g0) = all_present_run(false);
-            let (s1, t1, g1) = all_present_run(true);
+            let (s0, t0, g0) = all_present_run();
+            let (s1, t1, g1) = all_present_run();
             assert_eq!(s0, SUCCESS);
             assert_eq!(s0, s1);
             assert_eq!(t0, t1);
             assert_eq!(g0, g1);
         }
 
-        /// With no UV trim at all `sm_CheckEdgeuseGeometry` returns at its first test,
-        /// so the flag changes nothing there either.
+        /// With no UV trim at all `sm_CheckEdgeuseGeometry` returns at its first test
+        /// and makes no trim.
         #[test]
         fn wr446_no_trims_is_unchanged() {
-            for no_new in [false, true] {
-                let mut k = Kernel::default();
-                k.fixes.validation_does_not_make_uv_trims = no_new;
-                let mut b = half_disc_without_trims(&mut k);
-                assert!(trimmed_edgeuses(&b).is_empty());
-                let before = b.edgeuses().iter().count();
-                let mut reports = AssertArray::new();
-                let status =
-                    validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
-                assert_eq!(status, SUCCESS);
-                assert!(reports.is_empty(), "{:?}", reports.reports());
-                assert!(
-                    trimmed_edgeuses(&b).is_empty(),
-                    "the check made a trim with no witness"
-                );
-                assert_eq!(b.edgeuses().iter().count(), before);
-            }
+            let mut k = Kernel::default();
+            let mut b = half_disc_without_trims(&mut k);
+            assert!(trimmed_edgeuses(&b).is_empty());
+            let before = b.edgeuses().iter().count();
+            let mut reports = AssertArray::new();
+            let status = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
+            assert_eq!(status, SUCCESS);
+            assert!(reports.is_empty(), "{:?}", reports.reports());
+            assert!(
+                trimmed_edgeuses(&b).is_empty(),
+                "the check made a trim with no witness"
+            );
+            assert_eq!(b.edgeuses().iter().count(), before);
         }
     }
 }

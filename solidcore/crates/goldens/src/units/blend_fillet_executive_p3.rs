@@ -338,6 +338,15 @@ impl ExecutiveAccess<Handle> for Access {
             .ok_or_else(missing_error)?;
         orient_brep(k, b, outward, maybe_not_solid, just_unify, faces_to_swap_uv)
     }
+    fn keeps_open_result(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &SolidError,
+    ) -> SolidResult<bool> {
+        // never asked: this harness does not stitch (`do_stitching` is missing)
+        missing()
+    }
     fn do_stitching(
         &mut self,
         _: &mut Kernel,
@@ -821,7 +830,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
     else {
         return Err(HarnessError::new("short executive record"));
     };
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     k.context.set_doing_boolean(*prior_boolean != 0.0);
     let mut b = solidcore::topology::Brep::new();
     // Apply SmZoneTol3d's default-sentinel/fabs conversion, then write the member.
@@ -871,6 +880,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
+        roll_over_pass: false,
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),

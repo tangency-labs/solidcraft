@@ -2,8 +2,23 @@ use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI};
 
 use serde_json::{Value, json};
+use solidcraft_io::DxfShape;
 
 use crate::Session;
+
+fn dxf_has_layer(text: &str, name: &str) -> bool {
+    solidcraft_io::read_dxf_file(text).unwrap().layers().iter().any(|layer| layer.name() == name)
+}
+
+/// How many entities the file puts on the layer `name`.
+fn dxf_on_layer(text: &str, name: &str) -> usize {
+    let file = solidcraft_io::read_dxf_file(text).unwrap();
+    file.entities().iter().filter(|entity| file.layer(entity.layer()).unwrap().name() == name).count()
+}
+
+fn dxf_count(text: &str, predicate: impl Fn(&DxfShape) -> bool) -> usize {
+    solidcraft_io::read_dxf_file(text).unwrap().entities().iter().filter(|entity| predicate(entity.geometry())).count()
+}
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
@@ -112,6 +127,36 @@ fn side_edge_flanges_across_a_bend_keep_their_relief_through_rebuild_and_reopen(
 }
 
 #[test]
+fn two_arc_sheet_cut_does_not_depend_on_the_sketch_plane_origin() {
+    for offset in [0.0, 300.0, 1000.0, 10000.0, -10000.0] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"R1","thickness":"1.5 mm","bend_radius":"2 mm","k_factor":0.5,"active":true}));
+        base(&mut s, 200.0, 100.0);
+        run(&mut s, "sketch.create", json!({"plane":{"origin":[offset,offset,0],"x_dir":[1,0,0],"y_dir":[0,1,0]},"name":"Hole"}));
+        for y in [55.0, 45.0] {
+            let (start, end) = if y > 50.0 { (55.0, 45.0) } else { (45.0, 55.0) };
+            run(
+                &mut s,
+                "sketch.arc.three_point",
+                json!({"start":[start-offset,50.0-offset],"through":[50.0-offset,y-offset],"end":[end-offset,50.0-offset]}),
+            );
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch":"Hole","profiles":"all","distance":"6 mm","direction":"symmetric","operation":"cut"}));
+        let expected = (200.0 * 100.0 - PI * 25.0) * 1.5;
+        assert!((volume(&mut s) - expected).abs() < 1e-5, "origin {offset}");
+        let pattern = flat(&mut s);
+        assert_eq!(pattern["cutouts"].as_array().map(Vec::len), Some(1));
+        let body = &s.model.state().bodies[0].body;
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(50.0, 50.0, 0.75)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(solidcore_record::Vec3::new(60.0, 50.0, 0.75)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        assert!((volume(&mut reopened) - expected).abs() < 1e-5);
+        assert_eq!(flat(&mut reopened), pattern);
+    }
+}
+
+#[test]
 fn shallow_sheet_pocket_preserves_material_depth_export_undo_and_reopen() {
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
@@ -123,7 +168,7 @@ fn shallow_sheet_pocket_preserves_material_depth_export_undo_and_reopen() {
     assert_eq!(f["pockets"][0]["side"], "bottom");
     assert_eq!(f["pockets"][0]["depth_mm"], 1.0);
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
-    assert!(dxf.contains("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
+    assert!(dxf_has_layer(&dxf, "POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
     assert_eq!(solidcraft_io::read_dxf(&dxf).unwrap().len(), 8);
     run(&mut s, "edit.undo", json!({}));
     assert!((volume(&mut s) - 15000.0).abs() < 1e-6);
@@ -493,7 +538,9 @@ fn base_and_edge_flange_follow_the_k_factor() {
     assert_eq!(f["bends"][0]["direction"], "up");
     assert!(rel(volume(&mut s), 18972.622) < 1e-4, "{}", volume(&mut s));
     let m = run(&mut s, "inspect.measure", json!({}));
-    assert_eq!(m["total"]["faces"], 14, "{m}");
+    // The coplanar end pieces count together, while the raw sewn faces stay available.
+    assert_eq!(m["total"]["faces"], 10, "{m}");
+    assert_eq!(m["bodies"][0]["kernel"]["faces"], 14, "{m}");
     // The angle is a parameter: 45° (oracle 70 uses height 15).
     let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
     run(&mut s, "parameters.change", json!({"name": names[0], "expression": "15"}));
@@ -503,7 +550,8 @@ fn base_and_edge_flange_follow_the_k_factor() {
     // DXF: outline and an up bend line.
     let d = run(&mut s, "sheet.export_dxf", json!({}));
     let text = d["dxf"].as_str().unwrap_or_default();
-    assert!(text.contains("BEND_UP") && text.contains("OUTLINE"), "{text}");
+    let file = solidcraft_io::read_dxf_file(text).unwrap();
+    assert!(file.layers().iter().any(|layer| layer.name() == "BEND_UP") && file.layers().iter().any(|layer| layer.name() == "OUTLINE"), "{text}");
     assert!(s.execute("sheet.flange", &json!({"edges": [[50, 30, 40]], "height": 20})).is_err(), "not on an edge");
 }
 
@@ -1787,7 +1835,8 @@ fn the_bend_table_and_the_dxf_follow_what_flat_cuts_leave_of_a_bend() {
     // BEND_UP layer holds nothing else.
     let bend_lines = |s: &mut Session| -> Vec<(f64, f64)> {
         let text = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-        let on_layer = text.lines().collect::<Vec<_>>().windows(2).filter(|w| w[0].trim() == "8" && w[1].trim() == "BEND_UP").count();
+        let file = solidcraft_io::read_dxf_file(&text).unwrap();
+        let on_layer = file.entities().iter().filter(|entity| file.layer(entity.layer()).unwrap().name() == "BEND_UP").count();
         let mut found: Vec<(f64, f64)> = solidcraft_io::read_dxf(&text)
             .unwrap()
             .iter()
@@ -2214,7 +2263,12 @@ fn shop_bend(deg: f64, display: Option<&str>) -> Session {
 /// The DXF bend notes of the last sheet body.
 fn bend_notes(s: &mut Session) -> Vec<String> {
     let dxf = run(s, "sheet.export_dxf", json!({"bend_notes": true}))["dxf"].as_str().unwrap_or_default().to_string();
-    dxf.lines().map(str::trim).filter(|l| l.starts_with('B') && l.contains("%%d")).map(str::to_string).collect()
+    let file = solidcraft_io::read_dxf_file(&dxf).unwrap();
+    file.entities()
+        .iter()
+        .filter(|entity| matches!(entity.geometry(), DxfShape::Text { .. }) && file.layer(entity.layer()).unwrap().name() == "BEND_NOTES")
+        .map(|entity| entity.source_text().unwrap().raw_group1().unwrap().trim().to_string())
+        .collect()
 }
 
 #[test]
@@ -2322,8 +2376,8 @@ fn flat_dxf_preserves_exact_cutout_entities() {
         holes: Vec::new(),
     }];
     let dxf = super::flat_dxf(&sh, &super::DxfOptions::default()).unwrap();
-    assert_eq!(dxf.matches("0\nCIRCLE\n").count(), 1, "{dxf}");
-    assert!(!dxf.contains("0\nARC\n"), "a full circle must not become a zero-length ARC");
+    assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Circle { .. })), 1, "{dxf}");
+    assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Arc { .. })), 0, "a full circle must not become a zero-length ARC");
     let read = solidcraft_io::read_dxf(&dxf).unwrap();
     assert_eq!(read.len(), 5);
     assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Circle(c, r) if *c == Vec2::new(40.0, 30.0) && (*r - 5.0).abs() < 1e-9)));
@@ -2334,9 +2388,11 @@ fn flat_dxf_preserves_exact_cutout_entities() {
         ],
     };
     let dxf = super::flat_dxf(&sh, &super::DxfOptions::default()).unwrap();
-    assert_eq!(dxf.matches("0\nLINE\n").count(), 5, "four outline lines and one exact cutout line");
-    assert_eq!(dxf.matches("0\nARC\n").count(), 1);
-    assert!(dxf.contains(" 50\n0.0\n 51\n180.0\n"), "{dxf}");
+    assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), 5, "four outline lines and one exact cutout line");
+    assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Arc { .. })), 1);
+    let half =
+        |shape: &DxfShape| matches!(shape, DxfShape::Arc { c, r, a0, a1 } if *c == Vec2::new(20.0, 10.0) && *r == 10.0 && (*a0, *a1) == (0.0, 180.0));
+    assert_eq!(dxf_count(&dxf, half), 1, "the half circle from 0° to 180°: {dxf}");
     let read = solidcraft_io::read_dxf(&dxf).unwrap();
     assert_eq!(read.len(), 6);
     assert!(read.iter().any(|g| matches!(g, solidcraft_io::Geom2::Arc { c, a, b } if *c == Vec2::new(20.0, 10.0) && a.dist(Vec2::new(30.0, 10.0)) < 1e-9 && b.dist(Vec2::new(10.0, 10.0)) < 1e-9)));
@@ -2420,6 +2476,51 @@ fn inherited_round_hole_survives_flange_and_unfold_in_flipped_frames() {
         assert!((volume(&mut s) - expected).abs() < 0.1);
         run(&mut s, "sheet.refold", json!({}));
         assert!((volume(&mut s) - folded).abs() < 0.1);
+    }
+}
+
+#[test]
+fn measure_counts_round_holes_through_unfold_and_refold() {
+    // K-factor 0.33 gives different folded and flat volumes: compare each with its own blank.
+    let mut blank_volumes = [0.0; 3];
+    for holes in [0u64, 3, 19] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"R","thickness":"1","k_factor":"0.33","bend_radius":"0.74","active":true}));
+        base(&mut s, 120.0, 75.4);
+        run(&mut s, "sheet.flange", json!({"edges":[[60,0,1]],"height":10}));
+        for i in 0..holes {
+            run(&mut s, "solid.hole", json!({"position":[20 + 14 * (i % 7),20 + 15 * (i / 7),1],"diameter":4}));
+        }
+        for (stage_index, stage) in ["folded", "unfolded", "refolded"].into_iter().enumerate() {
+            match stage {
+                "unfolded" => {
+                    run(&mut s, "sheet.unfold", json!({}));
+                }
+                "refolded" => {
+                    run(&mut s, "sheet.refold", json!({}));
+                }
+                _ => {}
+            }
+            let measured = run(&mut s, "inspect.measure", json!({}));
+            let body = &measured["bodies"][0];
+            let counts = ["faces", "edges", "vertices"].map(|key| body[key].as_u64().expect("nonnegative topology count"));
+            let measured_volume = body["volume_mm3"].as_f64().unwrap();
+            if holes == 0 {
+                blank_volumes[stage_index] = measured_volume;
+            }
+            // A hole adds one wall and two circular rims, with one vertex on each rim.
+            // The flat extrusion also keeps each whole cylinder's seam.
+            // The folded blank extrudes an eight-segment L-section: ten faces, 24 edges, 16 vertices.
+            let blank = if stage == "unfolded" { [6, 12, 8] } else { [10, 24, 16] };
+            let edges_per_hole = if stage == "unfolded" { 3 } else { 2 };
+            assert_eq!(counts, [blank[0] + holes, blank[1] + edges_per_hole * holes, blank[2] + 2 * holes], "{holes} holes, {stage}: {body}");
+            assert_eq!(body["face_types"].as_object().unwrap().values().map(|n| n.as_u64().unwrap()).sum::<u64>(), counts[0]);
+            assert_eq!(body["sheet_metal"], true);
+            for (key, count) in ["faces", "edges", "vertices"].into_iter().zip(counts) {
+                assert_eq!(measured["total"][key], count, "{holes} holes, {stage}: total {key}");
+            }
+            assert!(rel(measured_volume, blank_volumes[stage_index] - holes as f64 * PI * 4.0) < 1e-5, "{body}");
+        }
     }
 }
 
@@ -2565,7 +2666,7 @@ fn overlapping_round_cuts_keep_exact_union_in_export_and_roundtrip() {
     assert!((volume(&mut s) - expected).abs() < 0.1);
     assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(1));
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
-    assert!(dxf.contains("0\nARC\n"));
+    assert!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Arc { .. })) > 0);
     let mut reopened = Session::default();
     run(&mut reopened, "sketch.insert_dxf", json!({"text": dxf, "name": "Blank"}));
     run(&mut reopened, "sketch.finish", json!({}));
@@ -2771,28 +2872,25 @@ fn depth_step_reopen(s: &mut Session, suffix: &str, want: f64, inside: solidcore
     std::fs::remove_file(path).unwrap();
 }
 
-/// The generic sketch importer intentionally drops DXF layers/depth. Reimport only the
-/// material outline at a separately known depth, never pretend all entities reconstruct3D.
+/// Reimport the actual material layers at a separately known depth. Selection
+/// uses owned geometry and layer handles from the shared layered reader.
 fn dxf_outline_only(text: &str) -> String {
-    let lines: Vec<_> = text.lines().collect();
-    let pairs: Vec<_> = lines.as_chunks::<2>().0.iter().filter_map(|p| Some((p.first()?.trim(), *p.get(1)?))).collect();
-    let mut out = String::from("0\nSECTION\n2\nENTITIES\n");
-    let mut start = 0;
-    for end in 1..=pairs.len() {
-        if end == pairs.len() || pairs.get(end).is_some_and(|p| p.0 == "0") {
-            let entity = &pairs[start..end];
-            if entity.first().is_some_and(|p| matches!(p.1, "LINE" | "ARC" | "CIRCLE"))
-                && entity.iter().any(|p| p.0 == "8" && matches!(p.1, "OUTLINE" | "CUT"))
-            {
-                for (code, value) in entity {
-                    out.push_str(&format!("{code}\n{value}\n"));
-                }
-            }
-            start = end;
+    let source = solidcraft_io::read_dxf_file(text).unwrap();
+    let mut selected = solidcraft_io::DxfFile::new().unwrap();
+    let mut layers = std::collections::BTreeMap::new();
+    for entity in source.entities() {
+        let layer = source.layer(entity.layer()).unwrap();
+        if !matches!(layer.name(), "OUTLINE" | "CUT")
+            || !matches!(entity.geometry(), DxfShape::Line(..) | DxfShape::Arc { .. } | DxfShape::Circle { .. })
+        {
+            continue;
         }
+        let handle = *layers
+            .entry(layer.name().to_string())
+            .or_insert_with(|| selected.declare_layer(layer.name(), layer.color(), layer.linetype(), layer.weight()).unwrap());
+        selected.push(handle, entity.geometry().clone(), entity.weight()).unwrap();
     }
-    out.push_str("0\nENDSEC\n0\nEOF\n");
-    out
+    solidcraft_io::write_dxf_file(&selected).unwrap()
 }
 
 #[test]
@@ -2820,7 +2918,7 @@ fn partial_depth_intersect_retains_bottom_top_and_middle_material_through_histor
                     .iter()
                     .any(|p| p["side"] == *side && p["z0_mm"] == *a && p["z1_mm"] == *b && p["depth_mm"] == b - a)
             );
-            assert!(dxf.contains(&format!("POCKET_{}_Z{a:.6}_TO_{b:.6}_MM", side.to_uppercase())));
+            assert!(dxf_has_layer(&dxf, &format!("POCKET_{}_Z{a:.6}_TO_{b:.6}_MM", side.to_uppercase())));
         }
         let outline = dxf_outline_only(&dxf);
         assert_eq!(solidcraft_io::read_dxf(&outline).unwrap().len(), 4);
@@ -2920,7 +3018,7 @@ fn partial_depth_intersect_keeps_disconnected_tool_islands_and_annular_curves() 
         assert_eq!(state.bodies[0].body.classify_point(Vec3::new(57.0, 30.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
     let dxf = run(&mut ring, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap().to_string();
-    assert!(dxf.contains("POCKET_TOP_Z1.000000_TO_2.500000_MM"));
+    assert!(dxf_has_layer(&dxf, "POCKET_TOP_Z1.000000_TO_2.500000_MM"));
     assert_eq!(solidcraft_io::read_dxf(&dxf_outline_only(&dxf)).unwrap().len(), 2);
 }
 
@@ -3159,7 +3257,7 @@ fn partial_depth_intersect_curved_to_object_preserves_current_trimmed_cap_footpr
         solidcraft_kernel::PointClass::Outside
     );
     let dxf = run(&mut s, "sheet.export_dxf", json!({"body":name}))["dxf"].as_str().unwrap().to_string();
-    assert!(dxf.contains("POCKET_TOP_Z1.000000_TO_2.500000_MM"));
+    assert!(dxf_has_layer(&dxf, "POCKET_TOP_Z1.000000_TO_2.500000_MM"));
     let outline = dxf_outline_only(&dxf);
     assert_eq!(solidcraft_io::read_dxf(&outline).unwrap().len(), 5);
     let mut outline_import = Session::default();
@@ -3317,7 +3415,9 @@ fn fold_across_two_rounded_tabs_keeps_one_face_per_arc() {
         assert!(rel(volume(&mut s), flat) < 1e-3, "a fold keeps the material");
         let bb = &run(&mut s, "inspect.measure", json!({}))["bodies"][0]["bbox"];
         assert!(bb["max"][2].as_f64().unwrap() > 7.0, "both tabs stand up: {bb}");
-        faces(&mut s)
+        // This construction check counts the sewn faces before coplanar end pieces merge.
+        let body = &run(&mut s, "inspect.measure", json!({}))["bodies"][0];
+        (body["kernel"]["faces"].as_u64().unwrap(), body["face_types"]["cylinder"].as_u64().unwrap_or(0))
     };
     let ((rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)) = (folded(&rounded), folded(&sharp));
     let counts = [(rounded_faces, rounded_cylinders), (sharp_faces, sharp_cylinders)];
@@ -4006,10 +4106,11 @@ fn has_round_cutout(f: &Value, c: [f64; 2], r: f64) -> bool {
 fn dxf_has_circle(s: &mut Session, c: [f64; 2], r: f64) -> bool {
     let dxf = run(s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
     let centre = solidcore_record::Vec2::new(c[0], c[1]);
-    solidcraft_io::read_dxf(&dxf)
-        .unwrap_or_default()
+    solidcraft_io::read_dxf_file(&dxf)
+        .unwrap()
+        .entities()
         .iter()
-        .any(|g| matches!(g, solidcraft_io::Geom2::Circle(at, radius) if at.dist(centre) < 1e-5 && (radius - r).abs() < 1e-5))
+        .any(|entity| matches!(entity.geometry(), DxfShape::Circle { c: at, r: radius } if at.dist(centre) < 1e-5 && (radius - r).abs() < 1e-5))
 }
 
 /// A hole on a flange lands in the flat pattern where the bend allowance puts its panel.
@@ -4386,7 +4487,7 @@ fn closed_corners_reach_the_flat_pattern_and_the_dxf() {
         assert!((v - area * 2.0).abs() < 1e-3 * v, "{deg}: {v} vs {}", area * 2.0);
         // The DXF: the closed outline in straight lines, four bend lines.
         let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-        assert_eq!(dxf.matches("0\nLINE\n").count(), n + 4, "{deg}: {n} outline points");
+        assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), n + 4, "{deg}: {n} outline points");
         // Unfold and refold keep it.
         run(&mut s, "sheet.unfold", json!({}));
         run(&mut s, "sheet.refold", json!({}));
@@ -4415,7 +4516,7 @@ fn corner_reliefs_of_the_rule_reach_the_part_the_flat_pattern_and_the_dxf() {
     let mut notch = Session::default();
     alu_tray(&mut notch, 72.0, json!({"corner_relief": "8 mm"}));
     let v0 = volume(&mut notch);
-    assert_eq!(export(&mut notch).matches("0\nARC\n").count(), 0);
+    assert_eq!(dxf_count(&export(&mut notch), |shape| matches!(shape, DxfShape::Arc { .. })), 0);
     run(&mut notch, "sheet.unfold", json!({}));
     let flat0 = volume(&mut notch);
     for (shape, of_the_base) in [("round", 4.0 * PI), ("rectangular", 16.0)] {
@@ -4655,7 +4756,7 @@ fn a_tear_of_the_rule_reaches_the_part_the_flat_pattern_and_the_dxf() {
         assert!((v - v0 - want).abs() < 0.05, "{deg}: {v} - {v0} vs {want}");
         // The DXF: the outline in straight lines, each cut one of them, and four bend lines.
         let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-        assert_eq!(dxf.matches("0\nLINE\n").count(), outline.len() + 4, "{deg}");
+        assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), outline.len() + 4, "{deg}");
         let cut_end = solidcore_record::Vec2::new(x_end(s0), s0 - ba);
         let read = solidcraft_io::read_dxf(&dxf).unwrap_or_default();
         let at_cut_end = |g: &solidcraft_io::Geom2| matches!(g, solidcraft_io::Geom2::Line(a, b) if a.dist(cut_end) < 1e-6 || b.dist(cut_end) < 1e-6);
@@ -5072,7 +5173,7 @@ fn edge_flanges_take_their_own_angle_and_height_per_edge() {
     assert!(rel(v1, area * 2.0) < 1e-3, "{v1} vs {}", area * 2.0);
     // The DXF: the outline in straight lines, and four bend lines.
     let dxf = run(&mut one, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert_eq!(dxf.matches("0\nLINE\n").count(), outline.len() + 4, "{} outline points", outline.len());
+    assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), outline.len() + 4, "{} outline points", outline.len());
     // Unfold and refold keep it.
     run(&mut one, "sheet.unfold", json!({}));
     assert!(same_points(&outline_points(&flat(&mut one)), &outline_points(&f1)));
@@ -5218,7 +5319,7 @@ fn returns_on_a_tray_close_at_its_corners() {
     assert!(rel(v, area * 2.0) < 1e-3, "{v} vs {}", area * 2.0);
     // The DXF: the outline in straight lines, and eight bend lines.
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert_eq!(dxf.matches("0\nLINE\n").count(), outline.len() + 8, "{} outline points", outline.len());
+    assert_eq!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Line(..))), outline.len() + 8, "{} outline points", outline.len());
     // Unfold and refold keep it.
     run(&mut s, "sheet.unfold", json!({}));
     assert!(same_points(&outline_points(&flat(&mut s)), &outline));
@@ -5529,7 +5630,7 @@ fn a_box_cut_straight_through_a_flat_sheet_is_a_cutout_like_the_extrude_cut() {
     run(&mut s, "solid.cylinder", json!({"base": [70, 30, -1], "radius": 5, "height": 5, "operation": "cut"}));
     assert_eq!(flat(&mut s)["cutouts"].as_array().map(Vec::len), Some(2));
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert!(dxf.contains("CIRCLE"), "the hole stays a circle");
+    assert!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Circle { .. })) > 0, "the hole stays a circle");
     assert!((volume(&mut s) - (14750.0 - PI * 25.0 * 2.5)).abs() < 0.5);
     // A box that only dents the top face is a pocket of constant depth.
     run(&mut s, "solid.box", json!({"corner": [50, 10, 1.5], "length": 10, "width": 10, "height": 5, "operation": "cut"}));
@@ -5580,7 +5681,7 @@ fn flat_pattern_reports_a_round_hole_as_a_circle() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "direction": "symmetric", "operation": "cut"}));
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert!(dxf.contains("CIRCLE"), "the DXF keeps the circle");
+    assert!(dxf_count(&dxf, |shape| matches!(shape, DxfShape::Circle { .. })) > 0, "the DXF keeps the circle");
     let f = flat(&mut s);
     let cutouts = f["cutouts"].as_array().cloned().unwrap_or_default();
     assert_eq!(cutouts.len(), 1);
@@ -6117,32 +6218,19 @@ fn staggered_count(w: f64, h: f64, d: f64, pitch: f64, margin: f64) -> usize {
 }
 
 fn perforation_circles(dxf: &str) -> Vec<(f64, f64, f64)> {
-    let lines: Vec<&str> = dxf.lines().map(str::trim).collect();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i + 1 < lines.len() {
-        if lines[i] == "0" && lines[i + 1] == "CIRCLE" {
-            let (mut layer, mut x, mut y, mut r) = ("", 0.0, 0.0, 0.0);
-            let mut j = i + 2;
-            while j + 1 < lines.len() && lines[j] != "0" {
-                match lines[j] {
-                    "8" => layer = lines[j + 1],
-                    "10" => x = lines[j + 1].parse().unwrap_or(0.0),
-                    "20" => y = lines[j + 1].parse().unwrap_or(0.0),
-                    "40" => r = lines[j + 1].parse().unwrap_or(0.0),
-                    _ => {}
-                }
-                j += 2;
+    let file = solidcraft_io::read_dxf_file(dxf).unwrap();
+    file.entities()
+        .iter()
+        .filter_map(|entity| {
+            if file.layer(entity.layer()).unwrap().name() != "PERFORATION" {
+                return None;
             }
-            if layer == "PERFORATION" {
-                out.push((x, y, r));
+            match entity.geometry() {
+                DxfShape::Circle { c, r } => Some((c.x, c.y, *r)),
+                _ => None,
             }
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
-    out
+        })
+        .collect()
 }
 
 /// #732: Rv 1.0-1.5 over a 100 x 60 x 0.8 sheet: every hole is in the flat pattern and in the DXF (layer
@@ -7083,8 +7171,11 @@ fn flange_segments_take_their_own_angles() {
     let table: Value = serde_json::from_str(table["text"].as_str().unwrap_or_default()).unwrap_or(Value::Null);
     let rows = table["bends"].as_array().cloned().unwrap_or_default();
     assert_eq!(rows.len(), 2, "{table}");
-    let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-    assert!(dxf.contains("BEND_UP") && dxf.contains("OUTLINE"), "{dxf}");
+    let out = run(&mut s, "sheet.export_dxf", json!({}));
+    let dxf = out["dxf"].as_str().unwrap_or_default();
+    // Both segments bend up: a bend line each on BEND_UP, as many as the export reports.
+    assert_eq!((dxf_on_layer(dxf, "BEND_UP"), out["bends"].as_u64()), (2, Some(2)), "{dxf}");
+    assert!(dxf_on_layer(dxf, "OUTLINE") > 0, "{dxf}");
 }
 
 /// Each segment takes its own side: one bend up, one down, and the two still sew into one solid

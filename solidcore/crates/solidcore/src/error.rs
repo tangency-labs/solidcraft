@@ -19,7 +19,6 @@
 //! | [`SolidError::Cancelled`], [`SolidError::cancelled`], [`SolidError::is_cancelled`] | (none: cooperative cancellation on [`crate::Kernel`]) |
 //! | [`SolidError::invalid_input`] | (none: out-of-range reads / null dereferences upstream) |
 //! | `ignored`, `ignore_status` (crate) | a call whose `SmStatus` upstream ignores    |
-//! | `checked_or_ignored` (crate) | per-call opt-in status policy (#483); legacy helpers unchanged |
 //! | `native_failure` (crate)  | a call whose failing `SmStatus` upstream handles (internal errors propagate) |
 //! | `?` operator                | `SER(...)` / `NER(...)` (return on error)        |
 //! | [`SolidError::Failed`], [`Failure`], [`Reason`] | none: a failure in solidcore's own terms (#2615) |
@@ -135,6 +134,7 @@ pub(crate) fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
 pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
+        Err(e) if e.is_not_certified() => Err(e),
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
@@ -152,16 +152,6 @@ pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
 /// [`SolidError::PreparationRequired`].
 pub(crate) fn ignore_status<T>(r: Result<T>) -> Result<()> {
     ignored(r).map(|_| ())
-}
-
-/// Select the status policy of one audited call. Checked mode returns the original
-/// error before its output is read; legacy mode preserves `ignored` unchanged.
-pub(crate) fn checked_or_ignored<T>(r: Result<T>, checked: bool) -> Result<Option<T>> {
-    if checked {
-        r.map(Some)
-    } else {
-        ignored(r)
-    }
 }
 
 /// One call whose status SMLib drops and the fork passes on (`SER(...)`): with `pass_on`
@@ -185,17 +175,6 @@ pub(crate) fn ignore_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<()> {
 /// `pass_on` its error is returned, without it the value is `None` as upstream.
 pub(crate) fn ignored_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<Option<T>> {
     ignored(passed_on(r, pass_on)?)
-}
-
-/// A status a port helper hands back in its value (`None` for `SM_SUCCESS`) where SMLib
-/// drops it and the fork passes it on (`SER(...)`): returned as the error with
-/// `pass_on`, dropped without (except [`SolidError::Unported`] and
-/// [`SolidError::Cancelled`], which always propagate).
-pub(crate) fn status_passed_on(status: Option<SolidError>, pass_on: bool) -> Result<()> {
-    match status {
-        Some(e) if pass_on || e.is_unported_or_cancelled() => Err(e),
-        _ => Ok(()),
-    }
 }
 
 /// A reference to one topological entity, used as error context.
@@ -550,8 +529,7 @@ pub const SM_ERR_TESS_FAIL_FACE: i32 = 1041;
 /// SMLib fork status `SM_ERR_OFFSET_WALLS_TOUCH` (tangency-labs/smlib a759622,
 /// `SmMessages.h`; not in the pinned upstream), as carried by [`SolidError::Upstream`]:
 /// an offset (a shell, a solid offset) whose walls would meet, because loops of an offset
-/// face touch without crossing. Returned only with
-/// `Kernel::fixes.offset_resolve_crossing_loops`.
+/// face touch without crossing.
 pub const SM_ERR_OFFSET_WALLS_TOUCH: i32 = 1042;
 
 /// SMLib fork status `SM_ERR_OFFSET_EDGE_VANISHES` (tangency-labs/smlib 34318f4,
@@ -1329,7 +1307,7 @@ pub enum ErrorKind {
     /// A fillet or chamfer is too large to build; the error names the largest size
     /// that builds.
     FilletTooLarge = 100,
-    // The blend's classes, 101 to 129 (the classes of the typed blend failure record,
+    // The blend's classes, 101 to 131 (the classes of the typed blend failure record,
     // `error::blend`), in their order: the record's numbers less 200, then the classes added
     // after them.
     /// The rolling ball does not fit a face it rolls on.
@@ -1400,6 +1378,15 @@ pub enum ErrorKind {
     /// A blend past its faces keeps no length of its edge, no corner taking any of it: the
     /// trim takes the whole of it.
     OverflowKeepsNothing = 129,
+    /// Removing a fillet would continue a face or an edge past its geometry, which only a
+    /// plane or a line continues exactly (for example a face that would grow past its
+    /// surface's domain): the removal refuses rather than build an approximate face. Not a
+    /// matter of size ([`crate::error::blend::RemovalRefusal`]).
+    RemovalNotExact = 130,
+    /// The face asked to be removed is not a fillet the removal recognises: its edges, the
+    /// faces across them or their surfaces are not those of a fillet between two faces. Not a
+    /// matter of size ([`crate::error::blend::RemovalRefusal`]).
+    NotARemovableFillet = 131,
     /// An offset face's offset folds: the wall is thicker than a radius of curvature.
     OffsetFolds = 200,
     /// Loops of an offset face touch without crossing: the offset walls would meet.
@@ -1485,6 +1472,8 @@ impl ErrorKind {
                 | Self::EndAtSeamVertex
                 | Self::TangentContinuationEnd
                 | Self::OverflowKeepsNothing
+                | Self::RemovalNotExact
+                | Self::NotARemovableFillet
                 | Self::OffsetFolds
                 | Self::OffsetWallsTouch
                 | Self::OffsetLoopsCross
@@ -1495,8 +1484,8 @@ impl ErrorKind {
 
     /// True for a refusal a size that builds is the way out of (false for a missing
     /// construction and for a defect): every refusal class but a contact line that leaves its
-    /// face, a round that ends where its edge runs on tangentially, and the offset's that the
-    /// size of its wall does not decide.
+    /// face, a round that ends where its edge runs on tangentially, a fillet removal's
+    /// refusals, and the offset's that the size of its wall does not decide.
     #[must_use]
     pub const fn sized(self) -> bool {
         self.is_refusal()
@@ -1504,6 +1493,8 @@ impl ErrorKind {
                 self,
                 Self::RailLeavesFace
                     | Self::TangentContinuationEnd
+                    | Self::RemovalNotExact
+                    | Self::NotARemovableFillet
                     | Self::OffsetWallsTouch
                     | Self::OffsetLoopsCross
                     | Self::OffsetEdgeVanishes
@@ -1558,6 +1549,8 @@ impl ErrorKind {
             Self::StageFailed => "stage_failed",
             Self::TangentContinuationEnd => "tangent_continuation_end",
             Self::OverflowKeepsNothing => "overflow_keeps_nothing",
+            Self::RemovalNotExact => "removal_not_exact",
+            Self::NotARemovableFillet => "not_a_removable_fillet",
             Self::OffsetFolds => "offset_folds",
             Self::OffsetWallsTouch => "offset_walls_touch",
             Self::OffsetLoopsCross => "offset_loops_cross",
@@ -1628,6 +1621,7 @@ impl SolidError {
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
+            e if e.is_not_certified() => e,
             _ => Self::sm_err(operation),
         }
     }
@@ -1737,12 +1731,26 @@ impl SolidError {
 
     /// True when this error must never be swallowed or remapped by an upstream
     /// status-ignoring fallback ([`SolidError::Unported`], [`SolidError::Cancelled`]
-    /// or [`SolidError::FaceTrimsUnavailable`], which no upstream status stands for).
+    /// or [`SolidError::FaceTrimsUnavailable`], which no upstream status stands for), or is a
+    /// blend certificate that ran out of its work budget
+    /// ([`crate::error::blend::BlendFailure::NotCertified`]): like a cancellation, work given
+    /// up never becomes a different geometric result.
     #[must_use]
-    pub(crate) const fn is_unported_or_cancelled(&self) -> bool {
+    pub(crate) fn is_unported_or_cancelled(&self) -> bool {
         matches!(
             self,
             Self::Unported { .. } | Self::Cancelled { .. } | Self::FaceTrimsUnavailable { .. }
+        ) || self.is_not_certified()
+    }
+
+    /// True for a blend certificate that spent its work budget
+    /// ([`crate::error::blend::BlendFailure::NotCertified`]). Every filter that passes a
+    /// cancellation on passes this on too: work given up never becomes another result.
+    #[must_use]
+    pub fn is_not_certified(&self) -> bool {
+        matches!(
+            self.blend_failure(),
+            Some(blend::BlendFailure::NotCertified { .. })
         )
     }
 
@@ -2027,6 +2035,29 @@ pub fn upstream_status(error: &SolidError) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A blend certificate that spent its work budget passes every status-ignoring
+    /// helper, as a cancellation does.
+    #[test]
+    fn a_certificate_past_its_budget_passes_every_status_filter() {
+        let e = SolidError::blend(
+            "t",
+            blend::BlendFailure::NotCertified {
+                halvings: 1,
+                stations: 2,
+            },
+        );
+        assert!(e.is_not_certified() && e.is_unported_or_cancelled());
+        assert_eq!(ignored::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(native_failure::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(ignore_status::<()>(Err(e.clone())), Err(e.clone()));
+        assert_eq!(
+            passed_on::<()>(Err(e.clone()), false).map(|_| ()),
+            Err(e.clone())
+        );
+        assert_eq!(SolidError::nl_ser("op")(e.clone()), e);
+        assert!(!SolidError::sm_err("t").is_not_certified());
+    }
 
     /// `e` is a stage of `operation` that failed with no reason the kernel names: class
     /// [`ErrorKind::StageFailed`], a defect, keeping `status` (the one the C++ reports) for the
@@ -2316,8 +2347,8 @@ mod tests {
                     BooleanFailure::SolidLeaks { face },
                 )
                 .into_error(),
-                "boolean::merge::p4::manifold_boolean: the union would delete face 7 and merge \
-                 the solid it bounds into the outside",
+                "boolean::merge::p4::manifold_boolean: the union deleted face 7 and the solid \
+                 it bounded merged into the outside",
                 ErrorKind::Failed,
                 SM_ERR,
             ),
@@ -2476,6 +2507,12 @@ mod tests {
                 129,
                 "overflow_keeps_nothing",
             ),
+            (ErrorKind::RemovalNotExact, 130, "removal_not_exact"),
+            (
+                ErrorKind::NotARemovableFillet,
+                131,
+                "not_a_removable_fillet",
+            ),
             (ErrorKind::OffsetFolds, 200, "offset_folds"),
             (ErrorKind::OffsetWallsTouch, 201, "offset_walls_touch"),
             (ErrorKind::OffsetLoopsCross, 202, "offset_loops_cross"),
@@ -2528,11 +2565,13 @@ mod tests {
                 ErrorKind::StageFailed => 41,
                 ErrorKind::TangentContinuationEnd => 42,
                 ErrorKind::OverflowKeepsNothing => 43,
-                ErrorKind::OffsetFolds => 44,
-                ErrorKind::OffsetWallsTouch => 45,
-                ErrorKind::OffsetLoopsCross => 46,
-                ErrorKind::OffsetEdgeVanishes => 47,
-                ErrorKind::OffsetCollapses => 48,
+                ErrorKind::RemovalNotExact => 44,
+                ErrorKind::NotARemovableFillet => 45,
+                ErrorKind::OffsetFolds => 46,
+                ErrorKind::OffsetWallsTouch => 47,
+                ErrorKind::OffsetLoopsCross => 48,
+                ErrorKind::OffsetEdgeVanishes => 49,
+                ErrorKind::OffsetCollapses => 50,
             }
         };
         for (i, &(kind, code, name)) in PINNED.iter().enumerate() {
@@ -2546,17 +2585,17 @@ mod tests {
             "codes are unique and ascending"
         );
         // the blend's classes: 101 to 127 are the record's numbers less 200, with no gap; 128
-        // and 129 follow them
+        // to 131 follow them
         let blend: Vec<u16> = PINNED
             .iter()
             .map(|r| r.1)
             .filter(|c| (101..200).contains(c))
             .collect();
-        assert_eq!(blend, (101..=129).collect::<Vec<u16>>());
+        assert_eq!(blend, (101..=131).collect::<Vec<u16>>());
         // defects, refusals and the sized ones
         let defects = [115, 125, 126, 127];
-        let unsized_refusals = [102, 128];
-        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=129).contains(&r.1)) {
+        let unsized_refusals = [102, 128, 130, 131];
+        for &(kind, code, _) in PINNED.iter().filter(|r| (101..=131).contains(&r.1)) {
             assert_eq!(kind.is_defect(), defects.contains(&code), "{kind:?}");
             assert_eq!(kind.is_refusal(), !defects.contains(&code), "{kind:?}");
             assert_eq!(

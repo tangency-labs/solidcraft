@@ -15,7 +15,7 @@
 //! | [`copy_vertices`], [`copy_vertices_with_context`], [`CopySource`] | `SmBrep::CopyVertices`                           |
 //! | [`delete_face`], [`DeleteFaceOptions`] | `SmBrep::DeleteFace`                      |
 //! | [`remove_slit_loops_where_solids_touch`] | not upstream: the fork's `SmBrep::RemoveSlitLoopsWhereSolidsTouch` (issue #746) |
-//! | [`split_disconnected_shells`]  | not upstream: the fork's `SmBrep::SplitDisconnectedShells` (issue #746) |
+//! | [`split_disconnected_shells`]  | not upstream: the fork's `SmBrep::SplitDisconnectedShells` (issue #746); its parts regrouped by nesting (below) |
 //! | [`make_wire_edge`]              | `SmBrep::MakeWireEdge`                           |
 //! | [`make_wire_edge_vertex`]       | `SmBrep::MakeWireEdgeVertex`                     |
 //! | [`merge_brep`], [`merge_brep_with_context`] | `SmBrep::MergeBrep`                              |
@@ -70,6 +70,11 @@
 //!   marked: the same answer, and the same marks as far as the walk goes. With the
 //!   caller's records ([`delete_face_with_body_identity`]), which keep the marks after
 //!   the call as upstream's objects do, the walk is upstream's.
+//! - **Split shells' regions.** The fork's `SplitDisconnectedShells` gives each part a
+//!   bounded region's split shell leaves a region of its own. The port regroups the parts
+//!   by nesting: a void part lying directly inside an outer part stays in that part's
+//!   region (a cavity that touched the body's outside along a slit), and only parts apart
+//!   from each other bound solids of their own (solids touching along a curve).
 //! - **Use notifications.** As elsewhere in the crate, the destructors and
 //!   constructors of uses, loops, shells and regions do not notify
 //!   (`SM_NO_DESTRUCTION` / `SM_NO_CONSTRUCTION` at `SmObject` level; `new_brep`'s own
@@ -161,6 +166,12 @@ use crate::topology::{
 };
 
 const OP: &str = "topology::brep::p3";
+
+/// The [`TopologyFailure::Inconsistent`] reason of the orientation's
+/// `"Nonorientable Brep, gathered faceuses from both sides of some face."` assert: more
+/// face uses are connected to one side than faces remain to be oriented.
+pub(crate) const GATHERED_BOTH_SIDES: &str =
+    "more face uses are connected than faces remain to be oriented";
 
 /// Upstream dereferences null here (no `NER`): the FFI guard rejects the input.
 const fn null_deref(reason: &'static str) -> SolidError {
@@ -753,15 +764,21 @@ pub(crate) fn seed_records(
     b: &Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) {
+    // (the scan passes every slot, emptied ones too, and the B-rep's key)
+    let visits = slot_counts(b).iter().sum::<usize>().saturating_add(1);
     if records.is_empty() {
         // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
+        let noted = records.take_visits();
         *records = entities(b)
             .map(|e| key_of(e).key)
             .chain([p2::brep_ref(b).key])
             .map(|k| (k, topo::Topology::default()))
             .collect();
+        records.note_visits(usize::try_from(noted).unwrap_or(usize::MAX));
+        records.note_visits(visits);
         return;
     }
+    records.note_visits(visits);
     for e in entities(b) {
         records.or_default(key_of(e).key);
     }
@@ -829,10 +846,13 @@ pub(crate) fn reseed_records(
             && mark.slots.iter().zip(slots).all(|(&then, now)| then <= now)
     };
     if let Some((since, changed)) = records.changed_since(same) {
-        for &e in removals.get(since.removed..).unwrap_or_default() {
+        let removed = removals.get(since.removed..).unwrap_or_default();
+        records.note_visits(removed.len().saturating_add(changed.len()));
+        for &e in removed {
             records.settle(key_of(e), false);
         }
         for (kind, (from, to)) in since.slots.into_iter().zip(slots).enumerate() {
+            records.note_visits(to.saturating_sub(from));
             for index in (from..to).map_while(|i| u32::try_from(i).ok()) {
                 if is_live(b, kind, index) {
                     records.settle(key_of(kind_entity(kind, index)), true);
@@ -851,10 +871,25 @@ pub(crate) fn reseed_records(
         let mut keys: Vec<ObjectKey> = std::iter::once(scheme.brep_key)
             .chain(entities(b).map(key_of))
             .collect();
+        // (the tally: every slot scanned for the keys and the B-rep's key, the pairs the
+        // sortedness test and the removal of repeats each compare, a sort's comparisons.
+        // The sortedness test is counted as its whole pass, which it is for keys that come
+        // out in order, as the schemes in use give them; on other keys it stops early.)
+        let pairs = keys.len().saturating_sub(1);
+        let mut visits = slots
+            .iter()
+            .sum::<usize>()
+            .saturating_add(1)
+            .saturating_add(pairs)
+            .saturating_add(pairs);
         if !keys.is_sorted() {
-            keys.sort_unstable();
+            keys.sort_unstable_by(|a, b| {
+                visits = visits.saturating_add(1);
+                a.cmp(b)
+            });
         }
         keys.dedup();
+        records.note_visits(visits);
         records.reset_to_keys(&keys);
     }
     let mark = topo::ReseedMark {
@@ -1116,6 +1151,10 @@ pub(crate) fn with_caller_identities_for<R>(
             // (a source is read, never added to)
             let context = env.context.as_deref().unwrap_or(&k.context);
             check_keys(context, src, key_of, 0)?;
+            // (the tally: every slot of the source scanned, and the source itself; no
+            // prospective object, the window being 0)
+            env.records
+                .note_visits(slot_counts(src).iter().sum::<usize>().saturating_add(1));
         }
     }
     seed_records_once(env.records, (id, instance), b, env.key_of)?;
@@ -1235,6 +1274,7 @@ fn check_keys_once(
     let mut checked_to = progress.checked_to;
     let mut passed: Vec<(usize, usize)> = Vec::new();
     let mut skipped: Vec<(usize, usize)> = Vec::new();
+    let mut visits = 0_usize;
     let kinds = live_counts(b)
         .into_iter()
         .zip(slot_counts(b))
@@ -1258,6 +1298,7 @@ fn check_keys_once(
         }
         let from = *to;
         *to = from.max(slots).max(end);
+        visits = visits.saturating_add(to.saturating_sub(from));
         for i in from..*to {
             let covered = (count..end).contains(&i)
                 || u32::try_from(i).is_ok_and(|index| is_live(b, kind, index));
@@ -1273,6 +1314,13 @@ fn check_keys_once(
         return Err(RESERVED_KEY);
     }
     progress.checked_to = checked_to;
+    // (the tally: the indices passed, where they were asked and where they leave the
+    // unchecked set; the indices skipped; the B-rep's key)
+    visits = visits
+        .saturating_add(passed.len())
+        .saturating_add(passed.len())
+        .saturating_add(skipped.len())
+        .saturating_add(1);
     for (kind, i) in passed {
         if let Some(unchecked) = progress.unchecked.get_mut(kind) {
             unchecked.remove(&i);
@@ -1283,6 +1331,7 @@ fn check_keys_once(
             unchecked.insert(i);
         }
     }
+    records.note_visits(visits);
     Ok(())
 }
 
@@ -1310,6 +1359,7 @@ fn seed_records_once(
     }
     // (through the store's own methods, so a reset sees what was added)
     for (kind, (from, to)) in from.into_iter().zip(slots).enumerate() {
+        records.note_visits(to.saturating_sub(from));
         for index in (from..to).map_while(|i| u32::try_from(i).ok()) {
             if is_live(b, kind, index) {
                 records.or_default(key_of(kind_entity(kind, index)).key);
@@ -1317,6 +1367,7 @@ fn seed_records_once(
         }
     }
     records.or_default(brep_key);
+    records.note_visits(1);
     Ok(())
 }
 
@@ -3010,21 +3061,12 @@ fn delete_face_in(
         if surviving == del_region {
             return Err(ser("the two shells are in the same region")); // Should not happen
         }
-        ignore_soft(crate::error::passed_on(
-            shell::region_remove_shell(b, del_region, os),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shell::region_remove_shell(b, del_region, os)?;
         shell::destroy(k, b, os, env)?;
         other_shell = None;
         for s in region_shells(b, del_region)? {
-            ignore_soft(crate::error::passed_on(
-                shell::region_remove_shell(b, del_region, s),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
-            ignore_soft(crate::error::passed_on(
-                shell::region_post_insert_shell(b, surviving, s),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            shell::region_remove_shell(b, del_region, s)?;
+            shell::region_post_insert_shell(b, surviving, s)?;
         }
         if Some(del_region) == b.infinite_region() {
             b.set_infinite_region(Some(surviving));
@@ -3045,10 +3087,7 @@ fn delete_face_in(
         ))?;
 
         // Remove and Delete the DelRegion
-        ignore_soft(crate::error::passed_on(
-            b.remove_region_from_list(del_region),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        b.remove_region_from_list(del_region)?;
         b.remove_region_record(del_region)?;
     }
 
@@ -3167,15 +3206,9 @@ fn delete_face_in(
     }
 
     // Take care of face and faceuses - remove from lists
-    ignore_soft(crate::error::passed_on(
-        shell::shell_remove_faceuse(b, shell, fu),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    shell::shell_remove_faceuse(b, shell, fu)?;
     if let Some(os) = other_shell {
-        ignore_soft(crate::error::passed_on(
-            shell::shell_remove_faceuse(b, os, other_fu),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shell::shell_remove_faceuse(b, os, other_fu)?;
     }
 
     // Don't allow stale pointers to remain in the Faces.
@@ -3217,39 +3250,33 @@ fn delete_face_in(
         // delete every edge converted into a wire
         for e in new_wire_edges {
             deleted.push(EntityRef::Edge(e));
-            ignore_soft(crate::error::passed_on(
-                match body {
-                    Some(body) => super::p4::delete_edge_with_body_identity(
-                        k,
-                        b,
-                        &mut super::p4::DeleteEnv::from_notify(env),
-                        e,
-                        None,
-                        body,
-                    ),
-                    None => delete_edge(k, b, env, e, None),
-                },
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            match body {
+                Some(body) => super::p4::delete_edge_with_body_identity(
+                    k,
+                    b,
+                    &mut super::p4::DeleteEnv::from_notify(env),
+                    e,
+                    None,
+                    body,
+                ),
+                None => delete_edge(k, b, env, e, None),
+            }?;
         }
 
         // remove vertices that have become shell vertices
         for v in orig_vertices {
             if vertex::is_shell_vertex(b, v)? {
                 deleted.push(EntityRef::Vertex(v));
-                ignore_soft(crate::error::passed_on(
-                    match body {
-                        Some(body) => super::p4::delete_vertex_with_body_identity(
-                            k,
-                            b,
-                            &mut super::p4::DeleteEnv::from_notify(env),
-                            v,
-                            body,
-                        ),
-                        None => delete_vertex(k, b, env, v),
-                    },
-                    k.fixes.brep_edit_statuses_pass_on,
-                )?)?;
+                match body {
+                    Some(body) => super::p4::delete_vertex_with_body_identity(
+                        k,
+                        b,
+                        &mut super::p4::DeleteEnv::from_notify(env),
+                        v,
+                        body,
+                    ),
+                    None => delete_vertex(k, b, env, v),
+                }?;
             }
         }
     }
@@ -3277,10 +3304,7 @@ fn delete_face_nesting(
     let mut vertices_needing_new_shell = 0usize;
     if any_edgeuse.is_none() && remaining(*vertex_count) == 0 {
         let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
-        ignore_soft(crate::error::passed_on(
-            shell::region_remove_shell(b, r, shell),
-            k.fixes.brep_edit_statuses_pass_on,
-        )?)?;
+        shell::region_remove_shell(b, r, shell)?;
         // delete pShell
         shell::destroy(k, b, shell, env)?;
     } else {
@@ -3439,10 +3463,7 @@ fn delete_face_nesting(
 
         // Transfer faceuses from the old shell to the new shell
         for &x in &faceuses {
-            ignore_soft(crate::error::passed_on(
-                shell::shell_remove_faceuse(b, shell, x),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            shell::shell_remove_faceuse(b, shell, x)?;
             shell::shell_post_insert_faceuse(b, new_shell, x)?;
         }
     }
@@ -3465,14 +3486,8 @@ fn delete_face_nesting(
     // pLastNewShell
     let last = last_new_shell.ok_or(null_deref("no new shell"))?;
     let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
-    ignore_soft(crate::error::passed_on(
-        shell::transfer_children(k, b, last, shell, None),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
-    ignore_soft(crate::error::passed_on(
-        shell::region_remove_shell(b, r, last),
-        k.fixes.brep_edit_statuses_pass_on,
-    )?)?;
+    shell::transfer_children(k, b, last, shell, None)?;
+    shell::region_remove_shell(b, r, last)?;
     shell::destroy(k, b, last, env)
 }
 
@@ -3734,16 +3749,19 @@ fn is_upward_use(b: &Brep, eu: EdgeuseId) -> Result<bool> {
 /// `SmBrep::SplitDisconnectedShells`): splits each shell into its connected parts, as
 /// [`delete_face`] splits a shell a removed face leaves in pieces. The face uses
 /// reached through the shell from the first face use's face's first vertex stay; the
-/// rest move to a new face-use shell, in the infinite region or in a region of its
-/// own (with the old region's void flag), which is split in its turn. At most
-/// `MAX_SHELL_SPLITS` splits of each shell.
+/// rest move to a new face-use shell in the same region, which is split in its turn. At
+/// most `MAX_SHELL_SPLITS` splits of each shell. A bounded region whose shells split is
+/// then regrouped by nesting ([`regroup_split_region`]): the fork gives every part a
+/// region of its own, which is right for solids touching along a curve but makes a
+/// second solid of a cavity that touched the body's outside.
 ///
 /// # Errors
 ///
-/// Those of the shell traversal, the mark lock and the list edits.
+/// Those of the shell traversal, the mark lock, the list edits and the regrouping.
 pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     for r in p1::regions(b, None)? {
         let mut shells = region_shells(b, r)?;
+        let mut split = false;
         let mut jj = 0;
         while let Some(&s) = shells.get(jj) {
             jj += 1;
@@ -3782,19 +3800,11 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
                     break;
                 }
 
-                // the face uses not reached go to a new shell, in the infinite region or
-                // a region of its own
+                // the face uses not reached go to a new shell in this region
                 let new_s = b.add_shell_record(crate::topology::Shell::default())?;
                 set_shell_type(b, new_s, ShellType::Faceuse)?;
-                if Some(r) == b.infinite_region() {
-                    shell::region_post_insert_shell(b, r, new_s)?;
-                } else {
-                    let new_r = b.add_region_record(Region::new())?;
-                    let is_void = b.region(r)?.is_void();
-                    region_set_is_void(b, new_r, is_void)?;
-                    shell::region_post_insert_shell(b, new_r, new_s)?;
-                    b.post_insert_region(new_r)?;
-                }
+                shell::region_post_insert_shell(b, r, new_s)?;
+                split = true;
                 for fu in all {
                     if reached.contains(&fu) {
                         continue;
@@ -3805,6 +3815,90 @@ pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
                 // the new shell may have parts of its own: it is split in its turn
                 shells.push(new_s);
             }
+        }
+        if split && Some(r) != b.infinite_region() {
+            regroup_split_region(k, b, r)?;
+        }
+    }
+    Ok(())
+}
+
+/// Not upstream: the shells of bounded region `r` after [`split_disconnected_shells`] split
+/// one of them, regrouped into regions as their nesting says. A region is bounded by one
+/// outer shell and the voids that lie directly inside it. A void is a face-use shell the
+/// region does not lie inside (its face uses face out of it, so
+/// [`crate::topology::Shell::is_inner_shell`], which is true for the shell holding its
+/// region, as [`shell::order_region_shells`] reads it, is false). A void lying directly
+/// inside another of `r`'s shells that is not one ([`shell::is_inner_shell_of`]) bounds
+/// that shell's region; every other shell is the outer shell of a solid of its own, as solids touching
+/// along a curve are, and as a shell is whose nesting the ray tests cannot decide. The
+/// region of the group holding `r`'s first shell stays `r`; each other group gets a new
+/// region with `r`'s void flag. Each group's outer shell is listed first, its voids after
+/// it in `r`'s order.
+///
+/// # Errors
+///
+/// Those of the ray tests (an [`SolidError::Unported`] or cancelled call), the list edits
+/// and dangling ids.
+fn regroup_split_region(k: &mut Kernel, b: &mut Brep, r: RegionId) -> Result<()> {
+    let shells = region_shells(b, r)?;
+    // a void of the region: a face-use shell the region does not lie inside
+    let mut void = Vec::new();
+    for &s in &shells {
+        let is_void = b.shell(s)?.is_faceuse_shell()
+            && match crate::topology::Shell::is_inner_shell(k, b, s) {
+                Ok(holds_the_region) => !holds_the_region,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => false,
+            };
+        void.push(is_void);
+    }
+    // each shell's outer shell: itself, or the outer shell a void lies directly inside
+    let mut outer: Vec<usize> = (0..shells.len()).collect();
+    for (i, &s) in shells.iter().enumerate() {
+        if !void.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        for (j, &t) in shells.iter().enumerate() {
+            if i == j || void.get(j).copied().unwrap_or(true) {
+                continue;
+            }
+            if shell::is_inner_shell_of(k, b, s, Some(t))? == TRUE {
+                if let Some(slot) = outer.get_mut(i) {
+                    *slot = j;
+                }
+                break;
+            }
+        }
+    }
+    let keep = outer.first().copied().unwrap_or(0);
+    for (o, &head) in shells.iter().enumerate() {
+        if outer.get(o) != Some(&o) {
+            continue;
+        }
+        let group: Vec<ShellId> = std::iter::once(head)
+            .chain(
+                shells
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, _)| i != o && outer.get(i) == Some(&o))
+                    .map(|(_, &s)| s),
+            )
+            .collect();
+        let region = if o == keep {
+            r
+        } else {
+            let new_r = b.add_region_record(Region::new())?;
+            let is_void = b.region(r)?.is_void();
+            region_set_is_void(b, new_r, is_void)?;
+            b.post_insert_region(new_r)?;
+            new_r
+        };
+        for &s in &group {
+            shell::region_remove_shell(b, r, s)?;
+        }
+        for &s in &group {
+            shell::region_post_insert_shell(b, region, s)?;
         }
     }
     Ok(())
@@ -4556,16 +4650,11 @@ fn turn_to_nurbs_in(
             // first extend the new surface in all directions by a small amount
             let new_surface = Surface::from(new_bss);
             let domain = new_surface.natural_uv_domain_with_nurb(k)?;
-            // (status not checked upstream: a failed call leaves the Init() box, whose
-            // size clamps to 1.0 below)
-            let srf_bbox =
-                match new_surface.calculate_bounding_box(k, &domain, [true, false, false], true) {
-                    Ok(boxes) => boxes.normal_box.unwrap_or_else(Extent3d::new),
-                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    // (fork 60a8a51 passes this status on: `SER`)
-                    Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
-                    Err(_) => Extent3d::new(),
-                };
+            // (status not checked upstream; fork 60a8a51 passes it on: `SER`)
+            let srf_bbox = new_surface
+                .calculate_bounding_box(k, &domain, [true, false, false], true)?
+                .normal_box
+                .unwrap_or_else(Extent3d::new);
             let mut size = srf_bbox.size().length();
             if size >= 1.0e15 || size <= 0.0 {
                 size = 1.0;
@@ -4830,10 +4919,7 @@ fn orient_body(
         // If this face needs swapping, do it. Aids in bookkeeping later.
         if in_swap(face) {
             // (no SER upstream; fork 60a8a51 passes the status on)
-            ignore_soft(crate::error::passed_on(
-                face1::swap_uv_with_notifications(k, b, face, env),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            face1::swap_uv_with_notifications(k, b, face, env)?;
         }
 
         let (reverse_votes, same_votes) = if just_unify_normals {
@@ -4891,9 +4977,7 @@ fn orient_body(
             if faceuses.len() > remaining {
                 return Err(SolidError::topology(
                     OP,
-                    TopologyFailure::Inconsistent(
-                        "more face uses are connected than faces remain to be oriented",
-                    ),
+                    TopologyFailure::Inconsistent(GATHERED_BOTH_SIDES),
                 ));
             }
         }
@@ -6352,9 +6436,8 @@ mod tests {
 
     /// WR-701 through a caller: `orient_trimmed_surfaces` asked to swap a cylinder face. With
     /// the face's net moved onto the axis the polar converter cannot be made on the
-    /// transposed net: the run returns the same error the face's own swap returns when
-    /// `brep_edit_statuses_pass_on` passes statuses on, and succeeds without it (the status
-    /// dropped as upstream drops it); either way the face keeps its surface, domain, face use
+    /// transposed net: the run returns the same error the face's own swap returns (the
+    /// status upstream drops is passed on), and the face keeps its surface, domain, face use
     /// and trims. The control: the unmoved face's own swap succeeds, and so does the run.
     #[test]
     fn orienting_with_a_face_whose_swap_is_refused_leaves_that_face_as_it_was() {
@@ -6427,41 +6510,29 @@ mod tests {
             (format!("{:?}", f.uv_domain), f.faceuse, kind, trims)
         };
 
-        for pass_on in [false, true] {
-            for on_axis in [false, true] {
-                let mut k = Kernel::default();
-                k.fixes.brep_edit_statuses_pass_on = pass_on;
-                // the face's own swap on a second, equal body: its error, if refused
-                let (mut direct, f2) = cylinder(&mut k, on_axis);
-                let swapped = face1::swap_uv(&k, &mut direct, f2);
-                assert_eq!(swapped.is_err(), on_axis, "{swapped:?}");
+        for on_axis in [false, true] {
+            let mut k = Kernel::default();
+            // the face's own swap on a second, equal body: its error, if refused
+            let (mut direct, f2) = cylinder(&mut k, on_axis);
+            let swapped = face1::swap_uv(&k, &mut direct, f2);
+            assert_eq!(swapped.is_err(), on_axis, "{swapped:?}");
 
-                let (mut b, face) = cylinder(&mut k, on_axis);
-                let before = state(&b, face);
-                b.set_editing_enabled(true);
-                let mut marks = Marks::default();
-                let r = with_env(|env| {
-                    orient_trimmed_surfaces(
-                        &mut k,
-                        &mut b,
-                        env,
-                        &mut marks,
-                        true,
-                        true,
-                        Some(&[face]),
-                    )
-                });
-                let what = format!("pass_on {pass_on}, on_axis {on_axis}");
-                if on_axis {
-                    match (pass_on, &r, &swapped) {
-                        (true, Err(e), Err(d)) => assert_eq!(e, d, "{what}"),
-                        (false, Ok(_), _) => {}
-                        _ => panic!("{what}: {r:?}"),
-                    }
-                    assert_eq!(state(&b, face), before, "{what}: the refused face changed");
-                } else {
-                    assert!(r.is_ok(), "{what}: {r:?}");
+            let (mut b, face) = cylinder(&mut k, on_axis);
+            let before = state(&b, face);
+            b.set_editing_enabled(true);
+            let mut marks = Marks::default();
+            let r = with_env(|env| {
+                orient_trimmed_surfaces(&mut k, &mut b, env, &mut marks, true, true, Some(&[face]))
+            });
+            let what = format!("on_axis {on_axis}");
+            if on_axis {
+                match (&r, &swapped) {
+                    (Err(e), Err(d)) => assert_eq!(e, d, "{what}"),
+                    _ => panic!("{what}: {r:?}"),
                 }
+                assert_eq!(state(&b, face), before, "{what}: the refused face changed");
+            } else {
+                assert!(r.is_ok(), "{what}: {r:?}");
             }
         }
     }

@@ -65,8 +65,8 @@ fn stroke_colours(shapes: &[egui::epaint::ClippedShape]) -> std::collections::BT
 
 /// Every axis is drawn in one set of X, Y and Z colours, the `axis_*` tokens (#976), in both
 /// themes and every colour vision mode: the Move gizmo's arrows, squares and rings, the view
-/// triad's ends, and the headless picture's origin axes, as the origin axes, the navigation
-/// cube's triad, 3D sketch triads and joint origins draw them.
+/// triad's ends, and the headless picture's origin axes, as the origin axes, the
+/// navigator's triad, 3D sketch triads and joint origins draw them.
 #[test]
 fn every_axis_is_drawn_in_one_set_of_colours() {
     use egui::{Pos2, Rect, vec2};
@@ -146,7 +146,8 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
-    ("icons/navigation.rs", 1, "the navigation cube's face shading, made from a token"),
+    ("navigation.rs", 1, "the navigator's face shading, made from a token"),
+    ("drawing_sheet_page.rs", 2, "the drawing sheet moves toward white, else black, to stand off the backdrop"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
     (
         "body_gizmo.rs",
@@ -172,6 +173,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
         5,
         "the link pills' brand fills (Ko-fi coral, Discord blurple: the services' own colours, the same in every theme), their white ink and the hover veil on the x",
     ),
+    ("workspace.rs", 1, "the view kinds' icon strokes, drawn on the Tabs board: a fixed palette per kind in each theme"),
     ("links.rs", 1, "the link pills' white ink on the brand fills"),
     ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),

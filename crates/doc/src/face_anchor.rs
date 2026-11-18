@@ -230,8 +230,7 @@ pub enum FaceAttachmentStatus {
 }
 
 fn map_plane(matrix: &crate::Mat, plane: &Plane) -> Result<Plane> {
-    Plane::new(crate::apply_point(matrix, plane.origin), crate::apply_vector(matrix, plane.x), crate::apply_vector(matrix, plane.y))
-        .ok_or_else(|| DocError::Invalid("attached plane transform is degenerate".into()))
+    crate::map_plane(matrix, plane).ok_or_else(|| DocError::Invalid("attached plane transform is degenerate".into()))
 }
 
 impl Document {

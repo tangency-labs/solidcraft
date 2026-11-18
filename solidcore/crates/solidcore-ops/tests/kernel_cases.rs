@@ -31,7 +31,7 @@
 //! - `KERNEL_CASES_CASE`: run only cases whose name contains it;
 //! - `KERNEL_CASES_TIMEOUT_S`: a case's time limit in seconds; one past it is a hang. In this
 //!   process (`KERNEL_CASES_JOBS` unset or 1) it is wall time, 180 s by default, and the cases
-//!   after a hang are not run (it holds the process kernel). With jobs it is the case process's
+//!   after a hang are not run (it still runs on its thread). With jobs it is the case process's
 //!   CPU time (user and system, from `/proc` on Linux; wall time elsewhere), 600 s by default,
 //!   with a backstop of four times it in wall time for a process that hangs without using CPU;
 //!   the hung process is killed, and the other cases still run;
@@ -53,6 +53,9 @@
     clippy::print_stdout,
     clippy::cast_precision_loss
 )] // test
+
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -151,6 +154,12 @@ struct Graded {
     /// Whether it ran past its time limit.
     hang: bool,
 }
+
+/// #16735's leak checks on result bodies read into the kernel: test code measuring geometry,
+/// which this crate itself does not (docs/layers.md §4).
+#[path = "../../solidcore/tests/support/volume_leak.rs"]
+#[allow(clippy::disallowed_methods)]
+mod volume_leak;
 
 /// An `Option<f64>` as its IEEE bits, for [`Graded::deviation`].
 mod f64_bits {
@@ -1442,14 +1451,28 @@ fn run_case_with_records(
         }
     }
     let mut deviation = None;
-    if let Some(v) = want["volume_mm3"].as_f64() {
+    if let Some(rig) = want["volume_mm3"].as_f64() {
+        // the rig's volume, or the case's volume with tolerant edges' gaps closed (#16735)
+        let closed = CLOSED_GAP_VOLUMES
+            .iter()
+            .find(|(c, _)| e["case"].as_str() == Some(c))
+            .map(|&(_, v)| v);
+        let v = closed.unwrap_or(rig);
         match got.volume {
             Some(g) => {
                 if v != 0.0 {
                     deviation = Some((g - v).abs() / v.abs());
                 }
                 if !within(g, v, tol) {
-                    diffs.push(format!("volume {g} (rig {v})"));
+                    diffs.push(match closed {
+                        Some(_) => format!("volume {g} (closed gaps {v}, rig {rig})"),
+                        None => format!("volume {g} (rig {v})"),
+                    });
+                }
+                if closed.is_some() {
+                    if let Err(x) = moved_from_the_rig(&result, rig, g) {
+                        diffs.push(x);
+                    }
                 }
             }
             None => diffs.push(format!("volume not measured (rig {v})")),
@@ -1460,6 +1483,61 @@ fn run_case_with_records(
     } else {
         Err(Stop::Fail(diffs.join(", ")))
     }
+}
+
+/// The cases whose volume moved off the rig's when `brep_volume` began closing tolerant
+/// edges' gaps (#16735), with their volume now. The rig's records stay as measured (its
+/// integrator leaked through the gaps as this one did); each case is graded on its volume
+/// now, and the move from the rig's is checked within the old leak's bound on the result
+/// ([`moved_from_the_rig`]).
+const CLOSED_GAP_VOLUMES: [(&str, f64); 5] = [
+    // rig 9440.034329164451
+    (
+        "report-peg-concave-round-r3-then-front-round-r1-5",
+        9_440.033_636_074_577,
+    ),
+    // rig 9404.790032915605
+    (
+        "report-peg-concave-round-then-front-round-r2",
+        9_404.789_833_109_295,
+    ),
+    // rig 9432.862095990427
+    (
+        "report-peg-front-round-r1-5-then-concave-round-r3",
+        9_432.861_779_882_673,
+    ),
+    // rig 9399.383292771683
+    (
+        "report-peg-front-round-then-concave-round-r2",
+        9_399.383_029_676_488,
+    ),
+    // rig 112506.83949124035
+    (
+        "16654-fillet-tube-joint-across-a-chamfer-crease-r1",
+        112_506.838_974_893_08,
+    ),
+];
+
+/// The one result body read into the kernel, its volume's move from the rig's `rig` to `got`
+/// checked by `volume_leak::moved_by_the_old_leak`.
+fn moved_from_the_rig(result: &[Slot], rig: f64, got: f64) -> Result<(), String> {
+    let [s] = result else {
+        return Err(format!("{} result bodies, not one", result.len()));
+    };
+    let bytes = s.body.to_smb(true).map_err(|x| format!("to_smb: {x}"))?;
+    // the case's own fixes: the reader refuses what they write otherwise
+    let mut k = solidcore::Kernel::default();
+    for name in session::fixes() {
+        let flag = k
+            .fixes
+            .flag_mut(name)
+            .ok_or_else(|| format!("unknown fix {name}"))?;
+        *flag = true;
+    }
+    let mut b = volume_leak::read_smb(&mut k, &bytes, true);
+    volume_leak::moved_by_the_old_leak(&k, &mut b, rig, got, VOLUME_ACCURACY).map(|line| {
+        println!("#16735 move: {line}");
+    })
 }
 
 /// A wrong endpoint, angle, tolerance cap or duplicate seam cannot pass the grader.
@@ -3053,10 +3131,7 @@ fn union_all_replays_an_odd_operand_list_without_consuming_inputs() {
 #[test]
 #[ignore = "the 17 captured unions are slow; also covered by the full kernel rig"]
 fn union_all_replays_captured_cases() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let mut files = Vec::new();
     entries(&corpus(), &mut files);
     files.sort();
@@ -3094,10 +3169,7 @@ fn union_all_replays_captured_cases() {
 #[test]
 #[ignore = "replays corpus cases with the rig's fixes; run with the kernel rig (--ignored)"]
 fn turn_cases_replay_their_traced_turn() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let listed = known_failing();
     for (case, refused) in [
         ("cov-fillet-turn-mitre-boss-base-r1", false),
@@ -3607,7 +3679,7 @@ fn grade(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) -> 
             g.moved = is_listed;
             g.hang = true;
             g.note
-                .push_str(" (the run stops here: the case holds the process kernel)");
+                .push_str(" (the run stops here: the case still runs on its thread)");
             return g;
         }
     };
@@ -4230,10 +4302,7 @@ fn extend_sheet_metadata_and_refusal_are_distinct() {
 #[test]
 #[ignore = "the whole corpus is slow; run it with --ignored, KERNEL_CASES_AREA shards it"]
 fn kernel_cases() {
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
-            .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let listed = known_failing();
     let areas: Option<Vec<String>> = std::env::var("KERNEL_CASES_AREA").ok().map(|a| {
         a.split(',')

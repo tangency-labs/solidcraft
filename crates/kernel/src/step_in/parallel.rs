@@ -18,6 +18,7 @@ pub(super) enum Source {
 }
 
 /// A solid item read and oriented where the file defines it, placed by each of its instances.
+#[derive(Clone)]
 pub(super) struct Part {
     pub body: Body,
     /// The shells are closed.
@@ -74,8 +75,15 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
-            let (part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
-            (Arc::new(part), Some(read))
+            // AP242 triangles (#3924): a mesh body, as STL and 3MF bring in.
+            if ex.get(*item).is_some_and(super::tessellated::is_item) {
+                let body = super::tessellated::read(ex, *item, units.units.len).map_err(|msg| Failure { read: true, msg })?;
+                let closed = body.is_closed_mesh();
+                (Arc::new(Part { body, closed, file_faces: 0, face_origin: Vec::new(), refused: None }), Some(Vec::new()))
+            } else {
+                let (part, read) = smlib_part(ex, *item, *units).or_else(|refused| surface_part(ex, *item, *units, refused))?;
+                (Arc::new(part), Some(read))
+            }
         }
     };
     let body = solidcraft_profile::scope("import", "step.place", || placed(&part.body, &job.placement))
@@ -87,7 +95,7 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
 
 /// The part's body where its instance goes: the very same body at the identity (it keeps the
 /// SMLib body the read made), else its record moved there.
-fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
+pub(super) fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
     if *m == IDENTITY {
         return Ok(body.clone());
     }
@@ -112,11 +120,17 @@ pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result:
 /// normal, so a sheet whose file uses some faces the other way is given to SMLib with those faces
 /// turned over (exactly, on the record) and they are turned back on SMLib's body: the body faces
 /// as the file does, and each of its faces is known to be the record's face it was.
-fn solid_part(solid: &solidcore_step::topology::Solid) -> std::result::Result<Part, Failure> {
+pub(super) fn solid_part(solid: &solidcore_step::topology::Solid) -> std::result::Result<Part, Failure> {
+    record_part(&solid.brep, &solid.face_origin, solid.sheet)
+}
+
+/// [`solid_part`] of a record given as plain data: the record, the file face each of its faces
+/// is, and whether it is a sheet.
+pub(super) fn record_part(record: &solidcore_record::brep::Brep, face_origin: &[u64], sheet: bool) -> std::result::Result<Part, Failure> {
     let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
-    let r = &solid.brep;
+    let r = record;
     let mut reversed = vec![false; r.faces.len()];
-    if solid.sheet {
+    if sheet {
         for s in &r.shells {
             if let solidcore_record::brep::Shell::Faces { faces, .. } = s {
                 for f in faces.iter().filter(|f| !f.forward) {
@@ -139,17 +153,19 @@ fn solid_part(solid: &solidcore_step::topology::Solid) -> std::result::Result<Pa
         // `of_natural[k]`; the body turned back's face i is SMLib's `back[i]`.
         let (natural, to_record) = turn(&as_read, &|f| reversed.get(f).copied().unwrap_or(false)).map_err(failed)?;
         // SMLib names a face it refuses by its index in the record it was given, `natural`'s.
-        let natural_origin: Vec<u64> = to_record.iter().map(|f| solid.face_origin.get(*f).copied()).collect::<Option<_>>().unwrap_or_default();
+        let natural_origin: Vec<u64> = to_record.iter().map(|f| face_origin.get(*f).copied()).collect::<Option<_>>().unwrap_or_default();
         let (smlib, of_natural) = smlib_body(natural.record()).map_err(|f| Failure { msg: name_record_face(&f.msg, &natural_origin), ..f })?;
         let record_of = |k: usize| of_natural.get(k).and_then(|j| to_record.get(*j)).copied();
         let (back, from) = turn(&smlib, &|k| record_of(k).and_then(|f| reversed.get(f)).copied().unwrap_or(false)).map_err(failed)?;
         let of_record = from.iter().map(|k| record_of(*k)).collect::<Option<Vec<usize>>>().ok_or_else(renumbered)?;
         (back.without_history(), of_record)
     } else {
-        smlib_body(r).map_err(|f| Failure { msg: name_record_face(&f.msg, &solid.face_origin), ..f })?
+        smlib_body(r).map_err(|f| Failure { msg: name_record_face(&f.msg, face_origin), ..f })?
     };
-    let face_origin = of_record.iter().map(|f| solid.face_origin.get(*f).copied()).collect::<Option<Vec<u64>>>().ok_or_else(renumbered)?;
-    Ok(Part { body, closed: !solid.sheet, file_faces: solid.face_origin.len(), face_origin, refused: None })
+    // The file's faces are the record's, however many faces SMLib's body has.
+    let file_faces = face_origin.len();
+    let face_origin = of_record.iter().map(|f| face_origin.get(*f).copied()).collect::<Option<Vec<u64>>>().ok_or_else(renumbered)?;
+    Ok(Part { body, closed: !sheet, file_faces, face_origin, refused: None })
 }
 
 fn renumbered() -> Failure {

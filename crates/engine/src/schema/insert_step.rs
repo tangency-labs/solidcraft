@@ -32,14 +32,17 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 
 use super::check::{located, whole};
-use super::component::{MatrixParam, MatrixTolerance};
+use super::component::{ExprMatrixParam, MatrixTolerance};
 use super::diagnostics::ProfileReport;
-use super::file::{HistoryParam, NamesParam, UpParam};
+use super::file::{HistoryParam, NamesParam, ReaderParam, UpParam};
 use super::types::not_blank_pattern;
 
 /// What `folder` says when it is neither true nor false, as `step_options` has it.
 const FOLDER_MESSAGE: &str =
     "`folder` must be true (an import that brings more than one item goes into a `Group #N` history folder) or false (no folder)";
+
+/// What `flatten` says when it is neither true nor false; the handler says the same.
+pub(crate) const FLATTEN_MESSAGE: &str = "`flatten` must be true (every solid comes in as a body of the import's component, with no subcomponents or joints) or false (the file's assembly structure is kept)";
 
 /// `path` as `path_arg` reads it: text that is not blank and under 4096 bytes, refused with the
 /// handler's own message.
@@ -59,13 +62,22 @@ fn folder_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error>
     value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole(FOLDER_MESSAGE)))
 }
 
-/// `matrix`: as given, `null` as left out, which is how the handler has it.
-fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MatrixParam>, D::Error> {
+/// `flatten`: true or false, `null` as left out, with the handler's message for anything else.
+fn flatten_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
     let value = Value::deserialize(d)?;
     if value.is_null() {
         return Ok(None);
     }
-    Ok(Some(MatrixParam(value)))
+    value.as_bool().map(Some).ok_or_else(|| D::Error::custom(whole(FLATTEN_MESSAGE)))
+}
+
+/// `matrix`: as given, `null` as left out, which is how the handler has it.
+fn matrix_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ExprMatrixParam>, D::Error> {
+    let value = Value::deserialize(d)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(ExprMatrixParam(value)))
 }
 
 /// The keys `file.insert_step` reads. See [`InsertStepParams`], which leaves out the keys the
@@ -102,12 +114,27 @@ pub struct InsertStepKeys {
     /// default), or only its solids as one Import feature.
     #[serde(default)]
     pub history: Option<HistoryParam>,
+    /// true brings every solid in as a body of the import's own component: no components below
+    /// it, no occurrences and no joints, a part the file places several times one body per
+    /// placement where the file places it. Each body's name is prefixed with the outermost named
+    /// part holding it (`R63: Terminal`), a placeholder name (empty, a bare number, or an
+    /// exporter's `… STEP translator …`) giving way to its nearest named product's. Default:
+    /// false (the file's assembly structure is kept).
+    #[serde(default, deserialize_with = "flatten_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub flatten: Option<bool>,
+    /// For a STEP (`.step`, `.stp`), FreeCAD or Rhino file (ignored for other files): which
+    /// reader reads it, `solidcraft` (the default) or `cadmpeg`.
+    #[serde(default)]
+    pub reader: Option<ReaderParam>,
     /// Where the import goes in the active component, as a rigid move applied after `up`: a
     /// row-major 3×4 (12 numbers) or 4×4 (16 numbers) matrix, flat or as rows, as
-    /// `occurrence.move` takes it. The reply gives the placement it made as `transform`.
+    /// `occurrence.move` takes it; its translation column may be length expressions that name
+    /// parameters, which the import then follows (#8192). The reply gives the placement it
+    /// made as `transform`.
     #[serde(default, deserialize_with = "matrix_key", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<MatrixParam>")]
-    pub matrix: Option<MatrixParam>,
+    #[schemars(with = "Option<ExprMatrixParam>")]
+    pub matrix: Option<ExprMatrixParam>,
     /// With `matrix` only: the largest accepted |RᵀR − I| per entry, above 0 and at most 0.001.
     /// Default: 1e-9. Read nowhere else, and `matrix::rigid` is the one that refuses both.
     #[serde(default)]
@@ -122,7 +149,7 @@ fn leave_unread(value: &mut Value) {
     };
     if !solidcraft_io::is_step_path(path) {
         // A file of another kind is refused before any other key is read.
-        for key in ["name", "up", "names", "folder", "history", "matrix", "tolerance"] {
+        for key in ["name", "up", "names", "folder", "history", "flatten", "reader", "matrix", "tolerance"] {
             keys.remove(key);
         }
         return;
@@ -136,7 +163,8 @@ fn leave_unread(value: &mut Value) {
 /// Insert a STEP, IGES, FreeCAD or Rhino file into the design as an Import base feature, in a new
 /// component named after the file and placed in the active component. An assembly's products
 /// become nested components held as one rigid group until `component.unlock`, and a part the file
-/// places more than once becomes one component with an occurrence per placement.
+/// places more than once becomes one component with an occurrence per placement; with `flatten` every
+/// solid is a body of the import's component instead.
 #[derive(Debug)]
 pub struct InsertStepParams(pub InsertStepKeys);
 
@@ -166,7 +194,7 @@ impl JsonSchema for InsertStepParams {
     }
 }
 
-const INSERT_STEP: &str = "Insert a STEP, IGES, FreeCAD or Rhino file into the design as an Import base feature, in a new component named after the file and placed in the active component. An assembly's products become nested components held as one rigid group until `component.unlock`, and a part the file places more than once becomes one component with an occurrence per placement.";
+const INSERT_STEP: &str = "Insert a STEP, IGES, FreeCAD or Rhino file into the design as an Import base feature, in a new component named after the file and placed in the active component. An assembly's products become nested components held as one rigid group until `component.unlock`, and a part the file places more than once becomes one component with an occurrence per placement. With `flatten`, every solid is a body of the import's own component instead, with no subcomponents or joints.";
 
 /// `path` is required, as the handler has it (not blank, fewer than 4096 bytes; `maxLength`
 /// counts characters, so 4095 is as close as the schema gets). `tolerance` has its shape only

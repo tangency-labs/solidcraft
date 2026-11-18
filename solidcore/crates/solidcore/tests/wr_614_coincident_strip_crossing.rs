@@ -245,6 +245,7 @@ fn wr_614_imported_tolerances_union_and_intersection_at_5e6() {
 /// When A continues well past the crossing ([-2, 10] instead of [-2, 2]) so B emerges
 /// out of A's y = 20 face up to y ~ 20.4, the crossing at x = 1.9999 is a real exit
 /// edge, not a two-sided coincident strip, and must not be dropped.
+/// The intersection, a wedge thinner than the tolerance, is empty.
 #[test]
 fn wr_614_wider_protruding_box_keeps_exit_crossing() {
     let mut k = Kernel::default();
@@ -263,9 +264,15 @@ fn wr_614_wider_protruding_box_keeps_exit_crossing() {
 
     let a = create_box(&mut k, Point3::new(-2.0, 16.0, 0.0), 12.0, SIDE, SIDE).unwrap();
     let (_, b) = strip_cubes(&mut k, D);
+    // The overlap is that wedge: 1e-4 across and 4 long, 5e-6 thick at most. Its two
+    // edges in each end plane (A's along y = 20, B's rising 5e-6 over that 1e-4) run
+    // between the same two vertices within their tolerances (1e-5 each) of each other
+    // over their whole length: one edge (docs/booleans.md, "One edge or two"), so no
+    // solid is left between them. Kept as two edges, the wedge was a body of 3 faces
+    // whose check failed (a loop of zero area, bad orientation) and whose volume
+    // measured 8.9e-20.
     let mut inter = boolean_intersection(&mut k, a, b).unwrap();
-    assert_eq!(shape(&inter).0, 0, "empty intersection");
-    assert_eq!(shape(&inter).3, 0, "no intersection solid");
+    assert_eq!(shape(&inter), (0, 0, 0, 0, false), "empty intersection");
     assert_valid(&mut k, &mut inter, "wider box intersection");
 }
 
@@ -552,18 +559,16 @@ fn wr_614_union_below_the_collapse_offsets_is_two_touching_solids() {
 }
 
 /// The narrow strip at d = 1e-6, on the collapse boundary (B's corner P0 and A's corner C
-/// 20.02 d = 2.002e-5 apart, just past the intersection tolerance 2e-5, so two points): the
-/// vertex the imprint makes at one corner needs a tolerance covering its certified gaps whose
-/// ball reaches the other, which it does not bound. No valid body holds both, so each
-/// Boolean is refused at the imprint, naming the tolerance needed and the one that fits,
-/// computed from the distances (never by building again). Here no tolerance fits (`None`):
-/// an earlier imprint at this offset made an edge 4 mm long with
-/// tolerance 8 (its curve dropped 4 mm off its face), and its vertex is one the ball
-/// would reach. That imprint is a separate defect; the refusal reports it as it finds it.
+/// 20.02 d = 2.002e-5 apart, just past the intersection tolerance 2e-5, so two points). An
+/// earlier imprint at this offset makes an edge 4 mm long with tolerance 8 (its curve dropped
+/// 4 mm off its face), a separate defect. The topology intersector cannot evaluate a point
+/// class of the face intersection on its face (no single nearest point on the face's
+/// surface), and `SetPointClassParameters` fails. C++ SMLib ignores that status and goes on
+/// with the point unevaluated; the fork passes it on (WR-658, tangency-labs/smlib e7ebc8d),
+/// so each Boolean is refused there, before any vertex tolerance is sized from the
+/// unevaluated point. No valid body is returned either way.
 #[test]
-fn wr_614_strip_at_its_collapse_boundary_is_refused_naming_the_size() {
-    use solidcore::error::boolean::BooleanFailure;
-    use solidcore::error::Reason;
+fn wr_614_strip_at_its_collapse_boundary_is_refused() {
     use solidcore::SolidError;
     for op in ["union", "intersection", "difference"] {
         let mut k = Kernel::default();
@@ -573,16 +578,15 @@ fn wr_614_strip_at_its_collapse_boundary_is_refused_naming_the_size() {
             "intersection" => boolean_intersection(&mut k, a, b),
             _ => boolean_difference(&mut k, a, b),
         };
-        let Err(SolidError::Failed(f)) = &r else {
+        let Err(e @ SolidError::Failed(_)) = &r else {
             panic!("{op}: a refusal, got {:?}", r.map(|b| shape(&b)));
         };
-        let Reason::Boolean(BooleanFailure::MergedVertexReaches { needed, fits_below }) = f.reason
-        else {
-            panic!("{op}: a merged vertex that reaches, got {f:?}");
-        };
         assert!(
-            needed > 0.0 && needed < 1e-4 && fits_below.is_none(),
-            "{op}: needed {needed}, fits below {fits_below:?}"
+            e.operation()
+                == "intersect::point_class::PointClassification::compute_point_parameters"
+                && e.sm_status() == Some(1001)
+                && e.to_string().contains("no single nearest point"),
+            "{op}: {e:?}"
         );
     }
 }
@@ -618,5 +622,78 @@ fn wr_614_diverging_same_side_boxes_keep_crossing() {
     assert!(
         (v - want).abs() <= ACCURACY * want,
         "volume {v}, want {want}"
+    );
+}
+
+/// tangency-labs/solidcraft#18166: the join of a body with a cone face B and a kept piece
+/// whose rolling-ball blend A leaves B tangentially along its edge E (E's other face lies
+/// on B). A and B are intersected along a curve that runs inside the tolerance band from
+/// E's end X to A's boundary edge N, 3.46e-3 from E's other end V, and the merge failed
+/// (`make_faceuse`: "the related vertex is not an end of the edge use"). solidcore
+/// certifies the strip between E and that curve within tolerance of B
+/// (`topology_intersector::curved_strip`) and drops the curve: the union is one valid
+/// manifold solid. The two operands touch along the coincident faces and do not overlap,
+/// so its volume is the sum of theirs: the certified enclosures (`enclose_volume`, each
+/// at most 0.04 wide, checked) of the union and of the two operands' sum must meet, and
+/// the enclosure of `union − (body + kept)`, rounded outward, must lie within ±0.12, three
+/// widths (PROVEN when it does: the true difference lies in it, so the union's volume is
+/// the operands' sum within 0.12, 2.5e-6 of it; a lost or doubled face piece moves it by
+/// far more; MEASURED: body [47534.0631202, 47534.1021680], kept [150.8624456,
+/// 150.9011549], union [47684.9444051, 47684.9842170], difference about [−0.059, 0.059]).
+#[test]
+fn curved_strip_join_union_is_one_valid_solid() {
+    use solidcore::geom::attribute::AttributeStore as Store;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::topology::api_files::read_brep_from_file;
+    use solidcore::topology::brep::p10::TopologyEnv;
+    use solidcore::topology::topology::NotifyRecords;
+
+    const WIDTH: f64 = 0.04;
+    let load = |k: &mut Kernel, bytes: &[u8]| {
+        let fresh = Brep::new();
+        let mut store = Store::new();
+        let mut records = NotifyRecords::new();
+        let key_of = |e| fresh.owner_identity(e);
+        let mut env = TopologyEnv {
+            all_attributes: &[],
+            attributes: &mut store,
+            key_of: &key_of,
+            records: &mut records,
+            next_key: 1 << 50,
+        };
+        let mut b = read_brep_from_file(k, Some(bytes.to_vec()), false, false, &mut env).unwrap();
+        b.refresh_cached_topology();
+        b
+    };
+    let mut k = Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    let mut body = load(&mut k, include_bytes!("data/curved_strip_join_body.smb"));
+    let mut kept = load(&mut k, include_bytes!("data/curved_strip_join_kept.smb"));
+    let body_v = enclose_volume(&k, &mut body, WIDTH).unwrap();
+    let kept_v = enclose_volume(&k, &mut kept, WIDTH).unwrap();
+
+    let mut u = boolean_union(&mut k, body, kept).unwrap();
+    assert_eq!(shape(&u).3, 1, "one solid region");
+    assert!(shape(&u).4, "manifold solid");
+    assert_valid(&mut k, &mut u, "curved strip join");
+    let v = enclose_volume(&k, &mut u, WIDTH).unwrap();
+    // (the operands touch and do not overlap: the union's volume is their sum)
+    for e in [&body_v, &kept_v, &v] {
+        assert!(e.hi - e.lo <= WIDTH, "{e:?} wider than {WIDTH}");
+    }
+    assert!(
+        v.lo <= body_v.hi + kept_v.hi && v.hi >= body_v.lo + kept_v.lo,
+        "union {v:?}, body {body_v:?}, kept {kept_v:?}"
+    );
+    // (each subtraction and sum rounds by under 1e-11 at these sizes: 1e-9 outward covers it)
+    let diff = (
+        v.lo - (body_v.hi + kept_v.hi) - 1e-9,
+        v.hi - (body_v.lo + kept_v.lo) + 1e-9,
+    );
+    assert!(
+        -3.0 * WIDTH <= diff.0 && diff.1 <= 3.0 * WIDTH,
+        "union − (body + kept) in {diff:?}"
     );
 }

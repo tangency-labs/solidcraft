@@ -125,7 +125,7 @@
 {"case":"gen0123","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
 {"case":"gen0124","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,8.0,0.0,4.0,1.0,7.0,2.0,6.0,3.0,5.0]}}
 {"case":"gen0125","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0],"tracker":{"blocks":[[559930.0,560882.0,32800607.0]],"n":172}}}
-{"case":"gen0126","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[22.000273171203112,22.000273171203112,297.0155900723766]],"n":68}}}
+{"case":"gen0126","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[22.000256345968186,22.000256345968186,297.01478246110014]],"n":68}}}
 {"case":"gen0127","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
 {"case":"gen0128","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0],"tracker":[0.0,0.0,0.0,0.0]}}
 {"case":"gen0129","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0],"tracker":{"blocks":[[79969.0,80105.0,943535.0]],"n":28}}}
@@ -449,13 +449,13 @@
 {"case":"make_wire_2_r0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[14.0,14.0,113.0]],"n":18}}}
 {"case":"make_wire_2_r1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[14.0,14.0,113.0]],"n":18}}}
 {"case":"make_wire_same_vertex","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[13.0,13.0,96.0]],"n":18}}}
-{"case":"mate_Endcap_e0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
+{"case":"mate_Endcap_e0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
 {"case":"mate_Endcap_e0_noedit","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
-{"case":"mate_Endcap_e1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
+{"case":"mate_Endcap_e1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
 {"case":"mate_Endcap_e1_noedit","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
-{"case":"mate_Endcap_e2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
+{"case":"mate_Endcap_e2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
 {"case":"mate_Endcap_e2_noedit","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
-{"case":"mate_Endcap_e3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0]}}
+{"case":"mate_Endcap_e3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
 {"case":"mate_Endcap_e3_noedit","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
 {"case":"mate_Mouse_e0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
 {"case":"mate_Mouse_e0_noedit","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1001.0]}}
@@ -963,7 +963,7 @@
 {"case":"rebuild_box_with_large_fillet","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[30.008851130799354,30.008851130799354,977.6239297213544]],"n":77}}}
 {"case":"rebuild_cone","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,1.0,1.0,0.0,0.0,0.00001,0.00001]}}
 {"case":"rebuild_disk","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1.0,1.0,0.0,0.0,0.00001,0.00001]}}
-{"case":"rebuild_ellips_ts2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[22.000273171203112,22.000273171203112,297.0155900723766]],"n":68}}}
+{"case":"rebuild_ellips_ts2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[22.000256345968186,22.000256345968186,297.01478246110014]],"n":68}}}
 {"case":"rebuild_net","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[0.00002,0.00002,0.00027000000000000006]],"n":17}}}
 {"case":"rebuild_plane10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.00001,0.00001,0.00001,0.00001]}}
 {"case":"rebuild_plane_circ","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,1.0,0.0,0.00001]}}

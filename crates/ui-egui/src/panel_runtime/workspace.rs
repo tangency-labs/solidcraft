@@ -324,6 +324,19 @@ impl WorkspacePanelHost {
         }
     }
 
+    /// Puts the panel's `ContentSlot::Title` in its title's place, `min_width` wide at least
+    /// (narrower headers move their actions to a row below), or gives the title back (`None`).
+    pub(crate) fn set_header_content(&mut self, instance: InstanceId, min_width: Option<f32>) {
+        let slots = &mut self.options.geometry.header_content;
+        let changed = match min_width {
+            Some(width) => slots.insert(instance, width) != Some(width),
+            None => slots.remove(&instance).is_some(),
+        };
+        if changed {
+            self.invalidate_geometry();
+        }
+    }
+
     pub(crate) fn set_live_drag(&mut self, enabled: bool) {
         self.live_drag = enabled;
         self.interaction.set_live_drag(enabled);
@@ -2539,7 +2552,10 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                 drag: matches!(target, HostPointerTarget::Header { .. } | HostPointerTarget::Tab { .. }),
                                 title: matches!(target, HostPointerTarget::Header { .. }),
                                 grip_only: matches!(target, HostPointerTarget::Header { .. })
-                                    && (tab_drop.is_some() || section.tabs.len() + section.hidden_tabs.len() > 1),
+                                    && (paint_section.side_strip
+                                        || paint_section.header_content.is_some()
+                                        || tab_drop.is_some()
+                                        || section.tabs.len() + section.hidden_tabs.len() > 1),
                                 rtl: self.layout.direction == Direction::Rtl,
                             },
                             if matches!(target, HostPointerTarget::Header { instance } | HostPointerTarget::Tab { instance }
@@ -2574,11 +2590,11 @@ impl PanelHost for WorkspaceContentHost<'_> {
                         }
                         _ => {}
                     });
+                    // Each panel's header actions as `<panel>:<action>` (`history:play`, `browser:magnifier`).
                     if let HostPointerTarget::HeaderAction { instance, action } = target
-                        && instance.0 == "history"
                         && response.interact_rect.is_positive()
                     {
-                        crate::scenario::publish_target(&format!("history:{}", action.0), response.interact_rect);
+                        crate::scenario::publish_target(&format!("{}:{}", instance.0, action.0), response.interact_rect);
                     }
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();
@@ -2650,7 +2666,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 let t = solidcraft_theme::Tokens::get();
                 // The title and its controls share the card background. One
                 // kit separator spans the header, rather than per-control tiles.
-                if !section.inline {
+                if !section.inline && !paint_section.side_strip {
                     let header = egui_rect(paint_section.header);
                     if !section.collapsed {
                         t.secondary_hline(ui.painter(), header.x_range(), header.bottom(), t.dialog_rule);
@@ -2669,6 +2685,20 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 let mut content_ui = ui.new_child(egui::UiBuilder::new().id_salt("content_clip").max_rect(paint_bounds));
                 content_ui.set_clip_rect(content_clip);
                 let content_ui = &mut content_ui;
+                if let Some(title) = paint_section.header_content {
+                    render_slot(
+                        content_ui,
+                        ContentSlot::Title,
+                        title,
+                        content_context,
+                        content,
+                        services,
+                        self.frame_content,
+                        self.content_reports,
+                        wanted_focus,
+                        &mut failure,
+                    );
+                }
                 if !section.collapsed && section.inline {
                     if let Some(body) = paint_section.inline_content {
                         render_slot(
@@ -2982,6 +3012,9 @@ fn paint_drop_tabs(
 }
 
 fn content_header_bounds(section: &HostSection) -> Option<LogicalRect> {
+    if section.side_strip {
+        return None;
+    }
     let body = section.body?;
     let y = super::layout::bottom(section.action_bar.unwrap_or(section.header));
     let height = body.origin.y - y;
@@ -3086,7 +3119,9 @@ impl WorkspacePanelHost {
                 if runtime.layout().interaction().focused.as_ref() != Some(instance) || section.collapsed {
                     presentation.push(HostSharedAction::Focus);
                 }
-                if section_collapsible(layout, runtime.layout().registry(), section).unwrap_or(false) {
+                if !frame.layout.sections.iter().any(|card| card.section == section.id && card.side_strip)
+                    && section_collapsible(layout, runtime.layout().registry(), section).unwrap_or(false)
+                {
                     presentation.push(HostSharedAction::Collapse);
                 }
                 if section.preferred_extent.is_some()
@@ -3430,20 +3465,24 @@ fn shared_label(
             .unwrap_or_else(|| locale.text("ui.panel_host.tab"));
         return locale.format("ui.panel_host.join_target", &[("title", title)]);
     }
+    // In a section with several tabs, moving takes only this tab, not the whole panel (#17217).
+    let one_of_tabs = runtime.layout().layout().containing(instance).is_ok_and(|section| section.tabs.len() > 1);
+    let side = |zone: &Zone| matches!(runtime.environment().direction.edge(*zone), Ok(PhysicalEdge::Left));
     locale
         .text(match action {
             HostSharedAction::Focus => "ui.panel_host.focus",
             HostSharedAction::Close => "ui.panel_host.close",
             HostSharedAction::Collapse => "ui.panel_host.collapse",
             HostSharedAction::ResetHeight => "ui.panel_host.reset_height",
-            HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) => {
-                if matches!(runtime.environment().direction.edge(*zone), Ok(PhysicalEdge::Left)) {
-                    "ui.panel_host.left"
-                } else {
-                    "ui.panel_host.right"
-                }
-            }
+            HostSharedAction::Move(zone @ (Zone::Left | Zone::Right)) => match (side(zone), one_of_tabs) {
+                (true, false) => "ui.panel_host.left",
+                (false, false) => "ui.panel_host.right",
+                (true, true) => "ui.panel_host.move_tab_left",
+                (false, true) => "ui.panel_host.move_tab_right",
+            },
+            HostSharedAction::Move(Zone::Bottom) if one_of_tabs => "ui.panel_host.move_tab_bottom",
             HostSharedAction::Move(Zone::Bottom) => "ui.panel_host.bottom",
+            HostSharedAction::Move(Zone::Floating) if one_of_tabs => "ui.panel_host.move_tab_floating",
             HostSharedAction::Move(Zone::Floating) => "ui.panel_host.floating",
             HostSharedAction::Move(Zone::Window) | HostSharedAction::Popout => "ui.panel_host.popout",
             HostSharedAction::Join(_) => "ui.panel_host.join",

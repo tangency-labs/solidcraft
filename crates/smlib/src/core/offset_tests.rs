@@ -59,14 +59,14 @@ impl Shape {
                 let c = Curve::from(create_line_segment(v3(a), v3(b))?);
                 create_linear_sweep(k, &[Some(&c)], v3(dir), dist, false)
             })
-            .map(Body::new)
+            .map(Body::from_kernel)
             .unwrap(),
             Shape::ArcSheet(o, r, degrees, h) => run("sheet", |k| {
                 let frame = Axis2Placement::new(v3(o), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
                 let c = Curve::from(Ellipse::create_canonical_circle(k, &frame, r, Some(&Extent1d::from_min_max(0.0, degrees)), None)?);
                 create_linear_sweep(k, &[Some(&c)], Vec3::new(0.0, 0.0, 1.0), h, false)
             })
-            .map(Body::new)
+            .map(Body::from_kernel)
             .unwrap(),
             Shape::Notched => {
                 let block = make_box([0.0; 3], [60.0, 40.0, 10.0]).unwrap();
@@ -581,6 +581,42 @@ fn mitred_rounds_follow_a_moved_top() {
         let v = volume(&moved, 1e-8).unwrap();
         assert_eq!(counts(&moved).unwrap(), n, "d {d}");
         assert!(rel(v, analytic(d)) < 1e-6, "d {d}: {v} vs {}", analytic(d));
+    }
+}
+
+/// A 100 x 60 x 5 plate extruded from a profile whose corners are rounded r 2 (#17414): its long
+/// side moved out between two rounds builds the 100 x (60 + d) plate with its corners still
+/// rounded, (100 (60 + d) - 4 (4 - pi)) 5. Each side's plane spans its own face only, so the new
+/// corners where the rounds come off lie past them.
+#[test]
+fn a_side_between_profile_rounds_moves() {
+    use crate::sweeps::{Curve, DraftCorner};
+    let (w, h, r) = (100.0, 60.0, 2.0);
+    let arc = |c: [f64; 2], start: f64| Curve::Arc {
+        center: [c[0], c[1], 0.0],
+        axis: Z,
+        reference: [1.0, 0.0, 0.0],
+        radius: r,
+        start,
+        end: start + PI / 2.0,
+    };
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], a[1], 0.0], end: [b[0], b[1], 0.0] };
+    let profile = [
+        line([r, 0.0], [w - r, 0.0]),
+        arc([w - r, r], 1.5 * PI),
+        line([w, r], [w, h - r]),
+        arc([w - r, h - r], 0.0),
+        line([w - r, h], [r, h]),
+        arc([r, h - r], 0.5 * PI),
+        line([0.0, h - r], [0.0, r]),
+        arc([r, r], PI),
+    ];
+    let plate = super::sweep::extrude(&profile, Z, 5.0, 0.0, DraftCorner::default(), true).unwrap();
+    for d in [80.0, 1.0] {
+        let moved = offset_faces(&plate, &[[55.0, 0.0, 2.5]], TOL, d).unwrap_or_else(|e| panic!("d {d}: {e}"));
+        let (v, want) = (volume(&moved, 1e-8).unwrap(), (w * (h + d) - 4.0 * (4.0 - PI)) * 5.0);
+        assert_eq!(counts(&moved).unwrap()[0], 10, "d {d}");
+        assert!(rel(v, want) < 1e-9, "d {d}: {v} vs {want}");
     }
 }
 

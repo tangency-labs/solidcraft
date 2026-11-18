@@ -1,6 +1,7 @@
 //! Why an operation failed, as data. An application words these for its users; the
 //! [`std::fmt::Display`] here is a plain statement of the variant for logs and tests.
 
+use solidcore::error::blend::BlendFailure;
 use solidcore::SolidError;
 
 pub use solidcore::topology::brep::SolidTest;
@@ -53,6 +54,16 @@ pub enum Error {
         /// Why there is no room.
         why: Option<RoomReason>,
     },
+    /// A blend whose surface the kernel could not certify within its tolerance in the work a
+    /// certificate is allowed (`BlendFailure::NotCertified`): the round is refused (not built),
+    /// no size named. The budget, not the geometry, decides it: the kernel's class is
+    /// `NotWithinTolerance`, not one of its refusal classes.
+    BlendNotCertified {
+        /// The spans its certificate halved.
+        halvings: usize,
+        /// Its stations.
+        stations: usize,
+    },
     /// A shell, offset or thicken whose wall is thicker than a face curves (the kernel's
     /// `OffsetFailure::Folds`): the largest wall that works, when the kernel names one.
     WallFolds {
@@ -64,6 +75,18 @@ pub enum Error {
     Unsupported(&'static str),
     /// A blend's edges meet at a vertex of a kind no blend corner handles yet.
     CornerUnsupported,
+    /// A swept turn ([`crate::Turn::Swept`]) the kernel does not build at the corner `at`:
+    /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
+    /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
+    /// of four edges, a curved, drafted or tangent side edge); `why` is the kernel's reason.
+    TurnRefused {
+        /// Whether no radius builds it; otherwise the corner is of a kind not built yet.
+        room: bool,
+        /// The kernel's reason.
+        why: String,
+        /// The corner's point, where the kernel's session notes it.
+        at: Option<[f64; 3]>,
+    },
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
     /// back a corner only where every edge meeting it is blended, all convex or all concave, or
     /// of mixed convexity with curvature-continuous rounds between planes.
@@ -290,6 +313,23 @@ pub enum Error {
         /// The least radius that rounds it.
         smallest: f64,
     },
+    /// A control-point edit that moves a point on edge `edge` (its record index), whose two
+    /// faces' boundary rows along it are not one curve's control polygon (the kernel's
+    /// `seam_twins`): moving the point on one face would open the seam, and the faces are not
+    /// rebuilt to make the rows match. Why, as the kernel names it.
+    SeamMismatch {
+        /// The edge's record index.
+        edge: usize,
+        /// Why its two rows are not one curve's.
+        why: crate::surface_cvs::SeamMismatch,
+    },
+    /// A control-point edit that moves a vertex ending edge `edge` (its record index), which
+    /// cannot follow it: it is not a line between planar faces the edit keeps, so moving its end
+    /// would leave a gap at the vertex.
+    EdgeLeftBehind {
+        /// The edge's record index.
+        edge: usize,
+    },
     /// A corner's setback too short for the corner: it stops short of where the rails of the
     /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
     /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
@@ -372,6 +412,15 @@ pub enum OffsetRefusal {
         /// The radius of curvature the face attains on the displaced side.
         radius: f64,
     },
+    /// The wall reaches half the width between two opposite planar faces (a square boss inset
+    /// by half its width): the material between them has no offset left. `largest` is half
+    /// the narrowest such width, the largest wall that fits.
+    WallsMeetAcross {
+        /// The offset distance asked for (signed).
+        distance: f64,
+        /// The largest wall that fits.
+        largest: f64,
+    },
     /// Loops of the face's offset cross in a way the offset does not resolve: how.
     LoopsCross {
         /// How they cross.
@@ -399,6 +448,13 @@ pub enum OffsetRefusal {
     /// In a local operation, the new surfaces of the face and of its neighbour across an
     /// edge meet nowhere near the edge, so the edge cannot be found again.
     FacesApart,
+    /// In a local operation, the face moves past where the curved face beside it ends (a
+    /// sphere's cap moved past the sphere's top): no extension of that face meets it there.
+    /// `largest` is how far the face could move and still meet it.
+    PastSide {
+        /// How far the face could move and still meet the face beside it.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -439,6 +495,11 @@ impl std::fmt::Display for OffsetRefusal {
                 f,
                 "its offset by {distance} collapses (a radius of curvature {radius})"
             ),
+            OffsetRefusal::WallsMeetAcross { largest, .. } => write!(
+                f,
+                "the wall reaches half the width between two opposite faces of a boss; the \
+                 largest wall that fits is {largest}"
+            ),
             OffsetRefusal::LoopsCross { crossing } => write!(
                 f,
                 "its offset's loops cross in a way the offset cannot resolve: {crossing}"
@@ -463,6 +524,11 @@ impl std::fmt::Display for OffsetRefusal {
                     "its new surface and a neighbour's meet nowhere near their edge"
                 )
             }
+            OffsetRefusal::PastSide { largest } => write!(
+                f,
+                "it would move past where the curved face beside it ends; it meets that face \
+                 only while it moves less than {largest}"
+            ),
             OffsetRefusal::ReachUncertified => {
                 write!(
                     f,
@@ -662,6 +728,26 @@ impl RoomReason {
             }
         }
     }
+
+    /// The reason in words for a blend whose size is `kind`: a chamfer (a distance or a scale)
+    /// has no rolling ball, so its reasons speak of its offset instead (#12128); a round's are
+    /// [`RoomReason::words`].
+    #[must_use]
+    pub const fn words_for(self, kind: FitKind) -> &'static str {
+        if !matches!(kind, FitKind::Distance | FitKind::Scale) {
+            return self.words();
+        }
+        match self {
+            RoomReason::BallDoesNotFit => "the chamfer's offset does not fit a face it runs along",
+            RoomReason::RailLeavesFace => "the chamfer's contact line leaves the face it runs along",
+            RoomReason::FaceConsumed => "the chamfers take the whole of a face they run along",
+            RoomReason::BallsFold => "the chamfer's offsets fold over each other along the edge",
+            RoomReason::OffsetCollapses => {
+                "the offset is as wide as a face it runs along, so the chamfer cannot end at the edge's end"
+            }
+            other => other.words(),
+        }
+    }
 }
 
 impl FitKind {
@@ -711,9 +797,20 @@ impl std::fmt::Display for Error {
             Error::TooLarge { size, kind, .. } => {
                 write!(f, "too large: the largest {kind:?} that fits is {size}")
             }
+            Error::BlendNotCertified { halvings, stations } => write!(
+                f,
+                "the blend could not be certified within its tolerance in the work allowed ({halvings} spans halved, {stations} stations)"
+            ),
             Error::WallFolds { largest } => write!(f, "the wall folds (largest {largest:?})"),
             Error::CornerUnsupported => {
                 write!(f, "a blend corner of this kind is not supported yet")
+            }
+            Error::TurnRefused { why, at, .. } => {
+                write!(f, "the swept corner is not built")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                write!(f, ": {why}")
             }
             Error::CornerRefused { corner } => write!(f, "corner {corner} is not set back"),
             Error::RoundsCross { at, fit } => write!(
@@ -824,6 +921,14 @@ impl std::fmt::Display for Error {
                 f,
                 "the round of edge {edge} is too small to change the part: the smallest is {smallest}"
             ),
+            Error::SeamMismatch { edge, why } => write!(
+                f,
+                "edge {edge} is not one curve on its two faces, so its points cannot move together: {why}"
+            ),
+            Error::EdgeLeftBehind { edge } => write!(
+                f,
+                "edge {edge} cannot follow its moved end: it is not a line between planar faces"
+            ),
             Error::SetbackTooShort {
                 vertex: Some(vertex),
                 least,
@@ -891,6 +996,12 @@ pub(crate) fn status(e: SolidError) -> Error {
         SolidError::PreparationRequired { .. } => Error::Exception,
         // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
-        e => Error::Status(e.sm_status().unwrap_or(SM_ERR)),
+        e => match e.blend_failure() {
+            // a blend certificate that ran out of its work budget: a refusal of its own
+            Some(&BlendFailure::NotCertified { halvings, stations }) => {
+                Error::BlendNotCertified { halvings, stations }
+            }
+            _ => Error::Status(e.sm_status().unwrap_or(SM_ERR)),
+        },
     }
 }

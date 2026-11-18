@@ -258,7 +258,7 @@ fn eval_and_inspect_reject_invalid_options_before_script_execution_or_reporting(
 #[test]
 fn cli_loads_both_design_encodings_by_contents() {
     let dir = Scratch::new();
-    for extension in ["sc", "solidcraft", "solvecraft", "json"] {
+    for extension in ["sc", "solidcraft", "json"] {
         let saved = dir.0.join(format!("box.{extension}"));
         json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&saved).output().unwrap());
         let bytes = std::fs::read(&saved).unwrap();
@@ -587,8 +587,8 @@ fn results_without_script_still_fail() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("--results needs a script"));
 }
 
-/// Compatibility shim (docs/compatibility.md): a design saved before the rename, with the
-/// legacy extension and format tag, still opens; re-saving writes the current tag.
+/// A design saved before the rename, with the old extension and format tag, still opens by its
+/// contents; re-saving writes the current tag.
 #[test]
 fn legacy_extension_and_format_tag_still_open() {
     let dir = Scratch::new();
@@ -610,6 +610,10 @@ fn legacy_extension_and_format_tag_still_open() {
     json_output(cli().args(["run", "--in"]).arg(&resaved).arg(dir.script()).arg("--save").arg(&current).output().unwrap());
     assert_eq!(body_count(&current), 3);
     assert!(solidcraft_engine::io::is_design_container(&std::fs::read(&current).unwrap()), "a .sc file is a design container");
+    // The pre-rename extension is no longer ours, but a container saved under it opens by contents.
+    let legacy_container = dir.0.join("container.solvecraft");
+    std::fs::copy(&current, &legacy_container).unwrap();
+    assert_eq!(body_count(&legacy_container), 3);
 }
 
 /// `snapshot` starts from `--in` as `run` does (its script runs on that design), and refuses an
@@ -651,13 +655,14 @@ fn snapshot_runs_its_script_on_the_in_design() {
     }
 }
 
-/// An unknown command's error suggests the id that was meant.
+/// An unknown command's error suggests the id that was meant first; other close ids (such as
+/// `drawing.open`) may follow it.
 #[test]
 fn unknown_command_suggests_the_closest_id() {
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open` or `panel.open`?"),
+        String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`, `panel.open` or `drawing.open`?"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -970,7 +975,10 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
     let run = json!({"path":package,"approval":inspected["approval"],"entry":"make"}).to_string();
     let refused = cli().args(["exec", "plugin.run", &run]).output().unwrap();
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("user host limits"));
+    // The refusal names the plugin, gives both numbers and the CLI setting that raises the ceiling.
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(stderr.contains("Sample: it asks for 200000000000 fuel, and plugins may use 100000000000."), "{stderr}");
+    assert!(stderr.contains("max_fuel in the --plugin-limits file"), "{stderr}");
     let policy = scratch.0.join("limits.json");
     std::fs::write(&policy, json!({"max_fuel":u64::MAX,"max_memory_mib":512}).to_string()).unwrap();
     let high = json_output(cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.inspect", &args]).output().unwrap());
@@ -1006,6 +1014,56 @@ fn explicit_plugin_host_settings_allow_reviewed_larger_requests_and_reject_bad_p
         std::fs::write(&policy, bad.to_string()).unwrap();
         let o = cli().arg("--plugin-limits").arg(&policy).args(["exec", "plugin.run", &run]).output().unwrap();
         assert!(!o.status.success());
+    }
+}
+
+/// `--keep-plugin-approvals`: a plugin installed and approved in one run keeps its approvals in the
+/// next, until they are revoked. Without it (the default) approvals last for the run; nothing
+/// outside `--plugins-dir` is read or written.
+#[test]
+fn plugin_approvals_are_kept_between_runs_only_when_asked() {
+    let scratch = Scratch::new();
+    let plugins = scratch.0.join("plugins");
+    let manifest = json!({"id":"sample","name":"Sample","version":"1","capabilities":["commands@0.1"],"runtime":{"module":"plugin.wasm","entries":["make"],"commands":["solid.box"],"limits":{"fuel":1_000_000,"memory_mib":256,"deadline_ms":30000}}});
+    let zip = scratch.0.join("sample.zip");
+    let bytes = solidcraft_engine::io::safe_zip::write(&[("plugin.json", manifest.to_string().as_bytes()), ("plugin.wasm", b"inert bytes")]).unwrap();
+    std::fs::write(&zip, bytes).unwrap();
+    let run = |keep: bool, command: &str, params: Value| {
+        let mut cli = cli();
+        cli.arg("--plugins-dir").arg(&plugins);
+        if keep {
+            cli.arg("--keep-plugin-approvals");
+        }
+        cli.args(["exec", command, &params.to_string()]).output().unwrap()
+    };
+    let exec = |command: &str, params: Value| run(true, command, params);
+    let inspect = json!({"path": plugins.join("sample")});
+    // The default: approved for that run only, nothing stored.
+    json_output(run(false, "plugin.install", json!({"path": zip, "approve": {"memory_mib": 256}})));
+    assert!(plugins.join("sample").is_dir() && !plugins.join(".grants").exists());
+    assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false);
+    json_output(exec("plugin.install", json!({"path": zip, "replace": true, "approve": {"memory_mib": 256}})));
+    assert!(plugins.join(".grants/sample.json").is_file());
+    assert_eq!(json_output(run(false, "plugin.inspect", inspect.clone()))["within_host_limits"], false, "not read without the flag");
+    assert_eq!(json_output(exec("plugin.inspect", inspect.clone()))["within_host_limits"], true, "the approved memory, in a later run");
+    let listed = json_output(exec("plugin.grants", json!({})));
+    assert_eq!((listed["grants"][0]["status"].as_str(), listed["grants"][0]["memory_mib"].as_u64()), (Some("current"), Some(256)));
+    assert_eq!(json_output(exec("plugin.revoke", json!({"id": "sample"})))["revoked"], true);
+    assert_eq!(json_output(exec("plugin.inspect", inspect))["within_host_limits"], false, "revoked: the app's ceiling again");
+    assert_eq!(json_output(exec("plugin.grants", json!({})))["grants"], json!([]));
+    for bad in [vec!["--plugins-dir"], vec!["--plugins-dir=", "commands"], vec!["--plugins-dir", "a", "--plugins-dir", "b", "commands"]] {
+        let output = cli().args(bad).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--plugins-dir"));
+    }
+    for flag in ["--plugins-dir", "--keep-plugin-approvals"] {
+        let mut connected = cli();
+        connected.arg(flag);
+        if flag == "--plugins-dir" {
+            connected.arg(&plugins);
+        }
+        let connected = connected.args(["exec", "plugin.grants", "{}", "--connect", "127.0.0.1:1"]).output().unwrap();
+        assert!(String::from_utf8_lossy(&connected.stderr).contains("control local sessions"), "{flag}: refused before any connection attempt");
     }
 }
 

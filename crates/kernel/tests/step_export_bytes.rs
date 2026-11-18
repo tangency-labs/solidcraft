@@ -49,14 +49,21 @@ fn fixtures(root: &std::path::Path) -> Vec<String> {
     out
 }
 
+/// Fixtures whose export is written but does not read back: a face that winds round its axis more
+/// than a turn is written on its multi-turn spline form, and the reader makes no pcurves on a
+/// spline form that overlaps itself (its edge's pcurve comes out on another sheet, 6 mm off).
+/// The export's bytes are still pinned below. Tracked in #17080. Shrinks only.
+const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"];
+
 /// (fixture, digest of its export) as written before the move, plus new fixtures; the torus-ring spline
-/// is now an exact torus (#16297).
+/// is now an exact torus (#16297), and an edge on a rational spline that is exactly a circular arc
+/// is written as that circle (#17929).
 #[rustfmt::skip]
 const DIGESTS: &[(&str, &str)] = &[
-    ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "197c80fea864545e"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/closed-spline-cylinder.step", "2b7d457b87394f2c"),
     ("solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step", "5545d4ee93431803"),
-    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "8432fa140e74c146"),
-    ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "c5176ac4d067ab52"),
+    ("solidcore/crates/solidcore-step/tests/fixtures/rod_doubled_edge.step", "7e5ec3041433853c"),
+    ("tests/kernel-cases/import/1721-closed-bspline-tube-face/input.step", "30a183e14f3b58b3"),
     ("tests/kernel-cases/import/2043-outer-bound-opposing-surface-sense/input.step", "d8c5f6b3ce4ea3cf"),
     ("tests/kernel-cases/import/258-cone-point-vertex/input.step", "be8c91bead2f5a20"),
     ("tests/kernel-cases/import/258-cone-to-point/input.step", "112fb1ed128b8863"),
@@ -66,31 +73,36 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/kernel-cases/import/3352-vertex-off-its-edge-curve/input.step", "5e6454bed8d85bc3"),
     ("tests/kernel-cases/import/3730-void-oriented-shell-false/input.step", "e461e3732a479928"),
     ("tests/kernel-cases/import/3880-cylinder-seam-edge/input.step", "183935caa3bdda17"),
-    ("tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step", "c072f4d08cfefb04"),
-    ("tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step", "c0e524535a1b5a62"),
+    ("tests/kernel-cases/import/3880-nurbs-hemisphere-dome/input.step", "2800a82d4a03a926"),
+    ("tests/kernel-cases/import/3963-closed-spline-edge-vertex-past-start/input.step", "3bc30242fa9c3a3f"),
     ("tests/kernel-cases/import/4005-cylinder-written-as-near-zero-cone/input.step", "6f13fdd4ff99c151"),
     ("tests/kernel-cases/import/4006-plane-written-as-cone-of-nearly-right-angle/input.step", "05c07f99a56d82c1"),
     ("tests/step-conformance/cone_point.step", "f8011a27d4b1fa9f"),
     ("tests/step-conformance/cone_point_vertex.step", "bc4c5fab88085533"),
     ("tests/step-conformance/cylinder.step", "e4e777124e084560"),
     ("tests/step-conformance/cylinder_inch.step", "11564eb93051bc70"),
-    ("tests/step-conformance/cylinder_nurbs.step", "d2fa55692f333099"),
+    ("tests/step-conformance/cylinder_nurbs.step", "6927d8cc4a4aca60"),
     ("tests/step-conformance/cylinder_placed.step", "54916a649b258555"),
     ("tests/step-conformance/cylinder_seam.step", "fba8ee481853a674"),
     ("tests/step-conformance/cylinder_twice.step", "0d40e99e9e7e5d6d"),
     ("tests/step-conformance/dome.step", "054949758cf68925"),
-    ("tests/step-conformance/dome_nurbs.step", "9fdf321f816644ca"),
+    ("tests/step-conformance/dome_nurbs.step", "400aef72aa5eead4"),
     ("tests/step-conformance/far_cylinder.step", "dcaaaadcc9f0ef04"),
     ("tests/step-conformance/grooved_shaft.step", "83cb26c7776bcf55"),
     ("tests/step-conformance/plate_100_holes.step", "414bd143a34716e6"),
     ("tests/step-conformance/sheet_disc.step", "a88c4d5661255edc"),
     ("tests/step-conformance/tiny_pin.step", "e86130e9cc19deff"),
-    ("tests/step-conformance/torus_ring_nurbs.step", "fb58a511c48a933c"),
+    ("tests/step-conformance/torus_ring_nurbs.step", "25b37c2f5bf478a5"),
     ("tests/step-conformance/washer.step", "490ba83889e1002f"),
+    ("tests/step-regressions/block_edge_off_its_face.step", "8e25cc9a701de87d"),
     ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
-    ("tests/step-regressions/cylinder_spline_rims.step", "609aa9a609b95308"),
-    ("tests/step-regressions/rod_doubled_edge.step", "8432fa140e74c146"),
-    ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "d2c476d6163c1863"),
+    ("tests/step-regressions/cylinder_spline_rims.step", "ed34ee7908eddf1d"),
+    ("tests/step-regressions/hole_round_revolved.step", "260e07ac4dec005d"),
+    ("tests/step-regressions/rod_doubled_edge.step", "7e5ec3041433853c"),
+    ("tests/step-regressions/thread_crest_band.step", "30923bc03bcfd757"),
+    ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "0909a2e6b030bd2c"),
+    ("tests/step-regressions/torus_patch_and_rest.step", "a82c8cbad7038460"),
+    ("tests/step-regressions/torus_patch_and_rest_revolved.step", "6b2f15c1dc602029"),
     ("(assembly)", "45b6ef6cf64529e2"),
 ];
 
@@ -136,7 +148,13 @@ fn step_export_keeps_its_bytes_and_reads_back() {
         let file_name = name.rsplit('/').next().unwrap_or(&name).to_string();
         let out = step_export_bodies(&bodies, &StepHeader { file_name, ..Default::default() }).unwrap_or_else(|e| panic!("{name}: {e}"));
         table.push((name.clone(), digest(&out)));
-        if let Err(e) = round_trip(&name, &measures(&imp.bodies), &out) {
+        let read_back = round_trip(&name, &measures(&imp.bodies), &out);
+        if NO_READ_BACK.contains(&name.as_str()) {
+            // Still the known gap: when it is fixed this fails, and the fixture leaves the list.
+            if read_back.is_ok() {
+                failures.push(format!("{name}: reads back now; take it off NO_READ_BACK"));
+            }
+        } else if let Err(e) = read_back {
             failures.push(e);
         }
     }

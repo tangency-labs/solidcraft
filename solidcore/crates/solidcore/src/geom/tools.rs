@@ -8,6 +8,7 @@
 //! | [`find_first_point_within_tol_to_pnt`] | `SmTools::FindFirstPointWithinTolToPnt`   |
 //! | [`find_first_vertex_within_tol_to_pnt`]| `SmTools::FindFirstVertexWithinTolToPnt`  |
 //! | [`find_coincident_edge`]               | `SmTools::FindCoincidentEdge`             |
+//! | [`find_edge_proved_along`]             | none (own design)                         |
 //! | [`find_edge`]                          | `SmTools::FindEdge`                       |
 //! | [`find_face`]                          | `SmTools::FindFace`                       |
 //! | [`PointMatch`]                         | the out-params of `FindFirstPointWithinTolToPnt` |
@@ -37,8 +38,12 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
 use crate::geom::vector3d::sqrt;
+use crate::intersect::curve_class::p1::SourceReach;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
+use crate::nurbs::math::gamma;
+use crate::surface::normal_cone::intersection_reach;
+use crate::surface::surface::Surface;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::{Brep, BrepId, EdgeId, FaceId, VertexId};
 
@@ -310,6 +315,151 @@ pub fn find_coincident_edge(
     }
 
     Ok(None)
+}
+
+/// Not upstream: the index of the first of `edges` between the query's vertices that is
+/// proved to be the query's curve (docs/booleans.md, "One edge or two"): every point of
+/// the curve over its interval within the query's tolerance plus the edge's of the edge's
+/// curve over its interval, and every point of the edge's curve as near the query's, or in
+/// the ball of one of the two vertices, which holds both curves' ends
+/// ([`Curve::proved_together`]: an enclosure, where [`find_coincident_edge`] samples). A
+/// vertex's ball is its tolerance about its point, or twice the distance from its point
+/// to the query curve's end at it where that is more: what the vertex has once the curve
+/// is an edge, whichever curve at the vertex is asked first (docs/booleans.md, "What a
+/// vertex stands for"). The edge owning the curve is skipped. A seam of
+/// `face` (the face on both sides of it, [`crate::topology::edge::face_on_both_sides`])
+/// bounds no material, and its tolerance adds nothing: the curve is the seam only within
+/// the query's own reach (docs/booleans.md, "Seams and poles"), which for the
+/// intersection curve of `face` with the surface `crossing` is its tolerance over the
+/// sine of the two surfaces' least angle along it
+/// ([`crate::surface::normal_cone::intersection_reach`]; without `crossing` the curve is
+/// known to the query's tolerance). `None` where no edge is proved.
+///
+/// # Errors
+///
+/// Those of the edge and vertex queries and of the proof (its cancellation).
+pub fn find_edge_proved_along(
+    k: &Kernel,
+    brep: &Brep,
+    face: FaceId,
+    query: &CoincidentEdgeQuery<'_>,
+    edges: &[EdgeId],
+    crossing: Option<&Surface>,
+) -> Result<Option<usize>> {
+    let (v1, v2) = (query.start_vertex, query.end_vertex);
+    // the curve's reach, read once and only for a seam
+    let mut reach: Option<SourceReach> = None;
+    // the two vertices' balls, read once and only where an edge runs between them
+    let mut balls: Option<Vec<(Point3, f64)>> = None;
+    for (ii, &e) in edges.iter().enumerate() {
+        if query.curve_owner == Some(e) {
+            continue;
+        }
+        let matches = (edge_vertex(brep, e)? == Some(v1)
+            && edge_other_vertex(brep, e, v1)? == Some(v2))
+            || (edge_vertex(brep, e)? == Some(v2) && edge_other_vertex(brep, e, v2)? == Some(v1));
+        if !matches {
+            continue;
+        }
+        // The edge's tolerance, at most the B-rep's: an edge's tolerance grows when a vertex
+        // of it takes in another point (a merge already decided), and read back here it
+        // decided the next edge by the merges before it. A 2 x 3 sheet shelled by exactly two
+        // tolerances had its wall along y = 3, merged after the one along y = 0, made one
+        // edge where y = 0 kept two (`tests/one_edge_or_two_symmetric_walls.rs`). The B-rep's
+        // tolerance is the same for every edge of the operation.
+        let edge_tol = edge_tolerance(brep, e)?.min(brep.tolerance());
+        // A seam of `face` adds nothing (docs/booleans.md, "Seams and poles").
+        let summed = query.tolerance + edge_tol;
+        let tol = if crate::topology::edge::face_on_both_sides(brep, e, face)? {
+            let known = if let Some(known) = reach {
+                known
+            } else {
+                let own = crate::topology::face::p2::surface(brep, face)?;
+                let known = match (crossing, own) {
+                    (Some(other), Some(own)) => intersection_reach(
+                        k,
+                        query.curve,
+                        &query.interval,
+                        own,
+                        other,
+                        query.tolerance,
+                    )?
+                    .map_or(SourceReach::Unbounded, SourceReach::Across),
+                    _ => SourceReach::Own,
+                };
+                reach = Some(known);
+                known
+            };
+            known.contact_tolerance(query.tolerance, summed)
+        } else {
+            summed
+        };
+        let edge_ivl = edge_interval(brep, e)?;
+        let ends = match balls.take() {
+            Some(ends) => ends,
+            None => vertex_balls(k, brep, query)?,
+        };
+        let together = query.curve.proved_together(
+            k,
+            &query.interval,
+            edge_curve(brep, e)?,
+            &edge_ivl,
+            tol,
+            &ends,
+        )?;
+        balls = Some(ends);
+        if together {
+            return Ok(Some(ii));
+        }
+    }
+    Ok(None)
+}
+
+/// Not upstream: the balls of the query's two vertices for [`find_edge_proved_along`]: each
+/// vertex's point with its tolerance, or with twice the distance from the point to the
+/// query curve's end at it where that is more. A vertex stands for the end of each curve
+/// at it (docs/booleans.md, "What a vertex stands for"): were the curve an edge of its
+/// own, that end would have to lie within half the vertex's tolerance
+/// (docs/validity-and-tolerances.md, section 5.2), so the vertex's ball is at least that
+/// wide, whichever of the curves that end at the vertex is imprinted first. The end at a
+/// vertex is the nearer of the curve's two (the two vertices differ), its distance taken
+/// with its rounding. A cover that is not finite is not larger: the stored tolerance
+/// stays.
+///
+/// # Errors
+///
+/// Those of the vertex queries and of the curve's evaluation.
+fn vertex_balls(
+    k: &Kernel,
+    brep: &Brep,
+    query: &CoincidentEdgeQuery<'_>,
+) -> Result<Vec<(Point3, f64)>> {
+    let curve_ends = [
+        query.curve.evaluate_point(k, query.interval.min())?,
+        query.curve.evaluate_point(k, query.interval.max())?,
+    ];
+    let mut balls = Vec::new();
+    for v in [query.start_vertex, query.end_vertex] {
+        let point = brep.vertex(v)?.point;
+        let mut gap = f64::INFINITY;
+        for end in curve_ends {
+            let d = point.distance(end) + gamma(8) * (point.length() + end.length());
+            if d < gap {
+                gap = d;
+            }
+        }
+        let stored = vertex_tolerance(brep, v)?;
+        let cover = 2.0 * gap;
+        balls.push((
+            point,
+            if cover.is_finite() && cover > stored {
+                cover
+            } else {
+                stored
+            },
+        ));
+    }
+    Ok(balls)
 }
 
 /// Finds the edge of `brep` nearest to `point` and the curve parameter of the

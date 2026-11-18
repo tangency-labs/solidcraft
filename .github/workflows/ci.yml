@@ -96,7 +96,8 @@ concurrency:
   # A `labeled` event for any label but approved-for-ci does no work and must not cancel (or queue
   # behind) the PR's real run, so it gets a group of its own; approved-for-ci replaces the
   # unlabelled run with the full one.
-  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && format('-ignored-{0}', github.run_id) || '' }}
+  # A re-run (attempt 2 or later, often of an older commit) gets a group of its own, so it never cancels the live run for the PR's current head.
+  group: ci-${{ github.event_name }}-${{ github.ref }}${{ github.run_attempt > 1 && format('-rerun-{0}', github.run_id) || '' }}${{ github.event.action == 'labeled' && github.event.label.name != 'approved-for-ci' && format('-ignored-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -198,12 +199,13 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui-wgpu and kernel, their scripts, or a lockfile change that moves
-          # the graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
+          # glue, the vendored egui and kernel, their scripts, the control server (its refusals,
+          # #10967), or a lockfile change that moves the graphics stack (wgpu, naga, egui, winit,
+          # windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*) windows=true ;;
+                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -494,6 +496,16 @@ jobs:
         run: python3 -I scripts/ci/test_affected.py
       - name: Merge-of-main detection self-test
         run: python3 -I scripts/ci/test_main_merge.py
+      # Static acceptance recipes are checked on every non-draft CI run; tests/fixtures
+      # are introduced by separate Drawing PRs, so run each validator when present.
+      - name: Drawing acceptance fixture contracts
+        run: |
+          if test -f tests/fixtures/w23a-drawing-updates/validate.py; then
+            python3 -I tests/fixtures/w23a-drawing-updates/validate.py
+          fi
+          if test -f tests/fixtures/w23-assembly-sheet/validate.py; then
+            python3 -I tests/fixtures/w23-assembly-sheet/validate.py
+          fi
       - name: Claim, triage and PR-check bot tests
         run: node --test scripts/claim/*.test.js scripts/triage/*.test.js scripts/pr-checks/*.test.js
 
@@ -1123,6 +1135,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
+      # On Windows a reset loses the reply sent before it, so only here does this test see one (#10967).
+      - name: Control channel refusals on Windows
+        run: cargo test -p solidcraft-control --profile ci --locked -- server::tests::a_connection_past_the_limit_reads_why
       - name: Build the app
         run: cargo build -p solidcraft --profile ci --locked
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1174,13 +1189,23 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          # The other runs of ci.yml for this commit. While one is still going, wait for it (at
-          # most 90 minutes); then pass only when the newest one that ran its checks passed.
+          # The other runs of ci.yml for this commit. While one that runs checks is still going,
+          # wait for it (at most 90 minutes); then pass only when the newest one that ran its
+          # checks passed. A run another label started is not waited for: its only job is ci,
+          # which waits as this one does, so two labels added close together had their runs wait
+          # for each other until the deadline. Such a run has every job but ci skipped; a run
+          # whose jobs are not listed yet, or cannot be read, is waited for.
           deadline=$((SECONDS + 5400))
           while :; do
             runs=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=pull_request&per_page=100" \
               --jq "[.workflow_runs[] | select(.id != $RUN_ID)]")
-            pending=$(jq '[.[] | select(.status != "completed")] | length' <<<"$runs")
+            pending=0
+            for id in $(jq -r '.[] | select(.status != "completed") | .id' <<<"$runs"); do
+              checks=$(gh api "repos/$REPO/actions/runs/$id/jobs?filter=latest&per_page=100" \
+                --jq 'if (.jobs | length) == 0 then 1
+                      else [.jobs[] | select(.name != "ci" and .conclusion != "skipped")] | length end') || checks=1
+              if [ "${checks:-1}" -gt 0 ]; then pending=$((pending + 1)); fi
+            done
             if [ "$pending" -eq 0 ] || [ "$SECONDS" -ge "$deadline" ]; then break; fi
             echo "Waiting for $pending run(s) of this commit to finish."
             sleep 30

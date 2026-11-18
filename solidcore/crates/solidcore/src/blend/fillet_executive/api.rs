@@ -32,7 +32,7 @@
 //! need an unported corner kind returns `Unported` from the session. The
 //! whole-operation wrappers here drop their session and return only the later fillet
 //! failure, so the executive's own error info is not in their `Result`: a caller that
-//! needs the retained missing-corner note (`fixes.fillet_vertex_error_diagnostics`)
+//! needs the retained missing-corner note (WR-513)
 //! drives [`FilletSession`] directly and reads
 //! [`FilletSession::error_info`].
 //! [`circular_fillet`] and [`chamfer_fillet`] ignore `LoadFilletSolver`'s status
@@ -158,7 +158,7 @@ fn invalid_input() -> SolidError {
 ///
 /// The executive's own error info is not returned here: this wrapper drops its session
 /// and returns only the later fillet failure. A caller that needs the retained
-/// missing-corner note (`fixes.fillet_vertex_error_diagnostics`) drives
+/// missing-corner note (WR-513) drives
 /// [`FilletSession`] directly and reads [`FilletSession::error_info`].
 ///
 /// # Errors
@@ -347,10 +347,7 @@ fn fillet_all_edges(
         };
         session.set_solver_generator(solver, generator)?;
         // fork 66b02de passes this on (SER)
-        ignored(crate::error::passed_on(
-            session.load_solver(k, solver),
-            k.fixes.fillet_statuses_pass_on,
-        )?)?;
+        session.load_solver(k, solver)?;
     }
 
     session.create_corners(k, None)?;
