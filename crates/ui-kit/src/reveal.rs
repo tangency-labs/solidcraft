@@ -36,6 +36,11 @@ impl State {
         self.keyboard
     }
 
+    /// End the keyboard hold when focus leaves the revealed controls.
+    pub fn release_keyboard(&mut self) {
+        self.keyboard = false;
+    }
+
     /// Repaint each animation frame, then once when the leave delay expires.
     pub fn repaint_after(self, now: f64) -> Option<f64> {
         let target = if self.shown { 1.0 } else { 0.0 };
@@ -123,6 +128,15 @@ mod tests {
         let s = reveal_step(s, Input { hovered: true, ..Input::default() }, 2.63);
         assert_eq!(s.fraction(2.63), part_way);
         assert_eq!(s.fraction(2.76), 1.0);
+    }
+
+    #[test]
+    fn keyboard_hold_can_end_with_focus_and_respects_the_leave_delay() {
+        let mut state = reveal_step(State::default(), Input { keyboard_show: true, reduced_motion: true, ..Input::default() }, 1.0);
+        state.release_keyboard();
+        let released = reveal_step(state, Input::default(), 2.0);
+        assert_eq!(released.fraction(2.0), 1.0);
+        assert_eq!(reveal_step(released, Input::default(), 3.0).fraction(3.12), 0.0);
     }
 
     #[test]

@@ -14,4 +14,4 @@ pub use view_set::{
     CameraLinkMode, DesignView, MAX_NAME, MAX_POPOUTS, MAX_VIEWS, MoveError, Moved, PopOut, ViewKind, ViewSet, WindowArrangement, WindowId,
     WindowLevel, WindowPlacement, WindowTarget, window_rect_for,
 };
-pub use window_options::{CardHeaders, WindowOptions};
+pub use window_options::{CardHeaders, TopBar, WindowOptions};

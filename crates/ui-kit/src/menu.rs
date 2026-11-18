@@ -1041,7 +1041,7 @@ mod tests {
 
     #[test]
     fn pop_out_window_menu_fits_small_screens_and_restores_focus() {
-        use crate::window_options_menu::{self, Action, CardHeaders, WindowMenu};
+        use crate::window_options_menu::{self, Action, CardHeaders, TopBar, WindowMenu};
 
         let ctx = crate::test_support::context();
         let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 220.0));
@@ -1052,9 +1052,10 @@ mod tests {
             displays: &[],
             card_headers: CardHeaders::Always,
             keep_on_top: false,
-            panels: false,
             ribbon: true,
             ribbon_auto_hide: true,
+            panels: false,
+            top_bar: TopBar::Always,
         };
         let frame = |events, open| {
             let mut action = None;
@@ -1071,6 +1072,8 @@ mod tests {
         let area = ctx.memory(|memory| memory.area_rect(id.with("window_options").with("popup"))).unwrap();
         assert!(screen.contains_rect(area), "{area:?} exceeds {screen:?}");
         frame(key(egui::Key::ArrowDown), false);
+        frame(key(egui::Key::ArrowDown), false);
+        assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::TopBar(TopBar::Edge)));
         frame(key(egui::Key::ArrowDown), false);
         frame(key(egui::Key::ArrowDown), false);
         assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::CardHeaders(CardHeaders::Hover)));

@@ -2,7 +2,7 @@
 
 use egui::{Context, Ui, ViewportClass, ViewportCommand, ViewportId};
 use serde_json::{Value, json};
-use solidcraft_views::{DesignView, PopOut, ViewSet, WindowId, WindowLevel, WindowOptions, WindowPlacement, WindowTarget};
+use solidcraft_views::{DesignView, PopOut, TopBar, ViewSet, WindowId, WindowLevel, WindowOptions, WindowPlacement, WindowTarget};
 
 use crate::ui_kit::{BackingTooltipExt as _, Container, Edge, Menu, Surface};
 use crate::{SolveApp, documents};
@@ -72,6 +72,8 @@ struct Host {
     panels: crate::panel_runtime::PopOutPanels,
     ribbon_reveal: crate::ui_kit::reveal::State,
     ribbon_focus_pending: bool,
+    top_bar_reveal: crate::ui_kit::reveal::State,
+    top_bar_focus_pending: bool,
     ribbon_tab: String,
     ribbon_view_workspace: &'static str,
     ribbon_context: Option<String>,
@@ -741,6 +743,9 @@ fn options_command(app: &mut SolveApp, command: &str, request: Value) -> Result<
         if let Some(panels) = change.panels {
             current.panels = panels;
         }
+        if let Some(top_bar) = change.top_bar {
+            current.top_bar = top_bar;
+        }
         if let Some(ribbon) = change.ribbon {
             current.ribbon = ribbon;
         }
@@ -1064,6 +1069,7 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
         card_headers,
         keep_on_top: options.keep_on_top,
         panels: options.panels,
+        top_bar: if options.top_bar == TopBar::Always { kit::TopBar::Always } else { kit::TopBar::Edge },
         ribbon: options.ribbon,
         ribbon_auto_hide: options.ribbon_auto_hide,
     };
@@ -1079,6 +1085,10 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
         }
         Action::KeepOnTop(on) => ("tab.window.set_options", json!({"window": id, "keep_on_top": on})),
         Action::Panels(on) => ("tab.window.set_options", json!({"window": id, "panels": on})),
+        Action::TopBar(mode) => {
+            let top_bar = if mode == kit::TopBar::Always { TopBar::Always } else { TopBar::Edge };
+            ("tab.window.set_options", json!({"window": id, "top_bar": top_bar}))
+        }
         Action::Ribbon(on) => ("tab.window.set_options", json!({"window": id, "ribbon": on})),
         Action::RibbonAutoHide(on) => ("tab.window.set_options", json!({"window": id, "ribbon_auto_hide": on})),
         Action::MoveToDisplay(display) => ("tab.window.move_to_display", json!({"window": id, "display": display})),
@@ -1150,7 +1160,185 @@ struct PanelContext<'a> {
     layout: &'a Option<Value>,
 }
 
-fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, ribbon: (f32, bool), had_dialog: bool, panel_context: PanelContext<'_>) {
+const GRIP_SIZE: egui::Vec2 = egui::vec2(104.0, 10.0);
+const REVEAL_EDGE: f32 = 6.0;
+
+#[derive(Default)]
+struct Chrome {
+    edge: bool,
+    bar_fraction: f32,
+    stack_height: f32,
+    bar_focus: bool,
+    grip_menu: bool,
+    ribbon: (f32, bool),
+}
+
+impl Chrome {
+    fn slide(&self) -> f32 {
+        self.stack_height * (1.0 - self.bar_fraction)
+    }
+}
+
+fn bar_layer(ctx: &Context) -> egui::LayerId {
+    egui::LayerId::new(egui::Order::Foreground, egui::Id::unique(("pop_out_top_bar", ctx.viewport_id())))
+}
+
+fn bar_menu_id(ctx: &Context) -> egui::Id {
+    bar_layer(ctx).id.with("window_options_anchor")
+}
+
+fn bar_grip_id(ctx: &Context) -> egui::Id {
+    bar_layer(ctx).id.with("grip")
+}
+
+fn bar_grip(rect: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_size(egui::pos2(rect.center().x - GRIP_SIZE.x * 0.5, rect.top() + 7.0), GRIP_SIZE)
+}
+
+fn near_top_bar(canvas: egui::Rect, at: egui::Pos2, visible_height: f32) -> bool {
+    (canvas.contains(at) && at.y <= canvas.top() + visible_height.max(REVEAL_EDGE)) || bar_grip(canvas).contains(at)
+}
+
+fn surrender_chrome_focus(ctx: &Context) {
+    ctx.memory_mut(|memory| {
+        if let Some(focus) = memory.focused() {
+            memory.surrender_focus(focus);
+        }
+    });
+}
+
+fn schedule_reveal(ctx: &Context, reveal: crate::ui_kit::reveal::State, now: f64) {
+    if let Some(delay) = reveal.repaint_after(now) {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(delay));
+    }
+}
+
+fn bar_action(app: &mut SolveApp, ctx: &Context, action: Option<crate::window_chrome::WindowAction>) {
+    if let Some(action) = action {
+        if action == crate::window_chrome::WindowAction::Close {
+            app.view_windows.close_current();
+        } else {
+            action.send(ctx);
+        }
+    }
+}
+
+fn window_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, rect: egui::Rect, chrome: &Chrome) {
+    let tokens = solidcraft_theme::Tokens::get();
+    let titlebar = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
+    let layout = titlebar.layout(rect);
+    if let Some(drag) = layout.drag {
+        crate::window_chrome::drag_area(ui, drag);
+    }
+    let content = layout.content;
+    let brand_end = crate::app_bar::paint_brand(ui.painter(), content, &solidcraft_look::glyphs::brand_mark, Some("SolidCraft"));
+    let menu = egui::Rect::from_center_size(egui::pos2(content.right() - 17.0, content.center().y), egui::Vec2::splat(26.0));
+    let menu_tip = app.tr("multi_window.window_menu");
+    let response = ui.interact(menu, bar_menu_id(ui.ctx()), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, menu_tip));
+    if chrome.bar_focus && ui.is_visible() && !ui.is_sizing_pass() {
+        response.request_focus();
+    }
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(menu, tokens.radius_sm, tokens.app_bar_hover_button);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(menu, tokens.radius_sm, egui::Stroke::new(1.0, tokens.app_bar_text), egui::StrokeKind::Inside);
+    }
+    for x in [-4.0, 0.0, 4.0] {
+        ui.painter().circle_filled(menu.center() + egui::vec2(x, 0.0), 1.25, tokens.app_bar_text);
+    }
+    let background = ui.ctx().viewport(|viewport| viewport.hits.click.is_none_or(|hit| hit.id == egui::Id::unique("titlebar-drag")));
+    let context_open = ui.input(|input| {
+        input.pointer.secondary_clicked()
+            && input.pointer.interact_pos().is_some_and(|at| content.contains(at) && (background || at.x <= brand_end || menu.contains(at)))
+    });
+    if response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+        start_window_rename(app, ui.ctx(), id);
+    }
+    window_menu(app, ui, id, response.backing_on_hover_text(menu_tip), context_open || chrome.grip_menu);
+    let mut left = brand_end + 12.0;
+    let right = menu.left() - 6.0;
+    let name = window_name(app, id);
+    let font = crate::ui_kit::type_face::semibold(tokens.font_small);
+    let name = ui.painter().layout_no_wrap(name, font, tokens.app_bar_text);
+    let width = 16.0 + tokens.space_6 + name.size().x;
+    if right - left >= width + 200.0 {
+        let icon = egui::Rect::from_center_size(egui::pos2(left + 8.0, content.center().y), egui::Vec2::splat(16.0));
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon, crate::ui_kit::icons::window_icon(true), tokens.app_bar_text);
+        let at = egui::pos2(icon.right() + tokens.space_6, content.center().y - name.size().y / 2.0);
+        ui.painter().galley(at, name, tokens.app_bar_text);
+        left += width + tokens.space_12;
+    }
+    if right > left {
+        documents::tabs(app, ui, rect, left, right);
+    }
+
+    if app.custom_titlebar && !chrome.edge {
+        let action = crate::window_chrome::caption_buttons(ui, rect);
+        bar_action(app, ui.ctx(), action);
+    }
+}
+
+fn overlay_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, canvas: egui::Rect, chrome: &Chrome) {
+    use egui::{Rect, pos2, vec2};
+    let t = solidcraft_theme::Tokens::get();
+    let layer = bar_layer(ui.ctx());
+    let slide = chrome.slide();
+    let fixed = Rect::from_min_size(canvas.min, vec2(canvas.width(), crate::app_bar::HEIGHT));
+    let rect = fixed.translate(vec2(0.0, -slide));
+    let mut clip = canvas;
+    if app.custom_titlebar {
+        clip.max.x -= crate::window_chrome::WIDTH;
+    }
+    let bar = rect.intersect(egui::Rect::from_min_max(egui::pos2(clip.left(), rect.top()), clip.right_bottom()));
+    let visible = bar.intersect(canvas);
+    let grip = bar_grip(canvas);
+    let grip_visible = visible.bottom() < grip.bottom();
+    let host = Container::new(ui.ctx(), Surface::ApplicationBar);
+    app.shell.top_bar_overlays = [
+        visible.is_positive().then_some(visible),
+        grip_visible.then_some(grip),
+        app.custom_titlebar.then(|| Rect::from_min_max(pos2(fixed.right() - crate::window_chrome::WIDTH, fixed.top()), fixed.right_bottom())),
+    ];
+    if let Some(captions) = app.shell.top_bar_overlays[2] {
+        host.area(layer.id.with("caption_buttons")).order(egui::Order::Foreground).fixed_pos(captions.min).constrain(false).show(ui.ctx(), |ui| {
+            ui.set_min_size(captions.size());
+            ui.painter().rect_filled(captions, 0, t.app_bar);
+            let action = crate::window_chrome::caption_buttons(ui, fixed);
+            bar_action(app, ui.ctx(), action);
+        });
+    }
+    if visible.is_positive() {
+        host.area(layer.id).order(layer.order).fixed_pos(visible.min).constrain(false).show(ui.ctx(), |ui| {
+            ui.set_min_size(visible.size());
+            ui.set_clip_rect(ui.clip_rect().intersect(clip));
+            let frame = crate::ui_kit::Menu::frame().fill(t.app_bar).inner_margin(0.0).outer_margin(0.0).corner_radius(0);
+            Container::paint_frame(ui.painter(), frame, bar);
+            window_bar(app, ui, id, rect, chrome);
+        });
+    }
+    if grip_visible {
+        let grip_id = bar_grip_id(ui.ctx());
+        host.area(layer.id.with("grip_area")).order(layer.order).fixed_pos(grip.min).constrain(false).show(ui.ctx(), |ui| {
+            ui.set_min_size(grip.size());
+            let response = ui.interact(grip, grip_id, egui::Sense::click());
+            let label = app.tr("window_topbar.show");
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+            ui.painter().rect_filled(grip, 5, t.text_dim.gamma_multiply(0.5));
+            let response = response.backing_on_hover_text(app.tr("window_topbar.show_help"));
+            if response.clicked() {
+                response.request_focus();
+            }
+            crate::scenario::publish_rect("pop_out:top_bar_grip", grip);
+        });
+    }
+    if visible.is_positive() {
+        crate::scenario::publish_rect("pop_out:top_bar", visible);
+    }
+}
+
+fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, chrome: Chrome, had_dialog: bool, panel_context: PanelContext<'_>) {
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if is_clean(app) {
         let tab = app.docs.current_tab();
@@ -1158,76 +1346,28 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, ribbon: (f32, b
             app.view_windows.tool_owner.remove(&tab);
         }
         app.shell.ribbon_overlay = None;
+        app.shell.top_bar_overlays = [None; 3];
         show_clean(app, ui);
         return;
     }
-    let tokens = solidcraft_theme::Tokens::get();
-    let edge = Container::new(ui.ctx(), Surface::ApplicationBar).edge("sc_view_window_bar", Edge::Top);
-    let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(tokens.app_bar);
-    Container::new(ui.ctx(), Surface::ApplicationBar).show_edge(
-        ui,
-        edge.exact_size(crate::app_bar::HEIGHT).show_separator_line(false),
-        frame,
-        |ui| {
-            let rect = ui.max_rect();
-            let titlebar = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
-            let action = titlebar.show(ui, rect, |ui, content| {
-                let brand_end = crate::app_bar::paint_brand(ui.painter(), content, &solidcraft_look::glyphs::brand_mark, Some("SolidCraft"));
-                let menu = egui::Rect::from_center_size(egui::pos2(content.right() - 17.0, content.center().y), egui::Vec2::splat(26.0));
-                let menu_tip = app.tr("multi_window.window_menu");
-                let response = ui.interact(menu, ui.scope_id().with("view_window_menu"), egui::Sense::click());
-                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, menu_tip));
-                if response.hovered() || response.has_focus() {
-                    ui.painter().rect_filled(menu, tokens.radius_sm, tokens.app_bar_hover_button);
-                }
-                if response.has_focus() {
-                    ui.painter().rect_stroke(menu, tokens.radius_sm, egui::Stroke::new(1.0, tokens.app_bar_text), egui::StrokeKind::Inside);
-                }
-                for x in [-4.0, 0.0, 4.0] {
-                    ui.painter().circle_filled(menu.center() + egui::vec2(x, 0.0), 1.25, tokens.app_bar_text);
-                }
-                let background = ui.ctx().viewport(|viewport| viewport.hits.click.is_none_or(|hit| hit.id == egui::Id::unique("titlebar-drag")));
-                let context_open = ui.input(|input| {
-                    input.pointer.secondary_clicked()
-                        && input
-                            .pointer
-                            .interact_pos()
-                            .is_some_and(|at| content.contains(at) && (background || at.x <= brand_end || menu.contains(at)))
-                });
-                if response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
-                    start_window_rename(app, ui.ctx(), id);
-                }
-                window_menu(app, ui, id, response.backing_on_hover_text(menu_tip), context_open);
-                let mut left = brand_end + 12.0;
-                let right = menu.left() - 6.0;
-                let name = window_name(app, id);
-                let font = crate::ui_kit::type_face::semibold(tokens.font_small);
-                let name = ui.painter().layout_no_wrap(name, font, tokens.app_bar_text);
-                let width = 16.0 + tokens.space_6 + name.size().x;
-                if right - left >= width + 200.0 {
-                    let icon = egui::Rect::from_center_size(egui::pos2(left + 8.0, content.center().y), egui::Vec2::splat(16.0));
-                    crate::ui_kit::icons::paint_ink(ui.painter(), icon, crate::ui_kit::icons::window_icon(true), tokens.app_bar_text);
-                    let at = egui::pos2(icon.right() + tokens.space_6, content.center().y - name.size().y / 2.0);
-                    ui.painter().galley(at, name, tokens.app_bar_text);
-                    left += width + tokens.space_12;
-                }
-                if right > left {
-                    documents::tabs(app, ui, rect, left, right);
-                }
-            });
-            if let Some(action) = action {
-                if action == crate::window_chrome::WindowAction::Close {
-                    app.view_windows.close_current();
-                } else {
-                    action.send(ui.ctx());
-                }
-            }
-        },
-    );
+    if chrome.edge {
+        let canvas = ui.available_rect_before_wrap();
+        overlay_bar(app, ui, id, canvas, &chrome);
+    } else {
+        app.shell.top_bar_overlays = [None; 3];
+        let tokens = solidcraft_theme::Tokens::get();
+        let container = Container::new(ui.ctx(), Surface::ApplicationBar);
+        let edge = container.edge("sc_view_window_bar", Edge::Top);
+        let frame = container.edge_frame(tokens.app_bar);
+        container.show_edge(ui, edge.exact_size(crate::app_bar::HEIGHT).show_separator_line(false), frame, |ui| {
+            window_bar(app, ui, id, ui.max_rect(), &chrome);
+        });
+    }
     let rect = ui.available_rect_before_wrap();
     app.shell.content = Some(rect);
     if child_options(app).ribbon {
-        crate::toolbar::pop_out_ribbon(app, ui, rect, ribbon.0, ribbon.1);
+        let slide = chrome.edge.then(|| chrome.slide());
+        crate::toolbar::pop_out_ribbon(app, ui, rect, chrome.ribbon.0, chrome.ribbon.1, slide);
     } else {
         app.shell.ribbon_overlay = None;
     }
@@ -1309,6 +1449,8 @@ impl Host {
             panels: Default::default(),
             ribbon_reveal: Default::default(),
             ribbon_focus_pending: false,
+            top_bar_reveal: Default::default(),
+            top_bar_focus_pending: false,
             ribbon_tab: String::new(),
             ribbon_view_workspace: "",
             ribbon_context: None,
@@ -1317,6 +1459,76 @@ impl Host {
             ready: false,
             startup: None,
         }
+    }
+
+    fn chrome(&mut self, app: &SolveApp, ctx: &Context, canvas: egui::Rect) -> Chrome {
+        use crate::ui_kit::reveal::{Input, reveal_step};
+        let options = child_options(app);
+        if options.top_bar == TopBar::Always || is_clean(app) {
+            self.top_bar_reveal = Default::default();
+            self.top_bar_focus_pending = false;
+            return Chrome { ribbon: self.ribbon(app, ctx), ..Chrome::default() };
+        }
+        let stack_ribbon = options.ribbon && options.ribbon_auto_hide;
+        let bar_height = crate::app_bar::HEIGHT;
+        let stack_height = bar_height + if stack_ribbon { crate::toolbar::ribbon_height(app.preferences.ribbon_labels) } else { 0.0 };
+        let (pointer, window_focused, now) = ctx.input(|i| (i.pointer.hover_pos(), i.viewport().focused.unwrap_or(i.focused), i.time));
+        let f10 = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F10));
+        let reduced_motion = solidcraft_theme::panel_motion_duration(ctx, false) == 0.0;
+        let own_popup = crate::ui_kit::window_options_menu::is_open(ctx, bar_menu_id(ctx))
+            || crate::app_bar::tab_popup_open(ctx, documents::tab_strip_id(ctx.viewport_id()))
+            || ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some());
+        let popup = own_popup || ctx.any_popup_open() || app.viewport.context_menu.is_some();
+        let focus = ctx.memory(|memory| memory.focused());
+        let grip_focused = focus == Some(bar_grip_id(ctx));
+        let bar_focused = window_focused
+            && (focus == Some(bar_menu_id(ctx))
+                || focus.and_then(|id| ctx.read_response(id)).is_some_and(|response| response.layer_id == bar_layer(ctx)));
+        let ribbon_focused = crate::toolbar::pop_out_ribbon_focus(ctx);
+
+        let visible_height = stack_height * self.top_bar_reveal.fraction(now);
+        let grip = bar_grip(canvas);
+        let grip_menu = visible_height < (stack_height - bar_height) + grip.bottom() - canvas.top()
+            && ctx.input(|i| i.pointer.secondary_clicked() && i.pointer.interact_pos().is_some_and(|at| grip.contains(at)));
+        let hovered = pointer.is_some_and(|at| near_top_bar(canvas, at, visible_height));
+        let keyboard_show = f10 || (window_focused && grip_focused);
+        let held = own_popup
+            || grip_menu
+            || (visible_height > 0.0 && ctx.any_popup_open())
+            || (visible_height > 0.0 && crate::view_window_drag::active(app));
+        if !popup && !bar_focused && !(stack_ribbon && window_focused && ribbon_focused) {
+            self.top_bar_reveal.release_keyboard();
+        }
+        let escape = !popup
+            && (visible_height > 0.0 || self.top_bar_reveal.keyboard())
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        self.top_bar_focus_pending = keyboard_show || (self.top_bar_focus_pending && window_focused && !bar_focused && !escape);
+        if escape && (bar_focused || grip_focused || (stack_ribbon && ribbon_focused)) {
+            surrender_chrome_focus(ctx);
+        }
+        self.top_bar_reveal = reveal_step(
+            self.top_bar_reveal,
+            Input {
+                hovered,
+                focused: bar_focused || (stack_ribbon && window_focused && ribbon_focused),
+                held,
+                keyboard_show,
+                escape,
+                dismiss_on_escape: true,
+                reduced_motion: reduced_motion || keyboard_show || grip_menu,
+            },
+            now,
+        );
+        schedule_reveal(ctx, self.top_bar_reveal, now);
+        let bar_fraction = self.top_bar_reveal.fraction(now);
+        let ribbon_fraction = if stack_ribbon {
+            bar_fraction
+        } else if options.ribbon {
+            1.0
+        } else {
+            0.0
+        };
+        Chrome { edge: true, bar_fraction, stack_height, bar_focus: self.top_bar_focus_pending, grip_menu, ribbon: (ribbon_fraction, false) }
     }
 
     fn ribbon(&mut self, app: &SolveApp, ctx: &Context) -> (f32, bool) {
@@ -1554,7 +1766,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             let revision = app.session.revision;
             let had_dialog = app.dialog.is_some();
             host.swap_ribbon_popup(ui.ctx());
-            let ribbon_geometry = host.ribbon(app, ui.ctx());
+            let chrome = host.chrome(app, ui.ctx(), ui.available_rect_before_wrap());
             host.panels.load(&window.panel_layout);
             host.panels.swap(app);
             app.view_windows.painting_panels = true;
@@ -1566,7 +1778,7 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                 app,
                 ui,
                 id,
-                ribbon_geometry,
+                chrome,
                 had_dialog,
                 PanelContext { workspace: panel_workspace.as_ref(), tab: &panel_tab, layout: &window.panel_layout },
             );

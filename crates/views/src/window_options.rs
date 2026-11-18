@@ -16,6 +16,18 @@ impl CardHeaders {
     pub const ALL: [Self; 3] = [Self::Always, Self::Hover, Self::Hidden];
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TopBar {
+    #[default]
+    Always,
+    Edge,
+}
+
+impl TopBar {
+    pub const ALL: [Self; 2] = [Self::Always, Self::Edge];
+}
+
 /// A missing value in an older remembered arrangement gets the classic pop-out behaviour.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 #[serde(default)]
@@ -25,11 +37,12 @@ pub struct WindowOptions {
     pub panels: bool,
     pub ribbon: bool,
     pub ribbon_auto_hide: bool,
+    pub top_bar: TopBar,
 }
 
 impl Default for WindowOptions {
     fn default() -> Self {
-        Self { card_headers: CardHeaders::Always, keep_on_top: false, panels: false, ribbon: false, ribbon_auto_hide: true }
+        Self { card_headers: CardHeaders::Always, keep_on_top: false, panels: false, ribbon: false, ribbon_auto_hide: true, top_bar: TopBar::Always }
     }
 }
 

@@ -354,7 +354,17 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 "pop_out_other_panels",
             );
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
-                use solidcraft_views::CardHeaders;
+                use solidcraft_views::{CardHeaders, TopBar};
+                let labels = [app.tr("window_options.always"), app.tr("window_topbar.edge")];
+                ui_kit::settings_row_help(ui, app.tr("window_topbar.top_bar"), app.tr("window_topbar.preference_help"), |ui| {
+                    let options = &mut app.preferences.pop_out_window_defaults;
+                    let mut selection = usize::from(options.top_bar == TopBar::Edge);
+                    if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(state) = TopBar::ALL.get(selection)
+                    {
+                        options.top_bar = *state;
+                    }
+                });
                 let labels = [app.tr("window_options.always"), app.tr("window_options.on_hover"), app.tr("window_options.hidden")];
                 ui_kit::settings_row_help(ui, app.tr("window_options.card_headers"), app.tr("window_options.card_headers_help"), |ui| {
                     let options = &mut app.preferences.pop_out_window_defaults;
