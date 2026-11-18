@@ -60,7 +60,7 @@ Create `plate-maker/plugin.json`:
   "name": "Plate Maker",
   "version": "0.1.0",
   "description": "Adds a square plate.",
-  "capabilities": ["commands@0.1"],
+  "capabilities": ["commands@0.2"],
   "runtime": {
     "module": "plate-maker.wasm",
     "commands": ["solid.box"],
@@ -82,7 +82,7 @@ Create `plate-maker/plugin.json`:
 |---|---|
 | `id` | 1 to 64 lowercase letters, digits and dashes. The package folder has this name. |
 | `name`, `version`, `description` | What the user sees: at most 80, 32 and 240 characters. |
-| `capabilities` | The host interfaces the plugin uses: `commands@0.1` for a command plugin, `formats@0.1` for an importer, plus `evaluate@0.1` for an importer that checks its result. |
+| `capabilities` | The host interfaces the plugin uses: `commands@0.2` for a command plugin, `formats@0.2` for an importer, plus `evaluate@0.2` for an importer that checks its result. Plugins built for 0.1 still run. |
 | `runtime.module` | The component's file name, beside `plugin.json`. |
 | `runtime.commands` | Every SolidCraft command the plugin calls, by exact id. Anything else is refused. |
 | `runtime.entries` | What the plugin offers. Each entry has a `name`, an `effect` (`edit`, or `read` for one that only reads), an `input_schema` (a JSON schema of an object) and optional `slots`. |
@@ -99,7 +99,7 @@ File or Help menu; every entry is in the Plugins menu anyway.
 
 The WIT file is the contract between SolidCraft and the plugin: what the plugin may call, and what
 it must export. Copy it from SolidCraft's source, `crates/craft-plugin/wit/plugin.wit`, into
-`plate-maker-src/wit/plugin.wit`. Its package is `craft:plugin@0.1.0`, and it has two worlds:
+`plate-maker-src/wit/plugin.wit`. Its package is `craft:plugin@0.2.0`, and it has two worlds:
 
 - `command-plugin` imports `commands` (run a SolidCraft command), `log`, `control` (progress and
   cancel), `files` (granted folders) and `clock`, and exports `entry`, whose `execute(entry, params)`
@@ -108,7 +108,9 @@ it must export. Copy it from SolidCraft's source, `crates/craft-plugin/wit/plugi
   goes), `evaluate`, `log`, `control` and `clock`, and exports `importer`.
 
 Errors are a `plugin-error` variant: `permission-denied`, `command-failed`, `limit-exceeded`,
-`invalid-input` and the others name their cause, and the user sees them.
+`invalid-input`, `unsupported` and the others name their cause, and the user sees them after the
+plugin's name. Return `unsupported` for a valid file or option your plugin does not handle ("the
+model has no solids"); `invalid-input` is for input that is broken.
 
 ## Step 3: write the component
 
@@ -248,7 +250,7 @@ installed for you, and your files are not touched. A case is:
 | `design` | A command runs on this design, in the `tests` folder. Default: an empty design. |
 | `file` | An importer opens this file, in the `tests` folder. |
 | `grants` | What the user approved: `command_groups`, `folders` (`[{"name", "read", "write", "from"}]`, each a fresh folder, or a copy of `from` in `tests`), `input_folder` and `memory_mib`. Default: everything the manifest asks for, as Install approves it. |
-| `expect.error` | The run fails with this kind of error: `permission_denied`, `command_failed`, `limit_exceeded`, `invalid_input`, `trap`, `cancelled`, or `any`. Default: it succeeds. |
+| `expect.error` | The run fails with this kind of error: `permission_denied`, `command_failed`, `limit_exceeded` (or, more exactly, `exhausted` when a budget ran out and `over_ceiling` when the app refused it before it ran), `invalid_input`, `unsupported`, `trap`, `cancelled`, or `any`. Default: it succeeds. |
 | `expect.message` | Text the error contains. |
 | `expect.reply` | Values the reply holds: `plugin.run`'s is `{"result": <what the entry returned>}`; `file.import`'s has `bodies`, `features`, `errors` and the `loss_report`. |
 | `expect.model` | Values `inspect.measure` gives for the resulting design, as `solidcraft-cli eval` prints them: `body_count`, `total.volume_mm3`, each body. |
@@ -315,8 +317,9 @@ folder fails with `permission_denied`.
 | `plugin.json` | 16 KiB | 16 KiB |
 | Parameters and replies | 1 MiB of JSON each | 1 MiB per read or write, 1 GiB read, a 256 MiB design |
 
-A run that goes past its fuel, memory or deadline stops with `limit_exceeded`, and nothing it did
-is kept. `plugin check` says when a request is over the app's ceilings, and `plugin test` runs
+A run that goes past its fuel, memory, stack or deadline stops with `exhausted`, which names the
+budget and its size ("it used all 100000 fuel it asks for and was stopped"), and nothing it did is
+kept. `plugin check` says when a request is over the app's ceilings, and `plugin test` runs
 under them.
 
 ## An importer
@@ -331,7 +334,7 @@ The manifest, `box-importer/plugin.json`:
   "id": "box-importer",
   "name": "Box Importer",
   "version": "0.1.0",
-  "capabilities": ["formats@0.1"],
+  "capabilities": ["formats@0.2"],
   "runtime": {
     "module": "box-importer.wasm",
     "commands": [],
@@ -419,7 +422,9 @@ holds `20 10 3`, and `box-importer/tests/small.json` is
 }
 ```
 
-A broken file is a case too: a file holding `20 10` with `"expect": {"error": "invalid_input"}`.
+A broken file is a case too: a file holding `20 10` with `"expect": {"error": "invalid_input"}`. A
+valid file the importer does not convert answers `unsupported`, which SolidCraft shows as
+"Box Importer does not support part.box: ...".
 
 Once installed, **File › Open** offers `.box` files, and `doc.open` and `file.import` open them.
 An importer that converts a large file can ask for more time (`deadline_ms` up to 600,000), stack
@@ -434,5 +439,5 @@ an assembly's other files and checking the result with `evaluate`.
 | `plugin check`: "component imports instance `wasi:...`" | The crate was built for a WASI target, or uses something in `std` that needs it. Build for `wasm32-unknown-unknown`. |
 | `plugin check`: "built against craft:plugin@..." | The WIT came from another SolidCraft version. Copy this version's `plugin.wit` and rebuild. |
 | A run fails with `permission_denied: command ... is not granted` | The command is not in `runtime.commands`. |
-| A run fails with `limit_exceeded: fuel` or `deadline` | The run did more work than its `limits` allow: raise them, or do less per run. |
+| A run fails with `exhausted`: "it used all ... fuel" or "ran longer than its time limit" | The run did more work than its `limits` allow: raise them, or do less per run. |
 | A run fails with `trap` | The plugin panicked or reached `unreachable`; the message says where. Nothing the run did is kept. |

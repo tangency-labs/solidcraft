@@ -5,6 +5,56 @@ use solidcraft_geom::tess::EvaluateMesh as _;
 use super::*;
 use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, revolve, sphere, step_export, torus};
 
+/// An opening design may hold five or more STEP imports. A four-item strong cache cap
+/// must not evict the weak lookup for an import still owned by that opening (#18814).
+#[test]
+fn recent_step_lookups_survive_more_than_four_live_imports() {
+    let empty = || {
+        Arc::new(StepImport {
+            bodies: Vec::new(),
+            tree: Vec::new(),
+            warnings: Vec::new(),
+            report: ImportReport::default(),
+            schema: String::new(),
+            system: String::new(),
+            preprocessor: String::new(),
+            description: String::new(),
+        })
+    };
+    let mut cache = Vec::new();
+    let mut held = Vec::new();
+    for i in 0..6 {
+        let imp = empty();
+        remember_in(&mut cache, (i, 200), &imp, false);
+        held.push(imp);
+    }
+    assert_eq!(cache.len(), 6, "all six externally owned imports remain findable");
+    for (i, imp) in held.iter().enumerate() {
+        assert!(cache.iter().any(|r| r.key.0 == i as u64 && r.import.upgrade().is_some_and(|found| Arc::ptr_eq(&found, imp))));
+    }
+    drop(held);
+    let next = empty();
+    remember_in(&mut cache, (6, 200), &next, false);
+    assert_eq!(cache.len(), 1, "dead weak entries are removed on the next import");
+
+    let mut held = Vec::new();
+    let mut small_cache = Vec::new();
+    for i in 0..6 {
+        let imp = empty();
+        remember_in(&mut small_cache, (i, 100), &imp, true);
+        held.push(imp);
+    }
+    assert_eq!(small_cache.len(), 6, "small imports still owned externally retain their lookups");
+    assert_eq!(small_cache.iter().filter(|r| r._small.is_some()).count(), 4, "only four small imports are retained by the cache itself");
+    drop(held);
+    assert!(small_cache[..2].iter().all(|r| r.import.upgrade().is_none()), "the oldest small imports are released");
+    assert!(small_cache[2..].iter().all(|r| r.import.upgrade().is_some()), "the four newest small imports remain cached");
+    let seventh = empty();
+    remember_in(&mut small_cache, (6, 100), &seventh, true);
+    assert_eq!(small_cache.len(), 4, "a new import prunes dead lookups and caps the retained small imports");
+    assert_eq!(small_cache.iter().filter(|r| r._small.is_some()).count(), 4);
+}
+
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-9)
 }

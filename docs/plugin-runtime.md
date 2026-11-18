@@ -126,24 +126,29 @@ the user grants it, as folders are:
 A manifest that lists a grouped command without its group is refused when it is read. A refused
 call is a typed `permission_denied` error naming the group, and it poisons the transaction like
 any other refusal. Ungrouped commands run under an empty file scope, so even a feature that names
-an external font or linked design gets no file access. A granted `file` or `doc` command runs with
-a scope of exactly the approved folders that the manifest requests for both read and write.
+an external font or linked design gets no file access. A granted `file` or `doc` command runs within the approved folders requested by its manifest. Known input-only commands (`file.insert_step`, `file.insert_mesh`, `file.insert_gerber`, `file.gerber_files`, `sketch.insert_dxf`, `sketch.insert_svg`) may read files from read-only grants. Commands that can write files, and commands that have not been reviewed as input-only, keep the stricter scope requiring both read and write approval. A read-only grant never authorizes a save, export, copy, move or delete.
 `plugin.install` validates its optional `approve` object against the manifest and stores grants
 by plugin id after successful publication. Each folder approval has `name`, absolute local `path`,
 `read` and `write`. Omitting `approve` leaves no grants, including after replacement. Explicit approvals
 replace the stored set, so stale grants cannot survive an update. Desktop preferences persist grants
-and pass them to the session and its worker copies. `plugin.run` intersects
+and pass them to the session and its worker copies; the plugins folder's grant store
+(`crates/engine/src/plugin/grant_store.rs`) keeps them for the command line and headless MCP too
+([Headless use](plugins.md#headless-use)). `plugin.run` intersects
 that id's stored grants with the manifest's requests; another plugin's grants never apply.
 A hand-installed package with no grant record receives no groups or folders. Removing a package
-through `plugin.remove` deletes its grant record. These are host preferences, never design data.
+through `plugin.remove` deletes its grant record; `plugin.revoke` deletes the record and keeps the
+package. These are host preferences, never design data.
 
 ## Versions and capabilities
 
-The WIT package is `craft:plugin@0.1.0`. Its interfaces (`types`, `commands`, `log`, `control`,
-`files`, `clock` and the exported `entry`) make up the capability `commands@0.1`. Later
+The WIT package is `craft:plugin@0.2.0`. Its interfaces (`types`, `commands`, `log`, `control`,
+`files`, `clock` and the exported `entry`) make up the capability `commands@0.2`. Later
 capabilities arrive as their own interfaces, each named and versioned on its own in the manifest:
 `ui`, `viewport`, `formats` and `storage`. While a version is 0.x, a minor version may break the
-previous one, so a host for `commands@0.1` runs only `commands@0.1` plugins.
+previous one. 0.2 added `plugin-error.unsupported`; the host also serves the frozen
+`craft:plugin@0.1.0` (`crates/craft-plugin/wit-0.1/plugin.wit`, `OLDER_CAPABILITIES`), choosing
+the bindings by the version the component's imports and exports name, so plugins built against
+0.1 run unchanged and see `invalid-input` where 0.2 has `unsupported`.
 
 ## Per-design plugin data
 
@@ -235,6 +240,9 @@ zero, fractional and out-of-range values are refused. The CLI reads it once befo
 local sessions. Omit the flag to use the original ceilings. `--connect` and non-headless `mcp`
 refuse this flag because the connected desktop owns its preferences. GUI preferences and CLI
 startup files are separate user settings; a package or saved design cannot supply either.
+Approvals given at install last for the run; with `--keep-plugin-approvals` these processes read
+and write the same grant store as the desktop app, or the one in `--plugins-dir DIR`
+([Headless use](plugins.md#headless-use)).
 
 Both host and manifest accept positive integer fuel through 18446744073709551615 (`u64::MAX`),
 without conversion through floating-point controls. Memory accepts 1..4096 MiB: the remaining
