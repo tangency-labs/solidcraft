@@ -746,6 +746,16 @@ pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
     result.import_report.as_deref().map(import_summary)
 }
 
+/// The status line after an open or an import that warns: the import's summary
+/// ([`import_status`]), else how many warnings the reply has and the first of them. `None` without
+/// warnings. The desktop's open, the web's open and an insert all say it the same way.
+pub(crate) fn import_warning_status(app: &SolveApp, reply: &Value) -> Option<String> {
+    import_status(app, reply).or_else(|| {
+        let w = reply.get("warnings").and_then(Value::as_array).filter(|w| !w.is_empty())?;
+        Some(format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or("")))
+    })
+}
+
 /// SMLib's check of an import's parts runs on after the design shows (#17697). When it ends,
 /// what it found joins the import's result, so its History chip warns, and a part to repair is
 /// said on the status line, once per import, in history order. While a check runs the window
