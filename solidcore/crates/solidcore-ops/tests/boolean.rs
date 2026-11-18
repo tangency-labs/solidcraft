@@ -13,7 +13,7 @@ use solidcore_ops::prism::extrude_planar_regions;
 use solidcore_ops::sweep::{extrude, join_arcs, revolve, zone_tolerance, Curve, DraftCorner, Join};
 use solidcore_ops::{
     blend, make_box, make_cone, make_sphere, session, Blend, Body, BooleanOp, CheckLevel, Corners,
-    Error,
+    Error, PointClass,
 };
 use solidcore_record::brep::Brep as Record;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -1896,6 +1896,350 @@ fn a_traced_join_onto_a_chamfered_holes_face_is_their_sum() {
         .unwrap()
         .unwrap();
     one_valid_solid_of_volume(&r, [9, 19, 12], block + slab, 1e-9);
+}
+
+/// #17118's cut as SolidCraft passed it: the target of #16935 (its 1 mm groove rounds) less one
+/// of the wedges between the plain decagon's sharp sloping edges and their 5 mm rounds. The
+/// wedge's two faces are tangent at its knife edges, so within about 0.01 of them it is thinner
+/// than the tolerance. Near the top, a vertex of the target where a groove round meets its corner
+/// patch lies 0.0115 from a knife edge, on the wedge's plane and 1.3e-5 off its cylinder: the
+/// round's edge on the plane and the patch's curve on the cylinder each imprinted a vertex for it
+/// in the wedge, 2.4e-5 apart, and relating the target's vertex to the second failed with
+/// "another entity is already related". Once the two are one vertex, a sliver of the round
+/// between that vertex and the knife edge, within the tolerance of both of the wedge's faces,
+/// was left to a ray and kept, so the result was not closed.
+///
+/// The cut removes the wedge less what the target's rounds and corner patches had already taken
+/// out of it near the top: under 1e-4, a tenth of the 1e-3 bound for all ten wedges in the
+/// intersect above.
+#[test]
+fn a_traced_cut_by_a_wedge_grazing_the_grooves_1_mm_rounds_removes_the_wedge() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let want = body("target").volume(1e-11).unwrap() - body("tool").volume(1e-11).unwrap();
+    let r = boolean(body("target"), body("tool"), BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    // the target's 92 faces and the wedge's cylinder
+    assert_eq!(r.counts().unwrap(), [93, 266, 175]);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        v >= want && v <= want + 1e-4,
+        "volume {v}, target less the wedge {want}"
+    );
+}
+
+/// #17118's cut repeated with all ten wedges, one at a time in the order SolidCraft cut them
+/// (`wedge0` to `wedge9`), each cut on what the earlier ones left. The wedges are rotated copies,
+/// but the faces are visited in a different order at each: where the sliver of a groove's round
+/// in the wedge's thin edge first meets the wedge's plane before that plane is classified, the
+/// two faces were not paired (they lie on surfaces of different kinds), the sliver was left to a
+/// ray and kept: the fifth cut here, and the sixth wedge alone on the target, left bodies that
+/// were not closed. The result is
+/// the intersect above: the target less the ten wedges, plus what the target's rounds had already
+/// taken out of them, under 1e-3.
+#[test]
+fn a_traced_cut_by_each_of_ten_wedges_in_turn_is_the_target_less_the_wedges() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let mut r = body("target");
+    let mut want = r.volume(1e-11).unwrap();
+    for i in 0..10 {
+        let wedge = body(&format!("wedge{i}"));
+        want -= wedge.volume(1e-11).unwrap();
+        r = boolean(r, wedge, BooleanOp::Subtract).unwrap().unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "after wedge {i}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "after wedge {i}");
+    }
+    // the target's 92 faces and the ten cylinders, as the intersect gives
+    assert_eq!(r.counts().unwrap(), [102, 320, 220]);
+    let v = r.volume(1e-11).unwrap();
+    assert!(
+        v >= want && v <= want + 1e-3,
+        "volume {v}, target less the wedges {want}"
+    );
+}
+
+/// The ten wedges of the test above joined to the target one at a time. Each wedge reaches out
+/// of the target only where the target's groove rounds and corner patches dip below the slopes,
+/// so each join adds the part the cut leaves behind, 6.8e-5. The sliver of a groove's round in
+/// a wedge's thin edge lies on the wedge's plane within the tolerance; the plane is kept, so
+/// the sliver goes. Classified as a coincident face the join keeps, it was kept beside the
+/// plane, and the first join left a body that was not closed; the face count and the check below
+/// catch that.
+///
+/// The volume bound is the precision of the volume of these traced bodies, not a tolerance on the
+/// joins. The bodies' edges may end anywhere within the tolerance of their vertices: the sixth
+/// wedge as traced (`wedge5`) has an arc on the top face that ends 4.5e-7 short of its vertex,
+/// where `wedge0`'s ends on it. The join keeps that arc, so the result's top face is open by that
+/// gap, and its integrated area is 2.1e-6 larger than in the first join (half the cross product of
+/// the arc's end with the gap); the volume integration over the open loops then depends on the
+/// point it is taken about. Moved 40 above the centre of the bounding box, where `Body::volume`
+/// takes it, that point changes the target's own volume by 1.3e-4 and what the sixth join adds by
+/// 1.8e-4. So nine joins add 7.3e-5 each, the sixth 1.0e-4 alone and 2.0e-4 after the other five,
+/// and the bound allows 3e-5 a wedge. The test after this one checks each join's vertices
+/// against the first join's, which the volume cannot do to better than that.
+#[test]
+fn a_traced_join_of_each_of_ten_wedges_in_turn_adds_what_lies_outside_the_target() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let target = body("target").volume(1e-11).unwrap();
+    // what the first wedge leaves when it is cut from the target: the part outside it
+    let wedge = body("wedge0");
+    let inside = target
+        - boolean(body("target"), body("wedge0"), BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+            .volume(1e-11)
+            .unwrap();
+    let outside = wedge.volume(1e-11).unwrap() - inside;
+    let mut r = body("target");
+    for i in 0..10 {
+        r = boolean(r, body(&format!("wedge{i}")), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "after wedge {i}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "after wedge {i}");
+    }
+    // the target's 92 faces and two faces of each wedge, its cylinder and its plane's piece
+    assert_eq!(r.counts().unwrap()[0], 112);
+    let added = r.volume(1e-11).unwrap() - target;
+    assert!(
+        (added - 10.0 * outside).abs() <= 10.0 * 3e-5,
+        "added {added}, ten times the part of a wedge outside the target {outside}"
+    );
+}
+
+/// The ten wedges of the test above, each joined alone to the target. The wedges and the target
+/// are ten turns of one part about the z axis, so each join, turned back by its wedge's multiple
+/// of 36 degrees, must have the first join's counts and its vertices, each within 1e-6 (a tenth of
+/// the tolerance) of one of the first join's and the other way round. This checks the geometry of
+/// every join directly, where the volume bound above only measures it as precisely as the traced
+/// bodies' open loops allow.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's comparison, not ops computing geometry
+fn a_traced_join_of_each_wedge_alone_is_the_first_join_turned_into_place() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let angle = |b: &Body| {
+        let [x, y, _] = b.mass_properties(1e-11).unwrap().centroid;
+        y.atan2(x)
+    };
+    let joined = |i: usize| {
+        let wedge = body(&format!("wedge{i}"));
+        let turn = angle(&wedge);
+        let r = boolean(body("target"), wedge, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let report = r.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "wedge {i}: {}", report.text);
+        assert_eq!(r.solid_count().unwrap(), 1, "wedge {i}");
+        (r, turn)
+    };
+    // each vertex of the join, turned about z by `turn`
+    let vertices = |r: &Body, turn: f64| -> Vec<[f64; 3]> {
+        let (_, brep) = common::kernel_copy(r);
+        let (s, c) = turn.sin_cos();
+        brep.vertices()
+            .ids()
+            .map(|v| {
+                let p = brep.vertex(v).unwrap().point;
+                [c * p.x - s * p.y, s * p.x + c * p.y, p.z]
+            })
+            .collect()
+    };
+    let nearest = |p: &[f64; 3], set: &[[f64; 3]]| {
+        set.iter()
+            .map(|q| ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt())
+            .fold(f64::INFINITY, f64::min)
+    };
+    let (first, first_turn) = joined(0);
+    let counts = first.counts().unwrap();
+    let want = vertices(&first, 0.0);
+    for i in 1..10 {
+        let (r, turn) = joined(i);
+        assert_eq!(r.counts().unwrap(), counts, "wedge {i}");
+        // the wedge's whole number of tenths of a turn from the first
+        let steps = ((turn - first_turn) / (TAU / 10.0)).round();
+        let got = vertices(&r, -steps * TAU / 10.0);
+        for (a, b, which) in [
+            (&got, &want, "of this join"),
+            (&want, &got, "of the first join"),
+        ] {
+            for p in a {
+                let d = nearest(p, b);
+                assert!(
+                    d <= 1e-6,
+                    "wedge {i}: a vertex {which} at {p:?} is {d} from the other"
+                );
+            }
+        }
+    }
+}
+
+/// The ten wedges joined to the target one at a time, compared with each joined alone. Each
+/// wedge changes the target only near itself, so the vertices of the joint result are the
+/// target's, less those each join alone removed and plus those each join alone added, and the
+/// same holds for the midpoints of the edges. Every point must be within 1e-6 (a tenth of the
+/// tolerance) of one expected and the other way round, which checks the faces' trims in the
+/// sequential result without its volume.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's comparison, not ops computing geometry
+fn a_traced_join_of_the_ten_wedges_in_turn_has_the_vertices_and_edges_of_each_join_alone() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    // the body's vertices, then the midpoints of its edges
+    let points = |r: &Body| -> [Vec<[f64; 3]>; 2] {
+        let (k, brep) = common::kernel_copy(r);
+        let vertices = brep
+            .vertices()
+            .ids()
+            .map(|v| {
+                let p = brep.vertex(v).unwrap().point;
+                [p.x, p.y, p.z]
+            })
+            .collect();
+        let midpoints = brep
+            .edges()
+            .ids()
+            .filter_map(|e| {
+                let edge = brep.edge(e).unwrap();
+                let p = edge
+                    .curve
+                    .as_ref()?
+                    .evaluate_point(&k, edge.interval.evaluate(0.5))
+                    .unwrap();
+                Some([p.x, p.y, p.z])
+            })
+            .collect();
+        [vertices, midpoints]
+    };
+    let near = |p: &[f64; 3], set: &[[f64; 3]]| {
+        set.iter().any(|q| {
+            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt() <= 1e-6
+        })
+    };
+    let target = points(&body("target"));
+    let mut want = target.clone();
+    let mut r = body("target");
+    for i in 0..10 {
+        let wedge = || body(&format!("wedge{i}"));
+        let alone = points(
+            &boolean(body("target"), wedge(), BooleanOp::Union)
+                .unwrap()
+                .unwrap(),
+        );
+        for kind in 0..2 {
+            let removed: Vec<_> = target[kind]
+                .iter()
+                .filter(|p| !near(p, &alone[kind]))
+                .copied()
+                .collect();
+            want[kind].retain(|p| !near(p, &removed));
+            want[kind].extend(alone[kind].iter().filter(|p| !near(p, &target[kind])));
+        }
+        r = boolean(r, wedge(), BooleanOp::Union).unwrap().unwrap();
+    }
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let got = points(&r);
+    for (kind, name) in [(0, "vertex"), (1, "edge midpoint")] {
+        assert_eq!(got[kind].len(), want[kind].len(), "{name}s");
+        for (a, b, which) in [
+            (&got[kind], &want[kind], "of the result is not expected"),
+            (&want[kind], &got[kind], "expected is not in the result"),
+        ] {
+            for p in a {
+                assert!(near(p, b), "a {name} {which}: {p:?}");
+            }
+        }
+    }
+}
+
+/// The ten wedges joined to the target one at a time, checked against the operands alone, with
+/// nothing taken from a join. The boundary of a union lies on the boundaries of its operands and
+/// inside none of them. So every point sampled from the result, nine along each edge's curve and
+/// one on each face (the face's point closest to the centroid of its area), must classify on the
+/// boundary of the target or of a wedge, and inside none of the eleven. A face kept on the wrong
+/// surface, a trim curve that leaves its surfaces, or a piece kept where another operand covers it
+/// fails this, whatever the volume and the counts say.
+#[test]
+#[allow(clippy::disallowed_methods)] // sampling the result to check it, not ops computing geometry
+fn a_traced_join_of_the_ten_wedges_in_turn_lies_on_its_operands_and_inside_none() {
+    all_fixes();
+    let body = traced_operands("issue_17118_wedge_cut_over_groove_rounds");
+    let operands: Vec<(String, Body)> = std::iter::once("target".to_string())
+        .chain((0..10).map(|i| format!("wedge{i}")))
+        .map(|name| {
+            let b = body(&name);
+            (name, b)
+        })
+        .collect();
+    let mut r = body("target");
+    for i in 0..10 {
+        r = boolean(r, body(&format!("wedge{i}")), BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+    }
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+
+    // nine points along each edge's curve, over its interval
+    let (k, brep) = common::kernel_copy(&r);
+    let mut points: Vec<([f64; 3], String)> = Vec::new();
+    for e in brep.edges().ids() {
+        let edge = brep.edge(e).unwrap();
+        let Some(curve) = edge.curve.as_ref() else {
+            continue;
+        };
+        for j in 1..10 {
+            let p = curve
+                .evaluate_point(&k, edge.interval.evaluate(f64::from(j) / 10.0))
+                .unwrap();
+            points.push(([p.x, p.y, p.z], format!("edge {e:?} at {j}/10")));
+        }
+    }
+    // one point on each face: its point closest to the centroid of its area
+    let (record, order) = r.to_record().unwrap();
+    for f in 0..record.faces.len() {
+        let c = r.face_centroid(&order, f, 1e-6).unwrap().centroid;
+        let on = r
+            .closest_to_point(&order, &[f], &[], c)
+            .unwrap()
+            .unwrap()
+            .to;
+        points.push((on, format!("face {f}")));
+    }
+    assert!(points.len() > 1000, "{} points", points.len());
+
+    let classes: Vec<Vec<PointClass>> = operands
+        .iter()
+        .map(|(_, b)| {
+            b.classify_points(&points.iter().map(|(p, _)| *p).collect::<Vec<_>>())
+                .unwrap()
+                .into_iter()
+                .map(Result::unwrap)
+                .collect()
+        })
+        .collect();
+    for (n, (p, from)) in points.iter().enumerate() {
+        let inside: Vec<_> = operands
+            .iter()
+            .zip(&classes)
+            .filter(|(_, c)| c[n] == PointClass::Inside)
+            .map(|((name, _), _)| name.as_str())
+            .collect();
+        assert!(inside.is_empty(), "{from} at {p:?} is inside {inside:?}");
+        assert!(
+            classes.iter().any(|c| c[n] == PointClass::OnBoundary),
+            "{from} at {p:?} is on no operand's boundary"
+        );
+    }
 }
 
 /// A 10 mm cube with the vertical edge at x = 0, y = 0 rounded to radius 2.
