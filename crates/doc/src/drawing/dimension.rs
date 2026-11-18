@@ -69,7 +69,7 @@ use std::f64::consts::{PI, TAU};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use solidcore_record::brep::Loop;
+use solidcore_record::brep::{Curve, Frame};
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::drawing_measure::{self, AngleFrom, Cone, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide, Sphere};
 use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
@@ -82,7 +82,7 @@ use crate::config::MAX_REFERENCE_NAME_BYTES;
 use crate::construct::{MAX_VERTEX_EDGES, as_circle, as_line, point_tolerance, shared_ends};
 use crate::display_units::length_number;
 use crate::format::MAX_REAL;
-use solidcraft_kernel::{FaceSurface, PointClass, edge_circle, face_surface};
+use solidcraft_kernel::{FaceSurface, PointClass, face_surface};
 
 use crate::appearance::face_index_at;
 use crate::name_lookup::{BodyEdges, EdgeMatch, face_has_name, faces_with_stem};
@@ -1303,7 +1303,7 @@ impl<'a> Lookup<'a> {
     }
 
     /// A sphere's size on the view through `basis`: its diameter when the body's faces on it are
-    /// the whole sphere ([`rim`] finds none), else its radius, read on the arc of its contour in
+    /// the whole sphere ([`rim_edges`] finds none), else its radius, read on the arc of its contour in
     /// this view that lies on them ([`contour_on`]). Its points are its centre and that arc's start,
     /// middle and end, as a radial dimension's are; a whole sphere's arc is its whole contour.
     fn sphere(&mut self, face: &ModelFace, basis: &Plane) -> std::result::Result<Found, Status> {
@@ -1314,11 +1314,14 @@ impl<'a> Lookup<'a> {
         let flattens = || Status::lost("its occurrence flattens it");
         let to_body = mat_inverse(&on.frame).ok_or_else(flattens)?;
         let seen = Plane::new(sphere.center, apply_vector(&to_body, basis.x), apply_vector(&to_body, basis.y)).ok_or_else(flattens)?;
-        let rim = rim(b, &on.faces);
+        let rim = rim_edges(b, &on.faces)?;
         let (label, value, (start, sweep)) = if rim.is_empty() {
             (LabelKind::SphericalDiameter, 2.0 * sphere.radius, (0.0, TAU))
         } else {
-            let arc = contour_on(b, &seen, &sphere, &rim)?.ok_or_else(|| {
+            if rim.len() > MAX_RIM_EDGES {
+                return Err(Status::Unmeasurable(format!("the sphere's faces end at more than {MAX_RIM_EDGES} edges: give a radius another way")));
+            }
+            let arc = contour_on(b, &seen, &sphere, &on.faces)?.ok_or_else(|| {
                 Status::Unmeasurable(format!("face `{}`'s contour in this view isn't on it: the view sees its rim, not its radius", face.name))
             })?;
             (LabelKind::SphericalRadius, sphere.radius, arc)
@@ -1345,10 +1348,12 @@ impl<'a> Lookup<'a> {
         let bounds = b.body.exact_bounds().map_err(|e| Status::Unmeasurable(e.to_string()))?;
         // Every point of the body is within this of the apex.
         let reach = cone.apex.dist(bounds.center()) + bounds.size().len() / 2.0;
-        let rim = rim(b, &on.faces);
+        if rim_edges(b, &on.faces)?.len() > MAX_RIM_EDGES {
+            return Err(Status::Unmeasurable(format!("the cone's faces end at more than {MAX_RIM_EDGES} edges: give its angle another way")));
+        }
         let mut points = Vec::with_capacity(4);
         for way in sides {
-            let (near, far) = ray_on(b, cone.apex, way, reach, &rim)?.ok_or_else(|| {
+            let (near, far) = ray_on(b, cone.apex, cone.axis, way, reach, &on.faces)?.ok_or_else(|| {
                 Status::Unmeasurable(format!("face `{}` isn't a whole cone in this view: one of its silhouettes isn't on it", face.name))
             })?;
             points.extend([near, far].map(|t| apply_point(&on.frame, cone.apex + way * t)));
@@ -1455,57 +1460,23 @@ fn surface_tolerance(b: &ModelBody) -> f64 {
     (b.body.size() * 1e-7).max(1e-9) * 10.0
 }
 
-/// The edges where `faces` of `b` meet a face that isn't one of them, or meet none (a free edge),
-/// each once. None when the faces close up on their own, as a whole sphere's do: its seam's and
-/// its poles' uses are all its own. Read off the record's topology, so exact.
-fn rim(b: &ModelBody, faces: &[usize]) -> Vec<usize> {
-    let record = b.body.record();
-    let edges = faces.iter().filter_map(|f| record.faces.get(*f)).flat_map(|f| &f.loops).flat_map(|l| match l {
-        Loop::Edges { edges } => edges.as_slice(),
-        Loop::Vertex { .. } => [].as_slice(),
-    });
-    let bounds =
-        |e: &usize| record.edges.get(*e).is_some_and(|edge| edge.uses.len() < 2 || edge.uses.iter().any(|u| !faces.contains(&(u.face as usize))));
-    let mut rim: Vec<usize> = edges.map(|u| u.edge as usize).filter(bounds).collect();
-    rim.sort_unstable();
-    rim.dedup();
-    rim
-}
-
-/// The most rim edges [`contour_on`] reads a sphere's contour across: past it, the faces are too
-/// broken up to read a radius off.
+/// The most rim edges a sphere's contour or a cone's silhouette is read across: past it, the faces
+/// are too broken up to read a size off.
 const MAX_RIM_EDGES: usize = 128;
-/// Where a rim edge isn't a circle, [`contour_on`] also cuts the contour at this many even steps.
-const CONTOUR_STEPS: u32 = 32;
 /// Cuts closer than this round the contour (radians) are one.
 const SAME_ANGLE: f64 = 1e-9;
 
 /// The longest arc of `sphere`'s contour on the view `seen` (both in `b`'s own frame) that lies on
 /// `b`'s boundary: its start angle and its sweep, or `None` when none does. The contour is cut
-/// where it crosses the plane of each circle in `rim` (the edges where the sphere's faces end).
-/// Between two cuts it is all on the faces or all off them, so one point classification at its middle (exact,
-/// SMLib's) decides, and pieces on them next to each other join: a rim circle's plane can also cut
-/// the contour where the faces go on. A rim edge that isn't on a circle ([`edge_circle`]) adds
-/// [`CONTOUR_STEPS`] even cuts instead, so there the arc's ends are within half a step, and an arc
-/// that holds no step's middle is missed.
-fn contour_on(b: &ModelBody, seen: &Plane, sphere: &Sphere, rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
-    if rim.len() > MAX_RIM_EDGES {
-        return Err(Status::Unmeasurable(format!("the sphere's faces end at more than {MAX_RIM_EDGES} edges: give a radius another way")));
-    }
-    let (mut cuts, mut stepped) = (Vec::new(), false);
-    for e in rim {
-        match edge_circle(&b.body, *e) {
-            Some(circle) => {
-                let crossed = drawing_measure::contour_crossings(seen, sphere, circle.center, Vec3::from(circle.axis));
-                cuts.extend(crossed.map_err(|e| Status::Unmeasurable(e.0.to_string()))?);
-            }
-            None => stepped = true,
-        }
-    }
-    if stepped {
-        cuts.extend((0..CONTOUR_STEPS).map(|k| TAU * f64::from(k) / f64::from(CONTOUR_STEPS)));
-    }
-    cuts.sort_by(f64::total_cmp);
+/// where the rim of `faces` (the body's faces on the sphere) crosses its plane on it, exactly,
+/// whatever curves the rim's edges are ([`outline_cuts`]). Between two cuts it is all on the faces
+/// or all off them, so one point classification at its middle (exact, SMLib's) decides, and pieces
+/// on them next to each other join.
+fn contour_on(b: &ModelBody, seen: &Plane, sphere: &Sphere, faces: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
+    // The contour as a record circle: its angle from the frame's x is `contour_point`'s.
+    let frame = Frame { origin: sphere.center.into(), x_axis: seen.x.into(), y_axis: seen.y.into() };
+    let contour = Curve::Circle { frame, radius: sphere.radius };
+    let mut cuts = outline_cuts(b, faces, &contour, [0.0, TAU], sphere.center, seen.normal())?;
     cuts.dedup_by(|a, b| (*a - *b).abs() <= SAME_ANGLE);
     // Each cut to the next round, the last back to the first; no cut leaves the whole contour.
     let arcs: Vec<(f64, f64)> = match cuts.as_slice() {
@@ -1513,11 +1484,9 @@ fn contour_on(b: &ModelBody, seen: &Plane, sphere: &Sphere, rim: &[usize]) -> st
         [one] => vec![(*one, TAU)],
         _ => cuts.iter().zip(cuts.iter().cycle().skip(1)).map(|(a, b)| (*a, (b - a).rem_euclid(TAU))).collect(),
     };
-    let mut pieces = Vec::with_capacity(arcs.len());
-    for (start, sweep) in arcs.into_iter().filter(|(_, sweep)| *sweep > SAME_ANGLE) {
-        let class = b.body.classify_point(sphere.contour_point(seen, start + sweep / 2.0)).map_err(|e| Status::Unmeasurable(e.to_string()))?;
-        pieces.push((start, sweep, class == PointClass::OnBoundary));
-    }
+    let arcs: Vec<(f64, f64)> = arcs.into_iter().filter(|(_, sweep)| *sweep > SAME_ANGLE).collect();
+    let middles: Vec<Vec3> = arcs.iter().map(|(start, sweep)| sphere.contour_point(seen, start + sweep / 2.0)).collect();
+    let pieces: Vec<(f64, f64, bool)> = arcs.iter().zip(on_boundary(b, &middles)?).map(|((start, sweep), on)| (*start, *sweep, on)).collect();
     Ok(longest_run(&pieces, true))
 }
 
@@ -1545,42 +1514,57 @@ fn longest_run(pieces: &[(f64, f64, bool)], round: bool) -> Option<(f64, f64)> {
 
 /// The longest piece of the ray from `apex` along the unit `way` (both in `b`'s own frame), out
 /// to `reach`, that lies on `b`'s boundary: how far from the apex it starts and ends, or `None`
-/// when none does. Cut as [`contour_on`] cuts a sphere's contour: where the ray crosses the plane of
-/// each circle in `rim`, or at [`CONTOUR_STEPS`] even steps where a rim edge isn't a circle, with
-/// one point classification at each piece's middle.
-fn ray_on(b: &ModelBody, apex: Vec3, way: Vec3, reach: f64, rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
-    if rim.len() > MAX_RIM_EDGES {
-        return Err(Status::Unmeasurable(format!("the cone's faces end at more than {MAX_RIM_EDGES} edges: give its angle another way")));
-    }
-    let (mut cuts, mut stepped) = (vec![0.0, reach], false);
-    for e in rim {
-        match edge_circle(&b.body, *e) {
-            Some(circle) => {
-                let normal = Vec3::from(circle.axis);
-                let slant = way.dot(normal);
-                // A ray in the circle's plane, or parallel to it, isn't cut by it.
-                if slant.abs() > SAME_ANGLE {
-                    let t = (circle.center - apex).dot(normal) / slant;
-                    if t > 0.0 && t < reach {
-                        cuts.push(t);
-                    }
-                }
-            }
-            None => stepped = true,
-        }
-    }
-    if stepped {
-        cuts.extend((1..CONTOUR_STEPS).map(|k| reach * f64::from(k) / f64::from(CONTOUR_STEPS)));
-    }
+/// when none does. The ray is a silhouette of the cone with `axis` that `faces` lie on, so it lies
+/// in the plane of the axis and itself: cut as [`contour_on`] cuts a sphere's contour, where the
+/// rim of `faces` crosses that plane on it, with one point classification at each piece's middle.
+fn ray_on(b: &ModelBody, apex: Vec3, axis: Vec3, way: Vec3, reach: f64, faces: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
+    let at = |t: f64| apex + way * t;
+    let meridian = Plane::new(apex, axis, way).ok_or_else(|| Status::Unmeasurable("the cone's silhouette runs along its axis".into()))?;
+    // The ray as a record line through `at(1)`, so its parameter is the distance from the apex.
+    let ray = Curve::Line { start: apex.into(), end: at(1.0).into() };
+    let mut cuts = vec![0.0, reach];
+    cuts.extend(outline_cuts(b, faces, &ray, [0.0, reach], apex, meridian.normal())?);
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() <= SAME_ANGLE * reach);
-    let mut pieces = Vec::with_capacity(cuts.len());
-    for pair in cuts.windows(2) {
-        let (start, length) = (pair[0], pair[1] - pair[0]);
-        let class = b.body.classify_point(apex + way * (start + length / 2.0)).map_err(|e| Status::Unmeasurable(e.to_string()))?;
-        pieces.push((start, length, class == PointClass::OnBoundary));
-    }
+    let spans: Vec<(f64, f64)> = cuts.windows(2).map(|pair| (pair[0], pair[1] - pair[0])).collect();
+    let middles: Vec<Vec3> = spans.iter().map(|(start, length)| at(start + length / 2.0)).collect();
+    let pieces: Vec<(f64, f64, bool)> = spans.iter().zip(on_boundary(b, &middles)?).map(|((start, length), on)| (*start, *length, on)).collect();
     Ok(longest_run(&pieces, false).map(|(start, length)| (start, start + length)))
+}
+
+/// Where the rim of `faces` of `b` cuts `outline`, a record curve over `interval` that lies in the
+/// plane through `point` square to `normal`: the outline's parameters, in order. solidcore's answer
+/// on the body's own copy in the kernel ([`solidcore_ops::Body::outline_cuts`]): where each rim
+/// edge crosses the plane, kept when it is on the outline.
+fn outline_cuts(
+    b: &ModelBody,
+    faces: &[usize],
+    outline: &Curve,
+    interval: [f64; 2],
+    point: Vec3,
+    normal: Vec3,
+) -> std::result::Result<Vec<f64>, Status> {
+    let (body, order) = exact_body(b)?;
+    body.outline_cuts(order, faces, outline, interval, point.into(), normal.into()).map_err(|e| Status::Unmeasurable(e.to_string()))
+}
+
+/// The rim of `faces` of `b`: the edges where they meet a face that isn't one of them, or meet
+/// none. None when the faces close up on their own, as a whole sphere's do. solidcore's answer
+/// ([`solidcore_ops::Body::rim_edges`]), the rim [`outline_cuts`] cuts with.
+fn rim_edges(b: &ModelBody, faces: &[usize]) -> std::result::Result<Vec<usize>, Status> {
+    let (body, order) = exact_body(b)?;
+    body.rim_edges(order, faces).map_err(|e| Status::Unmeasurable(e.to_string()))
+}
+
+/// The body's own copy in the kernel, which solidcore's exact queries read.
+fn exact_body(b: &ModelBody) -> std::result::Result<&(solidcore_ops::Body, solidcore_ops::Order), Status> {
+    b.body.ops_body().ok_or_else(|| Status::Unmeasurable("the kernel can't read the body's faces exactly".into()))
+}
+
+/// Whether each of `points` lies on `b`'s boundary, by one point classification of them all.
+fn on_boundary(b: &ModelBody, points: &[Vec3]) -> std::result::Result<Vec<bool>, Status> {
+    let classes = b.body.classify_points(points).map_err(|e| Status::Unmeasurable(e.to_string()))?;
+    Ok(classes.into_iter().map(|class| class == PointClass::OnBoundary).collect())
 }
 
 /// What a dimension of `kind` reads, where the kind says: `None` for a chain, which shows its
