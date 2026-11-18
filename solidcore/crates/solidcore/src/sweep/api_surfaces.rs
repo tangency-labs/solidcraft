@@ -519,6 +519,31 @@ mod tests {
             Point3::ZERO,
         );
 
+        // two quadratic spans bending opposite ways meet C1 but not G2 (mirrored
+        // normals): the whole profile is revolved, not its first span (upstream returned
+        // the surface of [0, 1] only)
+        let s_profile = api_curves::create_canonical_curve(&api_curves::CanonicalCurveParams {
+            points: &[
+                Point3::new(0.0, 1.0, 0.0),
+                Point3::new(1.0, 2.0, 0.0),
+                Point3::new(2.0, 1.0, 0.0),
+                Point3::new(3.0, 2.0, 0.0),
+            ],
+            knots: &[0.0, 1.0, 2.0],
+            knot_multiplicities: &[3, 1, 3],
+            weights: None,
+            degree: 2,
+            form: crate::nurbs::b_spline_curve::p1::BSplineCurveForm::Unspecified,
+        })
+        .unwrap();
+        let mut s_kernel = Kernel::default();
+        let s = create_surface_revolution(&mut s_kernel, Some(&s_profile), o, x, 180.0).unwrap();
+        let dom = s.natural_uv_domain_if_built();
+        assert_eq!((dom.min().y, dom.max().y), (0.0, 2.0));
+        let end = s.evaluate_point(&s_kernel, dom.max()).unwrap();
+        assert!((end.x - 3.0).abs() < 1e-9, "{end:?}");
+        assert!((end.y.hypot(end.z) - 2.0).abs() < 1e-9, "{end:?}");
+
         let mut k = Kernel::default();
         let a = Curve::from(wave(0.0));
         let b = Curve::from(wave(5.0));
