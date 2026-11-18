@@ -39,6 +39,7 @@ canvas.calibrate                  reference images, and sketches traced from the
 canvas.decal                      reference images, and sketches traced from them (sketch only)
 canvas.delete                     reference images, and sketches traced from them (sketch only)
 canvas.edit                       reference images, and sketches traced from them (sketch only)
+canvas.frame_sketch               reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.insert                     reference images, and sketches traced from them (sketch only)
 canvas.straighten                 reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.to_sketch                  reference images, and sketches traced from them (sketch only)
