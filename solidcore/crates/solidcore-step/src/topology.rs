@@ -655,7 +655,13 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         let p = e.params();
         let (vs_id, ve_id) = (rid(p.get(1), "edge start")?, rid(p.get(2), "edge end")?);
-        let (vs, ve) = (self.vertex(vs_id)?, self.vertex(ve_id)?);
+        let (mut vs, mut ve) = (self.vertex(vs_id)?, self.vertex(ve_id)?);
+        // Two VERTEX_POINTs written at one point are the one vertex of a closed edge, as when the
+        // file writes that vertex once: joined here, the edge is read as that edge on any curve.
+        if vs != ve && self.at_one_point(vs_id, ve_id) && self.join(vs, ve, false)? {
+            vs = self.find(vs);
+            ve = vs;
+        }
         let same_sense = flag(p.get(4), "edge same_sense")?;
         let curve = self.edge_geometry(rid(p.get(3), "edge geometry")?, 0)?;
         let (ps, pe) = (self.asm.point(vs)?, self.asm.point(ve)?);
@@ -774,18 +780,29 @@ impl<'b, 'a> Builder<'b, 'a> {
         self.vertex_members.get(&root).map_or(1, Vec::len)
     }
 
+    /// Whether VERTEX_POINTs `a` and `z` of the file are written at one point (their
+    /// CARTESIAN_POINTs' coordinates equal). An EDGE_CURVE between two such vertices is a closed
+    /// edge written with two vertices: [`Builder::edge`] reads it as the edge with one.
+    fn at_one_point(&self, a: u64, z: u64) -> bool {
+        let at = |v: u64| entity(self.ex, v).ok().and_then(|e| rid(e.params().get(1), "vertex point").ok()).and_then(|p| self.reader.point(p).ok());
+        matches!((at(a), at(z)), (Some(pa), Some(pz)) if pa == pz)
+    }
+
     /// Whether an EDGE_CURVE of the file, read yet or not, runs from a VERTEX_POINT of `small`'s
-    /// set to one of `other`'s (both roots).
+    /// set to one of `other`'s (both roots). An EDGE_CURVE whose two ends are at one point
+    /// ([`Builder::at_one_point`]) does not count: its ends are one vertex, not apart.
     fn edge_between(&mut self, small: u32, other: u32) -> bool {
         if self.edge_partners.is_none() {
+            let ex = self.ex;
             let mut partners: HashMap<u64, Vec<u64>> = HashMap::new();
-            for e in self.ex.entities.values() {
+            for e in ex.entities.values() {
                 if e.name() != "EDGE_CURVE" {
                     continue;
                 }
                 let p = e.params();
                 if let (Some(a), Some(z)) = (p.get(1).and_then(Param::as_ref_id), p.get(2).and_then(Param::as_ref_id))
                     && a != z
+                    && !self.at_one_point(a, z)
                 {
                     partners.entry(a).or_default().push(z);
                     partners.entry(z).or_default().push(a);
@@ -809,8 +826,15 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// file may write one corner as two VERTEX_POINTs at one point). Coincident ones are joined
     /// into one set, its root's tolerance covering both, so the faces and the edges they share
     /// meet at one vertex. Two vertices that are the two ends of one EDGE_CURVE of the file are
-    /// never joined, whether that edge is read yet or not: its own ends are apart.
+    /// never joined, whether that edge is read yet or not: its own ends are apart. The exception is
+    /// an edge whose two VERTEX_POINTs are at one point ([`Builder::edge_between`]).
     fn meet(&mut self, a: u32, b: u32) -> R<bool> {
+        self.join(a, b, true)
+    }
+
+    /// [`Builder::meet`]; with `unless_edge` false, without the test for an EDGE_CURVE between
+    /// the two, for [`Builder::edge`] joining the two ends of the edge it reads.
+    fn join(&mut self, a: u32, b: u32, unless_edge: bool) -> R<bool> {
         let (a, b) = (self.find(a), self.find(b));
         if a == b {
             return Ok(true);
@@ -821,7 +845,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         let Some(tolerance) = solidcore_ops::vertex_meet::points_meet(k.point, k.tolerance, d.point, d.tolerance) else {
             return Ok(false);
         };
-        if self.edge_between(drop, keep) {
+        if unless_edge && self.edge_between(drop, keep) {
             return Ok(false);
         }
         while self.vertex_parent.len() < self.asm.vertices.len() {

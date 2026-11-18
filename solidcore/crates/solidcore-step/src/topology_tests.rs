@@ -442,11 +442,18 @@ struct Cyl {
 }
 
 fn cylinder(w: &mut W, c: [f64; 2], r: f64, z: [f64; 2]) -> Cyl {
+    cylinder_with(w, c, r, z, false)
+}
+
+/// [`cylinder`]; with `twin_ends`, each rim circle ends at a second VERTEX_POINT at its start's
+/// point instead of at its start's own vertex (as OpenCascade's booleans can write a hole's rim).
+fn cylinder_with(w: &mut W, c: [f64; 2], r: f64, z: [f64; 2], twin_ends: bool) -> Cyl {
     let p = |h: f64| [c[0] + r, c[1], h];
     let (v0, v1) = (w.vertex(p(z[0])), w.vertex(p(z[1])));
     let circle = |w: &mut W, v: u64, h: f64| {
         let k = w.circle([c[0], c[1], h], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
-        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+        let end = if twin_ends { w.vertex(p(h)) } else { v };
+        w.add(format!("EDGE_CURVE('',#{v},#{end},#{k},.T.)"))
     };
     let circles = [circle(w, v0, z[0]), circle(w, v1, z[1])];
     let seam = w.line_edge((v0, p(z[0])), (v1, p(z[1])), true, 1.0);
@@ -1383,8 +1390,13 @@ fn a_faceted_brep_of_poly_loops_is_a_closed_solid() {
 /// A 20 × 20 × 5 plate with a hole of radius 3 through it; with `marked`, its square bounds are
 /// FACE_OUTER_BOUNDs, otherwise every bound is a FACE_BOUND and the hole is listed first.
 fn plate(marked: bool) -> p21::Exchange {
+    plate_with(marked, false)
+}
+
+/// [`plate`], its hole's rims written as [`cylinder_with`] writes them.
+fn plate_with(marked: bool, twin_ends: bool) -> p21::Exchange {
     let mut w = W::default();
-    let c = cylinder(&mut w, [10.0, 10.0], 3.0, [0.0, 5.0]);
+    let c = cylinder_with(&mut w, [10.0, 10.0], 3.0, [0.0, 5.0], twin_ends);
     let mut inner = |w: &mut W, up: f64| {
         // About the face's outward normal the hole runs clockwise.
         let oe = if up > 0.0 { w.oe(c.circles[1], false) } else { w.oe(c.circles[0], true) };
@@ -1433,6 +1445,97 @@ fn a_plate_with_a_through_hole() {
             }
         });
     }
+}
+
+/// The plate whose hole's rims are full circles each from one VERTEX_POINT to a second one at the
+/// same point (tangency-labs/solidcraft#18784): each rim is a full turn whose two ends are one
+/// vertex, so the hole's loops close and the plate reads as the same closed solid.
+#[test]
+fn a_full_circle_edge_between_two_vertices_at_one_point_closes_its_loop() {
+    for marked in [true, false] {
+        let s = one_solid(&plate_with(marked, true));
+        assert!(!s.sheet);
+        assert_eq!(counts(&s.brep), counts(&one_solid(&plate(marked)).brep), "marked {marked}");
+        for e in s.brep.edges.iter().filter(|e| matches!(e.curve, BCurve::Circle { .. })) {
+            let [a0, a1] = solidcore_ops::label::edge_curve_interval(e).unwrap();
+            assert!((a1 - a0 - TAU).abs() < 1e-12, "a full turn: {a0} {a1}");
+            assert_eq!(e.vertices[0], e.vertices[1]);
+        }
+    }
+}
+
+/// A unit square sheet bounded by one closed edge on a closed polygon spline round it (its seam
+/// at (1, 0.5)), from the vertex there to itself, or with `twin_ends` to a second VERTEX_POINT at
+/// the same point.
+fn spline_outline(twin_ends: bool) -> p21::Exchange {
+    let mut w = W::default();
+    let start = [1.0, 0.5, 0.0];
+    let v = w.vertex(start);
+    let end = if twin_ends { w.vertex(start) } else { v };
+    let pts: Vec<u64> = [start, [1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], start].iter().map(|p| w.pt(*p)).collect();
+    let c =
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',1,({}),.POLYLINE_FORM.,.T.,.F.,(2,1,1,1,1,2),(0.,1.,2.,3.,4.,5.),.UNSPECIFIED.)", list(&pts)));
+    let e = w.add(format!("EDGE_CURVE('',#{v},#{end},#{c},.T.)"));
+    let oe = w.oe(e, true);
+    let bound = w.bound(&[oe], true, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let face = w.face(&[bound], plane, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('',(#{shell}))"));
+    w.file(&[model])
+}
+
+/// A closed spline edge written with two vertices at one point is read as the same edge written
+/// with one: the whole spline, not an empty piece of it between one point and itself.
+#[test]
+fn a_closed_spline_edge_between_two_vertices_at_one_point_is_its_one_vertex_edge() {
+    let (one, two) = (one_solid(&spline_outline(false)), one_solid(&spline_outline(true)));
+    assert_eq!(counts(&two.brep), [1, 1, 1, 1, 1]);
+    assert_eq!(counts(&one.brep), counts(&two.brep));
+    let (a, b) = (&one.brep.edges[0], &two.brep.edges[0]);
+    assert_eq!(a.curve, b.curve);
+    assert_eq!(a.interval, b.interval);
+    assert_eq!(b.vertices[0], b.vertices[1]);
+}
+
+/// A LINE edge between two vertices at one point is refused as the LINE edge with one vertex is:
+/// joining its ends never makes an edge of no length.
+#[test]
+fn a_line_edge_between_two_vertices_at_one_point_is_refused_as_a_closed_edge() {
+    for twin_ends in [false, true] {
+        let mut w = W::default();
+        let p = [1.0, 2.0, 3.0];
+        let v = w.vertex(p);
+        let end = if twin_ends { w.vertex(p) } else { v };
+        let (o, d) = (w.pt(p), w.dir([1.0, 0.0, 0.0]));
+        let vec = w.add(format!("VECTOR('',#{d},1.)"));
+        let line = w.add(format!("LINE('',#{o},#{vec})"));
+        let e = w.add(format!("EDGE_CURVE('',#{v},#{end},#{line},.T.)"));
+        let ex = w.file(&[e]);
+        with_builder(&ex, |b| {
+            let err = b.edge(e).err().unwrap_or_default();
+            assert!(err.contains("a closed edge on a line"), "twin ends {twin_ends}: {err}");
+        });
+    }
+}
+
+/// Two vertices at one point that are the two ends of a circle edge not read yet meet: a loop
+/// read before that edge joins them, as the edge itself would.
+#[test]
+fn the_two_ends_at_one_point_of_an_edge_read_later_meet() {
+    let mut w = W::default();
+    let p = [3.0, 0.0, 0.0];
+    let (v0, v1) = (w.vertex(p), w.vertex(p));
+    let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 3.0);
+    let circle = w.add(format!("EDGE_CURVE('',#{v0},#{v1},#{k},.T.)"));
+    let ex = w.file(&[circle]);
+    with_builder(&ex, |b| {
+        let (a, z) = (b.vertex(v0).unwrap(), b.vertex(v1).unwrap());
+        assert!(b.meet(a, z).unwrap());
+        let (e, _) = b.edge(circle).unwrap();
+        let [s, t] = b.asm.edges[e as usize].vertices;
+        assert_eq!(s, t);
+    });
 }
 
 #[test]
