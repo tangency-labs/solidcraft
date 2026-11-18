@@ -273,16 +273,17 @@ fn the_menu_lists_install_then_entries_with_a_submenu_for_several() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     let empty = rows(&app);
     assert!(matches!(&empty[0], FileRow::Item(i) if i.id == INSTALL));
-    assert!(matches!(&empty[1], FileRow::Separator));
-    assert!(matches!(&empty[2], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_empty") && !i.enabled));
+    assert!(matches!(&empty[1], FileRow::Item(i) if i.id == LAST_REPORT && !i.enabled), "no import yet: nothing to show again");
+    assert!(matches!(&empty[2], FileRow::Separator));
+    assert!(matches!(&empty[3], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_empty") && !i.enabled));
     app.plugin_menu.listed = vec![
         listed("gears", vec![entry("spur", "edit", json!([{"kind":"menu","name":"Spur Gear"}]))]),
         listed("tools", vec![entry("measure", "read", json!([])), entry("tidy", "edit", json!([{"kind":"ribbon","name":"x"}]))]),
     ];
     let listed_rows = rows(&app);
-    assert_eq!(listed_rows.len(), 4);
-    assert!(matches!(&listed_rows[2], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "Spur Gear…"), "menu slot names the row");
-    let FileRow::Sub { label, rows: sub } = &listed_rows[3] else { panic!("several entries: a submenu") };
+    assert_eq!(listed_rows.len(), 5);
+    assert!(matches!(&listed_rows[3], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "Spur Gear…"), "menu slot names the row");
+    let FileRow::Sub { label, rows: sub } = &listed_rows[4] else { panic!("several entries: a submenu") };
     assert_eq!(label, "tools plugin");
     let labels: Vec<&str> = sub.iter().map(|r| if let FileRow::Item(i) = r { i.label.as_str() } else { "" }).collect();
     assert_eq!(labels, ["measure…", "tidy…"]);
@@ -307,8 +308,8 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     assert!(app.plugin_menu.dialogs.is_empty(), "listing opens nothing");
 
     let menu = rows(&app);
-    assert!(matches!(&menu[2], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "gears plugin…"));
-    assert!(matches!(&menu[3], FileRow::Sub { label, rows } if label == "tools plugin" && rows.len() == 2));
+    assert!(matches!(&menu[3], FileRow::Item(i) if i.id == "entry:0:0" && i.label == "gears plugin…"));
+    assert!(matches!(&menu[4], FileRow::Sub { label, rows } if label == "tools plugin" && rows.len() == 2));
 
     // The ribbon button opens that one command's dialog, titled by it alone.
     assert!(choose_ribbon(&mut app, "plugin_entry:tools:tidy"));
@@ -329,15 +330,15 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     let ids: Vec<String> = ribbon_buttons(&app).into_iter().map(|b| b.id).collect();
     assert_eq!(ids, ["plugin_entry:tools:measure", "plugin_entry:tools:tidy"], "off: no ribbon button");
     let menu = rows(&app);
-    assert_eq!(menu.len(), 3, "off: no menu row");
-    assert!(matches!(&menu[2], FileRow::Sub { label, .. } if label == "tools plugin"));
+    assert_eq!(menu.len(), 4, "off: no menu row");
+    assert!(matches!(&menu[3], FileRow::Sub { label, .. } if label == "tools plugin"));
     choose_ribbon(&mut app, "plugin_entry:gears:spur");
     choose(&mut app, "entry:0:0");
     assert!(app.plugin_menu.dialogs.is_empty(), "a plugin turned off opens nothing");
 
     app.preferences.disabled_plugins.insert("tools".into());
     assert!(ribbon_buttons(&app).is_empty());
-    assert!(matches!(&rows(&app)[2], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_all_off") && !i.enabled));
+    assert!(matches!(&rows(&app)[3], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_all_off") && !i.enabled));
 }
 
 #[test]
@@ -415,6 +416,44 @@ fn each_plugin_entry_has_its_own_dialog_with_its_own_values() {
     h.app.plugin_menu.dialogs.remove(0);
     h.frames(2);
     assert_eq!(h.app.plugin_menu.dialogs.iter().map(|d| d.entry.as_str()).collect::<Vec<_>>(), ["hex"]);
+}
+
+/// A reopened plugin command keeps its window position within the design. Another entry gets
+/// a separate window, while the serial id of each new run still changes (#18684).
+#[test]
+fn plugin_dialog_reopen_remembers_dragged_window_position() {
+    let mut h = crate::scenario::Harness::new();
+    assert!(!h.app.preferences.plugin_remember_dialog_position);
+    h.app.preferences.plugin_remember_dialog_position = true;
+    h.app.plugin_menu.listed = vec![listed("gears", vec![entry("spur", "edit", json!([])), entry("hex", "edit", json!([]))])];
+    h.app.plugin_menu.loaded = true;
+    open_entry(&mut h.app, 0, 0);
+    h.frames(4);
+    let dialog = h.app.plugin_menu.dialog().unwrap();
+    let (first_serial, first_id) = (dialog.id, dialog_window_id(dialog, true));
+    assert_ne!(dialog_window_id(dialog, false), first_id, "opt-out uses the old serial-based identity");
+    let first = h.ctx.memory(|m| m.area_rect(first_id)).expect("window is placed");
+    let header = crate::scenario::rect_of("dialog:header").unwrap();
+    let from = egui::pos2(header.left() + 48.0, header.center().y);
+    h.call("ui.drag", json!({"x0":from.x,"y0":from.y,"x1":from.x-105.0,"y1":from.y+55.0,"steps":8}));
+    h.frames(5);
+    let dragged = h.ctx.memory(|m| m.area_rect(first_id)).unwrap();
+    assert!((dragged.min - first.min).length() > 30.0, "drag moved the window: {first:?} -> {dragged:?}");
+
+    h.step(&json!({"click":{"handle":"plugin_dialog:cancel"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.plugin_menu.dialogs.is_empty(), "Cancel closes the old instance");
+    open_entry(&mut h.app, 0, 0);
+    h.frames(4);
+    let reopened = h.app.plugin_menu.dialog().unwrap();
+    assert_ne!(reopened.id, first_serial, "a new run gets a new serial");
+    assert_eq!(dialog_window_id(reopened, true), first_id, "the command's window keeps its egui identity");
+    let again = h.ctx.memory(|m| m.area_rect(first_id)).unwrap();
+    assert!((again.min - dragged.min).length() <= 2.0, "reopening keeps the moved position: {dragged:?} -> {again:?}");
+
+    open_entry(&mut h.app, 0, 1);
+    let other = h.app.plugin_menu.dialog().unwrap();
+    assert_ne!(dialog_window_id(other, true), first_id, "a different entry has its own position");
 }
 
 /// A 20 x 20 x 10 box in the home view, with a plugin whose one command has [`pick_schema`].

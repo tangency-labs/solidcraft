@@ -110,6 +110,11 @@ pub struct ViewportState {
     /// The triangles of each mesh the last scene drew as instances, by the mesh's address (the
     /// mesh held, so its address stays its own).
     instanced_tris: std::sync::Mutex<InstancedTris>,
+    /// The triangles of each look of a mesh whose faces have looks of their own, drawn as
+    /// instances one look at a time ([`Instances::place_looks`]), by the mesh's address and how
+    /// its faces are grouped: kept so every scene draws the same parts (and their triangles kept
+    /// in `instanced_tris` stay theirs).
+    look_parts: std::sync::Mutex<LookParts>,
     /// The definitions placed more than once in one world state (held, as `pick_bounds` is):
     /// their copies are drawn as instances ([`repeated_copy`]).
     repeated: std::sync::Mutex<Option<(std::sync::Arc<solidcraft_engine::doc::ModelState>, std::sync::Arc<std::collections::HashSet<usize>>)>>,
@@ -311,6 +316,8 @@ pub struct ViewportState {
     pub(crate) ss_view: (u64, f64),
     /// The right-click menu, open at this screen position.
     pub context_menu: Option<Pos2>,
+    /// The last frame's view could answer pointer motion without a frame: see [`QuietMotion`].
+    pub quiet_motion: Option<QuietMotion>,
     /// Select Other: its list, a press being held, and click cycling.
     pub select_other: crate::select_other::State,
     /// A sketch point or curve being dragged (its id, the undo depth when the drag began: the
@@ -1378,6 +1385,26 @@ type MeshBounds = std::collections::HashMap<(usize, [u64; 16]), (std::sync::Arc<
 /// [`ViewportState::instanced_tris`].
 type InstancedTris = std::collections::HashMap<usize, (std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<crate::gpu::SharedTris>)>;
 
+/// The meshes of a mesh's looks ([`ViewportState::look_parts`]): by the mesh's address and a digest
+/// of which faces share a look, the mesh (held, so its address stays its own) and one part per look.
+type LookParts = std::collections::HashMap<
+    (usize, u64),
+    (std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<Vec<std::sync::Arc<solidcraft_engine::geom::Mesh>>>),
+>;
+
+/// The part of `mesh` made of the triangles whose face is in look `look` (`group`: each face's
+/// look): the same vertices, the other triangles left out.
+fn look_part(mesh: &solidcraft_engine::geom::Mesh, group: &[u32], look: u32) -> solidcraft_engine::geom::Mesh {
+    let mut part = solidcraft_engine::geom::Mesh { positions: mesh.positions.clone(), normals: mesh.normals.clone(), ..Default::default() };
+    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        if group.get(*f as usize) == Some(&look) {
+            part.triangles.push(*t);
+            part.tri_face.push(*f);
+        }
+    }
+    part
+}
+
 /// A body alone is drawn as an instance of its triangles (shared vertices, indexed) from this many
 /// triangles: a large imported mesh. Smaller ones are drawn so only when placed more than once.
 pub(crate) const INSTANCE_ALONE: usize = 50_000;
@@ -1684,6 +1711,10 @@ struct Instances {
     by_mesh: std::collections::HashMap<(usize, crate::gpu::InstanceLook), usize>,
     kept: InstancedTris,
     lods: crate::mesh_lod::MeshLods,
+    /// The parts of meshes drawn a look at a time, from the last scene and made in this one.
+    parts: LookParts,
+    /// The parts this scene used (the others are dropped when it holds every shown body).
+    parts_used: std::collections::HashSet<(usize, u64)>,
 }
 
 impl Instances {
@@ -1713,7 +1744,16 @@ impl Instances {
                 })
                 .collect();
         }
-        Instances { candidates, meshes: Vec::new(), by_mesh: std::collections::HashMap::new(), kept, lods: app.viewport.mesh_lods.clone() }
+        let parts = app.viewport.look_parts.lock().map(|p| p.clone()).unwrap_or_default();
+        Instances {
+            candidates,
+            meshes: Vec::new(),
+            by_mesh: std::collections::HashMap::new(),
+            kept,
+            lods: app.viewport.mesh_lods.clone(),
+            parts,
+            parts_used: std::collections::HashSet::new(),
+        }
     }
 
     /// Draw `b` as an instance when it is one, in colour `col` (its alpha for a see-through
@@ -1730,6 +1770,68 @@ impl Instances {
         if !lod_eligible && matches!(look, crate::gpu::InstanceLook::Glass | crate::gpu::InstanceLook::Faded) && !oit {
             return None;
         }
+        self.add_placement(&mesh, &m, lod_eligible, b.is_closed(), col, look)?;
+        Some((mesh, m))
+    }
+
+    /// Draw `b`, whose faces have looks of their own, as instances one look at a time: each
+    /// part of its shared mesh whose faces share a look ([`look_part`]) in that look's palette
+    /// slot (`looks`: per look, the slot and how it is drawn; `group`: each face's look). Copies
+    /// of a part in the same looks share the parts. `None` (drawn from its own triangles, as
+    /// before) when a look could not be drawn as an instance.
+    fn place_looks(
+        &mut self,
+        b: &solidcraft_engine::doc::ModelBody,
+        looks: &[(crate::gpu::PaletteIndex, crate::gpu::InstanceLook)],
+        group: &[u32],
+        oit: bool,
+    ) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
+        let (mesh, m, _) = self.candidates.get(&b.name)?.clone();
+        // Glass parts sort on the CPU without order-independent blending: as the body itself.
+        if !oit && looks.iter().any(|(_, l)| matches!(l, crate::gpu::InstanceLook::Glass | crate::gpu::InstanceLook::Faded)) {
+            return None;
+        }
+        if mesh.tri_face.len() != mesh.triangles.len() {
+            return None;
+        }
+        let grouping = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            group.hash(&mut h);
+            h.finish()
+        };
+        let key = (std::sync::Arc::as_ptr(&mesh) as usize, grouping);
+        let parts = match self.parts.get(&key).filter(|(held, _)| std::sync::Arc::ptr_eq(held, &mesh)) {
+            Some((_, parts)) => parts.clone(),
+            None => {
+                let parts = std::sync::Arc::new((0..looks.len() as u32).map(|l| std::sync::Arc::new(look_part(&mesh, group, l))).collect::<Vec<_>>());
+                self.parts.insert(key, (mesh.clone(), parts.clone()));
+                parts
+            }
+        };
+        self.parts_used.insert(key);
+        let closed = b.is_closed();
+        for (part, (col, look)) in parts.iter().zip(looks) {
+            if !part.triangles.is_empty() {
+                // Levels of detail would merge triangles across faces of different looks.
+                self.add_placement(part, &m, false, closed, *col, *look)?;
+            }
+        }
+        Some((mesh, m))
+    }
+
+    /// One placement `m` of `mesh` in colour `col`, drawn `look`, among the instances (its
+    /// triangles made, or kept from the last scene, the first time).
+    fn add_placement(
+        &mut self,
+        mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>,
+        m: &solidcraft_engine::doc::Mat,
+        lod_eligible: bool,
+        closed: bool,
+        col: crate::gpu::PaletteIndex,
+        look: crate::gpu::InstanceLook,
+    ) -> Option<()> {
+        let mesh = mesh.clone();
         let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
         let key = std::sync::Arc::as_ptr(&mesh) as usize;
         let at = match self.by_mesh.get(&(key, look)).copied() {
@@ -1748,17 +1850,14 @@ impl Instances {
                         if lod_eligible { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
                     ),
                 };
-                self.meshes.push((
-                    mesh.clone(),
-                    crate::gpu::InstancedMesh { key: key as u64, tris, instances: Vec::new(), look, levels, closed: b.is_closed() },
-                ));
+                self.meshes.push((mesh.clone(), crate::gpu::InstancedMesh { key: key as u64, tris, instances: Vec::new(), look, levels, closed }));
                 self.by_mesh.insert((key, look), self.meshes.len() - 1);
                 self.meshes.len() - 1
             }
         };
         let (_, inst) = self.meshes.get_mut(at)?;
         inst.place(rows, col);
-        Some((mesh, m))
+        Some(())
     }
 
     /// The instanced meshes, keeping their triangles for the next scene (and, for a scene of
@@ -1775,6 +1874,13 @@ impl Instances {
             } else {
                 k.extend(kept);
             }
+        }
+        if let Ok(mut p) = app.viewport.look_parts.lock() {
+            let mut parts = self.parts;
+            if whole {
+                parts.retain(|key, _| self.parts_used.contains(key));
+            }
+            *p = parts;
         }
         self.meshes.into_iter().map(|(_, inst)| inst).collect()
     }
@@ -2052,6 +2158,11 @@ fn body_scene(
         let faces = b.body.face_count();
         let mut face_colors = Vec::with_capacity(faces);
         let mut face_classes = Vec::with_capacity(faces);
+        // With faces in looks of their own: each face's look (faces alike in colour, class and
+        // finish share one) and, per look, the slot it is drawn in and how.
+        let mut look_of: Vec<u32> = Vec::new();
+        let mut looks: Vec<(crate::gpu::PaletteIndex, crate::gpu::InstanceLook)> = Vec::new();
+        let mut look_keys: Vec<([u8; 4], crate::gpu::TriClass, crate::gpu::Material)> = Vec::new();
         for f in 0..faces {
             let look = face_looks.get(&f);
             let color = look.map_or(base, |l| Color32::from_rgb(l.color[0], l.color[1], l.color[2]));
@@ -2068,9 +2179,27 @@ fn body_scene(
             let slot = slots.face(f);
             set_palette_color(&mut arena, &mut sc.palette, slot, rgba);
             let pbr = look.map_or(body_pbr, |l| l.pbr.filter(|_| finishes && opacity >= 0.999));
-            arena.set_material(slot, finish(color, pbr));
+            let material = finish(color, pbr);
+            arena.set_material(slot, material);
             face_colors.push(slot);
             face_classes.push(class);
+            if !face_looks.is_empty() {
+                let key = (rgba, class, material);
+                let at = match look_keys.iter().position(|k| *k == key) {
+                    Some(at) => at,
+                    None => {
+                        let drawn = match class {
+                            crate::gpu::TriClass::Faded => crate::gpu::InstanceLook::Faded,
+                            crate::gpu::TriClass::Glass => crate::gpu::InstanceLook::Glass,
+                            _ => crate::gpu::InstanceLook::Opaque,
+                        };
+                        look_keys.push(key);
+                        looks.push((slot, drawn));
+                        looks.len() - 1
+                    }
+                };
+                look_of.push(at as u32);
+            }
         }
         let closed = b.is_closed();
         let class = plan_class(app, &face_classes);
@@ -2095,8 +2224,19 @@ fn body_scene(
             crate::gpu::InstanceLook::Opaque | crate::gpu::InstanceLook::Pbr => 255,
         };
         set_palette_color(&mut arena, &mut sc.palette, slots.instance, [col[0], col[1], col[2], alpha]);
-        let instanced =
-            (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance, look, app.viewport.gpu.is_some_and(|g| g.oit))).flatten();
+        let oit = app.viewport.gpu.is_some_and(|g| g.oit);
+        // Faces in looks of their own are drawn a look at a time, each in its first face's slot
+        // (alike faces share a colour): only while every face has a slot of its own.
+        let own_slots = slots.faces != u32::MAX && slots.face_capacity as usize >= faces;
+        let instanced = if on_gpu {
+            None
+        } else if face_looks.is_empty() {
+            instances.place(b, slots.instance, look, oit)
+        } else if own_slots {
+            instances.place_looks(b, &looks, &look_of, oit)
+        } else {
+            None
+        };
         let name = b.name.clone();
         let edge_tol = if edges { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
         let body = match instanced {
@@ -4504,7 +4644,7 @@ pub(crate) fn sel_hit(app: &SolveApp, sel: &Sel) -> Option<Hit> {
             let at = crate::selection::line_midpoint(sk, sk.curve_index(id)?)?;
             Hit::SketchMidpoint { sketch, id: id.clone(), at }
         }
-        Sel::Body { .. } | Sel::Feature { .. } | Sel::Occurrence { .. } | Sel::SketchConstraint { .. } => return None,
+        Sel::Body { .. } | Sel::Feature { .. } | Sel::Occurrence { .. } | Sel::SketchConstraint { .. } | Sel::Drawing { .. } => return None,
     })
 }
 
@@ -4946,7 +5086,7 @@ fn reference_line(sc: &mut GpuScene, a: [f32; 3], b: [f32; 3], col: [u8; 4], wid
 /// highlight (a whole scanned mesh is one face) is not built again, and the cached scene not
 /// drawn again, at every move of the pointer across it. An edge keeps its `mid`, which picks the
 /// part of a split edge that is lit (`edge_of`); a vertex or a sketch point is its position.
-fn hover_drawn(hover: &Option<Hit>) -> String {
+pub(crate) fn hover_drawn(hover: &Option<Hit>) -> String {
     match hover {
         Some(Hit::Face { body, index, .. }) => format!("face {body:?} {index}"),
         Some(Hit::Plane { name, .. }) => format!("plane {name:?}"),
@@ -6331,6 +6471,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // The Fillet and Chamfer window resolves its own corners: the nearest sketch point to a
     // corner drawn from the origin is the fixed origin, which ends no two curves.
     let corner = hover.filter(|_| inside && !navigating).and_then(|p| crate::sketch_modify_ui::corner_hit(app, &proj, p));
+    let corner_hovered = corner.is_some();
     let cand = if app.tool.is_some() {
         tool_hover(app, &hits).map(|h| (h, None))
     } else if let Some((hit, sel)) = corner {
@@ -6359,6 +6500,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
     list_hover(app);
+    let still = inside
+        && !navigating
+        && !hover_frozen
+        && !joint_handle_pointer
+        && !dragging_layer
+        && !layered
+        && !held
+        && !flat
+        && !corner_hovered
+        && !manipulator_dragging;
+    app.viewport.quiet_motion = still.then(|| QuietMotion::record(app, ui, &resp, rect, axes, proj)).flatten();
     let painter = ui.painter_at(rect);
     solidcraft_viewport_egui::paint_background(&painter, rect, t.viewport_top, t.viewport_bottom);
     crate::gpu::paint_background_picture(app, &painter, rect);
@@ -8279,6 +8431,114 @@ const WOKEN_CENTRE_PX: f32 = 16.0;
 /// awake: a fifth more than the circle or arc's own radius, so the pointer can cross the whole
 /// circle to reach the other side of it, but not wander off and leave the cross behind (#16346).
 const WOKEN_CENTRE_FAR: f64 = 1.2;
+
+/// What the last frame's view needs to tell, without a frame, that moving the pointer changes
+/// nothing on screen ([`follow_pointer_without_frame`]): the window then skips the frame that pointer
+/// motion asks for, instead of drawing the same picture again at every move.
+///
+/// Kept only while the view is still and the pointer only hovers it: no tool, dialog, sketch,
+/// drag, held button, open menu, woken snap point or view movement, all of which follow the
+/// pointer itself. What remains is the hover highlight, which is the same while the pointer
+/// stays over the same face, edge, vertex or plane, or over nothing.
+#[derive(Clone)]
+pub struct QuietMotion {
+    /// Where the pointer reaches the model: the view, less the axis view and its readout.
+    rect: Rect,
+    excluded: [Rect; 2],
+    proj: Proj,
+    /// The widgets egui found under the pointer, back to front, and the ones its click and drag
+    /// went to: the pointer reached no other widget while these stay the same.
+    widgets: Vec<egui::Id>,
+    click: Option<egui::Id>,
+    drag: Option<egui::Id>,
+    /// What the hover highlight draws ([`hover_drawn`]).
+    hover: String,
+    /// The joint glyphs drawn: one names its joint in a tooltip while the pointer is on it.
+    glyphs: Vec<crate::dialogs_assembly::JointGlyph>,
+}
+
+impl QuietMotion {
+    fn record(app: &SolveApp, ui: &egui::Ui, resp: &egui::Response, rect: Rect, axes: Rect, proj: Proj) -> Option<Self> {
+        let busy = app.tool.is_some()
+            || app.dialog.is_some()
+            || app.session.active_sketch.is_some()
+            || crate::sketch3d::active(app)
+            || crate::render_workspace::active(app)
+            || app.cam_anim.is_some()
+            || app.viewport.spin
+            || app.viewport.axis_drag.is_some()
+            || app.viewport.primary_nav.is_some()
+            || app.viewport.boxsel.is_some()
+            || app.viewport.context_menu.is_some()
+            || app.viewport.point_drag.is_some()
+            || app.viewport.tool_click
+            || app.viewport.woken_centre.is_some()
+            || app.viewport.woken.item.is_some()
+            || !app.viewport.woken.points.is_empty()
+            || crate::select_other::is_open(app)
+            || crate::joint_drag::active(app)
+            || crate::joint_handles::active(app)
+            || crate::occurrence_drag::active(app)
+            || crate::frame::dock_dragging(ui.ctx())
+            || !ui.is_enabled()
+            || ui.input(|i| i.pointer.any_down() || i.pointer.any_released() || i.pointer.any_pressed());
+        if busy {
+            return None;
+        }
+        let (widgets, click, drag) = ui
+            .ctx()
+            .viewport(|v| (v.hits.contains_pointer.iter().map(|w| w.id).collect::<Vec<_>>(), v.hits.click.map(|w| w.id), v.hits.drag.map(|w| w.id)));
+        // The pointer is on the view itself, not on a widget over it.
+        if click != Some(resp.id) || drag != Some(resp.id) {
+            return None;
+        }
+        // A joint glyph under the pointer shows its tooltip at the pointer, which follows it.
+        let glyphs = if crate::joint_handles::visible(app) { Vec::new() } else { crate::dialogs_assembly::joint_glyph_plan(app, &proj) };
+        if ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| crate::dialogs_assembly::joint_glyph_at(&glyphs, p).is_some()) {
+            return None;
+        }
+        let readout = crate::view_angles::readout_rect(ui.ctx(), rect).filter(|_| app.preferences.show_view_angles).unwrap_or(Rect::NOTHING);
+        Some(Self { rect, excluded: [axes, readout], proj, widgets, click, drag, hover: hover_drawn(&app.viewport.hover), glyphs })
+    }
+}
+
+/// Answer a pointer move to `pos` (in points) without a frame when it changes nothing the last
+/// frame drew: the view was quiet ([`QuietMotion`]), the pointer stays on it with no other widget,
+/// joint glyph or Joint Move handle reached, and what is under it lights up the same. The model is picked again here, as the frame
+/// would; nothing else of a frame runs. `ctx` is the window's: its last pass's widgets are
+/// hit-tested at `pos`.
+///
+/// When the move needs no frame (true), the hover and the pointer are brought up to date as the
+/// frame would have left them: the same item, picked at `pos` (a face's or an edge's point under
+/// the pointer moves along it). What reads them between frames (`ui.inspect`, the agents) then
+/// sees where the pointer is, not where the hover last changed. False changes nothing.
+pub fn follow_pointer_without_frame(app: &mut SolveApp, ctx: &egui::Context, pos: Pos2) -> bool {
+    let Some(q) = &app.viewport.quiet_motion else {
+        return false;
+    };
+    if !pos.is_finite() || !q.rect.contains(pos) || q.excluded.iter().any(|r| r.contains(pos)) || crate::shell::covered(app, pos) {
+        return false;
+    }
+    // A joint glyph's tooltip and a Joint Move handle's brightening are drawn by a frame.
+    if crate::dialogs_assembly::joint_glyph_at(&q.glyphs, pos).is_some() || crate::joint_handles::owns_pointer(app, &q.proj, pos) {
+        return false;
+    }
+    let hits = ctx.widget_hits_at(pos);
+    if hits.click.map(|w| w.id) != q.click
+        || hits.drag.map(|w| w.id) != q.drag
+        || !hits.contains_pointer.iter().map(|w| w.id).eq(q.widgets.iter().copied())
+    {
+        return false;
+    }
+    let picks = pick_with_sketch_points(app, &q.proj, pos, false);
+    let hover = candidate(app, &picks).map(|(hit, _)| hit);
+    if hover_drawn(&hover) != q.hover {
+        return false;
+    }
+    app.viewport.hover = hover;
+    app.viewport.mouse = Some(pos);
+    true
+}
 
 /// Hovering a circle's or an arc's edge in the sketch being edited wakes its centre: drawn, and
 /// picked from further away, so a line or a dimension is easily taken to it, and it stays awake
@@ -11203,6 +11463,47 @@ mod tests {
         assert_eq!(more, slots, "more placements take no more palette slots");
     }
 
+    /// A part with a face in a colour of its own, placed many times, is drawn as instances too:
+    /// one shared mesh per look (its faces in that look), each with every placement in that
+    /// look's colour. Before, each placement's moved triangles were built where it stood (a large
+    /// assembly placed a hundred times kept gigabytes of them for its few faces in their own
+    /// colours).
+    #[test]
+    fn placements_of_a_part_with_a_face_in_its_own_colour_are_instances_of_each_look() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.ground_shadow = false;
+        app.set_origin_shown(false);
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        app.run("component.create", json!({"name":"Part"})).unwrap();
+        app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
+        app.run("appearance.assign", json!({"body": "Block", "faces": [[5, 5, 10]], "color": "#cc2222"})).unwrap();
+        app.run("component.activate", json!({"component":"root"})).unwrap();
+        let place = |app: &mut SolveApp, count: usize| {
+            for k in 0..count {
+                app.run("occurrence.copy", json!({"component":"Part","translate":[40.0 * (k as f64 + 1.0),0,0]})).unwrap();
+            }
+            let scene = build_scene(app);
+            let slots = app.viewport.palette.lock().map(|a| a.entries().len()).unwrap_or(0);
+            (scene, slots)
+        };
+        let (scene, slots) = place(&mut app, 4);
+        assert!(scene.blocks.iter().all(|b| b.bytes.vertices.is_empty()), "no placement's triangles built where it stands");
+        assert_eq!(scene.instanced.len(), 2, "a shared mesh per look");
+        assert!(scene.instanced.iter().all(|m| m.count() == 5), "every placement in each look");
+        let colour = |m: &crate::gpu::InstancedMesh| {
+            let i = m.instances.get(48..52).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes);
+            i.and_then(|i| scene.palette.get(crate::gpu::PaletteIndex(i))).map(|c| [c[0], c[1], c[2]])
+        };
+        let red = scene.instanced.iter().find(|m| colour(m) == Some([0xcc, 0x22, 0x22])).expect("the red face's look");
+        assert_eq!(red.tris.indices.len(), 6, "the red look is the top face alone (two triangles)");
+        let rest = scene.instanced.iter().find(|m| colour(m) != Some([0xcc, 0x22, 0x22])).expect("the other faces' look");
+        assert_eq!(rest.tris.indices.len(), 30, "the other five faces");
+        let (again, more) = place(&mut app, 10);
+        assert_eq!(again.instanced.len(), 2);
+        assert!(again.instanced.iter().all(|m| m.count() == 15));
+        assert_eq!(more, slots, "more placements take no more palette slots");
+    }
+
     /// A part placed by several occurrences is drawn from one copy of its triangles, once per
     /// placement: one instanced mesh with a placement for each occurrence, whose triangles land
     /// where each occurrence's own moved mesh has them, and no moved copy is made to draw them.
@@ -13244,6 +13545,60 @@ mod tests {
         let plane = highlight_key(&app);
         app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::X });
         assert_eq!(highlight_key(&app), plane, "the same plane, another point");
+    }
+
+    /// Pointer motion over a still view is answered without a frame when what lights up stays
+    /// the same (`follow_pointer_without_frame`): moving across one face, or across the empty
+    /// background. The hover then follows the pointer along the face, as a frame would leave it.
+    /// Reaching another face or the background, or holding a button, needs a frame (and changes
+    /// nothing); a frame at each place lights up what the answer said.
+    #[test]
+    fn pointer_motion_that_lights_up_nothing_new_needs_no_frame() {
+        let ctx = crate::fonts::test_context();
+        let mut app = cylinder_app();
+        assert!(app.session.active_sketch.is_none(), "a part, not a sketch");
+        let moved = |at: Pos2| vec![egui::Event::PointerMoved(at)];
+        for _ in 0..3 {
+            hover_frame(&mut app, &ctx, moved(pos2(5.0, 5.0)));
+        }
+        // What lights up across the view, from the frame's own projection.
+        let proj = display_proj(&app);
+        let lit = |app: &SolveApp, at: Pos2| hover_drawn(&candidate(app, &pick(app, &proj, at)).map(|(h, _)| h));
+        let rect = proj.rect.shrink(60.0);
+        let grid: Vec<Pos2> = (0..20)
+            .flat_map(|i| (0..20).map(move |j| pos2(rect.left() + rect.width() * i as f32 / 19.0, rect.top() + rect.height() * j as f32 / 19.0)))
+            .collect();
+        let nothing = lit(&app, pos2(-1.0, -1.0));
+        let on_face: Vec<Pos2> = grid.iter().copied().filter(|p| lit(&app, *p).starts_with("face")).collect();
+        let face = *on_face.first().expect("the cylinder is in view");
+        let same_face = *on_face.iter().rev().find(|p| lit(&app, **p) == lit(&app, face) && **p != face).expect("two points on one face");
+        let empty: Vec<Pos2> = grid.iter().copied().filter(|p| lit(&app, *p) == nothing).collect();
+        assert!(empty.len() >= 2, "background around the cylinder");
+
+        hover_frame(&mut app, &ctx, moved(face));
+        assert!(app.viewport.quiet_motion.is_some(), "a still view, only hovered");
+        let lit_now = hover_drawn(&app.viewport.hover);
+        let at_face = app.viewport.hover.clone();
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, empty[0]), "off the face");
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, pos2(f32::NAN, 1.0)), "not a position");
+        assert_eq!(app.viewport.hover, at_face, "a move that needs a frame leaves the hover to it");
+        assert!(follow_pointer_without_frame(&mut app, &ctx, same_face), "the same face");
+        let followed = app.viewport.hover.clone();
+        assert_eq!(hover_drawn(&followed), lit_now, "the same face stays lit");
+        assert_ne!(followed, at_face, "the hover's point follows the pointer along the face");
+        assert_eq!(app.viewport.mouse, Some(same_face));
+        hover_frame(&mut app, &ctx, moved(same_face));
+        assert_eq!(app.viewport.hover, followed, "the frame leaves the hover as the answer did");
+
+        hover_frame(&mut app, &ctx, moved(empty[0]));
+        assert_eq!(hover_drawn(&app.viewport.hover), nothing);
+        assert!(follow_pointer_without_frame(&mut app, &ctx, empty[1]), "the background, still nothing lit");
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, face), "onto the face");
+
+        let press = egui::Event::PointerButton { pos: empty[0], button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() };
+        hover_frame(&mut app, &ctx, vec![press]);
+        assert!(app.viewport.quiet_motion.is_none(), "a held button follows the pointer");
+        assert!(!follow_pointer_without_frame(&mut app, &ctx, empty[1]));
     }
 
     #[test]

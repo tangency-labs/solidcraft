@@ -22,6 +22,7 @@
 )] // test helpers
 
 use solidcore::geom::attribute::AttributeStore;
+use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
@@ -556,7 +557,11 @@ fn corpus_mass(name: &str, lower: Option<(Tolerances<'_>, Tolerances<'_>)>) -> (
 ///
 /// Main 3a0f49b09's values per file, made by this file's functions on main: the read's
 /// digest, the lazily made UV trims' digest, the rebuilding read's digest, and the
-/// bits of `corpus.parity`'s area and volume.
+/// bits of `corpus.parity`'s area and volume. The mass integrator's knot-line split (trim
+/// pieces and closure strips end where a trim crosses a surface knot line) since moved
+/// 17 of those area and volume entries, on 14 files; they are main's with that split,
+/// each classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`.
 const MAIN: [(&str, [u64; 5]); 28] = [
     (
         "Fillet/blade_hub_1.smb",
@@ -565,7 +570,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x410172437ab22187,
             0x41949589187dc360,
             0x40c8bf351a4d4317,
-            0x40cb1472e2daad8a,
+            0x40cb1472e2cf47a6,
         ],
     ),
     (
@@ -575,7 +580,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8ce78a827602a435,
             0x9d95007e0e59fd13,
             0x40c6f745308c0c73,
-            0x40c837c714dc148a,
+            0x40c837c714d80c99,
         ],
     ),
     (
@@ -585,7 +590,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x3a137639560123dc,
             0x19b6267d7bab4376,
             0x40c94ce71acf47de,
-            0x40c96aa73761feba,
+            0x40c96aa73746aab0,
         ],
     ),
     (
@@ -595,7 +600,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x20f9e5358be089e4,
             0x56d4f90e1a00266f,
             0x40408f20e135de78,
-            0x40262233c6fff91f,
+            0x40262233c6c42c0b,
         ],
     ),
     (
@@ -604,8 +609,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xb5359aa30f9be919,
             0xa92d78f82fd63550,
             0x73843118350f3240,
-            0x409f327abf0704e1,
-            0x40adb03a50d6ac5b,
+            0x409f327abf06f6f4,
+            0x40adb03a50d6aa6d,
         ],
     ),
     (
@@ -635,7 +640,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x410172437ab22187,
             0x41949589187dc360,
             0x40c8bf351a4d4317,
-            0x40cb1472e2daad8a,
+            0x40cb1472e2cf47a6,
         ],
     ),
     (
@@ -645,7 +650,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8ce78a827602a435,
             0x9d95007e0e59fd13,
             0x40c6f745308c0c73,
-            0x40c837c714dc148a,
+            0x40c837c714d80c99,
         ],
     ),
     (
@@ -704,7 +709,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xc883abda5a4672f7,
             0xbef2111c0d616bcc,
             0xe9468e03f3395efe,
-            0x405664215d2967d8,
+            0x405664215d2a2cc7,
             0x7ff8000000000000,
         ],
     ),
@@ -714,7 +719,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x8f07277297df6078,
             0xcd50069fef891ecf,
             0x67b61d59d84afc0d,
-            0x4085e633bce84e1d,
+            0x4085e633bce85549,
             0x7ff8000000000000,
         ],
     ),
@@ -724,7 +729,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0xb3a46ba2e4d3817b,
             0x894d776ca5ba209d,
             0xfea47f8f2838bbe2,
-            0x40735d27cb8cc7eb,
+            0x40735d27cb8cc80f,
             0x7ff8000000000000,
         ],
     ),
@@ -735,7 +740,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x1f46996340f01656,
             0x2732c82601be613b,
             0x40821911bbfe80e6,
-            0x40895b346dbc001b,
+            0x40895b3470b2c59b,
         ],
     ),
     (
@@ -774,8 +779,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x6c2688581ef72501,
             0x934916761febf75d,
             0x629b7badfc0138a6,
-            0x40ff8cfbe4b56c96,
-            0x4130d86087906c9b,
+            0x40ff8cfbe4b56c95,
+            0x4130d860879069ed,
         ],
     ),
     (
@@ -795,7 +800,7 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x68482310d17f07be,
             0xbfc5158946937f01,
             0x40ff28e1cf641cd3,
-            0x4130d6e013e89aee,
+            0x4130d6e013e89a3e,
         ],
     ),
     (
@@ -834,8 +839,8 @@ const MAIN: [(&str, [u64; 5]); 28] = [
             0x462faca60ad813f0,
             0x88a9396a602fe93c,
             0x692f780f5f318bf3,
-            0x40d2a6a844e34477,
-            0x40f8a3124b2291b7,
+            0x40d2a6a844e34874,
+            0x40f8a3124b22bf69,
         ],
     ),
 ];
@@ -851,29 +856,24 @@ const MAIN: [(&str, [u64; 5]); 28] = [
 ///   ones), and every UV trim `GetOrCreateUVTrimCurve` makes after the read, are main's
 ///   bit for bit: trims fit at the edge's fit tolerance (`edgeuse::p3::fit_tolerance`),
 ///   not at the raised one;
-/// - `corpus.parity`'s areas are the same bit for bit with the moved tolerances set back
-///   to main's; its volumes are too, and as read differ only on
-///   `Fillet/corner_box.smb` and `Fillet/test1.smb`, by 1 ulp: the volume integrates
-///   about the middle of the B-rep's box, which is grown by the edge and vertex
-///   tolerances (`CalculateBoundingBox`, `bExpandByZoneTol3d`). Each pair is classified
-///   against a certified enclosure `[lo, hi]` of the exact volume
-///   (`mass::enclosure::enclose_volume`, which reads no edge tolerance), asked
-///   `1e-9 * |V|` wide, the goldens' relative tolerance. On `test1` it reaches 7.7e-7 and
-///   both values lie below `lo`, so the larger, this branch's, is closer to the exact
-///   volume. On `corner_box` it stops at its cell budget, 3.1e-3 wide, holding both
-///   values: neither can be told farther.
+/// - `corpus.parity`'s areas are main's bit for bit; its volumes are main's bit for bit
+///   with the moved tolerances set back to main's, and as read differ only on
+///   `Fillet/corner_box.smb`, by 1 ulp: the volume integrates about the middle of the
+///   B-rep's box, which is grown by the edge and vertex tolerances
+///   (`CalculateBoundingBox`, `bExpandByZoneTol3d`). The pair is classified against a
+///   certified enclosure `[lo, hi]` of the exact volume (`mass::enclosure::enclose_volume`,
+///   which reads no edge tolerance), asked `1e-9 * |V|` wide, the goldens' relative
+///   tolerance. It stops at its cell budget, wider than asked, holding both values:
+///   neither can be told farther. (`Fillet/test1.smb`'s as-read volume differed by 1 ulp
+///   too, before the knot-line split; with it, its as-read and set-back volumes agree.)
 ///
-/// With the moved tolerances set back to main's, #18195's integrator change (each trim
-/// piece ends at its surface's interior v knot lines on every face, not only on banded
-/// ones) moves some areas and volumes from main's: [`INTEGRATOR_MOVED`] lists them, each
-/// classified against a certified enclosure the same way.
-///
-/// Stacked on the WR-493 retirement, the two files here with a sphere or torus found in a
-/// NURBS (`Fillet/sphere_plane.smb`, `Solids/revolution_mold.smb`) also keep the file's
-/// NURB and trims on those faces (`wr493_class_proofs`'
+/// With the WR-493 retirement, the two files here with a sphere or torus found in a NURBS
+/// (`Fillet/sphere_plane.smb`, `Solids/revolution_mold.smb`) also keep the file's NURB and
+/// trims on those faces (`wr493_class_proofs`'
 /// `found_spheres_and_tori_keep_the_file_nurb_and_trims`), so their reads, areas and
-/// volumes differ from main by that too: their comparisons with main are collected apart,
-/// and asserted to be those two files only.
+/// volumes differ from main's by that too. They are pinned at this branch's head instead
+/// ([`WR493_HEAD`]; their moved mass entries are classified in `wr493_rows`), and asserted
+/// to be those two files only.
 #[test]
 fn corpus_reads_change_only_the_covered_tolerances() {
     let mut failures = Vec::new();
@@ -882,7 +882,6 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     let mut moved = 0;
     let mut moved_volumes = Vec::new();
     let mut volume_classes = Vec::new();
-    let mut integrator: Vec<(&str, &str, &str)> = Vec::new();
     for (name, [read_main, lazy_main, rebuild_main, area_main, volume_main]) in MAIN {
         let edges = entries(RAISED_EDGES, name);
         let vertices = entries(MOVED_VERTICES, name);
@@ -899,13 +898,12 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             false,
             &mut failures,
         );
-        let (area, volume) = corpus_mass(name, None);
-        let (area0, volume0) = corpus_mass(name, Some((edges, vertices)));
         if let Some((_, pins)) = WR493_HEAD.iter().find(|(n, _)| *n == name) {
-            // Stacked on the WR-493 retirement: the found spheres keep the file's NURB
-            // and trims, so these reads differ from main's (asserted) and are pinned at
-            // this branch's head instead; the replays' own checks above hold as for
-            // every file.
+            // the found spheres keep the file's NURB and trims, so these reads differ from
+            // main's (asserted) and are pinned at this branch's head; the replays' own
+            // checks above hold as for every file
+            let (area, volume) = corpus_mass(name, None);
+            let (area0, volume0) = corpus_mass(name, Some((edges, vertices)));
             let now = [
                 read_digest,
                 lazy_digest,
@@ -921,30 +919,6 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             if read_digest == read_main || rebuild_digest == rebuild_main {
                 failures.push(format!("{name}: read as main's"));
             }
-            // the integrator change against this branch before it (#18195 at 53b36b2a0)
-            let (_, before) = WR493_BEFORE_INTEGRATOR
-                .iter()
-                .find(|(n, _)| *n == name)
-                .expect("a WR-493 file");
-            for (what, now, before) in [("area", area0, before[0]), ("volume", volume0, before[1])]
-            {
-                if now.to_bits() != before.to_bits() {
-                    let mut k = Kernel::default();
-                    let mut b = read_corpus(&mut k, name, false);
-                    let e = if what == "area" {
-                        let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
-                        solidcore::mass::enclosure::enclose_face_area(
-                            &k,
-                            &mut b,
-                            &faces,
-                            1e-9 * before.abs(),
-                        )
-                    } else {
-                        solidcore::mass::enclosure::enclose_volume(&k, &mut b, 1e-9 * before.abs())
-                    };
-                    integrator.push((name, what, classify(now, before, e.map(|e| (e.lo, e.hi)))));
-                }
-            }
             wr493.push(name);
             continue;
         }
@@ -957,135 +931,73 @@ fn corpus_reads_change_only_the_covered_tolerances() {
                 failures.push(format!("{name}: {what} digest {now:#x}, main {main:#x}"));
             }
         }
-        if area.to_bits() != area0.to_bits() {
+        let (area, volume) = corpus_mass(name, None);
+        let (area0, volume0) = corpus_mass(name, Some((edges, vertices)));
+        if area.to_bits() != area_main || area0.to_bits() != area_main {
             failures.push(format!(
-                "{name}: area {:#x}, lowered {:#x}",
+                "{name}: area {:#x} / lowered {:#x}, main {area_main:#x}",
                 area.to_bits(),
                 area0.to_bits()
             ));
         }
-        // #18195's integrator change (each trim piece ends at its surface's interior v
-        // knot lines on every face): this branch's mass with main's tolerances against
-        // main's, classified against certified enclosures
-        for (what, now, main) in [("area", area0, area_main), ("volume", volume0, volume_main)] {
-            if now.to_bits() != main {
-                let main = f64::from_bits(main);
-                let mut k = Kernel::default();
-                let mut b = read_corpus(&mut k, name, false);
-                let e = if what == "area" {
-                    let faces = solidcore::topology::brep::p1::faces(&b, None).unwrap();
-                    solidcore::mass::enclosure::enclose_face_area(
-                        &k,
-                        &mut b,
-                        &faces,
-                        1e-9 * main.abs(),
-                    )
-                } else {
-                    solidcore::mass::enclosure::enclose_volume(&k, &mut b, 1e-9 * main.abs())
-                };
-                integrator.push((name, what, classify(now, main, e.map(|e| (e.lo, e.hi)))));
-            }
+        if volume0.to_bits() != volume_main {
+            failures.push(format!(
+                "{name}: lowered volume {:#x}, main {volume_main:#x}",
+                volume0.to_bits()
+            ));
         }
-        if volume.to_bits() != volume0.to_bits() {
-            // the gap cover's own move (the box's middle), classified against a certified
-            // enclosure of the exact volume, asked 1e-9 * |V| wide, the goldens' relative
-            // tolerance
+        if volume.to_bits() != volume_main {
+            // (classified against a certified enclosure of the exact volume, asked
+            // 1e-9 * |V| wide, the goldens' relative tolerance)
+            let main = f64::from_bits(volume_main);
             let mut k = Kernel::default();
             let mut b = read_corpus(&mut k, name, false);
-            let e = solidcore::mass::enclosure::enclose_volume(&k, &mut b, 1e-9 * volume0.abs())
-                .map(|e| (e.lo, e.hi));
-            let (lo, hi) = e.as_ref().map_or((f64::NAN, f64::NAN), |&e| e);
-            volume_classes.push((name, classify(volume, volume0, e), lo, hi));
+            let asked = 1e-9 * main.abs();
+            let e = solidcore::mass::enclosure::enclose_volume(&k, &mut b, asked).unwrap();
+            let class = if e.lo <= volume.min(main) && volume.max(main) <= e.hi {
+                "both enclosed"
+            } else if volume.max(main) < e.lo {
+                if volume > main {
+                    "closer"
+                } else {
+                    "farther"
+                }
+            } else if volume.min(main) > e.hi {
+                if volume < main {
+                    "closer"
+                } else {
+                    "farther"
+                }
+            } else {
+                "straddles"
+            };
+            volume_classes.push((name, class, e.lo, e.hi, asked, e.stop));
             moved_volumes.push(name);
         }
     }
     assert_eq!((raised, moved), (206, 296));
-    assert_eq!(
-        moved_volumes,
-        ["Fillet/corner_box.smb", "Fillet/test1.smb"],
-        "{failures:#?}"
-    );
-    let classes: Vec<_> = volume_classes.iter().map(|&(n, c, _, _)| (n, c)).collect();
+    assert_eq!(moved_volumes, ["Fillet/corner_box.smb"], "{failures:#?}");
+    assert_eq!(wr493, WR493_READS);
+    let classes: Vec<_> = volume_classes.iter().map(|&(n, c, ..)| (n, c)).collect();
     assert_eq!(
         classes,
-        [
-            ("Fillet/corner_box.smb", "both enclosed"),
-            ("Fillet/test1.smb", "closer")
-        ],
+        [("Fillet/corner_box.smb", "both enclosed")],
         "{volume_classes:?}"
     );
-    // (the enclosure widths the doc quotes, to the quoted two figures)
+    // (the doc's claim on the width, against the asked width rather than as printed
+    // digits, which move with any change to the enclosure's cells: `corner_box`'s spent
+    // its cell budget wider than asked, so "both enclosed" is all it can say)
     let widths: Vec<_> = volume_classes
         .iter()
-        .map(|&(n, _, lo, hi)| (n, format!("{:.1e}", hi - lo)))
+        .map(|&(n, _, lo, hi, asked, stop)| (n, stop, hi - lo <= asked))
         .collect();
     assert_eq!(
         widths,
-        [
-            ("Fillet/corner_box.smb", "3.1e-3".to_string()),
-            ("Fillet/test1.smb", "7.7e-7".to_string())
-        ],
+        [("Fillet/corner_box.smb", EnclosureStop::Budget, false)],
         "{volume_classes:?}"
     );
-    assert_eq!(integrator, INTEGRATOR_MOVED, "{integrator:#?}");
     assert!(failures.is_empty(), "{failures:#?}");
-    assert_eq!(wr493, WR493_READS);
 }
-
-/// `now` against `before`, two estimates of one exact value, by a certified enclosure
-/// `[lo, hi]` of it: `closer` or `farther` when both lie on one side of it (the one nearer
-/// it is nearer the exact value), `both enclosed` when it holds both (neither can be told
-/// farther), `straddles` otherwise; `unenclosed` when no enclosure is made (the reason
-/// printed).
-fn classify(now: f64, before: f64, e: solidcore::Result<(f64, f64)>) -> &'static str {
-    let (lo, hi) = match e {
-        Ok(e) => e,
-        Err(err) => {
-            eprintln!("unenclosed: {err}");
-            return "unenclosed";
-        }
-    };
-    if lo <= now.min(before) && now.max(before) <= hi {
-        "both enclosed"
-    } else if now.max(before) < lo {
-        if now > before {
-            "closer"
-        } else {
-            "farther"
-        }
-    } else if now.min(before) > hi {
-        if now < before {
-            "closer"
-        } else {
-            "farther"
-        }
-    } else {
-        "straddles"
-    }
-}
-
-/// The values of [`MAIN`]'s files (with main's tolerances) that #18195's integrator change
-/// moves, each classified ([`classify`]) against a certified enclosure asked `1e-9` of
-/// its magnitude wide. "both enclosed": main's and this branch's values both lie in the
-/// enclosure (the move is below what the enclosure resolves). "unenclosed": no enclosure
-/// exists for the body, so the move is measured only: `shell_fillet2`, `sphere_dif_box` and
-/// `sphere_plane` have a face whose sides are not one material region and one void
-/// (`sphere_plane`'s area is held to its closed form in `wr493_class_proofs`), and `vase1`
-/// and `vase3` a surface with no NURBS form.
-const INTEGRATOR_MOVED: [(&str, &str, &str); 12] = [
-    ("Fillet/blade_hub_1.smb", "volume", "both enclosed"),
-    ("Fillet/box_extrusion2.smb", "area", "both enclosed"),
-    ("Fillet/box_extrusion2.smb", "volume", "both enclosed"),
-    ("Fillet/cliff_1.smb", "volume", "both enclosed"),
-    ("Fillet/shell_fillet2.smb", "area", "unenclosed"),
-    ("Fillet/sphere_dif_box.smb", "area", "unenclosed"),
-    ("Fillet/sphere_plane.smb", "area", "unenclosed"),
-    ("Fillet/vase1.smb", "area", "unenclosed"),
-    ("Fillet/vase1.smb", "volume", "unenclosed"),
-    ("Fillet/vase3.smb", "volume", "unenclosed"),
-    ("Solids/revolution_mold.smb", "area", "both enclosed"),
-    ("Solids/revolution_mold.smb", "volume", "both enclosed"),
-];
 
 /// The files of [`MAIN`] with a sphere or torus found in a NURBS, whose reads the WR-493
 /// retirement changes too.
@@ -1118,16 +1030,6 @@ const WR493_HEAD: [(&str, [u64; 7]); 2] = [
             0x40f8a3124b2289fc,
             0x40f8a3124b2289fc,
         ],
-    ),
-];
-
-/// [`WR493_READS`]' area and volume (with main's tolerances) on this branch before the
-/// integrator change (`corpus.parity`'s rows at 53b36b2a0).
-const WR493_BEFORE_INTEGRATOR: [(&str, [f64; 2]); 2] = [
-    ("Fillet/sphere_plane.smb", [309.822_201_209_356_1, f64::NAN]),
-    (
-        "Solids/revolution_mold.smb",
-        [19_098.629_204_575_394, 100_913.143_343_513_41],
     ),
 ];
 
@@ -1893,7 +1795,8 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 }
 
 /// Main 3a0f49b09's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
-/// functions on main. The 19 equal digests (`0x30d463838d7fca03`) are bottle
+/// functions on main; entry 7 (`open_shell` e5) is main bcfb4b98e's, after #18402 moved
+/// that fillet's result (the other 28 are unchanged there). The 19 equal digests (`0x30d463838d7fca03`) are bottle
 /// fillets: main refuses each (status 1001) and leaves the read body, so all digest the
 /// same body and status.
 const FILLET_MAIN: [u64; 29] = [
@@ -1904,7 +1807,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xc0013e51f46a74a,
     0x357c96c0893f37a2,
     0x2dd7a7af4ca5bb1e,
-    0x9362785e2dee39d1,
+    0x51f6abb34e90bff2,
     0xb716929faf389955,
     0x30d463838d7fca03,
     0x30d463838d7fca03,
@@ -1930,7 +1833,10 @@ const FILLET_MAIN: [u64; 29] = [
 
 /// Main 3a0f49b09's mass bits for the rows whose mass moved in the expectations:
 /// `source-file-corner_box-edge4`, `-edge8`, `-edge9` and
-/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14).
+/// `stubs4-delete-edge-bottle-e8-r0.1` ([`FILLETS`] 1, 2, 3 and 14). Entry 14's are main's
+/// with the mass integrator's knot-line split, which moved that row since; its entries are
+/// classified against a certified enclosure in goldens'
+/// `mass_knot_line_moved_rows_are_classified`.
 const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
     (
         1,
@@ -1987,17 +1893,17 @@ const FILLET_MAIN_MASS: [(usize, [u64; 12]); 4] = [
         14,
         [
             0x40408bcce093b407,
-            0x402621896e50fcb0,
-            0x402621896e50fcb0,
-            0x3f10d1c99a559158,
-            0x3f13efa09958129b,
-            0x4000a10fe9da9881,
-            0x4050316571691566,
-            0x4050a9c3826e8ec1,
-            0x40151aaab5c59a6f,
-            0x3f6aed515da75eee,
-            0x3f66b6a18cf50b4e,
-            0xbf3c98659ef8970b,
+            0x402621896ddff25f,
+            0x402621896ddff25f,
+            0x3f10d1d4e45e472f,
+            0x3f13efa0c2fbea39,
+            0x4000a10fe9b1ffd5,
+            0x4050316570dd030e,
+            0x4050a9c381d79ffa,
+            0x40151aaab4b869fc,
+            0x3f6aed519268c01a,
+            0x3f66b6ad970f613a,
+            0xbf3c98793964b0c2,
         ],
     ),
 ];

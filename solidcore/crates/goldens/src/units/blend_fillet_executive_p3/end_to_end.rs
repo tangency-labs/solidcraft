@@ -1873,7 +1873,7 @@ pub(super) mod round_definition_proof {
     use solidcore::kernel::Kernel;
     use solidcore::mass::enclosure::{enclose_face_area_relative, enclose_volume};
     use solidcore::mass::integrator::properties::{
-        brep_mass_properties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
+        brep_mass_properties, MassProperties, PropertyAttributes, ESTIMATE_ACCURACY_FINEST,
     };
     use solidcore::math::Vec3;
     use solidcore::surface::surface::Surface;
@@ -1882,6 +1882,16 @@ pub(super) mod round_definition_proof {
 
     /// The golden's requested relative accuracy of the mass properties.
     pub(in super::super) const MASS_ACCURACY: f64 = 1e-4;
+
+    /// The integrator's estimates of a closed body's mass values (density 1, about the
+    /// origin), taken once by [`volume_band`] and read again by [`mass_bands`]: at the
+    /// golden's accuracy and at the integrator's finest, where it converges.
+    pub(in super::super) struct Estimates {
+        /// At [`MASS_ACCURACY`], as the golden measures.
+        golden: MassProperties,
+        /// At [`ESTIMATE_ACCURACY_FINEST`].
+        converged: MassProperties,
+    }
 
     /// The faces of `b` whose surface is a blend by its definition, each with the proved
     /// distance `d_f` between its net and its definition (`recertify`, at most its bound);
@@ -1931,28 +1941,30 @@ pub(super) mod round_definition_proof {
     /// [`certified_blends`]). Asserts that the volume the integrator
     /// converges to (its estimate at its finest accuracy, 1e-8 relative) lies in it. The
     /// golden's own estimate (at 1e-4) and the row before (`old`, the old body's) are
-    /// printed beside the band for the record only: an estimate is not a bound.
+    /// printed beside the band for the record only: an estimate is not a bound. Returns
+    /// both estimates, for [`mass_bands`].
     pub(in super::super) fn volume_band(
         k: &Kernel,
         b: &mut Brep,
         blends: &[(FaceId, f64)],
         old: f64,
         name: &str,
-    ) {
+    ) -> Estimates {
         let spread = spread(k, b, blends);
         let store = solidcore::geom::attribute::AttributeStore::default();
         let attributes = PropertyAttributes {
             store: &store,
             key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
         };
-        let mut volume = |accuracy: f64| {
-            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes)
-                .unwrap()
-                .properties
-                .volume
+        let mut at = |accuracy: f64| {
+            brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap()
         };
-        let new = volume(MASS_ACCURACY);
-        let converged = volume(ESTIMATE_ACCURACY_FINEST);
+        let estimates = Estimates {
+            golden: at(MASS_ACCURACY),
+            converged: at(ESTIMATE_ACCURACY_FINEST),
+        };
+        let new = estimates.golden.properties.volume;
+        let converged = estimates.converged.properties.volume;
         let enclosure = enclose_volume(k, b, 1e-6 * new.abs()).unwrap();
         let (lo, hi) = (enclosure.lo - spread, enclosure.hi + spread);
         assert!(
@@ -1964,6 +1976,7 @@ pub(super) mod round_definition_proof {
              certified [{lo}, {hi}], band width {:e}",
             hi - lo
         );
+        estimates
     }
 
     /// The certified bands of the closed body `b`'s other mass values, as the golden
@@ -1978,21 +1991,15 @@ pub(super) mod round_definition_proof {
     /// within that accuracy of it; prints `PROVEN` where the band is at most that accuracy
     /// wide (the golden's value is then within twice its accuracy of the true one) and
     /// `WIDE` where it is not. The bands are of the body as stored (its nets), which is the
-    /// body the golden measures.
-    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, name: &str) {
+    /// body the golden measures. The estimates are [`volume_band`]'s, of the same body.
+    pub(in super::super) fn mass_bands(k: &Kernel, b: &mut Brep, estimates: &Estimates, name: &str) {
         use solidcore::mass::enclosure::{enclose_mass_properties, Bounds};
-        let store = solidcore::geom::attribute::AttributeStore::default();
-        let attributes = PropertyAttributes {
-            store: &store,
-            key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
-        };
-        let mut at = |accuracy: f64| {
-            let m = brep_mass_properties(k, b, accuracy, 1.0, Vec3::ZERO, &attributes).unwrap();
+        let at = |m: &MassProperties| {
             let v = |p: Vec3| [p.x, p.y, p.z];
             (m.properties.area, v(m.centroid), v(m.inertia), v(m.products))
         };
-        let golden = at(MASS_ACCURACY);
-        let converged = at(ESTIMATE_ACCURACY_FINEST);
+        let golden = at(&estimates.golden);
+        let converged = at(&estimates.converged);
         let e = enclose_mass_properties(k, b, 1e-5).unwrap();
         if let Some((q, stop)) = e.short {
             eprintln!("{name}: the {q:?} enclosure stopped at {stop:?}, its band wider");
@@ -2224,8 +2231,8 @@ pub(super) mod round_definition_rows {
             }
             let blends = certified_blends(&k, &mut body, name);
             if let Some(old) = old_volume {
-                volume_band(&k, &mut body, &blends, old, name);
-                mass_bands(&k, &mut body, name);
+                let estimates = volume_band(&k, &mut body, &blends, old, name);
+                mass_bands(&k, &mut body, &estimates, name);
             }
         }
     }
@@ -3263,6 +3270,86 @@ mod wr493_certificates {
         );
         eprintln!("{NAME}: sphere vertex {now:?} off its circle, #18230 {before:?}");
         assert!(now.hi < before.lo, "{NAME}: sphere vertex {now:?}, #18230 {before:?}");
+    }
+}
+
+/// WR-661 (#14246, `fillet_statuses_pass_on` retired): a fillet of an open sheet may keep
+/// its result. The stitched result has lamina edges, so the closed-solid orientation's
+/// "face uses gathered from both sides" check fires (walking a face use's neighbours
+/// crosses the sheet's boundary to its other side) without the sheet being
+/// non-orientable. The executive keeps the stitched body only when the input was open,
+/// every lamina edge of the result has its ends on the input's boundary, no lamina edge
+/// runs along another (an unstitched seam), and, once the filleting is done, the body
+/// passes the level-2 check; otherwise the 1005 is returned and the body is restored.
+/// The `degenerate-test5` and `shell_fillet2` rows pass all three and are kept, as with the
+/// status ignored; the open-shell row fails level 2 and is refused.
+#[cfg(test)]
+mod wr661_open_sheets {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::inputs;
+    use super::*;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// `name`'s sheet is open before and after; the fillet adds one face, and the
+    /// result passes the level-2 check.
+    fn keeps_the_filleted_sheet(name: &str, faces_before: usize) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        assert_eq!(p1::faces(&body, None).unwrap().len(), faces_before, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        assert_eq!(p1::faces(&body, None).unwrap().len(), faces_before + 1, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2).unwrap().lines();
+        assert!(lines.is_empty(), "{name}: {lines:?}");
+    }
+
+    #[test]
+    fn a_degenerate_test5_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-degenerate-test5-e2-r0.5", 4);
+    }
+
+    #[test]
+    fn a_shell_fillet2_sheet_fillet_is_kept() {
+        keeps_the_filleted_sheet("stubs4-shell_fillet2-e5-r0.5", 3);
+    }
+
+    /// The open-shell sheet is open too, and its stitched result has its ends on the
+    /// sheet's boundary, but it fails the level-2 check (nine gaps beyond tolerance, up to
+    /// 3.0e-5: main's known-failing entry for this case, tangency-labs/solidcraft#13733), so
+    /// the pass-over does not keep it: the orientation's failure (1005) is returned and the
+    /// body is put back as it was.
+    #[test]
+    fn an_open_shell_sheet_fillet_that_fails_level_2_is_refused() {
+        let name = "stubs4-open_shell-e5-r0.5";
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let faces = p1::faces(&body, None).unwrap();
+        assert_eq!(faces.len(), 6, "{name}");
+        assert!(!solidcore::topology::brep::p2::is_manifold_solid(&body).unwrap(), "{name}");
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let error = fillet_selected(&mut k, &mut body, &selected, &input)
+            .ok()
+            .unwrap()
+            .expect_err("the invalid open result is refused");
+        assert_eq!(solidcore::error::upstream_status(&error), Some(1005), "{name}: {error:?}");
+        // the closed-solid orientation's "gathered from both sides" failure, not another one
+        assert!(
+            matches!(
+                error.failure().map(|f| &f.reason),
+                Some(solidcore::error::Reason::Topology(
+                    solidcore::error::topology::TopologyFailure::Inconsistent(
+                        "more face uses are connected than faces remain to be oriented"
+                    )
+                ))
+            ),
+            "{name}: {error:?}"
+        );
+        assert_eq!(p1::faces(&body, None).unwrap(), faces, "{name}: the body is put back");
     }
 }
 

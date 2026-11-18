@@ -157,7 +157,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     let mut k = Kernel::default();
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
-    k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.classify_edge_interval = true;
     k.fixes.curve_loop_normal_from_area = true;
@@ -169,7 +168,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
@@ -182,9 +180,7 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
-    k.fixes.ssi_low_angle_start_on_probation = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     let mut b = plate(&mut k);
     let before = volume(&k, &mut b);

@@ -337,6 +337,21 @@ fn point_at_a_vertex() {
     assert!(near(point(&s, "P"), Vec3::new(40.0, 30.0, 20.0)));
 }
 
+/// A vertex named by its edges is where every one of them ends. The bottom front edge and the
+/// uprights at both its ends don't all meet anywhere, so their names give no vertex and the pick
+/// decides: the top front corner, not an end of the first edge.
+#[test]
+fn a_vertex_is_where_every_named_edge_ends() {
+    let mut s = part();
+    let state = s.model.state();
+    let b = state.body("Box").unwrap_or_else(|| panic!("no Box"));
+    let at = [Vec3::new(20.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 10.0), Vec3::new(40.0, 0.0, 10.0)];
+    let edges = solidcraft_doc::naming::edge_names_at(b, &at);
+    assert!(edges.iter().all(|n| !n.is_empty()), "{edges:?}");
+    run(&mut s, "construct.point.vertex", json!({"point": {"type": "vertex", "at": [0, 0, 20], "edges": edges}, "name": "P"}));
+    assert!(near(point(&s, "P"), Vec3::new(0.0, 0.0, 20.0)), "{:?}", point(&s, "P"));
+}
+
 #[test]
 fn point_through_two_edges() {
     let mut s = part();

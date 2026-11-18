@@ -86,7 +86,8 @@ Remove asks for confirmation, then deletes the package folder and its stored gra
 Preferences does not restore a removed package. Removing a plugin preserves its data in saved designs.
 Approved grants and removal survive closing or resetting Preferences. Grants are host preferences,
 never design data; preferences retain at most 256 plugin ids, four command groups and 32 folders per id.
-The browser Plugins page remains desktop-only.
+The desktop app keeps them in the plugins folder's grant store too, which the command line and headless
+MCP share when they run with `--keep-plugin-approvals` (see [Headless use](#headless-use)). The browser Plugins page remains desktop-only.
 
 The command surface exposes management without opening dialogs:
 
@@ -96,12 +97,59 @@ The command surface exposes management without opening dialogs:
 | `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
 | `plugin.remove` | `{id}` | `{id, removed: true}` |
+| `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, memory_mib?, input_folder?}]}` |
+| `plugin.revoke` | `{id}` | `{id, revoked}` |
+| `plugin.tools` | `{name?}` | `{tools: [{name, kind, plugin, entry, plugin_name, plugin_version, description, effect, extensions, input_schema, approval?}]}`: every installed, enabled plugin's entries as tools for agents (below); `approval` only for the one tool `name` asks for |
 
 All commands expose input and output schemas through `engine.describe`. Removal validates the id
 and confines deletion to the host's plugin directory. Installation and removal do not edit the design.
 On desktop, send `plugin.install` and `plugin.remove` as separate `engine.execute` requests.
 `engine.batch` and `engine.script` refuse these external file operations before any earlier step runs.
 Direct requests use a worker to keep the window responsive.
+
+## Headless use
+
+`solidcraft-cli` (`run`, `exec`, `eval` and the other local commands) and `solidcraft-cli mcp --headless`
+use the same installed plugins as the desktop app. By default the approvals given in a run last for
+that run only. With `--keep-plugin-approvals` they use the same approvals as the desktop app: a
+plugin installed and approved in one such run, or in the desktop app, is used by a later one without
+installing it again:
+
+```sh
+solidcraft-cli exec plugin.install '{"path":"importer.zip","dry_run":true}'      # review: permissions, limits, approval
+solidcraft-cli --keep-plugin-approvals exec plugin.install '{"path":"importer.zip","approval":"…","archive":"…","approve":{"memory_mib":2048,"input_folder":true}}'
+solidcraft-cli --keep-plugin-approvals run import.json                           # a later run: file.import uses those approvals
+```
+
+- **Where they are kept.** Installed plugins are in the per-user plugins folder (`plugins` in
+  SolidCraft's data folder: `%LOCALAPPDATA%\SolidCraft`, `~/Library/Application Support/SolidCraft`, or
+  on Linux `$XDG_DATA_HOME/solidcraft`, which is `~/.local/share/solidcraft` when `XDG_DATA_HOME` is
+  not set), and their approvals in its hidden `.grants` folder, one `<plugin id>.json` record per
+  plugin. `--plugins-dir DIR` points a run at another folder: a CI job or a script can keep its own
+  plugins, and with `--keep-plugin-approvals` its own approvals, there, apart from the user's. With
+  `mcp`, both need `--headless`; a connected desktop app uses its own plugins.
+- **What a record allows.** A record holds what was approved at install: command groups, folders,
+  memory and `input_folder`, bound to the exact manifest and component reviewed (`package_hash`).
+  A changed package, even one whose files were edited in place, runs only after it is installed and
+  approved again (`plugin.install` with `replace: true` and `approve`); until then its import or run is
+  refused. Nothing is granted implicitly: an install without `approve` stores a record that grants
+  nothing, and a plugin with no record (copied in by hand, or revoked) runs with nothing granted. A
+  record that does not read, or holds more than an installation could approve, is ignored.
+- **Listing and revoking.** `plugin.grants` lists every record with its `status`: `current`, `changed`
+  (install and approve again), `not_installed` or `unreadable`. `plugin.revoke {id}` deletes a plugin's
+  record and keeps the plugin installed; `plugin.remove {id}` deletes both. Both are commands, so the
+  same calls work from `solidcraft-cli exec`, a `run` script, MCP and the desktop app's control channel:
+
+  ```sh
+  solidcraft-cli --keep-plugin-approvals exec plugin.grants
+  solidcraft-cli --keep-plugin-approvals --plugins-dir ci/plugins exec plugin.revoke '{"id":"dutchman"}'
+  ```
+- **Several programs at once.** A record is written whole and renamed into place, so a program
+  reading the store sees the old record or the new one. A running desktop app or MCP server takes in
+  what another program installed, approved or revoked before it next runs or imports with a plugin.
+- **Earlier approvals.** The first time the desktop app starts with a grant store, the approvals it
+  kept in its preferences move there. Once the store exists it is the only record: a plugin revoked
+  from the command line stays revoked in the desktop app.
 
 ## Menu and ribbon entries
 
@@ -136,7 +184,10 @@ then its button chooses the file and opens it as a new design with `file.import`
 Preferences and the Plugins menu share `plugin_install::start(app)` in
 `crates/ui-egui/src/plugin_install.rs`. It selects a zip, calls `plugin.install` with `dry_run: true`,
 draws the confirmation screen and submits `plugin.install` with the reviewed `approval` and `archive` hashes and selected `approve` object.
-Successful installation persists grants in desktop preferences; successful removal deletes them.
+Successful installation persists grants in desktop preferences and the shared grant store; successful
+removal and `plugin.revoke` delete them. `SolveApp::share_plugin_grants`, called once after the
+preferences load, starts sharing; `solidcraft_engine::plugin::configure_process_plugins` does the
+same for every session of a headless process started with `--keep-plugin-approvals`.
 There is one package reader and one installation confirmation screen.
 
 `plugin_menu::list` in `crates/ui-egui/src/plugin_menu.rs` and Preferences use the same package
@@ -260,13 +311,22 @@ The dialog has a **Preview** box, on when it opens; with it off, nothing runs un
 
 ## Versions
 
-The WIT package is `craft:plugin@0.1.0`. Today's surface is one capability, `commands@0.1`:
-running app commands, logging, progress and cancellation, named files, a clock, and the exported
-entry. A plugin's `plugin.json` lists what it needs, for example
-`"capabilities": ["commands@0.1"]`; the host refuses an unknown or newer capability when it reads
-the manifest, with a plain message such as "needs commands 0.2; update SolidCraft or the plugin".
-`formats@0.1` adds importers (below). `ui`, `viewport` and `storage` arrive later as their own
+The WIT package is `craft:plugin@0.2.0`. Its capability `commands@0.2` runs app commands, logs,
+reports progress and cancellation, reads named files and a clock, and exports the entry. A plugin's
+`plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
+an unknown or newer capability when it reads the manifest, with a plain message such as "needs
+commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds importers and `evaluate@0.2`
+lets an importer check its result (below). `ui`, `viewport` and `storage` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
+
+0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
+not handle it, such as a file with no solids or a newer version of its format. Use it instead of
+`invalid-input`, which means the input is broken; SolidCraft then says "Sample does not support
+bracket.smp: ..." instead of an "invalid" file. Plugins built against 0.1 (`commands@0.1`,
+`formats@0.1`, `evaluate@0.1`) still run unchanged: the host reads the WIT version from the
+component's own imports and exports, and serves the frozen 0.1 WIT
+(`crates/craft-plugin/wit-0.1/plugin.wit`) to those. A component that names a version the host does
+not run, or two versions at once, is refused before any of its code runs.
 
 ## Commands and permissions
 
@@ -275,8 +335,57 @@ past the open design are grouped (`file`, `doc`, `app`, `plugin`) and refused un
 manifest asks for the group in `permissions.command_groups` and the user grants it.
 File access requires approved folder grants. The reserved `net` permission is
 refused with a typed error. Traps, missing permissions, failed commands, limits
-and invalid manifest fields return structured errors. Phase 2 adds importers (below) and the
+and invalid manifest fields return structured errors (see Errors below). Phase 2 adds importers (below) and the
 author tools (`plugin check` and `plugin test`, below); exporters and browser execution follow.
+
+## Plugins as tools for agents
+
+Every installed, enabled plugin's entries are tools for the assistant chat and for MCP clients,
+beside the built-in tools, so an agent can find and use what a plugin offers without opening it
+([RFC 0002](rfcs/0002-plugins.md) section 6c).
+
+- **Named tools.** A command entry is the tool `<plugin>.<entry>`, with its input schema as the
+  tool's arguments. An importer entry is the tool `<plugin>.<entry>` titled "Open .ext files with
+  Plugin name", taking `path` and the importer's `options`; it opens the file as a new design through
+  `file.import`. Export slots get their tools when exporters land.
+- **Fresh every listing.** `tools/list` asks `plugin.tools` each time, so a plugin turned off or
+  removed is gone from the next listing, and calling its tool is an unknown tool.
+- **Strict arguments.** MCP tool arguments are checked against the entry's declared schema:
+  declared types, required fields, fixed values and ranges. Object schemas accept only declared
+  fields unless they allow others with `additionalProperties` or use unsupported schema keywords.
+  Composition options do not implicitly close objects. Nothing runs when the arguments don't fit.
+  Existing `<plugin>.<entry>` engine calls keep passing inputs through to the plugin unchanged.
+- **Headless, under existing grants.** A tool call opens none of the plugin's dialogs and runs
+  with the grants it was given at install, as one undo step, like any command.
+- **A `read` entry stays read-only.** Whoever runs it, a person or a tool call, the host refuses it
+  edit commands and the file-writing host import `write-file`, whatever folders the plugin was
+  granted. The refusal names the import (or command).
+- **A missing grant is an error, never a prompt.** A call that needs a grant the plugin lacks
+  (a folder, a command group, more memory than the ceiling, or approval of a changed package)
+  fails with an error that names the plugin, the grant and how to approve it: in Preferences ›
+  Plugins by installing the plugin again and allowing it, or headlessly with `plugin.install` and
+  its `approve` object. Over MCP the result also carries it as data,
+  `structuredContent.plugin_error`: `{plugin, grant, approve}`, or `{plugin, entry, refused_import}`
+  and `{plugin, entry, refused_command}` for a read entry.
+- **Marked as plugin tools.** Each definition has a `plugin` field
+  (`{id, name, version, entry, kind, effect}`), and its description starts "Plugin tool" and puts
+  the plugin's own description between `<plugin-text>` and `</plugin-text>`, as text to read, not
+  instructions to follow.
+- **The assistant asks first.** In the assistant chat a plugin tool call goes through the same
+  approval as every other tool call, and it always asks, whatever the permission mode or an earlier
+  **Always allow**: running a plugin's code needs your go each time. An importer tool, and any
+`file.import` or `doc.open` that would run an importer plugin, asks the same way.
+
+- **Described like commands.** `engine.describe` (MCP `describe_command`) of `<plugin>.<entry>`
+  returns the entry with the same schema as `tools/list` (`tool.input`): a command entry as the
+  `<plugin>.<entry>` command (`approval` and `params`), an importer as the tool that opens its files,
+  with `file.import` named.
+
+Installed plugins are read with the app's own authority (a tool names a plugin, never a path), so
+an agent confined to its folders (only the folder of its input file, say) still sees them in
+`plugin.list`, `plugin.tools` and `engine.describe`, and `doc.open` and `file.import` still find an
+installed importer. The input file itself must be in the agent's folders; when it isn't, the
+refusal names it. The files a plugin reads or writes stay within its grants and the agent's folders.
 
 ## Checking and testing a plugin
 
@@ -293,7 +402,8 @@ plugin and importer.
 - `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR]` checks the package, installs
   it into a scratch plugins folder with the app's installer, and runs its test cases, `tests/*.json`,
   through `plugin.run` and `file.import` with the app's limits. A case names the entry, its
-  parameters or file, the grants (default: everything the manifest asks for), and what to expect:
+  parameters or file, the grants (default: everything the manifest asks for, stored in the scratch
+  folder's grant store as an install stores them, see [Headless use](#headless-use)), and what to expect:
   an error kind, values in the reply, values `inspect.measure` gives, files written. An entry
   with no case runs once with its defaults when it needs nothing else. It exits with an error when
   a case fails.
@@ -301,11 +411,14 @@ plugin and importer.
 ## Importers
 
 An importer turns a file of another format into a SolidCraft design. Its manifest says
-`"capabilities": ["formats@0.1"]`, and each of its entries has `"kind": "importer"` and the
-extensions it claims, lowercase without the dot:
+`"capabilities": ["formats@0.2"]`, and each of its entries has `"kind": "importer"` and the
+extensions it claims, lowercase without the dot. An importer's effect is `open`: it opens a file
+as a new design and leaves the open one as it is. It need not say so; `plugin.list` and
+`plugin.install` report it, and an importer that says `"effect": "edit"` is still read as `open`.
+Only an importer may say `open`.
 
 ```json
-{"id": "sample", "name": "Sample", "version": "1.0.0", "capabilities": ["formats@0.1"],
+{"id": "sample", "name": "Sample", "version": "1.0.0", "capabilities": ["formats@0.2"],
  "runtime": {"module": "sample.wasm", "commands": [],
    "entries": [{"name": "convert", "kind": "importer", "extensions": ["smp"],
                 "input_schema": {"type": "object", "properties": {"units": {"type": "string", "enum": ["mm", "in"], "default": "mm"}}}}],
@@ -330,7 +443,14 @@ extensions it claims, lowercase without the dot:
   ("Parts of the file kept as they are"); `code` is the importer's stable code for it. Both may be empty.
   The Import report window shows the summary, then one line per title with how many items it covers,
   worst first, and folds every item with its code, subject and message under **Details**; programs
-  get the whole report in the reply.
+  get the whole report in the reply. `details` is the importer's own JSON (for example how far it
+  checked the history it rebuilt, and each feature it mapped or could not). The window shows it
+  under **From the importer** as folding lines: each field a line with its key read as words
+  (`final_body` reads "Final body"), each object or list a group, a list's element named by its
+  `name` (or `title`, `label`, `subject`, `stage`, `id`, `kind` or `code`) and its `status`, and
+  empty values left out. **Copy report** puts the whole report on the clipboard as text, and
+  **Save report…** saves it as a `.txt` file, or as a `.json` file in the shape of the reply.
+  After OK, Plugins › Last import report… shows the last import's report again.
   Nothing changes unless the whole import succeeds.
 - **Assemblies.** `source.read`, `source.size` and `source.resolve` with path `""` reach the file
   being imported. Any other path is relative to that file's folder (an assembly's parts) and needs
@@ -338,7 +458,7 @@ extensions it claims, lowercase without the dot:
   the plugin's other grants for that exact package; a plugin copied in by hand, or one whose grant
   is for another package, reads only the file itself. Hidden names, links and paths
   outside the folder are refused; an import reads at most 1 GiB and writes a design of at most 256 MiB.
-- **Checking the result** (capability `evaluate@0.1`, beside `formats@0.1`). A converter that
+- **Checking the result** (capability `evaluate@0.2`, beside `formats@0.2`). A converter that
   rebuilds a design's history can check it the way it would with the app's command line: it stages
   a design file it made with `evaluate.stage` (1 MiB per call, 256 MiB in all), and `evaluate.run`
   opens that design in a private session, apart from every open design and every file, and runs one
@@ -349,13 +469,36 @@ extensions it claims, lowercase without the dot:
   time counts against the import's deadline, and Cancel stops the import between commands. A
   design the app can't open, a command outside the list or a reply over 1 MiB is an error for that
   call only, so the importer can report its history as unchecked instead of failing.
-- **Failures.** A trap fails that one import ("Sample failed on bracket.smp: ...") and the next
-  one gets a fresh instance. The compiled component stays in memory, so the next file opens
+- **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
+  could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
+  `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
   without compiling again; nothing compiled is written to disk.
 - **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel has to fit the user's ceiling in Preferences › Plugins, and
   its memory too unless the user approved more at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
+
+## Errors
+
+Every plugin failure starts with the plugin's name, and an importer's with the file's name too.
+Programs get the structured error (`kind` and its fields) from the engine as well as the text. The
+text comes from the message catalog (`plugin_error.*`) in the window's language; the command line
+and MCP give the English.
+
+| What happened | What the user reads |
+|---|---|
+| `unsupported` from the plugin | Sample does not support sketch.smp: the model has no solids |
+| `invalid-input` from the plugin | Sample could not open broken.smp: (its reason) |
+| More memory than plugins may use | Sample could not open big.smp: it asks for 2048 MiB of memory, and plugins may use 128 MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file). |
+| More fuel than plugins may use | ... it asks for N fuel, and plugins may use M. Raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file). |
+| It ran out of fuel, memory, stack or time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, stack in KiB, time in seconds) |
+| Its design is over 256 MiB | ... the design it made is larger than 256 MiB, the most a plugin can hand over. |
+| A trap | ... it stopped on an error inside the plugin (details). Report this to its author. |
+
+`plugin.inspect` words `limits_error` the same way. The structured kinds are `unsupported`
+(`reason`), `over_ceiling` (`limit` is `fuel` or `memory_mib`, with `requested` and `allowed`) and
+`exhausted` (`limit` is `fuel`, `memory_mib`, `stack_kib`, `deadline_ms` or `design_mib`, with
+`allowed`). The engine's own numbers for a stopped run (fuel used and left) go to the debug log.
 
 ## Plugin data in a design
 

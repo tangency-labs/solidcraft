@@ -141,12 +141,11 @@ fn same_link_source(s: &Session, link: &DesignLink, file: &Path) -> bool {
     absolute(&old) == file || (link_refused(s.path.as_deref(), &link.path).is_ok() && same_file(&old, file))
 }
 
-/// Resolve a design's component links against its original file, before opening it from a
-/// different location (for example a recovery file) or keeping it in session history.
+/// Resolve a design's links (its component links and its drawings' sources) against its original
+/// file, before opening it from a different location (for example a recovery file) or keeping it
+/// in session history.
 pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
-    for link in doc.links.values_mut() {
-        link.path = absolute(&resolve(from, &link.path)).to_string_lossy().into_owned();
-    }
+    super::design_link::located(doc, from);
 }
 
 /// The bodies of a linked design: its name, the Import feature that holds them and the names
@@ -797,8 +796,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .feature(link.feature)
             .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
             .map(|f| digest(f.link_faces.as_slice()));
-        if let Some((known, properties)) =
-            kept_faces.and_then(|faces| unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.as_bytes()), faces))
+        if let Some((known, properties)) = kept_faces
+            .and_then(|faces| unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), digest(old.0.as_bytes()), faces))
         {
             warnings.extend(known);
             // Another component or session may have evaluated this source first. Its
@@ -824,7 +823,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             Err(e) => return Err(bad(cmd, format!("{cname}: {e}"))),
         };
         warnings.extend(sf.warnings.iter().cloned());
-        let same = matches!(&sf.kind, FeatureKind::Import { step, .. } if *step == old);
+        let same = matches!(&sf.kind, FeatureKind::Import { step, records, .. } if *step == old.0 && *records == old.1);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
         if same && kept == Some(&faces) {
             if inherit_properties(s, comp, &properties)? {
@@ -878,14 +877,27 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// `comp`'s linked design as it was last read (its bodies) and as its file is now, read before
 /// anything in the design changes.
-fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result<(std::sync::Arc<str>, PathBuf, Vec<u8>), String> {
-    let Some(FeatureKind::Import { step: old, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
+fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result<(ImportSource, PathBuf, Vec<u8>), String> {
+    let Some(FeatureKind::Import { step: old, records, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
         return Err(format!("its linked bodies (feature {}) are gone; break the link or insert the design again", link.feature));
     };
     link_refused(s.path.as_deref(), &link.path).map_err(|e| e.to_string())?;
     let file = resolve(s.path.as_deref(), &link.path);
     let bytes = read_link(&file, s.path.as_deref()).map_err(|e| e.to_string())?;
-    Ok((old.clone(), file, bytes))
+    Ok(((old.clone(), records.clone()), file, bytes))
+}
+
+/// What an Import feature's bodies are made from: its STEP text and its records.
+type ImportSource = (std::sync::Arc<str>, Option<std::sync::Arc<solidcraft_doc::kernel::ImportRecords>>);
+
+/// Whether two Import features make their bodies from the same source.
+fn same_import_source(a: &FeatureKind, b: &FeatureKind) -> bool {
+    match (a, b) {
+        (FeatureKind::Import { step, records, .. }, FeatureKind::Import { step: other, records: other_records, .. }) => {
+            step == other && records == other_records
+        }
+        _ => false,
+    }
 }
 
 /// The joints and joint origins on occurrences of `comp` that name its linked faces by their
@@ -938,10 +950,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     // undo step and restores both the document and evaluated state on any later failure.
     let (_, sf, faces, _, properties) = design_bodies(&file, &bytes, configuration, s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let read = DesignLink::file_digest(&bytes);
-    let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), &sf.kind) {
-        (Some(FeatureKind::Import { step: old, .. }), FeatureKind::Import { step, .. }) => old != step,
-        _ => true,
-    };
+    let geometry_changed = !s.doc.feature(link.feature).is_some_and(|f| same_import_source(&f.kind, &sf.kind));
     let path = stored(s.path.as_deref(), &file);
     let mut warnings = sf.warnings;
     if geometry_changed
@@ -1045,8 +1054,8 @@ fn relink_placement(
         return Err(bad(cmd, "the selected configuration changed while relinking; try again"));
     }
     let feature = s.doc.links.get(&linked).map(|l| l.feature).ok_or_else(|| bad(cmd, "the design was not linked"))?;
-    let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), s.doc.feature(feature).map(|f| &f.kind)) {
-        (Some(FeatureKind::Import { step: was, .. }), Some(FeatureKind::Import { step, .. })) => was != step,
+    let geometry_changed = match (s.doc.feature(link.feature), s.doc.feature(feature)) {
+        (Some(was), Some(now)) => !same_import_source(&was.kind, &now.kind),
         _ => true,
     };
     let mut warnings: Vec<String> = made["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_string)).collect();
@@ -1775,8 +1784,9 @@ mod tests {
 
     /// Every place that reaches a file through a link path goes through the design-path rule
     /// (`vfs::check_design_path` / `read_design_path` / `design_path_is_file` / `link_refusal`):
-    /// no plain file call on a link's path in the link commands, and the font file a design's text
-    /// names is checked before it is read.
+    /// no plain file call on a link's path in the link commands, a drawing's source path judged by the
+    /// rule before `same_file` canonicalises it, and the font file a design's text names is checked
+    /// before it is read.
     #[test]
     fn every_link_path_goes_through_the_design_path_rule() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -1809,6 +1819,11 @@ mod tests {
                 assert!(rule < at, "{file}: canonicalize before check_design_path");
             }
         }
+        // A drawing's source path: the rule judges its text before `same_file` canonicalises it (a network touch).
+        let drawing = code("src/cmd/drawing.rs");
+        let source = &drawing[drawing.find("fn linked_source(").unwrap()..];
+        let rule = source.find("check_design_path(given").expect("linked_source goes through the design-path rule");
+        assert!(rule < source.find("same_file(").unwrap(), "src/cmd/drawing.rs: same_file before check_design_path");
         let fonts = std::fs::read_to_string(root.join("../sketch/src/fonts.rs")).unwrap();
         let (check, read) = (fonts.find("FILE_CHECK.get()").unwrap(), fonts.find("read_font(&path)").unwrap());
         assert!(check < read, "a font file named by a design is checked before it is read");

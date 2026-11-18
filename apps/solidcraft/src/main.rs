@@ -128,6 +128,9 @@ struct App {
     dialog_folder: DialogFolder,
     /// Settings go to `app.ron` in the frame they change (#8275).
     prefs_writer: PrefsWriter,
+    /// The window's egui context: pointer motion between frames is hit-tested against its last
+    /// pass (`repaint_on_window_event`).
+    ctx: egui::Context,
     /// Preferences › Layout's `windows_smooth_window_drag`, as winit was given it.
     #[cfg(target_os = "windows")]
     window_move: native_frame::WindowMove,
@@ -191,6 +194,13 @@ impl PrefsWriter {
         self.pending_until = None;
         None
     }
+}
+
+/// A window position in physical pixels, in egui's points: what egui-winit makes of a
+/// `CursorMoved`. None for a scale or position that is not a usable number.
+fn pointer_in_points(x: f64, y: f64, pixels_per_point: f32) -> Option<egui::Pos2> {
+    let pos = egui::pos2(x as f32, y as f32) / pixels_per_point;
+    (pixels_per_point > 0.0 && pos.is_finite()).then_some(pos)
 }
 
 /// Input that can change a setting: a click, a key, typed or pasted text, a wheel or a pinch.
@@ -345,6 +355,24 @@ impl eframe::App for App {
         if self.solve.quit_requested {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+    }
+    /// Pointer motion over a still 3D view that lights up nothing new paints no frame: the view
+    /// would draw the same picture again (`viewport::follow_pointer_without_frame`, which keeps
+    /// the hover at the pointer). The motion still reaches the next frame. Any other event keeps
+    /// eframe's answer, as does every event of another window (eframe asks about the main
+    /// window's alone).
+    fn repaint_on_window_event(&mut self, event: &winit::event::WindowEvent) -> Option<bool> {
+        let winit::event::WindowEvent::CursorMoved { position, .. } = event else {
+            return None;
+        };
+        let pos = pointer_in_points(position.x, position.y, self.ctx.pixels_per_point())?;
+        solidcraft_ui_egui::viewport::follow_pointer_without_frame(&mut self.solve, &self.ctx, pos).then_some(false)
+    }
+    /// Raw mouse motion (not tied to a window) paints no frame while the 3D view is quiet: the
+    /// window's own pointer motion decides then, above.
+    fn repaint_on_device_event(&mut self, event: &winit::event::DeviceEvent) -> Option<bool> {
+        let quiet = matches!(event, winit::event::DeviceEvent::MouseMotion { .. }) && self.solve.viewport.quiet_motion.is_some();
+        quiet.then_some(false)
     }
     /// The frame's input before egui reads it: the release of a press handed to a window move
     /// or resize, the macOS menu and full-screen fixes, the 3D mouse, then the app's own hook.
@@ -1554,6 +1582,11 @@ fn main() -> eframe::Result {
             app.graphics_fallback = fallback_note.clone();
             let stored_ui = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k)));
             restore_preferences(&mut app, stored_ui.as_deref(), graphics().as_ref(), safe_mode);
+            // Plugin approvals live in the plugins folder's grant store, shared with the command
+            // line and headless MCP; safe mode keeps to its own empty preferences.
+            if !safe_mode {
+                app.share_plugin_grants();
+            }
             // The administrator's policy holds in safe mode too.
             app.policy = solidcraft_ui_egui::policy::load();
             if let Some(path) = &theme_file
@@ -1757,6 +1790,7 @@ fn main() -> eframe::Result {
                 native_menu: None,
                 nav_bridge,
                 dialog_folder,
+                ctx: cc.egui_ctx.clone(),
                 #[cfg(target_os = "windows")]
                 window_move,
             }))
@@ -1883,13 +1917,14 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
         let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
         startup::configure_adapter(setup, cpu, environment, adapter);
-        // A float depth buffer with a stencil (see `FLOAT_DEPTH_BITS`), and indirect draws that
-        // start at an instance (instanced meshes drawn a call per pipeline), wherever the adapter
-        // has them.
+        // A float depth buffer with a stencil (see `FLOAT_DEPTH_BITS`), indirect draws that start
+        // at an instance (instanced meshes drawn a call per pipeline), and timestamp queries for
+        // the GPU time the frame-rate readout shows, wherever the adapter has them.
         let base = setup.device_descriptor.clone();
         setup.device_descriptor = std::sync::Arc::new(move |adapter| {
             let mut d = base(adapter);
-            d.required_features |= adapter.features() & (startup::FLOAT_DEPTH_STENCIL | solidcraft_viewport_gpu::INDIRECT_DRAWS);
+            d.required_features |=
+                adapter.features() & (startup::FLOAT_DEPTH_STENCIL | solidcraft_viewport_gpu::INDIRECT_DRAWS | startup::TIMESTAMP_QUERY);
             d
         });
     }
@@ -2306,6 +2341,17 @@ mod prefs_writer_tests {
         assert!(super::changes_settings(&egui::Event::Text("5".into())));
         assert!(!super::changes_settings(&egui::Event::PointerMoved(egui::Pos2::ZERO)));
         assert!(!super::changes_settings(&egui::Event::MouseMoved(egui::Vec2::X)));
+    }
+
+    /// A window position in physical pixels is egui's points at the window's scale; a scale or
+    /// position that is not a usable number answers nothing, so eframe's repaint stands.
+    #[test]
+    fn pointer_motion_is_read_in_points() {
+        assert_eq!(super::pointer_in_points(300.0, 150.0, 2.0), Some(egui::pos2(150.0, 75.0)));
+        assert_eq!(super::pointer_in_points(10.0, 20.0, 1.0), Some(egui::pos2(10.0, 20.0)));
+        assert_eq!(super::pointer_in_points(10.0, 20.0, 0.0), None);
+        assert_eq!(super::pointer_in_points(f64::NAN, 20.0, 1.0), None);
+        assert_eq!(super::pointer_in_points(1e300, 20.0, 1.0), None);
     }
 
     /// A setting that changes in every frame (for example while a slider is dragged) doesn't

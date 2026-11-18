@@ -63,12 +63,10 @@
 //!   curves left ([`SurfaceIntersector::add_deferred_touching_points`]); such points
 //!   come after the traced curves, where upstream's boundary pass would have put them
 //!   first.
-//! - **Opt-in fix (WR-76, #392).** With
-//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
-//!   a traced curve removes, before it is flushed, the start points left in a tangent
-//!   cluster with either of its ends (`SurfaceIntersector::remove_end_tangent_clusters`);
-//!   the SolidCraft fork's tangency-labs/smlib@0ce09f2. Off by default (upstream
-//!   behaviour).
+//! - **Fix (WR-76, #392).** A traced curve removes, before it is flushed, the start
+//!   points left in a tangent cluster with either of its ends
+//!   (`SurfaceIntersector::remove_end_tangent_clusters`); the SolidCraft fork's
+//!   tangency-labs/smlib@0ce09f2. Upstream traces each of them again.
 //! - **Fix (WR-77, #393, #2110).** The curves are split at the singular points they
 //!   pass through after the tangent nodes are added (`super::singular_splits`); the
 //!   SolidCraft fork's tangency-labs/smlib@3c9d1d3. Always on (once the opt-in
@@ -766,12 +764,10 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                     self.base.trace_back(k, start, &out.curves_3d)?;
                 }
 
-                // opt-in fix (WR-76, #392): a traced curve that ends on a boundary
-                // inside a tangential contact consumes the start points of that
-                // contact's boundary cluster
-                if k.fixes.ssi_trace_tangent_curves_once {
-                    self.base.remove_end_tangent_clusters(k)?;
-                }
+                // fix (WR-76, #392): a traced curve that ends on a boundary inside
+                // a tangential contact consumes the start points of that contact's
+                // boundary cluster
+                self.base.remove_end_tangent_clusters(k)?;
 
                 // create the curves from the points in m_vCurvePoints
                 self.base.flush_curve(k, &mut out)?;

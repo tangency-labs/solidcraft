@@ -15,14 +15,15 @@ use solidcraft_doc::{BrowserEntry, FeatureKind, MAX_GROUP_NESTING, PlaneRef};
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr};
+use crate::browser_find::{Kind, MAX_PATTERN_CHARS, Pattern};
 use crate::params::{bad, bool_, expr, str_};
 use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
-    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FlipAxis, Isolated, PlaneFrame, RedefineAttachment,
-    RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn,
-    ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved,
-    VisibilityState,
+    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams, FindResult, FlipAxis, Isolated,
+    PlaneFrame, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace, RepairHole, RepairParams,
+    RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed,
+    ViewSaveParams, ViewSaved, VisibilityState,
 };
 use crate::schema::view_navigation::CameraReply;
 use crate::schema::{TypedContract, output_schema_for};
@@ -30,6 +31,7 @@ use crate::{Result, Session};
 
 const REPAIR_CONTRACT: TypedContract<RepairParams> = TypedContract::new();
 const UNITS_CONTRACT: TypedContract<DocumentUnitsParams> = TypedContract::new();
+const FIND_CONTRACT: TypedContract<FindParams> = TypedContract::new();
 const RENAME_BODY_CONTRACT: TypedContract<BodyRenameParams> = TypedContract::new();
 const GROUP_CONTRACT: TypedContract<BrowserGroupParams> = TypedContract::new();
 const UNGROUP_CONTRACT: TypedContract<BrowserUngroupParams> = TypedContract::new();
@@ -100,7 +102,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("camera")
         .contract(&VIEW_SAVE_CONTRACT)
         .output(output_schema_for::<ViewSaved>)
-        .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?} (replaces a view of the same name)"),
+        .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?, roll?, up?: z|y} (replaces a view of the same name)"),
     CommandSpec::new("view.rename", "Rename Named View", crate::checked!("view.rename", view_rename))
         .icon("rename")
         .contract(&VIEW_RENAME_CONTRACT)
@@ -174,6 +176,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "path?: [occurrence ids] (that placement's branch); component?: id; omit both for the whole tree: every placement, folder and group at every level. The row it starts from (the design row for the whole tree) stays open, so its first level remains visible. \
          Display only; not an undo step → open, open_by_default, closed_by_default",
+    ),
+    CommandSpec::new("browser.find", "Search the Browser", crate::checked!("browser.find", find))
+        .icon("filter")
+        .noundo()
+        .contract(&FIND_CONTRACT)
+        .output(output_schema_for::<FindResult>)
+        .params(
+        "text?: what the names hold, ignoring case (with * for any text or ? for any one character it must match the whole name: *:1 ends in :1; at most 256 characters); \
+         kinds?: [component|body|sketch|construction|joint] (default every kind; give text, kinds or both) \
+         → {found: [{kind, name, key, path, item?}], total, incomplete}: every placement of a component is its own match, path is the placement it is in, \
+         item is what select.set takes (a joint has none; its key is its id); at most 10000 listed, total counts them all",
     ),
 ];
 
@@ -524,6 +537,39 @@ fn shown_feature(world: &solidcraft_doc::ModelState, f: &solidcraft_doc::Feature
         return Some(Shown::Origin(f.name.clone()));
     }
     None
+}
+
+fn find(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "browser.find";
+    let pattern = find_text(p.get("text")).map_err(|e| bad(cmd, e))?;
+    let kinds = find_kinds(p.get("kinds")).map_err(|e| bad(cmd, e))?;
+    if pattern.is_none() && kinds.is_empty() {
+        return Err(bad(cmd, "give `text` (not blank), `kinds` or both"));
+    }
+    reply(cmd, FindResult { search: crate::browser_find::find(s, pattern.as_ref(), &kinds), param_warnings: Vec::new() })
+}
+
+/// `browser.find`'s `text`: none when absent, `null` or blank; the handler's message otherwise.
+pub(crate) fn find_text(v: Option<&Value>) -> std::result::Result<Option<Pattern>, String> {
+    match v {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) if text.chars().count() > MAX_PATTERN_CHARS => Err(format!("`text` is longer than {MAX_PATTERN_CHARS} characters")),
+        Some(Value::String(text)) => Ok(Pattern::new(text)),
+        Some(_) => Err("`text` must be a string".into()),
+    }
+}
+
+/// `browser.find`'s `kinds`: none when absent or `null`; the handler's message otherwise.
+pub(crate) fn find_kinds(v: Option<&Value>) -> std::result::Result<Vec<Kind>, String> {
+    match v {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Array(a)) if a.len() <= Kind::ALL.len() => a
+            .iter()
+            .map(|k| k.as_str().and_then(Kind::from_id))
+            .collect::<Option<Vec<Kind>>>()
+            .ok_or_else(|| "`kinds` takes component, body, sketch, construction and joint".into()),
+        Some(_) => Err("`kinds` must list at most 5 of component, body, sketch, construction and joint".into()),
+    }
 }
 
 /// A browser folder or group key (`Visibility::hidden_folders`): `c0` or `o:<ids>`, then
@@ -1236,7 +1282,7 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
 /// handler refuses it with.
 pub(crate) fn saved_view_form(c: &Value) -> std::result::Result<solidcraft_doc::NamedView, String> {
     let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| format!("bad camera: {e}"))?;
-    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov].iter().all(|x| x.is_finite()) && v.distance > 0.0;
+    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov, v.roll].iter().all(|x| x.is_finite()) && v.distance > 0.0;
     if ok { Ok(v) } else { Err("the camera must be finite with a positive distance".into()) }
 }
 
@@ -1312,9 +1358,9 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, CameraReply { camera: cam, param_warnings: Vec::new() })
 }
 
-/// The orbit camera of a named view (Z up, no roll).
+/// The full orbit camera of a named view, including its saved roll and up direction.
 fn camera_of(v: &solidcraft_doc::NamedView) -> solidcraft_viewport::Camera {
-    solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ..Default::default() }
+    solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, roll: v.roll, up: v.up }
 }
 
 fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
@@ -3032,6 +3078,35 @@ mod tests {
         }
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.named_views.len(), 2);
+    }
+
+    /// A saved view keeps the roll and up axis through serialisation and restores them,
+    /// while a design from before #18713 still reads as Z-up with no roll.
+    #[test]
+    fn named_view_restores_roll_and_up_after_reopening() {
+        use solidcraft_viewport::UpAxis;
+
+        let mut s = Session::default();
+        let camera = json!({
+            "target": [1, 2, 3], "yaw": 0.25, "pitch": -0.3,
+            "distance": 150, "fov": 0.1, "roll": 0.6, "up": "y"
+        });
+        run(&mut s, "view.save", json!({"name": "Detail", "camera": camera}));
+        let reopened = serde_json::from_str::<solidcraft_doc::Document>(&serde_json::to_string(&*s.doc).unwrap()).unwrap();
+        assert_eq!(reopened.named_views[0].roll, 0.6);
+        assert_eq!(reopened.named_views[0].up, UpAxis::Y);
+        let mut restored = Session::new(reopened);
+        run(&mut restored, "view.apply", json!({"view": "Detail"}));
+        let applied = restored.camera.unwrap();
+        assert_eq!((applied.yaw, applied.pitch, applied.roll, applied.up), (0.25, -0.3, 0.6, UpAxis::Y));
+
+        let old = json!({"name":"Old","target":[0,0,0],"yaw":0,"pitch":0,"distance":100});
+        let previous: solidcraft_doc::NamedView = serde_json::from_value(old).unwrap();
+        assert_eq!((previous.roll, previous.up), (0.0, UpAxis::Z));
+        for roll in [json!(null), json!("NaN")] {
+            let invalid = json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100,"roll":roll}});
+            assert!(s.execute("view.save", &invalid).is_err());
+        }
     }
 
     #[test]
