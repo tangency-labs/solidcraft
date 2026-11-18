@@ -39,6 +39,11 @@ const TOL: f64 = 1e-5;
 /// The case's surface: control point `(0.01 i, 0.01 j, z[i][j])`, row 0 collapsed to the
 /// point `(0, 0)` in x and y.
 fn surface() -> Surface {
+    surface_with_v_knots(&[0.0, 0.0, 0.0, 0.48093325471811293, 1.0, 1.0, 1.0])
+}
+
+/// [`surface`] over the v knots `v_knots`.
+fn surface_with_v_knots(v_knots: &[f64]) -> Surface {
     let z = [
         [
             -0.018312366950226835,
@@ -89,7 +94,7 @@ fn surface() -> Surface {
             6,
             &pw,
             &[0.0, 0.0, 0.0, 0.1116114584111405, 1.0, 1.0, 1.0],
-            &[0.0, 0.0, 0.0, 0.48093325471811293, 1.0, 1.0, 1.0],
+            v_knots,
         )
         .unwrap(),
     )
@@ -302,4 +307,90 @@ fn a_curve_on_the_face_surface_has_its_own_uv_as_foot() {
         let gap = (g.this_pos() - g.other_pos()).length();
         assert!(gap < 1e-15, "side {i}: gap {gap}");
     }
+}
+
+/// The exact line's knots are the interval's own: an interval within
+/// a scaled zero of `[0, 1]` (`[1e-13, 1]`, the v range of a surface whose knots start
+/// there) is one `edit_parameterization` leaves at `[0, 1]`, so the line's point at `t0`
+/// was `(f, 2e-13)`, not `(f, t0)`. The line now evaluates to `(f, t0)` and `(f, t1)` at the
+/// interval's ends, bit for bit.
+#[test]
+fn an_exact_iso_line_evaluates_to_its_ends_at_the_interval_ends() {
+    use solidcore::geom::vector2d::Point2;
+
+    let t0 = 1e-13;
+    let k = Kernel::default();
+    let s = surface_with_v_knots(&[t0, t0, t0, 0.48093325471811293, 1.0, 1.0, 1.0]);
+    let dom = Extent2d::from_bounds(0.1, t0, 0.8, 1.0);
+    let natural = s
+        .create_natural_uv_trim_curves(&k, &dom, SurfParamType::U, false)
+        .unwrap();
+    let curve = &natural.curves_3d[0];
+    let ivl = curve.natural_interval();
+    assert_eq!((ivl.min(), ivl.max()), (t0, 1.0));
+    let iso = s
+        .drop_iso_curve(&k, &dom, curve, &ivl, Point2::new(0.1, t0), TOL)
+        .unwrap();
+    assert!(iso.successful);
+    let line = iso.iso_uv_curve.unwrap();
+    assert_eq!(line.gw_nurb().unwrap().knots(), &[t0, t0, 1.0, 1.0]);
+    for (t, want) in [(t0, [0.1, t0]), (1.0, [0.1, 1.0])] {
+        let p = line.evaluate_point(t).unwrap();
+        assert_eq!([p.x, p.y], want, "the line at {t}");
+    }
+}
+
+/// A trimmed iso curve whose short end span the trim's degenerate-segment cleanup
+/// replaced is not `t -> S(f, t)`: the cleanup moves the curve by
+/// up to the zone tolerance and changes its parameterisation, so the exact ends do not
+/// apply and the computed ends stay. The domain ends `1e-9` past the surface's interior v
+/// knot, leaving a tail span far below the zone tolerance.
+#[test]
+fn a_trim_cleaned_iso_curve_keeps_the_computed_ends() {
+    use solidcore::geom::vector2d::Point2;
+    use solidcore::nurbs::nurbs_crv::crv_trim;
+
+    let k = Kernel::default();
+    let s = surface();
+    let v1 = 0.48093325471811293 + 1e-9;
+    let dom = Extent2d::from_bounds(0.1, 0.2, 0.8, v1);
+    let natural = s
+        .create_natural_uv_trim_curves(&k, &dom, SurfParamType::U, false)
+        .unwrap();
+    let curve = &natural.curves_3d[0];
+    let ivl = curve.natural_interval();
+    // the premise of the test: the edge's curve is the cleaned trim, not the plain
+    // knot-insertion restriction of the u = 0.1 iso curve
+    let solidcore::curve::curve::CurveKind::BSpline(b) = curve.kind() else {
+        panic!("a B-spline edge curve");
+    };
+    let made = b.gw_nurb().unwrap();
+    let solidcore::surface::surface::SurfaceKind::BSpline(bs) = s.kind() else {
+        panic!("a B-spline surface");
+    };
+    let whole = bs
+        .create_iso_parametric_curve(
+            &k,
+            SurfParamType::U,
+            0.1,
+            solidcore::nurbs::b_spline_surface::IsoCurveOptions {
+                domain: None,
+                uv_iso_curve: false,
+            },
+        )
+        .unwrap();
+    let plain = crv_trim(whole.curve.gw_nurb().unwrap(), ivl.min(), ivl.max()).unwrap();
+    assert_ne!(plain.knots(), made.knots(), "the trim cleaned an end span");
+    let iso = s
+        .drop_iso_curve(&k, &dom, curve, &ivl, Point2::new(0.1, ivl.min()), TOL)
+        .unwrap();
+    assert!(iso.successful);
+    let line = iso.iso_uv_curve.unwrap();
+    let cp = line.control_points().unwrap();
+    let (a, e) = (cp.first().unwrap(), cp.last().unwrap());
+    assert_ne!(
+        [a.x, a.y, e.x, e.y],
+        [0.1, ivl.min(), 0.1, ivl.max()],
+        "the cleaned curve took the exact iso line"
+    );
 }

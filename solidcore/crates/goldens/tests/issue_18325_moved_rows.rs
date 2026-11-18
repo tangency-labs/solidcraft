@@ -1384,9 +1384,22 @@ fn label_binormal_at(
 /// `±S_w(f, t*)` (the ideal trim is the iso line itself), the enclosures those values
 /// widened by the uv error of the float trim evaluation (`64 ε M`) and of the parameter
 /// (`γ_3 (|lo| + |hi|)`) through the hull bounds, and by the surface rounding.
-fn label_cos(v: &[f64], inputs: &Value, srf: &Srf, iso: &Iso, out: &mut BTreeMap<usize, Cert>) {
+fn label_cos(
+    v: &[f64],
+    main: &[f64],
+    inputs: &Value,
+    srf: &Srf,
+    iso: &Iso,
+    out: &mut BTreeMap<usize, Cert>,
+) {
     let n = v.len();
-    let (lo, hi) = (v[n - 3], v[n - 2]);
+    // the trim interval and the derivative's direction are main's: nothing in a reference
+    // comes from the new output (a reversed new tangent is then FARTHER)
+    let (lo, hi) = (main[n - 3], main[n - 2]);
+    assert!(
+        lo.to_bits() == v[n - 3].to_bits() && hi.to_bits() == v[n - 2].to_bits(),
+        "cos: main's trim interval is not the new one"
+    );
     let b = srf.bounds();
     let g = gam(srf_k(srf.p, srf.q));
     let e_uv = line_bound(iso);
@@ -1407,7 +1420,7 @@ fn label_cos(v: &[f64], inputs: &Value, srf: &Srf, iso: &Iso, out: &mut BTreeMap
         mid[mv] = Iv::p(lo).add(Iv::p(hi)).mul(Iv::p(0.5));
         let (_, su0, sv0) = srf.exact(mid[0], mid[1]);
         let smv0 = if mv == 1 { sv0 } else { su0 };
-        let opp = (v[3 + mv] < 0.0) != (smv0[mv].mid() < 0.0);
+        let opp = (main[3 + mv] < 0.0) != (smv0[mv].mid() < 0.0);
         let tt = if opp {
             1.0 - num(&inputs["t"])
         } else {
@@ -1420,7 +1433,7 @@ fn label_cos(v: &[f64], inputs: &Value, srf: &Srf, iso: &Iso, out: &mut BTreeMap
     uv[mv] = t;
     let (s, su, sv) = srf.exact(uv[0], uv[1]);
     let smv = if mv == 1 { sv } else { su };
-    let sg = sign_of(&pts(v, didx), &smv);
+    let sg = sign_of(&pts(main, didx), &smv);
     let mut r = [e_uv; 2];
     r[mv] = up_add(e_t, e_uv);
     // the parameter's own enclosure width moves the reference too
@@ -2613,7 +2626,7 @@ fn certificates(
         "binormal" => {
             // a `CrvOnSurf` edge's tangent is certified first: the binormal chain takes it
             if cos {
-                label_cos(v, inputs, &srf, &iso, &mut out);
+                label_cos(v, main, inputs, &srf, &iso, &mut out);
             }
             label_binormal(v, main, &srf, &iso, num(&inputs["frac"]), &mut out);
         }
@@ -2621,7 +2634,7 @@ fn certificates(
             if inputs["parameter_space"] == true {
                 label_norm_uv(main, inputs, &iso, &mut out);
             } else if cos {
-                label_cos(v, inputs, &srf, &iso, &mut out);
+                label_cos(v, main, inputs, &srf, &iso, &mut out);
             }
         }
         _ => {
@@ -4666,6 +4679,8 @@ fn moved_elements_are_closer_equal_or_at_rounding() {
             continue;
         }
         let unit = runner.id().to_owned();
+        // the committed new golden: the replay must encode to its row bit for bit
+        let committed = goldens::golden::read(&goldens::golden::default_dir(), &unit).unwrap();
         let cases: BTreeMap<String, goldens::Case> = runner
             .cases(&ctx)
             .unwrap()
@@ -4734,6 +4749,19 @@ fn moved_elements_are_closer_equal_or_at_rounding() {
                         }
                     }
                 }
+            }
+            let replay = Output {
+                values: BTreeMap::from([(key.clone(), v.clone())]),
+                ..Output::default()
+            };
+            let golden_row = committed
+                .get(name)
+                .and_then(|row| row["values"].get(key.as_str()))
+                .unwrap_or_else(|| panic!("{unit}/{name}: no committed golden row for {key}"));
+            if encode(name, &replay)["values"][key] != *golden_row {
+                bad.push(format!(
+                    "{unit}/{name} {key}: the replay is not the committed new golden"
+                ));
             }
             let certs = certificates(&unit, case, status, v, main, &d);
             let mut worst = Class::Equal;

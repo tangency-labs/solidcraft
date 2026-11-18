@@ -101,9 +101,12 @@ use crate::intersect::surface_tracer::tracer_surface_cache;
 use crate::kernel::Kernel;
 use crate::math::{max2, rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::{BSplineCurve, ControlPointForm};
-use crate::nurbs::b_spline_surface::{IsoCurveOptions, SurfParamType};
+use crate::nurbs::b_spline_surface::{BSplineSurface, IsoCurveOptions, SurfParamType};
+use crate::nurbs::crv_basic::Curve as NurbCurve;
+use crate::nurbs::geom::Interval;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::NOZ;
+use crate::nurbs::nurbs_crv::crv_trim;
 use crate::surface::surface::p2::{
     CreateUvTrimCurvePathType, DropCurveFail, DropCurveFailArgs, UNSURE,
 };
@@ -1498,8 +1501,14 @@ impl Surface {
                 let p = Point3::new(p.x, p.y, NOZ);
                 line.set_control_point(ControlPointForm::NonRational, i, p, 1.0)?;
             }
+            // and its knots are the interval's own, `[t0, t0, t1, t1]`: `edit_parameterization`
+            // keeps `[0, 1]` for an interval within a scaled zero of it (`[1e-15, 1]`), and
+            // the line's point at `t0` would then not be `(f, t0)`
+            line.get_or_create_gw_nurb()?
+                .reparam_to_interval(Interval::new(interval.min(), interval.max()))?;
+        } else {
+            line.edit_parameterization(interval)?;
         }
-        line.edit_parameterization(interval)?;
         Ok(IsoDrop {
             successful: true,
             max_drop_to_surf: max_drop,
@@ -1523,8 +1532,10 @@ impl Surface {
     /// [`BSplineSurface::create_iso_parametric_curve`](crate::nurbs::b_spline_surface::BSplineSurface::create_iso_parametric_curve)
     /// makes at the side `f` nearest the computed start (the fixed coordinate: `u` when
     /// `iso_u`), trimmed to `uv_domain`, as `CreateNaturalUVTrimCurves` makes a face's
-    /// natural edges. That curve is defined as `t -> S(f, t)` (extraction and trimming keep
-    /// the surface's parameter along it), so the curve point at `t` is the surface point at
+    /// natural edges, and a pure restriction of the untrimmed iso curve
+    /// ([`Surface::is_iso_restriction`]: not the trim's degenerate-span cleanup). That curve
+    /// is defined as `t -> S(f, t)` (extraction and knot-insertion trimming keep the
+    /// surface's parameter along it), so the curve point at `t` is the surface point at
     /// `(f, t)` by construction and the exact UV ends are `(f, t0)` and `(f, t1)` for the
     /// interval `[t0, t1]`, both doubles. Both must lie in `uv_domain` (the computed ends
     /// are clamped to it). A curve made any other way (another surface or side, a split or
@@ -1591,12 +1602,54 @@ impl Surface {
         let same = made.degree() == nurb.degree()
             && made.cpts() == nurb.cpts()
             && made.knots() == nurb.knots();
-        Ok(same.then_some(ExactIsoLine {
+        if !same || !Self::is_iso_restriction(k, surface, param, side, made)? {
+            return Ok(None);
+        }
+        Ok(Some(ExactIsoLine {
             iso_u,
             side,
             t0,
             t1,
         }))
+    }
+
+    /// Not upstream (#18325): whether `made`, the iso curve at `side` trimmed to a domain,
+    /// is a pure restriction of the untrimmed iso curve: equal to it, or to its
+    /// `crv_trim` (knot insertion at the ends) over `made`'s own interval, control point for
+    /// control point and knot for knot. Such a curve keeps the extraction's parameter, so it
+    /// is `t -> S(side, t)`. The trim of a 3D curve may instead replace a short end span with
+    /// `remove_degen_segs`' cleanup, which moves the curve by up to the zone tolerance and
+    /// changes its parameterisation: that curve is not a restriction and keeps the computed
+    /// ends.
+    fn is_iso_restriction(
+        k: &Kernel,
+        surface: &BSplineSurface,
+        param: SurfParamType,
+        side: f64,
+        made: &NurbCurve,
+    ) -> Result<bool> {
+        let options = IsoCurveOptions {
+            domain: None,
+            uv_iso_curve: false,
+        };
+        let Some(whole) =
+            native_failure(surface.create_iso_parametric_curve(k, param, side, options))?
+        else {
+            return Ok(false);
+        };
+        let Some(whole) = whole.curve.gw_nurb() else {
+            return Ok(false);
+        };
+        let equal = |c: &NurbCurve| {
+            c.degree() == made.degree() && c.cpts() == made.cpts() && c.knots() == made.knots()
+        };
+        if equal(whole) {
+            return Ok(true);
+        }
+        let (Some(&t0), Some(&t1)) = (made.knots().first(), made.knots().last()) else {
+            return Ok(false);
+        };
+        Ok(native_failure(crv_trim(whole, t0, t1))?.is_some_and(|c| equal(&c)))
     }
 }
 
@@ -1814,9 +1867,7 @@ mod tests {
         ];
         let kn = vec![0.0, 0.0, 1.0, 1.0];
         let n = crate::nurbs::srf_basic::Surface::new(net, 1, 1, kn.clone(), kn).unwrap();
-        let s = Surface::from(crate::nurbs::b_spline_surface::BSplineSurface::from_nurb(
-            n, false,
-        ));
+        let s = Surface::from(BSplineSurface::from_nurb(n, false));
         let c = Curve::from(crate::curve::line::Line::from_points(
             Vec3::new(0.0, 0.3, 0.0),
             Vec3::new(1.0, 0.3, 0.0),
