@@ -100,7 +100,8 @@
 //!   one whose second derivative across it, bounded over the whole stretch from its
 //!   Bernstein-B-spline coefficients, keeps one sign: its meetings with the line lie in
 //!   one interval of rounding size, and its run within the scaled zero of the line, bounded
-//!   by the same curvature, is under half the stretch; or [`curves_meet_at_most_once`]),
+//!   by the same curvature and the curve's speed, is within the tolerance; or
+//!   [`curves_meet_at_most_once`]),
 //!   and for a curve
 //!   against itself not on a fold. A touch the bounds do not certify (two curved curves
 //!   tangent to each other, an exact or near overlap with a conic over an arc) keeps its
@@ -2800,6 +2801,7 @@ impl Curve {
                     other,
                     stretches.1,
                     [touch[0], touch[1]],
+                    dist_tol,
                 )? || curves_meet_at_most_once(k, self, stretches.0, other, stretches.1))
                 {
                     continue;
@@ -3879,11 +3881,13 @@ fn de_boor(
 /// The same lower bound bounds the run within the meeting zero: where the curves are
 /// within `zero = EFF_ZERO (1 + size)` of each other, `g <= zero_g = 2 w_max zero +
 /// eps_f w_max`, which lies in an interval of length at most `2 sqrt(2 (zero_g - least) /
-/// kappa)` (`least` the bound's least value). Curves that never meet exactly but run
-/// within the zero of each other (a near overlap at the zero, for which the set of exact
-/// meetings is empty and the interval argument holds vacuously) have a run of half the
-/// stretch or more and are not certified; a touch's run is short beside its stretch, the
-/// stretch being where the curves are within the tolerance.
+/// kappa)` (`least` the bound's least value), and in space at most that times the curved
+/// curve's speed bound. The touch is certified only when that length is within `tol`:
+/// whatever the curves do inside the run (one exact meeting, or none, a near overlap at
+/// the zero, for which the interval argument above holds vacuously), they are within the
+/// zero of each other only over a length the tolerance does not resolve, and outside it
+/// they are apart by more than the zero. A run the bound cannot put within `tol` keeps
+/// the ranges, upstream's answer, whether or not the curves meet exactly.
 ///
 /// `Ok(false)` (no certificate, the ranges are kept) for any other pair of curves, a
 /// rational curve of degree above 2 or a weight not positive, a stretch over more than
@@ -3899,6 +3903,7 @@ pub fn touch_is_alone(
     b: &Curve,
     b_stretch: (f64, f64),
     at: [f64; 2],
+    tol: f64,
 ) -> Result<bool> {
     for (straight, s_stretch, curved, c_stretch, u0) in [
         (a, a_stretch, b, b_stretch, at[1]),
@@ -3922,7 +3927,7 @@ pub fn touch_is_alone(
         if !above(v_length, 2.0 * err_v) {
             continue;
         }
-        if touch_is_alone_against(k, &q, err_q, v, err_v, curved, c_stretch, u0)? {
+        if touch_is_alone_against(k, &q, err_q, v, err_v, curved, c_stretch, u0, tol)? {
             return Ok(true);
         }
     }
@@ -3941,6 +3946,7 @@ fn touch_is_alone_against(
     curved: &Curve,
     stretch: (f64, f64),
     u0: f64,
+    tol: f64,
 ) -> Result<bool> {
     let (lo, hi) = stretch;
     let Some(spline) = StretchSpline::of(curved, lo, hi, false) else {
@@ -4044,15 +4050,21 @@ fn touch_is_alone_against(
     // <= reach + zero` and `|n . v| / |v| <= |n|` (`eps` holds the `reach` part): `g <=
     // zero_g = 2 w_max |n| zero + eps`, its rounding in the last factor; g lies above its
     // quadratic lower bound, whose least is at least `least`, so that run lies in an
-    // interval of parameter length at most `2 sqrt(2 (zero_g - least) / kappa)`. A touch
-    // runs within the zero over a small part of the stretch; curves within the zero over
-    // half of it or more (a near overlap at the zero, which need not meet exactly, so the
-    // meetings below may be none) are not certified
-    let w_max = spline.points.iter().map(|c| c.1).fold(0.0, max2);
-    let zero = EFF_ZERO * (1.0 + max2(size, q.max_dimension() + err_q)) * (1.0 + gamma(4));
+    // interval of parameter length at most `2 sqrt(2 (zero_g - least) / kappa)`, and in
+    // space no longer than that times the curve's speed bound (below). Curves within the
+    // zero of each other over a length the tolerance resolves are an overlap at the zero
+    // (they need not meet exactly, so the meetings below may be none) and keep their
+    // ranges; the touch is certified only when that whole run is within the tolerance
+    // `tol`, a contact the tolerance does not resolve into a length
+    let Some((speed_c, size_c, w_max)) = curve_speed_bound(&spline) else {
+        return Ok(false);
+    };
+    let line_size = max2(q.max_dimension(), (*q + v).max_dimension()) + err_q + err_v;
+    let zero = EFF_ZERO * (1.0 + max2(size_c, line_size)) * (1.0 + gamma(4));
     let zero_g = (2.0 * w_max * n.length() * zero + eps) * (1.0 + gamma(4));
     let run = 2.0 * (2.0 * (zero_g - least) / kappa).sqrt() * (1.0 + gamma(8));
-    if !(run.is_finite() && 2.0 * run < hi - lo) {
+    let run_length = run * speed_c * (1.0 + gamma(4));
+    if !(run_length.is_finite() && run_length <= tol) {
         return Ok(false);
     }
     if least >= -eps {
@@ -4062,6 +4074,48 @@ fn touch_is_alone_against(
     // an interval of length 2 sqrt(2 (eps - least) / kappa) (an exact touch whose least the
     // bounds place a rounding below zero)
     Ok(one_contact(2.0 * (2.0 * (eps - least) / kappa).sqrt()))
+}
+
+/// For [`touch_is_alone`]: a bound on the speed `|c'(u)|` of `spline` over its knots, a
+/// bound on `|c(u)|` (each coordinate) and the largest weight, or `None` (a weight not
+/// positive, or not finite). With `x w` the homogeneous points, `c = X / w` and `c' = (X'
+/// - c w') / w`: `X'` and `w'` are B-splines with the coefficients `p (a[i + 1] - a[i]) /
+/// (U[i + p + 1] - U[i + 1])`, so each is at most its largest coefficient; `c` lies in the
+/// convex hull of the points `X_i / w_i` (positive weights), and `w` is at least the least
+/// weight. A curve without weights has `w = 1`, `w' = 0`.
+fn curve_speed_bound(spline: &StretchSpline) -> Option<(f64, f64, f64)> {
+    let p = spline.degree;
+    let pf = int_to_f64(p);
+    let knots = &spline.knots;
+    let weight = |w: f64| if spline.rational { w } else { 1.0 };
+    let (mut x_speed, mut w_speed, mut size, mut length): (f64, f64, f64, f64) =
+        (0.0, 0.0, 0.0, 0.0);
+    let (mut w_min, mut w_max) = (f64::INFINITY, 0.0_f64);
+    for i in 0..spline.points.len() {
+        let &(x, w, err) = spline.points.get(i)?;
+        let w = weight(w);
+        let (point, err_point) = spline.point(i)?;
+        size = max2(size, point.max_dimension() + err_point);
+        length = max2(length, point.length() + err_point);
+        w_min = min2(w_min, w);
+        w_max = max2(w_max, w);
+        let (Some(&(y, wy, err_y)), Some(&u1), Some(&u2)) = (
+            spline.points.get(i + 1),
+            knots.get(i + 1),
+            knots.get(i + p + 1),
+        ) else {
+            continue;
+        };
+        if u2 > u1 {
+            x_speed = max2(x_speed, ((y - x).length() + err + err_y) * pf / (u2 - u1));
+            w_speed = max2(w_speed, (weight(wy) - w).abs() * pf / (u2 - u1));
+        }
+    }
+    if !(w_min > 0.0 && w_min.is_finite() && w_max.is_finite()) {
+        return None;
+    }
+    let speed = (x_speed + length * w_speed) / w_min * (1.0 + gamma(8));
+    (speed.is_finite() && size.is_finite()).then_some((speed, size, w_max))
 }
 
 /// Scalar B-spline or Bezier coefficients, each `(value, error)`.
@@ -4584,10 +4638,10 @@ mod tests {
             assert!(p.distance(q) <= zero, "{s}: {p:?} {q:?}");
             assert!(p.distance(q) > 0.0, "{s}: {p:?} {q:?}");
         }
-        assert!(!touch_is_alone(&k, &line, whole, &flat, whole, [0.5, 0.5]).unwrap());
-        assert!(!touch_is_alone(&k, &flat, whole, &line, whole, [0.5, 0.5]).unwrap());
+        assert!(!touch_is_alone(&k, &line, whole, &flat, whole, [0.5, 0.5], 1e-5).unwrap());
+        assert!(!touch_is_alone(&k, &flat, whole, &line, whole, [0.5, 0.5], 1e-5).unwrap());
         let bent = parabola(1e-13, 1.0);
-        assert!(touch_is_alone(&k, &line, whole, &bent, whole, [0.5, 0.5]).unwrap());
-        assert!(touch_is_alone(&k, &bent, whole, &line, whole, [0.5, 0.5]).unwrap());
+        assert!(touch_is_alone(&k, &line, whole, &bent, whole, [0.5, 0.5], 1e-5).unwrap());
+        assert!(touch_is_alone(&k, &bent, whole, &line, whole, [0.5, 0.5], 1e-5).unwrap());
     }
 }

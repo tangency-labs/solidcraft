@@ -558,22 +558,22 @@ fn wr_647_a_curve_lying_on_part_of_a_line_stays_a_range() {
 /// The flat quadratic touching the x axis at the origin only (control heights 4e-6, 0, 0,
 /// 4e-6: on the knot 2 its point is the midpoint of (-0.5, 0) and (0.5, 0), the origin, with
 /// the tangent along the axis; on either side its height is the positive multiple t² of 2e-6
-/// of the local span parameter t, closed form). Within the tolerance of the axis over about
-/// -0.9 <= x <= 0.9, they meet at the origin and nowhere else: one touch point there.
+/// of the local span parameter t, closed form). They meet at the origin and nowhere else,
+/// but the curve stays within the meeting zero (about 4e-12 here) of the axis while
+/// 2e-6 t² <= 4e-12, |t| <= 1.4e-3: a run about 2.8e-3 long, which the tolerance (1e-5)
+/// resolves. At the zero that run cannot be told from a near overlap that never meets (the
+/// review r8 rows), so the touch is not certified and the stretch keeps upstream's range,
+/// covering the origin. (An earlier head of this PR asserted one point here.)
 #[test]
-fn wr_647_a_flat_curve_touching_a_line_meets_it_at_one_point() {
-    let k = Kernel::default();
+fn wr_647_a_flat_touch_whose_run_within_the_zero_the_tolerance_resolves_stays_a_range() {
     let (line, curve) = (axis_line(), flat_quadratic(4e-6, 0.0));
     let all = intersect(&line, &curve);
-    assert_eq!(all.len(), 1, "{all:?}");
-    let s = &all[0];
-    assert_eq!(s.solution_type, SolutionType::SingleValue, "{s:?}");
-    let p = line.evaluate_point(&k, s.start.parameters[0]).unwrap();
-    let q = curve.evaluate_point(&k, s.start.parameters[1]).unwrap();
-    let origin = Point3::new(0.0, 0.0, 0.0);
+    // the line is x = 6 t - 3: the origin at t = 1/2
     assert!(
-        p.distance(origin) <= TOL && q.distance(origin) <= TOL,
-        "{p:?} {q:?}"
+        all.iter().any(|s| s.solution_type == SolutionType::RangeOfValues
+            && s.start.parameters[0].min(s.end.parameters[0]) < 0.5
+            && s.start.parameters[0].max(s.end.parameters[0]) > 0.5),
+        "{all:?}"
     );
 }
 
@@ -1201,4 +1201,113 @@ fn wr_647_sub_tenth_near_overlaps_with_a_conic_stay_ranges() {
             }
         }
     }
+}
+
+/// The quadratic C1 B-spline over u in [0, 1] with x = 2u - 1 that is exactly
+/// `y = dr + c (u - 1/2)²` for |u - 1/2| <= `h` and continues C1 beyond with `y'' = e`
+/// (`A + B t + e t² / 2`, t = |u - 1/2| - h), on the interior knots `inner` (simple, holding
+/// 1/2 ± h); its control points are the blossoms of those polynomials (review r8's probe).
+fn flat_then_bending(h: f64, dr: f64, c: f64, e: f64, inner: &[f64]) -> Curve {
+    let (a, b) = (dr + c * h * h, 2.0 * c * h);
+    // the piece (alpha, beta, gamma), y = alpha + beta u + gamma u², of the span at `um`
+    let piece = |um: f64| -> (f64, f64, f64) {
+        if (um - 0.5).abs() <= h {
+            (dr + c / 4.0, -c, c)
+        } else if um > 0.5 {
+            let o = 0.5 + h;
+            (a - b * o + e / 2.0 * o * o, b - e * o, e / 2.0)
+        } else {
+            let o = 0.5 - h;
+            (a + b * o + e / 2.0 * o * o, -b - e * o, e / 2.0)
+        }
+    };
+    let mut knots = vec![0.0, 0.0, 0.0];
+    knots.extend_from_slice(inner);
+    knots.extend([1.0, 1.0, 1.0]);
+    let mut control = Vec::new();
+    for i in 0..knots.len() - 3 {
+        let (x, y) = (knots[i + 1], knots[i + 2]);
+        let um = if y > x {
+            (x + y) / 2.0
+        } else if x == 0.0 {
+            knots[3] / 2.0
+        } else {
+            (x + 1.0) / 2.0
+        };
+        let (al, be, ga) = piece(um);
+        control.push(Point3::new(
+            x + y - 1.0,
+            al + be * (x + y) / 2.0 + ga * x * y,
+            0.0,
+        ));
+    }
+    let mut mults = vec![3];
+    mults.extend(inner.iter().map(|_| 1));
+    mults.push(3);
+    let mut distinct = vec![0.0];
+    distinct.extend_from_slice(inner);
+    distinct.push(1.0);
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &mults,
+            knots: &distinct,
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// Review r8 (B1): a C1 quadratic spline that lies within 0.85e-12 + `dr` of the line
+/// from (-1.5, 0) to (1.5, 0) over -0.1 <= x <= 0.1 (u in [0.45, 0.55]; under the meeting
+/// zero, 1e-12 (1 + max coordinate)) and bends gently away beyond, within the tolerance
+/// over most of the curve. With `dr` = 1e-13 it never meets the line: a near overlap at the
+/// zero 0.2 long, which upstream keeps as a range. With `dr` = 0 it meets the line once,
+/// at the origin, but runs within the zero of it over the same 0.2: the tolerance (1e-5,
+/// 1e-3) resolves that run, and the meeting is not certified the only contact either. Every
+/// row, both orders, must keep a range covering the run (main: line [0.3, 0.7], curve
+/// [0.2, 0.8] for the first). The half-stretch cut of the previous head took the first,
+/// second and fourth rows for one point at u = 1/2.
+#[test]
+fn wr_647_a_run_within_the_zero_resolved_by_the_tolerance_stays_a_range() {
+    let line = bezier(&[Point3::new(-1.5, 0.0, 0.0), Point3::new(1.5, 0.0, 0.0)]);
+    let rows: [(f64, f64, f64, &[f64], f64); 6] = [
+        (0.05, 1e-13, 2.2e-4, &[0.2, 0.45, 0.55, 0.8], 1e-5),
+        (0.05, 1e-13, 2.2e-4, &[0.1, 0.2, 0.45, 0.55, 0.8, 0.9], 1e-5),
+        (0.04, 1e-13, 2.2e-4, &[0.15, 0.3, 0.46, 0.54, 0.7, 0.85], 1e-5),
+        (0.05, 1e-13, 2.2e-2, &[0.2, 0.45, 0.55, 0.8], 1e-3),
+        (
+            0.05,
+            1e-13,
+            2.2e-2,
+            &[0.1, 0.2, 0.3, 0.45, 0.55, 0.7, 0.8, 0.9],
+            1e-3,
+        ),
+        (0.05, 0.0, 2.2e-4, &[0.2, 0.45, 0.55, 0.8], 1e-5),
+    ];
+    let mut lost = Vec::new();
+    for (h, dr, e, inner, tol) in rows {
+        let c = (0.85e-12 - dr) / (h * h);
+        let curve = flat_then_bending(h, dr, c, e, inner);
+        for (order, all, on_curve) in [
+            ("line, curve", intersect_at(&line, &curve, tol), 1),
+            ("curve, line", intersect_at(&curve, &line, tol), 0),
+        ] {
+            let covered = all.iter().any(|s| {
+                let (u0, u1) = (s.start.parameters[on_curve], s.end.parameters[on_curve]);
+                s.solution_type == SolutionType::RangeOfValues
+                    && u0.min(u1) <= 0.5 - h
+                    && u0.max(u1) >= 0.5 + h
+            });
+            if !covered {
+                lost.push(format!("h {h} dr {dr:e} tol {tol:e} ({order}): {all:?}"));
+            }
+        }
+    }
+    assert!(lost.is_empty(), "{lost:#?}");
 }
