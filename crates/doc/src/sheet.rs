@@ -2410,13 +2410,21 @@ impl SheetBody {
         let mut out = Vec::new();
         let mut points = 0usize;
         for (piece, region) in pieces {
-            let panel = fitted_region(&planar_region(&region)?)?;
+            let exact = planar_region(&region)?;
+            let panel = fitted_region(&exact)?;
             // Each piece meets only the cut-outs near it: arranging every cut-out of the sheet (a
             // label's letters on its base) against each flange and bend zone too would charge the
             // budget for all of them once per piece.
             let panel_box = loop_box(&panel.outer)?;
             let near: Vec<Region2> = cuts.iter().zip(&cut_boxes).filter(|(_, b)| b.meets(&panel_box)).map(|(c, _)| c.clone()).collect();
-            let material = if near.is_empty() { vec![panel] } else { material_boolean(&[panel], &near, kernel::BoolOp::Cut, work)? };
+            let material = if near.is_empty() {
+                // A bend zone no cut-out meets keeps its curved ends (a butt corner's torn end,
+                // `torn_end`) whole: each folds to one chain and one wall, where its fitted arcs
+                // made a wall of a dozen faces.
+                vec![if matches!(piece, Piece::Zone(_)) { exact } else { panel }]
+            } else {
+                material_boolean(&[panel], &near, kernel::BoolOp::Cut, work)?
+            };
             for region in material {
                 points = points.saturating_add(region_complexity(std::slice::from_ref(&region))?.1);
                 if points > MAX_FLAT_POINTS || out.len() >= MAX_FLAT_PIECES {

@@ -3425,6 +3425,35 @@ fn fold_across_two_rounded_tabs_keeps_one_face_per_arc() {
     assert_eq!((rounded_faces, rounded_cylinders), (sharp_faces + 4, sharp_cylinders + 6), "rounded, sharp: {counts:?}");
 }
 
+/// A corner torn between flanges of two features (the rule's `tear`) closes with one face on each
+/// bend's torn end, as a corner torn within one feature does. The torn end of a butt corner is a curve
+/// in the flat (`torn_end`); its bend zone was cut from that curve's fitted arcs, so each end came out
+/// as a wall of a dozen faces (a 300 x 200 tray with 40 walls had 80 such faces, 8 when its four walls
+/// were one feature), and the tear looked faceted.
+#[test]
+fn a_corner_torn_between_two_features_has_one_face_per_torn_end() {
+    let tray = |groups: &[Value]| {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "sheet.manage_rules",
+            json!({"name": "AL1.5", "thickness": "1.5 mm", "k_factor": 0.5, "bend_radius": "1.5 mm", "gap": "0.2 mm", "corner_relief_shape": "tear", "active": true}),
+        );
+        base(&mut s, 300.0, 200.0);
+        for edges in groups {
+            run(&mut s, "sheet.flange", json!({"edges": edges, "height": 40}));
+        }
+        assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+        let body = run(&mut s, "inspect.measure", json!({}))["bodies"][0].clone();
+        (body["faces"].as_u64().unwrap_or(0), body["face_types"]["other"].as_u64().unwrap_or(0))
+    };
+    let (long, short) = (json!([[150, 0, 1.5], [150, 200, 1.5]]), json!([[0, 100, 1.5], [300, 100, 1.5]]));
+    let (one_faces, one_ends) = tray(&[json!([[150, 0, 1.5], [150, 200, 1.5], [0, 100, 1.5], [300, 100, 1.5]])]);
+    assert_eq!(one_ends, 8, "one feature: one face on each of the 8 torn ends");
+    let (two_faces, two_ends) = tray(&[long, short]);
+    assert_eq!(two_ends, 8, "two features: one face on each of the 8 torn ends ({two_faces} faces, {one_faces} in one feature)");
+}
+
 /// After one of two collinear tabs is folded, the other one folds in its own feature too (#638, follow-up to #264).
 #[test]
 fn fold_second_collinear_tab_after_the_first() {
