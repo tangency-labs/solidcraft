@@ -1582,8 +1582,13 @@ impl FilletSolver {
         };
 
         // Determine if we need to reverse the axis of revolution
+        // Not upstream (#17594): as for the end section below, a rail point on the axis
+        // carries no direction about it, not only one at the origin: where a face's offset
+        // collapses onto the axis (a cylinder of the ball's radius beside a plane square to
+        // it) the plane's rail point is the ball's pole, on the axis a radius above the
+        // origin, and the turn and the axis's sense were taken from that point
         let mut vec = p0 - origin;
-        if vec.length() < ANALYTIC_TOL {
+        if axis_of_revolution.cross(vec).length() < ANALYTIC_TOL {
             vec = p1 - origin;
         }
         let dir = axis_of_revolution.cross(vec); // Start direction of rail curves
