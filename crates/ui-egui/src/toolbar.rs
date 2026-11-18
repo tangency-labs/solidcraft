@@ -4802,6 +4802,9 @@ mod app_bar_tests {
             }
         }
         h.app.ui.tab = "MODEL".into();
+        // Tall enough for the whole File menu, so the plugin's row at its foot is on screen
+        // without scrolling the menu.
+        h.call("ui.resize", json!({"width":1600,"height":1400}));
         h.frames(3);
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         h.step(&json!({"widget":"Workshop helper · measure"})).unwrap();

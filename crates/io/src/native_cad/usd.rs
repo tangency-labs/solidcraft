@@ -30,8 +30,8 @@ use cadmpeg_ir::tessellation::Tessellation;
 use cadmpeg_ir::topology::Color;
 use cadmpeg_registry::{Format, build_encoder};
 use solidcore_record::Vec3;
-use solidcraft_doc::appearance::Look;
 use solidcraft_doc::MeshData;
+use solidcraft_doc::appearance::Look;
 
 use super::convert::decode_at;
 use crate::{GltfImport, MeshFeature, MeshPlan, PlanPlace};

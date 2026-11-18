@@ -2617,11 +2617,13 @@ fn export_usd(s: &Session, path: &str, bodies: &[String]) -> Result<Value> {
         solidcraft_io::step_assembly(&s.doc, &s.doc.painted(&s.model.state()), &name)?
     } else {
         let quality = solidcraft_io::MeshQuality::default();
-        solidcraft_io::export_with_parts_noted(&s.doc.painted(&*s.world_state()?), bodies, &[], Format::Step, &name, &s.doc.metadata, quality, None)?.0
+        solidcraft_io::export_with_parts_noted(&s.doc.painted(&*s.world_state()?), bodies, &[], Format::Step, &name, &s.doc.metadata, quality, None)?
+            .0
     };
     let (bytes, warnings) = solidcraft_io::usd_from_step(&step, path).map_err(EngineError::Other)?;
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{:?}", Format::Usd), warnings, ..ExportResult::default() };
+    let reply =
+        ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{:?}", Format::Usd), warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 

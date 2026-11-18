@@ -1523,7 +1523,10 @@ mod tests {
             assert!(h.app.library.root.is_none());
         }
         assert_eq!(asked.get(), 3);
-        assert_eq!(*filters.borrow(), vec![vec!["step", "stp"], vec!["igs", "iges"], vec!["3mf", "stl", "obj", "glb", "gltf", "usd", "usda", "usdc", "usdz"]]);
+        assert_eq!(
+            *filters.borrow(),
+            vec![vec!["step", "stp"], vec!["igs", "iges"], vec!["3mf", "stl", "obj", "glb", "gltf", "usd", "usda", "usdc", "usdz"]]
+        );
     }
 
     #[test]

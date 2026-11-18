@@ -82,7 +82,8 @@ fn an_assembly_exports_to_openusd_and_reads_back_in_place() {
         assert!(r.get("stand_up").is_none(), "{file}: {r}");
         assert_eq!(shown_boxes(&back), bracket_boxes(), "{file}");
         let bracket = back.doc.components.iter().find(|c| c.name.starts_with("Bracket")).map(|c| c.id);
-        let bracket = bracket.unwrap_or_else(|| panic!("{file}: no Bracket in {:?}", back.doc.components.iter().map(|c| &c.name).collect::<Vec<_>>()));
+        let bracket =
+            bracket.unwrap_or_else(|| panic!("{file}: no Bracket in {:?}", back.doc.components.iter().map(|c| &c.name).collect::<Vec<_>>()));
         assert_eq!(back.doc.occurrences.iter().filter(|o| o.component == bracket).count(), 2, "{file}");
         assert_eq!(back.model.state().bodies.len(), 3, "{file}: Loose, Base and Block, each built once");
 
