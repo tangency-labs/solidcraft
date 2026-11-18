@@ -218,12 +218,17 @@ pub(crate) fn profile_plane(app: &SolveApp, sketch: u64) -> Option<solidcore_rec
 }
 
 /// Where an extrude From a flat face at a slant starts above `centre`, on the face, when the
-/// build starts it there ([`solidcraft_engine::doc::from_slope_height`]): not with To Object,
-/// Through All (`all`) or a nonzero `taper`, nor for an edited extrude kept on its old start
-/// at the face's level (`from_level`). `None` otherwise, so the arrow starts at
-/// [`reference_height`] as before.
+/// build starts it there ([`solidcraft_engine::doc::from_slope_height`]): not with To Object on
+/// a face that is not flat ([`solidcraft_engine::doc::to_end_is_flat`]), Through All (`all`) or
+/// a nonzero `taper`, nor for an edited extrude kept on its old start at the face's level
+/// (`from_level`). `None` otherwise, so the arrow starts at [`reference_height`] as before.
 fn from_slope_height(app: &SolveApp, d: &Dialog, plane: &solidcore_record::Plane, centre: Vec3, all: bool, taper: &str) -> Option<f64> {
-    let to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty());
+    let to_point = crate::dialogs::object_point(&d.inputs, "To Object").and_then(|point| {
+        let p = point.as_array()?;
+        Some(Vec3::new(p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?))
+    });
+    let to_flat = to_point.is_some_and(|p| solidcraft_engine::doc::to_end_is_flat(&crate::open_meshing::session_world(&app.session), plane, p));
+    let to = d.inputs.iter().any(|input| input.label == "To Object" && !input.items.is_empty()) && !to_flat;
     let tapered = !taper.trim().is_empty() && crate::length_input::eval(&app.session.doc, taper, ValueKind::Angle).is_ok_and(|a| a != 0.0);
     let kept_level = d
         .editing
