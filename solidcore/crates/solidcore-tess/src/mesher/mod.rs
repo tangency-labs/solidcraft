@@ -183,7 +183,7 @@ pub(crate) struct SplitSide {
 }
 
 /// Most rounds of splitting the edge segments where a face's sampled boundary crosses itself:
-/// each round halves them, so their chords sag a quarter as far.
+/// each round inserts curve nodes at the crossing events, shared by every incident face.
 const MAX_UNTANGLE: u32 = 16;
 
 /// An error's own words, without its kind's prefix, for a message that names where it happened.
@@ -913,7 +913,7 @@ struct Boundary {
 /// run closer than their chords sag (the two arcs of a thin lune, a sliver cap between two
 /// cylinders), the chords may cross although the curves do not, and no triangulation follows
 /// such a boundary. The edge segments whose chords cross another of the face (in its loop or
-/// another, see [`tangle::crossing`]) are halved at their curve parameter's middle, on the edge,
+/// another, see [`tangle::crossing`]) are split at their crossing fractions, on the edge,
 /// so every face of the edge gets the new nodes; the faces of every edge split are checked again,
 /// until no chords cross. Boundaries that still cross after [`MAX_UNTANGLE`] rounds, or would
 /// put more than [`edges::MAX_EDGE_NODES`] on an edge, are an error naming the face and edges.
@@ -970,7 +970,7 @@ fn untangle(
             return Ok(Vec::new());
         }
         if round == MAX_UNTANGLE {
-            // Halving cannot part two curves that touch or cross: where they come within the chord
+            // Refinement cannot part two curves that touch or cross: where they come within the chord
             // tolerance of each other, they share nodes.
             let faces: Vec<usize> = tangled.iter().map(|(fi, _)| *fi).collect();
             tangled = snap_touches(evals, edge_faces, tol, nodes, boundaries, face_boundary, &faces, why)?;
@@ -982,19 +982,42 @@ fn untangle(
                     es.sort_unstable();
                     es.dedup();
                     let kind = b.faces.get(*fi).map_or("?", |f| kind(&f.surface));
-                    (*fi, format!("face {fi} ({kind}): boundary crosses itself: edges {es:?} run closer together than their chords can follow after {MAX_UNTANGLE} halvings"))
+                    (*fi, format!("face {fi} ({kind}): boundary crosses itself: edges {es:?} run closer together than their chords can follow after {MAX_UNTANGLE} refinements"))
                 })
                 .collect());
         }
-        let mut split: Vec<(u32, u32)> = tangled.iter().flat_map(|(_, c)| c.iter().copied()).collect();
-        split.sort_unstable();
-        split.dedup();
+        // Keep the event's position. A crossing arbitrarily near an end can survive every
+        // midpoint split; evaluating the curve at the event parts its chords directly. The
+        // loop may traverse the edge backwards, while edge parameters always increase.
+        let mut split: std::collections::BTreeMap<u32, Vec<f64>> = std::collections::BTreeMap::new();
+        for (fi, _) in &tangled {
+            let (Some(fb), Some(s)) = (boundaries.get(*fi), evals.get(*fi)) else {
+                continue;
+            };
+            for (l, k, fraction) in tangle::splits(s, fb.reach, &fb.loops) {
+                let Some(&(e, j)) = fb.segments.get(l).and_then(|segs| segs.get(k)) else {
+                    continue;
+                };
+                let Some(n) = nodes.get(e as usize) else {
+                    continue;
+                };
+                let j = j as usize;
+                let (Some(&t), Some(&u)) = (n.params.get(j), n.params.get(j + 1)) else {
+                    continue;
+                };
+                let Some(start) = fb.loops.get(l).and_then(|lp| lp.pts.get(k)) else {
+                    continue;
+                };
+                let f = if n.points.get(j) == Some(start) { fraction } else { 1.0 - fraction };
+                split.entry(e).or_default().push(t + f * (u - t));
+            }
+        }
         let mut redo: Vec<usize> = Vec::new();
-        for run in split.chunk_by(|a, c| a.0 == c.0) {
-            let Some(&(e, _)) = run.first() else { continue };
-            let segs: Vec<u32> = run.iter().map(|(_, k)| *k).collect();
-            let Some(slot) = nodes.get_mut(e as usize) else { continue };
-            if let Err(err) = edges::split_segments(b, e as usize, slot, &segs) {
+        for (e, ts) in split {
+            let Some(slot) = nodes.get_mut(e as usize) else {
+                continue;
+            };
+            if let Err(err) = edges::insert_at(b, e as usize, slot, &ts) {
                 for &fi in edge_faces.get(e as usize).into_iter().flatten() {
                     refuse(fi, &err, why);
                 }

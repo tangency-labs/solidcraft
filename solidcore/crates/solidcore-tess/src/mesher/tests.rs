@@ -651,3 +651,25 @@ fn a_sliver_whose_vertices_come_twice_is_still_drawn() {
     }
 }
 
+
+/// A crossing near an end is an event, not a request to bisect the whole segment. Sixteen
+/// midpoint splits can still miss it. Keep its fraction on both chords (and on a reversed
+/// use), so the edge sampler can evaluate a new point on each real curve there.
+#[test]
+fn crossing_refinement_keeps_the_crossing_parameter_near_an_end() {
+    let s = poles::Face::new(EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y }, 0.0);
+    let f = 2.0_f64.powi(-20);
+    let loop_at = |uv: Vec<[f64; 2]>| seam::Loop { pts: uv.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect(), uv };
+    for reversed in [false, true] {
+        let mut a = vec![[0.0, 0.0], [1.0, 0.0], [1.0, -2.0], [0.0, -2.0]];
+        if reversed {
+            a.reverse();
+            a.rotate_left(2);
+        }
+        let b = vec![[f, -1.0], [f, 1.0], [-1.0, 1.0], [-1.0, -1.0]];
+        let events = tangle::splits(&s, 0.0, &[loop_at(a), loop_at(b)]);
+        let fraction = events.iter().find(|(l, k, _)| (*l, *k) == (0, 0)).expect("the first chord crosses").2;
+        assert_eq!(fraction, if reversed { 1.0 - f } else { f });
+        assert!(events.contains(&(1, 0, 0.5)), "{events:?}");
+    }
+}
