@@ -3,7 +3,8 @@
 //! A switch on its plugin's card in Preferences › Plugins chooses one, kept as `plugin-id/effect-id` in
 //! the `ui_effect` preference (`""`: none, the default). The host draws the effect only while that
 //! plugin is turned on and its manifest still declares an effect of a kind the host draws: `hue-wave`,
-//! the RGB wave over the ribbon, its button blocks and the panels, or `galaxy`, a sky behind the model.
+//! the RGB wave over the ribbon, its button blocks and the panels, `galaxy`, a sky behind the model, or
+//! `rain`, rain on a frosted window in front of it.
 
 use std::path::PathBuf;
 
@@ -14,11 +15,14 @@ use crate::icons::{Wave, WaveSet};
 const HUE_WAVE: &str = "hue-wave";
 /// The effect kind the host draws as a galaxy behind the model.
 const GALAXY: &str = "galaxy";
+/// The effect kind the host draws as rain on a frosted window behind the model.
+const RAIN: &str = "rain";
 
 /// What the sky behind the model is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SkyKind {
     Galaxy,
+    Rain,
 }
 
 /// The sky a chosen effect asks for: its kind, and the picture from its plugin's package if the
@@ -47,6 +51,7 @@ pub(crate) fn sky(app: &mut SolveApp) -> Option<Sky> {
     let chosen = chosen(app)?;
     let kind = match chosen.kind.as_str() {
         GALAXY => SkyKind::Galaxy,
+        RAIN => SkyKind::Rain,
         _ => return None,
     };
     Some(Sky { kind, picture: chosen.picture })
@@ -89,7 +94,7 @@ fn installed(app: &SolveApp, key: &str) -> Option<Chosen> {
     }
     paths.into_iter().find_map(|path| {
         let package = solidcraft_engine::plugin::read_package(&path).ok().filter(|p| p.manifest.id == plugin)?;
-        let declared = package.manifest.effects.iter().find(|e| e.id == effect && matches!(e.kind.as_str(), HUE_WAVE | GALAXY))?;
+        let declared = package.manifest.effects.iter().find(|e| e.id == effect && matches!(e.kind.as_str(), HUE_WAVE | GALAXY | RAIN))?;
         let picture = declared
             .picture
             .as_deref()

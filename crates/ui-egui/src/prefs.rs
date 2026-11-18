@@ -1435,6 +1435,8 @@ preference_settings! {
     ui_effect: String = String::new(), PAGE_PLUGINS;
     /// The RGB wave, while `ui_effect` is chosen: the ribbon's command icons take its hue.
     ui_effect_icons: bool = false, PAGE_PLUGINS => check_id("prefs.ui_effect_icons");
+    /// How hard it rains while a rain effect is chosen: 0 (no new drops) to 1.
+    rain_amount: f32 = 0.6, PAGE_PLUGINS, accept(0.0..=1.0) => slider("prefs.rain_amount", 0.0..=1.0, 0.05, |v| format!("{:.0} %", v * 100.0), "prefs:rain_amount");
     /// The same wave tints each ribbon button's block at low alpha.
     ui_effect_buttons: bool = false, PAGE_PLUGINS => check_id("prefs.ui_effect_buttons");
     /// The same wave over the UI's panels and bars.
@@ -4868,6 +4870,9 @@ fn prepare_preferences(
         || !["left", "right"].contains(&new.drawing_panel_side.as_str())
     {
         return Err("Drawing preferences require a valid docking position and panel width of 240…560".into());
+    }
+    if !accepted::rain_amount(&new) {
+        return Err("`rain_amount` must be 0…1".into());
     }
     if !accepted::ui_effect_length(&new) || !accepted::ui_effect_speed(&new) {
         return Err("`ui_effect_length` must be 300…8000 and `ui_effect_speed` 10…1500".into());

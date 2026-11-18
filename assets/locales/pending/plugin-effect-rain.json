@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.rain_amount": "Rain amount"
+  },
+  "ar": {
+    "prefs.rain_amount": "كمية المطر"
+  },
+  "de": {
+    "prefs.rain_amount": "Regenmenge"
+  },
+  "he": {
+    "prefs.rain_amount": "כמות גשם"
+  },
+  "ja": {
+    "prefs.rain_amount": "雨の量"
+  },
+  "ko": {
+    "prefs.rain_amount": "비의 양"
+  },
+  "vi": {
+    "prefs.rain_amount": "Lượng mưa"
+  },
+  "zh": {
+    "prefs.rain_amount": "雨量"
+  }
+}

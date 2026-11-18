@@ -52,13 +52,20 @@ struct SkyPicture {
 
 const SKY_SHOWN: &str = "sc_sky_shown";
 
+/// The rain's clock: steps of a thirtieth of a second, so a repaint within one draws nothing, and
+/// back to the start each hour while an `f32` still holds it finely.
+fn rain_time(seconds: f64) -> f32 {
+    ((seconds % 3600.0) * 30.0).floor() as f32 / 30.0
+}
+
 /// Whether this frame's view shows the sky (glass then sees it too).
 pub(crate) fn sky_shown(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<u64>(egui::Id::unique(SKY_SHOWN))) == Some(ctx.cumulative_pass_nr())
 }
 
-/// The sky behind the model while a plugin's sky effect is chosen and on. Drawn window-sized into
-/// a texture of its own, which glass panels see; a 2:1 picture wraps round and turns with the view.
+/// The sky behind the model while a plugin's sky effect is chosen and on: the galaxy, or the rain
+/// on a frosted window. Drawn window-sized into a texture of its own, which glass panels see; a 2:1
+/// picture wraps round and turns with the view.
 /// The picture is the plugin's own, else the host draws one. False when no sky effect is chosen or
 /// there is no GPU for it, so the view's own background shows as before.
 pub(crate) fn paint_sky(app: &mut crate::SolveApp, painter: &egui::Painter, rect: egui::Rect) -> bool {
@@ -71,14 +78,18 @@ pub(crate) fn paint_sky(app: &mut crate::SolveApp, painter: &egui::Painter, rect
         let (sky, slot, repaint) = (sky.clone(), picture.decoded.clone(), ctx.clone());
         let limit = render_state.device.limits().max_texture_dimension_2d;
         std::thread::spawn(move || {
+            let made = |limit: u32| match sky.kind {
+                crate::plugin_effects::SkyKind::Galaxy => crate::sky_picture::galaxy(2048.min(limit)),
+                crate::plugin_effects::SkyKind::Rain => crate::sky_picture::rain_night(1280.min(limit)),
+            };
             let own = sky
                 .picture
                 .as_ref()
                 .map(|path| std::fs::read(path).map_err(|e| e.to_string()).and_then(|bytes| crate::sky_picture::decode(&bytes, limit)));
             let result = match own {
                 Some(Ok(picture)) => (picture, None),
-                Some(Err(error)) => (crate::sky_picture::galaxy(2048.min(limit)), Some(error)),
-                None => (crate::sky_picture::galaxy(2048.min(limit)), None),
+                Some(Err(error)) => (made(limit), Some(error)),
+                None => (made(limit), None),
             };
             *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
             repaint.request_repaint();
@@ -111,7 +122,18 @@ pub(crate) fn paint_sky(app: &mut crate::SolveApp, painter: &egui::Painter, rect
         PictureState::Failed => return false,
     };
     let window = ctx.content_rect();
-    let view = if crate::sky_picture::is_panorama(size) {
+    let view = if sky.kind == crate::plugin_effects::SkyKind::Rain {
+        let uv = crate::sky_picture::cover_uv(egui::vec2(size[0] as f32, size[1] as f32), window.size());
+        // Slower behind another window, as nobody is working here.
+        let focused = ctx.input(|i| i.focused);
+        ctx.request_repaint_after(std::time::Duration::from_millis(if focused { 33 } else { 100 }));
+        egui_glass::SkyView::Rain {
+            min: uv.min.into(),
+            max: uv.max.into(),
+            time: rain_time(ctx.input(|i| i.time)),
+            amount: app.preferences.rain_amount,
+        }
+    } else if crate::sky_picture::is_panorama(size) {
         round_view(&app.cam, window.size())
     } else {
         let uv = crate::sky_picture::cover_uv(egui::vec2(size[0] as f32, size[1] as f32), window.size());

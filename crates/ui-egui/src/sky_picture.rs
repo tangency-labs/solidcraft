@@ -97,6 +97,51 @@ pub(crate) fn galaxy(width: u32) -> Picture {
     Picture { size: [w, h], rgba }
 }
 
+/// The scene behind the rain when the plugin gives no picture: a dark night, 16:9 and `width`
+/// pixels wide, with soft out-of-focus lights low in it. The same every time.
+pub(crate) fn rain_night(width: u32) -> Picture {
+    let (w, h) = (width.max(16), (width.max(16) * 9 / 16).max(9));
+    let mut light = vec![[0.0_f32; 3]; (w * h) as usize];
+    for k in 0..90 {
+        let at = [hash(k, 1, 7) * w as f32, (0.35 + 0.65 * hash(k, 2, 7).sqrt()) * h as f32];
+        let radius = (0.004 + 0.02 * hash(k, 3, 7).powi(2)) * w as f32;
+        let warm = hash(k, 4, 7);
+        let tint = if warm < 0.6 { [1.0, 0.72 + 0.2 * warm, 0.4] } else { [0.45, 0.7, 1.0] };
+        let power = 0.4 + 0.6 * hash(k, 5, 7);
+        let (x0, x1) = ((at[0] - radius).floor().max(0.0) as u32, ((at[0] + radius).ceil() as u32).min(w - 1));
+        let (y0, y1) = ((at[1] - radius).floor().max(0.0) as u32, ((at[1] + radius).ceil() as u32).min(h - 1));
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let d = ((x as f32 + 0.5 - at[0]).powi(2) + (y as f32 + 0.5 - at[1]).powi(2)).sqrt() / radius;
+                if d < 1.0 {
+                    let v = power * (1.0 - smooth(0.0, 1.0, d));
+                    for (channel, tint) in light[(y * w + x) as usize].iter_mut().zip(tint) {
+                        *channel += v * tint;
+                    }
+                }
+            }
+        }
+    }
+    let mut rgba = vec![255u8; (w * h * 4) as usize];
+    for y in 0..h {
+        let t = y as f32 / h as f32;
+        for x in 0..w {
+            let l = light[(y * w + x) as usize];
+            let base = [7.0 + 8.0 * t, 9.0 + 6.0 * t, 18.0 + 8.0 * t];
+            let i = ((y * w + x) * 4) as usize;
+            for ((byte, base), light) in rgba[i..i + 3].iter_mut().zip(base).zip(l) {
+                *byte = (base + light * 300.0).clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    Picture { size: [w, h], rgba }
+}
+
+fn smooth(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

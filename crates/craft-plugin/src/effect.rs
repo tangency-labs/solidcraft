@@ -1,5 +1,5 @@
 //! Capability `effects@0.1`: a plugin offers an effect the host draws itself, such as the RGB wave
-//! over the ribbon's icons or a galaxy behind the model. The plugin names the kind; the host owns the
+//! over the ribbon's icons, or a galaxy or rain behind the model. The plugin names the kind; the host owns the
 //! drawing and the settings, and draws only while the plugin is on and its effect is chosen.
 
 use std::collections::BTreeSet;
@@ -13,10 +13,10 @@ use crate::{HostError, Result, invalid, plain, valid_id};
 pub const MAX_EFFECTS: usize = 8;
 
 /// The kinds this host draws. An effect of any other kind is refused at install.
-pub const KINDS: &[&str] = &["hue-wave", "galaxy"];
+pub const KINDS: &[&str] = &["hue-wave", "galaxy", "rain"];
 
 /// The kinds that may name a picture from the plugin's package.
-pub const PICTURE_KINDS: &[&str] = &["galaxy"];
+pub const PICTURE_KINDS: &[&str] = &["galaxy", "rain"];
 
 /// The picture formats an effect's `picture` may be, by file extension.
 pub const PICTURE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg"];
@@ -39,10 +39,11 @@ pub struct EffectDecl {
     pub id: String,
     /// What a person sees on the plugin's card.
     pub name: String,
-    /// What the host draws, one of [`KINDS`]: `"hue-wave"` or `"galaxy"`.
+    /// What the host draws, one of [`KINDS`]: `"hue-wave"`, `"galaxy"` or `"rain"`.
     pub kind: String,
     /// A picture in the plugin's package for the kind to show (`"galaxy"`: a 2:1 panorama of the
-    /// sky), as a PNG or JPEG path inside the package. Without one the host draws its own.
+    /// sky; `"rain"`: the scene behind the wet window), as a PNG or JPEG path inside the package.
+    /// Without one the host draws its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture: Option<String>,
 }
