@@ -1392,6 +1392,27 @@ mod tests {
     }
 
     #[test]
+    fn a_plugins_settings_sit_inside_its_card_above_remove() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("public-plugins");
+        write(
+            &dir,
+            "skies",
+            r#"{"id":"skies","name":"skies","version":"1","description":"","capabilities":["shaders@0.1"],"shaders":[{"id":"dusk","name":"dusk","kind":"background","source":"dusk.wgsl"}]}"#,
+        );
+        crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        let card = crate::scenario::rect_of("prefs:plugin:skies:card").unwrap();
+        let row = crate::scenario::rect_of("prefs:background:skies/dusk").unwrap();
+        let remove = crate::scenario::rect_of("prefs:plugin:skies:remove").unwrap();
+        assert!(card.contains_rect(row), "the background switch {row:?} is inside the card {card:?}");
+        assert!(row.bottom() <= remove.top(), "and above Remove: {row:?} vs {remove:?}");
+    }
+
+    #[test]
     fn plugin_cards_open_their_own_folder_and_cancel_restores_enabled_state() {
         use std::{cell::RefCell, rc::Rc};
         let previous = solidcraft_theme::is_dark();
