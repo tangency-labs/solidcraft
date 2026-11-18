@@ -1505,6 +1505,14 @@ mod tests {
         let noise_up = ev(v(1.0, 0.0, 0.0), v(0.0, 1e-9, 0.0));
         let noise_down = ev(v(1.0, 0.0, 0.0), v(0.0, -1e-9, 0.0));
         assert_eq!(c(&noise_up, &noise_down), ContinuityType::C1C2);
+
+        // C2 at the C2 gap is G2: equal second derivatives, mostly tangential (|P''| 600),
+        // and first derivatives 1e-7 apart (C1): the Frenet curvatures (9) differ by
+        // 1.8e-6, over the curvature gap, yet the join is C2 (`geom.geom_utility_p2`
+        // gen0721)
+        let a = ev(v(1.0, 0.0, 0.0), v(600.0, 9.0, 0.0));
+        let b = ev(v(1.0 + 1e-7, 0.0, 0.0), v(600.0, 9.0, 0.0));
+        assert_eq!(c(&a, &b), ContinuityType::C1C2);
     }
 
     /// WR-10: an oblique collinear set is Linear with the line tangent (pinned v1.0.1:
