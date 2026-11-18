@@ -769,7 +769,8 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
                 crate::ui_kit::Menu::text(ui, app.tr("multi_window.move_to_window"), |ui| {
                     let mut chosen = None;
                     let enabled = crate::view_windows::can_create(app);
-                    let new = crate::ui_kit::menu::button_enabled(ui, app.tr("multi_window.new_window"), "window", enabled);
+                    let new =
+                        crate::ui_kit::menu::button_enabled(ui, app.tr("multi_window.new_window"), crate::ui_kit::icons::window_icon(false), enabled);
                     if !enabled {
                         new.clone().backing_on_hover_text(app.tr("multi_window.too_many"));
                     }
@@ -780,8 +781,10 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
                     crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::heading(app.tr("multi_window.open_windows")));
                     for choice in crate::view_windows::window_choices(app).iter() {
                         let id = format!("view.window.{}", choice.id);
-                        let mut item = crate::ui_kit::MenuItem::new(&id, &choice.label, "");
-                        item.checked = (choice.id == app.view_windows.current_window()).then_some(true);
+                        let here = choice.id == app.view_windows.current_window();
+                        let label = if here { app.tr("view_layout.this_window") } else { &choice.label };
+                        let mut item = crate::ui_kit::MenuItem::new(&id, label, crate::ui_kit::icons::window_icon(here));
+                        item.checked = here.then_some(true);
                         if item.show(ui).clicked() {
                             chosen = Some(CardAction::MoveToWindow(Some(choice.id)));
                         }
