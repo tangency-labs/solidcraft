@@ -12,6 +12,7 @@ pub struct Input {
     pub escape: bool,
     pub dismiss_on_escape: bool,
     pub reduced_motion: bool,
+    pub hide_delay: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -74,7 +75,7 @@ pub fn reveal_step(mut state: State, input: Input, now: f64) -> State {
         state.hide_at = None;
         true
     } else if state.shown {
-        let until = *state.hide_at.get_or_insert(now + HIDE_DELAY);
+        let until = *state.hide_at.get_or_insert(now + input.hide_delay.unwrap_or(HIDE_DELAY));
         if now >= until {
             state.hide_at = None;
             false
@@ -98,6 +99,17 @@ pub fn reveal_step(mut state: State, input: Input, now: f64) -> State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ribbon_can_finish_hiding_before_the_top_bar_waits_to_hide() {
+        let instant = Input { reduced_motion: true, ..Input::default() };
+        let shown = reveal_step(State::default(), Input { hovered: true, ..instant }, 0.0);
+        let ribbon = Input { hide_delay: Some(0.12), ..instant };
+        let hiding_ribbon = reveal_step(shown, ribbon, 1.0);
+        let hiding_bar = reveal_step(shown, instant, 1.0);
+        assert_eq!(reveal_step(hiding_ribbon, ribbon, 1.2).fraction(1.2), 0.0);
+        assert_eq!(reveal_step(hiding_bar, instant, 1.2).fraction(1.2), 1.0);
+    }
 
     #[test]
     fn hover_and_focus_each_reveal_and_both_must_leave_before_the_delay() {

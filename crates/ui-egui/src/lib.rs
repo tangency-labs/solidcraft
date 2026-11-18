@@ -4373,9 +4373,12 @@ impl SolveApp {
             if view_tiles::shown(self) {
                 view_tiles::card_controls(self, ui);
             }
-            let mut controls = view_tiles::controls_ui(ui, self.session.uid, self.docs.views.active().id, rect);
-            render_workspace::host_result_overlays(self, &mut controls);
-            viewport::show_host_controls(self, &mut controls, rect);
+            let ctx = ui.ctx().clone();
+            view_tiles::with_visible_ground(self, &ctx, |app| {
+                let mut controls = view_tiles::controls_ui(ui, app.session.uid, app.docs.views.active().id, rect);
+                render_workspace::host_result_overlays(app, &mut controls);
+                viewport::show_host_controls(app, &mut controls, rect);
+            });
         }
         view_tiles::placement_overlay(self, ui.ctx());
         self.resolve_fit(ui.ctx());
@@ -4400,12 +4403,28 @@ impl SolveApp {
             }
         } else if view_tiles::shown(self) {
             view_tiles::show(self, ui);
+        } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
+            self.viewport.rect = Some(ui.max_rect());
+            let t = solidcraft_theme::Tokens::get();
+            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_bottom);
         } else if render_workspace::active(self) {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
             render_workspace::show(self, ui);
         } else {
             viewport::show(self, ui);
+        }
+        if let Some(view) = view_window_drag::hovered_view(self) {
+            let rect = if view == self.docs.views.active().id {
+                self.viewport.rect
+            } else {
+                self.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect)
+            };
+            if let Some(rect) = rect.filter(|rect| rect.is_positive()) {
+                let t = solidcraft_theme::Tokens::get();
+                ui.painter().rect_filled(rect.shrink(2.0), 6, t.accent.gamma_multiply(0.035));
+                ui.painter().rect_stroke(rect.shrink(2.0), 6, egui::Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
+            }
         }
     }
 

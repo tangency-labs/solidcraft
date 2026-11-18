@@ -1081,6 +1081,15 @@ mod tests {
         assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::CardHeaders(CardHeaders::Hover)));
         frame(key(egui::Key::Escape), false);
         assert!(ctx.memory(|memory| memory.has_focus(id)));
+        frame(vec![], true);
+        assert!(window_options_menu::is_open(&ctx, id));
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), focused: false, ..Default::default() }, |ui| {
+            let response = ui.interact(anchor, id, egui::Sense::click());
+            assert!(window_options_menu::show(ui, response, false, &menu).is_none());
+        });
+        assert!(!window_options_menu::is_open(&ctx, id), "losing the window focus dismisses its menu");
+        frame(vec![], false);
+        assert!(!window_options_menu::is_open(&ctx, id), "the menu stays closed when the window regains focus");
     }
 
     #[test]

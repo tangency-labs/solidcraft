@@ -1554,9 +1554,9 @@ fn clear_view_tabs_distinguish_the_four_placements() {
     assert_eq!(view_look(&card), ViewLook::Card);
     assert_eq!(view_look(&hidden), ViewLook::Hidden);
     assert_eq!(view_look(&elsewhere), ViewLook::Elsewhere);
-    assert_eq!(window_badge(&elsewhere, CollapseStage::Full), "Inspection");
-    assert_eq!(window_badge(&elsewhere, CollapseStage::LayoutGlyph), "Inspection");
-    assert_eq!(window_badge(&elsewhere, CollapseStage::WindowNumber), "3");
+    assert_eq!(window_badge(&elsewhere), "3");
+    assert!(!remote_name_hidden(&elsewhere, CollapseStage::Full));
+    assert!(remote_name_hidden(&elsewhere, CollapseStage::WindowNumber));
 }
 
 #[test]
@@ -1569,12 +1569,10 @@ fn clear_view_tabs_collapse_in_order_with_and_without_another_window() {
             let window_names = if elsewhere { 24.0 } else { 0.0 };
             let icons = focused + icon_tabs + 24.0;
             let window_number = icons + idle_names;
-            let glyph = window_number + window_names;
-            let full = glyph + 40.0;
-            let widths = [full, glyph, window_number, icons, focused + 28.0];
+            let full = window_number + window_names;
+            let widths = [full, window_number, icons, focused + 28.0];
             assert_eq!(collapse_stage(widths, full), CollapseStage::Full);
-            assert_eq!(collapse_stage(widths, full - 0.25), CollapseStage::LayoutGlyph);
-            assert_eq!(collapse_stage(widths, glyph - 0.25), if elsewhere { CollapseStage::WindowNumber } else { CollapseStage::Icons });
+            assert_eq!(collapse_stage(widths, full - 0.25), if elsewhere { CollapseStage::WindowNumber } else { CollapseStage::Icons });
             assert_eq!(collapse_stage(widths, icons - 0.25), CollapseStage::Overflow);
         }
     }
@@ -1589,8 +1587,10 @@ fn elsewhere_view_has_only_a_return_button_on_hover() {
     assert!(solidcraft_ui_registry::rect_of("t:vclose:0").is_some());
     assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
     assert!(solidcraft_ui_registry::rect_of("t:view:1:return").is_none());
+    assert!(solidcraft_ui_registry::rect_of("t:view:1:window").is_some());
     let elsewhere = rig.at("t:view:1");
     rig.frame(vec![egui::Event::PointerMoved(elsewhere)]);
+    assert!(solidcraft_ui_registry::rect_of("t:view:1:window").is_none());
     assert!(solidcraft_ui_registry::rect_of("t:vclose:1").is_none());
     assert_eq!(rig.press(rig.at("t:view:1:return"), egui::PointerButton::Primary), vec![TabAction::ReturnView(1)]);
 }

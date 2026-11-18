@@ -7,7 +7,7 @@ use egui::{Id, Key, Modifiers, Pos2, Rect, Response, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 use solidcraft_ui_text::tr;
 
-const WIDTH: f32 = 360.0;
+const WIDTH: f32 = 328.0;
 const ROW_HEIGHT: f32 = 34.0;
 const MENU_HEIGHT: f32 = 520.0;
 
@@ -120,7 +120,7 @@ impl FocusRows {
             memory.move_focus(egui::FocusDirection::None);
             memory.request_focus(id);
         });
-        Some(id)
+        (direction != 0).then_some(id)
     }
 
     fn row(&mut self, ui: &Ui, response: &Response) {
@@ -167,6 +167,9 @@ pub fn show(ui: &mut Ui, anchor: Response, context_open: bool, menu: &WindowMenu
         state = State::default();
         anchor.request_focus();
     }
+    if !ctx.input(|input| input.viewport().focused.unwrap_or(input.focused)) {
+        state = State::default();
+    }
     ctx.accesskit_node_builder(anchor.id, |node| node.set_expanded(state.open));
     let mut action = None;
     if state.open {
@@ -182,7 +185,14 @@ pub fn show(ui: &mut Ui, anchor: Response, context_open: bool, menu: &WindowMenu
                 .order(egui::Order::Foreground)
                 .show(&ctx, |ui| {
                     ui.set_max_height(height);
-                    Menu::show(ui, width, |ui| contents(ui, id, menu, height, &mut state))
+                    Menu::show(ui, width, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt(id.with("options_scroll"))
+                            .max_height((height - Menu::frame().total_margin().sum().y).max(0.0))
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| contents(ui, id, menu, &mut state))
+                            .inner
+                    })
                 });
             action = popup.inner.0;
             let outside = ctx.input(|input| {
@@ -202,7 +212,7 @@ pub fn show(ui: &mut Ui, anchor: Response, context_open: bool, menu: &WindowMenu
     action
 }
 
-fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, height: f32, state: &mut State) -> (Option<Action>, Option<Rect>) {
+fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State) -> (Option<Action>, Option<Rect>) {
     let t = Tokens::get();
     let display = menu.displays.iter().find(|display| display.current);
     ui.add_space(4.0);
@@ -216,16 +226,9 @@ fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, height: f32, state: &mut
         }
     });
     ui.add_space(6.0);
-    let preview_height = (height - 26.0 - 2.0 * ROW_HEIGHT - 80.0).clamp(0.0, 208.0);
-    crate::window_preview::show(ui, menu, preview_height);
-    let middle_height = (height - ui.min_rect().height() - 2.0 * ROW_HEIGHT - 26.0).max(0.0);
+    crate::window_preview::show(ui, menu, 196.0);
     let mut focus = FocusRows::new(state.scroll_focus);
-    let (mut action, flyout) = egui::ScrollArea::vertical()
-        .id_salt(id.with("options_scroll"))
-        .max_height(middle_height)
-        .auto_shrink([false, true])
-        .show(ui, |ui| middle(ui, id, menu, state, &mut focus))
-        .inner;
+    let (mut action, flyout) = middle(ui, id, menu, state, &mut focus);
     Menu::separator(ui);
     for (key, label, icon, shortcut, choice) in [
         ("return", "multi_window.return_views", "undo", "", Action::ReturnViews),
@@ -294,7 +297,7 @@ fn ribbon_options(ui: &mut Ui, menu: &WindowMenu<'_>, focus: &mut FocusRows) -> 
         ui.label(label);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(t.space_8);
-            let response = crate::preferences::theme_option_switch(ui, label, &mut ribbon);
+            let response = crate::preferences::theme_option_switch_with_focus_ring(ui, label, &mut ribbon, false);
             solidcraft_ui_registry::publish_target("window_options:ribbon", response.rect);
             focus.row(ui, &response);
         });
