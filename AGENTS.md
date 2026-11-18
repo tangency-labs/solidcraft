@@ -26,7 +26,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR: `skills/solidcraft-contributing/SKILL.md`.
 - A PR's title and first sentence make sense to someone who never saw your chat or the issue: `skills/solidcraft-contributing/SKILL.md`.
 - English throughout; independent work in parallel, dependent work in sequence: `skills/solidcraft-contributing/SKILL.md`.
-- Screenshots only for a visible UI or model change, captured yourself.
+- Screenshots only for a visible UI or model change, made yourself.
 - Run `cargo xtask fast` before each commit; CI runs the full gate. `cargo xtask skills` checks this file and `skills/`.
 
 ## Working on X: read the skill first
