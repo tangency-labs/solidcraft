@@ -63,6 +63,11 @@ fn mentioned(text: &str) -> Vec<&str> {
     names
 }
 
+/// How long `fuzz` may run before it counts as a fuzz run, which goes on for minutes. Usage or
+/// a refusal takes well under a second alone, but the whole test suite on all cores can hold a
+/// freshly built binary's start for tens of seconds.
+const FUZZ_RUN: Duration = Duration::from_secs(120);
+
 /// Runs the binary and waits at most `limit` for it to finish. `None` means it was still
 /// running and was killed: the fuzz run `fuzz --help` used to start goes on for minutes.
 fn run_within(limit: Duration, args: &[&str]) -> Option<(Option<i32>, String, String)> {
@@ -129,7 +134,7 @@ fn the_top_level_usage_still_lists_every_command() {
 
 #[test]
 fn fuzz_help_does_not_start_a_fuzz_run() {
-    let Some((code, stdout, stderr)) = run_within(Duration::from_secs(20), &["fuzz", "--help"]) else {
+    let Some((code, stdout, stderr)) = run_within(FUZZ_RUN, &["fuzz", "--help"]) else {
         panic!("`fuzz --help` kept running: it started a fuzz run instead of printing the usage");
     };
     assert_eq!(code, Some(0), "{stderr}");
@@ -141,7 +146,7 @@ fn fuzz_help_does_not_start_a_fuzz_run() {
 #[test]
 fn fuzz_refuses_an_argument_it_does_not_take() {
     for arg in ["--not-a-flag", "stray"] {
-        let Some((code, _stdout, stderr)) = run_within(Duration::from_secs(20), &["fuzz", arg]) else {
+        let Some((code, _stdout, stderr)) = run_within(FUZZ_RUN, &["fuzz", arg]) else {
             panic!("`fuzz {arg}` kept running: it started a fuzz run instead of refusing the argument");
         };
         assert_ne!(code, Some(0), "`fuzz {arg}` succeeded");
