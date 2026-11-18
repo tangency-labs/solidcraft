@@ -63,7 +63,14 @@ fn is_junk(path: &str) -> bool {
 /// Checks `zip`: one plugin (`plugin.json` and its module) at the top or in one top-level folder,
 /// a manifest the host accepts, safe paths and sizes.
 pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
-    let files: Vec<_> = safe_zip::read(zip, LIMITS)?.into_iter().filter(|f| !is_junk(&f.path)).collect();
+    let files = safe_zip::read(zip, LIMITS)?;
+    from_files(files, format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(zip)))
+}
+
+/// Checks a plugin's files as [`unpack`] reads them from a `.zip`, with `archive` the hash of what
+/// they came from. `plugin check` reads a package folder into the same checks.
+pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacked, InstallError> {
+    let files: Vec<_> = files.into_iter().filter(|f| !is_junk(&f.path)).collect();
     let manifests: Vec<&str> =
         files.iter().filter(|f| f.path == "plugin.json" || f.path.ends_with("/plugin.json")).map(|f| f.path.as_str()).collect();
     let prefix = match manifests.as_slice() {
@@ -126,7 +133,6 @@ pub fn unpack(zip: &[u8]) -> Result<Unpacked, InstallError> {
         &[]
     };
     let approval = super::package_hash(text, component);
-    let archive = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(zip));
     Ok(Unpacked { manifest, approval, archive, files })
 }
 

@@ -2,9 +2,11 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde_json::{Value, json};
-use solidcraft_doc::{Feature, FeatureKind};
+use solidcraft_doc::drawing::{self, Drawing};
+use solidcraft_doc::{Document, Feature, FeatureKind};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, num, str_};
@@ -26,6 +28,7 @@ use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("ui.assistant", "Toggle Assistant", crate::checked!("ui.assistant", assistant))
+        .any_part()
         .icon("assistant")
         .key("Ctrl+Shift+A")
         .noundo()
@@ -57,6 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(crate::schema::output_schema_for::<crate::schema::edit::DialogOkResult>)
         .params("Runs OK in the feature dialog open in the app, as Enter does; bind it to a key in Preferences. Only the app has a dialog: called here it is refused, and changes nothing"),
     CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
+        .any_part()
         .icon("undo")
         .key("Ctrl+Z")
         .noundo()
@@ -64,6 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&UNDO_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::UndoResult>),
     CommandSpec::new("edit.redo", "Redo", crate::checked!("edit.redo", redo))
+        .any_part()
         .icon("redo")
         .key("Ctrl+Y")
         .noundo()
@@ -78,13 +83,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&REPEAT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::RepeatResult>)
         .params("Starts the last tool or dialog started in the app again, with its defaults (a toolbar click, not a replay of its values). Only the app has a tool to start: called here it is refused, and changes nothing"),
-    CommandSpec::new("edit.checkpoint", "Checkpoint", crate::checked!("edit.checkpoint", checkpoint)).icon("checkpoint")
+    CommandSpec::new("edit.checkpoint", "Checkpoint", crate::checked!("edit.checkpoint", checkpoint)).any_part().icon("checkpoint")
         .noundo()
         .doc_only()
         .contract(&CHECKPOINT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::CheckpointResult>)
         .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
-    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", crate::checked!("edit.restore_checkpoint", restore_checkpoint)).icon("restore")
+    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", crate::checked!("edit.restore_checkpoint", restore_checkpoint)).any_part().icon("restore")
         .noundo()
         .doc_only()
         .contract(&RESTORE_CHECKPOINT_CONTRACT)
@@ -209,15 +214,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         "group: folder id → group, name, parent, features, joints; or feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
          inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning",
     ),
-    CommandSpec::new("select.set", "Select", crate::checked!("select.set", select_set)).icon("select")
+    CommandSpec::new("select.set", "Select", crate::checked!("select.set", select_set)).any_part().icon("select")
         .noundo()
         .contract(&SELECT_SET_CONTRACT)
         .output(output_schema_for::<SelectSetResult>)
-        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
+        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …} or {type: drawing, drawing, object: ids of the drawing open and of a view, dimension or balloon of it}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
     CommandSpec::new("select.filter", "Selection filter", crate::checked!("select.filter", select_filter)).icon("select").noundo().doc_only()
         .contract(&SELECT_FILTER_CONTRACT).output(output_schema_for::<SelectFilterResult>)
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
     CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
+        .any_part()
         .icon("select")
         .noundo()
         .contract(&SELECT_CLEAR_CONTRACT)
@@ -285,16 +291,20 @@ fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
 }
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let Some(prev) = s.undo.pop() else { return Err(EngineError::Other("nothing to undo".into())) };
-    let now = go_to(s, prev);
+    let at = latest(&s.undo, s.open_drawing).ok_or_else(|| nothing(s, "undo"))?;
+    let prev = s.undo.get(at).cloned().ok_or_else(|| nothing(s, "undo"))?;
+    let now = go_to(s, prev, "edit.undo")?;
+    s.undo.remove(at);
     let label = now.label.clone();
     s.redo.push(now);
     reply("edit.undo", crate::schema::edit::UndoResult { undone: label, param_warnings: Vec::new() })
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let Some(next) = s.redo.pop() else { return Err(EngineError::Other("nothing to redo".into())) };
-    let now = go_to(s, next);
+    let at = latest(&s.redo, s.open_drawing).ok_or_else(|| nothing(s, "redo"))?;
+    let next = s.redo.get(at).cloned().ok_or_else(|| nothing(s, "redo"))?;
+    let now = go_to(s, next, "edit.redo")?;
+    s.redo.remove(at);
     let label = now.label.clone();
     s.undo.push(now);
     reply("edit.redo", crate::schema::edit::RedoResult { redone: label, param_warnings: Vec::new() })
@@ -342,38 +352,85 @@ fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
     ))
 }
 
-/// Put the session at `snap`; returns where it was, under the same label.
-fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
-    let was = Snapshot {
-        label: snap.label,
-        doc: s.doc.clone(),
-        active_sketch: s.active_sketch,
-        pending_moves: s.pending_moves.clone(),
-        visibility: s.visibility.clone(),
-        section: snap.section.as_ref().map(|_| s.section_state()),
+/// Takes the latest of `steps` on `part` (the open drawing, else the model): undo and redo go
+/// through one part's steps, and leave the others' where they are.
+fn latest(steps: &[Snapshot], part: Option<u64>) -> Option<usize> {
+    steps.iter().rposition(|step| step.part == part)
+}
+
+fn nothing(s: &Session, what: &str) -> EngineError {
+    match s.open_drawing {
+        Some(_) => EngineError::Other(format!("nothing to {what} in this drawing (close it to {what} in the model)")),
+        None => EngineError::Other(format!("nothing to {what}")),
+    }
+}
+
+/// Put the session at `snap`; returns where it was, under the same label. A drawing's step puts
+/// back only that drawing. The model's step puts back the design as it was, but keeps each
+/// drawing the design had as it is now: each part's steps are undone in that part only. Neither
+/// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's while
+/// none is.
+fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
+    let was = Snapshot { part: snap.part, section: snap.section.as_ref().map(|_| s.section_state()), ..Snapshot::of(s, &snap.label) };
+    let mut snap = match snap.part {
+        Some(id) => Snapshot {
+            doc: drawing_from(&s.doc, &snap.doc, id),
+            active_sheet_sketch: snap.active_sheet_sketch.clone(),
+            section: snap.section.clone(),
+            ..was.clone()
+        },
+        None => Snapshot { doc: drawings_from(snap.doc, &s.doc), ..snap },
     };
-    let same = std::sync::Arc::ptr_eq(&s.doc, &snap.doc);
+    snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
+    let same = Arc::ptr_eq(&s.doc, &snap.doc);
+    let moved = s.active_sketch != snap.active_sketch || s.pending_moves != snap.pending_moves;
     // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating, and
     // a section step needs nothing evaluated or drawn again.
-    let display_only = same && s.visibility != snap.visibility;
-    let view_only = same && !display_only && snap.active_sketch == s.active_sketch && snap.pending_moves == s.pending_moves && snap.section.is_some();
-    if let Some(section) = snap.section {
+    let display_only = same && !moved && s.visibility != snap.visibility;
+    if let Some(section) = snap.section.take() {
         s.set_section_state(section);
     }
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
+    s.active_sheet_sketch = snap.active_sheet_sketch;
+    s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
     s.visibility = snap.visibility;
     s.selection.clear();
-    // A new document is evaluated by `execute`.
-    if same && !view_only {
-        if display_only {
-            s.refresh_display();
-        } else {
-            s.refresh();
-        }
+    // A new document is evaluated by `execute`, and a drawing's change evaluates nothing.
+    if display_only {
+        s.refresh_display();
+    } else if same && moved {
+        s.refresh();
     }
-    was
+    Ok(was)
+}
+
+/// `doc` with its drawing `id` as `step` has it.
+fn drawing_from(doc: &Arc<Document>, step: &Document, id: u64) -> Arc<Document> {
+    let mut doc = doc.clone();
+    if let Some(then) = step.drawing(id)
+        && !doc.drawing(id).is_some_and(|now| Arc::ptr_eq(then, now))
+    {
+        Arc::make_mut(&mut doc).put_drawing(then.clone());
+    }
+    doc
+}
+
+/// The model's step `step` with each of its drawings as `now` has it.
+fn drawings_from(mut step: Arc<Document>, now: &Document) -> Arc<Document> {
+    let current = |d: &Arc<Drawing>| now.drawing(d.id).filter(|n| !Arc::ptr_eq(d, n));
+    if step.drawings.iter().any(|d| current(d).is_some()) {
+        let mut drawings = step.drawings.clone();
+        for d in &mut drawings {
+            if let Some(n) = current(d) {
+                *d = n.clone();
+            }
+        }
+        drawing::sort(&mut drawings);
+        Arc::make_mut(&mut step).drawings = drawings;
+    }
+    step
 }
 
 fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -1646,6 +1703,12 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
                     return Err(bad("select.set", format!("no body `{name}`")));
                 }
             }
+        }
+        if let Sel::Drawing { drawing, object } = &one
+            && !s.selectable_in_drawing(*drawing, *object)
+        {
+            let object = solidcraft_doc::ids::encode(*object);
+            return Err(bad("select.set", format!("the drawing open has no view, dimension or balloon {object}")));
         }
         sel.push(one);
     }

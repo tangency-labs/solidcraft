@@ -72,14 +72,21 @@ fn reads_only(id: &str) -> bool {
         || id.ends_with(".list")
         || matches!(
             id,
-            "edit.checkpoint" | "selection.get" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers" | "engine.describe"
+            "edit.checkpoint"
+                | "selection.get"
+                | "render.status"
+                | "render.backends"
+                | "render.settings.get"
+                | "file.slicers"
+                | "engine.describe"
+                | "plugin.check"
         )
 }
 
 /// Commands that read or write a file by their nature: any string they are given in a path
 /// parameter is a file, whatever it looks like.
 fn is_file_verb(id: &str) -> bool {
-    if id == "plugin.inspect" {
+    if id == "plugin.inspect" || id == "plugin.check" {
         return true;
     }
     id.starts_with("library.") || ["export", "import", "save", "open", "insert", "load", "write", "recover"].iter().any(|v| id.contains(v))
@@ -375,6 +382,7 @@ mod tests {
             assert!(question.contains("sample") && question.contains("make"), "{question}");
         }
         assert!(matches!(exec("plugin.inspect", json!({"path":"sample"})), Verdict::Ask(_)));
+        assert!(matches!(exec("plugin.check", json!({"path":"sample"})), Verdict::Ask(_)), "checking a package reads its files");
     }
 
     #[test]

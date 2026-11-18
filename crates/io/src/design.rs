@@ -294,7 +294,7 @@ fn write_container(
         value.as_object_mut().ok_or_else(|| invalid("point cloud metadata"))?.insert("points_blob".into(), blob);
         clouds.push(value);
     }
-    let mut replacements = fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases))]);
+    let mut replacements = fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases)), ("drawings", Value::Null)]);
     if !clouds.is_empty() {
         replacements.insert("point_clouds".into(), Value::Array(clouds));
     }
@@ -320,8 +320,10 @@ fn write_container(
         replacements.insert("render".into(), render);
     }
     let mut metadata = replace(doc, replacements).map_err(invalid)?;
-    // Plugin data goes beside the design, a part each, as it came (`plugin_data`).
+    // The drawings have entries of their own, and plugin data goes beside the design, a part each,
+    // as it came: `document.json` is the same with them or without.
     if let Some(object) = metadata.as_object_mut() {
+        object.remove("drawings");
         object.remove("plugin_data");
     }
     solidcraft_doc::newer_file::restore(doc, &mut metadata);
@@ -339,6 +341,7 @@ fn write_container(
         }
         writer.part(name, bytes, true)?;
     }
+    drawing::write(&mut writer, doc)?;
     for (key, data) in &doc.plugin_data {
         let bytes = solidcraft_doc::canvas::base64_decode(data).ok_or_else(|| invalid(format!("plugin data `{key}` is not base64")))?;
         writer.part(&format!("{}{key}", solidcraft_doc::plugin_data::PREFIX), &bytes, true)?;
@@ -913,7 +916,10 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
     }
     // A blob a typed record uses comes back from that record; others only for what is kept.
     for name in reader.part_names() {
-        let ours = matches!(name.as_str(), "document.json" | "container.json") || name.starts_with("cache/") || plugin_part(&name).is_some();
+        let ours = matches!(name.as_str(), "document.json" | "container.json")
+            || name.starts_with("cache/")
+            || name.starts_with("drawings/")
+            || plugin_part(&name).is_some();
         let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
         if !ours && !unused_blob {
             file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
@@ -1012,6 +1018,9 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
     let mut doc = Document::from_json(text)?;
+    if !doc.drawings.is_empty() {
+        return Err(invalid("ambiguous drawings in document.json and in their own entries"));
+    }
     for (index, complex) in complexes {
         if let Some(cloud) = doc.point_clouds.get_mut(index) {
             cloud.complex = serde::Deserialize::deserialize(&complex).map_err(invalid)?;
@@ -1073,6 +1082,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         let value = metadata.get("point_clouds").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing point cloud metadata"))?;
         decode_cloud(reader.blob(value, "points_blob", "points")?, cloud)?;
     }
+    doc.drawings = drawing::read(reader)?;
     Ok(doc)
 }
 

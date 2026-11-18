@@ -1287,6 +1287,67 @@ fn a_source_without_a_body_name_names_its_kind_alone() {
     assert_eq!(LinkSource::Face { body: "Body1".into(), at }.describe(), "face of Body1");
 }
 
+/// A view edge is saved with the drawing edge reference's keys, its path only when it has one, and
+/// reads back the same.
+#[test]
+fn a_view_edge_saves_as_the_drawings_edge_reference() {
+    let edge = |path: Vec<u64>| LinkSource::ViewEdge { body: "Body1".into(), origin_feature: 3, name: "F3:e#2".into(), path };
+    let own = serde_json::to_value(edge(Vec::new())).unwrap();
+    assert_eq!(own, serde_json::json!({ "type": "view_edge", "body": "Body1", "origin_feature": 3, "name": "F3:e#2" }));
+    let placed = serde_json::to_value(edge(vec![7, 9])).unwrap();
+    assert_eq!(placed["path"], serde_json::json!([7, 9]));
+    for source in [edge(Vec::new()), edge(vec![7, 9])] {
+        let back: LinkSource = serde_json::from_value(serde_json::to_value(&source).unwrap()).unwrap();
+        assert_eq!(back, source);
+    }
+    assert_eq!(edge(Vec::new()).describe(), "edge of Body1");
+    assert_eq!(edge(Vec::new()).bodies(), ["Body1"]);
+    let unnamed = LinkSource::ViewEdge { body: String::new(), origin_feature: 3, name: "F3:e#2".into(), path: Vec::new() };
+    assert_eq!(unnamed.describe(), "edge");
+}
+
+/// A boundary segment becomes the link geometry of the same curve: an arc runs counter-clockwise
+/// whichever way it was swept, a conic keeps its shape, and a Bézier past the largest degree is
+/// none.
+#[test]
+fn a_boundary_segment_becomes_the_same_link_curve() {
+    use std::f64::consts::TAU;
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-12;
+    let c = v(1.0, 1.0);
+    assert_eq!(LinkGeom::from_seg(&Seg2::Line { a: v(0.0, 0.0), b: v(4.0, 0.0) }), Some(LinkGeom::Line(v(0.0, 0.0), v(4.0, 0.0))));
+    for sweep in [TAU, -TAU] {
+        assert_eq!(LinkGeom::from_seg(&Seg2::Arc { center: c, radius: 2.0, start: 0.3, sweep }), Some(LinkGeom::Circle(c, 2.0)));
+    }
+    // The quarter from (3, 1) to (1, 3), swept either way.
+    for (start, sweep) in [(0.0, FRAC_PI_2), (FRAC_PI_2, -FRAC_PI_2)] {
+        match LinkGeom::from_seg(&Seg2::Arc { center: c, radius: 2.0, start, sweep }) {
+            Some(LinkGeom::Arc { c: centre, a, b }) => {
+                assert_eq!(centre, c);
+                assert!(near(a, v(3.0, 1.0)) && near(b, v(1.0, 3.0)), "{start} {sweep}: {a:?} {b:?}");
+            }
+            other => panic!("{start} {sweep}: {other:?}"),
+        }
+    }
+    let (a, apex, b) = (v(0.0, 0.0), v(1.0, 1.0), v(2.0, 0.0));
+    for (w, rho) in [(1.0, 0.5), (3.0, 0.75)] {
+        assert_eq!(LinkGeom::from_seg(&Seg2::Conic { a, apex, b, w }), Some(LinkGeom::Conic { a, apex, b, rho }));
+    }
+    let pts = [v(0.0, 0.0), v(1.0, 2.0), v(3.0, 2.0), v(4.0, 0.0)];
+    assert_eq!(
+        LinkGeom::from_seg(&Seg2::Cubic { p0: pts[0], p1: pts[1], p2: pts[2], p3: pts[3] }),
+        Some(LinkGeom::Spline { pts: pts.to_vec(), control: true, degree: 3, periodic: false, nurbs: None })
+    );
+    let mut p = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
+    for (i, q) in p.iter_mut().enumerate() {
+        *q = v(i as f64, (i % 2) as f64);
+    }
+    assert_eq!(
+        LinkGeom::from_seg(&Seg2::Bezier { n: 4, p }),
+        Some(LinkGeom::Spline { pts: p[..=4].to_vec(), control: true, degree: 4, periodic: false, nurbs: None })
+    );
+    assert_eq!(LinkGeom::from_seg(&Seg2::Bezier { n: solidcore_record::MAX_BEZIER_CTRL as u8, p }), None);
+}
+
 /// Many independent constrained rectangles solve quickly (per-component work).
 #[test]
 fn large_sketch_solves_fast() {
