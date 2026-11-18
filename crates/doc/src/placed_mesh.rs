@@ -442,7 +442,9 @@ mod tests {
         for p in &placed {
             let (mesh, m) = p.mesh_in_place();
             assert!(Arc::ptr_eq(&mesh, &own), "the definition's mesh, not a copy");
+            assert!(!p.mesh_bounds_made());
             let bounds = p.mesh_bounds();
+            assert!(p.mesh_bounds_made() && p.clone().mesh_bounds_made(), "worked out once, shared by its clones");
             let tilted = Plane { origin: Vec3::new(1., 2., 3.), x: Vec3::new(0.6, 0.8, 0.), y: Vec3::Z };
             let seen = p.mesh_bounds_in(&tilted);
             assert!(p.cached_mesh().is_none(), "no moved copy is made");

@@ -823,7 +823,11 @@ fn a_design_keeps_its_drawings_inline_in_plain_json() {
     assert_eq!(crate::Document::from_json(&saved).unwrap().to_json(), saved, "save, open, save: the same bytes");
     let v: Value = serde_json::from_str(&saved).unwrap();
     assert_eq!(v["drawings"][3], file(&plate()));
-    assert!(v["format_pending"].as_array().is_some_and(|names| names.contains(&json!("drawings"))), "{}", v["format_pending"]);
+    // Drawings in a design are a change of design format 59 (folded for 0.45.0-rc.1): a design
+    // that holds drawings is written at 59 or later, and no longer names the change as pending.
+    let format = v["format"].as_str().and_then(crate::format::version_of);
+    assert!(format.is_some_and(|n| n >= 59), "{}", v["format"]);
+    assert!(!v["format_pending"].as_array().is_some_and(|names| names.contains(&json!("drawings"))), "{}", v["format_pending"]);
     let empty: Value = serde_json::from_str(&crate::Document::new("Plate").to_json()).unwrap();
     assert_eq!(empty.get("drawings"), None);
 }
@@ -1094,7 +1098,8 @@ fn drawings_without_sketches_keep_their_old_shape_and_gain_only_the_pending_form
     let v = file(&old);
     assert!(v.get("sketches").is_none());
     assert!(read(&v).unwrap().sketches.is_empty());
-    assert!(DRAWING.pending_names().iter().any(|n| n == "sheet-sketches"));
+    // Sheet sketches are a change of drawing format 2 (folded for 0.45.0-rc.1), no longer pending.
+    assert!(DRAWING.current() >= 2 && !DRAWING.pending_names().iter().any(|n| n == "sheet-sketches"));
     let mut explicit_empty = v;
     explicit_empty["sketches"] = json!([]);
     assert!(file(&read(&explicit_empty).unwrap()).get("sketches").is_none());

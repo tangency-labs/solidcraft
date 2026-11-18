@@ -1262,6 +1262,49 @@ fn an_arc_that_turns_back_is_drawn_as_chords() {
 }
 
 #[test]
+fn a_closed_edge_that_turns_back_with_no_pieces_is_drawn_as_chords() {
+    // Rational quadratic quarter arcs on the circle of radius 10: out from (10, 0) over the top
+    // to (-10, 0), then back the same way. A closed edge on the circle, but only its upper half.
+    // Its knot at the turn repeats past the degree, so it has no Bézier pieces and its turn
+    // can't be certified: chords, not the whole circle.
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let pts = [
+        (10., 0., 1.),
+        (10., 10., s),
+        (0., 10., 1.),
+        (-10., 10., s),
+        (-10., 0., 1.),
+        (-10., 0., 1.),
+        (-10., 10., s),
+        (0., 10., 1.),
+        (10., 10., s),
+        (10., 0., 1.),
+    ];
+    let homogeneous: Vec<[f64; 4]> = pts.iter().map(|&(x, y, w)| [x * w, y * w, 0., w]).collect();
+    let knots = vec![0., 0., 0., 1., 1., 2., 2., 2., 3., 3., 4., 4., 4.];
+    let start = [10., 0., 0.];
+    let shape = Brep {
+        version: solidcore_record::brep::VERSION,
+        shells: vec![Shell {
+            vertices: vec![start],
+            edges: vec![Edge { vertices: [0, 0], curve: Curve::RationalSpline { knots, homogeneous } }],
+            faces: vec![Face {
+                loops: vec![vec![uses(0, true)]],
+                surface: Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] },
+                forward: true,
+            }],
+        }],
+    };
+    let def = prepare(&shape, &Options::default()).unwrap();
+    let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let d = hidden_lines(&[def], &[identity(0, [0.; 3])], &view, &Options::default(), &never).unwrap();
+    let line = edge_line(&d, 0, 0);
+    assert!(line.pieces.iter().all(|p| matches!(p.accuracy, CurveAccuracy::Sampled { .. })), "{:?}", line.pieces);
+    let low = line.pieces.iter().flat_map(|p| p.geometry.iter()).map(|g| g.point_at(0.).y.min(g.point_at(1.).y)).fold(f64::MAX, f64::min);
+    assert!(low > -1e-6, "the lower half is drawn (down to y = {low})");
+}
+
+#[test]
 fn a_cone_tip_trimmed_near_the_apex_is_only_its_tip() {
     // A cone record of slope 0.25 from its apex up to 10 m, trimmed by a circle at z = 1 to the
     // tip below it: a box edge at x = 40, z = 50 to 150, seen along +X, is in front of nothing.

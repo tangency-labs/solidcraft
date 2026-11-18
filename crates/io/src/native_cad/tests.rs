@@ -24,21 +24,48 @@ const PLATE_FCSTD: &[u8] = include_bytes!("fixtures/plate.FCStd");
 /// STEP text, which these importers refuse.
 const STEP_TEXT: &str = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
+/// Both readers of a FreeCAD or Rhino file: the STEP route (the default) and the records.
+const READERS: [crate::StepReader; 2] = [crate::StepReader::SolidCraft, crate::StepReader::Cadmpeg];
+
+/// `bytes` (a file called `file`) read into an Import feature by `reader`.
+fn read(bytes: &[u8], file: &str, reader: crate::StepReader) -> crate::StepFeature {
+    crate::step_import_feature_read(bytes, file, crate::StepNames::default(), reader).unwrap_or_else(|e| panic!("{file} ({reader:?}): {e}"))
+}
+
 /// The file imports as one solid with the box's volume, through the same Import feature as STEP.
+/// By default cadmpeg's STEP writer restates it and the feature keeps that STEP text, as on main;
+/// with the cadmpeg reader the feature keeps the records the file was read into and no STEP text.
 fn imports_the_block(bytes: &[u8], file: &str) {
     let step = native_cad_to_step(bytes, file).unwrap().0;
     assert!(step.contains("MANIFOLD_SOLID_BREP"), "{file}: no solid in the restated STEP");
-    let sf = crate::step_import_feature(bytes, &format!("dir/{file}")).unwrap();
-    assert_eq!(sf.import.bodies.len(), 1, "{file}");
-    let solidcraft_doc::FeatureKind::Import { file: held, step, .. } = &sf.kind else { panic!("not an Import feature") };
-    assert_eq!(held, file);
-    assert!(step.contains("MANIFOLD_SOLID_BREP"), "the feature keeps the restated STEP");
-    let v = solidcraft_kernel::measure(&sf.import.bodies[0].body).unwrap().volume;
-    assert!((v - 6000.0).abs() < 1e-6, "{file}: volume {v}");
-    // FreeCAD's object label does not come through cadmpeg; the product is then named after the file.
-    let stem = file.rsplit_once('.').unwrap().0;
-    assert!(["Block", stem].contains(&sf.body_names[0].as_str()), "{file}: {:?}", sf.body_names);
-    assert!(!step.contains("cadmpeg_model"), "{file}");
+    let default = crate::step_import_feature(bytes, &format!("dir/{file}")).unwrap();
+    assert!(
+        matches!(&default.kind, solidcraft_doc::FeatureKind::Import { step, records: None, .. } if step.contains("MANIFOLD_SOLID_BREP")),
+        "{file}: by default the feature keeps the restated STEP"
+    );
+    for reader in READERS {
+        let sf = read(bytes, &format!("dir/{file}"), reader);
+        assert_eq!(sf.import.bodies.len(), 1, "{file} ({reader:?})");
+        let solidcraft_doc::FeatureKind::Import { file: held, step, records, .. } = &sf.kind else { panic!("not an Import feature") };
+        assert_eq!(held, file);
+        match reader {
+            crate::StepReader::SolidCraft => {
+                assert!(step.contains("MANIFOLD_SOLID_BREP"), "{file}: the feature keeps the restated STEP");
+                assert!(!step.contains("cadmpeg_model"), "{file}");
+                assert!(records.is_none(), "{file}: no records on the STEP route");
+            }
+            crate::StepReader::Cadmpeg => {
+                assert!(step.is_empty(), "{file}: no STEP text in between");
+                assert_eq!(records.as_ref().map(|r| r.bodies.len()), Some(1), "{file}: the feature keeps the records");
+            }
+        }
+        let v = solidcraft_kernel::measure(&sf.import.bodies[0].body).unwrap().volume;
+        assert!((v - 6000.0).abs() < 1e-6, "{file} ({reader:?}): volume {v}");
+        // A Rhino object keeps its name; FreeCAD's object label does not come through cadmpeg, so
+        // the body is named after the file.
+        let stem = file.rsplit_once('.').unwrap().0;
+        assert!(["Block", stem].contains(&sf.body_names[0].as_str()), "{file} ({reader:?}): {:?}", sf.body_names);
+    }
 }
 
 #[test]
@@ -82,6 +109,8 @@ fn other_contents_are_refused() {
         (fcstd, "x.sldprt"),
     ];
     for (bytes, name) in cases {
+        let e = native_cad_records(bytes, name).expect_err(name);
+        assert!(e.starts_with(name), "{name}: the message names the file: {e}");
         let e = native_cad_to_step(bytes, name).expect_err(name);
         assert!(e.starts_with(name), "{name}: the message names the file: {e}");
     }
@@ -108,8 +137,10 @@ fn hostile_native_cad_never_panics() {
         cases.push(tail);
         cases.push(good.iter().rev().copied().collect());
         for (i, bytes) in cases.iter().enumerate() {
-            let r = std::panic::catch_unwind(|| crate::step_import_feature(bytes, name));
-            assert!(r.is_ok(), "{name}: case {i} panicked");
+            for reader in READERS {
+                let r = std::panic::catch_unwind(|| crate::step_import_feature_read(bytes, name, crate::StepNames::default(), reader));
+                assert!(r.is_ok(), "{name} ({reader:?}): case {i} panicked");
+            }
         }
     }
 }
@@ -139,7 +170,23 @@ fn a_zip_bomb_is_refused() {
     }
     let bytes = zip.finish().unwrap().into_inner();
     assert!(bytes.len() < 2 << 20, "{} bytes", bytes.len());
+    assert!(native_cad_records(&bytes, "bomb.FCStd").is_err());
     assert!(native_cad_to_step(&bytes, "bomb.FCStd").is_err());
+}
+
+/// Records of which not one body can be made are refused as a file with no solids is, with the
+/// reason, not imported as an Import feature with no bodies; the same records whole import.
+#[test]
+fn records_that_make_no_body_are_refused_with_why() {
+    let (records, _, _) = native_cad_records(BLOCK_FCSTD, "block.FCStd").unwrap();
+    let mut broken = records.clone();
+    for b in &mut broken.bodies {
+        b.face_origin.clear();
+    }
+    let e = crate::records_import_feature((broken, Vec::new(), true), "block.FCStd", crate::StepNames::default()).err().map(|e| e.to_string());
+    assert!(e.as_deref().is_some_and(|e| e.contains("no bodies could be made") && e.contains("face origins")), "{e:?}");
+    let f = crate::records_import_feature((records, Vec::new(), true), "block.FCStd", crate::StepNames::default()).unwrap();
+    assert!(!f.import.bodies.is_empty());
 }
 
 fn types(d: &NativeDesign) -> Vec<&'static str> {
@@ -197,27 +244,55 @@ fn freecad_primitives_rebuild_and_rhino_has_no_history() {
 /// tool's shape hidden in the file, and those are not imported (they were before).
 #[test]
 fn freecad_hidden_intermediate_shapes_are_not_imported() {
-    let sf = crate::step_import_feature(BRACKET_FCSTD, "bracket.FCStd").unwrap();
-    let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
-    let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
-    assert_eq!(built.len(), 1, "{} bodies in the file, {} skipped", sf.import.bodies.len(), skip.len());
-    let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
-    assert!((v - (7840.0 - 50.0 * std::f64::consts::PI)).abs() < 0.05, "volume {v}");
-    // A Part workbench file has nothing hidden.
-    let sf = crate::step_import_feature(BLOCK_FCSTD, "block.FCStd").unwrap();
-    assert!(matches!(&sf.kind, solidcraft_doc::FeatureKind::Import { skip, .. } if skip.is_empty()));
+    for reader in READERS {
+        let sf = read(BRACKET_FCSTD, "bracket.FCStd", reader);
+        let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
+        let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
+        assert_eq!(built.len(), 1, "{reader:?}: {} bodies in the file, {} skipped", sf.import.bodies.len(), skip.len());
+        let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
+        assert!((v - (7840.0 - 50.0 * std::f64::consts::PI)).abs() < 0.05, "{reader:?}: volume {v}");
+        // A Part workbench file has nothing hidden.
+        let sf = read(BLOCK_FCSTD, "block.FCStd", reader);
+        assert!(matches!(&sf.kind, solidcraft_doc::FeatureKind::Import { skip, .. } if skip.is_empty()), "{reader:?}");
+    }
 }
 
 /// The hidden-shape skip follows the format detected in the file's contents, not its name: a
-/// Rhino file called .FCStd is still a Rhino file, so its hidden object imports; a FreeCAD file
-/// called .3dm is still a FreeCAD file, so its hidden intermediate shape is left out.
+/// FreeCAD file called .3dm is still a FreeCAD file, so its hidden intermediate shapes are left
+/// out; a Rhino file called .FCStd is still a Rhino file, whose hidden objects would import.
 #[test]
 fn hidden_items_follow_the_detected_format_not_the_file_name() {
+    // The STEP route, on the INVISIBILITY the STEP writer writes.
     let step = "#1=MANIFOLD_SOLID_BREP('body',#2);\n#9=INVISIBILITY((#1));\n";
-    assert!(crate::hidden_items("part.FCStd", BLOCK_FCSTD, step).contains(&1), "a FreeCAD body's hidden shape is left out");
-    assert!(crate::hidden_items("renamed.3dm", BLOCK_FCSTD, step).contains(&1), "the contents say FreeCAD, not the name");
-    assert!(crate::hidden_items("renamed.FCStd", BLOCK_3DM, step).is_empty(), "a Rhino file's hidden object still imports");
-    assert!(crate::hidden_items("part.3dm", BLOCK_3DM, step).is_empty());
+    assert!(crate::native_cad::hidden_items("part.FCStd", BLOCK_FCSTD, step).contains(&1), "a FreeCAD body's hidden shape is left out");
+    assert!(crate::native_cad::hidden_items("renamed.3dm", BLOCK_FCSTD, step).contains(&1), "the contents say FreeCAD, not the name");
+    assert!(crate::native_cad::hidden_items("renamed.FCStd", BLOCK_3DM, step).is_empty(), "a Rhino file's hidden object still imports");
+    assert!(crate::native_cad::hidden_items("part.3dm", BLOCK_3DM, step).is_empty());
+    // Both routes, on the files.
+    for reader in READERS {
+        let skipped = |bytes: &[u8], file: &str| match read(bytes, file, reader).kind {
+            solidcraft_doc::FeatureKind::Import { skip, .. } => skip.len(),
+            _ => panic!("not an Import feature"),
+        };
+        assert_eq!(skipped(BRACKET_FCSTD, "bracket.FCStd"), 7, "{reader:?}: a FreeCAD body's hidden shapes are left out");
+        assert_eq!(skipped(BRACKET_FCSTD, "renamed.3dm"), 7, "{reader:?}: the contents say FreeCAD, not the name");
+        assert_eq!(skipped(BLOCK_3DM, "renamed.FCStd"), 0, "{reader:?}: a Rhino file leaves nothing out");
+    }
+}
+
+/// FreeCAD places a PartDesign body's shape by the body's placement: the knob, placed off the
+/// origin and turned, comes in where FreeCAD shows it (the file's own history, rebuilt, agrees).
+#[test]
+fn a_placed_freecad_body_imports_where_freecad_shows_it() {
+    for reader in READERS {
+        let sf = read(KNOB_FCSTD, "knob.FCStd", reader);
+        let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
+        let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
+        assert_eq!(built.len(), 1, "{reader:?}");
+        let m = solidcraft_kernel::measure(&built[0].body).unwrap();
+        assert!((m.bbox.min.x - 38.0).abs() < 1e-6 && (m.bbox.min.y + 12.0).abs() < 1e-6, "{reader:?}: {:?}", m.bbox);
+        assert!((m.volume - 2564.8775).abs() < 1e-3, "{reader:?}: volume {}", m.volume);
+    }
 }
 
 /// A FreeCAD design is detected from its contents, not from the file's name.
@@ -263,10 +338,288 @@ fn freecad_patterns_and_mirrors_rebuild() {
 /// neither is imported beside the body's own shape.
 #[test]
 fn freecad_shown_tip_and_binders_are_not_imported_twice() {
-    let sf = crate::step_import_feature(PLATE_FCSTD, "plate.FCStd").unwrap();
-    let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
-    let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
-    assert_eq!(built.len(), 1, "{} bodies in the file, {} skipped", sf.import.bodies.len(), skip.len());
-    let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
-    assert!((v - 7818.009).abs() < 0.05, "volume {v}");
+    for reader in READERS {
+        let sf = read(PLATE_FCSTD, "plate.FCStd", reader);
+        let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
+        let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
+        assert_eq!(built.len(), 1, "{reader:?}: {} bodies in the file, {} skipped", sf.import.bodies.len(), skip.len());
+        let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
+        assert!((v - 7818.009).abs() < 0.05, "{reader:?}: volume {v}");
+    }
+}
+
+/// The route a FreeCAD or Rhino file takes by default (the STEP route), on the neutral model, to
+/// compare with the records: cadmpeg's STEP writer (AP214), then SolidCraft's STEP reader. Returns the
+/// import, or why there is none, and the writer's losses.
+fn by_step_text(ir: &cadmpeg_ir::document::CadIr) -> (Result<solidcraft_kernel::StepImport, String>, Vec<String>) {
+    use cadmpeg_ir::codec::write::{EncodeInput, target::TargetRequest};
+    let plan =
+        match cadmpeg_registry::build_encoder(cadmpeg_registry::Format::Step).plan(EncodeInput::new(ir, None), TargetRequest::Explicit("ap214")) {
+            Ok(plan) => plan,
+            Err(e) => return (Err(e.to_string()), Vec::new()),
+        };
+    let losses: Vec<String> = plan.report().losses.iter().map(|l| format!("{}: {}", l.code, l.message)).collect();
+    let mut out = Vec::new();
+    if let Err(e) = plan.write_to(&mut out) {
+        return (Err(e.to_string()), losses);
+    }
+    (solidcraft_kernel::step_import(&String::from_utf8_lossy(&out)).map_err(|e| e.to_string()), losses)
+}
+
+/// The route they take with the cadmpeg reader: the neutral model read into records, the records made into bodies.
+fn by_records(ir: &cadmpeg_ir::document::CadIr) -> (Result<solidcraft_kernel::StepImport, String>, Vec<String>) {
+    let records = cadir_records(ir, "compared", "test");
+    let warnings = records.warnings.clone();
+    (solidcraft_kernel::records_import(&records).map_err(|e| e.to_string()), warnings)
+}
+
+/// A file decoded by cadmpeg into its neutral model: FreeCAD, Rhino or (for comparison) STEP.
+fn neutral(bytes: &[u8], name: &str) -> cadmpeg_ir::document::CadIr {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    let (_, decoded) = convert::decode_at(name, &ext, bytes, &["fcstd", "rhino", "step"], cadmpeg_core::decode::DecodeDepth::Full).unwrap();
+    decoded.into_parts().0
+}
+
+/// What an import built, body by body, ordered by volume: whether it is whole (not a surface body
+/// of the faces that read), its faces, volume and bounding box.
+fn built(imp: &solidcraft_kernel::StepImport) -> Vec<(bool, usize, f64, [f64; 6])> {
+    let mut out: Vec<_> = imp
+        .bodies
+        .iter()
+        .map(|b| {
+            let m = solidcraft_kernel::measure(&b.body).unwrap();
+            (b.refused.is_none(), m.faces, m.volume, [m.bbox.min.x, m.bbox.min.y, m.bbox.min.z, m.bbox.max.x, m.bbox.max.y, m.bbox.max.z])
+        })
+        .collect();
+    // By volume and then box, each to a thousandth, so two bodies of nearly one volume (a part
+    // placed twice) keep one order whatever the last digits of their volumes are.
+    let key = |b: &(bool, usize, f64, [f64; 6])| {
+        let mut k = vec![(b.2 * 1e3).round() as i64];
+        k.extend(b.3.iter().map(|v| (v * 1e3).round() as i64));
+        k
+    };
+    out.sort_by_key(key);
+    out
+}
+
+/// Whether two imports built the same bodies: the same number, each as whole, with as many faces,
+/// the same volume and the same box (to a millionth of the part's size).
+fn same_bodies(a: &[(bool, usize, f64, [f64; 6])], b: &[(bool, usize, f64, [f64; 6])]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(a, b)| {
+            let size = a.3.iter().chain(&b.3).fold(1.0f64, |m, v| m.max(v.abs()));
+            a.0 == b.0
+                && a.1 == b.1
+                && (a.2 - b.2).abs() <= 1e-6 * a.2.abs().max(b.2.abs()).max(1.0)
+                && a.3.iter().zip(&b.3).all(|(x, y)| (x - y).abs() <= 1e-6 * size)
+        })
+}
+
+/// The parts compared between the two routes: every FreeCAD and Rhino fixture, and every
+/// step-conformance part decoded by cadmpeg's STEP decoder (as the cadmpeg STEP reader reads it),
+/// and the import kernel cases whose surfaces the records once read differently
+/// ([`KERNEL_CASES`]).
+fn compared_parts() -> Vec<(String, Vec<u8>)> {
+    let mut parts: Vec<(String, Vec<u8>)> = [
+        ("block.FCStd", BLOCK_FCSTD),
+        ("block.3dm", BLOCK_3DM),
+        ("bracket.FCStd", BRACKET_FCSTD),
+        ("knob.FCStd", KNOB_FCSTD),
+        ("plate.FCStd", PLATE_FCSTD),
+    ]
+    .into_iter()
+    .map(|(n, b)| (n.to_string(), b.to_vec()))
+    .collect();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut steps: Vec<_> =
+        std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "step")).collect();
+    steps.sort();
+    assert!(steps.len() >= 17, "{} step-conformance parts", steps.len());
+    parts.extend(steps.iter().map(|p| (p.file_name().unwrap().to_string_lossy().to_string(), std::fs::read(p).unwrap())));
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/kernel-cases/import");
+    parts.extend(KERNEL_CASES.iter().map(|c| (format!("{c}.step"), std::fs::read(cases.join(c).join("input.step")).unwrap())));
+    parts
+}
+
+/// Import kernel cases on surfaces whose record form depends on the face, which the records route
+/// once refused: a SURFACE_OF_LINEAR_EXTRUSION of an ellipse across the ellipse's parameter origin
+/// (cadmpeg reads it as a procedural surface with no solved form), and a cone of nearly a right
+/// angle that is a plane.
+const KERNEL_CASES: [&str; 2] = ["3208-extruded-ellipse-face-over-parameter-seam", "4006-plane-written-as-cone-of-nearly-right-angle"];
+
+/// Reading the neutral model into records builds the bodies the STEP route built (cadmpeg's
+/// STEP writer, then our STEP reader): the same bodies, each as whole, with as many faces, the
+/// same volume and the same box, for every part in [`compared_parts`], an assembly's parts at
+/// each of their placements.
+#[test]
+fn records_build_the_bodies_the_step_route_built() {
+    let mut differ = Vec::new();
+    for (name, bytes) in &compared_parts() {
+        let ir = neutral(bytes, name);
+        let (old, _) = by_step_text(&ir);
+        let (new, warnings) = by_records(&ir);
+        let old = built(&old.unwrap_or_else(|e| panic!("{name}: the STEP route: {e}")));
+        let new = built(&new.unwrap_or_else(|e| panic!("{name}: the records: {e} {warnings:?}")));
+        if !same_bodies(&old, &new) {
+            differ.push(name.clone());
+        }
+    }
+    assert!(differ.is_empty(), "parts whose bodies differ between the two routes: {differ:?}");
+}
+
+/// An assembly read through cadmpeg's STEP decoder has the product tree SolidCraft's own STEP
+/// reader gives it: the same products nested the same way, each placed in its parent, with its
+/// bodies, and each body under its products' names and its occurrence's. A part used twice is
+/// two bodies, one at each placement.
+#[test]
+fn an_assembly_read_into_records_has_the_tree_our_step_reader_gives_it() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    for (name, bodies) in [("cylinder_placed.step", 1), ("cylinder_twice.step", 2)] {
+        let bytes = std::fs::read(dir.join(name)).unwrap();
+        let ours = solidcraft_kernel::step_import(&String::from_utf8_lossy(&bytes)).unwrap();
+        let (theirs, warnings) = by_records(&neutral(&bytes, name));
+        let theirs = theirs.unwrap_or_else(|e| panic!("{name}: {e} {warnings:?}"));
+        assert_eq!(theirs.bodies.len(), bodies, "{name}");
+        assert_eq!(tree_of(&theirs), tree_of(&ours), "{name}");
+        assert!(same_bodies(&built(&theirs), &built(&ours)), "{name}: the bodies differ from our reader's");
+        // The same part placed twice is one part to the design, as with our reader.
+        let parts = |imp: &solidcraft_kernel::StepImport| imp.bodies.iter().map(|b| b.source_item).collect::<std::collections::BTreeSet<_>>().len();
+        assert_eq!(parts(&theirs), parts(&ours), "{name}: parts");
+    }
+}
+
+/// An import's product tree, one line a node: its depth and name, its placement in its parent
+/// (rounded to a micrometre), and each of its bodies' product path and occurrence.
+fn tree_of(imp: &solidcraft_kernel::StepImport) -> Vec<String> {
+    fn walk(nodes: &[solidcraft_kernel::StepNode], imp: &solidcraft_kernel::StepImport, depth: usize, out: &mut Vec<String>) {
+        for n in nodes {
+            let m: Vec<String> = n.transform.iter().flatten().map(|v| format!("{:.3}", v + 0.0)).collect();
+            let bodies: Vec<String> = n
+                .bodies
+                .iter()
+                .filter_map(|b| imp.bodies.get(*b))
+                .map(|b| format!("{}|{}", b.path.join("/"), b.instance.clone().unwrap_or_default()))
+                .collect();
+            out.push(format!("{depth} {} [{}] {bodies:?}", n.name, m.join(" ")));
+            walk(&n.children, imp, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&imp.tree, imp, 0, &mut out);
+    out
+}
+
+/// The import kernel cases read into records build what each case expects: one whole body, its
+/// faces and volume as `expected.json` gives them.
+#[test]
+fn kernel_cases_read_into_records_build_their_expected_bodies() {
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/kernel-cases/import");
+    for c in KERNEL_CASES {
+        let expected: serde_json::Value = serde_json::from_slice(&std::fs::read(cases.join(c).join("expected.json")).unwrap()).unwrap();
+        let ir = neutral(&std::fs::read(cases.join(c).join("input.step")).unwrap(), &format!("{c}.step"));
+        let (imp, warnings) = by_records(&ir);
+        let bodies = built(&imp.unwrap_or_else(|e| panic!("{c}: {e} {warnings:?}")));
+        assert_eq!(bodies.len(), 1, "{c}: {bodies:?} {warnings:?}");
+        let (whole, faces, volume, _) = bodies[0];
+        assert!(whole, "{c}: {warnings:?}");
+        assert_eq!(faces as u64, expected["faces"].as_u64().unwrap(), "{c}");
+        let want = expected["volume_mm3"].as_f64().unwrap();
+        assert!((volume - want).abs() < 1e-3 * want, "{c}: {volume} vs {want}");
+    }
+}
+
+/// What the STEP route did with what the records now leave out, each with the reason. A body placed
+/// by a mirror: cadmpeg's STEP writer could not write the placement, so the body came in unplaced
+/// (a loss noted, the geometry in the wrong place). An elliptical cone: the writer wrote a circular
+/// cone, its ratio dropped, so the body came in as if the cone were round.
+#[test]
+fn what_the_records_leave_out_the_step_route_imported_wrongly() {
+    // The 10 × 20 × 30 mm block, mirrored in x and moved 100 mm along it: it belongs at x 90..100.
+    let mut ir = neutral(BLOCK_FCSTD, "block.FCStd");
+    let unplaced = built(&by_step_text(&ir).0.unwrap());
+    for b in &mut ir.model.bodies {
+        b.transform = Some(cadmpeg_ir::transform::Transform::affine([[-1.0, 0.0, 0.0, 100.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]).unwrap());
+    }
+    let (old, losses) = by_step_text(&ir);
+    assert!(same_bodies(&built(&old.unwrap()), &unplaced), "the STEP route imported the mirrored block where it was before the move");
+    assert!(!losses.is_empty(), "with a loss noted");
+    let (new, warnings) = by_records(&ir);
+    assert!(new.is_ok_and(|imp| imp.bodies.is_empty()), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("not imported: its placement:")), "{warnings:?}");
+
+    // The knob's chamfer, a cone, made elliptical (the ratio of its minor to its major radius halved).
+    let ir = neutral(KNOB_FCSTD, "knob.FCStd");
+    let round = built(&by_step_text(&ir).0.unwrap());
+    let mut json = serde_json::to_value(&ir).unwrap();
+    fn halve_ratio(v: &mut serde_json::Value) -> usize {
+        match v {
+            serde_json::Value::Object(m) if m.contains_key("half_angle") && m.contains_key("ratio") => {
+                m.insert("ratio".into(), 0.5.into());
+                1
+            }
+            serde_json::Value::Object(m) => m.values_mut().map(halve_ratio).sum(),
+            serde_json::Value::Array(a) => a.iter_mut().map(halve_ratio).sum(),
+            _ => 0,
+        }
+    }
+    assert!(halve_ratio(&mut json) > 0, "a cone in the model");
+    let ir: cadmpeg_ir::document::CadIr = serde_json::from_value(json).unwrap();
+    let (old, _) = by_step_text(&ir);
+    assert!(same_bodies(&built(&old.unwrap()), &round), "the STEP route imported the elliptical cone as the round one");
+    let (_, warnings) = by_records(&ir);
+    assert!(warnings.iter().any(|w| w.contains("an elliptical cone")), "{warnings:?}");
+}
+
+/// A component whose placement mirrors is left out with the reason, and the part's other
+/// placement still comes in.
+#[test]
+fn a_mirrored_component_is_left_out_with_why() {
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mut ir = neutral(&bytes, "cylinder_twice.step");
+    let mirror = cadmpeg_ir::transform::Transform::affine([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]).unwrap();
+    let leaf = ir.model.occurrences.iter_mut().find(|o| !matches!(o.parent, cadmpeg_ir::products::OccurrenceParent::Root {})).unwrap();
+    leaf.transform = mirror;
+    let records = cadir_records(&ir, "mirrored", "test");
+    assert_eq!(records.bodies.len(), 1, "{:?}", records.warnings);
+    assert!(records.warnings.iter().any(|w| w.contains("mirrors")), "{:?}", records.warnings);
+}
+
+/// A part whose every placement is left out (each mirrored, or the assembly that holds them)
+/// does not come in at all, rather than where its file defines it, which the warning would deny.
+#[test]
+fn a_part_whose_every_placement_is_left_out_does_not_come_in() {
+    use cadmpeg_ir::products::{Occurrence, OccurrenceParent};
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mirror = cadmpeg_ir::transform::Transform::affine([[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]]).unwrap();
+    let leaves = |o: &Occurrence| !matches!(o.parent, OccurrenceParent::Root {});
+    let root = |o: &Occurrence| matches!(o.parent, OccurrenceParent::Root {});
+    for (which, refused) in [("every placement", &leaves as &dyn Fn(&Occurrence) -> bool), ("the assembly", &root)] {
+        let mut ir = neutral(&bytes, "cylinder_twice.step");
+        for o in ir.model.occurrences.iter_mut().filter(|o| refused(o)) {
+            o.transform = mirror;
+        }
+        let (imp, warnings) = by_records(&ir);
+        let imp = imp.unwrap();
+        assert!(imp.bodies.is_empty(), "{which} mirrored: {} bodies", imp.bodies.len());
+        assert!(warnings.iter().any(|w| w.contains("mirrors")), "{which} mirrored: {warnings:?}");
+    }
+}
+
+/// Occurrences that contain each other end the walk with a warning, never a hang or a panic.
+#[test]
+fn occurrences_in_a_cycle_end_with_a_warning() {
+    let bytes = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder_twice.step")).unwrap();
+    let mut ir = neutral(&bytes, "cylinder_twice.step");
+    let ids: Vec<_> = ir.model.occurrences.iter().map(|o| o.id.clone()).collect();
+    // Each occurrence's parent the next: a cycle with no root, and one with the root kept.
+    for (k, o) in ir.model.occurrences.iter_mut().enumerate() {
+        o.parent = cadmpeg_ir::products::OccurrenceParent::Occurrence { occurrence: ids[(k + 1) % ids.len()].clone() };
+    }
+    let records = cadir_records(&ir, "cycle", "test");
+    assert!(solidcraft_kernel::records_import(&records).is_ok());
+    if let Some(first) = ir.model.occurrences.first_mut() {
+        first.parent = cadmpeg_ir::products::OccurrenceParent::Root {};
+    }
+    let records = cadir_records(&ir, "cycle", "test");
+    assert!(solidcraft_kernel::records_import(&records).is_ok(), "{:?}", records.warnings);
 }

@@ -1,6 +1,46 @@
 use super::*;
 use serde_json::{Value, json};
 
+#[test]
+fn named_tool_refusals_keep_plugin_file_and_budget_details() {
+    let session = Session::default();
+    let mut m = manifest();
+    m["runtime"]["permissions"] = json!({"files":[{"name":"project","write":true}]});
+    let manifest = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap();
+    for file in [None, Some("part.smp")] {
+        for (error, structured) in [
+            (
+                HostError::PermissionDenied { permission: "files.write:project".into() },
+                json!({"plugin":"sample","grant":"files.write:project","approve":tools::APPROVE}),
+            ),
+            (
+                HostError::PermissionDenied { permission: format!("{}write-file", craft_plugin::READ_ENTRY_IMPORT) },
+                json!({"plugin":"sample","entry":"make","refused_import":"write-file"}),
+            ),
+            (
+                HostError::OverCeiling { limit: "memory_mib".into(), requested: 2048, allowed: 128 },
+                json!({"plugin":"sample","grant":"memory_mib","approve":tools::APPROVE}),
+            ),
+        ] {
+            let failure = PluginFailure { plugin: "Sample".into(), file: file.map(String::from), error };
+            let original = failure.text();
+            let explained = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure))).to_string();
+            assert!(explained.starts_with(&original), "{explained}");
+            assert_eq!(structured_tool_error(&explained), Some(structured), "{explained}");
+        }
+        let failure = PluginFailure {
+            plugin: "Sample".into(),
+            file: file.map(String::from),
+            error: HostError::Exhausted { limit: "fuel".into(), allowed: 100000 },
+        };
+        let original = failure.text();
+        let unchanged = explain_named(&session, &manifest, "make", EngineError::PluginFailed(Box::new(failure)));
+        assert!(matches!(unchanged, EngineError::PluginFailed(_)));
+        assert_eq!(unchanged.to_string(), original);
+    }
+    assert!(matches!(explain_named(&session, &manifest, "make", HostError::Cancelled.into()), EngineError::Plugin(HostError::Cancelled)));
+}
+
 fn manifest() -> Value {
     json!({"id":"sample", "name":"Sample", "version":"0.1.0", "capabilities":["commands@0.1"],"runtime":{
         "module":"plugin.wasm","entries":["make"],"commands":["solid.box"],
@@ -74,6 +114,7 @@ fn an_importer_checks_its_own_design_apart_from_the_open_one() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     let mut made = Session::new(solidcraft_doc::Document::new("Bracket"));
@@ -103,6 +144,7 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     let catalog = host.command_catalog();
@@ -140,6 +182,73 @@ fn every_built_command_is_reachable_and_sensitive_ones_need_their_group() {
     m["runtime"]["permissions"] = json!({"command_groups":["file"]});
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
 }
+/// A read-only folder must pass the importer's scope check without granting write access.
+/// Both the user's grant and the package's manifest must allow the intended operation.
+#[test]
+fn file_scopes_require_separate_read_and_write_approvals() {
+    let folder = solidcraft_io::vfs::temp_dir().join("sc-readonly-grant-18793");
+    let approved = vec![FileGrant { name: "data".into(), folder: folder.clone(), read: true, write: false }];
+    let manifest = vec![craft_plugin::FilePermission { name: "data".into(), read: true, write: false }];
+    assert_eq!(approved_file_folders(&approved, &manifest, false), vec![folder.clone()]);
+    assert!(approved_file_folders(&approved, &manifest, true).is_empty());
+
+    let mut more_grant = approved.clone();
+    more_grant[0].write = true;
+    assert!(approved_file_folders(&more_grant, &manifest, true).is_empty(), "a grant cannot override a read-only manifest");
+    let mut more_manifest = manifest.clone();
+    more_manifest[0].write = true;
+    assert!(approved_file_folders(&approved, &more_manifest, true).is_empty(), "the manifest cannot override read-only approval");
+    assert_eq!(approved_file_folders(&more_grant, &more_manifest, true), vec![folder.clone()]);
+    assert!(approved_file_folders(&more_grant, &[], false).is_empty(), "a missing manifest declaration confers no access");
+    assert!(approved_file_folders(&[], &more_manifest, false).is_empty(), "a missing user grant confers no access");
+
+    for command in ["file.insert_step", "file.insert_mesh", "file.insert_gerber", "file.gerber_files", "sketch.insert_dxf", "sketch.insert_svg"] {
+        assert!(input_only_command(command), "{command} reads its supplied file");
+    }
+    for command in ["file.save_as", "file.copy", "file.move", "file.trash", "file.export_step", "doc.open", "doc.recovery_discard", "library.export"]
+    {
+        assert!(!input_only_command(command), "{command} needs the stricter write-capable scope");
+    }
+}
+
+/// Importing a STEP may change the design without modifying its source file. Even after this
+/// read-only command succeeds, write commands must not gain access to the same folder.
+#[test]
+fn read_only_folder_allows_step_insert_but_refuses_file_writes() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-read-scope-{}", std::process::id()));
+    let read = root.join("read");
+    std::fs::create_dir_all(&read).unwrap();
+    let source_path = read.join("source.step");
+    let mut source = Session::default();
+    source.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
+    source.execute("file.export_step", &json!({"path":source_path})).unwrap();
+    assert!(source_path.is_file());
+
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: Vec::new(),
+        file_read_folders: vec![read.clone()],
+        evaluation: None,
+    };
+    host.begin_transaction().unwrap();
+    let inserted = host.run_command("file.insert_step", &json!({"path":source_path}));
+    assert!(inserted.is_ok(), "read-only insert should work: {inserted:?}");
+    let output = read.join("forbidden.sc");
+    let write = host.run_command("file.save_as", &json!({"path":output}));
+    assert!(matches!(&write, Err(HostError::CommandFailed { .. })), "the same grant cannot save files: {write:?}");
+    assert!(!output.exists(), "no file was written under a read-only grant");
+    let output = read.join("forbidden.stl");
+    assert!(host.run_command("file.export_stl", &json!({"path":output})).is_err(), "export also requires write authority");
+    assert!(!output.exists());
+    assert!(source_path.exists(), "the imported STEP is unchanged");
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees_only_its_folders() {
     let root = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-plugin-groups-{}", std::process::id()));
@@ -152,6 +261,7 @@ fn a_sensitive_command_is_refused_unless_granted_and_a_granted_file_command_sees
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     host.begin_transaction().unwrap();
@@ -183,6 +293,7 @@ fn a_command_in_another_spelling_is_never_granted() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     host.begin_transaction().unwrap();
@@ -228,6 +339,16 @@ fn disabled_ids_survive_scratch_and_new_design() {
     assert!(s.disabled_plugins.contains("sample"));
 }
 
+#[test]
+fn a_failure_message_shows_braces_in_a_file_name_or_reason_as_they_are() {
+    let failure = |file: &str, reason: &str| PluginFailure {
+        plugin: "Sample".into(),
+        file: Some(file.into()),
+        error: craft_plugin::HostError::Unsupported { reason: reason.into() },
+    };
+    assert_eq!(failure("part{reason}.smp", "no {file} solids").text(), "Sample does not support part{reason}.smp: no {file} solids");
+    assert_eq!(failure("part.smp", "no solids").text(), "Sample does not support part.smp: no solids");
+}
 #[cfg(all(feature = "plugins", any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod native {
     use super::*;
@@ -587,7 +708,8 @@ mod native {
         assert_eq!(entry["commands"], json!(["sample.make"]));
         assert_eq!(entry["manifest"]["runtime"]["entries"][0]["input_schema"], schema);
         let description = s.execute("engine.describe", &json!({"command":"sample.make"})).unwrap();
-        assert_eq!(description["input"]["properties"]["params"], schema);
+        assert_eq!(description["input"]["properties"]["params"], craft_plugin::strict_input_schema(&schema), "as strict as the check");
+        assert_eq!(description["tool"]["input"], description["input"]["properties"]["params"], "the tool takes the inputs alone");
         assert_eq!(description["effect"], "edit");
         assert!(s.doc.features.is_empty());
         assert!(s.execute("sample.make", &json!({"params":{}})).is_err());
@@ -716,6 +838,7 @@ mod native {
                     view: None,
                     groups: BTreeSet::new(),
                     file_folders: Vec::new(),
+                    file_read_folders: Vec::new(),
                     evaluation: None,
                 };
                 solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([f.0.clone()])), || {
@@ -805,6 +928,19 @@ mod native {
         std::fs::write(f.0.join("sample/tests/big.bin"), vec![0u8; 17 << 20]).unwrap();
         std::fs::write(f.0.join("sample/.notes"), b"x").unwrap();
         assert_eq!(check(&mut s, &f.path())["problems"], json!([]));
+        // A name the .zip reader refuses is refused in a folder too (Windows cannot even make it).
+        #[cfg(unix)]
+        {
+            std::fs::write(f.0.join("sample/notes\\old.txt"), b"x").unwrap();
+            let reply = check(&mut s, &f.path());
+            assert_eq!((reply["ok"].as_bool(), reply["problems"][0]["field"].as_str()), (Some(false), Some("package")), "{reply}");
+            assert!(reply["problems"][0]["problem"].as_str().unwrap().contains("backslash"), "{reply}");
+            std::fs::remove_file(f.0.join("sample/notes\\old.txt")).unwrap();
+            std::fs::create_dir_all(f.0.join("sample/notes")).unwrap();
+            std::fs::write(f.0.join("sample/notes/old.txt"), b"x").unwrap();
+            assert_eq!(check(&mut s, &f.path())["problems"], json!([]), "a plain path in a folder is fine");
+            std::fs::remove_dir_all(f.0.join("sample/notes")).unwrap();
+        }
         let fields = |reply: &Value| -> Vec<(String, String)> {
             reply["problems"]
                 .as_array()
@@ -965,6 +1101,177 @@ mod native {
         assert_eq!(direct["result"], namespaced["result"]);
     }
 
+    /// A component whose entry runs `storage.set` with `{"document":{"teeth":24}}`.
+    fn storage_component() -> Vec<u8> {
+        let template = component_template();
+        let code = "      call $box\n      call $box\n";
+        let data = "    (data (;2;) (i32.const 2048) \"file.export\")\n";
+        assert!(template.contains(code) && template.contains(data));
+        let source = template.replacen(code, "      i32.const 2560 i32.const 11 i32.const 3072 i32.const 25 i32.const 0 call $run\n", 1).replacen(
+            data,
+            &format!(
+                "{data}    (data (i32.const 2560) \"storage.set\")\n    (data (i32.const 3072) \"{{\\22document\\22:{{\\22teeth\\22:24}}}}\")\n"
+            ),
+            1,
+        );
+        wat::parse_str(source).unwrap()
+    }
+    #[test]
+    fn a_plugin_keeps_its_data_in_the_design_as_one_undo_step_and_a_newer_formats_data_stays_read_only() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("sample/plugin.wasm"), storage_component()).unwrap();
+        let write_manifest = |data_format: u32| {
+            let mut m = manifest();
+            m["capabilities"] = json!(["commands@0.1", "storage@0.1"]);
+            m["runtime"]["commands"] = json!(["storage.set"]);
+            m["runtime"]["data_format"] = json!(data_format);
+            std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        };
+        write_manifest(2);
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = Some(f.0.join("installed"));
+        f.run(&mut s).unwrap();
+        assert_eq!(s.undo.len(), 1);
+        let data = s.execute("storage.get", &json!({"plugin":"sample"})).unwrap();
+        assert_eq!((data["document"].clone(), data["format"].clone(), data["name"].clone()), (json!({"teeth":24}), json!(2), json!("Sample")));
+        // Only the plugin's own run writes it.
+        assert!(s.execute("storage.set", &json!({"document":{}})).unwrap_err().to_string().contains("only a plugin changes its data"));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.plugin_data.is_empty(), "one undo takes the data out again");
+        s.execute("edit.redo", &json!({})).unwrap();
+        let saved = s.doc.to_json();
+
+        // Opened where the plugin is not installed, the data is kept and says whose it is.
+        let mut elsewhere = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        elsewhere.plugin_state.plugins_dir = Some(f.0.join("installed"));
+        let listed = elsewhere.execute("storage.list", &json!({})).unwrap();
+        assert_eq!(listed["plugins"][0]["status"], "missing");
+        assert_eq!((listed["plugins"][0]["name"].clone(), listed["plugins"][0]["read_only"].clone()), (json!("Sample"), json!(true)));
+        assert_eq!(elsewhere.doc.plugin_data, s.doc.plugin_data);
+
+        // An older version of the plugin reads the data but never changes it.
+        write_manifest(1);
+        let before = s.doc.to_json();
+        let refused = f.run(&mut s).unwrap_err().to_string();
+        assert!(refused.contains("saved by a newer version of the plugin (data format 2; this version writes 1)"), "{refused}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, 1));
+        assert_eq!(s.execute("storage.list", &json!({})).unwrap()["plugins"][0]["status"], "older");
+        // A newer one migrates it: the next write saves it in the newer format.
+        write_manifest(3);
+        assert_eq!(s.execute("storage.list", &json!({})).unwrap()["plugins"][0]["status"], "migrate");
+        f.run(&mut s).unwrap();
+        assert_eq!(s.execute("storage.get", &json!({"plugin":"sample"})).unwrap()["format"], 3);
+        // storage commands need the capability.
+        let mut m = manifest();
+        m["runtime"]["commands"] = json!(["storage.get"]);
+        let refused = parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").unwrap_err().to_string();
+        assert!(refused.contains("needs the storage capability"), "{refused}");
+    }
+    #[test]
+    fn named_calls_preserve_input_pass_through() {
+        let f = Fixture::new("i32.const 0 i32.const 0 i32.store i32.const 4 local.get 2 i32.store i32.const 8 local.get 3 i32.store");
+        let mut m = manifest();
+        m["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"size":{"type":"number","minimum":1}}}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap()["approval"].clone();
+        for inputs in [json!({"colour":"red"}), json!({"size":0}), json!({"size":"large"})] {
+            let result = s.execute("sample.make", &json!({"approval":approval,"params":inputs})).unwrap();
+            assert_eq!(result["result"], inputs, "direct calls pass inputs to the plugin unchanged");
+        }
+    }
+
+    #[test]
+    fn a_scoped_fresh_session_lists_installed_commands_before_tools_are_requested() {
+        let f = Fixture::new("call $box");
+        let mut installed = Session::default();
+        f.install(&mut installed, json!({}));
+        let mut s = Session::default();
+        s.plugin_state.plugins_dir = installed.plugin_state.plugins_dir.clone();
+        assert!(s.plugin_state.packages.is_empty());
+        solidcraft_io::vfs::scoped(Some(Default::default()), || {
+            let listed = s.execute("plugin.list", &json!({})).unwrap();
+            assert_eq!(listed["plugins"].as_array().unwrap().len(), 1, "{listed}");
+            assert_eq!(listed["plugins"][0]["commands"], json!(["sample.make"]));
+        });
+    }
+
+    /// An installed plugin's entry is a tool: listed with its plugin's text and strict inputs,
+    /// called by name as one undo step, gone from the listing once turned off or removed.
+    #[test]
+    fn installed_entries_are_tools_that_run_as_one_undo_step_until_removed() {
+        let f = Fixture::new("call $box");
+        let mut m = manifest();
+        m["description"] = json!("Makes a box");
+        m["runtime"]["entries"] = json!([{"name":"make","input_schema":{"type":"object","properties":{"size":{"type":"number"}}}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        let listed = s.execute("plugin.tools", &json!({})).unwrap();
+        let tools = listed["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 1, "{listed}");
+        let tool = &tools[0];
+        assert_eq!(
+            (&tool["name"], &tool["kind"], &tool["plugin"], &tool["effect"]),
+            (&json!("sample.make"), &json!("command"), &json!("sample"), &json!("edit"))
+        );
+        assert_eq!((&tool["plugin_name"], &tool["description"]), (&json!("Sample"), &json!("Makes a box")));
+        assert_eq!(tool["input_schema"]["additionalProperties"], false, "the listed inputs are as strict as the check");
+        assert!(tool.get("approval").is_none(), "a listing reads no component");
+        let approval = s.execute("plugin.tools", &json!({"name":"sample.make"})).unwrap()["tools"][0]["approval"].clone();
+        assert!(approval.is_string());
+        let undo = s.undo.len();
+        s.execute("sample.make", &json!({"approval": approval, "params": {"size": 2}})).unwrap();
+        assert_eq!((s.doc.features.len(), s.undo.len()), (1, undo + 1));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.features.is_empty(), "one undo takes back the whole call");
+        s.disabled_plugins.insert("sample".into());
+        assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"], json!([]));
+        s.disabled_plugins.clear();
+        assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"].as_array().unwrap().len(), 1);
+        s.execute("plugin.remove", &json!({"id":"sample"})).unwrap();
+        assert_eq!(s.execute("plugin.tools", &json!({})).unwrap()["tools"], json!([]));
+    }
+
+    /// Called by name, a refusal says which grant the plugin lacks and how to approve it, or
+    /// which host import a read entry was refused; nothing waits for a dialog.
+    #[test]
+    fn a_named_call_names_the_missing_grant_and_the_refused_import() {
+        let f = Fixture::new("call $box");
+        std::fs::write(f.0.join("sample/plugin.wasm"), file_component(true)).unwrap();
+        let mut m = manifest();
+        m["runtime"]["permissions"] = json!({"files":[{"name":"project","read":true,"write":true}]});
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        let secret = f.0.join("secret.txt");
+        std::fs::write(&secret, b"original").unwrap();
+        let mut s = Session::default();
+        f.install(&mut s, json!({}));
+        let call = |s: &mut Session| {
+            let approval = s.execute("plugin.tools", &json!({"name":"sample.make"})).unwrap()["tools"][0]["approval"].clone();
+            s.execute("sample.make", &json!({"approval": approval})).unwrap_err().to_string()
+        };
+        let missing = call(&mut s);
+        assert_eq!(
+            structured_tool_error(&missing),
+            Some(json!({"plugin":"sample","grant":"files.write:project","approve":tools::APPROVE})),
+            "{missing}"
+        );
+        // A read entry with the folder granted for writing is still refused the write.
+        m["runtime"]["entries"] = json!([{"name":"make","effect":"read","input_schema":{"type":"object"}}]);
+        std::fs::write(f.0.join("sample/plugin.json"), m.to_string()).unwrap();
+        f.install(&mut s, json!({"folders":[{"name":"project","path":f.0,"read":true,"write":true}]}));
+        let refused = call(&mut s);
+        assert_eq!(structured_tool_error(&refused), Some(json!({"plugin":"sample","entry":"make","refused_import":"write-file"})), "{refused}");
+        assert_eq!(std::fs::read(&secret).unwrap(), b"original");
+        assert!(s.doc.features.is_empty());
+        // The same entry run by a person (plugin.run, not by name) is refused the same write.
+        let installed = s.plugin_state.packages["sample"].clone();
+        let approval = read_package(&installed).unwrap().approval;
+        let direct = s.execute("plugin.run", &json!({"path":installed,"approval":approval,"entry":"make"})).unwrap_err();
+        assert!(direct.to_string().contains("write-file"), "{direct}");
+        assert_eq!(std::fs::read(&secret).unwrap(), b"original");
+    }
+
     #[test]
     fn metadata_only_discovery_preserves_the_explicitly_inspected_path() {
         let f = Fixture::new("call $box");
@@ -1070,6 +1377,7 @@ fn command_effects_are_explicit_and_independent_of_undo() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     let catalog = host.command_catalog();
@@ -1103,6 +1411,7 @@ fn granted_roots_allow_hidden_ancestors_but_exclude_hidden_descendants() {
         view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
+        file_read_folders: Vec::new(),
         evaluation: None,
     };
     solidcraft_io::vfs::scoped(None, || {
@@ -1178,6 +1487,38 @@ mod importers {
         assert!(s.execute("doc.open", &json!({"path": stl})).map_or(true, |r| r.get("loss_report").is_none()));
         assert_eq!(s.execute("file.import", &json!({"path": stl})).unwrap()["format"], "smp.convert");
         assert_eq!(s.execute("doc.open", &json!({"path": stl, "format": "smp.convert"})).unwrap()["bodies"], 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An agent that may use only the folder of its input file still sees and uses the installed
+    /// importer: the registry is the app's, not the agent's (finding 2 of a new-user walk). The
+    /// input file itself is still checked, and refused with the path named.
+    #[test]
+    fn an_agent_with_only_its_input_folder_lists_describes_and_uses_an_installed_importer() {
+        let (mut s, root) = installed("scoped", &[("smp", &["smp"], false)]);
+        let file = put(&root, "bracket.smp", &design());
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let outside = elsewhere.join("other.smp");
+        std::fs::write(&outside, design()).unwrap();
+        let scope = solidcraft_io::vfs::PathScope::new([root.join("files")]);
+        solidcraft_io::vfs::scoped(Some(scope), || {
+            let listed = s.execute("plugin.list", &json!({})).unwrap();
+            assert_eq!(listed["importers"][0]["id"], "smp.convert", "{listed}");
+            assert_eq!(listed["plugins"].as_array().unwrap().len(), 1, "{listed}");
+            let tools = s.execute("plugin.tools", &json!({})).unwrap();
+            assert_eq!(tools["tools"][0]["name"], "smp.convert", "{tools}");
+            // Described as the tool tools/list gives (finding 9): its schema, not "unknown command".
+            let described = s.execute("engine.describe", &json!({"command":"smp.convert"})).unwrap();
+            assert_eq!(described["kind"], "importer");
+            assert_eq!(described["tool"]["input"], tools["tools"][0]["input_schema"]);
+            assert_eq!(described["input"]["required"], json!(["path"]));
+            assert_eq!(s.execute("doc.open", &json!({"path": file})).unwrap()["format"], "smp.convert");
+            assert_eq!(s.execute("file.import", &json!({"path": file, "format": "smp.convert"})).unwrap()["bodies"], 1);
+            let refused = s.execute("file.import", &json!({"path": outside.to_string_lossy(), "format": "smp.convert"})).unwrap_err().to_string();
+            assert!(refused.contains("other.smp") || refused.contains("elsewhere"), "the input file's own refusal names it: {refused}");
+            assert!(!refused.contains("no installed"), "{refused}");
+        });
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1667,6 +2008,179 @@ mod install_zip {
         assert!(!root.join("plugins").exists() && !root.join("evil").exists());
         let _ = std::fs::remove_dir_all(root);
     }
+}
+
+/// The `storage.*` commands as a running plugin sees them: its own data only, files in parts, a
+/// merge patch, and the size limits.
+#[test]
+fn storage_commands_reach_only_the_running_plugins_data_within_its_limits() {
+    let mut s = Session::default();
+    let other = solidcraft_doc::canvas::base64_encode(br#"{"kept":true}"#);
+    s.doc_mut().plugin_data.insert("other-tool/data.json".into(), other.clone().into());
+    s.plugin_state.storage_caller =
+        Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1.4.0".into(), data_format: 3 });
+    s.execute("storage.set", &json!({"document":{"teeth":24,"module":{"value":2,"unit":"mm"}}})).unwrap();
+    s.execute("storage.patch", &json!({"patch":{"teeth":30,"module":{"unit":null},"name":"spur"}})).unwrap();
+    let data = s.execute("storage.get", &json!({})).unwrap();
+    assert_eq!(data["document"], json!({"teeth":30,"module":{"value":2},"name":"spur"}));
+    assert_eq!((data["format"].clone(), data["plugin_format"].clone(), data["read_only"].clone()), (json!(3), json!(3), json!(false)));
+    let meta = solidcraft_doc::plugin_data::meta(&s.doc.plugin_data, "gears");
+    assert_eq!((meta.name.as_str(), meta.plugin_version.as_str(), meta.format), ("Gears", "1.4.0", 3));
+    // A plugin reads only its own data, and never changes another's.
+    assert!(s.execute("storage.get", &json!({"plugin":"other-tool"})).unwrap_err().to_string().contains("only its own data"));
+    assert_eq!(s.doc.plugin_data["other-tool/data.json"].as_ref(), other.as_str());
+
+    // A file written in parts reads back in parts; writing it as a cache file moves it.
+    let b64 = solidcraft_doc::canvas::base64_encode;
+    s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[1, 2, 3])})).unwrap();
+    let grown = s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[4, 5]),"append":true})).unwrap();
+    assert_eq!(grown["bytes"], 5);
+    let part = s.execute("storage.get_blob", &json!({"name":"paths/op3.bin","offset":3,"len":10})).unwrap();
+    assert_eq!((part["data"].clone(), part["bytes"].clone()), (json!(b64(&[4, 5])), json!(5)));
+    s.execute("storage.put_blob", &json!({"name":"paths/op3.bin","data":b64(&[9]),"cache":true})).unwrap();
+    let blobs = s.execute("storage.get", &json!({})).unwrap()["blobs"].clone();
+    assert_eq!(blobs, json!([{"name":"paths/op3.bin","cache":true,"bytes":1}]));
+    assert!(s.execute("storage.put_blob", &json!({"name":"../escape","data":""})).is_err());
+    assert!(s.execute("storage.put_blob", &json!({"name":"x","data":"not base64!"})).is_err());
+    assert_eq!(s.execute("storage.delete_blob", &json!({"name":"paths/op3.bin"})).unwrap()["deleted"], true);
+    assert_eq!(s.execute("storage.delete_blob", &json!({"name":"paths/op3.bin"})).unwrap()["deleted"], false);
+    // Over the main document's limit, nothing changes.
+    let before = s.doc.plugin_data.clone();
+    let big = "x".repeat(storage::MAX_DOCUMENT_BYTES);
+    assert!(s.execute("storage.set", &json!({"document":big})).unwrap_err().to_string().contains("16 MiB"));
+    assert_eq!(s.doc.plugin_data, before);
+    // Outside a plugin's run, reads name the plugin and writes are refused.
+    s.plugin_state.storage_caller = None;
+    assert!(s.execute("storage.get", &json!({})).is_err());
+    assert_eq!(s.execute("storage.get", &json!({"plugin":"other-tool"})).unwrap()["document"], json!({"kept":true}));
+    assert!(s.execute("storage.patch", &json!({"patch":{}})).is_err());
+}
+
+#[test]
+fn storage_large_main_document_reads_in_bounded_parts() {
+    let mut s = Session::default();
+    s.plugin_state.storage_caller = Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 });
+    let empty = s.execute("storage.get", &json!({"offset":0})).unwrap();
+    assert_eq!(empty["bytes"], 0);
+    assert_eq!(empty["data"], "");
+    let first = "x".repeat(600 * 1024);
+    // Include multibyte JSON text: chunks are bytes, not independently parsed JSON strings.
+    let second = "é".repeat(300 * 1024);
+    s.execute("storage.patch", &json!({"patch":{"first":first}})).unwrap();
+    s.execute("storage.patch", &json!({"patch":{"second":second}})).unwrap();
+    let expected = json!({"first":first,"second":second});
+    assert!(serde_json::to_vec(&expected).unwrap().len() > 1 << 20);
+    let mut joined = Vec::new();
+    for _ in 0..3 {
+        let part = s.execute("storage.get", &json!({"offset":joined.len()})).unwrap();
+        assert!(serde_json::to_vec(&part).unwrap().len() <= 1 << 20);
+        assert_eq!(part["offset"], joined.len());
+        assert!(part.get("document").is_none());
+        let decoded = solidcraft_doc::canvas::base64_decode(part["data"].as_str().unwrap()).unwrap();
+        assert!(!decoded.is_empty());
+        joined.extend_from_slice(&decoded);
+        if joined.len() as u64 == part["bytes"].as_u64().unwrap() {
+            break;
+        }
+    }
+    assert_eq!(serde_json::from_slice::<Value>(&joined).unwrap(), expected);
+    let prefix = s.execute("storage.get", &json!({"len":5})).unwrap();
+    assert_eq!(prefix["offset"], 0);
+    assert_eq!(solidcraft_doc::canvas::base64_decode(prefix["data"].as_str().unwrap()).unwrap(), joined[..5]);
+    let past_end = s.execute("storage.get", &json!({"offset":u64::MAX})).unwrap();
+    assert_eq!(past_end["data"], "");
+    for len in [0, storage::MAX_READ_BYTES + 1] {
+        assert!(s.execute("storage.get", &json!({"len":len})).is_err());
+    }
+    assert!(s.execute("storage.get", &json!({"plugin":"other-tool","offset":0})).is_err());
+    s.plugin_state.storage_caller = None;
+    assert!(s.execute("storage.get", &json!({"offset":0})).is_err());
+    let outside = s.execute("storage.get", &json!({"plugin":"gears","offset":0,"len":5})).unwrap();
+    assert_eq!(outside["data"], prefix["data"]);
+}
+
+// Fill a quota with shared encoded chunks, keeping boundary tests small in memory.
+fn fill_storage_bytes(s: &mut Session, bytes: u64) {
+    let chunk = 1 << 20;
+    let encoded: std::sync::Arc<str> = solidcraft_doc::canvas::base64_encode(&vec![0; chunk]).into();
+    for i in 0..bytes / chunk as u64 {
+        s.doc_mut().plugin_data.insert(format!("filler/blobs/{i}"), encoded.clone());
+    }
+    let tail = bytes as usize % chunk;
+    if tail != 0 {
+        s.doc_mut().plugin_data.insert("filler/blobs/tail".into(), solidcraft_doc::canvas::base64_encode(&vec![0; tail]).into());
+    }
+}
+
+#[test]
+fn storage_append_preserves_bytes_when_changing_categories() {
+    let mut s = Session::default();
+    s.plugin_state.storage_caller = Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 });
+    let b64 = solidcraft_doc::canvas::base64_encode;
+    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[1,2,3]),"cache":true})).unwrap();
+    for (cache, next, expected) in [(false, 4, vec![1, 2, 3, 4]), (true, 5, vec![1, 2, 3, 4, 5])] {
+        s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[next]),"append":true,"cache":cache})).unwrap();
+        let read = s.execute("storage.get_blob", &json!({"name":"tool.bin"})).unwrap();
+        assert_eq!(read["data"], b64(&expected));
+        assert_eq!(read["cache"], cache);
+        assert_eq!(s.doc.plugin_data.len(), 2);
+    }
+}
+
+#[test]
+fn storage_category_replacement_uses_final_file_and_byte_counts() {
+    let mut s = Session::default();
+    s.plugin_state.storage_caller = Some(storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 });
+    let b64 = solidcraft_doc::canvas::base64_encode;
+    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[1,2,3])})).unwrap();
+    for i in 0..solidcraft_doc::plugin_data::MAX_FILES - 2 {
+        s.doc_mut().plugin_data.insert(format!("filler/blobs/{i}"), "".into());
+    }
+    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[4]),"cache":true})).unwrap();
+    assert_eq!(s.doc.plugin_data.len(), solidcraft_doc::plugin_data::MAX_FILES);
+    assert_eq!(storage::blob(&s.doc, "gears", "cache/tool.bin"), Some(vec![4]));
+    let before = s.doc.plugin_data.clone();
+    assert!(s.execute("storage.put_blob", &json!({"name":"new.bin","data":""})).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+
+    s.doc_mut().plugin_data.retain(|key, _| key.starts_with("gears/"));
+    let meta_bytes = storage::blob(&s.doc, "gears", "meta.json").unwrap().len() as u64;
+    fill_storage_bytes(&mut s, storage::MAX_TOTAL_BYTES - meta_bytes - 1);
+    // The final total is exactly the limit even though the destination is new.
+    s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[5])})).unwrap();
+    let before = s.doc.plugin_data.clone();
+    assert!(s.execute("storage.put_blob", &json!({"name":"tool.bin","data":b64(&[6,7]),"cache":true})).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+    assert_eq!(storage::blob(&s.doc, "gears", "blobs/tool.bin"), Some(vec![5]));
+}
+
+#[test]
+fn storage_total_counts_metadata_creation_growth_and_shrinkage_before_mutation() {
+    let mut s = Session::default();
+    let mut caller = storage::StorageCaller { id: "gears".into(), name: "Gears".into(), version: "1".into(), data_format: 1 };
+    fill_storage_bytes(&mut s, storage::MAX_TOTAL_BYTES - 1);
+    let before = s.doc.plugin_data.clone();
+    assert!(storage::put(&mut s, &caller, "blobs/tool.bin", Some(&[1])).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+
+    s.doc_mut().plugin_data.clear();
+    storage::put(&mut s, &caller, "blobs/tool.bin", Some(&[1])).unwrap();
+    let meta_bytes = storage::blob(&s.doc, "gears", "meta.json").unwrap().len() as u64;
+    fill_storage_bytes(&mut s, storage::MAX_TOTAL_BYTES - meta_bytes - 1);
+    let before = s.doc.plugin_data.clone();
+    caller.name.push('s');
+    assert!(storage::put(&mut s, &caller, "blobs/tool.bin", Some(&[1])).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+    // Even deleting a payload must account for a metadata increase larger than that payload.
+    caller.name.push('s');
+    assert!(storage::put(&mut s, &caller, "blobs/tool.bin", None).is_err());
+    assert_eq!(s.doc.plugin_data, before);
+    // A shrinking payload can pay for a growing metadata record.
+    caller.name.pop();
+    storage::put(&mut s, &caller, "blobs/tool.bin", None).unwrap();
+    // A shrinking metadata record can pay for a growing payload.
+    caller.name = "Gears".into();
+    storage::put(&mut s, &caller, "blobs/tool.bin", Some(&[2])).unwrap();
 }
 
 /// The grant store the desktop app, the command line and headless MCP share.

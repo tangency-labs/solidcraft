@@ -189,11 +189,38 @@ fn a_component_for_another_api_version_is_refused_in_plain_words() {
         matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0")) && reason.contains("update")),
         "{failure}"
     );
-    assert_eq!((app.value, app.commits, app.rollbacks), (0, 0, 1));
+    // Refused while the component is checked, before any transaction starts: nothing to roll back.
+    assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (0, 0, 0, 0));
     // A component naming two versions the host runs is refused too: it was built against neither.
     let source = format!("{prefix}\n(import \"{package}/storage@0.1.0\" (instance))\n)");
     let failure = run(&mut App::default(), &manifest(), &wat::parse_str(source).unwrap(), "make", &json!({})).unwrap_err();
     assert!(matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains("mixes")), "{failure}");
+    // A version named inside an exported instance counts like one at the top.
+    let source = format!(
+        "{prefix}\n(instance $inner)\n(instance $compat (export \"{package}/storage@0.9.0\" (instance $inner)))\n(export \"compat\" (instance $compat))\n)"
+    );
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert!(
+        matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0"))),
+        "{failure}"
+    );
+    // Past 4096 exports the scan stops with an error rather than leave the rest unread.
+    let exports: String = (0..4097).map(|i| format!("(export \"e{i}\" (instance $inner))\n")).collect();
+    let source = format!("{prefix}\n(instance $inner)\n{exports})");
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert_eq!(failure, HostError::LimitExceeded { limit: "plugin export interface count or depth".into() });
+    // Below our scan budget, Wasmtime's own instance-index limit still becomes a host limit.
+    let exports: String = (0..1001).map(|i| format!("(export \"e{i}\" (instance $inner))\n")).collect();
+    let source = format!("{prefix}\n(instance $inner)\n{exports})");
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert!(matches!(&failure, HostError::LimitExceeded { limit } if limit.contains("instances count exceeds limit")), "{failure}");
+    // An unsupported interface after those aliases is refused before validation hits that limit.
+    let source = format!("{prefix}\n(instance $inner)\n{exports}(export \"{package}/storage@0.9.0\" (instance $inner)))");
+    let failure = crate::check_component(&manifest(), &wat::parse_str(source).unwrap()).unwrap_err();
+    assert!(
+        matches!(&failure, HostError::UnsupportedCapability { reason, .. } if reason.contains(&format!("built against {package}@0.9.0")) && reason.contains("update")),
+        "{failure}"
+    );
 }
 #[test]
 fn a_command_plugin_built_against_wit_0_1_still_runs() {
@@ -462,6 +489,27 @@ fn component_file_writes_are_denied_without_a_host_grant() {
         assert_eq!(failure, HostError::PermissionDenied { permission: "files.write:project".into() });
         assert_eq!((app.value, app.begins, app.commits, app.rollbacks), (7, 1, 0, 1));
     }
+}
+
+#[test]
+fn a_read_entry_is_refused_write_file_even_with_a_write_grant() {
+    let root = std::env::temp_dir().join(format!("craft-plugin-read-entry-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    let target = root.join("secret.txt");
+    std::fs::write(&target, b"original").unwrap();
+    let mut manifest = manifest();
+    let runtime = manifest.runtime.as_mut().unwrap();
+    runtime.entries[0].effect = Effect::Read;
+    runtime.permissions.files.push(FilePermission { name: "project".into(), read: true, write: true });
+    let mut app = App { grants: vec![FileGrant { name: "project".into(), folder: root.clone(), read: true, write: true }], ..Default::default() };
+    // The guest ignores the refusal and returns normally: the call still fails, naming the import.
+    let failure = run(&mut app, &manifest, &files_component(true, true), "make", &json!({})).unwrap_err();
+    assert_eq!(failure, craft_plugin::read_entry_refusal("write-file"));
+    assert!(failure.to_string().contains("write-file"), "{failure}");
+    assert_eq!(std::fs::read(&target).unwrap(), b"original");
+    assert_eq!((app.commits, app.rollbacks), (0, 1));
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1, "nothing is staged");
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
