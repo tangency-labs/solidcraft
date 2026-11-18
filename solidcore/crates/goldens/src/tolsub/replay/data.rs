@@ -385,7 +385,7 @@ pub(super) static DATA: &[Row] = &[
     (
         "blend.fillet_executive_p3",
         "stubs4-delete-edge-bottle-e8-r0.1",
-        0x4ce483897bc5149d,
+        0x873a5aae229b2334,
         1,
         &[
             (0, false, 25, 0x3ef71d7309f3641b, 0x3ee942308b035f45),
