@@ -12,6 +12,11 @@ impl Folder {
     pub(crate) fn new(name: &str) -> Folder {
         let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        // macOS's temp folder is under /var, a link to /private/var, and opening a design names
+        // it by its real path; the folder's own real path keeps the two alike. (Windows'
+        // canonical form is a `\\?\` path, so only macOS.)
+        #[cfg(target_os = "macos")]
+        let dir = dir.canonicalize().unwrap_or(dir);
         Folder(dir)
     }
     pub(crate) fn path(&self, file: &str) -> String {
