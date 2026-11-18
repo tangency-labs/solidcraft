@@ -830,6 +830,44 @@ fn find_in_browser_reaches_a_folded_body() {
     assert!(crate::scenario::handle_at("fold:Bodies").is_none(), "with no folder row");
 }
 
+/// #18509: Find in Browser on a placed component picked in the view (the selection filter picks
+/// components) opens the placements above its row and no further, selects it and scrolls to it.
+/// While rows start closed, the next find closes them again. A path the design lacks, or one with
+/// something other than a number in it, finds nothing.
+#[test]
+fn find_in_browser_reveals_a_placed_component_picked_in_the_view() {
+    let mut h = Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    let outer = h.app.run("component.create", json!({"name":"Frame"})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Deep"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.app.ui.show_browser = true;
+    let (path, key) = (vec![outer, inner], format!("o:{outer}/{inner}"));
+    h.frames(2);
+    let row = |path: &str| crate::scenario::handle_at(&format!("row:occurrence:{path}"));
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "the placement starts closed away");
+    h.app.session.selection = vec![Sel::Occurrence { path: path.clone() }];
+    let find = context_menu::items(&h.app, &Target::Viewport).into_iter().find(|i| i.id == "ui.findBrowser").unwrap();
+    context_menu::run_item(&mut h.app, &find, egui::Pos2::ZERO);
+    assert_eq!(h.app.session.selection, [Sel::Occurrence { path: path.clone() }]);
+    assert!(crate::browser::is_open(&h.app, &format!("o:{outer}"), false), "the placement above opens");
+    assert!(!crate::browser::is_open(&h.app, &key, false), "the found placement itself stays closed");
+    h.frames(2);
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "the placement's row is drawn");
+    assert!(h.app.tree.reveal_row.is_none(), "and scrolled to");
+    // A body found next closes the rows this find opened (they start closed).
+    h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[0,40,0],"body_name":"Loose"})).unwrap();
+    crate::browser::reveal_body(&mut h.app, "Loose");
+    assert!(!crate::browser::is_open(&h.app, &format!("o:{outer}"), false), "the last find's rows close again");
+    for bad in [json!({"occurrence": [outer, 999_999]}), json!({"occurrence": [outer, "x", inner]}), json!({"occurrence": "o:1"})] {
+        let before = (h.app.tree.expanded.clone(), h.app.session.selection.clone());
+        context_menu::run_item(&mut h.app, &crate::ui_kit::Item::action("ui.findBrowser", "", "").with(bad.clone()), egui::Pos2::ZERO);
+        assert_eq!((h.app.tree.expanded.clone(), h.app.session.selection.clone()), before, "{bad}");
+        assert!(h.app.tree.reveal_row.is_none(), "{bad}");
+    }
+}
+
 /// #4217: while a placement's Bodies folder is folded away, the placement's menu takes the
 /// folder's items it lacks: Create Components from Bodies (the folder's bodies) and, with several
 /// of them selected, Group Selected. With the folder drawn they stay on the folder's own menu.

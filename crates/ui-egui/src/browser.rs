@@ -102,16 +102,77 @@ struct Found {
 /// what is inside it.
 fn find_in_tree(app: &mut SolveApp, body: &str) {
     app.tree.reveal_feature = None;
+    app.tree.reveal_row = None;
     app.tree.reveal = Some(body.to_string());
     remember_reveal_source(app, body);
     let Some((component, source, path)) = body_placement(app, body) else { return };
+    open_found_rows(app, component, &path, "bodies", &source);
+    app.tree.found = Some(Found { body: body.to_string(), path, selection: app.session.selection.clone() });
+}
+
+/// Find in Browser for a sketch (#18509): select it, show the Browser and open the rows down to
+/// its row in its component's Sketches folder (under the component's first placement), as
+/// [`reveal_body`] does for a body.
+pub(crate) fn reveal_sketch(app: &mut SolveApp, id: u64) {
+    let Some(component) = app.session.doc.feature(id).filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.component) else {
+        return;
+    };
+    // The design's own sketches are in no placement.
+    let path = app.session.doc.first_path(component);
+    if component != 0 && path.is_empty() {
+        return;
+    }
+    let key = if path.is_empty() { format!("s:{id}") } else { format!("{}/s:{id}", occurrence_key(&path)) };
+    reveal_row(app, RowReveal { key, sel: Sel::Feature { id } });
+    open_found_rows(app, component, &path, "sketches", &id.to_string());
+}
+
+/// Find in Browser for a placed component (#18509): select it, show the Browser and open the
+/// placements above its row.
+pub(crate) fn reveal_placement(app: &mut SolveApp, path: &[u64]) {
+    let Some((_, above)) = path.split_last().filter(|_| app.session.occurrence_placement(path).is_ok()) else { return };
+    reveal_row(app, RowReveal { key: occurrence_key(path), sel: Sel::Occurrence { path: path.to_vec() } });
+    let rows = path_rows(app, above);
+    open_rows(app, rows);
+}
+
+/// Select what a row stands for and show the Browser, which scrolls to the row once it draws it.
+fn reveal_row(app: &mut SolveApp, target: RowReveal) {
+    sync_reveals(app);
+    let _ = app.run("select.set", json!({ "items": [target.sel] }));
+    app.ui.show_browser = true;
+    reveal_shared_panel(app, "browser");
+    app.tree.reveal = None;
+    app.tree.reveal_source = None;
+    app.tree.reveal_feature = None;
+    app.tree.found = None;
+    app.tree.reveal_row = Some(target);
+}
+
+/// The design's row and the placements down to `path`, each with whether it starts open.
+fn path_rows(app: &SolveApp, path: &[u64]) -> Vec<(String, bool)> {
     let start_open = rows_start_open(app);
-    // A body of the design itself is in no placement: its folder is the design's (`c0`).
-    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     let mut rows = vec![("c0".to_string(), true)];
     rows.extend((1..=path.len()).map(|depth| (occurrence_key(&path[..depth]), start_open)));
-    rows.push((format!("{scope}/bodies"), start_open));
-    rows.extend(group_chain(app, component, "bodies", &source).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
+    rows
+}
+
+/// Open the rows down to an item of `folder` (keyed `key` there) in the placement at `path` of
+/// `component`: the design, the placements, the folder and the groups around the item.
+fn open_found_rows(app: &mut SolveApp, component: u64, path: &[u64], folder: &str, key: &str) {
+    let start_open = rows_start_open(app);
+    // An item of the design itself is in no placement: its folder is the design's (`c0`).
+    let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
+    let mut rows = path_rows(app, path);
+    rows.push((format!("{scope}/{folder}"), folder_starts_open(app, folder)));
+    rows.extend(group_chain(app, component, folder, key).into_iter().map(|id| (format!("{scope}/g{id}"), start_open)));
+    open_rows(app, rows);
+}
+
+/// Open `rows` (key, starts open). While the rows start closed, the rows the last find opened
+/// close again, unless they were opened or closed by hand since or are among these.
+fn open_rows(app: &mut SolveApp, rows: Vec<(String, bool)>) {
+    let start_open = rows_start_open(app);
     // Rows that start open stay open after a find, as they always have: only rows that start
     // closed close again at the next one.
     if start_open {
@@ -131,7 +192,6 @@ fn find_in_tree(app: &mut SolveApp, body: &str) {
         }
     }
     app.tree.found_rows = opened;
-    app.tree.found = Some(Found { body: body.to_string(), path, selection: app.session.selection.clone() });
 }
 
 /// Another design is shown: the rows the last Find in Browser opened were that design's, and the
@@ -220,6 +280,8 @@ pub struct TreeState {
     found: Option<Found>,
     /// A native feature to reveal in its placed component's Features folder (Find in Timeline).
     pub(super) reveal_feature: Option<features::Reveal>,
+    /// Scroll to this row, a sketch's or a placement's: Find in Browser on one (#18509).
+    reveal_row: Option<RowReveal>,
     /// The search above the tree (#1413).
     pub search: crate::browser_search::BrowserSearch,
     /// The Redefine Sketch Plane panel (sketch id).
@@ -287,6 +349,24 @@ struct BodyRevealSource {
     creator: u64,
 }
 
+/// A row Find in Browser scrolls to, other than a body's: its tree key and what it stands for.
+#[derive(Clone, Debug)]
+struct RowReveal {
+    key: String,
+    sel: Sel,
+}
+
+impl RowReveal {
+    /// What the row stands for is no longer in the design.
+    fn gone(&self, session: &solidcraft_engine::Session) -> bool {
+        match &self.sel {
+            Sel::Occurrence { path } => session.occurrence_placement(path).is_err(),
+            Sel::Feature { id } => session.doc.feature(*id).is_none(),
+            _ => true,
+        }
+    }
+}
+
 /// Pending presentation requests parked alongside their session in a bounded document slot.
 /// Pointer input (`view_pick`) deliberately never travels with the slot.
 #[derive(Default)]
@@ -295,6 +375,7 @@ pub(crate) struct PendingReveals {
     body: Option<String>,
     source: Option<BodyRevealSource>,
     feature: Option<features::Reveal>,
+    row: Option<RowReveal>,
     timeline: Option<u64>,
 }
 
@@ -302,6 +383,7 @@ pub(crate) fn discard_reveals(app: &mut SolveApp) {
     app.tree.reveal = None;
     app.tree.reveal_source = None;
     app.tree.reveal_feature = None;
+    app.tree.reveal_row = None;
     app.tree.timeline_reveal = None;
     app.tree.view_pick = None;
     app.tree.reveal_session = Some(app.session.uid);
@@ -327,6 +409,7 @@ pub(crate) fn take_reveals(app: &mut SolveApp) -> PendingReveals {
         body: app.tree.reveal.take(),
         source: app.tree.reveal_source.take(),
         feature: app.tree.reveal_feature.take(),
+        row: app.tree.reveal_row.take(),
         timeline: app.tree.timeline_reveal.take(),
     }
 }
@@ -337,6 +420,7 @@ pub(crate) fn restore_reveals(app: &mut SolveApp, pending: PendingReveals) {
         app.tree.reveal = pending.body;
         app.tree.reveal_source = pending.source;
         app.tree.reveal_feature = pending.feature;
+        app.tree.reveal_row = pending.row;
         app.tree.timeline_reveal = pending.timeline;
     }
 }
@@ -1717,6 +1801,27 @@ pub(crate) fn prune_reveals(app: &mut SolveApp) {
     if app.tree.timeline_reveal.is_some_and(|id| app.session.doc.feature(id).is_none()) {
         app.tree.timeline_reveal = None;
     }
+    if app.tree.reveal_row.as_ref().is_some_and(|row| row.gone(&app.session)) {
+        app.tree.reveal_row = None;
+    }
+}
+
+/// The row other than a body's that Find in Browser scrolls to, while the Browser shows its own rows.
+fn row_reveal(app: &SolveApp) -> Option<&str> {
+    app.tree.reveal_row.as_ref().filter(|_| app.tree.content.browser_presentation()).map(|row| row.key.as_str())
+}
+
+/// Scroll a row Find in Browser found to where Preferences › Layout places it (#18509): whether
+/// it is in view.
+fn scroll_found(app: &SolveApp, ui: &egui::Ui, rect: Rect) -> bool {
+    crate::semantic_content::scroll_acknowledged_at(ui, rect, app.preferences.browser_find_place.align())
+}
+
+/// Row `key` is drawn at `rect`: while Find in Browser waits for it, scroll to it until it is in view.
+fn acknowledge_row(app: &mut SolveApp, ui: &egui::Ui, key: &str, rect: Option<Rect>) {
+    if row_reveal(app) == Some(key) && rect.is_some_and(|rect| scroll_found(app, ui, rect)) {
+        app.tree.reveal_row = None;
+    }
 }
 
 fn component_name(app: &SolveApp, id: u64) -> String {
@@ -2004,6 +2109,7 @@ fn occurrence_rows_inner(
     if r.drag_started {
         rows.drag_with(vec![node_id(key)], Some(Payload::new(PlacementDrag { path: path.to_vec(), component: placement.component })));
     }
+    acknowledge_row(app, rows.ui(), key, r.rect);
     if r.fold {
         toggle(app, key, true);
     }
@@ -3031,6 +3137,12 @@ fn bodies_folded(app: &SolveApp, comp: u64, scope: &str, bodies: usize) -> bool 
     }
 }
 
+/// Whether a component's folder starts open: as the rows do ([`rows_start_open`]), except that
+/// with the History in the Browser the sketches are there too, so their folder starts closed.
+fn folder_starts_open(app: &SolveApp, folder: &str) -> bool {
+    rows_start_open(app) && !(folder == "sketches" && app.preferences.history_in_browser)
+}
+
 /// A component's folder: its row, its groups and its items. Rows are drag sources; items,
 /// groups and the folder row are drop targets (reorder, into a group, out of groups).
 #[allow(clippy::too_many_arguments)]
@@ -3059,9 +3171,7 @@ fn folder_rows_at(
     // eyes, hover and drops do its jobs. It is always open, as nothing could open it again.
     let render = crate::render_workspace::active(app);
     let folded = !render && folder == "bodies" && bodies_folded(app, comp, prefix, data.count);
-    let start_open = rows_start_open(app);
-    // With the history in the browser the sketches are there too: their folder starts closed.
-    let folder_start_open = start_open && !(folder == "sketches" && app.preferences.history_in_browser);
+    let folder_start_open = folder_starts_open(app, folder);
     let open = folded || is_open(app, key, folder_start_open);
     let inner = if folded { depth } else { depth + 1 };
     // The folder's eye is its own: hiding it hides its items without changing theirs, and its
@@ -3365,7 +3475,8 @@ fn entry_row(
     let pattern_key = e.patterns.as_deref().filter(|_| unsearched);
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
-    let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
+    let revealed = (folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b)))
+        || row_reveal(app) == Some(e.row_key.as_str());
     // Features under bodies (#11945): the body row folds open on the features that built it.
     let built_key = (folder == "bodies"
         && unsearched
@@ -3476,10 +3587,11 @@ fn entry_row(
     if folder == "bodies"
         && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b))
         && let Some(rect) = r.rect
-        && crate::semantic_content::scroll_acknowledged(rows.ui(), rect)
+        && scroll_found(app, rows.ui(), rect)
     {
         app.tree.reveal = None;
     }
+    acknowledge_row(app, rows.ui(), &e.row_key, r.rect);
     if r.eye {
         set_visible(app, folder, &[e], !visible);
     }

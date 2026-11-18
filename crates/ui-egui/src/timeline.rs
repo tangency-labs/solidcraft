@@ -1413,8 +1413,12 @@ impl history_bar::Contents for BarSteps<'_> {
 
 /// Select what a feature made, so the browser shows it. While the browser's rows start closed
 /// (Preferences › Layout), its first body is also found there, as Find in Browser on a body
-/// does: the rows down to it open.
+/// does: the rows down to it open. A sketch is found in its Sketches folder (#18509).
 pub(crate) fn find_in_browser(app: &mut SolveApp, id: u64) {
+    if app.session.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })) {
+        crate::browser::reveal_sketch(app, id);
+        return;
+    }
     let st = crate::open_meshing::session_world(&app.session);
     let bodies: Vec<String> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
     let items: Vec<serde_json::Value> = if bodies.is_empty() {

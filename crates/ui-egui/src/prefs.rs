@@ -989,6 +989,37 @@ impl BodiesFolders {
     }
 }
 
+/// Where Find in Browser scrolls the row it finds in the Browser (#18509).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserFindPlace {
+    /// The Browser's middle, as before. Also what a value this version doesn't know reads as
+    /// (`lenient`).
+    #[default]
+    Centre,
+    Top,
+}
+
+impl BrowserFindPlace {
+    pub const ALL: [Self; 2] = [Self::Centre, Self::Top];
+
+    /// Its stored value and its name in the Preferences (a message id).
+    pub fn ids(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Centre => ("centre", "prefs.browser_find_place_centre"),
+            Self::Top => ("top", "prefs.browser_find_place_top"),
+        }
+    }
+
+    /// The scroll's alignment of the found row.
+    pub fn align(self) -> egui::Align {
+        match self {
+            Self::Centre => egui::Align::Center,
+            Self::Top => egui::Align::TOP,
+        }
+    }
+}
+
 // The stored fields, their defaults, page resets and simple form controls share this table.
 // Omitted pages keep fields such as grid_follows_view and added agents when restoring defaults.
 // Accepted control-channel ranges may differ from slider ranges (look_at_speed).
@@ -1597,6 +1628,10 @@ preference_settings! {
     /// again after each edit. Off by default: folders start open, placements as "Components start
     /// open" says, and a pick in the 3D view opens the Browser down to its body (#3005), as before.
     browser_rows_start_closed: bool = false, PAGE_LAYOUT;
+    /// Where Find in Browser scrolls the row it finds: the Browser's centre (the default, as
+    /// before) or its top (#18509). A pick in the view that the Browser follows (#3005) finds its
+    /// body the same way.
+    browser_find_place: BrowserFindPlace = BrowserFindPlace::Centre, PAGE_LAYOUT;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
@@ -7271,6 +7306,7 @@ mod tests {
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
             ("browser_components_open", json!(true), PAGE_LAYOUT),
             ("browser_rows_start_closed", json!(true), PAGE_LAYOUT),
+            ("browser_find_place", json!("top"), PAGE_LAYOUT),
             ("quick_measure", json!(true), PAGE_GRAPHICS),
             ("origin_plane_names", json!("top_front_right"), PAGE_DESIGN),
             ("direct_interaction", json!(true), PAGE_TOOLS),
@@ -7727,6 +7763,41 @@ mod tests {
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Never, "Cancel puts it back");
         defaults(&mut h.app, PAGE_LAYOUT);
         assert_eq!(h.app.preferences.browser_bodies_folders, BodiesFolders::Several, "Interface's Restore Defaults");
+    }
+
+    /// Find in Browser places the row (#18509): at the centre by default, also in preferences saved
+    /// before the setting existed. Each value is saved and read back; `ui.prefs` refuses anything
+    /// else and changes nothing, and saved preferences read such a value as the centre and keep the
+    /// rest. The Layout page's segments set it, Cancel puts it back and the page's Restore Defaults
+    /// resets it.
+    #[test]
+    fn browser_find_place_is_saved_restored_and_refuses_unknown_values() {
+        use super::*;
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.preferences.browser_find_place, BrowserFindPlace::Centre);
+        assert_eq!(lenient(&json!({"theme": "light"})).browser_find_place, BrowserFindPlace::Centre, "saved before it existed");
+        for (place, id) in [(BrowserFindPlace::Top, "top"), (BrowserFindPlace::Centre, "centre")] {
+            assert_eq!(control(&mut h.app, &json!({"browser_find_place": id})).unwrap()["browser_find_place"], id);
+            let mut restored = SolveApp::new(Default::default(), Default::default());
+            restored.load_prefs(&h.app.prefs());
+            assert_eq!(restored.preferences.browser_find_place, place, "{id}");
+        }
+        for bad in [json!("middle"), json!("Top"), json!("center"), json!(""), json!(1), json!(null), json!(["top"])] {
+            let before = h.app.preferences.clone();
+            assert!(set(&mut h.app, &json!({"browser_find_place": bad})).is_err(), "{bad}");
+            assert_eq!(h.app.preferences, before, "{bad}: a refused value changes nothing");
+            let saved = lenient(&json!({"browser_find_place": bad, "theme": "light"}));
+            assert_eq!((saved.browser_find_place, saved.theme.as_str()), (BrowserFindPlace::Centre, "light"), "{bad}");
+        }
+        h.call("ui.prefs", json!({"open": "Layout"}));
+        reveal_preference(&mut h, "prefs:browser_find_place:top");
+        h.step(&json!({"click": {"handle": "prefs:browser_find_place:top"}})).unwrap();
+        assert_eq!(h.app.preferences.browser_find_place, BrowserFindPlace::Top);
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert_eq!(h.app.preferences.browser_find_place, BrowserFindPlace::Centre, "Cancel puts it back");
+        h.app.preferences.browser_find_place = BrowserFindPlace::Top;
+        defaults(&mut h.app, PAGE_LAYOUT);
+        assert_eq!(h.app.preferences.browser_find_place, BrowserFindPlace::Centre, "Layout's Restore Defaults");
     }
 
     /// Design tabs: views shown as tabs, sub-tabs for sheets, sketches and Render, and reusing a

@@ -56,7 +56,10 @@ view.
   start, as before). **Preferences › Layout › Browser rows start closed** (off by default) starts
   folders closed too, and components whatever **Components start open** says: they open with
   their arrow, **Expand All**, or **Find in Browser** on a body, face or edge in the view, which
-  opens just the rows down to that body, and a pick in the view leaves the Browser as it is. Rows
+  opens just the rows down to that body, and a pick in the view leaves the Browser as it is.
+  **Find in Browser** sits near the top of the view's right-click menu, for a body, face or edge,
+  a placed component and a sketch; **Preferences › Layout › Find in Browser**
+  chooses whether the row it finds comes to the middle of the Browser (the default) or its top. Rows
   drag into groups and other components. **Preferences ›
   Interface › Bodies folders** sets when a component's bodies sit in a Bodies folder of their own:
   **Several bodies only** (the default) lists a component's body straight under it when it has

@@ -460,6 +460,24 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target(&format!("dialog:{}:Several bodies only", app.tr("prefs.bodies_folders")), rect);
                     }
                 });
+                // Where Find in Browser scrolls the row it finds (#18509).
+                let row = app.tr("prefs.browser_find_place");
+                ui_kit::settings_row_help(ui, row, app.tr("prefs.browser_find_place_note"), |ui| {
+                    let places = BrowserFindPlace::ALL;
+                    let labels: Vec<_> = places.iter().map(|p| app.tr(p.ids().1)).collect();
+                    let mut selected = places.iter().position(|p| *p == app.preferences.browser_find_place).unwrap_or(0);
+                    if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(place) = places.get(selected)
+                    {
+                        app.preferences.browser_find_place = *place;
+                    }
+                });
+                for place in BrowserFindPlace::ALL {
+                    let (id, label) = place.ids();
+                    if let Some(at) = crate::scenario::handle_at(&format!("dialog:{row}:{}", app.tr(label))) {
+                        crate::scenario::publish_handle(&format!("prefs:browser_find_place:{id}"), at);
+                    }
+                }
             });
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
