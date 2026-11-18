@@ -70,10 +70,13 @@
 //! and C both lie on B's face (E imprinted by the coincident pair, C classified inside
 //! it).
 //!
-//! A true crossing is not dropped: where A crosses B along C (or leaves it past the
-//! tolerance before C), A's points between E and C reach farther from B than the
-//! tolerance, the bound exceeds it, and the curve stays (the unit test
-//! `a_strip_off_b_keeps_its_curve`).
+//! A crossing past the tolerance is not dropped: where A's points between E and C reach
+//! farther from B than the tolerance (A passes to B's other side there, or leaves B before
+//! C), the bound exceeds it and the curve stays (the unit test
+//! `a_strip_off_b_keeps_its_curve`). A that changes sides of B along C but stays within
+//! the tolerance of B between E and C is dropped: at that tolerance A meets B along E and
+//! the strip, the case of a face that leaves B tangentially at C, and A past C is off B
+//! either way.
 //!
 //! Nothing is made on the B-rep while deciding: the trims used must already exist (the
 //! curve's classification against A makes them), so a refused candidate leaves the
@@ -102,7 +105,7 @@ use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::nurbs_crv::{is_clamped, nonempty_spans};
 use crate::nurbs::srf_basic::Surface as NurbSurface;
-use crate::nurbs::srf_tool::p1::{extract_patch, PATCH_SNAP_TOL};
+use crate::nurbs::srf_tool::p1::{extract_patch, snap as patch_snap};
 use crate::query::curve_surface_gap::curve_uv_gap_bound;
 use crate::surface::implicit::{off_surface_bound, AnalyticSupport, Implicit};
 use crate::surface::surface::p2::SurfaceKind;
@@ -579,7 +582,14 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
         // the strip over each slab of the boxes' span in u, enclosed
         // (`extra` is the test seam's perturbation, 0 outside the unit tests)
         let (extra, _) = perturbed(k);
-        if !strip_within(&a.net, a.net_bound + extra[0], &boxes, implicit, self.tol) {
+        if !strip_within(
+            k,
+            &a.net,
+            a.net_bound + extra[0],
+            &boxes,
+            implicit,
+            self.tol,
+        )? {
             return Ok(false);
         }
 
@@ -863,27 +873,33 @@ fn slabs(boxes: &[Extent2d]) -> Vec<Option<Extent2d>> {
 /// (`implicit`) over the strip whose boundary lies in `boxes` (module docs): every slab
 /// of [`slabs`] meets a box, lies in the net's domain, and its sub-patch's
 /// [`off_surface_bound`] plus `net_bound`, grown by its roundings, is within `tol`.
+///
+/// # Errors
+///
+/// Cancellation (polled at every slab).
 fn strip_within(
+    k: &Kernel,
     net: &BSplineSurface,
     net_bound: f64,
     boxes: &[Extent2d],
     implicit: &Implicit,
     tol: f64,
-) -> bool {
+) -> Result<bool> {
     let mut worst = 0.0_f64;
     for slab in slabs(boxes) {
+        k.check_cancelled(OP)?;
         let Some(slab) = slab else {
-            return false;
+            return Ok(false);
         };
         let Some(bound) = net_bound_over(net, &slab, implicit) else {
-            return false;
+            return Ok(false);
         };
         worst = worst.max(bound);
         if !within(worst, net_bound, tol) {
-            return false;
+            return Ok(false);
         }
     }
-    true
+    Ok(true)
 }
 
 /// An edge E the strip may lie beside: E, its end V away from the curve's end at E,
@@ -921,7 +937,9 @@ fn net_of(surface: &Surface) -> Option<(BSplineSurface, f64)> {
         // (a procedural blend always has its definition)
         None => return None,
     };
-    (bound >= 0.0 && bound.is_finite()).then(|| (net.clone(), bound))
+    // (`clone` fixes the knots up, which can move near-coincident ones: the net certified
+    // is the face's own)
+    (bound >= 0.0 && bound.is_finite()).then(|| (net.clone_exact(), bound))
 }
 
 /// The bound of [`off_surface_bound`] over the net's sub-patch covering `box_uv`: the
@@ -1002,11 +1020,13 @@ fn net_cut(net: &BSplineSurface, box_uv: &Extent2d) -> Option<NurbSurface> {
     // the widened box in the domain (as `copy_sub_patch` cut it), each end snapped as
     // `extract_patch` snaps it: to the first of the knots `0..r` within its tolerance
     let snap = |x: f64, knots: &[f64]| {
-        knots
-            .iter()
-            .take(knots.len().saturating_sub(1))
-            .find(|&&kn| x > kn - PATCH_SNAP_TOL && x < kn + PATCH_SNAP_TOL)
-            .map_or(x, |&kn| kn)
+        let mut x = x;
+        let _ = patch_snap(
+            &mut x,
+            knots,
+            isize::try_from(knots.len().saturating_sub(1)).unwrap_or(0),
+        );
+        x
     };
     let rect = Rectangle {
         ul: snap((lo.x - widen(lo.x)).max(n_lo.x), uk),
@@ -1035,14 +1055,21 @@ fn net_cut(net: &BSplineSurface, box_uv: &Extent2d) -> Option<NurbSurface> {
 
 /// Whether a clamped knot vector of degree `d` with last control index `n` can be cut:
 /// `n + d + 2` finite, non-decreasing knots ([`nonempty_spans`], as `srf_piece_box`
-/// requires) whose first and last values occur exactly `d + 1` times.
+/// requires) whose first and last values occur exactly `d + 1` times, and whose range
+/// `last − first` is finite (each insertion's ratio divides by a span: an overflowing one
+/// is infinite and the ratio 0, a cut that is not the net's).
 fn knots_fit_a_cut(knots: &[f64], d: usize, n: usize) -> bool {
     let len = knots.len();
     let simple_end = |i: Option<usize>| {
         i.and_then(|i| Some((knots.get(i)?, knots.get(i.checked_add(1)?)?)))
             .is_some_and(|(a, b)| a < b)
     };
+    let finite_range = match (knots.first(), knots.last()) {
+        (Some(&a), Some(&b)) => (b - a).is_finite(),
+        _ => false,
+    };
     nonempty_spans(knots, d, n).is_some()
+        && finite_range
         && simple_end(Some(d))
         && simple_end(len.checked_sub(d.saturating_add(2)))
 }
@@ -1304,6 +1331,7 @@ mod tests {
             origin: crate::math::Vec3::ZERO,
             normal: crate::math::Vec3::Z,
         };
+        let k = Kernel::default();
         // (the strip's boundary: its sides x = 0 and x = 0.5, and its ends y = 0 and 1)
         let boxes = [
             Extent2d::from_bounds(0.0, 0.0, 0.0, 1.0),
@@ -1311,11 +1339,23 @@ mod tests {
             Extent2d::from_bounds(0.0, 0.0, 0.5, 0.0),
             Extent2d::from_bounds(0.0, 1.0, 0.5, 1.0),
         ];
-        assert!(strip_within(&net, 0.0, &boxes, &plane, 1e-3));
-        assert!(!strip_within(&net, 0.0, &boxes, &plane, 4e-4));
-        assert!(!strip_within(&net, 6e-4, &boxes, &plane, 1e-3));
+        assert!(strip_within(&k, &net, 0.0, &boxes, &plane, 1e-3).unwrap());
+        assert!(!strip_within(&k, &net, 0.0, &boxes, &plane, 4e-4).unwrap());
+        assert!(!strip_within(&k, &net, 6e-4, &boxes, &plane, 1e-3).unwrap());
         // (not a number is not within)
-        assert!(!strip_within(&net, f64::NAN, &boxes, &plane, 1e-3));
+        assert!(!strip_within(&k, &net, f64::NAN, &boxes, &plane, 1e-3).unwrap());
+        // (a cancelled kernel stops the enclosure: cancellation, not a refusal)
+        let token = crate::kernel::CancelToken::default();
+        token.cancel();
+        let cancelled = Kernel {
+            cancel: Some(token),
+            ..Kernel::default()
+        };
+        let stopped = strip_within(&cancelled, &net, 0.0, &boxes, &plane, 1e-3);
+        assert!(
+            matches!(&stopped, Err(e) if e.is_cancelled()),
+            "{stopped:?}"
+        );
     }
 
     /// [`gap_within`] of a line 4.2e-7 above the plane patch z = 0 at the UV line under it
@@ -1672,6 +1712,57 @@ mod tests {
             }
             assert_eq!(net_bound_over(&net, &bx, &plane), None);
         }
+    }
+
+    /// A net whose knot range overflows (`(−1e308)⁴, −1, 0, 1, 2, (1e308)⁴`): finite,
+    /// non-decreasing and clamped, but `1e308 − (−1e308)` is infinite, so an insertion's
+    /// ratio over the end span is 0 and the cut is not the net. The net is not cut.
+    #[test]
+    fn a_net_whose_knot_range_overflows_is_not_cut() {
+        let (lo, hi) = (-1e308, 1e308);
+        let u = [lo, lo, lo, lo, -1.0, 0.0, 1.0, 2.0, hi, hi, hi, hi];
+        let z = [0.3, -0.2, 1.0, 0.5, -0.7, 0.2, 0.9, -0.4];
+        let (net, nurb) = cubic_net_with_u_knots(&u, &z);
+        let plane = Implicit::Plane {
+            origin: crate::math::Vec3::ZERO,
+            normal: crate::math::Vec3::Z,
+        };
+        for (a, b) in [(-0.5, 0.5), (-1.0, 2.0), (0.25, 0.75)] {
+            let bx = Extent2d::from_bounds(a, 0.0, b, 1.0);
+            if net_cut(&net, &bx).is_some() {
+                let bound = net_bound_over(&net, &bx, &plane);
+                let height = sampled_height(&nurb, &bx);
+                panic!("box [{a}, {b}]: a cut was given, bound {bound:?}, A sampled {height:e}");
+            }
+            assert_eq!(net_bound_over(&net, &bx, &plane), None);
+        }
+    }
+
+    /// The net certified is the face's own: a plain B-spline face whose knots are closer
+    /// than the knot fixup's 1.2e-8 (`0⁴, 0.2, 0.4, 0.4 + 5e-9, 0.8, 1⁴`) keeps them bit
+    /// for bit (`clone` would spread them, moving the surface without its bound).
+    #[test]
+    fn the_net_of_a_face_keeps_its_knots() {
+        let u = [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.2,
+            0.4,
+            0.4 + 5e-9,
+            0.8,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        ];
+        let z = [0.3, -0.2, 1.0, 0.5, -0.7, 0.2, 0.9, -0.4];
+        let (net, _) = cubic_net_with_u_knots(&u, &z);
+        let (of, bound) = net_of(&Surface::from(net)).unwrap();
+        assert_eq!(bound, 0.0);
+        let knots = of.gw_nurb().unwrap().u_knots();
+        assert_eq!(knots.get(..12), Some(&u[..]), "{knots:?}");
     }
 
     /// r7 B11: a start knot of multiplicity `p + 2` (`0⁵, 0.4, 0.6, 0.8, 1⁴`): the first

@@ -706,11 +706,11 @@ fn net_size(net: &crate::nurbs::srf_basic::Surface, origin: Vec3) -> Option<(f64
     for c in net.rows().flatten() {
         let wi = if c.w == NOW { 1.0 } else { c.w };
         let z = if c.z == NOZ { 0.0 } else { c.z };
-        let hm = c.x.abs().max(c.y.abs()).max(z.abs());
-        // (`max` would drop a value that is not a number)
-        if !(hm.is_finite() && wi.is_finite()) {
+        // (each coordinate checked: `max` would drop a value that is not a number)
+        if !(c.x.is_finite() && c.y.is_finite() && z.is_finite() && wi.is_finite()) {
             return None;
         }
+        let hm = c.x.abs().max(c.y.abs()).max(z.abs());
         hmax = hmax.max(hm);
         wmax = wmax.max(wi.abs());
     }
@@ -3022,6 +3022,15 @@ mod tests {
             normal: Vec3::X,
         };
         assert_eq!(off_surface_bound(&tiny, &tiny_plane, &tiny).unwrap(), None);
+        // (not a number in one coordinate of a source point outside the patch, the others
+        // finite: `max` would hide it, and the source's size would not be a number)
+        let mut source = patch.gw_nurb().unwrap().clone();
+        source.cpt_mut(0, 1).unwrap().x = f64::NAN;
+        let source = BSplineSurface::from_nurb(source, true);
+        assert_eq!(
+            off_surface_bound(&patch, &plane(1.5), &source).unwrap(),
+            None
+        );
         // (a surface that cannot be made from it is refused earlier, as well)
         if let Ok(nan_patch) = nan_patch {
             assert_eq!(
