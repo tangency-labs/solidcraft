@@ -803,13 +803,13 @@ fn export(app: App, slot: &str) -> (App, Result<Vec<u8>>) {
 }
 #[test]
 fn an_exporter_reads_the_design_through_read_commands_and_returns_the_file() {
-    let mut manifest = exporter_manifest();
-    crate::check_component(&manifest, &exporter_component()).unwrap();
+    let mut exporter = exporter_manifest();
+    crate::check_component(&exporter, &exporter_component()).unwrap();
     // The compatibility linker must not accept a legacy command world as an export slot.
-    assert!(crate::check_component(&manifest, &component_for("0.1.0", "call $box")).is_err());
+    assert!(crate::check_component(&exporter, &component_for("0.1.0", "call $box")).is_err());
     // Format slots may request a larger stack than commands, including during installation.
-    manifest.runtime.as_mut().unwrap().limits.stack_kib = Some(2048);
-    crate::check_component(&manifest, &exporter_component()).unwrap();
+    exporter.runtime.as_mut().unwrap().limits.stack_kib = Some(2048);
+    crate::check_component(&exporter, &exporter_component()).unwrap();
     let (app, file) = export(App::default(), "copy");
     let file: Value = serde_json::from_slice(&file.unwrap()).unwrap();
     assert_eq!(file, json!({"name":"Bracket","bodies":1}));
