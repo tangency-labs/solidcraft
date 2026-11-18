@@ -4964,6 +4964,48 @@ fn a_hex_rim_rounded_at_its_corner_rounds_radius_closes_on_six_spheres() {
         ],
         [8, 12, 6]
     );
+    // each surface of revolution is the ball about its own corner's axis point 1 below the
+    // top: a 7 x 7 grid over its face's domain lies on that unit sphere
+    let (k, _) = kernel_copy(&b);
+    let mut at_corner = Vec::new();
+    for &f in brep.face_list() {
+        let s = brep.face(f).unwrap().surface.as_ref().unwrap();
+        if surface_kind_name(s) != "surface-of-revolution" {
+            continue;
+        }
+        let d = solidcore::topology::face::uv_domain(&brep, f).unwrap();
+        let mid = s
+            .evaluate_point(
+                &k,
+                Point2::new(0.5 * (d.u_min() + d.u_max()), 0.5 * (d.v_min() + d.v_max())),
+            )
+            .unwrap();
+        let (i, c) = corners
+            .iter()
+            .enumerate()
+            .min_by(|a, b| {
+                let da = (a.1[0] - mid.x).hypot(a.1[1] - mid.y);
+                let db = (b.1[0] - mid.x).hypot(b.1[1] - mid.y);
+                da.total_cmp(&db)
+            })
+            .unwrap();
+        at_corner.push(i);
+        let centre = Vec3::new(c[0], c[1], top - 1.0);
+        for a in 0..7 {
+            for e in 0..7 {
+                let u = d.u_min() + (d.u_max() - d.u_min()) * f64::from(a) / 6.0;
+                let v = d.v_min() + (d.v_max() - d.v_min()) * f64::from(e) / 6.0;
+                let p = s.evaluate_point(&k, Point2::new(u, v)).unwrap();
+                let off = (p.distance(centre) - 1.0).abs();
+                assert!(
+                    off <= 1e-9,
+                    "face {f:?} at corner {i}: {off:e} off its ball"
+                );
+            }
+        }
+    }
+    at_corner.sort_unstable();
+    assert_eq!(at_corner, [0, 1, 2, 3, 4, 5], "one sphere at each corner");
     let removed = 6.0 * ((1.0 - PI / 4.0) * HEX_RC + PI / 18.0);
     let after = b.volume(1e-11).unwrap();
     assert!(
