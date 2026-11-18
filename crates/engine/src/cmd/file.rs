@@ -2341,8 +2341,14 @@ fn export_to(
         bytes
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let reply = ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), warnings, ..ExportResult::default() };
+    let skipped = skipped_from_warnings(&warnings);
+    let reply =
+        ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), skipped, warnings, ..ExportResult::default() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn skipped_from_warnings(warnings: &[String]) -> Vec<String> {
+    warnings.iter().filter_map(|w| w.split_once(": skipped: meshing failed").map(|(b, _)| b.to_string())).collect()
 }
 
 /// A picture of the part, drawn only for a format that has a place for it.
@@ -2395,11 +2401,13 @@ fn export_laid(
     quality: solidcraft_io::MeshQuality,
 ) -> Result<Value> {
     let (bytes, laid) = write_laid(s, path, format, bodies, parts, quality)?;
+    let skipped = skipped_from_warnings(&laid.warnings);
     let reply = ExportResult {
         path: path.to_string(),
         bytes,
         format: format!("{format:?}"),
         print_faces: laid.bodies,
+        skipped,
         warnings: laid.warnings,
         ..ExportResult::default()
     };

@@ -615,7 +615,7 @@ fn canvas_value_fields_grow_with_an_expression_up_to_three_times_their_width() {
                     ui.horizontal(|ui| {
                         let id = ui.scope_id().with(case);
                         rect = match case {
-                            "canvas" => canvas_value_field(ui, id, &mut value, false).rect,
+                            "canvas" => canvas_value_field(ui, id, &mut value, false, "").rect,
                             _ => placement_field(ui, id, &mut value, "").rect,
                         };
                     });
@@ -632,6 +632,38 @@ fn canvas_value_fields_grow_with_an_expression_up_to_three_times_their_width() {
         assert!(long > formula && long <= number * 3.0 + 1.0, "{case}: {long} capped at three times {number}");
         assert!((width("4") - number).abs() < 0.5, "{case}: and back to a number's width");
     }
+}
+
+/// A canvas value field's hint is shown in the field while it is empty, and not beside a value.
+#[test]
+fn a_canvas_value_field_shows_its_hint_only_while_it_is_empty() {
+    fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(t) => out.push(t.galley.job.text.clone()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let ctx = crate::test_support::context();
+    let painted = |value: &str, hint: &str| {
+        let mut value = value.to_owned();
+        let mut texts = Vec::new();
+        // An area paints nothing in the frame it is first sized in.
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::Area::new(egui::Id::unique("hinted")).fixed_pos(egui::pos2(10.0, 10.0)).show(ui.ctx(), |ui| {
+                    canvas_value_field(ui, ui.scope_id().with("canvas"), &mut value, false, hint);
+                });
+            });
+            output.textures_delta.clear();
+            texts.clear();
+            output.shapes.iter().for_each(|s| walk(&s.shape, &mut texts));
+        }
+        texts
+    };
+    assert!(painted("", "All").iter().any(|t| t == "All"), "an empty field shows its hint");
+    assert!(!painted("12 mm", "All").iter().any(|t| t == "All"), "a value takes the hint's place");
+    assert!(!painted("", "").iter().any(|t| t == "All"), "no hint, no text");
 }
 
 #[test]
@@ -880,7 +912,7 @@ fn a_right_click_on_every_kind_of_text_field_opens_its_menu() {
                 "expression" | "plain" => super::editor(ui, value, "", case == "expression").2.rect,
                 "cell" => cell_editor(ui, id, value, "", false).rect,
                 "placement" => placement_field(ui, id, value, "").rect,
-                "canvas" => canvas_value_field(ui, id, value, false).rect,
+                "canvas" => canvas_value_field(ui, id, value, false, "").rect,
                 "password" => password_field(ui, id, value, "").rect,
                 "multiline" => multiline_text_field(ui, "Text", id, value).rect,
                 "area" => text_area(ui, "Text", id, value, 3, 100).rect,
@@ -1032,7 +1064,7 @@ fn a_right_click_on_a_value_box_over_the_canvas_does_not_reach_the_canvas() {
         let ctx = ui.ctx().clone();
         let area = Container::new(&ctx, Surface::Canvas).area(egui::Id::unique("canvas_box_area"));
         area.fixed_pos(egui::pos2(60.0, 60.0)).order(egui::Order::Foreground).show(&ctx, |ui| {
-            field.set(canvas_value_field(ui, id, &mut value.borrow_mut(), false).rect);
+            field.set(canvas_value_field(ui, id, &mut value.borrow_mut(), false, "").rect);
         });
     };
     menu_frame(&ctx, vec![], &mut draw);

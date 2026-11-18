@@ -414,6 +414,14 @@ fn export_replies_match_the_output_schema() {
             assert!(reply.get("param_warnings").is_none(), "{p}: {reply}");
             assert!(conforms(schema, schema, &reply), "{p}: {reply} doesn't match {schema}");
         }
+        // #18780: ExportResult with skipped bodies conforms to schema
+        let reply_with_skipped = json!({
+            "path": at("k.3mf"),
+            "bytes": 1024,
+            "format": "ThreeMf",
+            "skipped": ["BrokenBody"]
+        });
+        assert!(conforms(schema, schema, &reply_with_skipped));
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

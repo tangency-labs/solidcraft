@@ -253,7 +253,7 @@ pub use tolerance_heal::{
     HealFailure, HealPreferenceForTests, ToleranceHeal, heal_preference_for_tests, heal_tolerance_defects, heals_tolerance_defects,
     set_heals_tolerance_defects,
 };
-pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
+pub use topo::{CylinderFace, cylinder_between_rims, cylinder_end_at, cylinder_face, cylinder_face_at, material_in_ring};
 pub use topo::{TopoCounts, merged_topology, seam_flags, whole_edge};
 pub use tspline::tspline_sheet;
 pub use validation::{CheckFailure, FailedTest, KeptCheck, Validation, check_kept, detach_kept, failing_check, validating};
