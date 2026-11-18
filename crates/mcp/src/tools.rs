@@ -414,7 +414,9 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              materials appearances); the result reports the component (id, component_name). Replaces the current design; insert into it \
              instead with the file.insert_step (STEP) or file.insert_mesh (mesh) commands. A STEP file from a system \
              that has Y up opens lying on its back: `up: \"y\"` turns its component a quarter turn about X (Y becomes Z). glTF is Y up, \
-             so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful.",
+             so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful. \
+             A file of another kind opens with an installed importer plugin that claims its extension (the `<plugin>.<entry>` tools \
+             titled \"Open .ext files with …\" list them).",
             object(
                 json!({
                     "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb or .gltf file"),
@@ -467,14 +469,16 @@ fn inspect_design_tool(opts: Options) -> Value {
          rolled back, error, warning, timing), bodies (volume, area, centre of mass, bounding box, face/edge/vertex \
          counts), sketches (curves with ids and coordinates, points, constraints, profiles, degrees of freedom, solve \
          status), assembly joints (what each origin is attached to: occurrence, the feature, face, edge or sketch \
-         curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one), \
+         curve its face names refer to, whether it resolves and why not; `execute` `joint.inspect {joint}` gives one; with \
+         `joints: \"summary\"` the rigid joints holding an imported assembly's contents are only counted, per component, in \
+         `joint_summary`), \
          the active sketch, selection and undo depth. On a large design keep the reply small with `timeline: \"summary\"` \
          (each feature as id, name, type, and error or warning only when it has one) or false, and `bodies: \"names\"` or false.",
             object(
                 json!({
                     "measure": {"type": "boolean", "description": "Measure bodies (default true)"},
                     "sketches": {"type": "boolean", "description": "Full sketch contents (default true; false = summary only)"},
-                    "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
+                    "joints": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": JOINTS_ARG},
                     "timeline": timeline_arg(),
                     "bodies": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": BODIES_ARG},
                 }),
@@ -492,7 +496,8 @@ fn inspect_design_tool(opts: Options) -> Value {
          plane, counts of points, curves, constraints and profiles, degrees of freedom, solve status); their full contents \
          (curves with ids and coordinates, points, constraints, profiles) only for the sketches named in `sketches`, or \
          all with `sketches: true` (large: a 720-point sketch is some 200 KB). Assembly joints: what each origin is \
-         attached to (`execute` `joint.inspect {joint}` gives one). On a large design keep the reply small with \
+         attached to (`execute` `joint.inspect {joint}` gives one; the rigid joints holding an imported assembly's \
+         contents are only counted, per component, in `joint_summary`). On a large design keep the reply small with \
          `timeline: \"summary\"` (each feature as id, name, type, and error or warning only when it has one) or false, and \
          `bodies: \"names\"` or false. Arguments: measure, sketches, bodies, timeline, joints.",
         object(
@@ -510,7 +515,7 @@ fn inspect_design_tool(opts: Options) -> Value {
                     "anyOf": [{"type": "array", "items": {"type": "string"}}, {"type": "boolean"}, {"type": "string"}],
                     "description": "Only these bodies, by name (default: all); or \"names\" (only the body names, nothing measured) or false (no bodies)",
                 },
-                "joints": {"type": "boolean", "description": "Joint definitions as joint.inspect gives them, when the design has joints (default true)"},
+                "joints": {"anyOf": [{"type": "boolean"}, {"type": "string"}], "description": JOINTS_ARG},
                 "timeline": timeline_arg(),
             }),
             &[],
@@ -559,6 +564,9 @@ fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
             .or_else(|| v.get("failed").and_then(|failed| failed.get("panel_error")).cloned())
     {
         r["structuredContent"] = json!({"panel_error":reason});
+    } else if is_error && let Some(refusal) = v.as_str().and_then(crate::plugin_tools::structured_error) {
+        // A plugin tool's missing grant or a read entry's refusal, as data.
+        r["structuredContent"] = json!({"plugin_error": refusal});
     }
     r
 }
@@ -574,6 +582,10 @@ pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Optio
     let empty = Map::new();
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
+        _ if crate::plugin_tools::is_plugin_tool(name) => match args.as_object() {
+            Some(args) => crate::plugin_tools::call(b, name, args),
+            None => Err(format!("`{name}`: arguments must be an object")),
+        },
         "screenshot" => return screenshot(b, a),
         "compare_picture" => return compare_picture(b, a, opts),
         "batch" => return batch(b, a, opts),
@@ -959,13 +971,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                     .collect();
                 d["sketches"] = Value::Array(full);
             }
-            // Joints: what each is attached to (left out when there are none, or the app is older).
-            if a.get("joints").and_then(Value::as_bool).unwrap_or(true)
-                && let Ok(j) = exec(b, "joint.inspect", json!({}))
-                && j["joints"].as_array().is_some_and(|v| !v.is_empty())
-            {
-                d["joints"] = j["joints"].clone();
-            }
+            design_joints(b, a, &mut d);
             Ok(d)
         }
         "pending" => pending(b),
@@ -1361,14 +1367,48 @@ fn inspect_design_compact(b: &mut dyn Backend, a: &Map<String, Value>) -> Result
             .collect();
         d["sketches"] = Value::Array(out);
     }
-    // Joints: what each is attached to (left out when there are none, or the app is older).
-    if a.get("joints").and_then(Value::as_bool).unwrap_or(true)
-        && let Ok(j) = exec(b, "joint.inspect", json!({}))
-        && j["joints"].as_array().is_some_and(|v| !v.is_empty())
-    {
+    design_joints(b, a, &mut d);
+    Ok(d)
+}
+
+/// `inspect_design`'s `joints` argument.
+const JOINTS_ARG: &str = "Joint definitions as joint.inspect gives them, when the design has joints: true (every joint, the default), \
+     \"summary\" (every joint but the rigid joints holding an imported assembly's contents, which `joint_summary` counts per \
+     component) or false (none)";
+
+/// `inspect_design`'s joints: what each is attached to. With `joints: "summary"`, not the rigid
+/// joints holding a component's contents together (an imported assembly has one per placement,
+/// hundreds of them), which `joint_summary` counts per component instead, with every joint by
+/// type; an app from before the filters gives every joint. Left out when there are none or
+/// `joints: false`.
+fn design_joints(b: &mut dyn Backend, a: &Map<String, Value>, d: &mut Value) {
+    let summary = match a.get("joints") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(false)) => return,
+        Some(Value::Bool(true)) => false,
+        Some(Value::String(v)) if v.trim().eq_ignore_ascii_case("summary") => true,
+        // Anything else: as the default, every joint.
+        Some(_) => false,
+    };
+    let filtered = if summary { exec(b, "joint.inspect", json!({"exclude_rigid_groups": true})).ok() } else { None };
+    let j = match filtered.map_or_else(|| exec(b, "joint.inspect", json!({})), Ok) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
+    if j["joints"].as_array().is_some_and(|v| !v.is_empty()) {
         d["joints"] = j["joints"].clone();
     }
-    Ok(d)
+    // Something left out: the summary says what and where. `kinds: []` keeps no rows. Without
+    // one, what was left out and why there is no summary, so the reply never hides joints.
+    if let Some(omitted) = j.get("omitted") {
+        d["joint_summary"] = match exec(b, "joint.list", json!({"summary": true, "quiet": true, "kinds": []})) {
+            Ok(list) => match list.get("summary") {
+                Some(summary) => summary.clone(),
+                None => json!({"omitted": omitted, "error": "joint.list gave no summary"}),
+            },
+            Err(e) => json!({"omitted": omitted, "error": e}),
+        };
+    }
 }
 
 /// The steps of the script file `batch` was given as `path` (`None`: it was given `commands`).

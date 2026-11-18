@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use solidcraft_doc::Document;
+use solidcraft_doc::{Document, drawing};
 
 use crate::{EngineError, Result, Session};
 
@@ -271,7 +271,7 @@ impl Drop for Autosaver {
 struct Writing {
     doc: Arc<Document>,
     visibility: crate::Visibility,
-    done: std::sync::mpsc::Receiver<Result<()>>,
+    done: std::sync::mpsc::Receiver<Result<Vec<String>>>,
 }
 
 /// What one autosave writes, taken from the session in an instant.
@@ -280,20 +280,18 @@ struct Snapshot {
     id: String,
     doc: Arc<Document>,
     visibility: crate::Visibility,
+    dimension_values: crate::DimensionValues,
     path: Option<String>,
 }
 
 impl Snapshot {
     /// Write the design and its entry (the slow part: serialising and compressing the design).
-    fn write(&self) -> Result<()> {
+    /// Returns a line for each drawing left out, as one breaking a rule would keep the copy from
+    /// opening ([`drawing::openable`]).
+    fn write(&self) -> Result<Vec<String>> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
-        let bytes = if self.visibility.is_empty() {
-            solidcraft_io::write_design_container(&self.doc)?
-        } else {
-            let mut doc = (*self.doc).clone();
-            doc.visibility = self.visibility.clone();
-            solidcraft_io::write_design_container(&doc)?
-        };
+        let (doc, left_out) = drawing::openable(&self.doc);
+        let bytes = solidcraft_io::write_design_container(&crate::as_saved(&doc, &self.visibility, &self.dimension_values))?;
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
         let entry = Entry {
             id: self.id.clone(),
@@ -304,7 +302,7 @@ impl Snapshot {
         };
         let meta = serde_json::to_vec_pretty(&entry).map_err(|e| EngineError::Other(e.to_string()))?;
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, "json"), &meta, false).map_err(io)?;
-        Ok(())
+        Ok(left_out)
     }
 }
 
@@ -365,7 +363,7 @@ impl Autosaver {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let (tx, rx) = std::sync::mpsc::channel();
-            let (doc, visibility) = (snapshot.doc.clone(), snapshot.visibility.clone());
+            let (doc, visibility, dimension_values) = (snapshot.doc.clone(), snapshot.visibility.clone(), snapshot.dimension_values.clone());
             let started = std::thread::Builder::new().name("autosave".into()).spawn(move || {
                 let _ = tx.send(snapshot.write());
             });
@@ -376,7 +374,7 @@ impl Autosaver {
                 }
                 // No thread to write on: write here, as before.
                 Err(_) => {
-                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, path: s.path.clone() };
+                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, dimension_values, path: s.path.clone() };
                     let written = snapshot.write();
                     self.written(s, snapshot.doc, snapshot.visibility, written)?;
                     Ok(true)
@@ -410,7 +408,14 @@ impl Autosaver {
         if self.last.as_ref().is_some_and(|(l, v)| (Arc::ptr_eq(l, &s.doc) || **l == *s.doc) && *v == s.visibility) {
             return None;
         }
-        Some(Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc: s.doc.clone(), visibility: s.visibility.clone(), path: s.path.clone() })
+        Some(Snapshot {
+            dir: self.dir.clone(),
+            id: self.id.clone(),
+            doc: s.doc.clone(),
+            visibility: s.visibility.clone(),
+            dimension_values: s.dimension_values.clone(),
+            path: s.path.clone(),
+        })
     }
 
     /// The running write's outcome, once it has one (`wait`: wait for it). True when no write
@@ -433,9 +438,10 @@ impl Autosaver {
         Ok(true)
     }
 
-    /// A write of `doc` (with `visibility`) ended with `outcome`.
-    fn written(&mut self, s: &Session, doc: Arc<Document>, visibility: crate::Visibility, outcome: Result<()>) -> Result<()> {
-        outcome?;
+    /// A write of `doc` (with `visibility`) ended with `outcome`: written, an error still names
+    /// each drawing it left out.
+    fn written(&mut self, s: &Session, doc: Arc<Document>, visibility: crate::Visibility, outcome: Result<Vec<String>>) -> Result<()> {
+        let left_out = outcome?;
         self.has_entry = true;
         // Crash replays start from this autosave from here, unless the design changed while it
         // was written: the journal then keeps the commands since its older start.
@@ -443,7 +449,7 @@ impl Autosaver {
             crate::crash::rebased(s, Some(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT)), true);
         }
         self.last = Some((doc, visibility));
-        Ok(())
+        if left_out.is_empty() { Ok(()) } else { Err(EngineError::Other(left_out.join("; "))) }
     }
 
     /// The user closed this design (saving it or choosing Don't Save): discard only its entry.
@@ -557,6 +563,104 @@ mod tests {
         assert_eq!(entry.features, 1);
         remove(&d, &entry.id).unwrap();
         assert!(orphans(&d).is_empty());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A design's drawings are part of it (#3890), so a change to a drawing alone is unsaved
+    /// work: it is autosaved, and after a crash it comes back with the design.
+    #[test]
+    fn a_drawing_change_alone_is_autosaved_and_recovered() {
+        let d = dir("drawing");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("drawing.create", &json!({"name": "Box drawing"})).unwrap();
+        s.mark_saved();
+        assert!(!a.save(&s).unwrap(), "nothing unsaved");
+        s.execute("drawing.properties.set", &json!({"values": {"author": "Jane Doe"}})).unwrap();
+        assert!(a.save(&s).unwrap(), "the drawing's change is unsaved");
+        drop(a);
+        let found = orphans(&d);
+        assert_eq!(found.len(), 1);
+        let (doc, entry) = load(&d, &found[0].id).unwrap();
+        assert_eq!(doc.drawings, s.doc.drawings);
+        assert_eq!(doc, *s.doc);
+        remove(&d, &entry.id).unwrap();
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A drawing that breaks a rule of the record would keep the whole autosave from opening:
+    /// the autosave keeps the rest of the design, and its error names the drawing and the rule.
+    #[test]
+    fn an_autosave_leaves_out_a_drawing_that_breaks_a_rule() {
+        let d = dir("broken-drawing");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("drawing.create", &json!({"name": "Kept"})).unwrap();
+        s.execute("drawing.create", &json!({"name": "Broken"})).unwrap();
+        let mut doc = (*s.doc).clone();
+        let broken = doc.drawings.iter_mut().find(|d| d.name == "Broken").unwrap();
+        Arc::make_mut(broken).language = "?".into();
+        s.doc = Arc::new(doc);
+        let error = a.save(&s).unwrap_err().to_string();
+        assert!(error.starts_with(r#"drawing "Broken" ("#) && error.contains(") left out: the language is not"), "{error}");
+        assert!(!a.save(&s).unwrap(), "written: not again until the design changes");
+        drop(a);
+        let found = orphans(&d);
+        assert_eq!(found.len(), 1);
+        let (doc, entry) = load(&d, &found[0].id).unwrap();
+        assert_eq!(doc.features, s.doc.features);
+        assert_eq!(doc.drawings.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["Kept"]);
+        remove(&d, &entry.id).unwrap();
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// What is shown and hidden is not part of the design's undo history but is restored with it:
+    /// the autosave keeps a hidden body hidden (K9' check, gap G3).
+    #[test]
+    fn an_autosave_keeps_what_is_hidden() {
+        let d = dir("hidden");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"})).unwrap();
+        s.execute("browser.visibility", &json!({"items": ["Box"], "visible": false})).unwrap();
+        assert!(!s.visibility.is_empty());
+        assert!(a.save(&s).unwrap());
+        drop(a);
+        let found = orphans(&d);
+        let (doc, entry) = load(&d, &found[0].id).unwrap();
+        assert_eq!(doc.visibility, s.visibility);
+        remove(&d, &entry.id).unwrap();
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// A drawing too large to save would fail the whole autosave: it is left out like one that
+    /// breaks a rule, the rest is written, and the error names it (K9' check, gap G2).
+    #[test]
+    fn an_autosave_leaves_out_a_drawing_too_large_to_save() {
+        let d = dir("huge-drawing");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("drawing.create", &json!({"name": "Kept"})).unwrap();
+        let items = vec!["0"; 2_000_000].join(",");
+        let format = solidcraft_doc::format::DRAWING.format_string(1);
+        let huge = solidcraft_doc::drawing::Drawing::from_json(&format!(
+            r#"{{"format":"{format}","id":"0000000000002","name":"Huge","sources":[],"language":"en","sheets":[{{"id":"0000000000003","name":"S","sheet":{{"size":{{"standard":"a4"}}}}}}],"properties":{{"com.example":{{"items":[{items}]}}}}}}"#
+        ))
+        .unwrap();
+        let mut doc = (*s.doc).clone();
+        doc.drawings.push(Arc::new(huge));
+        s.doc = Arc::new(doc);
+        let error = a.save(&s).unwrap_err().to_string();
+        assert!(error.starts_with(r#"drawing "Huge" ("#) && error.contains("left out: drawing too large to save"), "{error}");
+        drop(a);
+        let found = orphans(&d);
+        assert_eq!(found.len(), 1);
+        let (doc, entry) = load(&d, &found[0].id).unwrap();
+        assert_eq!(doc.drawings.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["Kept"]);
+        remove(&d, &entry.id).unwrap();
         let _ = fs::remove_dir_all(&d);
     }
 

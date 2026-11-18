@@ -4,16 +4,16 @@
 //! the cone at its height it lies on the far nappe; upstream's inversion mirrors it through
 //! the apex and succeeds with a height outside the cone, and the iso curve there fails with
 //! `SM_ERR`. `SmSphere::IntersectWithCone` passes such a point for a sphere on the axis
-//! crossing the cone's line just past the apex, so that intersection fails too. With
-//! `Kernel::fixes.cone_iso_circle_at_axial_height` the circle is at the point's height
-//! clamped to the cone, here the apex, and inside the cone it is where it was.
+//! crossing the cone's line just past the apex, so that intersection fails too. The port
+//! (the flag `cone_iso_circle_at_axial_height` until its retirement) puts the circle at the
+//! point's height clamped to the cone, here the apex, and inside the cone at the point's
+//! height.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
-use solidcore::error::SM_ERR;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::approx_tol3d;
@@ -26,10 +26,8 @@ use solidcore::Kernel;
 const TOL: f64 = 1e-3;
 const SEMI: f64 = 70.0;
 
-fn kernel(on: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.cone_iso_circle_at_axial_height = on;
-    k
+fn kernel() -> Kernel {
+    Kernel::default()
 }
 
 fn placement() -> Axis2Placement {
@@ -64,25 +62,20 @@ fn circle_height(k: &Kernel, cone: &Cone, p: Point3) -> Result<Option<f64>, i32>
 fn point_past_the_apex_gives_the_apex_circle() {
     for z in [-1e-6, -5e-4, -9e-4] {
         for (f, off) in [(1.0, 0.0), (0.5, 0.0), (1.0, 0.3), (0.0, 0.0)] {
-            let off_k = kernel(false);
-            let cone = apex_cone(&off_k);
+            let k = kernel();
+            let cone = apex_cone(&k);
             let r = cone.radius(z) * f + off;
             let p = Point3::new(0.6 * r, 0.8 * r, z);
-            assert_eq!(
-                circle_height(&off_k, &cone, p),
-                Err(SM_ERR),
-                "flag off, z {z}, p {p:?}"
-            );
-            let on_k = kernel(true);
-            let cone = apex_cone(&on_k);
-            let h = circle_height(&on_k, &cone, p).unwrap().unwrap();
-            assert!(h.abs() < 1e-12, "flag on, z {z}, p {p:?}: height {h}");
+            let h = circle_height(&k, &cone, p).unwrap().unwrap();
+            assert!(h.abs() < 1e-12, "z {z}, p {p:?}: height {h}");
         }
     }
 }
 
+/// Inside the cone the circle is at the point's height, and within the tolerance past the
+/// top at the top (the height clamped to [0, 1]); past the tolerance there is none.
 #[test]
-fn circles_inside_and_past_the_top_are_unchanged() {
+fn circles_inside_and_past_the_top_are_at_the_clamped_height() {
     for (bottom, swap_uv, inside_out) in [
         (0.0, false, false),
         (0.5, false, false),
@@ -91,29 +84,26 @@ fn circles_inside_and_past_the_top_are_unchanged() {
         (0.5, true, true),
     ] {
         for z in [0.0, 1e-3, 0.25, 0.5, 0.999, 1.0, 1.0005, 1.0009, 1.002] {
-            let mut got = [None, None];
-            for (i, on) in [false, true].into_iter().enumerate() {
-                let k = kernel(on);
-                let cone = Cone::create_canonical_with_semi_angle(
-                    &k,
-                    &placement(),
-                    bottom,
-                    SEMI,
-                    Some(1.0),
-                    swap_uv,
-                    inside_out,
-                )
-                .unwrap();
-                let r = cone.radius(z);
-                got[i] = Some(circle_height(&k, &cone, Point3::new(0.6 * r, 0.8 * r, z)));
-            }
-            let [off, on] = got.map(Option::unwrap);
-            match (off, on) {
-                (Ok(Some(a)), Ok(Some(b))) => assert!(
-                    (a - b).abs() < 1e-12,
-                    "bottom {bottom} swap {swap_uv} io {inside_out} z {z}: {a} vs {b}"
-                ),
-                (a, b) => assert_eq!(a, b, "bottom {bottom} swap {swap_uv} io {inside_out} z {z}"),
+            let k = kernel();
+            let cone = Cone::create_canonical_with_semi_angle(
+                &k,
+                &placement(),
+                bottom,
+                SEMI,
+                Some(1.0),
+                swap_uv,
+                inside_out,
+            )
+            .unwrap();
+            let r = cone.radius(z);
+            let got = circle_height(&k, &cone, Point3::new(0.6 * r, 0.8 * r, z));
+            let what = format!("bottom {bottom} swap {swap_uv} io {inside_out} z {z}");
+            if z > 1.0 + TOL {
+                assert_eq!(got, Ok(None), "{what}");
+            } else {
+                let h = got.unwrap().unwrap();
+                let want = z.clamp(0.0, 1.0);
+                assert!((h - want).abs() < 1e-12, "{what}: height {h}, want {want}");
             }
         }
     }
@@ -130,8 +120,8 @@ fn sphere_crossing_just_past_the_apex() {
     let past = Point3::new(-2.0 * TOL * s, 0.0, -2.0 * TOL * c);
     let radius = past.distance(centre);
     let want = 4.0 * c * c + 2.0 * TOL * c;
-    for on in [false, true] {
-        let k = kernel(on);
+    {
+        let k = kernel();
         let sphere = Surface::from(
             Sphere::new(
                 &k,
@@ -156,13 +146,6 @@ fn sphere_crossing_just_past_the_apex() {
             Some(approx_tol3d(&k, TOL)),
             None,
         );
-        if !on {
-            match status {
-                Err(e) if e.sm_status().is_some() => assert_eq!(e.sm_status(), Some(SM_ERR)),
-                other => panic!("flag off: expected SM_ERR, got {other:?}"),
-            }
-            continue;
-        }
         status.unwrap();
         let mut at_want = false;
         for curve in &x.curves_3d {
@@ -191,30 +174,24 @@ fn sphere_crossing_just_past_the_apex() {
 /// An unbounded cone of radius 1 whose semi-angle, 5e-11 degrees, is just above the cylinder
 /// test, with swapped parameters, and a point at height 0.7. Upstream's circle, built from the
 /// inverted STEP point, is at height 3.95 (as the pinned C++, difftest `surface.cone_p1`
-/// `r4_09393_*`). The fork's, from the sweep start and the clamped height, is at the point's
+/// `r4_09393_*`). The port's, from the sweep start and the clamped height, is at the point's
 /// height to within the NURB's height mapping on this near-cylinder (8.8e-5).
 #[test]
 fn near_cylinder_swapped_circle_is_at_the_point_height() {
     let p = Point3::new(-1.0, 1e-13, 0.7);
-    for on in [false, true] {
-        let k = kernel(on);
-        let cone =
-            Cone::create_canonical_with_semi_angle(&k, &placement(), 1.0, 5e-11, None, true, false)
-                .unwrap();
-        let circle = cone
-            .create_iso_circle_from_point(&k, p, 1e-9)
-            .unwrap_or_else(|e| panic!("flag {on}: {e:?}"))
-            .unwrap_or_else(|| panic!("flag {on}: no circle"));
-        let start = circle
-            .evaluate_point(&k, circle.natural_interval().min())
+    let k = kernel();
+    let cone =
+        Cone::create_canonical_with_semi_angle(&k, &placement(), 1.0, 5e-11, None, true, false)
             .unwrap();
-        let off = (start.z - 0.7).abs();
-        if on {
-            assert!(off < 1e-3, "flag on: circle at height {}", start.z);
-            let radius = (start.x * start.x + start.y * start.y).sqrt();
-            assert!((radius - 1.0).abs() < 1e-5, "flag on: radius {radius}");
-        } else {
-            assert!(off > 1.0, "flag off: circle at height {}", start.z);
-        }
-    }
+    let circle = cone
+        .create_iso_circle_from_point(&k, p, 1e-9)
+        .unwrap_or_else(|e| panic!("{e:?}"))
+        .unwrap_or_else(|| panic!("no circle"));
+    let start = circle
+        .evaluate_point(&k, circle.natural_interval().min())
+        .unwrap();
+    let off = (start.z - 0.7).abs();
+    assert!(off < 1e-3, "circle at height {}", start.z);
+    let radius = (start.x * start.x + start.y * start.y).sqrt();
+    assert!((radius - 1.0).abs() < 1e-5, "radius {radius}");
 }

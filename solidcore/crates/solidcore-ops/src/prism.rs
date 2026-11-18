@@ -428,6 +428,17 @@ pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
 }
 
+/// Counter-clockwise angle between two planar rays, in radians modulo one turn.
+/// Equal rays give zero. Nonfinite and zero rays have no angle.
+#[must_use]
+pub fn counterclockwise_sweep(center: Vec2, start: Vec2, end: Vec2) -> Option<f64> {
+    kp::counterclockwise_sweep(
+        convert::vec2(center),
+        convert::vec2(start),
+        convert::vec2(end),
+    )
+}
+
 /// The directed parameter interval of a recognized ellipse arc, in the input plane.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EllipseArc {
