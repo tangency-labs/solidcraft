@@ -6405,6 +6405,33 @@ fn fillet_fit_taper_closes_to_a_point() {
 }
 
 #[test]
+fn spline_fillet_follows_a_rounded_corner_chain() {
+    // #6473: the top outline has a line, an R10 quarter arc, and another line.
+    // Equal spline control radii describe the same R2 round as a constant fillet,
+    // including the arc between the two straight edges.
+    let rounded_box = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30, "corner": [0, 0, 0]}));
+        run(&mut s, "solid.fillet", json!({"edges": [[100, 0, 15]], "radius": "10 mm"}));
+        s
+    };
+    let mut constant = rounded_box();
+    run(&mut constant, "solid.fillet", json!({"edges": [[50, 0, 30]], "radius": "2 mm", "tangent_chain": true}));
+    let mut spline = rounded_box();
+    run(
+        &mut spline,
+        "solid.fillet",
+        json!({
+            "edges": [[50, 0, 30]], "radius": "2 mm", "type": "spline",
+            "start": [0, 0, 30], "tangent_chain": true,
+            "radii": ["2 mm", "2 mm", "2 mm", "2 mm"],
+            "knots": [0, 0, 0, 0, 0.5, 1, 1, 1, 1]
+        }),
+    );
+    assert!(rel(volume(&mut spline), volume(&mut constant)) < 1e-9);
+}
+
+#[test]
 fn spline_fillet_takes_over_a_taper() {
     // A tapered fillet keeps each edge's radius spline; given back as a `spline` fillet it makes
     // the same part, and its control radii are then the user's to change.
