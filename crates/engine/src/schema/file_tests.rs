@@ -21,7 +21,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "mesh_prefix", "path", "velocity"]);
     assert_keys(
         input_schema_for::<ExportParams>(),
-        &["bodies", "effort", "format", "lay_on_print_faces", "mesh_prefix", "objects", "path", "quality", "velocity"],
+        &["bodies", "effort", "format", "hierarchy", "lay_on_print_faces", "mesh_prefix", "objects", "path", "quality", "velocity"],
     );
     assert_keys(
         input_schema_for::<OpenParams>(),
