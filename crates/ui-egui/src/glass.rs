@@ -65,6 +65,26 @@ impl GlassState {
     }
 }
 
+/// The error a popped scope caught. A browser's answer comes later and is not waited for.
+fn popped(f: impl std::future::Future<Output = Option<egui_wgpu::wgpu::Error>>) -> Option<egui_wgpu::wgpu::Error> {
+    #[cfg(not(target_arch = "wasm32"))]
+    return pollster::block_on(f);
+    #[cfg(target_arch = "wasm32")]
+    match std::pin::pin!(f).poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+        std::task::Poll::Ready(e) => e,
+        std::task::Poll::Pending => None,
+    }
+}
+
+/// Builds glass's pipelines once the theme has glass; the error, once, if the device refused them.
+fn ensure_built(
+    build: &mut Build<egui_glass::SceneBrightness>,
+    t: &Tokens,
+    make: impl FnOnce() -> Result<egui_glass::SceneBrightness, String>,
+) -> Option<String> {
+    build.ensure(t.glass.is_some(), make)
+}
+
 /// Glass's pipelines in the window's pass (one sample, no depth), the device's refusal as the error.
 fn build_pipelines(render_state: &egui_wgpu::RenderState) -> Result<egui_glass::SceneBrightness, String> {
     use egui_wgpu::wgpu;
@@ -74,8 +94,7 @@ fn build_pipelines(render_state: &egui_wgpu::RenderState) -> Result<egui_glass::
     let brightness = egui_glass::init_scene_backdrop(render_state);
     let mut error = None;
     for scope in scopes.into_iter().rev() {
-        let mut popped = std::pin::pin!(scope.pop());
-        if let std::task::Poll::Ready(Some(e)) = popped.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+        if let Some(e) = popped(scope.pop()) {
             error.get_or_insert(e);
         }
     }
@@ -257,13 +276,13 @@ fn flip_texts(shape: &mut Shape, panes: &[&Pane], scene: &egui_glass::SceneLuma)
 /// Turns the frame's panel fills into glass while a glass theme is on; else does nothing.
 pub(crate) fn frame(app: &mut crate::SolveApp, ctx: &Context) {
     let t = Tokens::get();
-    let Some(glass) = t.glass else { return };
     let Some(state) = app.glass.as_mut() else { return };
-    let refused = state.build.ensure(true, || build_pipelines(&state.render_state));
+    let refused = ensure_built(&mut state.build, &t, || build_pipelines(&state.render_state));
     if let Some(error) = refused {
         app.set_status(format!("Glass is off, the graphics card refused its pipelines: {error}"), true);
         return;
     }
+    let Some(glass) = t.glass else { return };
     let Some(state) = app.glass.as_mut() else { return };
     let Some(brightness) = state.build.ready().cloned() else { return };
     let dark = solidcraft_theme::is_dark();
@@ -426,9 +445,14 @@ mod tests {
     /// Glass's pipelines are built only once a glass theme is on: a flat theme costs the GPU nothing.
     #[test]
     fn a_theme_without_glass_builds_nothing() {
-        let mut build: Build<u8> = Build::Idle;
-        assert_eq!(build.ensure(false, || panic!("built for a theme without glass")), None);
+        let flat = Tokens::light();
+        assert!(flat.glass.is_none());
+        let mut build = Build::Idle;
+        assert_eq!(ensure_built(&mut build, &flat, || panic!("built for a theme without glass")), None);
         assert!(!build.is_built());
+        let glassy = Tokens { glass: Some(Glass { blur: 30.0, refraction: 4.0, see_through: 0.5, reach: 1.0 }), ..flat };
+        assert_eq!(ensure_built(&mut build, &glassy, || Ok(Default::default())), None);
+        assert!(build.is_built());
     }
 
     /// A build the device refuses leaves the panels flat, says why once, and is not tried again.
