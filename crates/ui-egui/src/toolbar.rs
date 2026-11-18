@@ -2676,7 +2676,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             continue;
         }
         if drawing && k == Key::Escape {
-            if crate::drawing_workspace::close_panel(app) || crate::drawing_sheet_page::clear_view_selection(app) {
+            // As in a sketch: the first Esc drops the Dimension tool's picks, the next leaves it.
+            if crate::drawing_workspace::dimension::clear_picks(app)
+                || crate::drawing_workspace::close_panel(app)
+                || crate::drawing_sheet_page::clear_view_selection(app)
+            {
                 app.esc_handled = true;
             }
             continue;
