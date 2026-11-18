@@ -514,27 +514,57 @@ pub fn distance_bound(form: &BSplineSurface, a: &Implicit, delta: [f64; 2]) -> R
 ///   [`decompose_to_bez`];
 /// - its complement `1 − α̂` takes 1 (`oma = 1.0 − alf`, `1.0 − x`);
 /// - `combine2` takes 3, two products and a sum;
-/// - so the `α` term carries `γ₅` (ratio, product, sum) and the `1 − α` term `γ₃`
-///   (complement, product, sum) on `(1 − α) |b|`, plus the ratio's `γ₃` on `α |b|`
-///   through the complement; with `|a|, |b| ≤ M`, the level's new error is at most
-///   `(5 α + 3 (1 − α) + 3 α) u M ≤ 8 u M` to first order, and the earlier errors pass
-///   through with the factor `α̂ + (1 − α̂) = 1` up to a rounding.
+/// - so, against `α a + (1 − α) b` of the computed `a` and `b`, the `a` term carries
+///   `α (1 + θ₅)` (ratio, product, sum) and the `b` term
+///   `(1 − α) (1 + θ₃) − α θ₃ (1 + θ₃)` (complement, product, sum, and the ratio's error
+///   through the complement); with `|a|, |b| ≤ M̂`, the largest computed size, the level's
+///   new error is at most `(α (γ₅ + γ₃ + γ₃²) + (1 − α) γ₃) M̂ ≤ γ₈ M̂`
+///   (`γ_j + γ_k + γ_j γ_k ≤ γ_{j+k}`), and the earlier errors pass through with the
+///   exact factors `α` and `1 − α`, so a level's error is at most the larger of its two
+///   inputs' plus `γ₈ M̂`.
 ///
-/// `M` is the size of the original net: every intermediate point is a convex combination
-/// of its control points, so each homogeneous coordinate is within `max |H|∞` and each
-/// weight within `W_max` (both up to the roundings themselves). A point's chain runs
-/// through at most `p` insertions at each end of the extraction in u (`p − mul` and
-/// `p − mur`) and `p − 1` at each of its span's two knots in the decomposition, `4p − 2`
-/// in u and `4q − 2` in v, so `L ≤ 4 (p + q) − 4` levels: the error is at most
-/// `γ_{8L} M`, and `γ_{32(p+q)+8}` covers that, the second-order terms and `8` more
-/// roundings for the coefficients' scale. In the coordinates moved to the equation's origin
+/// `M` is the size of the original net: every intermediate point is within its error of a
+/// convex combination of its control points, so each homogeneous coordinate is within
+/// `max |H|∞` and each weight within `W_max` up to that error. After a chain of `L` levels
+/// the error is at most `L γ₈ M̂ ≤ γ_{8L} M̂`, and with `M̂ ≤ M + γ_{8L} M̂` at most
+/// `γ_{8L} / (1 − γ_{8L}) M ≤ γ_{8L+1} M` (as `8L (8L + 1) u ≤ 1`).
+///
+/// `L`, the longest chain of levels behind one point of a patch, is at most
+/// `L_u + L_v` with `L_u = 2p + p (p − 1) / 2` and `L_v` alike in `q`
+/// (`insertion_levels`), counted from the loops that run (`nurbs/srf_tool/p1.rs`):
+/// - the extraction in u ([`extract_patch`](crate::nurbs::srf_tool::p1::extract_patch),
+///   per column): the left knot's round `i` (`1..=p − mul`) sets `aw[j]` from `aw[j]` and
+///   `aw[j + 1]` of round `i − 1`, one level per round, so at most `p − mul`; the right
+///   knot's round `i` (`1..=p − mur`) sets `aw[k]` from `aw[k]` and `aw[k − 1]`, which may
+///   be left-inserted points, so at most `(p − mul) + (p − mur) ≤ 2p`; then in v, per
+///   row of those points, `(q − mvl) + (q − mvr)` more;
+/// - the decomposition in u ([`decompose_to_bez`], per column): at a knot of multiplicity
+///   `μ < p` it runs `r = p − μ` rounds; round `i` sets `bw[j]` for `j = p` down to `μ + i`
+///   from `bw[j]` and `bw[j − 1]`, and saves `bw[p]` as the next strip's point `r − i`
+///   (`nbw[save]`), whose points `r..=p` come fresh from the net. So a chain runs on
+///   through the saves of earlier knots: at the start of every strip the point at
+///   position `x` is at most `B(x) = (p − x) (p − x − 1) / 2` levels past the net it is
+///   decomposed from. Fresh points are 0; a saved point `r − i` is `bw[p]` after `i`
+///   rounds, at most `i + B(p − i) = i (i + 1) / 2 ≤ B(r − i) = (μ + i) (μ + i − 1) / 2`
+///   (`μ ≥ 1`, `B` falls with `x`). The strip's point `j`, set in `n` rounds
+///   (`j − n ≥ μ`, so `k = p − (j − n) ≤ p − 1` and `n ≤ k`), is at most
+///   `n + B(j − n) ≤ k (k + 1) / 2 ≤ p (p − 1) / 2`, and an untouched one at most
+///   `B(0) = p (p − 1) / 2`. Simple knots reach it: the chain runs back through the saves
+///   of `p − 1` earlier knots, `Σ_{i=1}^{p−1} i`;
+/// - the decomposition in v, per row of each strip, the same on the strip's points:
+///   `q (q − 1) / 2` more.
+///
+/// `γ_{8L+16}` covers `γ_{8L+1}` and `8` more roundings for the coefficients' scale. The
+/// test `the_rounding_count_covers_the_insertion_chains` runs the loops above on tracked
+/// points for degrees 1 to 10 (bit-equal to the real extraction and decomposition) and
+/// checks the count against the deepest chain they make. In the coordinates moved to the equation's origin
 /// `O` the error is at most `γ A` with `A = max |H|∞ + |O|∞ W_max`, and in the weight at
 /// most `γ W_max`, so at a point with weight `W ≥ W₀`, `X − O = (H − O W) / W` moves by at
 /// most `γ A / W₀ + A (1 + γ) γ W_max / (W₀ (W₀ − γ W_max))`, twice that as a Euclidean
 /// length (`√3 < 2`); `None` where `W₀ ≤ γ W_max`. The net's size is the larger of
 /// `source`'s and `form`'s and the patch's own (so `form` alone, as `source`, is sound when
 /// it was not cut from another net). The margin against the uses is wide: the slack is a
-/// relative `2 γ_{200} ≈ 4.4e-14` for a bicubic patch, against bounds compared with
+/// relative `2 γ_{160} ≈ 3.6e-14` for a bicubic patch (`L = 18`), against bounds compared with
 /// tolerances of `1e-6` and more. A patch whose rounding `τ` is below `MIN_POSITIVE / ε`
 /// (where the coefficients' underflow is not inside the `γ` model, as [`distance_bound`])
 /// has no bound. The whole is the largest over the patches, grown by a few roundings.
@@ -626,7 +656,7 @@ pub(crate) fn off_surface_bound(
                 }
                 Implicit::Sphere { .. } | Implicit::Torus { .. } => return Ok(None),
             };
-            let g = gamma(32 * (p + q) + 8);
+            let g = gamma(rounding_index(p, q));
             let absolute = net_absolute.max(r.absolute);
             let wmax = net_wmax.max(r.wmax);
             // (the true weight is at least `W₀ − γ W_max`)
@@ -645,6 +675,25 @@ pub(crate) fn off_surface_bound(
     }
     let bound = bound * (1.0 + 8.0 * f64::EPSILON);
     Ok(bound.is_finite().then_some(bound))
+}
+
+/// The longest chain of knot-insertion levels behind a point of [`off_surface_bound`]'s
+/// Bézier patches of degrees `(p, q)`, `L_u + L_v` with `L_u = 2p + p (p − 1) / 2` (the
+/// extraction's two ends and the decomposition's saved points; derived there) and `L_v`
+/// alike in `q`. Saturates (a degree that large has no net to decompose).
+fn insertion_levels(p: usize, q: usize) -> usize {
+    let per = |d: usize| {
+        d.saturating_mul(2)
+            .saturating_add(d.saturating_mul(d.saturating_sub(1)) / 2)
+    };
+    per(p).saturating_add(per(q))
+}
+
+/// The `n` of [`off_surface_bound`]'s `γ_n`: `8 L + 16`, `L` the [`insertion_levels`]
+/// (eight roundings a level, one for the size's feedback, eight for the coefficients'
+/// scale, the rest spare).
+fn rounding_index(p: usize, q: usize) -> usize {
+    insertion_levels(p, q).saturating_mul(8).saturating_add(16)
 }
 
 /// The size of the control net `net` for [`off_surface_bound`]'s rounding, moved to the
@@ -2831,10 +2880,10 @@ mod tests {
     /// patch at x = 2 (y, z from 0 to 1) lies 0.5 from the plane x = 1.5, and its equation
     /// is linear in the homogeneous coordinates (weights 1), so the bound is 0.5 within a
     /// few roundings (PROVEN: never below the true distance), and on the plane x = 2 only
-    /// the counted rounding (the slack `2 γ₇₂ · 4 · 2 ≈ 1.3e-13`, `4 = |H|∞ + |O|∞ W`, plus
+    /// the counted rounding (the slack `2 γ₄₈ · 4 · 2 ≈ 8.5e-14`, `4 = |H|∞ + |O|∞ W`, plus
     /// the coefficients' `τ = γ₃₂ · 4 ≈ 1.4e-14`, under 2e-13). Not a number in a control
     /// point or in the equation has no bound. Cut from a net a million times larger, the
-    /// same patch carries that net's rounding: at least `2 γ₇₂ · 2e6 · 2 ≈ 6.4e-8`.
+    /// same patch carries that net's rounding: at least `2 γ₄₈ · 2e6 · 2 ≈ 4.3e-8`.
     #[test]
     fn a_plane_patch_off_a_plane_is_bounded_by_its_distance() {
         let patch = BSplineSurface::create_canonical(&CanonicalSurfaceData {
@@ -2890,7 +2939,7 @@ mod tests {
         let from_large = off_surface_bound(&patch, &plane(2.0), &large)
             .unwrap()
             .unwrap();
-        assert!(from_large >= 2.0 * gamma(72) * 2e6 * 2.0, "{from_large:e}");
+        assert!(from_large >= 2.0 * gamma(48) * 2e6 * 2.0, "{from_large:e}");
         // (not a number in the equation, or in a control point)
         let nan_plane = Implicit::Plane {
             origin: Vec3::new(f64::NAN, 0.0, 0.0),
@@ -3015,5 +3064,279 @@ mod tests {
             radius: 50.0,
         };
         assert_eq!(off_surface_bound(&form, &sphere, &form).unwrap(), None);
+    }
+
+    /// A homogeneous point and the length of the longest chain of
+    /// [`CPoint::combine2`](crate::nurbs::math::CPoint::combine2) levels behind it.
+    type Tracked = (crate::nurbs::math::CPoint, usize);
+
+    fn mix(a: f64, x: Tracked, b: f64, y: Tracked) -> Tracked {
+        (
+            crate::nurbs::math::CPoint::combine2(a, x.0, b, y.0),
+            x.1.max(y.1) + 1,
+        )
+    }
+
+    /// One column (or row) of `extract_patch` over `[a, b]`, its loops as written there
+    /// (`a`, `b` inside the domain and off the knots, so nothing snaps).
+    fn extract_line(pts: &[Tracked], p: usize, u: &[f64], a: f64, b: f64) -> Vec<Tracked> {
+        use crate::nurbs::knots::{KnotVector, Side};
+        let kv = KnotVector::from_slice(u).unwrap();
+        let (span_l, mul) = kv.find_span_and_mult(p, a, Side::Left).unwrap();
+        let (span_r, mur) = kv.find_span_and_mult(p, b, Side::Left).unwrap();
+        let (p, span_l, mul, span_r, mur) = (
+            p as isize,
+            span_l as isize,
+            mul as isize,
+            span_r as isize,
+            mur as isize,
+        );
+        let at = |i: isize| u[i as usize];
+        let (is, ie) = (span_l - p, span_r - mur);
+        let n = ie - is;
+        let mut aw: Vec<Tracked> = pts[is as usize..=ie as usize].to_vec();
+        let ll = span_l - p;
+        for i in 1..=p - mul {
+            for j in 0..=p - i - mul {
+                let left = at(ll + i + j);
+                let alf = (a - left) / (at(span_l + j + 1) - left);
+                let (j, oma) = (j as usize, 1.0 - alf);
+                aw[j] = mix(alf, aw[j + 1], oma, aw[j]);
+            }
+        }
+        let (lr, lk) = (span_r - p, n - p + mur);
+        for i in 1..=p - mur {
+            let mut j = p - i - mur;
+            while j >= 0 {
+                let k = (lk + i + j) as usize;
+                let left = at(lr + i + j).max(a);
+                let alf = (b - left) / (at(span_r + j + 1) - left);
+                aw[k] = mix(alf, aw[k], 1.0 - alf, aw[k - 1]);
+                j -= 1;
+            }
+        }
+        aw
+    }
+
+    /// One column (or row) of [`decompose_to_bez`], its loops as written there: the
+    /// Bézier segments.
+    fn decompose_line(pts: &[Tracked], p: usize, u: &[f64]) -> Vec<Vec<Tracked>> {
+        let r = u.len() - 1;
+        let mut bw: Vec<Tracked> = pts[..=p].to_vec();
+        let mut nbw = bw.clone();
+        let (mut al, mut om) = (vec![0.0; p], vec![0.0; p]);
+        let (mut isu, mut ieu) = (p, p + 1);
+        let mut out = Vec::new();
+        while ieu < r {
+            let i0 = ieu;
+            while ieu < r && u[ieu] == u[ieu + 1] {
+                ieu += 1;
+            }
+            let mlu = ieu - i0 + 1;
+            // (the last strip ends at the clamped end, `mlu = p + 1`: no insertion, and
+            // nothing is saved)
+            let ru = p.saturating_sub(mlu);
+            if mlu < p {
+                let num = u[ieu] - u[isu];
+                for i in (mlu + 1..=p).rev() {
+                    let x = num / (u[isu + i] - u[isu]);
+                    al[i - mlu - 1] = x;
+                    om[i - mlu - 1] = 1.0 - x;
+                }
+                for i in 1..=ru {
+                    let su = mlu + i;
+                    for j in (su..=p).rev() {
+                        bw[j] = mix(al[j - su], bw[j], om[j - su], bw[j - 1]);
+                    }
+                    if ieu < r {
+                        nbw[ru - i] = bw[p];
+                    }
+                }
+            }
+            out.push(bw.clone());
+            if ieu < r {
+                for i in ru..=p {
+                    nbw[i] = pts[ieu - p + i];
+                }
+            }
+            isu = ieu;
+            ieu += 1;
+            core::mem::swap(&mut bw, &mut nbw);
+        }
+        out
+    }
+
+    /// The deepest chain over the Bézier patches of `net` (rows u, columns v), decomposed
+    /// as [`decompose_to_bez`] does, each point checked bit-equal to `real`'s.
+    fn deepest(
+        net: &[Vec<Tracked>],
+        p: usize,
+        q: usize,
+        u: &[f64],
+        v: &[f64],
+        real: &[Vec<crate::nurbs::srf_basic::Surface>],
+    ) -> usize {
+        let cols: Vec<Vec<Vec<Tracked>>> = (0..net[0].len())
+            .map(|l| {
+                let col: Vec<Tracked> = net.iter().map(|row| row[l]).collect();
+                decompose_line(&col, p, u)
+            })
+            .collect();
+        let mut depth = 0;
+        for (iu, real_row) in real.iter().enumerate() {
+            assert_eq!(cols[0].len(), real.len());
+            for k in 0..=p {
+                let row: Vec<Tracked> = cols.iter().map(|c| c[iu][k]).collect();
+                let segs = decompose_line(&row, q, v);
+                assert_eq!(segs.len(), real_row.len());
+                for (seg, patch) in segs.iter().zip(real_row) {
+                    let got: Vec<_> = patch.rows().nth(k).unwrap().to_vec();
+                    let want: Vec<_> = seg.iter().map(|t| t.0).collect();
+                    assert_eq!(got, want, "p {p} q {q} strip {iu} row {k}");
+                    depth = seg.iter().fold(depth, |d, t| d.max(t.1));
+                }
+            }
+        }
+        depth
+    }
+
+    /// B7 of #18612's review: [`off_surface_bound`]'s `γ` covers the longest chain of
+    /// knot-insertion levels its patches carry. For degrees 1 to 10 in u and v, on
+    /// nets with simple interior knots (where the decomposition's chains through saved
+    /// points are longest, `p (p − 1) / 2`) and with knots of mixed multiplicity, the
+    /// loops of `extract_patch` and [`decompose_to_bez`] run on tracked points (bit-equal
+    /// to the real ones), from the net itself (`form` as its own `source`) and from every
+    /// patch cut from inside one span to inside the same or a later one. The deepest chain
+    /// `L` must be within [`insertion_levels`] and `γ`'s index at least `8 L + 9` (eight
+    /// roundings a level, one for the size's feedback, eight for the coefficients'
+    /// scale). MEASURED: simple knots give the decomposition alone exactly
+    /// `p (p − 1) / 2 + q (q − 1) / 2`, the cut patches 4 levels at `(1, 1)` (the count's
+    /// 4), 41 at `(9, 1)` and 96 at `(10, 10)` (counted 130). The count before r4,
+    /// `32 (p + q) + 8` from `L ≤ 4 (p + q) − 4`, fails it from `(1, 9)` and `(9, 1)`.
+    #[test]
+    fn the_rounding_count_covers_the_insertion_chains() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Net;
+        use crate::nurbs::srf_tool::p1::extract_patch;
+        // clamped knots on [0, spans] with interior multiplicities `mults`
+        let knots = |p: usize, mults: &[usize]| {
+            let mut u = vec![0.0; p + 1];
+            for (i, &m) in mults.iter().enumerate() {
+                let t = (i + 1) as f64 + 0.13 * ((i * 7) % 5) as f64;
+                u.extend(std::iter::repeat_n(t, m.min(p)));
+            }
+            let end = (mults.len() + 1) as f64 + 0.5;
+            u.extend(std::iter::repeat_n(end, p + 1));
+            u
+        };
+        let mut worst = 0;
+        for p in 1..=10_usize {
+            for q in 1..=10_usize {
+                let simple = |d: usize| vec![1; d + 2];
+                let mixed = |d: usize| (0..d + 3).map(|i| [1, 2, 1, 3][i % 4]).collect::<Vec<_>>();
+                for (mu, mv) in [(simple(p), simple(q)), (mixed(p), mixed(q))] {
+                    let (u, v) = (knots(p, &mu), knots(q, &mv));
+                    let (rows, cols) = (u.len() - p - 1, v.len() - q - 1);
+                    let net: Vec<Vec<CPoint>> = (0..rows)
+                        .map(|i| {
+                            (0..cols)
+                                .map(|j| {
+                                    let (x, y) = (i as f64, j as f64);
+                                    let w = 1.0 + 0.25 * (1.3 * x + 0.7 * y).sin().abs();
+                                    CPoint::new(
+                                        w * (x + 0.1 * y.sin()),
+                                        w * (y + 0.1 * x.cos()),
+                                        w * (0.3 * x * y).sin(),
+                                        w,
+                                    )
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    let tracked: Vec<Vec<Tracked>> = net
+                        .iter()
+                        .map(|row| row.iter().map(|&c| (c, 0)).collect())
+                        .collect();
+                    let source = Net::new(net, p, q, u.clone(), v.clone()).unwrap();
+                    // the net decomposed as it is
+                    let own = deepest(&tracked, p, q, &u, &v, &decompose_to_bez(&source).unwrap());
+                    // patches cut from it, each from inside a span to inside a later one
+                    // (or the same), the same choice in u and v: the extraction's chains
+                    // feed the decomposition's
+                    let spans = |k: &[f64], d: usize| -> Vec<usize> {
+                        (d..k.len() - d - 1).filter(|&i| k[i] < k[i + 1]).collect()
+                    };
+                    let (su, sv) = (spans(&u, p), spans(&v, q));
+                    let inside = |k: &[f64], i: usize, f: f64| k[i] + f * (k[i + 1] - k[i]);
+                    let mut from_cut = 0;
+                    for a in 0..su.len().max(sv.len()) {
+                        for b in a..su.len().max(sv.len()) {
+                            let pick = |s: &[usize], i: usize| s[i.min(s.len() - 1)];
+                            let (ul, ur) = (
+                                inside(&u, pick(&su, a), 0.37),
+                                inside(&u, pick(&su, b), 0.61),
+                            );
+                            let (vl, vr) = (
+                                inside(&v, pick(&sv, a), 0.41),
+                                inside(&v, pick(&sv, b), 0.58),
+                            );
+                            let rect = crate::nurbs::geom::Rectangle {
+                                ul,
+                                ur,
+                                vb: vl,
+                                vt: vr,
+                            };
+                            let cut = extract_patch(&source, rect).unwrap();
+                            let (_, _, cr, cs) = cut.array_sizes();
+                            let aw: Vec<Vec<Tracked>> = (0..cols)
+                                .map(|l| {
+                                    let col: Vec<Tracked> =
+                                        tracked.iter().map(|row| row[l]).collect();
+                                    extract_line(&col, p, &u, ul, ur)
+                                })
+                                .collect();
+                            let cut_net: Vec<Vec<Tracked>> = (0..aw[0].len())
+                                .map(|i| {
+                                    let row: Vec<Tracked> = aw.iter().map(|c| c[i]).collect();
+                                    extract_line(&row, q, &v, vl, vr)
+                                })
+                                .collect();
+                            let real: Vec<Vec<CPoint>> =
+                                cut.rows().map(<[CPoint]>::to_vec).collect();
+                            let mirror: Vec<Vec<CPoint>> = cut_net
+                                .iter()
+                                .map(|row| row.iter().map(|t| t.0).collect())
+                                .collect();
+                            assert_eq!(real, mirror, "p {p} q {q} box {a} {b}: the extraction");
+                            from_cut = from_cut.max(deepest(
+                                &cut_net,
+                                p,
+                                q,
+                                &cut.u_knots()[..=cr],
+                                &cut.v_knots()[..=cs],
+                                &decompose_to_bez(&cut).unwrap(),
+                            ));
+                        }
+                    }
+                    let chain = own.max(from_cut);
+                    worst = worst.max(chain);
+                    assert!(
+                        chain <= insertion_levels(p, q),
+                        "p {p} q {q}: {chain} levels, {} counted",
+                        insertion_levels(p, q)
+                    );
+                    assert!(
+                        rounding_index(p, q) >= 8 * chain + 9,
+                        "p {p} q {q}: γ index {} below 8 · {chain} + 9",
+                        rounding_index(p, q)
+                    );
+                    // (simple knots: the decomposition alone reaches its count)
+                    if mu.iter().all(|&m| m == 1) && mv.iter().all(|&m| m == 1) {
+                        assert_eq!(own, p * (p - 1) / 2 + q * (q - 1) / 2, "p {p} q {q}");
+                    }
+                }
+            }
+        }
+        assert_eq!(worst, 96, "the deepest chain, at (10, 10)");
     }
 }

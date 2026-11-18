@@ -247,7 +247,10 @@ fn perturbed(k: &Kernel) -> ([f64; 3], bool) {
         .map_or(([0.0; 3], false), |r| (r.extra, r.event_on_n))
 }
 
-/// See the test build's version: no perturbation.
+/// See the test build's version: no perturbation. Outside the crate's unit tests this is
+/// identically `([0.0; 3], false)`, so every use of it is a no-op there: `x + 0.0` and
+/// `x − 0.0` are `x` for the finite values it meets, and the synthetic event is
+/// `false && …`.
 #[cfg(not(test))]
 fn perturbed(_k: &Kernel) -> ([f64; 3], bool) {
     ([0.0; 3], false)
@@ -640,7 +643,8 @@ impl<O: ClassObject + SolutionObject + Ord> Strip<'_, O> {
                 }
             }
         }
-        // (the test seam's synthetic end on N, at its piece's middle: none otherwise)
+        // (the test seam's synthetic end on N, at its piece's middle: none otherwise, where
+        // `perturbed` is identically zero and this is `Ok(false)`)
         let synthetic = EndOn::Edge(n, 0.5 * (piece.min() + piece.max()));
         Ok(perturbed(k).1 && event_in_piece(synthetic, n, v, w, tw, piece))
     }
@@ -1341,8 +1345,10 @@ mod tests {
     /// runs [`drop_strip_crossings`] on a copy of it where the union's topology intersector
     /// calls it): the dropped curve C goes at the intersector's tolerance 5e-6 (one
     /// interval), and stays (none) when any one check refuses:
-    /// - at 1e-7, below C's certified gap (MEASURED 4.22e-7);
-    /// - at 1e-8, below the net's bound `ε` (MEASURED 1.21e-8);
+    /// - at 1e-7 (below C's certified gap, MEASURED 4.22e-7): C's gap and other checks
+    ///   refuse (no single revert lets it through);
+    /// - at 1e-8 (below the net's bound `ε`, MEASURED 1.21e-8): the strip's enclosure and
+    ///   other checks refuse (likewise);
     /// - at 5e-6 with 1 added to the strip's enclosure ([`strip_within`]), to C's gap or
     ///   to N's piece's gap ([`gap_within`]), or with a synthetic interval end on N at the
     ///   middle of its piece ([`Strip::other_event_on`]).
