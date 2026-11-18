@@ -1,27 +1,35 @@
-//! A test-only seam (feature `wr57-replay`, off by default and never on in a release or
-//! wasm build) at the two WR-57 entry points: [`Surface::find_degen_param_for_direction`]
-//! and the singular point inversion ([`Surface::invert_point_near_singularity`]).
+//! A test-only seam (feature `wr57-replay`, off by default and never on in `cargo build`,
+//! a release or a wasm build) at the two WR-57 entry points:
+//! [`Surface::find_degen_param_for_direction`] and the singular point inversion
+//! ([`Surface::invert_point_near_singularity`]).
 //!
-//! The goldens crate's substitution replay (`wr57_replay`, #17856) installs a hook that
-//! sees each outermost call's inputs and answer and may put another answer in its place:
-//! main's, from a committed tape. A golden row that then equals main's row bit for bit
-//! moved only through those answers.
+//! The goldens crate's substitution replay (`wr57_replay`, #17856) gives a kernel a
+//! [`ReplaySeam`] ([`Kernel::replay`]): a hook that sees each outermost call's inputs,
+//! surface and answer, and may put another answer in its place: main's, from a committed
+//! tape. A golden row that then equals main's row bit for bit moved only through those
+//! answers.
 //!
-//! Nothing here changes a result while no hook is installed: [`wrap`] then only calls
-//! the function. The hook lives in a thread local because the seam must reach every
-//! kernel a runner makes; the library is single threaded, and the feature exists only for
-//! the goldens tests (a dev-dependency feature).
+//! The seam's state lives on the [`Kernel`] (no global or thread local state): a kernel
+//! made with [`Kernel::new`] has no hook, and [`wrap`] then only calls the function. The
+//! kernel copies an operation makes for its caches share the caller's seam, as they share
+//! its profiler.
 //!
 //! [`Surface::find_degen_param_for_direction`]: super::Surface::find_degen_param_for_direction
 //! [`Surface::invert_point_near_singularity`]: super::Surface::invert_point_near_singularity
+//! [`Kernel`]: crate::Kernel
+//! [`Kernel::new`]: crate::Kernel::new
+//! [`Kernel::replay`]: crate::Kernel::replay
 
-use std::cell::{Cell, RefCell};
+use core::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use super::p7::DegenParam;
 use super::p8::SingularityInversion;
+use super::Surface;
 use crate::error::{Result, SolidError};
 use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::vector2d::Point2;
+use crate::Kernel;
 
 /// Which entry point a call went through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,19 +43,53 @@ pub enum Seam {
 /// A call's answer: its value as bits, or its error.
 pub type Answer = std::result::Result<Vec<u64>, SolidError>;
 
-/// The hook: the seam, the call's inputs as bits and the function's own answer; it
-/// returns the answer the caller gets.
-pub type Hook = Box<dyn FnMut(Seam, &[u64], Answer) -> Answer>;
-
-thread_local! {
-    static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
-    static DEPTH: Cell<u32> = const { Cell::new(0) };
+/// One outermost call, as the hook sees it.
+pub struct Call<'a> {
+    /// The entry point.
+    pub seam: Seam,
+    /// The call's inputs as bits ([`degen_input`], [`invert_input`]).
+    pub input: &'a [u64],
+    /// The surface the call was made on.
+    pub surface: &'a Surface,
+    /// The kernel the call was made with.
+    pub kernel: &'a Kernel,
+    /// For [`Seam::Invert`]: whether the inversion maximizes the distance (`false` for a
+    /// closest point, and for [`Seam::Degen`]).
+    pub farthest: bool,
+    /// The function's own answer.
+    pub own: Answer,
 }
 
-/// Installs `hook` (or removes the hook, with `None`) on this thread; returns the one
-/// it replaces.
-pub fn install(hook: Option<Hook>) -> Option<Hook> {
-    HOOK.with(|c| c.replace(hook))
+/// The hook: given a call, the answer the caller gets.
+pub type Hook = Box<dyn FnMut(Call<'_>) -> Answer + Send>;
+
+/// A kernel's seam: no hook (the default), or a hook shared with the kernel's copies.
+#[derive(Clone, Default)]
+pub struct ReplaySeam {
+    hook: Option<Arc<Mutex<Hook>>>,
+    /// The seam calls under way: a call inside another seam call (or inside the hook) is
+    /// not an outermost call and goes straight to the function.
+    depth: Arc<AtomicU32>,
+}
+
+impl ReplaySeam {
+    /// A seam with `hook`.
+    #[must_use]
+    pub fn new(hook: Hook) -> Self {
+        Self {
+            hook: Some(Arc::new(Mutex::new(hook))),
+            depth: Arc::default(),
+        }
+    }
+}
+
+impl core::fmt::Debug for ReplaySeam {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ReplaySeam")
+            .field("hook", &self.hook.is_some())
+            .field("depth", &self.depth)
+            .finish()
+    }
 }
 
 /// A seam's value as bits.
@@ -107,28 +149,45 @@ impl Bits for SingularityInversion {
     }
 }
 
-/// Runs `f`, an outermost call of `seam` with `input`, through the installed hook. With
-/// no hook, or inside another seam's call, it only runs `f`.
+/// Runs `f`, a call of `seam` on `surface` with `input`, through `k`'s hook. With no hook,
+/// or inside another seam call, it only runs `f`.
 ///
 /// # Errors
 ///
 /// `f`'s error or the hook's; [`SolidError::InvalidInput`] when the hook's bits are not
-/// a value.
-pub(crate) fn wrap<T: Bits>(seam: Seam, input: &[u64], f: impl FnOnce() -> Result<T>) -> Result<T> {
-    let active = DEPTH.with(Cell::get) == 0 && HOOK.with(|c| c.borrow().is_some());
-    if !active {
+/// a value, or the hook panicked on an earlier call.
+pub(crate) fn wrap<T: Bits>(
+    k: &Kernel,
+    surface: &Surface,
+    seam: Seam,
+    input: &[u64],
+    farthest: bool,
+    f: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let seam_state = &k.replay;
+    let Some(hook) = seam_state.hook.as_ref() else {
+        return f();
+    };
+    if seam_state.depth.load(Ordering::Relaxed) > 0 {
         return f();
     }
-    DEPTH.with(|d| d.set(d.get() + 1));
-    let own = f();
-    DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
-    let mut hook = HOOK.with(|c| c.borrow_mut().take());
-    let answer = own.map(|t| t.to_bits());
-    let answer = match hook.as_mut() {
-        Some(h) => h(seam, input, answer),
-        None => answer,
+    seam_state.depth.fetch_add(1, Ordering::Relaxed);
+    let own = f().map(|t| t.to_bits());
+    let answer = match hook.lock() {
+        Ok(mut h) => h(Call {
+            seam,
+            input,
+            surface,
+            kernel: k,
+            farthest,
+            own,
+        }),
+        Err(_) => Err(SolidError::InvalidInput {
+            operation: "surface::surface::replay::wrap",
+            reason: "the hook panicked on an earlier call",
+        }),
     };
-    HOOK.with(|c| *c.borrow_mut() = hook);
+    seam_state.depth.fetch_sub(1, Ordering::Relaxed);
     answer.and_then(|b| {
         T::from_bits(&b).ok_or(SolidError::InvalidInput {
             operation: "surface::surface::replay::wrap",

@@ -1038,38 +1038,13 @@ mod tests {
     /// distance's own ([`solidcore::geom::certified::distance`]) charged; `None` where the
     /// evaluation is not bounded (a rational net past its knots).
     fn wr57_distance(k: &Kernel, s: &Surface, p: Vec3, uv: Point2) -> Option<(f64, f64)> {
-        let q = s.evaluate_point(k, uv).expect("evaluate");
-        let d = solidcore::geom::certified::distance(q, p);
-        let slack = crate::certify::evaluation_slack_at(k, s, uv)?;
-        Some((d.value - d.bound - slack, d.value + d.bound + slack))
+        crate::certify::distance(k, s, p, uv)
     }
 
-    /// A lower bound on the distance from `p` to `s` over its natural domain, as the least
-    /// of [`solidcore::query::distance_bound::surface_distance_lower_bound`] over a grid of
-    /// boxes covering it, each subdivided on its own (asked for `want`): 4, 16 and then
-    /// 64 boxes a side, stopping once the bound is within `1e-6` relative of `want`.
+    /// A lower bound on the distance from `p` to `s` over its natural domain
+    /// ([`crate::certify::split_lower_bound`]).
     fn wr57_split_lower_bound(k: &Kernel, s: &Surface, p: Vec3, want: f64) -> f64 {
-        use solidcore::query::distance_bound::surface_distance_lower_bound;
-        let nat = s.natural_uv_domain_with_nurb(k).expect("the domain");
-        let (u0, v0, u1, v1) = (nat.min().x, nat.min().y, nat.max().x, nat.max().y);
-        let mut lo = 0.0;
-        for n in [4_u32, 16, 64] {
-            let at = |a: f64, b: f64, i: u32| if i == n { b } else { a + (b - a) * f64::from(i) / f64::from(n) };
-            lo = f64::INFINITY;
-            for iu in 0..n {
-                for iv in 0..n {
-                    let b = Extent2d::from_points(
-                        Point2::new(at(u0, u1, iu), at(v0, v1, iv)),
-                        Point2::new(at(u0, u1, iu + 1), at(v0, v1, iv + 1)),
-                    );
-                    lo = lo.min(surface_distance_lower_bound(k, s, Some(&b), p, want).expect("the lower bound"));
-                }
-            }
-            if want - lo <= 1e-6 * want {
-                break;
-            }
-        }
-        lo
+        crate::certify::split_lower_bound(k, s, p, want).expect("the lower bound")
     }
 
     /// The nearest of 2001 samples on each edge of `dom` to `p`, with its enclosed

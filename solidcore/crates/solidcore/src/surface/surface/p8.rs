@@ -3221,7 +3221,7 @@ impl Surface {
         #[cfg(feature = "wr57-replay")]
         let body = || {
             let input = super::replay::invert_input(test_pt, uv_domain, uv_guess, tol);
-            super::replay::wrap(super::replay::Seam::Invert, &input, body)
+            super::replay::wrap(k, self, super::replay::Seam::Invert, &input, farthest, body)
         };
         body()
     }

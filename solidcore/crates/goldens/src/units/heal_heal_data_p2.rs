@@ -2049,7 +2049,7 @@ fn rust_heal(
     let (path, block) = block_of(brep, validate_only, init_gaps)?;
     // the block contract (HANG-29, the size ranges)
     source_contract(&path, &block).map_err(|e| harness(format!("B-rep block: {e}")))?;
-    let mut k = Kernel::default();
+    let mut k = crate::runner_kernel();
     let mut b = match own_brep(&mut k, brep, validate_only, init_gaps)? {
         Built::Brep(b) => *b,
         // the B-rep could not be built: the shim reports `-1 status`

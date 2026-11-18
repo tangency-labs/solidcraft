@@ -967,7 +967,7 @@ impl UnitDiff for Runner {
         let i: Inputs = c.parse()?;
         compared_input(&i)?;
         let a = &i.data;
-        let mut k = Kernel::default();
+        let mut k = crate::runner_kernel();
         let point = v([a[11], a[12], a[13]]);
         let result = match i.op {
             1 => curve(&k, a)

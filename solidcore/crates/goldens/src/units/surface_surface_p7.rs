@@ -1966,46 +1966,10 @@ mod tests {
         ("gen2997", &[1001.0, 1.0, 0.9984474015655054], &[0.0, 1.0, 0.9984474015655054]),
     ];
 
-    /// The alignment `A = w / |w| . dir` of the derivative `w` across the singular direction
-    /// at `uv` with the direction, and a bound on its rounding: `w` and its error `e` come
-    /// from the certified partials of the surface's NURBS form
-    /// ([`solidcore::eval::collapse::certified_partials`]); the unit vector moves by at
-    /// most `2 e / |w|` (`|a / |a| - b / |b|| <= 2 |a - b| / |a|`), and its own computation
-    /// and the dot product round by at most `2 gamma(16)`. `None` where `2 e >= |w|`.
+    /// The enclosed alignment at `uv` ([`crate::certify::alignment`], shared with the
+    /// goldens' WR-57 substitution replay).
     fn wr57_alignment(k: &Kernel, s: &Surface, uv: Point2, dir: Vec3, singular_u: bool) -> Option<(f64, f64)> {
-        use solidcore::eval::collapse::certified_partials;
-        use solidcore::eval::spline::EvalSurface;
-        use solidcore::nurbs::math::gamma;
-        let net = solidcore::blend::fillet_section::station::as_b_spline(k, crate::certify::measured(s))
-            .expect("the NURBS form")
-            .expect("a NURBS form");
-        let nurb = net.gw_nurb().expect("a NURB");
-        let cp = nurb.cpts();
-        let (nu, nv) = (cp.len(), cp[0].len());
-        let mut ctrl = Vec::new();
-        for j in 0..nv {
-            for row in &cp {
-                let c = row[j];
-                let w = if c.w == NOW { 1.0 } else { c.w };
-                let z = if c.z == NOZ { 0.0 } else { c.z };
-                ctrl.push([c.x, c.y, z, w]);
-            }
-        }
-        let eval = EvalSurface::nurbs_closed(
-            [nurb.p(), nurb.q()],
-            [nurb.u_knots().to_vec(), nurb.v_knots().to_vec()],
-            [nu, nv],
-            ctrl,
-            [false; 2],
-        );
-        let (d, e) = certified_partials(&eval, [uv.x, uv.y]).expect("certified partials");
-        let (w, ew) = if singular_u { (d[0][1], e[0][1]) } else { (d[1][0], e[1][0]) };
-        let len = w.length();
-        if 2.0 * ew >= len {
-            return None;
-        }
-        let a = (w / len).dot(dir);
-        Some((a, 2.0 * ew / len + 2.0 * gamma(16)))
+        crate::certify::alignment(k, s, uv, dir, singular_u)
     }
 
     /// WR-57 (#17856): every row of `FindDegenParamForDirection` that moved from main is

@@ -206,6 +206,110 @@ pub(crate) fn sampled_max(
     max
 }
 
+/// The alignment `A = w / |w| . dir` of the derivative `w` across the singular direction
+/// (the `u` derivative where `singular_u`, else the `v` one) at `uv` with the direction,
+/// and a bound on its rounding (WR-57, #17856): `w` and its error `e` come from the
+/// certified partials of the surface's NURBS form
+/// ([`solidcore::eval::collapse::certified_partials`]); the unit vector moves by at most
+/// `2 e / |w|` (`|a / |a| - b / |b|| <= 2 |a - b| / |a|`), and its own computation and the
+/// dot product round by at most `2 gamma(16)`. `None` where `2 e >= |w|` (the tangent is
+/// not enclosed away from zero), or the surface has no NURBS form or its partials no bound.
+pub(crate) fn alignment(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    dir: solidcore::math::Vec3,
+    singular_u: bool,
+) -> Option<(f64, f64)> {
+    use solidcore::eval::collapse::certified_partials;
+    use solidcore::eval::spline::EvalSurface;
+    use solidcore::nurbs::math::NOZ;
+    let net = as_b_spline(k, measured(surface)).ok()??;
+    let nurb = net.gw_nurb()?;
+    let cp = nurb.cpts();
+    let (nu, nv) = (cp.len(), cp.first()?.len());
+    let mut ctrl = Vec::new();
+    for j in 0..nv {
+        for row in &cp {
+            let c = *row.get(j)?;
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            let z = if c.z == NOZ { 0.0 } else { c.z };
+            ctrl.push([c.x, c.y, z, w]);
+        }
+    }
+    let eval = EvalSurface::nurbs_closed(
+        [nurb.p(), nurb.q()],
+        [nurb.u_knots().to_vec(), nurb.v_knots().to_vec()],
+        [nu, nv],
+        ctrl,
+        [false; 2],
+    );
+    let (d, e) = certified_partials(&eval, [uv.x, uv.y]).ok()?;
+    let (w, ew) = if singular_u {
+        (d[0][1], e[0][1])
+    } else {
+        (d[1][0], e[1][0])
+    };
+    let len = w.length();
+    if 2.0 * ew >= len || !len.is_finite() {
+        return None;
+    }
+    let a = (w / len).dot(dir);
+    Some((a, 2.0 * ew / len + 2.0 * gamma(16)))
+}
+
+/// The certified distance from `p` to `surface`'s point at `uv`: `[lo, hi]`, the
+/// evaluation's rounding ([`evaluation_slack_at`], grown past the knots) and the distance's
+/// own ([`solidcore::geom::certified::distance`]) charged; `None` where the evaluation fails
+/// or is not bounded (a rational net past its knots).
+pub(crate) fn distance(k: &Kernel, surface: &Surface, p: Point3, uv: Point2) -> Option<(f64, f64)> {
+    let q = surface.evaluate_point(k, uv).ok()?;
+    let d = solidcore::geom::certified::distance(q, p);
+    let slack = evaluation_slack_at(k, surface, uv)?;
+    let lo = d.value - d.bound - slack;
+    let hi = d.value + d.bound + slack;
+    (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+}
+
+/// A lower bound on the distance from `p` to `surface` over its natural domain, as the
+/// least of [`surface_distance_lower_bound`] over a grid of boxes covering it, each
+/// subdivided on its own (asked for `want`): 4, 16 and then 64 boxes a side, stopping once
+/// the bound is within `1e-6` relative of `want`. `None` where the domain or a box's bound
+/// is not available.
+pub(crate) fn split_lower_bound(
+    k: &Kernel,
+    surface: &Surface,
+    p: Point3,
+    want: f64,
+) -> Option<f64> {
+    let nat = surface.natural_uv_domain_with_nurb(k).ok()?;
+    let (u0, v0, u1, v1) = (nat.min().x, nat.min().y, nat.max().x, nat.max().y);
+    let mut lo = 0.0;
+    for n in [4_u32, 16, 64] {
+        let at = |a: f64, b: f64, i: u32| {
+            if i == n {
+                b
+            } else {
+                a + (b - a) * f64::from(i) / f64::from(n)
+            }
+        };
+        lo = f64::INFINITY;
+        for iu in 0..n {
+            for iv in 0..n {
+                let b = Extent2d::from_points(
+                    Point2::new(at(u0, u1, iu), at(v0, v1, iv)),
+                    Point2::new(at(u0, u1, iu + 1), at(v0, v1, iv + 1)),
+                );
+                lo = lo.min(surface_distance_lower_bound(k, surface, Some(&b), p, want).ok()?);
+            }
+        }
+        if want - lo <= 1e-6 * want {
+            break;
+        }
+    }
+    Some(lo)
+}
+
 thread_local! {
     static KEPT: std::cell::RefCell<Option<solidcore::topology::Brep>> =
         const { std::cell::RefCell::new(None) };

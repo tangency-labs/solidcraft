@@ -1144,7 +1144,7 @@ impl Surface {
         #[cfg(feature = "wr57-replay")]
         let search = || {
             let input = super::replay::degen_input(uv, dir, dir_from_pole, singular_dir, tol);
-            super::replay::wrap(super::replay::Seam::Degen, &input, search)
+            super::replay::wrap(k, self, super::replay::Seam::Degen, &input, false, search)
         };
         search()
     }
