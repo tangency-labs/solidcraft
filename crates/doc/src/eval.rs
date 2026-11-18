@@ -4959,6 +4959,8 @@ fn tools_clearly_apart(bodies: &[Body]) -> bool {
 /// vertex. Crossing and nested bodies come out in one piece, touching ones in one or in two that
 /// share an edge or a face.
 fn apart_by_union(a: &Body, b: &Body) -> bool {
+    #[cfg(test)]
+    cost_tests::count(|c| c.apart_unions += 1);
     match kernel::boolean(a, b, BoolOp::Union) {
         Ok(Some(u)) => u.record().material_regions().len() == 2 && u.region_contacts().is_ok_and(|c| c.is_empty()),
         _ => false,
