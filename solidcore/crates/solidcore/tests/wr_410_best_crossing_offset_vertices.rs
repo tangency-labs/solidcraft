@@ -228,7 +228,7 @@ fn analytic_distance(s: &AnalyticSupport, x: Point3) -> (f64, Vec3) {
             let len = v.length();
             (len - radius, v * (1.0 / len))
         }
-        _ => panic!("not a plane, cylinder, cone or sphere: {s:?}"),
+        AnalyticSupport::Torus { .. } => panic!("not a plane, cylinder, cone or sphere: {s:?}"),
     }
 }
 
@@ -261,7 +261,7 @@ fn newton_corner(dist: impl Fn(Point3) -> [(f64, Vec3); 3], start: Point3) -> (P
             det3(m) / det
         };
         let dx = Vec3::new(col(0), col(1), col(2));
-        x = x + dx;
+        x += dx;
         if dx.length() < 1e-16 {
             break;
         }
