@@ -525,6 +525,9 @@ pub fn tangent_end_rib(
     let mut spans: usize = 8;
     let mut stations = false;
     let mut halvings = 0;
+    // a zero-speed rib's midpoint without an exact point ends the refinement (upstream's
+    // break), with upstream's failure, not as not certified
+    let mut unsolved = false;
     while spans <= max_spans {
         if !stations {
             // stations t = j / spans, solved from the tangent end outward
@@ -724,7 +727,8 @@ pub fn tangent_end_rib(
 
         // the zero-speed rib: each span off the rib halved at its exact midpoint
         if !solved {
-            return Err(fail("no stations give the rib within the tolerance"));
+            unsolved = true;
+            break;
         }
         for &(jj, alpha, uv, exact) in off.iter().rev() {
             let at = jj + 1;
@@ -742,7 +746,7 @@ pub fn tangent_end_rib(
 
     // no station count certifies the rib within the tolerance (#17744); upstream's check:
     // no stations give the rib within tolerance
-    if faces.is_some() {
+    if faces.is_some() && !unsolved {
         return Err(SolidError::blend(
             OP_RIB,
             crate::error::blend::BlendFailure::NotCertified {
