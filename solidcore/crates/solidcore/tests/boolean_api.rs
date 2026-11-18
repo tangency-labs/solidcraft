@@ -1932,3 +1932,75 @@ fn a_box_face_past_a_spheres_poles_does_not_touch_them() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// A closed polygon of `n` sides about the origin, as the one degree-1 B-spline of its
+/// `n` vertices (the first repeated at the end, each knot twice).
+fn polygon_spline(n: usize) -> Curve {
+    let mut control = Vec::with_capacity(n + 1);
+    for i in 0..n {
+        let a = 2.0 * PI * (i as f64) / (n as f64);
+        control.push(Point3::new(10.0 * a.cos(), 10.0 * a.sin(), 0.0));
+    }
+    control.push(control[0]);
+    let knots: Vec<f64> = (0..=n).map(|i| i as f64).collect();
+    // the expanded knot vector of a degree-1 curve with n + 1 control points holds
+    // n + 3 knots: the first and the last twice, the rest once
+    let mut mults = vec![1usize; n + 1];
+    mults[0] = 2;
+    mults[n] = 2;
+    Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 1,
+            control_points: &control,
+            form: BSplineCurveForm::default(),
+            knot_multiplicities: &mults,
+            knots: &knots,
+            knot_type: KnotType::default(),
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    )
+}
+
+/// The prism of an `n`-sided polygon, swept `up` from the plane z = 0 (down when it is
+/// not), 2 mm tall.
+fn polygon_prism(k: &mut Kernel, n: usize, up: bool) -> Brep {
+    let curve = polygon_spline(n);
+    let dir = if up { Vec3::new(0.0, 0.0, 1.0) } else { Vec3::new(0.0, 0.0, -1.0) };
+    create_linear_sweep(k, &[Some(&curve)], dir, 2.0, true).unwrap()
+}
+
+/// The seam and pole tests a union of two prisms that share an `n`-edged face makes
+/// ([`Kernel::work_counters`]): the face is tested for a seam once, not once for every
+/// curve classified on it.
+fn seam_checks_of_a_shared_face(n: usize) -> u64 {
+    let mut k = Kernel::default();
+    let lower = polygon_prism(&mut k, n, false);
+    let upper = polygon_prism(&mut k, n, true);
+    k.work_counters.reset();
+    let mut union = boolean_union(&mut k, lower, upper).unwrap();
+    // the union is one solid of the prism's volume (an n-gon of radius 10, 4 mm tall)
+    let area = 0.5 * n as f64 * 100.0 * (2.0 * PI / n as f64).sin();
+    let volume = volume_of(&k, &mut union);
+    assert!(
+        (volume - 4.0 * area).abs() < 1e-6 * volume,
+        "volume {volume} vs {}",
+        4.0 * area
+    );
+    k.work_counters.seam_checks()
+}
+/// A boolean of two solids that share a many-edged face tests that face for a seam once,
+/// not once for every curve classified on it: the work grows with the edges of the face,
+/// not with their square (a face with 2,000 edges made a join twice as long as it was,
+/// the seam and pole tests of every curve rescanning the whole face).
+#[test]
+fn a_boolean_of_two_solids_sharing_a_many_edged_face_tests_its_seams_once() {
+    let (checks16, checks32) = (seam_checks_of_a_shared_face(16), seam_checks_of_a_shared_face(32));
+    println!("16 edges: {checks16} seam checks; 32 edges: {checks32} seam checks");
+    assert!(
+        checks32 <= checks16,
+        "the seam tests grew with the number of curves: {checks16} for 16 edges, {checks32} for 32"
+    );
+}

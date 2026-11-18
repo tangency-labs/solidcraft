@@ -508,6 +508,7 @@ fn pole_of_face<O: ClassObject>(
     geometry: &impl ClassGeometry<O>,
     vertex: O,
     face: Option<O>,
+    k: &Kernel,
 ) -> Result<bool> {
     let Some(face) = face else {
         return Ok(false);
@@ -519,6 +520,7 @@ fn pole_of_face<O: ClassObject>(
         (Some((b, EntityRef::Vertex(v))), Some((fb, EntityRef::Face(f))))
             if std::ptr::eq(b, fb) =>
         {
+            k.work_counters.add_seam_check();
             crate::topology::vertex::inside_face(b, v, f)
         }
         _ => Ok(false),
@@ -929,7 +931,7 @@ impl<O: ClassObject> CurveClassification<O> {
             // whether a contact is held to the curve's region: at a pole, for every curve
             // but the face's own seam curve (checked as upstream does)
             let mut regional = false;
-            let tolerance = if pole_of_face(geometry, vertex, self.face())? {
+            let tolerance = if pole_of_face(geometry, vertex, self.face(), k)? {
                 let working = match &wrapped {
                     Some(lifted) => lifted,
                     None => self.curve_geometry(geometry)?,

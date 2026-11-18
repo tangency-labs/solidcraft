@@ -1703,7 +1703,7 @@ fn boundary_edge<O: ClassObject>(
         interval: record.interval,
         zone_tol_3d: record.tolerance,
         face_gap,
-        seam: seam_ends(objects.brep(), edge, face)?,
+        seam: seam_ends(k, objects.brep(), edge, face)?,
     })
 }
 
@@ -1711,7 +1711,8 @@ fn boundary_edge<O: ClassObject>(
 /// that bound material: a vertex that is no pole of the face
 /// ([`crate::topology::vertex::inside_face`]), with its point and tolerance
 /// (docs/booleans.md, "Seams and poles"). `None` for an edge that is no seam.
-fn seam_ends(b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<SeamEnds>> {
+fn seam_ends(k: &Kernel, b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<SeamEnds>> {
+    k.work_counters.add_seam_check();
     if !crate::topology::edge::face_on_both_sides(b, edge, face)? {
         return Ok(None);
     }

@@ -171,6 +171,7 @@ pub struct WorkCounters {
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
     coincident_curves_classified: Cell<u64>,
+    seam_checks: Cell<u64>,
     containment_edge_drops: Cell<u64>,
     loop_walks: Cell<u64>,
     target_record_seedings: Cell<u64>,
@@ -281,6 +282,16 @@ impl WorkCounters {
         self.coincident_curves_classified.get()
     }
 
+    /// The seam and pole tests a face's edges and vertices were asked for: each edge
+    /// tested for being a seam of the face (an edge with the face on both sides) and each
+    /// vertex tested for being a pole of it (a vertex all of whose edges are seams). A
+    /// face without a seam edge is tested once for the face, not once for every curve
+    /// classified on it. Not upstream (the fork's counters have none).
+    #[must_use]
+    pub fn seam_checks(&self) -> u64 {
+        self.seam_checks.get()
+    }
+
     /// Edge curves the loop containment test (`query::loop::contains_uv_point`) drops the
     /// test point onto: those whose box, grown by the edge's tolerance, reaches the point.
     /// Not upstream (upstream drops it onto every edge of the loop it walks).
@@ -362,6 +373,7 @@ impl WorkCounters {
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
         self.coincident_curves_classified.set(0);
+        self.seam_checks.set(0);
         self.containment_edge_drops.set(0);
         self.loop_walks.set(0);
         self.target_record_seedings.set(0);
@@ -441,6 +453,12 @@ impl WorkCounters {
     pub(crate) fn add_coincident_curve_classified(&self) {
         self.coincident_curves_classified
             .set(self.coincident_curves_classified.get().saturating_add(1));
+    }
+
+    /// Counts one seam or pole test of a face's edges or vertices (an edge tested for
+    /// being a seam of the face, a vertex tested for being a pole of it).
+    pub(crate) fn add_seam_check(&self) {
+        self.seam_checks.set(self.seam_checks.get().saturating_add(1));
     }
 
     /// Counts one drop of a containment test's point onto an edge curve.
