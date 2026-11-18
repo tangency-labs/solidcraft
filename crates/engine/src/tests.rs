@@ -45,6 +45,12 @@ pub(crate) mod doc_copies {
     }
 }
 
+/// A PNG's width and height (its IHDR).
+pub(crate) fn png_size(png: &[u8]) -> (u32, u32) {
+    let be = |i: usize| u32::from_be_bytes([png[i], png[i + 1], png[i + 2], png[i + 3]]);
+    (be(16), be(20))
+}
+
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
         Ok(v) => v,
