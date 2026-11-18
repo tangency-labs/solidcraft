@@ -4815,9 +4815,13 @@ fn union_all(operands: &[&Traced]) -> Result<Traced> {
 /// their exact boxes, each grown by twice its body's tolerance, do not meet
 /// ([`kernel::union_apart`]). `None` when that cannot be shown (two boxes meet, a mesh body, a
 /// box that cannot be measured): the caller runs the kernel's union.
+///
+/// Bodies whose mesh boxes are apart are apart ([`more::apart_by_mesh`]), and the kernel's union
+/// is not run on them: measuring the tight box of a body with many faces costs the kernel
+/// minutes (#18821: 537 s for the combine of the cup of the report).
 fn union_all_apart(operands: &[&Traced]) -> Option<Traced> {
     let bodies: Vec<Body> = operands.iter().map(|t| t.body.clone()).collect();
-    let one = kernel::union_apart(&bodies).ok().flatten()?;
+    let one = if more::apart_by_mesh(&bodies) { kernel::join_apart(&bodies).ok().flatten() } else { kernel::union_apart(&bodies).ok().flatten() }?;
     #[cfg(test)]
     cost_tests::count(|c| c.joined_apart += 1);
     Some(Traced::step(one, operands))

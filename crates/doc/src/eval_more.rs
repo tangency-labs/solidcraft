@@ -2101,6 +2101,46 @@ pub(super) fn exact_box(body: &Body) -> Option<Aabb3> {
     (!b.is_empty() && b.min.is_finite() && b.max.is_finite()).then(|| b.inflated(2.0 * body.record().tolerance + 1e-6))
 }
 
+/// Whether no two of `bodies` meet: their mesh boxes, each grown by twice its body's
+/// tolerance, do not meet. A mesh's box holds the body's points (a mesh's vertices are on
+/// the surface), so bodies whose mesh boxes are apart are apart, and the kernel's tight
+/// boxes need not be measured: measuring the tight box of a body with many faces costs
+/// the kernel minutes (#18821: 537 s for the combine of the cup of the report).
+///
+/// False whenever that cannot be shown: a mesh body, a body without a mesh, a box that
+/// cannot be measured, two boxes that meet.
+pub(super) fn apart_by_mesh(bodies: &[Body]) -> bool {
+    if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
+        return false;
+    }
+    let mut boxes: Vec<Aabb3> = Vec::with_capacity(bodies.len());
+    for body in bodies {
+        let tolerance = kernel::MeshTolerance { chord: (body.size() * 1e-3).max(1e-3), angle: Some(kernel::DISPLAY_ANGLE) };
+        let Ok(mesh) = body.mesh(&tolerance) else { return false };
+        let box_of = mesh.bounds();
+        if box_of.is_empty() || !box_of.min.is_finite() || !box_of.max.is_finite() {
+            return false;
+        }
+        boxes.push(box_of.inflated(2.0 * body.record().tolerance + 1e-6));
+    }
+    // Sweep along x: only boxes whose x ranges overlap are compared.
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&i, &j| boxes.get(i).map(|b| b.min.x).unwrap_or(0.0).total_cmp(&boxes.get(j).map(|b| b.min.x).unwrap_or(0.0)));
+    for (k, &i) in order.iter().enumerate() {
+        let Some(a) = boxes.get(i) else { return false };
+        for &j in order.iter().skip(k + 1) {
+            let Some(b) = boxes.get(j) else { return false };
+            if b.min.x > a.max.x {
+                break;
+            }
+            if !boxes_apart(&Some(*a), &Some(*b)) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Whether every tool of `reach` lies inside `mb`: its box is inside the box of the
 /// body's mesh, which holds the body's points (a mesh's vertices are on the surface) and
 /// is nearly free.
