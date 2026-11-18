@@ -30,6 +30,12 @@ impl CardHeaders {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TopBar {
+    Always,
+    Edge,
+}
+
 pub struct DisplayChoice<'a> {
     pub id: usize,
     pub name: &'a str,
@@ -44,6 +50,7 @@ pub struct WindowMenu<'a> {
     pub panels: bool,
     pub ribbon: bool,
     pub ribbon_auto_hide: bool,
+    pub top_bar: TopBar,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +60,7 @@ pub enum Action {
     Panels(bool),
     Ribbon(bool),
     RibbonAutoHide(bool),
+    TopBar(TopBar),
     MoveToDisplay(usize),
     Rename,
     UseAsDefault,
@@ -123,6 +131,11 @@ impl FocusRows {
         }
         self.ids.push(id);
     }
+}
+
+/// Whether the window menu is holding the pop-out chrome open.
+pub fn is_open(ctx: &egui::Context, anchor: Id) -> bool {
+    ctx.data(|data| data.get_temp::<State>(anchor.with("window_options"))).is_some_and(|state| state.open)
 }
 
 fn popup_origin(screen: Rect, anchor: Rect, width: f32, height: f32) -> Pos2 {
@@ -229,6 +242,7 @@ fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, height: f32, state: &mut
 fn middle(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {
     Menu::heading(ui, tr("window_menu.show_here"));
     let mut action = ribbon_options(ui, menu, focus);
+    action = top_bar(ui, menu.top_bar, focus).or(action);
     action = panel_options(ui, menu.panels, focus).or(action);
     action = card_headers(ui, menu.card_headers, focus).or(action);
     Menu::separator(ui);
@@ -323,53 +337,76 @@ fn panel_options(ui: &mut Ui, current: bool, focus: &mut FocusRows) -> Option<Ac
     (panels != current).then_some(Action::Panels(panels))
 }
 
+fn top_bar(ui: &mut Ui, mode: TopBar, focus: &mut FocusRows) -> Option<Action> {
+    let labels = [tr("window_options.always"), tr("window_topbar.edge")];
+    let targets = ["window_options:top_bar:always", "window_options:top_bar:edge"];
+    let selected = usize::from(mode == TopBar::Edge);
+    segment_row(ui, tr("window_topbar.top_bar"), selected, &labels, &targets, 170.0, focus)
+        .map(|index| Action::TopBar(if index == 0 { TopBar::Always } else { TopBar::Edge }))
+}
+
 fn card_headers(ui: &mut Ui, headers: CardHeaders, focus: &mut FocusRows) -> Option<Action> {
     let labels = [tr("window_options.always"), tr("window_options.on_hover"), tr("window_options.hidden")];
     let targets = ["window_options:headers:always", "window_options:headers:hover", "window_options:headers:hidden"];
-    let mut selected = headers.index();
+    segment_row(ui, tr("window_options.card_headers"), headers.index(), &labels, &targets, 210.0, focus)
+        .and_then(|index| CardHeaders::ALL.get(index).copied())
+        .map(Action::CardHeaders)
+}
+
+fn segment_row(
+    ui: &mut Ui,
+    label: &str,
+    mut selected: usize,
+    labels: &[&str],
+    targets: &[&str],
+    max_width: f32,
+    focus: &mut FocusRows,
+) -> Option<usize> {
     let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.add_space(8.0);
-        ui.label(tr("window_options.card_headers"));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    ui.push_id(label, |ui| {
+        ui.horizontal(|ui| {
             ui.add_space(8.0);
-            let width = ui.available_width().min(210.0);
-            let t = Tokens::get();
-            ui.allocate_ui_with_layout(vec2(width, ROW_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                // A segment has the usual native focus target. Register the selected one as the
-                // row's default target and preserve the active segment when navigating from it.
-                let ids = [0_usize, 1, 2].map(|index| ui.make_persistent_id(("segment", index)));
-                let focused = ids.iter().position(|id| ui.memory(|memory| memory.has_focus(*id)));
-                if focused.is_some() {
-                    let step = ui.input_mut(|input| {
-                        if input.consume_key(Modifiers::NONE, Key::ArrowLeft) {
-                            -1
-                        } else if input.consume_key(Modifiers::NONE, Key::ArrowRight) {
-                            1
-                        } else {
-                            0
+            ui.label(label);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                let width = ui.available_width().min(max_width);
+                let t = Tokens::get();
+                ui.allocate_ui_with_layout(vec2(width, ROW_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    // A segment has the usual native focus target. Register the selected one as the
+                    // row's default target and preserve the active segment when navigating from it.
+                    let ids = (0..labels.len()).map(|index| ui.make_persistent_id(("segment", index))).collect::<Vec<_>>();
+                    let focused = ids.iter().position(|id| ui.memory(|memory| memory.has_focus(*id)));
+                    if focused.is_some() {
+                        let step = ui.input_mut(|input| {
+                            if input.consume_key(Modifiers::NONE, Key::ArrowLeft) {
+                                -1
+                            } else if input.consume_key(Modifiers::NONE, Key::ArrowRight) {
+                                1
+                            } else {
+                                0
+                            }
+                        });
+                        if step != 0 {
+                            selected = (focused.unwrap_or(selected) + (step + labels.len() as isize) as usize) % labels.len();
+                            if let Some(id) = ids.get(selected) {
+                                ui.memory_mut(|memory| {
+                                    memory.move_focus(egui::FocusDirection::None);
+                                    memory.request_focus(*id);
+                                });
+                            }
+                            changed = true;
                         }
-                    });
-                    if step != 0 {
-                        selected = (focused.unwrap_or(selected) + (step + 3) as usize) % 3;
-                        if let Some(id) = ids.get(selected) {
-                            ui.memory_mut(|memory| {
-                                memory.move_focus(egui::FocusDirection::None);
-                                memory.request_focus(*id);
-                            });
-                        }
-                        changed = true;
                     }
-                }
-                let rect = Rect::from_min_size(ui.next_widget_position(), vec2(width, t.control_height));
-                changed |= segmented(ui, &mut selected, &labels, Segments { compact: true, small: true, targets: &targets, ..Default::default() });
-                if let Some(id) = ids.get(focused.unwrap_or(selected)) {
-                    focus.register(ui, *id, rect);
-                }
+                    let rect = Rect::from_min_size(ui.next_widget_position(), vec2(width, t.control_height));
+                    changed |= segmented(ui, &mut selected, labels, Segments { compact: true, small: true, targets, ..Default::default() });
+                    if let Some(id) = ids.get(focused.unwrap_or(selected)) {
+                        focus.register(ui, *id, rect);
+                    }
+                });
             });
-        });
+        })
     });
-    CardHeaders::ALL.get(selected).copied().filter(|_| changed).map(Action::CardHeaders)
+    changed.then_some(selected)
 }
 
 fn displays(ui: &mut Ui, id: Id, displays: &[DisplayChoice<'_>], state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {

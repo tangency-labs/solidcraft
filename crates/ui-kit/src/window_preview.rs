@@ -1,6 +1,6 @@
 //! Draws the small window shown at the top of the pop-out options menu.
 
-use crate::window_options_menu::{CardHeaders, WindowMenu};
+use crate::window_options_menu::{CardHeaders, TopBar, WindowMenu};
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 
@@ -58,17 +58,18 @@ fn desktop(painter: &Painter, rect: Rect, start: Color32, end: Color32) {
 fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>, t: Tokens) {
     let point = |x, y| window.min + vec2(x, y) * scale;
     let region = |x, y, w, h| Rect::from_min_size(point(x, y), vec2(w, h) * scale);
-    let bar = region(3.0, 3.0, 894.0, 44.0);
-    painter.rect_filled(bar, (12.0 * scale).round() as u8, t.app_bar);
-    painter.rect_filled(region(16.0, 11.0, 260.0, 28.0), 2, t.app_bar_hover_button);
-    for x in [28.0, 96.0, 158.0, 220.0] {
-        painter.rect_filled(region(x, 21.0, 40.0, 7.0), 1, t.app_bar_text.gamma_multiply(0.62));
+    if menu.top_bar == TopBar::Always {
+        let bar = region(3.0, 3.0, 894.0, 44.0);
+        painter.rect_filled(bar, (12.0 * scale).round() as u8, t.app_bar);
+        painter.rect_filled(region(16.0, 11.0, 260.0, 28.0), 2, t.app_bar_hover_button);
+        for x in [28.0, 96.0, 158.0, 220.0] {
+            painter.rect_filled(region(x, 21.0, 40.0, 7.0), 1, t.app_bar_text.gamma_multiply(0.62));
+        }
+        crate::app_bar::paint_layout_glyph(painter, region(289.0, 14.0, 20.0, 20.0), "layout.side_by_side", t.app_bar_text);
+        for x in [830.0, 838.0, 846.0] {
+            painter.circle_filled(point(x, 24.0), 2.8 * scale, t.app_bar_text);
+        }
     }
-    crate::app_bar::paint_layout_glyph(painter, region(289.0, 14.0, 20.0, 20.0), "layout.side_by_side", t.app_bar_text);
-    for x in [830.0, 838.0, 846.0] {
-        painter.circle_filled(point(x, 24.0), 2.8 * scale, t.app_bar_text);
-    }
-
     cube(painter, point(446.0, 294.0), 145.0 * scale, t);
     let card = region(633.0, 368.0, 253.0, 176.0);
     painter.rect_filled(card.translate(vec2(0.0, 8.0 * scale)), 3, t.figure_shadow);
@@ -104,7 +105,7 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
             }
         }
     }
-    if menu.ribbon {
+    if menu.ribbon && (menu.top_bar == TopBar::Always || !menu.ribbon_auto_hide) {
         let ribbon = region(3.0, 47.0, 894.0, 84.0);
         if menu.ribbon_auto_hide {
             painter.rect_filled(ribbon, 0, t.toolbar.gamma_multiply(0.62));
@@ -122,6 +123,9 @@ fn miniature(painter: &Painter, window: Rect, scale: f32, menu: &WindowMenu<'_>,
             painter.rect_filled(region(x as f32, 71.0, 26.0, 29.0), 1, t.text_dim.gamma_multiply(0.40));
             painter.rect_filled(region(x as f32 - 5.0, 110.0, 36.0, 4.0), 1, t.text_dim.gamma_multiply(0.48));
         }
+    }
+    if menu.top_bar == TopBar::Edge {
+        painter.rect_filled(region(398.0, 7.0, 104.0, 10.0), (5.0 * scale).round() as u8, t.text_dim.gamma_multiply(0.5));
     }
 }
 
