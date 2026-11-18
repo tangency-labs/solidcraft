@@ -2645,10 +2645,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     // Home hides the design: only New, Open and Preferences work there.
     // An empty Drawing workspace has no drawing history, selection or camera. Shortcuts
     // must not silently edit the source design behind it. Explicit source editors retain
-    // their existing shortcuts while open.
+    // their existing shortcuts while open. With a drawing open, undo and redo step through that
+    // drawing's own history only, so Ctrl+Z and Ctrl+Y pass.
     let drawing =
         crate::drawing_workspace::active(app) && app.bom.is_none() && app.design_properties.is_none() && !crate::dialogs_sheet::flat_active(app);
     let shown = design_shown(app) && !drawing;
+    let drawing_history = drawing && design_shown(app) && app.session.open_drawing.is_some();
     if shown {
         crate::edit_clipboard::handle(app, ctx);
     } else {
@@ -2697,7 +2699,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                         }
                     });
                 }
-                _ if !shown => {}
+                _ if !shown && !(drawing_history && matches!(k, Key::Z | Key::Y)) => {}
                 // Ctrl+W closes the view shown, and the design with it when that is its only view;
                 // Ctrl+Shift+W closes the design shown. A design is closed asking first when it is
                 // unsaved; closing the last one shows the start page (#5366).
