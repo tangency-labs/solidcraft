@@ -448,6 +448,13 @@ pub enum OffsetRefusal {
     /// In a local operation, the new surfaces of the face and of its neighbour across an
     /// edge meet nowhere near the edge, so the edge cannot be found again.
     FacesApart,
+    /// In a local operation, the face moves past where the curved face beside it ends (a
+    /// sphere's cap moved past the sphere's top): no extension of that face meets it there.
+    /// `largest` is how far the face could move and still meet it.
+    PastSide {
+        /// How far the face could move and still meet the face beside it.
+        largest: f64,
+    },
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -517,6 +524,11 @@ impl std::fmt::Display for OffsetRefusal {
                     "its new surface and a neighbour's meet nowhere near their edge"
                 )
             }
+            OffsetRefusal::PastSide { largest } => write!(
+                f,
+                "it would move past where the curved face beside it ends; it meets that face \
+                 only while it moves less than {largest}"
+            ),
             OffsetRefusal::ReachUncertified => {
                 write!(
                     f,

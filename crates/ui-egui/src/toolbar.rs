@@ -797,8 +797,11 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
         if let Some(format) = format {
             params["format"] = json!(format);
         }
-        if app.run("file.export", params).is_ok() {
-            app.set_status(format!("Exported {path}"), false);
+        if let Ok(result) = app.run("file.export", params) {
+            let skipped =
+                result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
+            let line = if skipped.is_empty() { format!("Exported {path}") } else { format!("Exported {path} (skipped {})", skipped.join(", ")) };
+            app.set_status(line, false);
         }
     });
 }

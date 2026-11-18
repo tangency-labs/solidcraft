@@ -825,3 +825,45 @@ fn a_procedural_revolution_states_its_normal_against_the_definitions() {
         assert_eq!(got, reversed, "{d:?}");
     }
 }
+
+/// A body placed by a scale, or by a mirror, is refused with the reason rather than read where
+/// it is: its geometry would otherwise be at the wrong size or place. A rigid placement moves it.
+#[test]
+fn a_body_placed_by_a_scale_or_mirror_is_refused_and_a_rigid_one_moves_it() {
+    let placed = |rows: [[f64; 4]; 3]| {
+        let mut ir = cube();
+        ir.model.bodies.first_mut().unwrap().transform =
+            Some(cadmpeg_ir::transform::Transform::affine(rows).unwrap());
+        read_bodies(&ir, None)
+    };
+    for rows in [
+        [
+            [2.0, 0.0, 0.0, 100.0],
+            [0.0, 2.0, 0.0, 0.0],
+            [0.0, 0.0, 2.0, 0.0],
+        ],
+        [
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ],
+    ] {
+        let b = placed(rows);
+        assert!(b.read.is_empty(), "{rows:?}");
+        assert!(
+            b.failures[0].message.starts_with("its placement:"),
+            "{:?}",
+            b.failures
+        );
+    }
+    let b = placed([
+        [1.0, 0.0, 0.0, 100.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+    ]);
+    assert_eq!(b.read.len(), 1);
+    assert_eq!(
+        b.read[0].placement.map(|m| m[3]),
+        Some([100.0, 0.0, 0.0, 1.0])
+    );
+}

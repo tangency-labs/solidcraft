@@ -28,6 +28,7 @@ pub struct State {
     options: Option<Tool>,
     placement: Option<placement::Placement>,
     note: Option<note::Draft>,
+    view_edit: Option<panels::ViewEdit>,
     add_sheet: Option<panels::AddSheet>,
     rename_sheet: Option<u64>,
     sheet_menu: Option<SheetMenu>,
@@ -75,6 +76,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.drawing_workspace.options = None;
         app.drawing_workspace.placement = None;
         app.drawing_workspace.note = None;
+        app.drawing_workspace.view_edit = None;
         app.drawing_workspace.add_sheet = None;
         app.drawing_workspace.rename_sheet = None;
         app.drawing_workspace.sheet_menu = None;
@@ -119,6 +121,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.options = None;
     app.drawing_workspace.placement = None;
     app.drawing_workspace.note = None;
+    app.drawing_workspace.view_edit = None;
     app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
@@ -824,6 +827,10 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     } else if let Some(Tool::Note(selected)) = app.drawing_workspace.options {
         note::editor(app, ui, selected);
+    } else if let Some(Tool::Edit(view)) = app.drawing_workspace.options {
+        if panels::view_editor(app, ui, view) {
+            close_panel(app);
+        }
     } else if let Some(tool) = app.drawing_workspace.options {
         panels::tool_body(app, ui, tool);
         if panels::footer(ui, tool) {

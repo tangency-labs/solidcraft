@@ -306,6 +306,9 @@ pub struct ExportResult {
     /// With `lay_on_print_faces` only: the bodies that were written laid on their print face.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub print_faces: Vec<String>,
+    /// Bodies that could not be meshed and were skipped in the export (#18780).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<String>,
     /// STL, OBJ and 3MF: a warning for each face the mesh path left short of its smallest angle
     /// or chord tolerance (and each edge whose sampling stopped off it), led by its body's name.
     /// With `lay_on_print_faces`, also one for each body that has a print face but was written
@@ -479,6 +482,36 @@ pub enum HistoryParam {
     Solids,
 }
 
+/// `reader` of `doc.open` and `file.insert_step`: which reader reads a FreeCAD or Rhino file's
+/// solids, `solidcraft` (cadmpeg's STEP writer, then SolidCraft's own STEP reader, which keeps
+/// the STEP text) or `cadmpeg` (cadmpeg's model read straight into B-rep records), read as the
+/// handler reads it.
+#[derive(Clone, Copy, Debug)]
+pub struct ReaderParam(pub solidcraft_io::StepReader);
+
+impl<'de> Deserialize<'de> for ReaderParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_str()
+            .and_then(solidcraft_io::StepReader::parse)
+            .map(ReaderParam)
+            .ok_or_else(|| D::Error::custom(whole(crate::cmd::READER_MESSAGE)))
+    }
+}
+
+impl JsonSchema for ReaderParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ReaderParam".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "solidcraft (the default) restates a FreeCAD or Rhino file's solids as STEP with cadmpeg's STEP writer, which SolidCraft's own STEP reader reads and the Import feature keeps; cadmpeg reads cadmpeg's model straight into B-rep records, with no STEP text in between. Matching ignores case and surrounding spaces.",
+            "type": "string",
+            "enum": ["solidcraft", "cadmpeg"]
+        })
+    }
+}
+
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
 /// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
@@ -508,6 +541,10 @@ pub struct OpenParams {
     /// SolidCraft features, or only its solids as one Import feature. Default: features.
     #[serde(default)]
     pub history: Option<HistoryParam>,
+    /// For a FreeCAD or Rhino file (ignored for other files): which reader reads its solids.
+    /// Default: solidcraft.
+    #[serde(default)]
+    pub reader: Option<ReaderParam>,
     /// For a 3MF, STL, OBJ or glTF file only (refused for any other): true moves the mesh so its
     /// box is centred on X and Y with its base on Z = 0. Default: false.
     #[serde(default)]
