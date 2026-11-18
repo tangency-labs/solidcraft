@@ -1164,7 +1164,11 @@ fn measure(ui: &egui::Ui, strip: &TabStrip, tab: &DocTab, name: &str, view_typed
     let shown = tab.views.get(active).map_or("", |v| v.name);
     let switch_w = 8.0 + 15.0 + 6.0 + text_width(ui, shown, view_font(true)).min(VIEW_LABEL_MAX) + 6.0 + badge_width(ui, n) + 6.0 + 13.0 + 4.0;
     let switcher = 13.0 + dot + name_w + 8.0 + SLASH + 8.0 + switch_w + 8.0 + 22.0 + 4.0;
-    let width = if kind == SelectedLayout::Pill { pill.min(room) } else { switcher.min(room.max(MIN_TAB)) };
+    let incoming = ui.ctx().data(|data| {
+        let lifted_here = data.get_temp::<ViewDrag>(strip.id.with("view_drag")).is_some_and(|drag| !drag.cancelled);
+        if lifted_here { 0.0 } else { data.get_temp::<(usize, f32)>(strip.id.with("view_drag_slot")).map_or(0.0, |(_, width)| width + VIEW_GAP) }
+    });
+    let width = if kind == SelectedLayout::Pill { (pill + incoming).min(room) } else { switcher.min(room.max(MIN_TAB)) };
     let (name_w, switch_w) = if kind == SelectedLayout::Switcher {
         // The tab's painted frame is two points narrower than its allocation. Keep the
         // switcher and close targets inside it before giving the design name any room.
@@ -1601,9 +1605,36 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
     let right = (pr.right() - pill_after(strip)).max(start);
     let (first, count) = view_window(&g.view_ws, active, right - start, g.more_w + VIEW_GAP);
+    let more = (count < tab.views.len()).then_some((right - g.more_w).max(start));
+    let right = more.map_or(right, |left| (left - VIEW_GAP).max(start));
     let slot = ui.ctx().data(|data| data.get_temp::<(usize, f32)>(strip.id.with("view_drag_slot")));
     let source = pen.drag.filter(|drag| !drag.cancelled);
-    let slide_time = if ui.ctx().global_style().animation_time > 0.0 { 0.14 } else { 0.0 };
+    let gap = slot.map(|(index, width)| {
+        let width = width.min((right - start).max(0.0));
+        let mut x = start;
+        let mut local = tab.views.iter().take(first).filter(|view| view.to_window.is_none()).count();
+        for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
+            if local >= index {
+                break;
+            }
+            if source.is_none_or(|drag| drag.from != k) {
+                x += g.view_ws[k] + VIEW_GAP;
+            }
+            if view.to_window.is_none() {
+                local += 1;
+            }
+        }
+        (index, Rect::from_min_size(pos2(x.min(right - width), cy - VIEW_HEIGHT * 0.5), vec2(width, VIEW_HEIGHT)))
+    });
+    ui.ctx().data_mut(|data| {
+        let id = strip.id.with("view_drag_gap");
+        if let Some(gap) = gap {
+            data.insert_temp(id, gap);
+        } else {
+            data.remove::<(usize, Rect)>(id);
+        }
+    });
+    let slide_time = if slot.is_some() && ui.ctx().global_style().animation_time > 0.0 { 0.14 } else { 0.0 };
     let clip = ui.clip_rect();
     ui.set_clip_rect(clip.intersect(Rect::from_min_max(pos2(start, pr.top()), pos2(right, pr.bottom()))));
     let mut x = start;
@@ -1611,8 +1642,9 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
         let w = g.view_ws.get(k).copied().unwrap_or(0.0);
         let rect = Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(w, VIEW_HEIGHT));
-        let open = slot.filter(|(index, _)| local >= *index).map_or(0.0, |(_, width)| width + VIEW_GAP);
-        let close = source.filter(|drag| k > drag.from).map_or(0.0, |drag| drag.origin.width() + VIEW_GAP);
+        let opening_after = gap.is_some_and(|(index, _)| local >= index);
+        let open = gap.filter(|_| opening_after).map_or(0.0, |(_, rect)| rect.width() + VIEW_GAP);
+        let close = source.filter(|drag| slot.is_some() && k > drag.from).map_or(0.0, |drag| drag.origin.width() + VIEW_GAP);
         let offset = ui.ctx().animate_value_with_time(strip.id.with(("view_slide", k)), open - close, slide_time);
         if view.to_window.is_none() {
             // A moving neighbour cannot move the zone that chose the move.
@@ -1620,11 +1652,26 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
             local += 1;
         }
         let rect = rect.translate(vec2(offset, 0.0));
-        draw_view(ui, strip, k, view, rect, pen);
+        if gap.is_none() || source.is_none_or(|drag| drag.from != k) {
+            let region = ui.clip_rect();
+            if let Some((_, gap)) = gap {
+                let mut side = region;
+                if opening_after {
+                    side.min.x = side.min.x.max(gap.right());
+                } else {
+                    side.max.x = side.max.x.min(gap.left());
+                }
+                ui.set_clip_rect(side);
+            }
+            if ui.clip_rect().is_positive() {
+                draw_view(ui, strip, k, view, rect, pen);
+            }
+            ui.set_clip_rect(region);
+        }
         x += w + VIEW_GAP;
     }
     ui.set_clip_rect(clip);
-    if count < tab.views.len() {
+    if let Some(x) = more {
         more_button(ui, strip, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(g.more_w, VIEW_HEIGHT)), tab.views.len() - count, pen);
     }
     let pointer = ui.ctx().pointer_interact_pos();
@@ -1925,8 +1972,14 @@ pub struct ViewDropZone {
     pub view_centres: Vec<(usize, f32)>,
 }
 
-/// Leave room for the dragged view before this local insertion index. The caller clears the
-/// slot when the pointer leaves the strip. The reported drop zones stay fixed while tabs slide.
+/// The laid-out opening, shared by the strip and the drag preview.
+pub fn view_drag_gap(ctx: &egui::Context, strip: egui::Id, index: usize) -> Option<Rect> {
+    ctx.data(|data| data.get_temp::<(usize, Rect)>(strip.with("view_drag_gap")))
+        .filter(|(current, rect)| *current == index && rect.is_positive())
+        .map(|(_, rect)| rect)
+}
+
+/// Leave room for an insertion before the given local index. Clear it when the pointer leaves.
 pub fn set_view_drag_slot(ctx: &egui::Context, strip: egui::Id, index: Option<usize>, width: f32) {
     let id = strip.with("view_drag_slot");
     let target = index.filter(|_| width.is_finite() && width > 0.0).map(|index| (index, width));
