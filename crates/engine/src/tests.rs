@@ -6355,24 +6355,26 @@ fn a_chamfer_along_a_tangent_chain_into_a_round_is_not_refused_as_overlapping_it
 }
 
 #[test]
-fn a_chamfer_whose_band_overlaps_a_chain_chamfer_by_a_hair_is_refused_naming_a_size_that_builds() {
-    // On the wall, the window's chamfer reaches 0.0008 mm past the chain's rail: less than the
-    // ten tolerances the band check let through before, where the trim leaked. Refused, naming a
+fn a_chamfer_whose_band_overlaps_a_chain_chamfer_is_refused_naming_a_size_that_builds() {
+    // Windows whose chamfer reaches past the chain's rail on the wall: by about 0.01, 3e-4 (as
+    // the band check samples it: less than the ten tolerances, 4e-4, it let through before, where
+    // the trim leaked), 0.016 and 0.029 mm. Each is refused as too large, not failed, naming a
     // size that builds.
-    let window = Some((1.80, 5.05));
-    let mut s = slot_wall_beside_a_rounded_groove(window);
-    let e = s.execute("solid.chamfer", &slot_wall_chamfer(window, 0.4)).unwrap_err().to_string();
-    assert!(!e.contains("1001"), "{e}");
-    assert!(e.contains("larger than the faces beside its edges allow"), "{e}");
-    let named: f64 = e
-        .split_once("the largest distance that fits is ")
-        .and_then(|(_, rest)| rest.split_once(" mm"))
-        .and_then(|(n, _)| n.parse().ok())
-        .unwrap_or_else(|| panic!("no distance named: {e}"));
-    assert!(named < 0.4 && named > 0.35, "{named}: {e}");
-    let mut s = slot_wall_beside_a_rounded_groove(window);
-    if let Err(e) = s.execute("solid.chamfer", &slot_wall_chamfer(window, named)) {
-        panic!("the named distance {named} does not build: {e}");
+    for window in [(1.75, 5.10), (1.80, 5.05), (1.90, 4.98), (1.95, 4.95)] {
+        let mut s = slot_wall_beside_a_rounded_groove(Some(window));
+        let e = s.execute("solid.chamfer", &slot_wall_chamfer(Some(window), 0.4)).unwrap_err().to_string();
+        assert!(!e.contains("1001") && !e.contains("leak"), "{window:?}: {e}");
+        assert!(e.contains("larger than the faces beside its edges allow"), "{window:?}: {e}");
+        let named: f64 = e
+            .split_once("the largest distance that fits is ")
+            .and_then(|(_, rest)| rest.split_once(" mm"))
+            .and_then(|(n, _)| n.parse().ok())
+            .unwrap_or_else(|| panic!("{window:?}: no distance named: {e}"));
+        assert!(named < 0.4 && named > 0.35, "{window:?}: {named}: {e}");
+        let mut s = slot_wall_beside_a_rounded_groove(Some(window));
+        if let Err(e) = s.execute("solid.chamfer", &slot_wall_chamfer(Some(window), named)) {
+            panic!("{window:?}: the named distance {named} does not build: {e}");
+        }
     }
 }
 

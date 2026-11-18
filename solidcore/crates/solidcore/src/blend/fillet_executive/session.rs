@@ -4460,16 +4460,16 @@ fn band_rails(
 /// Named only where that is exact, decided from the geometry's kinds, not from the points:
 /// both blends chamfers, their shared face a plane, both edges lines, parallel (a band between
 /// planes along a line has one width, and scales with the chamfer, so the feet's distances
-/// scale and `W` stays); elsewhere `None`, as before. The check refuses only bands overlapping
-/// by more than its `apart` (ten of the solvers' tolerances), so between this size and the
-/// size the check refuses, `(W + apart) / (|p - f| + |e - r|)`, lie the margin and `apart`,
-/// about 1010 tolerances: this is the bound section 3.5 names, the check the fork's.
+/// scale and `W` stays); elsewhere `None`, as before. The check refuses bands overlapping by
+/// more than the solvers' tolerance (#18823; ten tolerances, its `apart`, before), so between
+/// this size and the size the check refuses, `(W + tol) / (|p - f| + |e - r|)`, lie the margin
+/// and that tolerance, about 1001 tolerances: this is the bound section 3.5 names.
 ///
 /// `lambda` is rounded down by `gamma_7`: its three operations (a difference, a sum and a
 /// quotient) and the three a check of the chamfers scaled by it adds (each setback scaled, their
 /// sum, and the width less the margin), so the scaled chamfers' sum stays within `W - margin`
-/// through the rounding; the feet's own accuracy (the drops') lies within the margin and
-/// `apart` between this size and the check's.
+/// through the rounding; the feet's own accuracy (the drops') lies within the margin and the
+/// tolerance between this size and the check's.
 fn band_scale(
     objects: &SessionObjects<'_>,
     k: &Kernel,
@@ -5999,8 +5999,9 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                         // intersection within the solvers' tolerance, cut rail `a` into pieces
                         // that each lie wholly on one side of rail `b`, so the middle of each
                         // piece is judged too, by the same band test as the samples: a piece
-                        // inside the band refuses, and rails that only touch (bands meeting at
-                        // their fit, closer than `apart`) do not.
+                        // inside the band by more than the solvers' tolerance refuses, and rails
+                        // that only touch (bands meeting at their fit, within that tolerance) do
+                        // not.
                         let mut at: Vec<f64> = (1..16_u32)
                             .map(|s| ivl_a.evaluate(f64::from(s) / 16.0))
                             .collect();

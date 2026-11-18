@@ -142,12 +142,13 @@
           0.4
         ],
         "turn": "mitre"
-      }
+      },
+      "refused_as": "no room"
     }
   ],
   "case": "18823-chain-and-wall-window-s1p75-top5p1-d0p4-bands-overlap-refused",
   "expected": {
-    "method": "The chain's chamfer on the wall: solidcore keeps a chamfer's offsets along a tangent chain, taken at the wedge of its edge between planes (the wall and the slope, 72.612 deg; surface/procedural_blend/chamfer.rs), r = d tan(36.306 deg) off the wall and off the slope, the r1 round or the r3 groove. Its rail on the wall is the foot on the wall of the point standing r off both, solved section by section along the chain (independently, with no kernel output). The window's chamfer is between two planes at 90 deg: it takes the wall from its top edge up to d above it, over the window's 0.2 along the wall, and ends on the window's side walls. On the window's span the chain's rail on the wall comes down to 0.00969 below the top of the window's strip (z = 5.1+0.4): the two bands overlap on the wall, so the chamfer is refused (main refused it too). SolidCraft names the largest distance that fits.",
+    "method": "The chain's chamfer on the wall: solidcore keeps a chamfer's offsets along a tangent chain, taken at the wedge of its edge between planes (the wall and the slope, 72.612 deg; surface/procedural_blend/chamfer.rs), r = d tan(36.306 deg) off the wall and off the slope, the r1 round or the r3 groove. Its rail on the wall is the foot on the wall of the point standing r off both, solved section by section along the chain (independently, with no kernel output). The window's chamfer is between two planes at 90 deg: it takes the wall from its top edge up to d above it, over the window's 0.2 along the wall, and ends on the window's side walls. On the window's span the chain's rail on the wall comes down to as much as 0.00969 below the top of the window's strip (the largest overlap over the window's span) (z = 5.1+0.4): the two bands overlap on the wall, so the chamfer is refused (main refused it too). SolidCraft names the largest distance that fits.",
     "outcome": "refused",
     "source": "analytic",
     "sources": [
