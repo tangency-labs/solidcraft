@@ -820,6 +820,7 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
             out.center_delta = Some((c.to - c.from).into());
         }
         out.measure = Some(if c.is_some() { MeasureKind::Center } else { MeasureKind::Min });
+        out.parallel_distance_mm = super::measure_shape::parallel_distance(&a.shape, &b.shape);
         if let (Some(da), Some(db)) = (a.dir, b.dir) {
             let both_faces = matches!(sels.as_slice(), [Sel::Face { .. }, Sel::Face { .. }]);
             let cos = if both_faces { da.dot(db) } else { corner_cos(a.shape, b.shape).unwrap_or_else(|| da.dot(db).abs()) };

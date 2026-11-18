@@ -982,6 +982,12 @@ pub struct MeasuredItems {
     /// Two items: the distance between their centres (or from an axis) (mm).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub center_distance: Option<f64>,
+    /// Two items that are parallel (flat faces, planes, sketch regions, straight edges and sketch
+    /// lines, or a straight one along a flat one): the distance between them square to them, the
+    /// lines and planes running on past their ends (mm). It differs from `distance_mm` where the
+    /// items are offset sideways and do not face each other.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_distance_mm: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub center_delta: Option<[f64; 3]>,
     /// Two items: which distance is the one to read, `center` or `min`.

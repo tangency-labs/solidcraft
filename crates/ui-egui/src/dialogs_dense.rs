@@ -1251,7 +1251,8 @@ fn fmt_mm(app: &SolveApp, v: &Value) -> String {
 }
 
 /// The measurement in the dialog: each item's size, then the distance (a pair of round items
-/// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items.
+/// offers centre to centre, closest and farthest), its ΔX/Y/Z, the distance square to two parallel
+/// items where it differs from the closest, and the angle between two items.
 fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>) {
     let Some(r) = r else {
         ui_kit::text(ui, tr("pick one or two vertices, edges or faces"), ui_kit::Text::Hint("measure"));
@@ -1309,6 +1310,9 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
         for (l, v) in [("ΔX", delta.x), ("ΔY", delta.y), ("ΔZ", delta.z)] {
             value(ui, l, &crate::prefs::show_mm(app, v.abs(), 1));
         }
+    }
+    if let Some(d) = crate::quick_measure::parallel_distance(r) {
+        value(ui, tr("measure.parallel_distance"), &crate::prefs::show_mm(app, d, 1));
     }
     if let Some(a) = r["angle_deg"].as_f64()
         && r["items"].as_array().is_some_and(|v| v.len() == 2)

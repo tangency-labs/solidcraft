@@ -2433,9 +2433,12 @@ fn measure_items() {
     let end = |k: &str| -> Vec3 { serde_json::from_value(r[k].clone()).unwrap_or_else(|e| panic!("{k}: {e} in {r}")) };
     let (from, to) = (end("from"), end("to"));
     assert!((from.z - 20.0).abs() < 1e-9 && to.z.abs() < 1e-9 && (to - from).cross(Vec3::Z).len() < 1e-9, "{r}");
+    // Two parallel flat faces: the distance square to them, here the closest distance too.
+    assert!((r["parallel_distance_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{r}");
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(ff, [20.0, 0.0, 10.0])]}));
     assert!(r["distance_mm"].as_f64().unwrap() < 1e-9);
     assert!((r["angle_deg"].as_f64().unwrap() - 90.0).abs() < 1e-6);
+    assert!(r.get("parallel_distance_mm").is_none(), "faces at a right angle are not parallel: {r}");
     for k in ["from", "to"] {
         assert!(serde_json::from_value::<Vec3>(r[k].clone()).is_ok_and(|p| p.is_finite()), "{k} in {r}");
     }
@@ -2445,6 +2448,24 @@ fn measure_items() {
     let w = json!({"type": "vertex", "body": "Body1", "point": [40, 30, 20]});
     let r = run(&mut s, "inspect.measure", json!({"items": [v, w]}));
     assert!((r["distance_mm"].as_f64().unwrap() - (1600.0f64 + 900.0 + 400.0).sqrt()).abs() < 1e-9);
+    assert!(r.get("parallel_distance_mm").is_none(), "two points are not parallel items: {r}");
+    // Parallel flat faces offset sideways (#17405): the closest distance runs on the slant, from
+    // the top's edge at x = 40 to the step's at x = 60; the planes are 20 apart square to them.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 30, "height": 5, "corner": [60, 0, 40], "operation": "new", "body_name": "Step"}));
+    let step = json!({"type": "face", "body": "Step", "point": [65.0, 15.0, 40.0]});
+    let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), step]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - 800.0f64.sqrt()).abs() < 1e-6, "{r}");
+    assert!((r["parallel_distance_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{r}");
+    // Two parallel straight edges offset the same way, and an edge along a face: the top's front
+    // edge (y = 0, z = 20) to the step's lower front edge (y = 0, z = 40) and to its upper one.
+    let edge = |body: &str, p: [f64; 3]| json!({"type": "edge", "body": body, "point": p});
+    let r = run(&mut s, "inspect.measure", json!({"items": [edge("Body1", [20.0, 0.0, 20.0]), edge("Step", [65.0, 0.0, 40.0])]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - 800.0f64.sqrt()).abs() < 1e-6, "{r}");
+    assert!((r["parallel_distance_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{r}");
+    let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), edge("Step", [65.0, 0.0, 45.0])]}));
+    assert!((r["parallel_distance_mm"].as_f64().unwrap() - 25.0).abs() < 1e-9, "{r}");
+    let r = run(&mut s, "inspect.measure", json!({"items": [edge("Body1", [20.0, 0.0, 20.0]), edge("Body1", [0.0, 15.0, 20.0])]}));
+    assert!(r.get("parallel_distance_mm").is_none(), "edges at a right angle are not parallel: {r}");
     assert!(s.execute("inspect.measure", &json!({"items": []})).is_err());
     assert!(s.execute("inspect.measure", &json!({"items": [{"type": "nonsense"}]})).is_err());
 }
@@ -2478,6 +2499,17 @@ fn measure_closest_between_items_that_end() {
         assert!((min(&r) - want).abs() < 1e-9, "{points}: want {want}, {r}");
         assert!((at(&r, "from").dist(at(&r, "to")) - want).abs() < 1e-9, "{points}: {r}");
     }
+    // Two parallel sketch lines offset sideways: the closest distance runs from end to end, the
+    // distance square to the lines is 5.
+    let mut s = Session::default();
+    block(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Lines"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[20, 5], [30, 5]]}));
+    let line = |id: &str| json!({"type": "sketch_curve", "sketch": 2, "id": id});
+    let r = run(&mut s, "inspect.measure", json!({"items": [line("l1"), line("l2")]}));
+    assert!((min(&r) - 125.0f64.sqrt()).abs() < 1e-9, "{r}");
+    assert!((r["parallel_distance_mm"].as_f64().unwrap_or(f64::NAN) - 5.0).abs() < 1e-9, "{r}");
     // A body's straight edge 15 above the face: from its lower end straight down.
     let mut s = Session::default();
     block(&mut s);
