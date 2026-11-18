@@ -9,6 +9,9 @@
     clippy::expect_used
 )] // test helpers
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use common::*;
@@ -2254,14 +2257,10 @@ fn the_faces_a_round_is_carried_on_past_are_the_kernels() {
     ));
 }
 
-/// The kernel rig's fix set (`fixes.json`), as the rig runs its entries.
+/// The kernel rig's fix set (SolidCraft's preset, `solidcraft_fixes.rs`), as the rig runs its
+/// entries.
 fn rig_fixes() {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../solidcore/tests/kernel_cases/fixes.json"
-    );
-    let fixes: Vec<String> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-    solidcore_ops::session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 /// The ledge of the kernel case `10876-fillet-ledge-convex-and-concave-edges-at-bore-r0-5`:
@@ -3805,21 +3804,9 @@ fn issue_13911_rails(
 /// stand `reach` off the loop at the two heights).
 #[test]
 fn the_inner_top_outline_of_13911_chamfers_and_rounds_at_every_size() {
-    let mut fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    // SolidCraft's fix set when it traced the case (the corpus list lags it by these)
-    for f in [
-        "brep_ray_classifies_current_trims",
-        "closed_smooth_pole_tangent_limit",
-        "fillet_chamfer_corner",
-    ] {
-        if !fixes.iter().any(|x| x == f) {
-            fixes.push(f.to_owned());
-        }
-    }
-    solidcore_ops::session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    // SolidCraft's fix set when it traced the case: its preset, which has every flag on but the
+    // held-back ones
+    solidcore_ops::session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let (input, _) = issue_13911_body();
     let before = input.check(CheckLevel::All).unwrap();
     let known = before.to_string();

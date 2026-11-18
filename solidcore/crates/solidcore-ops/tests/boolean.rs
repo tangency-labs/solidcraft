@@ -1,6 +1,9 @@
 //! The boolean family on bodies whose answers are known.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use std::f64::consts::{PI, TAU};
@@ -434,10 +437,7 @@ fn corpus_case(case: &str) -> (Value, impl Fn(&str) -> Body) {
         "{}/../solidcore/tests/kernel_cases",
         env!("CARGO_MANIFEST_DIR")
     );
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(format!("{corpus}/fixes.json")).unwrap())
-            .unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let entry: Value = serde_json::from_str(
         &std::fs::read_to_string(format!("{corpus}/booleans/{case}.json")).unwrap(),
     )

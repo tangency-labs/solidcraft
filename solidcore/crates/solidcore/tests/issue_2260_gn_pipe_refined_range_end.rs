@@ -88,13 +88,16 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.
 const FORK_VOLUME: f64 = 40_267.709_270_590_589;
 
+/// A kernel with the fixes `names` on and the rest off. A name the kernel no longer has is a
+/// retired flag, whose fix is now the default behaviour: it is skipped, so retiring a flag
+/// edits none of these lists.
 fn kernel(names: &[&str]) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = UpstreamFixes::default();
     for name in names {
-        *k.fixes
-            .flag_mut(name)
-            .unwrap_or_else(|| panic!("no flag {name}")) = true;
+        if let Some(on) = k.fixes.flag_mut(name) {
+            *on = true;
+        }
     }
     k
 }
