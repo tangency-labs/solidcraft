@@ -740,6 +740,9 @@ fn options_command(app: &mut SolveApp, command: &str, request: Value) -> Result<
         if let Some(keep_on_top) = change.keep_on_top {
             current.keep_on_top = keep_on_top;
         }
+        if let Some(interface_size) = change.interface_size {
+            current.interface_size = interface_size;
+        }
         if let Some(panels) = change.panels {
             current.panels = panels;
         }
@@ -1063,11 +1066,14 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
         .map(|(id, (display, name))| DisplayChoice { id, name, current: current == Some(display.name.as_str()) })
         .collect();
     let title = window_name(app, id);
+    let interface_sizes = solidcraft_views::InterfaceSize::ALL.map(u16::from);
     let menu = WindowMenu {
         title: &title,
         displays: &displays,
         card_headers,
         keep_on_top: options.keep_on_top,
+        interface_sizes: &interface_sizes,
+        interface_size: options.interface_size.into(),
         panels: options.panels,
         top_bar: if options.top_bar == TopBar::Always { kit::TopBar::Always } else { kit::TopBar::Edge },
         ribbon: options.ribbon,
@@ -1084,6 +1090,7 @@ fn window_menu(app: &mut SolveApp, ui: &mut Ui, id: WindowId, anchor: egui::Resp
             ("tab.window.set_options", json!({"window": id, "card_headers": value}))
         }
         Action::KeepOnTop(on) => ("tab.window.set_options", json!({"window": id, "keep_on_top": on})),
+        Action::InterfaceSize(percent) => ("tab.window.set_options", json!({"window": id, "interface_size": percent})),
         Action::Panels(on) => ("tab.window.set_options", json!({"window": id, "panels": on})),
         Action::TopBar(mode) => {
             let top_bar = if mode == kit::TopBar::Always { TopBar::Always } else { TopBar::Edge };
@@ -1683,7 +1690,8 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         }
         let mut refused = false;
         let mut close_request = None;
-        ctx.show_viewport_immediate(os_id, builder, |ui, class| {
+        let interface_scale = window.options.interface_size.factor();
+        let draw = |ui: &mut egui::Ui, class| {
             if class == ViewportClass::EmbeddedWindow {
                 refused = true;
                 return;
@@ -1703,11 +1711,11 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
                         let physical = (rect.center().to_vec2() * scale).to_pos2();
                         let display = app.view_windows.displays.iter().find(|display| display.bounds.contains(physical));
                         let origin = display.map_or(egui::Vec2::ZERO, |display| display.bounds.min.to_vec2() / display.scale);
-                        (p.x, p.y) = (rect.left() - origin.x, rect.top() - origin.y);
+                        (p.x, p.y) = (rect.left() * interface_scale - origin.x, rect.top() * interface_scale - origin.y);
                         p.display = display.map(|display| display.name.clone());
                     }
                     if let Some(rect) = viewport.inner_rect.filter(|r| r.is_positive() && r.is_finite()) {
-                        (p.w, p.h) = (rect.width(), rect.height());
+                        (p.w, p.h) = (rect.width() * interface_scale, rect.height() * interface_scale);
                     }
                     p.maximised = viewport.maximized.unwrap_or_default();
                     p.fullscreen = viewport.fullscreen.unwrap_or_default();
@@ -1826,7 +1834,8 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
             if revision != app.session.revision {
                 ctx.request_repaint_of(ViewportId::ROOT);
             }
-        });
+        };
+        crate::view_window_scale::in_window(ctx, os_id, interface_scale, || ctx.show_viewport_immediate(os_id, builder, draw));
         if !app.docs.tab_open(tab) {
             ctx.send_viewport_cmd_to(os_id, ViewportCommand::Close);
             retired.extend(host.viewport.window_scene_slots());

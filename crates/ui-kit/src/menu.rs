@@ -1052,6 +1052,8 @@ mod tests {
             displays: &[],
             card_headers: CardHeaders::Always,
             keep_on_top: false,
+            interface_size: 100,
+            interface_sizes: &[90, 100, 125, 150, 200],
             ribbon: true,
             ribbon_auto_hide: true,
             panels: false,

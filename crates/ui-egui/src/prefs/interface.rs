@@ -376,6 +376,20 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
             });
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("window_size.interface_size"), app.tr("window_size.default_help"), |ui| {
+                    use solidcraft_views::InterfaceSize;
+                    let options = &mut app.preferences.pop_out_window_defaults;
+                    let labels = InterfaceSize::ALL.map(|size| format!("{}%", u16::from(size)));
+                    let labels = labels.each_ref().map(String::as_str);
+                    let mut selection = InterfaceSize::ALL.iter().position(|size| *size == options.interface_size).unwrap_or_default();
+                    if ui_kit::segmented(ui, &mut selection, &labels, ui_kit::Segments { intrinsic: true, ..Default::default() })
+                        && let Some(size) = InterfaceSize::ALL.get(selection)
+                    {
+                        options.interface_size = *size;
+                    }
+                });
+            });
             layout_check(
                 ui,
                 app.tr("window_options.keep_on_top"),

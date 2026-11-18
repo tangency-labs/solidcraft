@@ -83,7 +83,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("window?: pop-out id (default: current or last focused pop-out) → window, options"),
     CommandSpec::new("tab.window.set_options", "Set Window Options", crate::checked!("tab.window.set_options", set_window_options))
         .icon("panel_float").noundo().doc_only().contract(&SET_WINDOW_OPTIONS_CONTRACT).output(output_schema_for::<TabWindowOptionsReply>)
-        .params("window?: pop-out id; card_headers?: always|hover|hidden; keep_on_top?: bool; ribbon?: bool; ribbon_auto_hide?: bool; panels?: bool; top_bar?: always|edge → window, options"),
+        .params("window?: pop-out id; card_headers?: always|hover|hidden; keep_on_top?: bool; interface_size?: 90|100|125|150|200; ribbon?: bool; ribbon_auto_hide?: bool; panels?: bool; top_bar?: always|edge → window, options"),
     CommandSpec::new("window.options.use_as_default", "Use Window Options as Default", crate::checked!("window.options.use_as_default", default_window_options))
         .icon("save").noundo().doc_only().contract(&WINDOW_OPTIONS_CONTRACT).output(output_schema_for::<TabWindowOptionsReply>)
         .params("window?: pop-out id (default: current or last focused pop-out) → window, options; saves its options as the defaults for new pop-outs"),
@@ -237,6 +237,7 @@ fn requested_window_options(cmd: &str, p: &Value) -> Result<Value> {
         window: requested.window,
         card_headers: None,
         keep_on_top: None,
+        interface_size: None,
         ribbon: None,
         ribbon_auto_hide: None,
         panels: None,

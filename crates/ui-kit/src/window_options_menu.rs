@@ -47,6 +47,8 @@ pub struct WindowMenu<'a> {
     pub displays: &'a [DisplayChoice<'a>],
     pub card_headers: CardHeaders,
     pub keep_on_top: bool,
+    pub interface_sizes: &'a [u16],
+    pub interface_size: u16,
     pub panels: bool,
     pub ribbon: bool,
     pub ribbon_auto_hide: bool,
@@ -57,6 +59,7 @@ pub struct WindowMenu<'a> {
 pub enum Action {
     CardHeaders(CardHeaders),
     KeepOnTop(bool),
+    InterfaceSize(u16),
     Panels(bool),
     Ribbon(bool),
     RibbonAutoHide(bool),
@@ -73,6 +76,7 @@ struct State {
     open: bool,
     focus: bool,
     displays: bool,
+    sizes: bool,
     focus_display: bool,
     scroll_focus: Option<Id>,
 }
@@ -233,7 +237,7 @@ fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, height: f32, state: &mut
             action = Some(choice);
         }
     }
-    if !state.displays {
+    if !state.displays && !state.sizes {
         state.scroll_focus = focus.step(ui, &mut state.focus);
     }
     (action, flyout)
@@ -263,8 +267,9 @@ fn middle(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: 
         action = Some(Action::KeepOnTop(on));
     }
 
+    let (size_action, size_flyout) = sizes(ui, id, menu, state, focus);
     let (display_action, flyout) = displays(ui, id, menu.displays, state, focus);
-    action = display_action.or(action);
+    action = display_action.or(size_action).or(action);
     for (key, label, icon, shortcut, choice) in [
         ("rename", "window_menu.rename", "rename", "F2", Action::Rename),
         ("use_defaults", "window_menu.use_default", "star", "", Action::UseAsDefault),
@@ -275,7 +280,7 @@ fn middle(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: 
             action = Some(choice);
         }
     }
-    (action, flyout)
+    (action, flyout.or(size_flyout))
 }
 
 fn ribbon_options(ui: &mut Ui, menu: &WindowMenu<'_>, focus: &mut FocusRows) -> Option<Action> {
@@ -421,6 +426,7 @@ fn displays(ui: &mut Ui, id: Id, displays: &[DisplayChoice<'_>], state: &mut Sta
     let right = response.has_focus() && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowRight));
     if response.clicked() || right {
         state.displays = !state.displays || right;
+        state.sizes = false;
         state.focus_display = true;
     }
     if !state.displays {
@@ -453,6 +459,57 @@ fn displays(ui: &mut Ui, id: Id, displays: &[DisplayChoice<'_>], state: &mut Sta
     let back = ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape) || input.consume_key(Modifiers::NONE, Key::ArrowLeft));
     if back || flyout.inner.is_some() {
         state.displays = false;
+        response.request_focus();
+    }
+    (flyout.inner, Some(flyout.response.rect))
+}
+
+fn sizes(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, state: &mut State, focus: &mut FocusRows) -> (Option<Action>, Option<Rect>) {
+    let value = format!("{}%", menu.interface_size);
+    let mut row = MenuItem::new("window_options:interface_size", tr("window_size.interface_size"), "zoom");
+    row.shortcut = &value;
+    row.submenu = true;
+    row.highlighted = state.sizes;
+    let response = row.show(ui);
+    focus.row(ui, &response);
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(state.sizes));
+    let right = response.has_focus() && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowRight));
+    if response.clicked() || right {
+        state.sizes = !state.sizes || right;
+        state.displays = false;
+        state.focus_display = true;
+    }
+    if !state.sizes {
+        return (None, None);
+    }
+    let ctx = ui.ctx().clone();
+    let height = (ctx.content_rect().height() - 16.0).max(0.0);
+    let flyout = Menu::submenu(&ctx, id.with("sizes"), response.rect, height.min(menu.interface_sizes.len() as f32 * ROW_HEIGHT), false, |ui| {
+        let mut focus = FocusRows::new(state.scroll_focus);
+        let (action, scroll_focus) = egui::ScrollArea::vertical()
+            .max_height((height - 14.0).max(0.0))
+            .show(ui, |ui| {
+                let mut action = None;
+                for &percent in menu.interface_sizes {
+                    let label = format!("{percent}%");
+                    let id = format!("window_options:size:{percent}");
+                    let mut item = MenuItem::new(&id, &label, "");
+                    item.checked = Some(percent == menu.interface_size);
+                    let response = item.show(ui);
+                    focus.row(ui, &response);
+                    if response.clicked() {
+                        action = Some(Action::InterfaceSize(percent));
+                    }
+                }
+                (action, focus.step(ui, &mut state.focus_display))
+            })
+            .inner;
+        state.scroll_focus = scroll_focus;
+        action
+    });
+    let back = ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape) || input.consume_key(Modifiers::NONE, Key::ArrowLeft));
+    if back || flyout.inner.is_some() {
+        state.sizes = false;
         response.request_focus();
     }
     (flyout.inner, Some(flyout.response.rect))
