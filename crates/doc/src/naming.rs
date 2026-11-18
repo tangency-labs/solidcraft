@@ -1074,10 +1074,12 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
             format!("F{fid}:{role}")
         }
         FeatureKind::Cylinder { axis, .. } => {
-            let flat = !ns.is_empty() && ns.iter().all(|m| m.cross(axis.0).len() < 1e-6);
+            // The axis is numbers here: `naming_feature` evaluated it.
+            let Some(axis) = crate::literal_dir(axis) else { return format!("F{fid}:face:{fi}") };
+            let flat = !ns.is_empty() && ns.iter().all(|m| m.cross(axis).len() < 1e-6);
             let role = if !flat {
                 "side"
-            } else if ns.first().is_some_and(|m| m.dot(axis.0) > 0.0) {
+            } else if ns.first().is_some_and(|m| m.dot(axis) > 0.0) {
                 "top"
             } else {
                 "bottom"

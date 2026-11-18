@@ -11,7 +11,7 @@
 
 use serde_json::{Map, Value};
 use solidcore_record::Vec3;
-use solidcraft_doc::{Mat, apply_point, apply_vector, is_identity, map_point_expr, map_vector_expr, mat_inverse};
+use solidcraft_doc::{Mat, apply_point, apply_vector, is_identity, map_dir_expr, map_point_expr, map_vector_expr, mat_inverse};
 use solidcraft_geom::prelude::*;
 
 use crate::Session;
@@ -956,7 +956,12 @@ fn map_local_with_input(
                 Picks => m.picks(v, body.as_deref()),
                 ToolPicks => m.picks(v, obj.get("tool").and_then(|t| t.get("body")).and_then(Value::as_str)),
                 Make => m.make(v),
-                Dir => m.dir(v),
+                // A cylinder's axis of unitless expressions (#18822) turns with the frame and
+                // stays expressions.
+                Dir => m.dir(v).or_else(|| {
+                    let frame = m.first.unwrap_or(m.f.active);
+                    m.map_expr(&frame, v, map_dir_expr)
+                }),
                 Delta => m.dir(v).or_else(|| {
                     let frame = m.first.unwrap_or(m.f.active);
                     m.map_expr(&frame, v, map_vector_expr)
@@ -1037,9 +1042,8 @@ fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'
     match (kind, cmd) {
         (Feature::Box { corner, centred, .. }, "solid.box") => vec![(if *centred { "center" } else { "corner" }, point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],
-        (Feature::Cylinder { base, axis, .. }, "solid.cylinder") | (Feature::Coil { base, axis, .. }, "solid.coil") => {
-            vec![("base", point(base)), ("axis", pt(axis.0))]
-        }
+        (Feature::Cylinder { base, axis, .. }, "solid.cylinder") => vec![("base", point(base)), ("axis", point(axis))],
+        (Feature::Coil { base, axis, .. }, "solid.coil") => vec![("base", point(base)), ("axis", pt(axis.0))],
         _ => Vec::new(),
     }
 }

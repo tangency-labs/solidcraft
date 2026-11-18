@@ -36,6 +36,49 @@ fn cylinder_base_expressions_follow_parameters() {
     assert!(near(lo, [25.0, 5.0, -2.0]), "{lo:?}");
 }
 
+/// A cylinder's axis takes unitless expressions, as its base does (#18822): it turns when the
+/// parameter changes, follows a rename, and survives a save and reopen. Plain numbers are still
+/// stored as normalized numbers, and an axis that is zero for the values now is refused.
+#[test]
+fn cylinder_axis_expressions_follow_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "45 deg"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 10, "axis": ["0", "-sin(t)", "-cos(t)"], "body_name": "Slant"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 10, "axis": [0, -1, -1], "base": [20, 0, 0], "body_name": "Fixed"}));
+    let shifted = |(lo, hi): ([f64; 3], [f64; 3])| ([lo[0] - 20.0, lo[1], lo[2]], [hi[0] - 20.0, hi[1], hi[2]]);
+    let (slant, fixed) = (bbox(&s, "Slant"), shifted(bbox(&s, "Fixed")));
+    assert!(near(slant.0, fixed.0) && near(slant.1, fixed.1), "{slant:?} {fixed:?}");
+    assert!(slant.0[1] < -7.0 && slant.0[2] < -7.0, "{slant:?}");
+    // Turned to lie along -Y when the parameter changes.
+    run(&mut s, "parameters.change", json!({"name": "t", "expression": "90 deg"}));
+    let (lo, hi) = bbox(&s, "Slant");
+    assert!(near(lo, [-1.0, -10.0, -1.0]) && near(hi, [1.0, 0.0, 1.0]), "{lo:?} {hi:?}");
+    // A rename follows into the axis, and the parameter can't be deleted while it uses it.
+    assert!(s.execute("parameters.delete", &json!({"name": "t"})).is_err());
+    run(&mut s, "parameters.rename", json!({"name": "t", "new_name": "tilt"}));
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "0 deg"}));
+    let (lo, hi) = bbox(&s, "Slant");
+    assert!(near(lo, [-1.0, -1.0, -10.0]) && near(hi, [1.0, 1.0, 0.0]), "{lo:?} {hi:?}");
+    // Saved as expressions; plain numbers stay numbers, normalized as before.
+    let text = s.doc.to_json();
+    let v: Value = serde_json::from_str(&text).unwrap();
+    let feats = v["features"].as_array().unwrap();
+    assert_eq!(feats[0]["axis"], json!([0.0, "-sin(tilt)", "-cos(tilt)"]), "{v}");
+    let h = std::f64::consts::FRAC_1_SQRT_2;
+    let fixed = feats[1]["axis"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect::<Vec<_>>();
+    assert!(fixed.len() == 3 && fixed[0] == 0.0 && (fixed[1] + h).abs() < 1e-12 && (fixed[2] + h).abs() < 1e-12, "{v}");
+    let mut s2 = Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
+    let (lo, _) = bbox(&s2, "Slant");
+    assert!(near(lo, [-1.0, -1.0, -10.0]), "{lo:?}");
+    run(&mut s2, "parameters.change", json!({"name": "tilt", "expression": "90 deg"}));
+    let (lo, _) = bbox(&s2, "Slant");
+    assert!(near(lo, [-1.0, -10.0, -1.0]), "{lo:?}");
+    // An axis that is zero for the values now is refused, not built along some other line.
+    let before = s.doc.features.len();
+    assert!(s.execute("solid.cylinder", &json!({"radius": 1, "height": 2, "axis": ["sin(tilt)", 0, 0]})).is_err());
+    assert_eq!(s.doc.features.len(), before);
+}
+
 #[test]
 fn primitive_points_take_expressions() {
     let mut s = Session::default();
