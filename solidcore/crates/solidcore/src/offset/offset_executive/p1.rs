@@ -2479,6 +2479,15 @@ impl OffsetExecutive {
         } else {
             Vec::new()
         };
+        // Not upstream: a face of a local operation that keeps its surface is the copy of
+        // its own surface and loops, so its edge uses keep the UV curves copied with them as
+        // their trim curves. Dropped again from the lifted edges, a trim curve ending at a
+        // pole can end there at another parameter (every one lifts to the pole) and then
+        // runs elsewhere through the face, so `map_edgeuses` finds no original edge use
+        // for it and a kept edge loses its offset (#17598).
+        let keeps_uv_curves = self.operation == OffsetOperation::LocalOperation
+            && self.local_faces.contains(&face_id)
+            && !self.moved_faces.contains(&face_id);
         let input = FaceCurvesInput {
             loops,
             curves_3d: None,
@@ -2503,6 +2512,7 @@ impl OffsetExecutive {
             None,
             &this_face,
             &vertex_slots,
+            keeps_uv_curves,
             &mut owners,
             &mut offset_env(notifications, offset_key_of),
         ) {
