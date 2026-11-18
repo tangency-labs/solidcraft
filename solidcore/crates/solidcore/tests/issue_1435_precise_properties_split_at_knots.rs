@@ -604,22 +604,25 @@ mod box_w_slot {
                 "mass[{i}]: row {r}, reference {e}"
             );
         }
-        // the row, pinned
+        // The row, pinned. With the gap-closure strips also split at the knot crossings,
+        // the volume and second moments are within 1.5e-14 relative of the same call at
+        // 1e-12 (MEASURED); with the strips across the crossings they were up to 3.8e-12
+        // relative off it.
         assert_eq!(
             row,
             [
                 5.914390008549578,
-                0.6807481066085856,
-                0.6807481066085856,
+                0.6807481066067114,
+                0.6807481066067114,
                 1.9999999999999853,
-                -0.21949084150645912,
-                0.19830878452084486,
-                0.3158247468053984,
-                2.796768143654571,
-                3.0415735197585216,
-                -0.02963089696288452,
-                0.2699966591728285,
-                -0.29883594954687837,
+                -0.21949084150622125,
+                0.19830878452084488,
+                0.31582474680321304,
+                2.796768143646739,
+                3.0415735197486984,
+                -0.029630896962770808,
+                0.26999665917208526,
+                -0.298835949545732,
             ]
         );
     }
