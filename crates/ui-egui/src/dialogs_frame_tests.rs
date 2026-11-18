@@ -172,6 +172,20 @@ fn an_edit_keeps_a_located_point() {
     assert_eq!(*locate, Some([10.0, 5.0]));
 }
 
+/// Edit Feature shows a located member's Offset A and B, worked out once from its `locate` and
+/// its anchor; OK keeps the located point as it was.
+#[test]
+fn an_edit_shows_the_offsets_of_a_located_member() {
+    let mut app = frame_app();
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3});
+    app.run("frame.member", json!({"sketch": "Frame", "profile": tube, "anchor": "bottom", "locate": [0, -70]})).unwrap();
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(member(&mut e).offset, ["0 mm".to_string(), "50 mm".to_string()], "the tube's bottom is 50 mm from its line");
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["locate"], json!([0.0, -70.0]), "{}", c[0].1);
+}
+
 /// Without lines there is nothing to place; lines and the section in one sketch are refused.
 #[test]
 fn missing_or_mixed_picks_are_refused() {
