@@ -627,6 +627,9 @@ pub struct Dialog {
     /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
     /// be picked even when an earlier feature uses the sketch and hides it.
     pub(crate) started_from_sketch: Option<u64>,
+    /// Sketch used by the last Invert Profiles action, even when it left no profiles selected.
+    /// Dialog-only state: never passed as a feature/command parameter.
+    profile_invert_sketch: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -899,6 +902,7 @@ impl Dialog {
             op_auto: Default::default(),
             anchor_hint: None,
             started_from_sketch: None,
+            profile_invert_sketch: None,
             auto: None,
         }
     }
@@ -2356,8 +2360,9 @@ fn retain_profile_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
     }
 }
 
-/// The sketch whose drawn profiles Extrude's Invert Selection works on: prefer an already
-/// picked profile, then an active sketch, then the most recent sketch (#18704).
+/// The sketch whose drawn profiles Extrude's Invert Selection works on: prefer a newly
+/// picked profile, then the last inverted sketch (which survives clearing every profile),
+/// then an active sketch or the most recent sketch (#18704).
 fn invert_profile_sketch(d: &Dialog, s: &Session) -> Option<u64> {
     if !matches!(d.kind, Kind::Extrude { .. }) || !d.inputs.first().is_some_and(|i| i.accept & PROFILES != 0) {
         return None;
@@ -2370,6 +2375,7 @@ fn invert_profile_sketch(d: &Dialog, s: &Session) -> Option<u64> {
             Sel::Profile { sketch, .. } => Some(*sketch),
             _ => None,
         })
+        .or(d.profile_invert_sketch)
         .or(s.active_sketch)
         .or_else(|| s.doc.features.iter().rev().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id))
 }
@@ -2396,6 +2402,7 @@ fn invert_extrude_profiles(d: &mut Dialog, s: &Session) -> bool {
         .collect();
     input.items.retain(|item| !matches!(item, Sel::Profile { sketch: id, .. } if *id == sketch));
     input.items.extend(candidates.into_iter().filter(|index| !selected.contains(index)).map(|index| Sel::Profile { sketch, index }));
+    d.profile_invert_sketch = Some(sketch);
     d.profile_selection_changed = true;
     d.active = 0;
     d.awaiting_pick = true;
