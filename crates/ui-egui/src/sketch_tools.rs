@@ -377,8 +377,9 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         return true;
     }
     let command = id.to_string();
-    // Offer the image types first: the default Open filter lists only designs and meshes.
-    app.pick_open_for(&["png", "jpg", "jpeg"], move |app, path| {
+    // Offer the image types first: the default Open filter lists only designs and meshes. An SVG
+    // is drawn into a PNG as the command inserts it.
+    app.pick_open_for(&["png", "jpg", "jpeg", "svg"], move |app, path| {
         if let Some(path) = path {
             start_image_placement(app, &command, path);
         }

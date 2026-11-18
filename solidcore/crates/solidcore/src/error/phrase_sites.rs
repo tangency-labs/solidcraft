@@ -648,7 +648,7 @@ const PINNED: &[(&str, usize)] = &[
     ("solidcore/src/blend/fillet_executive/session/trim_at_creases.rs", 34),
     ("solidcore/src/blend/fillet_executive/session/two_offsets.rs", 18),
     ("solidcore/src/blend/fillet_geom/p1.rs", 62),
-    ("solidcore/src/blend/fillet_geom/p2.rs", 112),
+    ("solidcore/src/blend/fillet_geom/p2.rs", 111),
     ("solidcore/src/blend/fillet_geom/p3.rs", 47),
     ("solidcore/src/blend/fillet_geom/p4.rs", 120),
     ("solidcore/src/blend/fillet_geom/p5.rs", 117),
