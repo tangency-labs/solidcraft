@@ -905,6 +905,15 @@ impl Worker {
         if let Some(m) = &self.mcp {
             m.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
         }
+        self.refresh_tools()
+    }
+
+    /// Lists the tools again, so a plugin installed, enabled or removed since the last turn is
+    /// offered (or no longer offered) from the next turn on. Both lists change together.
+    fn refresh_tools(&mut self) -> Result<(), String> {
+        if self.mcp.is_none() {
+            return Ok(());
+        }
         let list = self.mcp_call("tools/list", json!({}))?;
         self.tools = match self.cfg.protocol {
             Protocol::OpenAi => openai_tools(&list),
@@ -915,6 +924,8 @@ impl Worker {
     }
 
     fn turn(&mut self, parts: Vec<PromptPart>) {
+        // A failed refresh keeps the previous listing: the turn still runs with the tools it had.
+        let _ = self.refresh_tools();
         self.history.push(user_message(self.cfg.protocol, &parts));
         let dropped = drop_old_views(&mut self.history, MAX_HISTORY_IMAGES);
         let trimmed = self.trim_history();
