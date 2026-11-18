@@ -15,8 +15,9 @@
 //! and the inner 6. Upstream's parametric G2 test compares raw second derivatives, whose
 //! lengths follow the parameter speed (it jumps by up to 1.3e-5 relative at these knots),
 //! called hundreds of the knots G1 and split the skins into 342 and 274 faces. On the 7
-//! and 6 faces the difference needs the curve/curve crossing of
-//! `simple_coincidence_crossing_is_point` (WR-647, on in SolidCraft); without it it fails
+//! and 6 faces the difference needs the nearest-point half of
+//! `simple_coincidence_crossing_is_point` (WR-647, on in SolidCraft; its crossing half is
+//! always on); without it it fails
 //! in `topology/brep/p6.rs` as the pinned C++ does.
 //!
 //! Provenance of `tests/data/issue_948_min7.txt` (third-party data): source
