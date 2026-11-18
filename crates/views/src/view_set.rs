@@ -274,6 +274,7 @@ pub struct ViewSet {
     closed: Vec<(usize, DesignView)>,
     next_id: u64,
     window_id: WindowId,
+    window_name: Option<String>,
     windows: Vec<PopOut>,
     next_window: WindowId,
     /// Open views belonging to another window of the same design.
@@ -303,6 +304,7 @@ impl ViewSet {
             closed: Vec::new(),
             next_id,
             window_id,
+            window_name: None,
             windows: Vec::new(),
             next_window: 1,
             elsewhere: 0,
@@ -389,6 +391,19 @@ impl ViewSet {
         // A caller may allocate directly through the mutable strip, without a take/put cycle.
         window.views.next_id = window.views.next_id.max(next_id);
         Some(window)
+    }
+
+    pub fn window_name(&self) -> Option<&str> {
+        self.window_name.as_deref()
+    }
+
+    pub fn rename_window(&mut self, name: &str) -> bool {
+        let Some(name) = valid_name(name) else { return false };
+        if self.window_id == 0 {
+            return false;
+        }
+        self.window_name = Some(name.to_owned());
+        true
     }
 
     pub fn views_of(&self, id: WindowId) -> Option<&ViewSet> {
@@ -1158,6 +1173,7 @@ impl ViewSet {
             "tiles": self.tiles.as_ref().map(Tiles::to_json),
             "windows": self.windows.iter().map(|window| json!({
                 "id": window.id,
+                "name": window.views.window_name(),
                 "level": window.level.key(),
                 "options": window.options,
                 "active": window.views.active,
@@ -1239,7 +1255,10 @@ impl ViewSet {
         };
         let mut set = read_strip(0, value)?;
         for (id, item) in window_records {
-            let Some(views) = read_strip(id, item) else { continue };
+            let Some(mut views) = read_strip(id, item) else { continue };
+            if let Some(name) = item.get("name").and_then(Value::as_str) {
+                views.rename_window(name);
+            }
             let level = item.get("level").and_then(Value::as_str).and_then(WindowLevel::from_key).unwrap_or_default();
             let placement = item.get("placement").and_then(WindowPlacement::from_json);
             let options = item.get("options").cloned().and_then(|value| serde_json::from_value(value).ok()).unwrap_or_default();
@@ -1477,6 +1496,21 @@ mod tests {
         assert_eq!(window_rect_for(source, None, tiny_display, None, false), Some(Rect { x: 10.0, y: -795.0, w: 180.0, h: 90.0 }),);
         assert_eq!(window_rect_for(source, None, tiny_display, Some([f32::NAN, 0.0]), false), None);
         assert_eq!(window_rect_for(source, None, Rect { w: -30.0, ..small_display }, None, false), None);
+    }
+
+    #[test]
+    fn a_pop_out_name_round_trips_without_renaming_its_views() {
+        let mut set = models(2);
+        let moved = set.move_to_window(2, new_window()).unwrap();
+        let child = &mut set.window_mut(moved.window).unwrap().views;
+        let view_name = child.active().name.clone();
+        assert!(child.rename_window(" Inspection "));
+        assert!(!child.rename_window(" "));
+        let restored = ViewSet::from_json(&set.to_json()).unwrap();
+        let child = restored.views_of(moved.window).unwrap();
+        assert_eq!(child.window_name(), Some("Inspection"));
+        assert_eq!(child.active().name, view_name);
+        assert_eq!(restored.window_name(), None);
     }
 
     #[test]
