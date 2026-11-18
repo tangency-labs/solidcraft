@@ -513,9 +513,11 @@ mod tests {
             && p.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
             && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Cheaper Inference" && key_safe_for(p.base_url)));
-        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "UnoRouter"
-            && p.base_url == "https://api.unorouter.com/v1"
-            && key_safe_for(p.base_url)));
+        assert!(
+            presets(Protocol::OpenAi)
+                .iter()
+                .any(|p| p.name == "UnoRouter" && p.base_url == "https://api.unorouter.com/v1" && key_safe_for(p.base_url))
+        );
         assert!(!presets(Protocol::Anthropic).iter().any(|p| p.name == "UnoRouter"), "this preset uses OpenAI-compatible chat completions");
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
         for name in ["DeepSeek", "Qwen"] {
