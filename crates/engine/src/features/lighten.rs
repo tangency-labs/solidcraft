@@ -11,7 +11,7 @@ use crate::cmd::features::add_feature;
 use crate::params::{bad, bool_, num, str_, vec3};
 use crate::{Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.lighten", "Lighten", lighten).at("SOLID", "MODIFY").icon("pocket").params(
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.lighten", "Lighten", lighten).at("SOLID", "MODIFY").icon("lighten").params(
     "target_face?: u64 (planar face index, or picked via faces/selection); \
              faces?: [[x,y,z]]; body?: name; wall_offset?: expr (default 4.0 mm); \
              depth?: expr (default 7.0 mm); draft_angle?: expr (default 0 deg); \
@@ -268,6 +268,25 @@ fn parse_lighten_params(s: &Session, p: &Value) -> Result<ParsedLighten> {
     let feature = LightenFeature { target_face, wall_offset, depth: depth_val, draft_angle, corner_radius, auto_fillet, auto_chamfer };
 
     Ok(ParsedLighten { body_idx, target_face, feature, config })
+}
+
+/// Build before/after model states with fast pocket boolean cuts (no 3D SMLib blends) for live preview.
+pub fn preview_cut_state_for_command(
+    s: &Session,
+    p: &Value,
+) -> std::result::Result<(solidcraft_doc::ModelState, solidcraft_doc::ModelState), String> {
+    let parsed = parse_lighten_params(s, p).map_err(|e| e.to_string())?;
+    let before = (*s.model.state()).clone();
+    let mb = before.bodies.get(parsed.body_idx).ok_or_else(|| "no target body for lighten preview".to_string())?;
+    let mut cut_body = mb.body.clone();
+    let fillet_loc = parsed.feature.auto_fillet.map(|(_, loc)| loc).unwrap_or_default();
+    let chamfer_loc = parsed.feature.auto_chamfer.map(|(_, loc)| loc).unwrap_or_default();
+    solidcraft_kernel::lighten::preview_cut_body_with_locations(&mut cut_body, parsed.target_face, &parsed.config, fillet_loc, chamfer_loc)?;
+    let mut after = before.clone();
+    let mut next_mb = solidcraft_doc::ModelBody::new(mb.name.clone(), cut_body, mb.feature);
+    next_mb.component = mb.component;
+    after.bodies[parsed.body_idx] = next_mb;
+    Ok((before, after))
 }
 
 /// Build cutter prism preview bodies (prior to committing the boolean cut) for `solid.lighten`.

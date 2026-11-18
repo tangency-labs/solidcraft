@@ -1141,7 +1141,7 @@ fn build_pocket_regions(body: &Body, face_idx: usize, plane: &Plane, config: &Li
     let filtered_regions: Vec<Region2> = raw_regions.into_iter().filter(|r| r.area().abs() > 1e-2).collect();
     let pocket_regions: Vec<Region2> = if filtered_regions.len() > 1 && config.corner_radius > 1e-3 {
         let mut out = Vec::with_capacity(filtered_regions.len());
-        for res in crate::par::map("lighten fillet corners", &filtered_regions, true, |r| Ok(fillet_region_corners(r, config.corner_radius))) {
+        for res in crate::par::map_with_local_pools(&filtered_regions, usize::MAX, |r| Ok(fillet_region_corners(r, config.corner_radius))) {
             let r = res.map_err(|e| e.to_string())?;
             if r.area().abs() > 1e-2 {
                 out.push(r);
@@ -1254,7 +1254,7 @@ fn extrude_pocket_prisms(plane: &Plane, pocket_regions: &[Region2], cut_depth: f
     }
     if pocket_regions.len() > 1 {
         let mut cutters = Vec::with_capacity(pocket_regions.len());
-        for res in crate::par::map("lighten extrude pockets", pocket_regions, true, |region| {
+        for res in crate::par::map_with_local_pools(pocket_regions, usize::MAX, |region| {
             Ok(extrude_single_pocket_prism(plane, region, cut_depth, draft_angle))
         }) {
             let inner = res.map_err(|e| e.to_string())?;
@@ -1413,7 +1413,7 @@ pub fn preview_pockets_with_locations(
 
         let mut cutters = Vec::with_capacity(pocket_regions.len());
         if pocket_regions.len() > 1 && (top_bevel.is_some() || bottom_bevel.is_some()) {
-            for res in crate::par::map("lighten preview", &pocket_regions, true, |region| Ok(build_bay(region))) {
+            for res in crate::par::map_with_local_pools(&pocket_regions, usize::MAX, |region| Ok(build_bay(region))) {
                 let inner = res.map_err(|e| e.to_string())?;
                 if let Some(b) = inner? {
                     cutters.push(b);
@@ -1552,6 +1552,21 @@ fn collect_face_edge_mids(body: &Body, face_idx: usize) -> Vec<Vec3> {
         }
     }
     mids
+}
+
+/// Execute `solid.lighten` auto-pocketing (including top/bottom fillets and chamfers) under
+/// `Validation::Off` for fast live cut-away preview rendering matching Shell / Extrude.
+pub fn preview_cut_body_with_locations(
+    body: &mut Body,
+    face_id: u64,
+    config: &LightenConfig,
+    fillet_loc: FilletLocation,
+    chamfer_loc: ChamferLocation,
+) -> Result<(), String> {
+    crate::validation::validating(crate::validation::Validation::Off, || {
+        auto_pocket_with_warnings(body, face_id, config, fillet_loc, chamfer_loc).map(|_| ())
+    })
+    .0
 }
 
 /// Execute `solid.lighten` auto-pocketing and return non-fatal warnings if an edge blend falls back.

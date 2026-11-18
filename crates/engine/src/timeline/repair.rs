@@ -425,14 +425,12 @@ impl DocumentTimeline {
                             anchor_name: name.clone(),
                         });
                     }
-                    PlaneRef::Construction { name } => {
-                        if let Some(target) = doc.features.iter().find(|f| f.name == name.0) {
-                            deps.insert(target.id);
-                            refs.push(TopologicalReference::SketchPlane {
-                                plane_type: "Construction",
-                                target_feature_id: Some(target.id),
-                            });
-                        }
+                    PlaneRef::Construction { feature, .. } => {
+                        deps.insert(feature.0);
+                        refs.push(TopologicalReference::SketchPlane {
+                            plane_type: "Construction",
+                            target_feature_id: Some(feature.0),
+                        });
                     }
                     PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => {
                         collect_plane_dependencies(base, doc, &mut deps);
@@ -839,10 +837,8 @@ impl DocumentTimeline {
 /// Helper to recursively gather plane references.
 fn collect_plane_dependencies(plane: &PlaneRef, doc: &Document, deps: &mut HashSet<u64>) {
     match plane {
-        PlaneRef::Construction { name } => {
-            if let Some(target) = doc.features.iter().find(|f| f.name == name.0) {
-                deps.insert(target.id);
-            }
+        PlaneRef::Construction { feature, .. } => {
+            deps.insert(feature.0);
         }
         PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => {
             collect_plane_dependencies(base, doc, deps);
@@ -1116,12 +1112,7 @@ impl DocumentDryRunExt for Document {
 /// Commit a mutation and its deterministic remapping as a single atomic undo/redo transaction.
 pub fn commit_edit_and_remap(session: &mut Session, mutation: TimelineMutation) -> Result<DiagnosticReport> {
     // 1. Record single undo snapshot for the atomic transaction
-    let before = Snapshot {
-        label: "Timeline Fixer: Edit & Auto-Remap".to_string(),
-        doc: session.doc.clone(),
-        active_sketch: session.active_sketch,
-        pending_moves: session.pending_moves.clone(),
-    };
+    let before = Snapshot::of(session, "Timeline Fixer: Edit & Auto-Remap");
 
     // 2. Apply mutation to session doc
     let mut next_doc = (*session.doc).clone();

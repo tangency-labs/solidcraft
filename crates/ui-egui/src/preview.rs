@@ -749,51 +749,13 @@ fn lighten_preview(s: &Session, cmds: &[(String, Value)], c: Colors) -> Option<J
         "timeline.redefine" if p.get("command").and_then(Value::as_str) == Some("solid.lighten") => p.get("params"),
         _ => None,
     })?;
-    let cutters = match solidcraft_engine::features::lighten::preview_pockets_for_command(s, params) {
-        Ok(cutters) => cutters,
+    let (before, after) = match solidcraft_engine::features::lighten::preview_cut_state_for_command(s, params) {
+        Ok(states) => states,
         Err(e) => return Some(Err(e)),
     };
-    let mut sc = GpuScene::default();
-    let removed = sc.color(c.removed);
-    let edge = sc.color([c.removed[0], c.removed[1], c.removed[2], 255]);
-    let mut bounds = state_bounds(&s.model.state());
-    let tol = solidcraft_engine::kernel::MeshTolerance::chord(0.12);
-    let meshes: Vec<_> = if cutters.len() > 1 {
-        solidcraft_engine::kernel::map_with_local_pools(&cutters, usize::MAX, |body| body.mesh(&tol)).into_iter().filter_map(Result::ok).collect()
-    } else {
-        cutters.iter().filter_map(|body| body.mesh(&tol).ok()).collect()
-    };
-    for m in &meshes {
-        bounds = bounds.union(&m.bounds());
-        for t in &m.triangles {
-            for k in t {
-                let i = *k as usize;
-                if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
-                    if c.cut_tint {
-                        sc.xray_tri(p.to_f32(), n.to_f32(), removed);
-                    }
-                }
-            }
-        }
-        for (ei, e) in m.edges.iter().enumerate() {
-            if m.shaded_edge_visible(ei) {
-                for w in e.windows(2) {
-                    sc.line(w[0].to_f32(), w[1].to_f32(), edge, 1.3, true);
-                }
-            }
-        }
-    }
-    Some(Ok(Built {
-        scene: sc,
-        sketches: Vec::new(),
-        replaced: Vec::new(),
-        outlines: Vec::new(),
-        error: None,
-        bounds,
-        applied: None,
-        tapered: Vec::new(),
-        stopped: None,
-    }))
+    let mut b = build_as(&before, &after, c, None);
+    b.bounds = state_bounds(&after);
+    Some(Ok(b))
 }
 
 /// The tool body of a feature that adds or removes one, built on its own (as a new body): what
