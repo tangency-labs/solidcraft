@@ -39,9 +39,7 @@ fn entry() -> Value {
 #[test]
 fn the_oversized_round_keeps_its_operand_and_definition() {
     let root = corpus();
-    let fixes: Vec<String> =
-        serde_json::from_str(&std::fs::read_to_string(root.join("fixes.json")).unwrap()).unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_fixes(crate::test_corpus::solidcraft_fixes::solidcraft_fix_names()).unwrap();
     let entry = entry();
     let path = root
         .join("fillets")

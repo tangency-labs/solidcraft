@@ -2090,8 +2090,29 @@ fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
     t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-5)");
     t += TAIL;
     let (volume, area) = pin_with_cylinder(major, minor);
-    // SMLib's check fails the part as the reader makes it (#17706): the import says so.
-    assert_closed_measures(&t, volume, area, &[], true);
+    // The part passes SMLib's check (#17706, fixed by #17856: the check measured the apex
+    // against the far pole).
+    assert_closed_measures(&t, volume, area, &[], false);
+    // The check's verdict is backed by proved gaps: each meridian lies on both torus halves within
+    // a certified 1e-8 (edge tolerance 5e-6), and the apex's exact distance to the torus,
+    // √(major² + minor²) − minor = 3.62e-5, is inside its vertex tolerance.
+    let imp = step_import(&t).unwrap();
+    let body = &imp.bodies[0].body;
+    let (rec, sm) = (body.record(), body.smlib().unwrap());
+    // Record order: faces 0 plane, 1 cylinder, 2 and 3 the torus halves (their surface is held as a NURBS).
+    let torus = [2usize, 3];
+    let apex = rec.vertices.iter().position(|v| v.point == [0.0, 0.0, minor]).unwrap();
+    let meridians: Vec<usize> = (0..rec.edges.len()).filter(|&e| rec.edges[e].vertices.contains(&(apex as u32))).collect();
+    assert_eq!(meridians.len(), 2);
+    for &e in &meridians {
+        let edge = &rec.edges[e];
+        for &f in &torus {
+            let b = sm.curve_face_gap_bound(edge.nurbs.as_ref().unwrap_or(&edge.curve), edge.interval, f, 1e-9).unwrap().unwrap();
+            assert!(b < 1e-8 && b < edge.tolerance, "edge {e} face {f}: {b}");
+        }
+    }
+    let gap = (major * major + minor * minor).sqrt() - minor; // exact to ~1e-17
+    assert!((gap - 3.62299817e-5).abs() < 1e-12 && rec.vertices[apex].tolerance > gap * (1.0 + 1e-9));
 }
 
 /// The lemon of a spindle torus (the tube's part across the axis: a closed surface with a pole

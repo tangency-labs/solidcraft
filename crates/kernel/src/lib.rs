@@ -237,6 +237,9 @@ pub use step_in::{
     HealedBody, ImportChecks, ImportHeals, ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, StepImport, StepNode, StepReading,
     step_cache_alive, step_import, step_import_shared, step_orientation_errors, step_validate,
 };
+/// An import's limits, which every reader of an assembly applies alike: the deepest nesting
+/// followed, the most bodies, and the most occurrences visited.
+pub use step_in::{MAX_ASSEMBLY_DEPTH as IMPORT_MAX_DEPTH, MAX_BODIES as IMPORT_MAX_BODIES, MAX_VISITS as IMPORT_MAX_VISITS};
 pub use step_out::{ExportBody, ExportProduct, StepExport, StepHeader, step_export_bodies, step_export_bodies_with_face_ids, step_export_products};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
 pub use surface_kind::{AxialPiece, EdgeCircle, FaceSurface, axial_face_section, edge_circle, face_edge_indices, face_surface};

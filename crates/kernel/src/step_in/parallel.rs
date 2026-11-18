@@ -18,6 +18,7 @@ pub(super) enum Source {
 }
 
 /// A solid item read and oriented where the file defines it, placed by each of its instances.
+#[derive(Clone)]
 pub(super) struct Part {
     pub body: Body,
     /// The shells are closed.

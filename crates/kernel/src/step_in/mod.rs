@@ -35,12 +35,12 @@ fn body_item(rep: u64, name: &str) -> bool {
 }
 
 /// Deepest assembly nesting followed.
-const MAX_ASSEMBLY_DEPTH: usize = 32;
+pub const MAX_ASSEMBLY_DEPTH: usize = 32;
 /// Most body instances in one import.
-const MAX_BODIES: usize = 10_000;
+pub const MAX_BODIES: usize = 10_000;
 /// Most product occurrences and mapped representations visited (a shared sub-assembly used
 /// twice at every level would otherwise grow exponentially).
-const MAX_VISITS: usize = 100_000;
+pub const MAX_VISITS: usize = 100_000;
 /// Most planned solids converted in one go (bounds the geometry held at once).
 const MAX_WINDOW: usize = 64;
 /// Most representation entries walked while deciding which items are converted exactly once. A

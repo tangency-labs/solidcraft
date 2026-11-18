@@ -5465,6 +5465,10 @@ fn apply_traced_with(
             // boolean: in a design of many bodies that was most of a hole's time (#10225). A body
             // whose exact box lies clear of every tool's is left as it is. A body shown in another
             // frame, and a mesh body, are cut as before; an intersect removes the bodies it misses.
+            // The exact box of the body is measured only when it can show a tool apart of it: a
+            // tool inside the body is not apart from it, and measuring the box of a body with
+            // many faces costs the kernel minutes (#18821: 347 s for the cup of the report,
+            // against 30 s for the cut the box was measured for).
             let reach: Option<Vec<Option<solidcraft_geom::Aabb3>>> =
                 (op == Operation::Cut && !tools.iter().any(|t| t.body.is_mesh())).then(|| tools.iter().map(|t| more::exact_box(&t.body)).collect());
             for &ti in &target_idx {
@@ -5475,6 +5479,7 @@ fn apply_traced_with(
                     && into.is_none()
                     && !reach.is_empty()
                     && !target.body.is_mesh()
+                    && !more::tools_inside(target, reach)
                     && let Some(tb) = more::exact_box(&target.body)
                     && reach.iter().all(|tool| more::boxes_apart(&Some(tb), tool))
                 {
