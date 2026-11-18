@@ -658,7 +658,8 @@ impl<'b, 'a> Builder<'b, 'a> {
         let (mut vs, mut ve) = (self.vertex(vs_id)?, self.vertex(ve_id)?);
         // Two VERTEX_POINTs written at one point are the one vertex of a closed edge, as when the
         // file writes that vertex once: joined here, the edge is read as that edge on any curve.
-        if vs != ve && self.at_one_point(vs_id, ve_id) && self.join(vs, ve, false)? {
+        // The join is `meet`'s, which still keeps apart the two ends of any other EDGE_CURVE.
+        if vs != ve && self.at_one_point(vs_id, ve_id) && self.meet(vs, ve)? {
             vs = self.find(vs);
             ve = vs;
         }
@@ -829,12 +830,6 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// never joined, whether that edge is read yet or not: its own ends are apart. The exception is
     /// an edge whose two VERTEX_POINTs are at one point ([`Builder::edge_between`]).
     fn meet(&mut self, a: u32, b: u32) -> R<bool> {
-        self.join(a, b, true)
-    }
-
-    /// [`Builder::meet`]; with `unless_edge` false, without the test for an EDGE_CURVE between
-    /// the two, for [`Builder::edge`] joining the two ends of the edge it reads.
-    fn join(&mut self, a: u32, b: u32, unless_edge: bool) -> R<bool> {
         let (a, b) = (self.find(a), self.find(b));
         if a == b {
             return Ok(true);
@@ -845,7 +840,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         let Some(tolerance) = solidcore_ops::vertex_meet::points_meet(k.point, k.tolerance, d.point, d.tolerance) else {
             return Ok(false);
         };
-        if unless_edge && self.edge_between(drop, keep) {
+        if self.edge_between(drop, keep) {
             return Ok(false);
         }
         while self.vertex_parent.len() < self.asm.vertices.len() {

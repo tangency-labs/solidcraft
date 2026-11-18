@@ -1566,6 +1566,33 @@ fn the_two_ends_at_one_point_of_an_edge_read_later_meet() {
     });
 }
 
+/// A circle edge from A to a second vertex C at A's point, read after an earlier loop joined A
+/// with B, where B and C are the two ends of a LINE 1.5e-7 mm long (within their 1e-7 mm
+/// tolerances): the circle's two ends meet as any two vertices do, so they are not joined across
+/// the LINE, and the LINE keeps its two vertices.
+#[test]
+fn a_two_vertex_circle_never_joins_the_two_ends_of_a_line_read_after_it() {
+    let mut w = W::default();
+    let (a, c, bp) = ([0.0; 3], [0.0; 3], [1.5e-7, 0.0, 0.0]);
+    let (va, vb, vc) = (w.vertex(a), w.vertex(bp), w.vertex(c));
+    let k = w.circle([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 1.0);
+    let circle = w.add(format!("EDGE_CURVE('',#{va},#{vc},#{k},.T.)"));
+    let line = w.line_edge((vb, bp), (vc, c), true, 1.0);
+    let ex = w.file(&[circle, line]);
+    with_builder(&ex, |b| {
+        let (ia, ib) = (b.vertex(va).unwrap(), b.vertex(vb).unwrap());
+        // An earlier loop meets A and B: they are apart by less than their tolerances.
+        assert!(b.meet(ib, ia).unwrap());
+        let _ = b.edge(circle);
+        let (e, _) = b.edge(line).unwrap();
+        b.join_vertices().unwrap();
+        let [s, t] = b.asm.edges[e as usize].vertices;
+        assert_ne!(s, t, "the LINE keeps its two vertices");
+        let ic = b.vertex(vc).unwrap();
+        assert_ne!(b.find(ib), b.find(ic));
+    });
+}
+
 #[test]
 fn a_closed_shell_beside_open_shells_reads_each_open_shell_as_a_sheet() {
     // A closed shell beside two open ones: the closed shell is a solid body and each open shell a
