@@ -352,7 +352,8 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     let mut bodies: Vec<_> = if !parts.is_empty() {
         st.bodies.iter().filter(|b| parts.contains(&b.name)).collect()
     } else if implicit_all {
-        st.bodies.iter().collect()
+        // As the evaluator's `*`: every body but the envelopes, which only stand in for checks.
+        st.bodies.iter().filter(|b| !b.envelope).collect()
     } else {
         active_scope(s, st)
     };

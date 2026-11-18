@@ -42,6 +42,9 @@ struct Job {
     /// The size a shared volume is measured against: the first body's, or the smaller one's
     /// when one is an envelope, so a large envelope does not pass a small overlap as clear.
     size: f64,
+    /// One of the pair is an envelope: a shared volume too small to count is listed as not
+    /// checked rather than cleared, as the parts inside may be smaller than the size it allows.
+    envelope: bool,
 }
 
 /// What an exact check of one pair came to.
@@ -130,13 +133,15 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let (Some(a), Some(b)) = (bodies.get(i), bodies.get(j)) else { continue };
+        let envelope = envelopes.is_envelope(&a.name) || envelopes.is_envelope(&b.name);
         jobs.push(Job {
             pair: k,
             a: a.body.clone(),
             b: b.body.clone(),
             names: (a.name.clone(), b.name.clone()),
             cost: a.body.face_count().saturating_mul(b.body.face_count()),
-            size: if envelopes.is_envelope(&a.name) || envelopes.is_envelope(&b.name) { a.body.size().min(b.body.size()) } else { a.body.size() },
+            size: if envelope { a.body.size().min(b.body.size()) } else { a.body.size() },
+            envelope,
         });
     }
     let intersected = jobs.len();
@@ -214,11 +219,11 @@ fn round_ms(ms: f64) -> f64 {
 /// The exact check of one pair: the bodies' intersection, measured.
 fn check(job: &Job) -> Done {
     let started = web_time::Instant::now();
-    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names, job.size));
+    let (outcome, kernel) = solidcraft_kernel::profile::capture(|| check_pair(&job.a, &job.b, &job.names, job.size, job.envelope));
     Done { outcome, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
 }
 
-fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64) -> Outcome {
+fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64, envelope: bool) -> Outcome {
     let threshold = 1e-9 * size.max(1.0).powi(3);
     // A pair whose shared part can't be worked out is reported, not passed as clear.
     let shared = match solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect) {
@@ -239,6 +244,14 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String), size: f64) -> Out
             bbox: OverlapBounds { min: m.bbox.min.into(), max: m.bbox.max.into() },
             center: m.centroid.into(),
         });
+    }
+    // Under the size's noise floor, but an envelope's parts may be far smaller than the envelope:
+    // their overlap could count where the envelopes' does not.
+    if envelope && m.volume > 0.0 {
+        return Outcome::Unchecked(format!(
+            "not checked: the envelopes share {:.3e} mm³, too little to tell from a contact at their size; check the parts inside (envelopes: false)",
+            m.volume
+        ));
     }
     Outcome::Clear
 }

@@ -95,7 +95,8 @@ pub struct ModelBody {
     /// The look it was imported with, carried through later features.
     pub imported: Option<Arc<crate::appearance::ImportedLook>>,
     /// A component's envelope (a Bounding Solid of its contents): a stand-in for checks, never
-    /// one of the bodies a feature of its component works on when the feature names none.
+    /// one of the bodies a feature works on unless the feature names it (not by `*`, nor by
+    /// naming none).
     pub envelope: bool,
     /// [`Body::retained_bytes`] of `body`, measured when a feature made or changed it (0: not
     /// measured), so the evaluation cache's budget does not walk every body after every feature.
@@ -2422,7 +2423,7 @@ impl PlacementReads {
         let names = if targets.is_empty() { &f.participants } else { &targets };
         let all = names.len() == 1 && names.first().is_some_and(|n| n == "*");
         if all || names.is_empty() {
-            self.bodies.extend(st.bodies.iter().filter(|b| all || b.in_default_scope(f)).map(|b| b.name.clone()));
+            self.bodies.extend(st.bodies.iter().filter(|b| if all { !b.envelope } else { b.in_default_scope(f) }).map(|b| b.name.clone()));
         } else {
             for name in names {
                 self.placed_body(Some(st), name);
@@ -4878,7 +4879,13 @@ fn apply_beside_sheet_cut(
         .filter(|b| {
             !handled.contains(&b.name)
                 && (!skip_surfaces || !b.is_surface())
-                && (all || if effective.is_empty() { b.in_default_scope(f) } else { effective.contains(&b.name) })
+                && (if all {
+                    !b.envelope
+                } else if effective.is_empty() {
+                    b.in_default_scope(f)
+                } else {
+                    effective.contains(&b.name)
+                })
         })
         .map(|b| b.name.clone())
         .collect();
@@ -5169,7 +5176,15 @@ pub(crate) fn boolean_scope(state: &ModelState, f: &Feature, targets: &[String])
     let names = state
         .bodies
         .iter()
-        .filter(|b| all || if effective.is_empty() { b.in_default_scope(f) } else { effective.contains(&b.name) })
+        .filter(|b| {
+            if all {
+                !b.envelope
+            } else if effective.is_empty() {
+                b.in_default_scope(f)
+            } else {
+                effective.contains(&b.name)
+            }
+        })
         .map(|b| b.name.clone())
         .collect();
     (!all && !effective.is_empty(), names)
@@ -5249,7 +5264,7 @@ fn apply_traced_with(
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
     let named = !all && !targets.is_empty();
     let mut target_idx: Vec<usize> = if all {
-        (0..state.bodies.len()).collect()
+        (0..state.bodies.len()).filter(|i| state.bodies.get(*i).is_some_and(|b| !b.envelope)).collect()
     } else if targets.is_empty() {
         (0..state.bodies.len()).filter(|i| state.bodies.get(*i).is_some_and(|b| b.in_default_scope(f))).collect()
     } else {
@@ -9428,7 +9443,18 @@ fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
 /// `apply_traced` picks a cut's targets).
 fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
     let all = f.participants.len() == 1 && f.participants.first().is_some_and(|t| t == "*");
-    st.bodies.iter().filter(|b| all || if f.participants.is_empty() { b.in_default_scope(f) } else { f.participants.contains(&b.name) }).collect()
+    st.bodies
+        .iter()
+        .filter(|b| {
+            if all {
+                !b.envelope
+            } else if f.participants.is_empty() {
+                b.in_default_scope(f)
+            } else {
+                f.participants.contains(&b.name)
+            }
+        })
+        .collect()
 }
 
 /// Whether hole tool `tool` is clear of every body the hole cuts, by their exact boxes (#10701).
@@ -9454,7 +9480,15 @@ fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
 fn miss_scope<'a>(st: &'a ModelState, f: &'a Feature, targets: &'a [String]) -> impl Iterator<Item = &'a ModelBody> + 'a {
     let targets = if targets.is_empty() { &f.participants } else { targets };
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
-    st.bodies.iter().filter(move |b| all || if targets.is_empty() { b.in_default_scope(f) } else { targets.contains(&b.name) })
+    st.bodies.iter().filter(move |b| {
+        if all {
+            !b.envelope
+        } else if targets.is_empty() {
+            b.in_default_scope(f)
+        } else {
+            targets.contains(&b.name)
+        }
+    })
 }
 
 /// Whether a copy has no material to cut in any of its eligible targets.
@@ -12011,9 +12045,11 @@ fn eval_feature_kind(
             let bb = if *contents {
                 crate::envelope::contents_bounds(doc, st, f.component)?
             } else {
+                // The bodies' display meshes, as before envelopes: a saved Bounding Solid builds
+                // the same box it always did.
                 let mut bb = solidcraft_geom::Aabb3::EMPTY;
                 for b in st.bodies.iter().filter(|b| bodies.is_empty() || bodies.iter().any(|t| *t == b.name)) {
-                    bb = bb.union(&b.body.exact_bounds()?);
+                    bb = bb.union(&b.mesh().bounds());
                 }
                 bb
             };

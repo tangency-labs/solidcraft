@@ -294,3 +294,31 @@ fn a_small_overlap_with_a_large_envelope_is_found() {
     assert_eq!(env["count"], 1, "{env}");
     assert!((f(&env["interferences"][0]["volume_mm3"]) - 32.0).abs() < 1e-6, "{env}");
 }
+
+/// Two large envelopes sharing a sliver too small to count at their size are not passed as clear:
+/// the parts inside can be far smaller than the envelopes, so the pair is listed as not checked.
+#[test]
+fn a_sliver_shared_by_two_large_envelopes_is_listed_not_cleared() {
+    let mut s = Session::default();
+    for (name, corner) in [("A", [0.0, 0.0, 0.0]), ("B", [1999.5, 1999.5, 1999.5])] {
+        run(&mut s, "component.create", json!({"name": name}));
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 2000, "width": 2000, "height": 2000, "corner": corner, "operation": "new", "body_name": format!("{name} Frame")}),
+        );
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "solid.bounding_solid", json!({"component": name, "body_name": format!("{name} Envelope")}));
+    }
+    // 0.5 mm cubed: 0.125 mm³, under the 8 mm³ a 2 m box's span allows.
+    let env = run(&mut s, "inspect.interference", json!({"envelopes": true}));
+    assert_eq!(env["count"], 0, "{env}");
+    let unchecked = env["unchecked"].as_array().unwrap();
+    assert!(
+        unchecked.iter().any(|u| {
+            let pair = [u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")];
+            pair.contains(&"A Envelope") && pair.contains(&"B Envelope")
+        }),
+        "{env}"
+    );
+}

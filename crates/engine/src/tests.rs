@@ -3125,6 +3125,29 @@ fn pipe_scale_offset_bounding_and_materials() {
     assert!(s.execute("material.assign", &json!({"bodies": ["Cube"], "material": "unobtainium"})).is_err());
 }
 
+/// A Bounding Solid of listed bodies (no `contents`), as every saved design has it, keeps the box
+/// it always built: around the bodies' display meshes, not their exact bounds, so a design saved
+/// before component envelopes rebuilds at the same size.
+#[test]
+fn a_bounding_solid_without_contents_keeps_its_mesh_bound_size() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "body_name": "Rod"}));
+    // Turned 7 degrees about Z, the rim's mesh points no longer reach the exact circle's extremes.
+    run(&mut s, "solid.move", json!({"bodies": ["Rod"], "axis": [0, 0, 1], "angle": "7 deg"}));
+    let st = s.model.state();
+    let rod = st.body("Rod").unwrap();
+    let (mesh, exact) = (rod.mesh().bounds(), rod.body.exact_bounds().unwrap());
+    drop(st);
+    assert!((exact.max.x - mesh.max.x).abs() > 1e-6 || (exact.max.y - mesh.max.y).abs() > 1e-6, "{mesh:?} vs {exact:?}");
+    run(&mut s, "solid.bounding_solid", json!({"bodies": ["Rod"], "margin": 1, "body_name": "Stock"}));
+    let stock = s.model.state().body("Stock").unwrap().body.exact_bounds().unwrap();
+    for (got, want) in
+        [(stock.min.x, mesh.min.x - 1.0), (stock.min.y, mesh.min.y - 1.0), (stock.max.x, mesh.max.x + 1.0), (stock.max.y, mesh.max.y + 1.0)]
+    {
+        assert!((got - want).abs() < 1e-9, "{stock:?} around mesh {mesh:?}");
+    }
+}
+
 /// A component's envelope (`solid.bounding_solid` with `component`) bounds every body placed inside
 /// it, its subcomponents' and each placement of a part placed twice, in its own frame: it moves
 /// with the component and is built again when a part inside it moves.
@@ -3179,6 +3202,16 @@ fn a_components_envelope_bounds_its_parts_where_they_are_placed() {
     let plate = volume(&mut s, "Plate");
     assert!((plate - 992.0).abs() < 1e-6, "the plate is cut: {plate}, envelope {envelope} -> {}", volume(&mut s, "Bought Envelope"));
     assert!((volume(&mut s, "Bought Envelope") - envelope).abs() < 1e-6, "the envelope is left alone");
+    // A cut from the root, which has no body of its own, takes part in every body (`*`): the
+    // parts, never the envelope.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [102, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "cut"}));
+    assert_eq!(s.doc.features.last().unwrap().participants, vec!["*".to_string()]);
+    let plate = volume(&mut s, "Plate");
+    assert!((plate - 972.0).abs() < 1e-6, "the plate is cut from the root: {plate}");
+    assert!((volume(&mut s, "Bought Envelope") - envelope).abs() < 1e-6, "the envelope is left alone by `*`");
 }
 
 /// An envelope smaller than its contents could miss a contact: a negative margin, single or for
