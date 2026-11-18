@@ -310,7 +310,7 @@ fn offset_plane_world_bases_reopen_after_the_component_moves_again() {
         ]));
         app.session.selection = vec![Sel::Plane { name: name.into() }];
         let mut d = crate::dialogs::Dialog::for_command(&app, "construct.plane.offset").unwrap();
-        d.kind = Kind::OffsetPlane { offset: "-12 mm".into() };
+        d.kind = Kind::OffsetPlane { offset: "-12 mm".into(), angle: String::new(), direction_only: false };
         let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
         app.session.execute(&command, &params).unwrap();
         let world_plane =
@@ -326,7 +326,7 @@ fn offset_plane_world_bases_reopen_after_the_component_moves_again() {
         let (origin, normal) = crate::canvas::anchor(&app, &d).unwrap();
         assert!(normal.unwrap().dist(before.normal()) < 1e-8);
         assert!(origin.dist(before.origin + before.normal() * 12.) < 1e-8);
-        d.kind = Kind::OffsetPlane { offset: "9 mm".into() };
+        d.kind = Kind::OffsetPlane { offset: "9 mm".into(), angle: String::new(), direction_only: false };
         let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
         app.session.execute(&command, &params).unwrap();
         let after = world_plane(&app);
@@ -380,7 +380,7 @@ fn offset_plane_foreign_datum_edits_keep_the_reference() {
     app.session.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
     app.session.selection = vec![Sel::Plane { name: key.clone() }];
     let mut d = crate::dialogs::Dialog::for_command(&app, "construct.plane.offset").unwrap();
-    d.kind = Kind::OffsetPlane { offset: "10 mm".into() };
+    d.kind = Kind::OffsetPlane { offset: "10 mm".into(), angle: String::new(), direction_only: false };
     let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!(params["base"], key);
     app.session.execute(&command, &params).unwrap();
@@ -428,14 +428,16 @@ fn offset_plane_through_a_fixed_point_reopens_in_world_coordinates() {
     ]));
     let feature = app.session.doc.find_feature("Plane1").unwrap().clone();
     let mut d = crate::dialogs::for_feature(&app, feature.id, None).unwrap();
-    assert!(matches!(&d.inputs[1].items[..], [Sel::Vertex { point, .. }] if point.dist(Vec3::new(17.,20.,30.)) < 1e-8));
+    // Axis sits at index 1; Through is found by label (#12038).
+    let through = d.inputs.iter().find(|i| i.label == "Through point").expect("Through point");
+    assert!(matches!(&through.items[..], [Sel::Vertex { point, .. }] if point.dist(Vec3::new(17.,20.,30.)) < 1e-8));
     let (command, params) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!(params["params"]["through"]["type"], "point");
     app.session.execute(&command, &params).unwrap();
     let (_, _, plane) = solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == "Plane1").unwrap();
     assert!(plane.normal().dist(Vec3::X) < 1e-8);
     assert!(plane.origin.dist(Vec3::X * 17.) < 1e-8);
-    d.active = 1;
+    d.active = d.inputs.iter().position(|i| i.label == "Through point").expect("Through point");
     d.pick(&app.session, Sel::Vertex { body: String::new(), point: Vec3::new(18., 20., 30.) });
     assert!(!d.extra.contains_key("through"), "a new point must discard the saved reference");
 }

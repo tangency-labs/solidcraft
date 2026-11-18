@@ -3456,10 +3456,13 @@ fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> 
     if matches!(d.kind, Kind::Split) && index == 1 {
         return Some("split_tool_mode");
     }
-    if matches!(d.kind, Kind::OffsetPlane { .. }) {
-        return match index {
-            0 => Some("base"),
-            1 => Some("through"),
+    // Offset Plane / Plane at Angle: Axis sits at index 1; Through and Pivot are by label (#12038).
+    if matches!(d.kind, Kind::OffsetPlane { .. } | Kind::AnglePlane { .. }) {
+        return match d.inputs.get(index).map(|i| i.label) {
+            Some("Plane") => Some("base"),
+            Some("Axis") => Some("axis"),
+            Some("Through point") => Some("through"),
+            Some("Pivot") => Some("pivot"),
             _ => None,
         };
     }
@@ -6455,10 +6458,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 match offset_through_point(d) {
                     // A null `offset` keeps the descriptor's distance out: the plane goes through the point.
                     Some(point) => {
-                        // A snap point saved before, picked again where it was: kept as saved.
-                        let through = match (point, d.extra.get("through")) {
-                            (Sel::Vertex { point, .. }, Some(saved)) if saved.get("at").and_then(vec3_of) == Some(*point) => saved.clone(),
-                            _ => construct_ref(app, point)?,
+                        // Keep the saved reference (snap, fixed point, …) until the pick is cleared or replaced.
+                        let through = match d.extra.get("through") {
+                            Some(saved) => saved.clone(),
+                            None => construct_ref(app, point)?,
                         };
                         ("construct.plane.offset", json!({"base": base, "through": through, "offset": null}))
                     }
