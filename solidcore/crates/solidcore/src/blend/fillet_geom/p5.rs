@@ -2855,6 +2855,7 @@ impl FilletBrep {
 
                     // fork 7d79866: no end span shorter than the zone tolerance
                     let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
+                    let dropped = t;
                     t = snap_rail_end_to_knot(
                         k,
                         &rail_curve,
@@ -2868,6 +2869,9 @@ impl FilletBrep {
                     // set Vertexuse0->UVPoint on filletSurface
                     self.fillet_vertexuse_mut(vu0)?
                         .set_uv_point(Point2::new(t, iso_v));
+                    if t != dropped {
+                        self.end_curves_follow_rail_end(k, g, rail, v0, Point2::new(t, iso_v))?;
+                    }
 
                     // save V0 to d3Curve dropPoint parameter
                     if self.brep().edgeuse(prim)?.orientation == OrientType::Same {
@@ -2908,6 +2912,7 @@ impl FilletBrep {
                     let mut from_start = Extent1d::default();
                     from_start.set_min_max(param1, trim_ivl.max())?;
                     let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
+                    let solved = param2;
                     param2 = snap_rail_end_to_knot(
                         k,
                         &rail_curve,
@@ -2921,6 +2926,15 @@ impl FilletBrep {
                     // set Vertexuse1->UVPoint on filletSurface
                     self.fillet_vertexuse_mut(vu1)?
                         .set_uv_point(Point2::new(param2, iso_v));
+                    if param2 != solved {
+                        self.end_curves_follow_rail_end(
+                            k,
+                            g,
+                            rail,
+                            v1,
+                            Point2::new(param2, iso_v),
+                        )?;
+                    }
                 }
 
                 // clip the interval to drop points; fork 9b7cd48 passes this on (SER)
@@ -2963,6 +2977,61 @@ impl FilletBrep {
                 // else: more than 1 self intersection found on rail curve - case not
                 // handled yet
             }
+        }
+        Ok(())
+    }
+
+    /// Not upstream (#18918): the UV trim curves of geometry `g` on its fillet surface that
+    /// end at the rail's end vertex `v` (its end curves and cross sections, other than the
+    /// rail `rail` itself) end at `uv`, the rail's end the near-knot snap moved. They were
+    /// built before `TrimRailCurves` and end at the vertex; the drop of the vertex onto the
+    /// rail finds that end to the solve's accuracy, and the snap then moves the rail's end
+    /// along it by up to the zone tolerance. A curve left at the vertex opens the fillet
+    /// face's loop at that corner by as much: the face builder closes a loop corner on
+    /// whichever side it meets first (`sm_FixUVTrimCurves`), and a rail's UV curve is
+    /// later dropped again from its trimmed 3D curve, so only a curve that ends where the
+    /// rail does keeps the loop closed.
+    ///
+    /// # Errors
+    /// [`SolidError::NotFound`] for a dangling id; those of the curve edit.
+    fn end_curves_follow_rail_end(
+        &mut self,
+        k: &Kernel,
+        g: FilletGeomId,
+        rail: EdgeId,
+        v: VertexId,
+        uv: Point2,
+    ) -> Result<()> {
+        let geom = self.geom(g)?;
+        let mut uses = geom.side_eus.clone();
+        for &eu in &geom.ref_eus {
+            if !uses.contains(&eu) {
+                uses.push(eu);
+            }
+        }
+        for eu in uses {
+            let rec = self.brep().edgeuse(eu)?;
+            let Some(e) = rec.edge.filter(|&e| e != rail) else {
+                continue;
+            };
+            if rec.uv_trim_curve.is_none() {
+                continue;
+            }
+            let same = rec.orientation == OrientType::Same;
+            let start = eu_vertex(self.brep(), eu, OP_TRIM)?;
+            let end = edge::other_vertex(self.brep(), e, Some(start))?;
+            // the curve runs along the edge: the use's start is its first end when the use
+            // is `SM_OT_SAME`
+            let edit_start = match (start == v, end == Some(v)) {
+                (true, false) => same,
+                (false, true) => !same,
+                // a closed edge at v, or one not at v
+                _ => continue,
+            };
+            let Some(curve) = self.brep_mut().edgeuse_mut(eu)?.uv_trim_curve.as_mut() else {
+                continue;
+            };
+            crate::topology::face::p2::edit_uv_end_point(k, curve, uv, edit_start)?;
         }
         Ok(())
     }
