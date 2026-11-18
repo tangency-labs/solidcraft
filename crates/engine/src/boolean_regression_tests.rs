@@ -2250,3 +2250,43 @@ fn two_sided_revolve_cut_tangent_to_a_bore_matches_the_other_order() {
     let got = volume(&s, "Cube");
     assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
 }
+
+/// #18556: a Ø3.8 notch cut 12.5 mm down into the rim of an extruded closed fit-point spline,
+/// its side passing 0.00001 mm from the point where the periodic spline closes (+X), failed
+/// SMLib's result check ("Bad CurveCusp" on a trim curve). The notch just past, on and just
+/// across the closing point all cut one valid body that loses about half the notch's disc, and
+/// the three agree.
+#[test]
+fn a_notch_beside_an_extruded_splines_closing_point_is_cut() {
+    let outline = json!([[30, 0], [22.7, 15.1], [0, 18], [-22.7, 15.1], [-30, 0], [-19.7, -13.1], [0, -22], [19.7, -13.1]]);
+    let disc = std::f64::consts::PI * 1.9 * 1.9 * 12.5;
+    let mut cut = Vec::new();
+    for centre in [1.90001, 1.9, 1.89999] {
+        let mut s = Session::default();
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Outline"})),
+            ("sketch.spline.fit_point", json!({"points": outline, "periodic": true})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"sketch": "Outline", "distance": 25, "operation": "new", "body_name": "Base"})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+        }
+        let solid = volume(&s, "Base");
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Notch", "offset": 25})),
+            ("sketch.circle.center", json!({"center": [30, centre], "diameter": 3.8})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"sketch": "Notch", "distance": 12.5, "direction": "negative", "operation": "cut", "targets": ["Base"]})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("notch at y = {centre}, {command}: {e}"));
+        }
+        let state = s.model.state();
+        assert_eq!(state.bodies.len(), 1, "notch at y = {centre}");
+        let base = state.body("Base").unwrap();
+        assert!(base.body.validity().is_empty(), "notch at y = {centre}: {:?}", base.body.validity());
+        let removed = solid - volume(&s, "Base");
+        assert!(removed > 0.4 * disc && removed < 0.6 * disc, "notch at y = {centre} removed {removed} of a {disc} mm³ disc");
+        cut.push(removed);
+    }
+    assert!(cut.iter().all(|r| (r - cut[0]).abs() < 1e-3), "{cut:?}");
+}
