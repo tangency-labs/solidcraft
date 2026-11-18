@@ -512,16 +512,14 @@ pub fn ends_on_both(
             }
             let on = surface.evaluate_point(k, d.result_uv)?;
             *normal = surface.evaluate_normal(k, d.result_uv, Side::Left, Side::Left)?;
-            // Not the fork's (`fixes.fillet_plane_curve_ends_past_face`): a plane goes on as
+            // Not the fork's: a plane goes on as
             // itself past the face it was made for, so a point is on it by its distance to the
             // plane, not to the plane's domain, which ends at the face's edge (an end past a
             // shallow concave crease lies on the side face's plane continued)
-            let off = if k.fixes.fillet_plane_curve_ends_past_face
-                && matches!(
-                    surface.kind(),
-                    crate::surface::surface::p2::SurfaceKind::Plane(_)
-                )
-                && normal.length() > crate::math::EFF_ZERO
+            let off = if matches!(
+                surface.kind(),
+                crate::surface::surface::p2::SurfaceKind::Plane(_)
+            ) && normal.length() > crate::math::EFF_ZERO
             {
                 ((p - on).dot(*normal) / normal.length()).abs()
             } else {
@@ -584,13 +582,13 @@ mod tests {
     }
 
     /// A plane goes on past the face it was made for: an end on the plane `z = 0` but past its
-    /// domain (made for a face 2 wide) is on it, by its distance to the plane, with
-    /// `fillet_plane_curve_ends_past_face`. Upstream dropped the end onto the domain, whose edge
+    /// domain (made for a face 2 wide) is on it, by its distance to the plane. Upstream
+    /// dropped the end onto the domain, whose edge
     /// lies 2 from it, and answered `false`, so `sm_SurfacePlaneCurve` was never made for a
     /// corner's side curve running past its side face's edge.
     #[test]
     fn an_end_past_a_planes_domain_is_on_the_plane() {
-        let mut k = Kernel::new(&KernelOptions::default());
+        let k = Kernel::new(&KernelOptions::default());
         let small = Extent2d::from_bounds(-1.0, -1.0, 1.0, 1.0);
         let large = Extent2d::from_bounds(-50.0, -50.0, 50.0, 50.0);
         let floor = Surface::from(Plane::new(
@@ -609,8 +607,6 @@ mod tests {
             &large,
         ));
         let ends = [Point3::new(0.0, 0.5, 0.0), Point3::new(0.0, 3.0, 0.0)];
-        assert!(!ends_on_both(&k, [&floor, &wall], ends, 4.0e-5).unwrap());
-        k.fixes.fillet_plane_curve_ends_past_face = true;
         assert!(ends_on_both(&k, [&floor, &wall], ends, 4.0e-5).unwrap());
         // an end off the plane is still off it
         let off = [ends[0], Point3::new(0.0, 3.0, 1.0e-3)];
