@@ -76,7 +76,7 @@ impl Document {
                 let m = &o.transform;
                 out.push(Joint {
                     id: next,
-                    // Distinct names: an exporter that makes names unique does so in one step.
+                    // One name per occurrence; URDF export suffixes any that still coincide, one step each.
                     name: format!("{}: {}", group.name, o.name),
                     kind: JointKind::Rigid,
                     a: JointOrigin::new(
