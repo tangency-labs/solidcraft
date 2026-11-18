@@ -160,6 +160,9 @@ pub struct AppBar<'a> {
     pub report: Report<'a>,
     /// The link pills, left to right, just before Report a bug.
     pub pills: Vec<Pill<'a>>,
+    /// Width reserved for an app-owned notice beside the assistant, including its gap.
+    /// The caller measures this before painting, so the link pills cannot cover the notice.
+    pub offer_reserve: f32,
     /// The bar holds the command search field, just before Settings.
     pub search: bool,
     /// The shortcut the closed search field shows, as the keymap displays it; it sets the field's
@@ -494,11 +497,10 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     // actions; labelled where Report a bug is (an icon-only one leaves it to fit by room).
     let mut controls_left = anchor - CLUSTER_BUTTONS - search_shift;
     let offer = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
-    // The link pills sit left of the offer pill (which stays beside the assistant: the app draws it
-    // in `offer`, and its width is last frame's) or, with none, of the assistant. They are left out
-    // where the tabs would keep less than one tab's room (216) beside them, so a narrow bar looks as
-    // it did without them.
-    let offered = solidcraft_ui_registry::rect_of("titlebar:update").map_or(0.0, |u| u.width() + 4.0);
+    // Reserve the app-owned notice from the current layout. The widget registry is cleared
+    // at the start of every frame, so looking up last frame's update pill always returns None
+    // and would let the link pills overlap it (#18688).
+    let offered = if data.offer_reserve.is_finite() { data.offer_reserve.max(0.0) } else { 0.0 };
     let pills_w = pills_width(ui, &data.pills);
     let pills_shown = !data.pills.is_empty() && controls_left - offered - pills_w - tabs_start >= 216.0;
     let pills_right = controls_left - 4.0 - offered;
