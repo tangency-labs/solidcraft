@@ -2325,6 +2325,8 @@ fn pump_tools(app: &mut SolveApp) {
             refuse(req, error);
             continue;
         }
+        // What runs after the gate is what the gate decided on: the registered command ids.
+        gate::canonicalize(&req.method, &mut req.params);
         let undo_len = app.session.undo.len();
         let Some(turn) = app.agent_chat.turn.as_mut() else {
             refuse(req, "the agent chat has no message in progress".into());
@@ -2343,12 +2345,8 @@ fn pump_tools(app: &mut SolveApp) {
         let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
         let tool = gate::tool_key(&req.method, &req.params);
         let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
-        let plugin_run = req
-            .params
-            .get("command")
-            .or_else(|| req.params.get("id"))
-            .and_then(Value::as_str)
-            .is_some_and(|id| id.eq_ignore_ascii_case("plugin.run"));
+        // A plugin's code runs only on the user's Allow, alone or as a batch's step.
+        let plugin_run = gate::runs_plugin(&req.method, &req.params);
         let verdict = match gate::request(&req.method, &req.params, undo_left) {
             gate::Verdict::Ask(_) if !plugin_run && (mode == agents::Mode::All || always) => gate::Verdict::Run { change: true },
             gate::Verdict::Run { change: true } if mode == agents::Mode::Ask && !always => {
@@ -2383,6 +2381,8 @@ fn pump_tools(app: &mut SolveApp) {
                 app.agent_chat.notice(trf("ui.agent_chat_refused", &[("reason", &e)]), false);
                 refuse(req, e);
             }
+            // A mistyped id: the agent hears what the engine would have said, and nothing runs.
+            gate::Verdict::Unknown(e) => refuse(req, e),
         }
     }
     app.agent_chat.tools_rx = Some(rx);
