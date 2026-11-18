@@ -51,6 +51,8 @@ pub(super) struct Counts {
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
     pub tight_boxes: usize,
+    pub blends: usize,
+    pub fit_searches: usize,
 }
 
 thread_local! {
@@ -80,6 +82,8 @@ thread_local! {
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
             tight_boxes: 0,
+            blends: 0,
+            fit_searches: 0,
         })
     };
 }
@@ -3424,3 +3428,100 @@ fn a_cut_measures_the_tight_box_of_its_tool_only() {
     // The tool crosses the top face: it takes 500 mm3 of the block with it.
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
 }
+
+
+/// The design of #4282: a cube with a hole through it along each of the three axes, all of
+/// them through the cube's centre, and a round on every edge of the result.
+fn holed_cube(doc: &mut Document, size: f64, hole: f64) {
+    block(doc, "Cube", Vec3::new(-size / 2.0, -size / 2.0, 0.0), [size, size, size]);
+    // The three holes: a hole along each axis, its axis through the cube's centre.
+    for (base, axis) in [
+        (Vec3::new(-size / 2.0, 0.0, size / 2.0), Vec3::X),
+        (Vec3::new(0.0, -size / 2.0, size / 2.0), Vec3::Y),
+        (Vec3::new(0.0, 0.0, 0.0), Vec3::Z),
+    ] {
+        let kind = FeatureKind::Cylinder {
+            base: point_expr(base),
+            axis: Dir(axis),
+            radius: (hole / 2.0).to_string().into(),
+            height: size.to_string().into(),
+            operation: Operation::Cut,
+            references: Vec::new(),
+        };
+        doc.add_feature(kind, None).unwrap();
+    }
+}
+
+/// The middle of every edge of the body, the points a round of all of them is picked with.
+fn every_edge(body: &kernel::Body) -> Vec<Vec3> {
+    let tol = (body.size() * 1e-3).max(1e-3);
+    body.edges(tol).unwrap().iter().map(|e| e.mid).collect()
+}
+
+/// A round of every edge of the body, with `radius`, and the feature it makes.
+fn round_of_every_edge(doc: &mut Document, body: &kernel::Body, radius: &str) -> u64 {
+    let edges = every_edge(body);
+    let kind = FeatureKind::Fillet {
+        edges: edges.into_iter().map(Position).collect(),
+        radius: radius.into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: true,
+        edge_radii: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap()
+}
+
+/// A round the kernel refuses without naming a radius that fits does not make the document
+/// search for the largest radius that fits (#4282): the search cannot be guided then, and it
+/// blends every edge again for each of the sizes it tries. On the design of #4282 (a cube with
+/// a hole through each axis, a 2 mm round of every edge) those ten blends of the forty-one edges
+/// took 77 s, fifteen times the blend that failed, and they found nothing: the round fails at
+/// any radius there.
+#[test]
+fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
+    // The design of #4282 at a third of its size (the round and the holes keep their
+    // proportions): a cube with a hole through each axis, a round of every one of its edges.
+    // The kernel refuses the radius and cannot size the refusal.
+    let mut doc = Document::new("holed cube");
+    holed_cube(&mut doc, 10.0, 10.0 / 3.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let body = model.state().bodies[0].body.clone();
+    let fillet = round_of_every_edge(&mut doc, &body, &format!("{} mm", 2.0 / 3.0));
+    let work = counted(|| model.evaluate(&doc));
+    let r = model.result(fillet);
+    let error = r.and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("larger than the faces beside its edges allow"), "{error}");
+    // The blend the kernel refused, and no search for a radius that fits.
+    assert_eq!(work.blends, 1, "{work:?}");
+    assert_eq!(work.fit_searches, 0, "{work:?}");
+}
+
+/// A round the kernel refuses naming the radius that fits still searches for it: the search is
+/// guided by that radius and settles in two or three blends, and the refusal names the largest
+/// radius that fits.
+#[test]
+fn a_refused_round_that_names_a_radius_to_try_searches_for_it() {
+    // A 10 mm box with a 6 mm round of all its edges: the radius is too large and the kernel
+    // names the largest that fits (4.99 mm).
+    let mut doc = Document::new("a box");
+    block(&mut doc, "A", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let body = model.state().bodies[0].body.clone();
+    let fillet = round_of_every_edge(&mut doc, &body, "6");
+    let work = counted(|| model.evaluate(&doc));
+    let r = model.result(fillet);
+    let error = r.and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("larger than the faces beside its edges allow"), "{error}");
+    // The blend that was refused, and the search for the radius that fits.
+    assert_eq!(work.blends, 1, "{work:?}");
+    assert_eq!(work.fit_searches, 1, "{work:?}");
+}
+
