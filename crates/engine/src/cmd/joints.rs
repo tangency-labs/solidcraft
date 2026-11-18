@@ -317,13 +317,24 @@ fn solution(s: &Session, held: &joints::Held, analysis: joints::Analysis) -> joi
     joints::solve_holding_with_analysis(&s.doc, &s.model.state(), held, analysis)
 }
 
+/// Applies the solve. A part it moves loses its move not captured, which would hide where the
+/// joints put it; an exploded view's placement stays shown.
 fn resolve_with_analysis(s: &mut Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
     let sol = solution(s, held, analysis);
     if !sol.world.is_empty() {
         let mut next = (*s.doc).clone();
         if next.apply_joint_solution(&sol) {
+            let moved: BTreeSet<u64> = next
+                .occurrences
+                .iter()
+                .zip(&s.doc.occurrences)
+                .filter(|(n, o)| n.id != o.id || n.transform != o.transform)
+                .map(|(n, _)| n.id)
+                .collect();
             *s.doc_mut() = next;
             s.revision += 1;
+            let exploded = &s.exploded;
+            s.pending_moves.retain(|id, m| !moved.contains(id) || exploded.get(id) == Some(m));
         }
     }
     sol

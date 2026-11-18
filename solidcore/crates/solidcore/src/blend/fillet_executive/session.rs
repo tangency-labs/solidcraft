@@ -5950,6 +5950,34 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             }
                             let mut chord = e - r;
                             let width = chord.length();
+                            // Not the fork's (#16654): the rail's point nearest `p` is the
+                            // band's across from `e` only where it is near the rail's point
+                            // across from `e` itself; a rail run on past an end where its
+                            // blend shrinks to a vertex (two tubes of one radius) comes back
+                            // round the far side, and its point there spans no band.
+                            let across = curve_b.drop_point(
+                                k,
+                                &ivl_b,
+                                e,
+                                None,
+                                crate::math::BIG_DOUBLE,
+                                None,
+                                SolverOperation::Minimize,
+                            )?;
+                            if across.success {
+                                let band =
+                                    (curve_b.evaluate_point(k, across.parameter)? - e).length();
+                                // A sample inside the band at `e` is within `band` of `e`, and
+                                // within `band` of the rail's point across from `e`; the
+                                // rail's point nearest it is no further from it than that
+                                // one. So the chord from `e` to that nearest point is at most
+                                // `band + band` long, by the triangle through the sample: a
+                                // longer one (past the margin) is to a point of the rail's
+                                // run on, not across this band.
+                                if width > 2.0 * band + apart {
+                                    continue;
+                                }
+                            }
                             if !matches!(
                                 width.partial_cmp(&(2.0 * apart)),
                                 Some(core::cmp::Ordering::Greater)

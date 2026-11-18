@@ -141,6 +141,7 @@ fn reads_only(id: &str) -> bool {
                 | "file.slicers"
                 | "engine.describe"
                 | "plugin.check"
+                | "plugin.tools"
         )
 }
 
