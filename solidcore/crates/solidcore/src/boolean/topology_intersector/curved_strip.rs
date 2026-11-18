@@ -100,6 +100,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Point3};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::geom::Rectangle;
+use crate::nurbs::nurbs_crv::is_clamped;
 use crate::nurbs::srf_basic::Surface as NurbSurface;
 use crate::nurbs::srf_tool::p1::{extract_patch, PATCH_SNAP_TOL};
 use crate::query::curve_surface_gap::curve_uv_gap_bound;
@@ -923,7 +924,9 @@ fn net_of(surface: &Surface) -> Option<(BSplineSurface, f64)> {
     (bound >= 0.0 && bound.is_finite()).then(|| (net.clone(), bound))
 }
 
-/// The bound of [`off_surface_bound`] over the net's sub-patch covering `box_uv`: the box
+/// The bound of [`off_surface_bound`] over the net's sub-patch covering `box_uv`: the net
+/// must be clamped in u and v (the extraction takes it as clamped; on an unclamped net its
+/// patch at an end on the valid domain's end knot is not A), the box
 /// must lie in the net's domain within the extraction's snapping (a box past it would
 /// hold points of no face, or of the surface across a seam), and the sub-patch is
 /// extracted over the box widened by that snapping and must cover the box; else `None`.
@@ -950,7 +953,7 @@ fn net_bound_over(
 }
 
 /// [`net_bound_over`]'s sub-patch of `net` covering `box_uv`, its knots `net`'s own;
-/// `None` where there is none.
+/// `None` where there is none, and for a net whose knots are not clamped.
 fn net_cut(net: &BSplineSurface, box_uv: &Extent2d) -> Option<NurbSurface> {
     let nurb = net.gw_nurb()?;
     let natural = net.natural_uv_domain();
@@ -977,6 +980,13 @@ fn net_cut(net: &BSplineSurface, box_uv: &Extent2d) -> Option<NurbSurface> {
     let (_, _, r, s) = nurb.array_sizes();
     let uk = nurb.u_knots().get(..=r)?;
     let vk = nurb.v_knots().get(..=s)?;
+    // the extraction takes the net as clamped: at an end on `k_p` or `k_{r-p}` of an
+    // unclamped net its patch is not A (its domain `[k_0, k_r]` is wider than the valid
+    // `[k_p, k_{r-p}]` too), so only clamped nets are cut, as `srf_piece_box` requires
+    let (p, q) = nurb.degrees();
+    if !is_clamped(uk, p) || !is_clamped(vk, q) {
+        return None;
+    }
     // the widened box in the domain (as `copy_sub_patch` cut it), each end snapped as
     // `extract_patch` snaps it: to the first of the knots `0..r` within its tolerance
     let snap = |x: f64, knots: &[f64]| {
@@ -1503,6 +1513,70 @@ mod tests {
             normal: crate::math::Vec3::Z,
         };
         assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
+    }
+
+    /// r6 B10: the extraction takes the net as clamped. On a cubic net with unclamped u
+    /// knots `0, 1, …, 11` (valid domain `[3, 8]`; set without a knot fixup), a box whose
+    /// widened end snaps onto `k_{r-p} = 8` or `k_p = 3` was cut to a patch that is not A
+    /// (1.30 and 1.46 off it), and with these control-point heights the bound over the
+    /// upper box was 0.50000006 while A is 0.545 off the plane inside it. Both cuts are
+    /// refused; any cut that were given would have to be A.
+    #[test]
+    fn a_net_with_unclamped_knots_is_not_cut() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+        use crate::nurbs::knots::Side;
+        let z = [0.0, 0.0, 0.0, -1.0, 1.0, -1.0, 0.0, 0.0];
+        let points: Vec<Point3> = (0..8u32)
+            .flat_map(|i| {
+                (0..2u32).map(move |j| Point3::new(f64::from(i), f64::from(j), z[i as usize]))
+            })
+            .collect();
+        let base = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 1,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[4, 1, 1, 1, 1, 4],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let mut nurb = base.gw_nurb().unwrap().clone();
+        let (_, _, r, _) = nurb.array_sizes();
+        assert_eq!(r, 11);
+        for (i, k) in nurb.u_knots_mut()[..=r].iter_mut().enumerate() {
+            *k = i as f64;
+        }
+        let net = BSplineSurface::from_nurb(nurb.clone(), true);
+        let plane = Implicit::Plane {
+            origin: crate::math::Vec3::ZERO,
+            normal: crate::math::Vec3::Z,
+        };
+        let hi = (8.0 - 5e-9 - 2e-8) / (1.0 + 2e-8);
+        let lo = (3.0 + 5e-9 + 2e-8) / (1.0 - 2e-8);
+        for (a, b) in [(5.0, hi), (lo, 6.0)] {
+            let bx = Extent2d::from_bounds(a, 0.25, b, 0.75);
+            if let Some(cut) = net_cut(&net, &bx) {
+                let (_, _, cr, _) = cut.array_sizes();
+                let (ca, cb) = (cut.u_knots()[0], cut.u_knots()[cr]);
+                let worst = (0..=40)
+                    .map(|t| {
+                        let u = ca + (cb - ca) * f64::from(t) / 40.0;
+                        let on_a = nurb.eval(u, 0.5, Side::Left, Side::Left).unwrap();
+                        let on_cut = cut.eval(u, 0.5, Side::Left, Side::Left).unwrap();
+                        (on_a - on_cut).length()
+                    })
+                    .fold(0.0f64, f64::max);
+                let bound = net_bound_over(&net, &bx, &plane);
+                panic!("box [{a}, {b}]: a cut over [{ca}, {cb}] was given, {worst:e} off A, bound {bound:?}");
+            }
+            assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
+        }
     }
 
     /// The fixture of `tests/wr_614_coincident_strip_crossing.rs`
