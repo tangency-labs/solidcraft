@@ -88,12 +88,14 @@ impl Folders {
         self.names.get(&id).map_or("Folder", String::as_str)
     }
 
-    /// The deepest folder whose run holds the slot between features `slot - 1` and `slot` (a
-    /// slot at a folder's edge is outside it), as a dropped feature joins it.
-    pub(crate) fn at_slot(&self, slot: usize) -> Option<u64> {
+    /// The deepest folder whose run holds the slot between features `slot - 1` and `slot`, as a
+    /// dropped feature joins it. A slot at a folder's edge is outside it, except the first slot
+    /// of a folder in `past` (open, dropped on its chip or after it), so a folder of one feature
+    /// takes drops too (#18471).
+    pub(crate) fn at_slot(&self, slot: usize, past: &[u64]) -> Option<u64> {
         let mut level = &self.spans;
         let mut found = None;
-        while let Some(span) = level.iter().find(|s| s.start < slot && slot < s.end) {
+        while let Some(span) = level.iter().find(|s| slot < s.end && (s.start < slot || (s.start == slot && past.contains(&s.id)))) {
             found = Some(span.id);
             level = &span.children;
         }
@@ -328,9 +330,10 @@ fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &cr
 /// out of every folder), else `timeline.move_many` into the folder the slot is in (or out of
 /// folders), so a feature dropped between an open folder's features joins it.
 /// `active`: the drop lands before the history marker, which sits at `marker_slot`; crossing it
-/// rolls the feature back or forward in the same step.
-pub(crate) fn drop_feature(app: &mut SolveApp, folders: &Folders, id: u64, slot: usize, active: bool, marker_slot: usize) {
-    let target = folders.at_slot(slot);
+/// rolls the feature back or forward in the same step. `past`: the open folders whose chip the
+/// drop is on or right of.
+pub(crate) fn drop_feature(app: &mut SolveApp, folders: &Folders, id: u64, slot: usize, active: bool, marker_slot: usize, past: &[u64]) {
+    let target = folders.at_slot(slot, past);
     let from = app.session.doc.feature_index(id).unwrap_or(0);
     let home = app.session.doc.timeline_groups.iter().find(|g| g.features.contains(&id)).map(|g| g.id);
     if home == target {
