@@ -3384,12 +3384,12 @@ mod tests {
         let options = app.run("tab.window.options", json!({"window":window})).unwrap()["options"].clone();
         assert_eq!(
             options,
-            json!({"card_headers":"always","keep_on_top":false,"panels":false,"ribbon":true,"ribbon_auto_hide":true,"top_bar":"always"})
+            json!({"card_headers":"always","interface_size":100,"keep_on_top":false,"panels":false,"ribbon":true,"ribbon_auto_hide":true,"top_bar":"always"})
         );
         let edited = app
             .run(
                 "tab.window.set_options",
-                json!({"window":window,"card_headers":"hidden","keep_on_top":true,"panels":true,"ribbon":false,"ribbon_auto_hide":false,"top_bar":"edge"}),
+                json!({"window":window,"card_headers":"hidden","interface_size":150,"keep_on_top":true,"panels":true,"ribbon":false,"ribbon_auto_hide":false,"top_bar":"edge"}),
             )
             .unwrap();
         app.run("window.options.use_as_default", json!({"window":window})).unwrap();

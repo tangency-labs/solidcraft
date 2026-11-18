@@ -3,7 +3,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use solidcraft_views::{CardHeaders, TopBar, WindowOptions};
+use solidcraft_views::{CardHeaders, InterfaceSize, TopBar, WindowOptions};
 
 /// The destination can be a new pop-out or the id of an open window.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, JsonSchema)]
@@ -102,6 +102,8 @@ pub struct TabWindowSetOptionsParams {
     pub card_headers: Option<CardHeaders>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_on_top: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interface_size: Option<InterfaceSize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ribbon: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

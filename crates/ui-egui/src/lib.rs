@@ -387,6 +387,7 @@ mod view_setups;
 mod view_setups_ui;
 mod view_tiles;
 mod view_window_drag;
+mod view_window_scale;
 pub mod view_windows;
 pub mod viewport;
 mod viewport_details;

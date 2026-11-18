@@ -1676,7 +1676,12 @@ mod tests {
         let placement =
             WindowPlacement { display: Some("Display 2".into()), x: -25.0, y: 16.0, w: 700.0, h: 500.0, maximised: false, fullscreen: false };
         let id = set.move_to_window(2, WindowTarget::New { placement: Some(placement) }).unwrap().window;
-        let options = crate::WindowOptions { card_headers: crate::CardHeaders::Hover, keep_on_top: true, ..crate::WindowOptions::new_pop_out() };
+        let options = crate::WindowOptions {
+            card_headers: crate::CardHeaders::Hover,
+            keep_on_top: true,
+            interface_size: crate::InterfaceSize::try_from(150).unwrap(),
+            ..crate::WindowOptions::new_pop_out()
+        };
         let child = set.window_mut(id).unwrap();
         child.options = options;
         child.panel_layout = Some(json!({"catalogue":"opaque workspace positions"}));
@@ -1689,6 +1694,7 @@ mod tests {
         let old_options = ViewSet::from_json(&saved).unwrap().window(id).unwrap().options;
         assert!(!old_options.ribbon && old_options.ribbon_auto_hide);
         assert_eq!(old_options.card_headers, crate::CardHeaders::Hover);
+        assert_eq!(old_options.interface_size, crate::InterfaceSize::default());
         saved["windows"][0].as_object_mut().unwrap().remove("options");
         saved["windows"][0]["panel_layout"] = json!({"catalogue": []});
         saved["windows"][0]["active"] = json!(5);
