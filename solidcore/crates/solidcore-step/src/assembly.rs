@@ -1315,6 +1315,27 @@ impl<'t> Assembly<'t> {
         self.measure_edges(&label, &edge_loops)?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
+        // A form ends on the quarter line its face's boundary runs past by up to the tolerance,
+        // so an edge that lies wholly past that line (a few µm of a tube circle beyond it) has no
+        // closed form on it, and the kernel's trims are made for an edge off their surface. Its
+        // closed form is taken on the face's form not cut short (the same quarter grid, so the
+        // same parameters), and put on the range below as the others are ([`onto_form`]).
+        let mut uncut_forms = false;
+        if !wound
+            && exact.iter().flatten().any(Option::is_none)
+            && let (Some(e), Some(_)) = (extent, &form)
+            && let Some((uncut, d)) = crate::kernel::form::surface_within(&label, e, 0.0)
+        {
+            let wide = pcurve::exact_pcurves(&uncut, &uses_of(&self.edges, &edge_loops, None)?, tol, Some(d)).map_err(|e| e.to_string())?;
+            for (l, w) in exact.iter_mut().zip(wide) {
+                for (pc, w) in l.iter_mut().zip(w) {
+                    if pc.is_none() && w.is_some() {
+                        *pc = w;
+                        uncut_forms = true;
+                    }
+                }
+            }
+        }
         // On a form of many turns a closed form does not say which turn each of its ends is on:
         // an arc's two ends came out turns apart. An edge that goes round the axis (an arc, a
         // helix) takes its pcurve from its own angle, followed ([`wound::pcurve`]); a ruling,
@@ -1331,7 +1352,12 @@ impl<'t> Assembly<'t> {
 
         // Without a kernel, a use with neither is refused below with why.
         let missing = exact.iter().flatten().any(Option::is_none);
+        // Closed forms taken on the uncut form are given as they are: made again on the form,
+        // they would have none.
         let made = match self.trims {
+            _ if uncut_forms && !missing => {
+                Some(exact.iter().map(|l| l.iter().cloned().collect::<Option<Vec<_>>>()).collect::<Option<Vec<_>>>().ok_or("a closed form")?)
+            }
             // A face that winds round its axis is on a form SMLib's trims hop sheets on.
             _ if wound && missing => Some(self.wound_pcurves(&label, &edge_loops, &exact)?),
             Some(trims) if missing => {

@@ -636,6 +636,61 @@ fn a_patch_is_not_continued_far_round_where_it_closes_or_where_its_trims_are_on_
     assert!(extend::extended(&cylinder, [[0.0, 4.0], [0.0, 1.01]], 1e-6).is_some());
 }
 
+/// A wedge of a cylinder (radius 10, height 5) from angle −δ to π/2, its curved face's bottom and
+/// top arcs each two edges split at angle 0: the arcs from −δ to 0 lie wholly within the
+/// tolerance past the quarter line the face's form ends on, so they have no closed form on it.
+/// Their closed forms are taken on the form not cut short and put on its range: the wedge is a
+/// closed solid of the sector's volume, with no kernel to make trims.
+#[test]
+fn an_arc_wholly_past_the_quarter_line_its_faces_form_ends_on_takes_its_closed_form() {
+    let (r, h, tol) = (10.0, 5.0, 1e-3);
+    let delta = 0.8 * tol / r;
+    let mut asm = Assembly::new(tol, None);
+    let rim = |a: f64, z: f64| [r * a.cos(), r * a.sin(), z];
+    let half = std::f64::consts::FRAC_PI_2;
+    let (cb, ct) = (asm.add_vertex([0.0; 3]).unwrap(), asm.add_vertex([0.0, 0.0, h]).unwrap());
+    let mut at = |a: f64, z: f64| asm.add_vertex(rim(a, z)).unwrap();
+    let (bm, b0, bq) = (at(-delta, 0.0), at(0.0, 0.0), at(half, 0.0));
+    let (tm, t0, tq) = (at(-delta, h), at(0.0, h), at(half, h));
+    let mut line = |o: u64, a: [f64; 3], b: [f64; 3], va: u32, vb: u32| {
+        let (e, along) = asm.add_edge(o, BCurve::Line { start: a, end: b }, [0.0, 1.0], [va, vb]).unwrap();
+        assert!(along);
+        e
+    };
+    let axis = line(1, [0.0; 3], [0.0, 0.0, h], cb, ct);
+    let (b_m, b_q) = (line(2, [0.0; 3], rim(-delta, 0.0), cb, bm), line(3, [0.0; 3], rim(half, 0.0), cb, bq));
+    let (t_m, t_q) = (line(4, [0.0, 0.0, h], rim(-delta, h), ct, tm), line(5, [0.0, 0.0, h], rim(half, h), ct, tq));
+    let (up_m, up_q) = (line(6, rim(-delta, 0.0), rim(-delta, h), bm, tm), line(7, rim(half, 0.0), rim(half, h), bq, tq));
+    let circle = |z: f64| BCurve::Circle { frame: Frame { origin: [0.0, 0.0, z], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: r };
+    let mut arc = |o: u64, z: f64, i: [f64; 2], v: [u32; 2]| {
+        let (e, along) = asm.add_edge(o, circle(z), i, v).unwrap();
+        assert!(along);
+        e
+    };
+    let (ba, bb) = (arc(8, 0.0, [-delta, 0.0], [bm, b0]), arc(9, 0.0, [0.0, half], [b0, bq]));
+    let (ta, tb) = (arc(10, h, [-delta, 0.0], [tm, t0]), arc(11, h, [0.0, half], [t0, tq]));
+    let cylinder = BSurface::Cylinder { frame: Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: r };
+    let plane = |origin: [f64; 3], u_axis: [f64; 3], v_axis: [f64; 3]| BSurface::Plane { origin, u_axis, v_axis };
+    let d = [(-delta).cos(), (-delta).sin(), 0.0];
+    let faces = [
+        (cylinder, vec![(ba, true), (bb, true), (up_q, true), (tb, false), (ta, false), (up_m, false)]),
+        (plane([0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]), vec![(b_q, true), (bb, false), (ba, false), (b_m, false)]),
+        (plane([0.0, 0.0, h], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), vec![(t_m, true), (ta, true), (tb, true), (t_q, false)]),
+        (plane([0.0; 3], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]), vec![(axis, true), (t_q, true), (up_q, false), (b_q, false)]),
+        (plane([0.0; 3], d, [0.0, 0.0, 1.0]), vec![(b_m, true), (up_m, true), (t_m, false), (axis, false)]),
+    ];
+    let mut ids = Vec::new();
+    for (k, (surface, uses)) in faces.into_iter().enumerate() {
+        ids.push((asm.add_face(k as u64, surface, vec![Bound::Edges(uses)], Some(0), true).unwrap(), true));
+    }
+    let solid = asm.finish(0, "wedge".into(), vec![ids], Kind::Solid).unwrap_or_else(|e| panic!("{e}"));
+    let want = 0.5 * r * r * (half + delta) * h;
+    // As the assembly made it (the healer would merge the arcs shorter than the tolerance).
+    let (body, _) = solidcore_ops::Body::from_record(&solid.brep, true).unwrap();
+    let got = body.volume(1e-9).unwrap();
+    assert!((got - want).abs() < 1e-6 * want, "{got} against {want}");
+}
+
 /// A unit cylinder of height 1 as one rational patch closed in u: four quarter arcs over u in
 /// [0, 4], its seam at u = 0.
 fn whole_cylinder() -> BSurface {
