@@ -3113,6 +3113,34 @@ fn pcurves_past_a_quarter_line_the_form_ends_on_are_put_on_the_form() {
     }
 }
 
+#[test]
+fn pcurves_a_few_microns_past_the_height_a_cone_form_ends_at_are_put_on_the_form() {
+    // A cone face of half angle 60 degrees over heights 1 to 4: its form ends where the domain
+    // does. A line pcurve fitted 0.4 tol below the bottom (a height that moves the surface by
+    // 0.8 tol along the cone's line) is put on it; one 0.6 tol above the top (1.2 tol) is not.
+    let half_angle = std::f64::consts::FRAC_PI_3;
+    let label = BSurface::Cone {
+        frame: Frame { origin: [1.0, 2.0, 3.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] },
+        radius_at_origin: 5.0,
+        half_angle,
+    };
+    let tol = 1e-3;
+    let domain = [[0.2, 1.0], [1.0, 4.0]];
+    let (f, _) = crate::kernel::form::surface_within(&label, domain, tol).unwrap();
+    let ranges = solidcore_ops::label::surface_natural(&f);
+    assert!(matches!(ranges.get(1), Some(Natural::Range(a, b)) if *a == 1.0 && *b == 4.0), "{ranges:?}");
+    let u = crate::kernel::form::param(0.5);
+    let line = |v0: f64, v1: f64| Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[u, v0], [u, v1]] };
+    let mut pcs = vec![vec![line(1.0 - 0.4 * tol, 2.0)], vec![line(3.0, 4.0 + 0.6 * tol)]];
+    assert_eq!(onto_form(&f, &label, domain, tol, &mut pcs), 1, "only the end within the tolerance moves");
+    assert_eq!(pcs[0][0], line(1.0, 2.0));
+    assert_eq!(pcs[1][0], line(3.0, 4.0 + 0.6 * tol));
+    // The move is the surface's distance between the two heights, within the tolerance.
+    let on = SurfaceEval::new(&f).unwrap();
+    let gap = on.point([u, 1.0]).unwrap().dist(on.point([u, 1.0 - 0.4 * tol]).unwrap());
+    assert!(gap <= tol && (gap - 0.8 * tol).abs() < 1e-9, "{gap}");
+}
+
 /// A kernel making the missing pcurves as SMLib makes some: each a straight line in (u, v)
 /// between the true parameters of its edge's ends on the face's NURBS form, with no regard for
 /// the form's range (a cylinder face; the angle unwrapped to the turn the face's domain is on).

@@ -1888,17 +1888,21 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
     (area.abs() > 1e-9 * magnitude && magnitude > 0.0).then_some(0.5 * area)
 }
 
-/// The angles `tolerance` (mm) makes along the two directions of a face on `label` over the
-/// height `v`: on the widest circle of the face about the axis (a cylinder or cone), and on a
-/// sphere's meridian or a torus's tube. `form::surface_within` ends a face's form on a quarter
-/// line its domain ends within these angles of; zero along a direction that is no angle.
+/// The parameters `tolerance` (mm) moves a face on `label` over the height `v` by, along its two
+/// directions: the angle on the widest circle of the face about the axis (a cylinder or cone), and
+/// on a sphere's meridian or a torus's tube; along a cylinder's or cone's height, the height that
+/// moves the surface by `tolerance` along its line (the whole of it on a cylinder, its cosine of
+/// the half angle on a cone). `form::surface_within` ends a face's form on a quarter line its
+/// domain ends within these angles of, and at the heights its domain ends at; zero along another
+/// direction.
 fn form_reach(label: &BSurface, v: [f64; 2], tolerance: f64) -> [f64; 2] {
     let reach = |radius: f64| if tolerance > 0.0 && radius > 0.0 && radius.is_finite() { tolerance / radius } else { 0.0 };
+    let along = |cosine: f64| if tolerance > 0.0 && cosine.is_finite() { tolerance * cosine } else { 0.0 };
     match label {
-        BSurface::Cylinder { radius, .. } => [reach(radius.abs()), 0.0],
+        BSurface::Cylinder { radius, .. } => [reach(radius.abs()), along(1.0)],
         BSurface::Cone { radius_at_origin, half_angle, .. } => {
             let slope = half_angle.tan();
-            [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), 0.0]
+            [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), along(half_angle.cos().abs())]
         }
         BSurface::Sphere { radius, .. } => [reach(radius.abs()), reach(radius.abs())],
         BSurface::Torus { major_radius, minor_radius, .. } => [reach(major_radius.abs() + minor_radius.abs()), reach(minor_radius.abs())],
@@ -1911,7 +1915,10 @@ fn form_reach(label: &BSurface, v: [f64; 2], tolerance: f64) -> [f64; 2] {
 /// quarter's end the form ends there, but the boundary still lies where its edges do, as much as
 /// `tolerance` past it: a pcurve control point past the form's end by no more than the form
 /// parameter of that angle (less than the angle: a quarter's parameter changes by at most 1/√2
-/// per radian, [`form_reach`]) is moved onto the end. A B-spline is a convex combination of its
+/// per radian, [`form_reach`]) is moved onto the end. Along a cylinder's or cone's height the form
+/// ends where the domain does, and a pcurve's end fitted a few µm past it (an edge's end that lies
+/// within its tolerance of the vertex, not on it) is moved onto it where that height moves the
+/// surface by no more than `tolerance`. A B-spline is a convex combination of its
 /// control points, so each pcurve then lies on the form, and the face's domain, which ends at
 /// the form's, holds it; the pcurve moves by no more than its points did, a gap the edges'
 /// tolerances are measured to cover (`raise_edges`). A point further out is left as it is, for
