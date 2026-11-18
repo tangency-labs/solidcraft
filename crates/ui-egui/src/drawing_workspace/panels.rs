@@ -226,27 +226,24 @@ pub(super) fn view_editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Optio
             _ => "ui.drawing_panel.shaded_hidden",
         }));
     }
-    let (cancel, apply, ok) = egui::Frame::NONE
-        .inner_margin(Tokens::get().space_12)
-        .show(ui, |ui| {
-            ui_kit::section_heading(ui, tr("ui.drawing_panel.display"));
-            ui_kit::choice_row(ui, tr("ui.drawing_panel.visual_style"), "drawing:edit:style", &mut index, &labels);
-            if let Some(value) = styles.get(index) {
-                edit.style = *value;
-            }
-            ui_kit::section_heading(ui, tr("ui.scale"));
-            ui_kit::text_row(ui, tr("ui.scale"), &mut edit.scale, "1:1");
-            let valid = edit.scale.trim().parse::<Scale>().is_ok();
-            ui.separator();
-            ui.horizontal(|ui| {
-                let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
-                let apply = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.apply"), Button::Normal)).inner.clicked();
-                let ok = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.heading_ok"), Button::Normal)).inner.clicked();
-                (cancel, apply, ok)
-            })
-            .inner
+    let (cancel, apply, ok) = super::inset(ui, |ui| {
+        ui_kit::section_heading(ui, tr("ui.drawing_panel.display"));
+        ui_kit::choice_row(ui, tr("ui.drawing_panel.visual_style"), "drawing:edit:style", &mut index, &labels);
+        if let Some(value) = styles.get(index) {
+            edit.style = *value;
+        }
+        ui_kit::section_heading(ui, tr("ui.scale"));
+        ui_kit::text_row(ui, tr("ui.scale"), &mut edit.scale, "1:1");
+        let valid = edit.scale.trim().parse::<Scale>().is_ok();
+        ui.separator();
+        ui.horizontal(|ui| {
+            let cancel = ui_kit::button(ui, tr("ui.cancel"), Button::Normal).clicked();
+            let apply = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.apply"), Button::Normal)).inner.clicked();
+            let ok = ui.add_enabled_ui(valid, |ui| ui_kit::button(ui, tr("ui.heading_ok"), Button::Normal)).inner.clicked();
+            (cancel, apply, ok)
         })
-        .inner;
+        .inner
+    });
     if cancel {
         return true;
     }
