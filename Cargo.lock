@@ -6231,7 +6231,7 @@ dependencies = [
  "log",
  "pdf-writer",
  "pgp",
- "png",
+ "png 0.18.1",
  "quick-xml",
  "rand 0.8.8",
  "rustix 1.1.6",
@@ -6253,7 +6253,7 @@ dependencies = [
  "solidcraft-testkit",
  "tempfile",
  "thiserror 2.0.21",
- "tiny-skia",
+ "tiny-skia 0.12.0",
  "trash",
  "zip",
 ]
