@@ -29,7 +29,7 @@ use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::knots::Side;
-use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple, shell_brep_simple};
+use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::query::api_queries::{face_bounding_box, face_classify_uv, face_closest_point_in_shape, face_internal_point};
 use solidcore::query::brep::{BrepIdentity, BrepQuery, LiveBrepObjects};
@@ -276,7 +276,8 @@ fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> 
         create_offset_solid: true,
         merge_sheet_side_walls: true,
     };
-    shell_brep_simple(k, b, options, open)
+    // solidcore's shell, a feature narrower than twice an inward wall left solid
+    solidcore::offset::thin_features::shell_brep(k, b, options, open)
 }
 
 /// `SmApiOffsetBrepFull(b, distance, TRUE, TRUE, r)`.

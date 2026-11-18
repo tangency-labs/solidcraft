@@ -30,13 +30,15 @@
     clippy::indexing_slicing
 )] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::blend::fillet_executive::api::{create_face_from_surface, fillet_edges};
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::curve::curve::Curve;
 use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::tol;
-use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point2, Point3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
@@ -55,17 +57,10 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, vertex, EdgeId, FaceId};
 use solidcore::{Brep, Kernel, SolidError};
 
-/// SolidCraft's fix list (`tests/kernel_cases/fixes.json`).
+/// SolidCraft's fix list (`support/solidcraft_fixes.rs`).
 fn kernel() -> Kernel {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut f = UpstreamFixes::default();
-    for name in &names {
-        if let Some(flag) = f.flag_mut(name) {
-            *flag = true;
-        }
-    }
     Kernel {
-        fixes: f,
+        fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::default()
     }
 }

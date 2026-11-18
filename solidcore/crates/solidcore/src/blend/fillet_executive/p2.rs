@@ -24,6 +24,10 @@
 //! | [`FilletLaw::bspline`] | `SmBSplineFilletLaw::SmBSplineFilletLaw(SmBSplineCurve*, const SmExtent1d&)` |
 //!
 //! Deviations:
+//! - **Solver approximation tolerance.** `SetFilletParameters` takes `TOL_FACTOR` times
+//!   the edge's fit tolerance (`topology::edgeuse::p3::fit_tolerance`), not times an edge
+//!   tolerance the healer raised only to cover the edge's edge/face gap; elsewhere the
+//!   two are the same.
 //! - **Exact arcs.** A circular round's generator takes the exact circle, as the fork's
 //!   tangency-labs/smlib@523bc25 does, where upstream takes approximated arcs (WR-708);
 //!   the fork builds it as its `SmGnSectionFSG` order-1 circle (3aae1c4), here the pinned
@@ -446,11 +450,14 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// The native topology or geometry query failures.
     fn parameters_blend_edgeuse(&mut self, k: &mut Kernel, edge: O) -> Result<Option<O>>;
-    /// The actual edge tolerance.
+    /// The tolerance geometry is fitted at along the actual edge (upstream: the edge
+    /// tolerance). Not upstream: on a B-rep, the edge tolerance unless that only covers
+    /// the edge's edge/face gap (`topology::edgeuse::p3::fit_tolerance`), so a tolerance
+    /// the healer raised to cover a gap does not loosen the solver's approximation.
     ///
     /// # Errors
-    /// Object resolution or tolerance query failures.
-    fn parameters_edge_tolerance(&self, edge: O) -> Result<f64>;
+    /// Object resolution, tolerance query or edge/face gap failures.
+    fn parameters_edge_tolerance(&mut self, k: &Kernel, edge: O) -> Result<f64>;
     /// How far the edge lies from its faces: its largest measured edge/face gap. The stored
     /// tolerance (an upper bound on that gap) where nothing can be measured.
     ///
@@ -541,7 +548,8 @@ where
     fn parameters_blend_edgeuse(&mut self, k: &mut Kernel, edge: O) -> Result<Option<O>> {
         ExecutiveAccess::blend_edgeuse(self, k, edge)
     }
-    fn parameters_edge_tolerance(&self, edge: O) -> Result<f64> {
+    fn parameters_edge_tolerance(&mut self, _k: &Kernel, edge: O) -> Result<f64> {
+        // (an adapter's edge has no edge/face gaps to tell apart: its tolerance)
         ExecutiveAccess::edge_tolerance(self, edge)
     }
     /// An executive adapter measures no gaps: its edge's tolerance, which bounds the gap.
@@ -866,7 +874,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // carrying 2.6e-3 on a B-rep of 1e-5 gave the round's edges and vertices about 1e-2,
             // past the B-rep's bound on them (1000 times its tolerance), and the full check
             // refused the result.
-            let stored = access.parameters_edge_tolerance(edge)?;
+            // the tolerance geometry is fitted at along the edge (not one raised to cover its
+            // edge/face gap)
+            let stored = access.parameters_edge_tolerance(k, edge)?;
             let brep_tol = access.parameters_tolerance(k, brep, false)?;
             // An edge stored at the B-rep's tolerance or finer keeps it whatever its gap
             // measures, so the gap (which evaluates the faces' surfaces, a reopened round's

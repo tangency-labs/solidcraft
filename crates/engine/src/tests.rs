@@ -1858,7 +1858,7 @@ fn step_insert_delete_removes_assembly_and_undo_restores_it() {
     assert!(reopened.find_feature("Imported").unwrap().inserted, "the insert keeps its mark through save");
     run(&mut s, "solid.mirror", json!({"bodies": ["Part"], "plane": {"origin": [0, 30, 0], "normal": [0, 1, 0]}}));
     assert!(s.model.state().body("Part (3)").is_some());
-    assert!(!s.doc.assembly.joints.is_empty());
+    assert!(!s.doc.assembly.rigid_groups.is_empty());
     assert!(!s.doc.body_components.is_empty());
     let before = s.doc.clone();
     let history = s.undo.len();
@@ -1867,7 +1867,7 @@ fn step_insert_delete_removes_assembly_and_undo_restores_it() {
     assert_eq!(s.undo.len(), history + 1);
     assert_eq!(s.doc.components.iter().map(|c| c.id).collect::<Vec<_>>(), [kept]);
     assert_eq!(s.doc.occurrences, [kept_occurrence]);
-    assert!(s.doc.assembly.joints.is_empty());
+    assert!(s.doc.assembly.joints.is_empty() && s.doc.assembly.rigid_groups.is_empty());
     assert!(s.doc.body_components.is_empty());
     assert!(s.doc.body_offsets.is_empty());
     let state = s.model.state();
@@ -6249,6 +6249,133 @@ fn a_round_whose_contact_line_misses_the_seam_it_joins_across_names_the_radius_t
     }
     let v = volume(&mut s);
     assert!(v > 0.0 && v < 36554.03, "{v}");
+}
+
+fn block_with_a_square_notch() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 25, "center": [0, 0, 12.5], "operation": "new", "body_name": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "NotchSketch1", "offset": 25}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 20], "corner": [2.4, 22.4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.extrude",
+        json!({"sketch": "NotchSketch1", "distance": 12.5, "direction": "negative", "operation": "cut", "targets": ["Base"]}),
+    );
+    s
+}
+
+/// #18545: the top loop of a block with a 4.8 mm square notch in an edge, chamfered 4 and 2 mm,
+/// failed inside the blend (status 1001): the notch's side walls are 2.4 mm long, too short for
+/// the 4 mm side. It is refused naming the largest scale of the two distances that builds
+/// (2.4 / 4 less one step, 0.599); that scale builds, and 2 by 1 mm builds as before.
+#[test]
+fn an_unequal_chamfer_too_large_for_a_notch_names_the_scale_that_fits() {
+    let edges =
+        json!([[30, -10, 25], [-30, 10, 25], [-15, -20, 25], [16.2, 20, 25], [-16.2, 20, 25], [2.4, 18.8, 25], [-2.4, 18.8, 25], [0, 17.6, 25]]);
+    let chamfer = |d1: f64, d2: f64| {
+        let mut s = block_with_a_square_notch();
+        s.execute("solid.chamfer", &json!({"edges": edges, "distance": d1, "distance2": d2, "body": "Base"})).map(|_| ()).map_err(|e| e.to_string())
+    };
+    assert_eq!(chamfer(2.0, 1.0), Ok(()));
+    let e = chamfer(4.0, 2.0).unwrap_err();
+    assert!(!e.contains("1001"), "{e}");
+    assert!(e.contains("larger than the faces beside its edges allow"), "{e}");
+    let scale: f64 = e
+        .split_once("the largest that fits is ")
+        .and_then(|(_, rest)| rest.split_once(" times the distances given"))
+        .and_then(|(n, _)| n.parse().ok())
+        .unwrap_or_else(|| panic!("no scale named: {e}"));
+    assert!((scale - 0.599).abs() < 1e-9, "{e}");
+    assert_eq!(chamfer(4.0 * scale, 2.0 * scale), Ok(()), "the scale named builds");
+}
+
+/// #18823: a block whose front half slopes at 45 degrees, a groove down the slope (a cylinder of
+/// radius 3, its axis 2.5 above the slope) with both edges rounded 1 mm, and a slot slanted 65
+/// degrees in plan whose inner wall runs into the round and the groove. The wall's top edge, where
+/// it meets the slope, runs on tangentially into its edges with the round and the groove, and a
+/// chamfer with tangent propagation blends the three. `window` cuts a window 0.2 wide and 0.5
+/// tall, 1 deep, square into that wall, centred `s` along the wall from its back corner, its top
+/// edge at `top`.
+fn slot_wall_beside_a_rounded_groove(window: Option<(f64, f64)>) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[-10, 0], [10, 0], [10, 15], [0, 15], [-10, 5]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 20, "direction": "symmetric"}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[-18.8388, -0.3033], [2.3744, 20.9099], [4.4957, 18.7886], [-16.7175, -2.4246]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"axis": "l1", "operation": "cut"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[1.6583, -5, 10], [-1.6583, -5, 10]], "radius": 1}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2}));
+    run(&mut s, "sketch.line", json!({"closed": true, "points": [[3.2133, -11.3595], [5.0236, -11.3595], [3.1218, -7.2811], [1.3115, -7.2811]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 15, "operation": "cut"}));
+    if let Some((at, top)) = window {
+        // along the wall from its back corner towards the front, and the wall's normal into the slot
+        let (u, n) = ((0.4226183, -0.9063078), (0.9063078, 0.4226183));
+        let (x, y) = (1.3115 + u.0 * at, -7.2811 + u.1 * at);
+        let origin = json!([x + 0.5 * n.0, y + 0.5 * n.1, 0]);
+        run(&mut s, "sketch.create", json!({"plane": {"origin": origin, "x_dir": [u.0, u.1, 0], "y_dir": [0, 0, 1]}}));
+        run(&mut s, "sketch.line", json!({"closed": true, "points": [[-0.1, top - 0.5], [0.1, top - 0.5], [0.1, top], [-0.1, top]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 1.5, "operation": "cut"}));
+    }
+    s
+}
+
+/// The chain's pick, and the window's top edge at its middle.
+fn slot_wall_chamfer(window: Option<(f64, f64)>, distance: f64) -> Value {
+    let mut edges = vec![json!([2.4395, -9.7, 5.3])];
+    if let Some((at, top)) = window {
+        edges.push(json!([1.3115 + 0.4226183 * at, -7.2811 - 0.9063078 * at, top]));
+    }
+    json!({"edges": edges, "distance": distance})
+}
+
+#[test]
+fn a_chamfer_along_a_tangent_chain_into_a_round_is_not_refused_as_overlapping_itself() {
+    // The chain alone at 0.4 mm builds: its chamfers meet at shared sections that lie well before
+    // the edges' vertices on the slanted wall, and the band check no longer takes the third one's
+    // rail beside the end of the first edge for an overlap. Removed: 0.4438 (the case's interval
+    // in solidcore's corpus, worked out independently).
+    let mut s = slot_wall_beside_a_rounded_groove(None);
+    let before = volume(&mut s);
+    run(&mut s, "solid.chamfer", slot_wall_chamfer(None, 0.4));
+    let removed = before - volume(&mut s);
+    assert!((removed - 0.44378).abs() < 0.003, "{removed}");
+    // A window whose chamfer stays clear of the chain's on the wall (0.07 apart) builds with it,
+    // each removing what it does alone.
+    let mut s = slot_wall_beside_a_rounded_groove(Some((1.65, 5.10)));
+    let before = volume(&mut s);
+    run(&mut s, "solid.chamfer", slot_wall_chamfer(Some((1.65, 5.10)), 0.4));
+    let removed = before - volume(&mut s);
+    assert!((removed - 0.44378 - 0.016).abs() < 0.003, "{removed}");
+}
+
+#[test]
+fn a_chamfer_whose_band_overlaps_a_chain_chamfer_is_refused_naming_a_size_that_builds() {
+    // Windows whose chamfer reaches past the chain's rail on the wall: by about 0.01, 3e-4 (as
+    // the band check samples it: less than the ten tolerances, 4e-4, it let through before, where
+    // the trim leaked), 0.016 and 0.029 mm. Each is refused as too large, not failed, naming a
+    // size that builds.
+    for window in [(1.75, 5.10), (1.80, 5.05), (1.90, 4.98), (1.95, 4.95)] {
+        let mut s = slot_wall_beside_a_rounded_groove(Some(window));
+        let e = s.execute("solid.chamfer", &slot_wall_chamfer(Some(window), 0.4)).unwrap_err().to_string();
+        assert!(!e.contains("1001") && !e.contains("leak"), "{window:?}: {e}");
+        assert!(e.contains("larger than the faces beside its edges allow"), "{window:?}: {e}");
+        let named: f64 = e
+            .split_once("the largest distance that fits is ")
+            .and_then(|(_, rest)| rest.split_once(" mm"))
+            .and_then(|(n, _)| n.parse().ok())
+            .unwrap_or_else(|| panic!("{window:?}: no distance named: {e}"));
+        assert!(named < 0.4 && named > 0.35, "{window:?}: {named}: {e}");
+        let mut s = slot_wall_beside_a_rounded_groove(Some(window));
+        if let Err(e) = s.execute("solid.chamfer", &slot_wall_chamfer(Some(window), named)) {
+            panic!("{window:?}: the named distance {named} does not build: {e}");
+        }
+    }
 }
 
 #[test]

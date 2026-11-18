@@ -53,8 +53,11 @@ solidcraft-doc = { workspace = true }
 solidcraft-io = { workspace = true }
 solidcraft-render = { workspace = true }
 solidcraft-profile = { workspace = true }
+solidcraft-ui-text = { workspace = true }
 # reference pictures for inspect.compare_picture (PNG and JPEG decode, PNG encode)
 image = { workspace = true, features = ["jpeg"] }
+# an SVG canvas or decal image, drawn into a PNG as it is inserted (src/cmd/canvas_svg.rs)
+resvg = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -72,6 +75,8 @@ solidcraft-profile = { workspace = true, features = ["enabled"] }
 solidcraft-io = { workspace = true, features = ["dxf-legacy-baseline-tests", "trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
+# Sheet metal tests read the joints of a sheet made from surfaces.
+solidcraft-develop = { workspace = true }
 
 [[example]]
 name = "render_resource_workflow"

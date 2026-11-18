@@ -252,6 +252,24 @@ fn standard_views_are_laid_out_together_in_the_drawings_projection() {
     }
 }
 
+/// An edit that moves a view or changes its size lists it, and the views lined up with it, when
+/// they now leave the sheet's drawing space, as the commands that place a view do; none is moved
+/// back in. An edit that changes no size or place lists nothing.
+#[test]
+fn an_edit_that_takes_a_view_off_the_sheet_says_so() {
+    let (mut s, [front, right, _]) = three_views();
+    let scaled = edit_view(&mut s, front, json!({"scale": "1:1"}));
+    assert!(scaled.get("outside").is_none(), "still on the sheet: {scaled}");
+    // Up past the sheet's top edge, the front view and the right view lined up with it both leave.
+    let off = edit_view(&mut s, front, json!({"place": {"at": [150.0, 290.0]}}));
+    let listed: Vec<Value> = off["outside"].as_array().unwrap().iter().map(|o| o["view"].clone()).collect();
+    assert_eq!(listed, vec![json!(ids::encode(front)), json!(ids::encode(right))], "{off}");
+    assert_eq!(inspect_view(&mut s, front)["place"], json!({"at": [150.0, 290.0]}), "none is moved back in");
+    // A display setting changes no size or place: nothing is listed.
+    let styled = edit_view(&mut s, front, json!({"visual_style": "visible"}));
+    assert!(styled.get("outside").is_none(), "{styled}");
+}
+
 /// A second sheet in the drawing, A3 landscape as the first: its id.
 fn second_sheet(s: &mut Session) -> u64 {
     let added = run(s, "drawing.sheet.add", json!({}));

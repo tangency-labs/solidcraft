@@ -1,19 +1,19 @@
 {
  "sources": [],
- "what": "002's L with an 8 mm hem on the base's back edge, folded under it with a 1 mm inner radius",
+ "what": "002's L with an 8 mm hem on the base's back edge, folded under it with a 1 mm gap (a 0.5 mm inner radius)",
  "source": "analytic",
- "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). A hem (sheet.rs add_hem) is a 180 deg bend starting at the edge, its inner radius the gap, folded under the face it is picked on (the top here, so down), its length to the outer face: the leg is 8 - (1 + 2) = 5 and BA = pi (1 + 1) = 2 pi. V = 2 (002's flat area + 100 (2 pi + 5)). Bbox: the bend's outer face reaches R + T = 3 past the edge (y 63) and, a half turn round its axis 1 mm under the base, down to z = -(2 R + T) = -4",
+ "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). A hem is a 180 deg bend starting at the edge, its inner radius half its gap (the gap is the space between its leg and the face it folds under), folded under the face it is picked on (the top here, so down), its length to the outer face: with gap 1 the radius is 0.5, the leg 8 - (0.5 + 2) = 5.5 and BA = pi (0.5 + 1) = 1.5 pi. V = 2 (002's flat area + 100 (1.5 pi + 5.5)). Bbox: the bend's outer face reaches 0.5 + T = 2.5 past the edge (y 62.5) and, a half turn round its axis 0.5 mm under the base, down to z = -(2 x 0.5 + T) = -3",
  "body_count": 1,
- "volume_mm3": 17684.955592154,
+ "volume_mm3": 17470.79632679502,
  "bbox": {
   "min": [
    0,
    0,
-   -4.0
+   -3.0
   ],
   "max": [
    100.0,
-   63.0,
+   62.5,
    20.0
   ]
  }

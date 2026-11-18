@@ -384,10 +384,37 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         // Corners on a single neighbour with no corner to go to (a V notch's apex): the
         // neighbour's gap stretch closes straight past them.
         let mut dropped: HashSet<u32> = HashSet::new();
+        // The plane of a face that keeps a gap vertex: a neighbour's, or (a face meeting the gap
+        // only at a corner) its own where it is planar.
+        let kept_plane = |f: usize| -> Option<(Vec3, f64)> {
+            planes.get(&f).copied().or_else(|| match surf_of(&rec, f) {
+                Some(Surf::Plane { n, d }) => Some((n, d)),
+                _ => None,
+            })
+        };
         for v in &gap_vertices {
             let Some(fs) = vfaces.get(v) else { continue };
             let keep: Vec<usize> = fs.iter().copied().filter(|x| !del.contains(x)).collect();
-            if keep.is_empty() || keep.len() >= 3 {
+            if keep.is_empty() {
+                continue;
+            }
+            if keep.len() >= 3 {
+                // Three or more remaining faces hold the vertex where they meet, unless their
+                // planes all run through one line (a ridge whose round is deleted at its end):
+                // then it slides along that line to the corner the gap closes at, as a vertex of
+                // two faces does.
+                let Some(kp) = keep.iter().map(|f| kept_plane(*f)).collect::<Option<Vec<_>>>() else { continue };
+                let pinned = kp.iter().enumerate().any(|(i, a)| {
+                    kp.iter().enumerate().skip(i + 1).any(|(j, b)| kp.iter().skip(j + 1).any(|c| a.0.dot(b.0.cross(c.0)).abs() >= 1e-9))
+                });
+                if pinned {
+                    continue;
+                }
+                let p = asm.point(*v).ok_or_else(|| fail("vertex"))?;
+                let on_all = |c: Vec3| kp.iter().all(|(n, d)| (n.dot(c) - d).abs() <= size * 1e-6);
+                if let Some(c) = corners.iter().filter(|c| on_all(**c)).min_by(|a, b| a.dist(p).total_cmp(&b.dist(p))) {
+                    moved.insert(*v, *c);
+                }
                 continue;
             }
             if keep.iter().any(|x| !planes.contains_key(x)) {
@@ -419,12 +446,28 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             }
             let f = asm.faces.get(fi).and_then(Option::as_ref).ok_or_else(|| fail("face"))?.clone();
             if !neighbours.contains(&fi) {
-                // Untouched, unless one of its corners moves.
+                // Untouched, unless one of its corners moves: a plane meeting the gap only at a
+                // corner that slides along its edge (a ridge) follows it with its straight edges
+                // when every moved corner stays on it; any other face cannot.
                 if f.loops.iter().flatten().any(|u| corner_moves(&asm, &moved, u)) {
-                    return Err(fail(format!("face {fi} meets the gap only at a corner; it cannot follow")));
+                    let follows = match surf_of(&rec, fi) {
+                        Some(Surf::Plane { n, d }) => f
+                            .loops
+                            .iter()
+                            .flatten()
+                            .filter_map(|u| asm.ends(u))
+                            .flat_map(|(a, b)| [a, b])
+                            .filter_map(|v| moved.get(&v))
+                            .all(|c| (n.dot(*c) - d).abs() <= size * 1e-6),
+                        _ => false,
+                    };
+                    if !follows {
+                        return Err(fail(format!("face {fi} meets the gap only at a corner; it cannot follow")));
+                    }
+                } else {
+                    history.push((fi, crate::record::from_face(0, fi, Change::Kept)));
+                    continue;
                 }
-                history.push((fi, crate::record::from_face(0, fi, Change::Kept)));
-                continue;
             }
             let mut loops: Vec<Vec<AUse>> = Vec::new();
             for l in &f.loops {
@@ -546,7 +589,7 @@ mod tests {
     use solidcraft_geom::MeshGeom;
 
     use super::delete_faces;
-    use crate::{BoolOp, boolean, box_solid, chamfer, cylinder, fillet};
+    use crate::{BoolOp, HalfSpace, boolean, box_solid, chamfer, convex_polyhedron, cylinder, fillet};
 
     fn volume(b: &crate::Body) -> f64 {
         b.mesh(&crate::MeshTolerance::chord(1e-3)).unwrap().measure().volume
@@ -766,5 +809,36 @@ mod tests {
         assert_eq!(back.face_count(), 6);
         assert_eq!(back.classify_point(Vec3::new(20.0, 8.0, 9.0)).unwrap(), crate::PointClass::Inside);
         assert_eq!(back.classify_point(Vec3::new(20.0, 22.0, 9.0)).unwrap(), crate::PointClass::Inside);
+    }
+
+    /// A round whose end lies on a ridge (T-219): a wedge, its top sloping down from the ridge
+    /// x = 0, z = 26 to x = -37, with a rib on its wall x = 0 (x 0..20, y -22.5..-17.5, up to the
+    /// ridge's height), the inside corner between the wall and the rib rounded r2. The round's
+    /// top end on the wall, (0, -24.5, 26), lies on the rib's top, the wall and the wedge's
+    /// slope, three planes through the ridge: it slides along the ridge to the sharp corner at
+    /// y = -22.5 with the slope's edges. It stayed, and the rib's top came back with an edge
+    /// along the ridge out to -24.5 and back (SmFace test #34).
+    ///
+    /// Closed form: the wedge 37 x 26 / 2 over y -40..10 (24050) and the rib 20 x 5 x 26 (2600).
+    #[test]
+    fn delete_a_round_ending_on_a_ridge() {
+        let slope = Vec3::new(-26.0, 0.0, 37.0);
+        let wedge = convex_polyhedron(&[
+            HalfSpace { n: Vec3::new(1.0, 0.0, 0.0), d: 0.0 },
+            HalfSpace { n: Vec3::new(0.0, 0.0, -1.0), d: 0.0 },
+            HalfSpace { n: Vec3::new(0.0, -1.0, 0.0), d: 40.0 },
+            HalfSpace { n: Vec3::new(0.0, 1.0, 0.0), d: 10.0 },
+            HalfSpace { n: slope, d: 37.0 * 26.0 },
+        ])
+        .unwrap();
+        let rib = box_solid(Vec3::new(0.0, -22.5, 0.0), Vec3::new(20.0, -17.5, 26.0)).unwrap();
+        let ribbed = boolean(&wedge, &rib, BoolOp::Union).unwrap().unwrap();
+        let rounded = fillet(&ribbed, &[Vec3::new(0.0, -22.5, 13.0)], 2.0).unwrap();
+        let round = faces_where(&rounded, |p| ((p.x - 2.0).hypot(p.y + 24.5) - 2.0).abs() < 1e-2);
+        assert_eq!(round.len(), 1, "{round:?}");
+        let back = delete_faces(&rounded, &round).unwrap();
+        assert!(crate::failing_check(&back).unwrap().is_none(), "{:?}", crate::failing_check(&back));
+        let want = 37.0 * 26.0 / 2.0 * 50.0 + 20.0 * 5.0 * 26.0;
+        assert!((volume(&back) - want).abs() < 1e-9 * want, "{} against {want}", volume(&back));
     }
 }
