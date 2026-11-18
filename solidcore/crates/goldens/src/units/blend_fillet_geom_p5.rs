@@ -1188,3 +1188,105 @@ impl UnitDiff for Runner {
         default_cases(self, &ctx)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The rail trims whose golden moved from a success to a refusal when
+    /// `fillet_statuses_pass_on` was removed (WR-661; the same 13 rows also move with
+    /// `fillet_rail_trim_at_near_knot`, WR-664). Each end point of the rail drops back
+    /// onto the rail before its start point, so the trim interval `[param1, param2]` has
+    /// `param1 > param2` and is not an interval. `Extent1d::set_min_max` refuses it.
+    /// Upstream ignored that status and trimmed the rail to its previous interval, but set
+    /// the vertex uses at the reversed parameters.
+    #[test]
+    fn wr661_moved_rail_trims_end_before_they_start() {
+        const MOVED: [&str; 13] = [
+            "gen0001", "gen0023", "gen0073", "gen0092", "gen0105", "gen0113", "gen0124",
+            "gen0142", "gen0154", "gen0178", "gen0196", "gen0268", "gen0269",
+        ];
+        for name in MOVED {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let Query::TrimRails { g } = &i.query else {
+                panic!("{name}: not a rail trim");
+            };
+            let mut rm = RustModel::build(&i.model).expect("model");
+            let solvers: Vec<FilletSolver> = i
+                .solvers
+                .iter()
+                .map(|s| FilletSolver::new(s.approx, s.ang, s.tang))
+                .collect();
+            for gi in 0..i.model.geoms.len() {
+                if let Ok(si) = u32::try_from(geom_solver(&i, gi)) {
+                    let gid = rm.geom(gi).expect("geometry");
+                    rm.fb.geom_mut(gid).expect("geometry").solver = Some(FilletSolverId(si));
+                }
+            }
+            let k = Kernel::default();
+            let target = rm.target.clone_standing_for_self().expect("target");
+            let gid = rm.geom(*g).expect("geometry");
+            let e = rm
+                .fb
+                .trim_rail_curves(&k, gid, &solvers, &target)
+                .expect_err("the rail trim is refused");
+            assert!(
+                matches!(
+                    e,
+                    SolidError::InvalidInput {
+                        operation: "geom::extent1d::Extent1d::set_min_max",
+                        ..
+                    }
+                ),
+                "{name}: {e:?}"
+            );
+            // The refused interval is [param1, param2]: each end is the rail parameter
+            // stored on its processed vertex use, else the rail's natural end. The
+            // reversal must be real, not a snap: the rail's points at the two ends are
+            // further apart than the solver's approximation tolerance, below which
+            // `TrimRailCurves` treats two trim points as one (`pnt0.distance(pnt1) >
+            // app_tol`).
+            let approx = i
+                .solvers
+                .get(usize::try_from(geom_solver(&i, *g)).expect("a solver"))
+                .expect("the solver")
+                .approx;
+            let reversed: Vec<(f64, f64)> = (0..2)
+                .filter_map(|ii| {
+                    let fb = &rm.fb;
+                    let rail = fb.geom(gid).expect("geometry").rail(ii).expect("rail");
+                    let curve = edge::curve(fb.brep(), rail).expect("curve").expect("rail curve");
+                    let natural = curve.natural_interval();
+                    let prim = eu1::primary_edgeuse(fb.brep(), rail)
+                        .expect("edge use")
+                        .expect("primary");
+                    let mate = eu1::mate(fb.brep(), prim).expect("mate").expect("mate");
+                    let end = |eu, fallback: f64| {
+                        let vu = fb.brep().edgeuse(eu).expect("edge use").vertexuse;
+                        let vu = vu.expect("vertex use");
+                        let v = fb.brep().vertexuse(vu).expect("vertex use").vertex;
+                        let v = v.expect("vertex");
+                        if fb.fillet_vertex(v).expect("vertex").is_processed() {
+                            fb.fillet_vertexuse(vu).expect("vertex use").uv_point().x
+                        } else {
+                            fallback
+                        }
+                    };
+                    let param1 = end(prim, natural.min());
+                    let param2 = end(mate, natural.max());
+                    (param1 > param2).then(|| {
+                        let p1 = curve.evaluate_point(&k, param1).expect("point");
+                        let p2 = curve.evaluate_point(&k, param2).expect("point");
+                        (param1 - param2, p1.distance(p2))
+                    })
+                })
+                .collect();
+            println!("{name}: reversed by (parameter, distance) {reversed:?}, approx {approx:e}");
+            assert!(
+                reversed.iter().any(|&(_, distance)| distance > approx),
+                "{name}: no rail trim reversed beyond the approximation tolerance"
+            );
+        }
+    }
+}

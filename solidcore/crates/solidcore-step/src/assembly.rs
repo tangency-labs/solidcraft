@@ -1541,8 +1541,9 @@ pub(crate) fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2]
 /// that moves the surface within their edge's tolerance (`tolerances`, as `pcs`): the parameter
 /// tolerance that edge has on this patch. The kernel moves the control points and proves the
 /// bound, along u and v at once ([`SurfaceEval::pcurve_onto_knots`]); the gap to the edge is then
-/// measured and covered (`raise_edges`). A pcurve it refuses (farther past, on a rational or
-/// closed patch) is left as it is, for the record check to refuse. The number of moves made.
+/// measured and covered (`raise_edges`). A pcurve it refuses (farther past, past both ranges of
+/// a rational patch, or on a closed patch) is left as it is, for the record check to refuse. The
+/// number of moves made.
 pub(crate) fn onto_knots(surface: &BSurface, tolerances: &[Vec<f64>], pcs: &mut [Vec<Curve2>]) -> usize {
     let Ok(on) = SurfaceEval::new(surface) else { return 0 };
     let mut moved = 0;

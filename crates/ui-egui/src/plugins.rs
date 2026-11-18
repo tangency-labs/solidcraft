@@ -42,6 +42,26 @@ pub(crate) fn normalize_request(session: &solidcraft_engine::Session, method: &s
     }
 }
 
+/// Whether an agent's request runs a plugin's code: `plugin.run` (a `<plugin>.<entry>` call is
+/// one once normalized), `file.import`, or `doc.open` of a file an installed importer opens, alone
+/// or as a batch step. The chat asks before such a request in every mode, whatever was allowed
+/// before: running a plugin's code needs the user's go each time.
+pub(crate) fn runs_plugin_code(session: &solidcraft_engine::Session, method: &str, params: &serde_json::Value) -> bool {
+    let step = |step: &serde_json::Value| {
+        let Some(command) = step.get("command").or_else(|| step.get("id")).and_then(serde_json::Value::as_str) else { return false };
+        let params = step.get("params").unwrap_or(&serde_json::Value::Null);
+        command.eq_ignore_ascii_case("plugin.run") || solidcraft_engine::cmd::runs_plugin_importer(session, command, params)
+    };
+    match method {
+        "engine.execute" | "command" => step(params),
+        "engine.batch" | "engine.script" => {
+            let steps = if params.is_array() { params.as_array() } else { params.get("commands").and_then(serde_json::Value::as_array) };
+            steps.is_some_and(|steps| steps.iter().take(10_000).any(step))
+        }
+        _ => false,
+    }
+}
+
 /// How many turned-off ids a preferences file may name.
 pub const MAX_DISABLED: usize = 256;
 /// `plugin.json` larger than this is refused.
@@ -565,6 +585,13 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         }
         ui.add_space(8.0);
         resource_controls(app, ui);
+        crate::ui_kit::checkbox(
+            ui,
+            solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
+            &mut app.preferences.plugin_remember_dialog_position,
+        )
+        .on_hover_text(solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position_help"));
+        ui.add_space(8.0);
         let t = solidcraft_theme::Tokens::get();
         let path = dir.display().to_string();
         let searching = crate::ui_kit::settings_search::querying(ui);

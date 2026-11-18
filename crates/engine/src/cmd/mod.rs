@@ -62,6 +62,7 @@ mod features;
 mod features_more;
 mod join_pieces;
 pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
+pub(crate) use browser::{find_kinds, find_text};
 pub(crate) use component::follow_expressed_moves;
 pub(crate) use component::{path_ids, refuse_filled_virtual};
 pub(crate) use config::put_row;
@@ -82,6 +83,7 @@ pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mas
 pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
+pub use file::runs_plugin_importer;
 pub use file::use_import_cache_dir;
 pub(crate) use file::{NAMES_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
 pub(crate) use inspect::color_param;
@@ -124,6 +126,7 @@ pub(crate) mod motion;
 mod notes;
 mod parts;
 mod plugin;
+mod plugin_storage;
 mod point_cloud;
 mod point_cloud_deviation;
 mod script;
@@ -460,6 +463,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
     v.extend(plugin::COMMANDS.iter());
+    v.extend(plugin_storage::COMMANDS.iter());
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
@@ -527,7 +531,15 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v
 }
 
+/// The command an id names: its exact id, else the one it spells in another case. Surrounding
+/// whitespace is ignored. Command ids are ASCII, so an id with any other character names none
+/// (a look-alike letter such as a Cyrillic `е` or a fullwidth `ｆ` is never a command).
+///
+/// Everything that decides what a command id may do (the agent chat's gate, the read-only
+/// classification, a host's check) decides on the id this returns, never the id as sent, so it
+/// and the engine cannot disagree about which command a request runs.
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
+    let id = normalize_command_id(id)?;
     let all = command_specs();
     all.iter().find(|c| c.id == id).or_else(|| all.iter().find(|c| c.id.eq_ignore_ascii_case(id))).copied()
 }
@@ -544,6 +556,13 @@ pub fn command_verb_alternative(id: &str, candidate: &str) -> bool {
     groups
         .iter()
         .any(|words| words.iter().any(|word| verb.eq_ignore_ascii_case(word)) && words.iter().any(|word| other_verb.eq_ignore_ascii_case(word)))
+}
+
+/// A command id as [`find_command`] reads it: without surrounding whitespace, and `None` when it
+/// holds anything but printable ASCII (no command id does).
+pub fn normalize_command_id(id: &str) -> Option<&str> {
+    let id = id.trim();
+    (!id.is_empty() && id.bytes().all(|b| b.is_ascii_graphic())).then_some(id)
 }
 
 /// The end of an unknown command's error: up to three ids like `id`. Alternative verbs in

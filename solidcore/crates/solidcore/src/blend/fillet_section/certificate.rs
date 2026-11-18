@@ -451,7 +451,7 @@ pub fn nurbs_partials_over_piece(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, None)
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Shift::None)
 }
 
 /// [`nurbs_partials_over_piece`] of the surface moved by `−about`: the partials of
@@ -476,7 +476,35 @@ pub fn nurbs_partials_over_piece_about(
     lk: usize,
     about: [f64; 3],
 ) -> Result<Partials<Ivl>> {
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Some(about))
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, None, Shift::About(about))
+}
+
+/// The piece's control weights' range where the box lies inside its closed knot span (the
+/// weight there is a convex combination of them), else `None`.
+#[allow(clippy::too_many_arguments)]
+fn span_weights(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+) -> Option<Ivl> {
+    let inside = |u: &[f64], k: usize, a: f64, b: f64| {
+        knot(u, k as isize) <= a && b <= knot(u, k as isize + 1)
+    };
+    if !(inside(&cn.u, ku, ua, ub) && inside(&cn.v, kv, va, vb)) {
+        return None;
+    }
+    let mut h: Option<Ivl> = None;
+    for i in (ku + 1).saturating_sub(cn.p + 1)..=ku {
+        for j in (kv + 1).saturating_sub(cn.q + 1)..=kv {
+            let w = Ivl::from(pw_at(&cn.pw, 4 * (i * cn.nv + j) + 3));
+            h = Some(h.map_or(w, |x| x.hull(w)));
+        }
+    }
+    h
 }
 
 /// [`nurbs_partials_over_piece`] for a box inside the piece's closed knot span (not the
@@ -500,26 +528,67 @@ pub fn nurbs_partials_within_span(
     vb: f64,
     lk: usize,
 ) -> Result<Partials<Ivl>> {
-    let inside = |u: &[f64], k: usize, a: f64, b: f64| {
-        knot(u, k as isize) <= a && b <= knot(u, k as isize + 1)
-    };
-    let hull = if inside(&cn.u, ku, ua, ub) && inside(&cn.v, kv, va, vb) {
-        let mut h: Option<Ivl> = None;
-        for i in (ku + 1).saturating_sub(cn.p + 1)..=ku {
-            for j in (kv + 1).saturating_sub(cn.q + 1)..=kv {
-                let w = Ivl::from(pw_at(&cn.pw, 4 * (i * cn.nv + j) + 3));
-                h = Some(h.map_or(w, |x| x.hull(w)));
-            }
-        }
-        h
-    } else {
-        None
-    };
-    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, None)
+    let hull = span_weights(cn, ku, kv, ua, ub, va, vb);
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, Shift::None)
 }
 
-/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given, of
-/// the surface moved by `−about` where given ([`nurbs_partials_over_piece_about`]).
+/// [`nurbs_partials_within_span`], the quotient taken about the box's middle point: the
+/// partials of `S` itself, enclosed as `(S − o) + o` with `o` the surface's point at the
+/// box's middle (rounded to doubles).
+///
+/// The partials of order above 0 of `S − o` and `S` are the same functions, and `P[0][0]`
+/// is `S − o` plus the constant `o`, so the result encloses exactly what
+/// [`nurbs_partials_within_span`] encloses. It is an enclosure for any finite `o`: the
+/// homogeneous net of `S − o` is `(w_i (P_i − o), w_i)`, so its point derivatives are the
+/// net's `A − o w`, taken in rounded interval arithmetic ([`Ivl`]'s products and
+/// differences round outward) and then put through the same quotient, and the last `+ o`
+/// rounds outward too. Only the width depends on `o`: the quotient's `w_ij P[a−i][b−j]`
+/// terms are of the size of `S − o` over the box, not of `S`'s distance from the origin,
+/// so on a rational face far from the origin every partial is far narrower. A box that is
+/// one point, and a box where `o` is not finite (the weight's middle value 0 or not
+/// finite), are enclosed as [`nurbs_partials_within_span`] encloses them, bit for bit: at
+/// a point every term is of rounding's size whatever `o` is, and the shift would only add
+/// its own two roundings.
+///
+/// # Errors
+///
+/// As [`nurbs_partials_over_piece`].
+#[allow(clippy::too_many_arguments)]
+pub fn nurbs_partials_within_span_centred(
+    cn: &Nurbs,
+    ku: usize,
+    kv: usize,
+    ua: f64,
+    ub: f64,
+    va: f64,
+    vb: f64,
+    lk: usize,
+) -> Result<Partials<Ivl>> {
+    let hull = span_weights(cn, ku, kv, ua, ub, va, vb);
+    // a point has no Taylor terms over the box to narrow: the shift would only add its
+    // two roundings to P[0][0]
+    let shift = if ua == ub && va == vb {
+        Shift::None
+    } else {
+        Shift::Middle
+    };
+    partials_over_piece(cn, ku, kv, ua, ub, va, vb, lk, hull, shift)
+}
+
+/// The point the rational quotient of [`partials_over_piece`] is taken about.
+#[derive(Clone, Copy)]
+enum Shift {
+    /// The origin: the partials of `S`.
+    None,
+    /// `about`: the partials of `S − about` ([`nurbs_partials_over_piece_about`]).
+    About([f64; 3]),
+    /// The surface's point at the box's middle `o`, added back: the partials of `S`
+    /// ([`nurbs_partials_within_span_centred`]).
+    Middle,
+}
+
+/// [`nurbs_partials_over_piece`], the weight's enclosure cut to `weights` where given, the
+/// quotient taken about the point `shift` names.
 #[allow(clippy::too_many_arguments)]
 fn partials_over_piece(
     cn: &Nurbs,
@@ -531,7 +600,7 @@ fn partials_over_piece(
     vb: f64,
     lk: usize,
     weights: Option<Ivl>,
-    about: Option<[f64; 3]>,
+    shift: Shift,
 ) -> Result<Partials<Ivl>> {
     let um = 0.5 * (ua + ub);
     let vm = 0.5 * (va + vb);
@@ -553,14 +622,32 @@ fn partials_over_piece(
                     }
                 }
             }
-            if let Some(o) = about {
+            *hab = h;
+        }
+    }
+    // the point the quotient is taken about, and whether it is added back to P[0][0]
+    let (about, add_back) = match shift {
+        Shift::None => (None, false),
+        Shift::About(o) => (Some(o), false),
+        Shift::Middle => {
+            // the surface's point at the middle, as doubles: any finite point is sound,
+            // this one makes S − o smallest over the box
+            let h = at2(&hm, 0, 0, [IZ; 4]);
+            let w = h[3].mid();
+            let o = [h[0].mid() / w, h[1].mid() / w, h[2].mid() / w];
+            let finite = o.iter().all(|x| x.is_finite());
+            (finite.then_some(o), finite)
+        }
+    };
+    if let Some(o) = about {
+        for row in &mut hm {
+            for h in row.iter_mut() {
                 // (A − o w): the homogeneous form of S − o
                 let w = h[3];
                 for (he, &oe) in h.iter_mut().zip(&o) {
                     *he = *he - Ivl::from(oe) * w;
                 }
             }
-            *hab = h;
         }
     }
     let du = Ivl::new(ua, ub) - Ivl::from(um);
@@ -654,6 +741,19 @@ fn partials_over_piece(
                 },
             );
         }
+    }
+    if let (true, Some(o)) = (add_back, about) {
+        // S = (S − o) + o, rounded outward
+        let p = out.at(0, 0);
+        out.set(
+            0,
+            0,
+            V3 {
+                x: p.x + Ivl::from(o[0]),
+                y: p.y + Ivl::from(o[1]),
+                z: p.z + Ivl::from(o[2]),
+            },
+        );
     }
     Ok(out)
 }
