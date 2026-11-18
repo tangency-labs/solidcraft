@@ -5002,7 +5002,9 @@ impl Document {
                             Self::eval_in(vals, y, Kind::Length)?,
                             Self::eval_in(vals, z, Kind::Length)?,
                         );
-                        if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) {
+                        // Up to and including 1e9 mm, the largest number a design file holds: an
+                        // origin saved at exactly that distance rebuilt before this check existed.
+                        if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() <= 1e9) {
                             return Err(DocError::Invalid("the plane's axis origin is out of range".into()));
                         }
                         (o, *axis_dir)
