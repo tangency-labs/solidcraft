@@ -1,5 +1,5 @@
 //! The cliff overflow trimmed at its creases in place (WR-695, tangency-labs/smlib#79
-//! step 6, `UpstreamFixes::fillet_overflow_trim_at_creases`).
+//! step 6; once `UpstreamFixes::fillet_overflow_trim_at_creases`, now unconditional).
 //!
 //! Each case is graded against the closed form of the section the round removes
 //! ([`removed_area`] swept along the edge), the face count and `AssertValid` at
@@ -16,6 +16,7 @@
 )]
 
 use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -26,18 +27,13 @@ use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-use solidcore::topology::{edge, EdgeId};
+use solidcore::topology::{edge, vertex, EdgeId};
 use solidcore::{Brep, Kernel};
 
-/// The cliff overflow's flags (as `wr631_cliff_overflow_construction`), the trim at the
-/// creases on (`trim`) or off (the subtraction).
-fn kernel(trim: bool) -> Kernel {
+/// The cliff overflow's flags (as `wr631_cliff_overflow_construction`).
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_rails_leaving_faces = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_rail_end_on_continued_surface = true;
-    k.fixes.fillet_cliff_overflow = true;
-    k.fixes.fillet_overflow_trim_at_creases = trim;
     k
 }
 
@@ -92,15 +88,8 @@ enum Outcome {
 
 /// Rounds (`chamfer` false: circular section; true: linear) the edge from `p` to `q` of
 /// the body `make` builds, by `r`.
-fn blend(
-    trim: bool,
-    make: fn(&mut Kernel) -> Brep,
-    p: Point3,
-    q: Point3,
-    r: f64,
-    chamfer: bool,
-) -> Outcome {
-    let mut k = kernel(trim);
+fn blend(make: fn(&mut Kernel) -> Brep, p: Point3, q: Point3, r: f64, chamfer: bool) -> Outcome {
+    let mut k = kernel();
     let mut b = make(&mut k);
     let e = edge_between(&k, &b, p, q);
     let mut session = FilletSession::new(&mut k, &mut b).unwrap();
@@ -218,44 +207,22 @@ const FORK_REL: f64 = 1e-8;
 
 /// The stepped bar's edge at x = 10 rounded r6, past the step's 5 high face: the round is
 /// cut along its crease with the step's riser, 8 faces and 1546.0445712960786 of the 1700.
-/// Without the trim it is subtracted, to the same volume.
 #[test]
 fn step_round_trimmed_at_its_crease() {
     let (s, t) = (p(10.0, 0.0, 0.0), p(10.0, 0.0, 20.0));
     let closed = 1700.0 - 20.0 * removed_area(6.0, 10.0, 5.0);
-    assert_builds(
-        &blend(true, stepped_bar, s, t, 6.0, false),
-        closed,
-        CLOSED_REL,
-        8,
-    );
-    assert_builds(
-        &blend(false, stepped_bar, s, t, 6.0, false),
-        closed,
-        CLOSED_REL,
-        8,
-    );
+    assert_builds(&blend(stepped_bar, s, t, 6.0, false), closed, CLOSED_REL, 8);
 }
 
 /// The stepped bar's inner step edge chamfered 4: the chamfer's leg runs past the step's foot
-/// under the wall. The trim builds it as the subtraction does, the step's plane carried on to the
-/// leg, 1700 - 160 (the fork refuses it, `SM_FILERR_BAD_MERGE`, fork 8832ead's every-face case:
-/// its extension's material probe misses the 1 wide strip and the walls beside are not fenced).
+/// under the wall. The trim builds it (as the removed subtraction did), the step's plane
+/// carried on to the leg, 1700 - 160 (the fork refuses it, `SM_FILERR_BAD_MERGE`, fork
+/// 8832ead's every-face case: its extension's material probe misses the 1 wide strip and the
+/// walls beside are not fenced).
 #[test]
-fn chamfer_past_the_step_foot_builds_as_the_subtraction() {
+fn chamfer_past_the_step_foot_builds() {
     let (s, t) = (p(10.0, 5.0, 0.0), p(10.0, 5.0, 20.0));
-    assert_builds(
-        &blend(true, stepped_bar, s, t, 4.0, true),
-        1540.0,
-        CLOSED_REL,
-        9,
-    );
-    assert_builds(
-        &blend(false, stepped_bar, s, t, 4.0, true),
-        1540.0,
-        CLOSED_REL,
-        9,
-    );
+    assert_builds(&blend(stepped_bar, s, t, 4.0, true), 1540.0, CLOSED_REL, 9);
 }
 
 /// An 80 x 5 x 5 bar's top edge rounded r10, past both faces: 5 faces and 630.2934872554397
@@ -265,8 +232,7 @@ fn chamfer_past_the_step_foot_builds_as_the_subtraction() {
 fn bar_round_past_both_faces() {
     let (s, t) = (p(0.0, 5.0, 5.0), p(80.0, 5.0, 5.0));
     let closed = 2000.0 - 80.0 * removed_area(10.0, 5.0, 5.0);
-    assert_builds(&blend(true, bar, s, t, 10.0, false), closed, CLOSED_REL, 5);
-    assert_builds(&blend(false, bar, s, t, 10.0, false), closed, CLOSED_REL, 5);
+    assert_builds(&blend(bar, s, t, 10.0, false), closed, CLOSED_REL, 5);
 }
 
 /// A 40 x 20 x 10 box's top back edge rounded r10.05, just past the 10 high face: 6 faces
@@ -276,13 +242,7 @@ fn box_round_just_past_its_face() {
     let (s, t) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
     let closed = 8000.0 - 40.0 * removed_area(10.05, 20.0, 10.0);
     assert_builds(
-        &blend(true, box_40_20_10, s, t, 10.05, false),
-        closed,
-        CLOSED_REL,
-        6,
-    );
-    assert_builds(
-        &blend(false, box_40_20_10, s, t, 10.05, false),
+        &blend(box_40_20_10, s, t, 10.05, false),
         closed,
         CLOSED_REL,
         6,
@@ -297,31 +257,21 @@ fn box_round_just_past_its_face() {
 fn round_trimmed_at_a_hole() {
     let (s, t) = (p(0.0, 20.0, 10.0), p(40.0, 20.0, 10.0));
     assert_builds(
-        &blend(true, block_with_hole, s, t, 4.0, false),
+        &blend(block_with_hole, s, t, 4.0, false),
         7_580.287_342_340_768_2,
         FORK_REL,
         8,
     );
-    assert!(matches!(
-        blend(false, block_with_hole, s, t, 4.0, false),
-        Outcome::Built { .. }
-    ));
 }
 
 /// A 10 x 20 x 30 box's top edge rounded r12, past the 10 wide top: 6 faces and
-/// 5384.178285184314 of the 6000, and the subtraction gives the same.
+/// 5384.178285184314 of the 6000.
 #[test]
 fn round_past_the_top() {
     let (s, t) = (p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
     let closed = 6000.0 - 20.0 * removed_area(12.0, 10.0, 30.0);
     assert_builds(
-        &blend(true, box_10_20_30, s, t, 12.0, false),
-        closed,
-        CLOSED_REL,
-        6,
-    );
-    assert_builds(
-        &blend(false, box_10_20_30, s, t, 12.0, false),
+        &blend(box_10_20_30, s, t, 12.0, false),
         closed,
         CLOSED_REL,
         6,
@@ -329,21 +279,97 @@ fn round_past_the_top() {
 }
 
 /// A 20 cube's edge rounded r21, past both 20 wide faces: 5 faces and 6107.529369550197 of
-/// the 8000, and the subtraction gives the same.
+/// the 8000.
 #[test]
 fn cube_round_past_both_faces() {
     let (s, t) = (p(0.0, 0.0, 0.0), p(20.0, 0.0, 0.0));
     let closed = 8000.0 - 20.0 * removed_area(21.0, 20.0, 20.0);
-    assert_builds(
-        &blend(true, cube_20, s, t, 21.0, false),
-        closed,
-        CLOSED_REL,
-        5,
+    assert_builds(&blend(cube_20, s, t, 21.0, false), closed, CLOSED_REL, 5);
+}
+
+/// The variable round, linear `r0` to `r1`, on the 10 x 20 x 30 box's top edge at x = 0, its
+/// volume, face, edge and vertex counts and the largest gap between an edge's curve and
+/// its vertices.
+fn variable_round(r0: f64, r1: f64) -> (f64, (usize, usize, usize), f64) {
+    let mut k = kernel();
+    let mut b = box_10_20_30(&mut k);
+    let e = edge_between(&k, &b, p(0.0, 0.0, 30.0), p(0.0, 20.0, 30.0));
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_variable_radius_edges(&mut k, &[e], r0, FilletLaw::linear(r0, r1, None), 1, 1)
+        .unwrap();
+    session
+        .do_fillet(&mut k)
+        .unwrap_or_else(|e| panic!("{r0} -> {r1}: {e}"));
+    drop(session);
+    assert!(
+        is_manifold_solid(&b).unwrap(),
+        "{r0} -> {r1}: not a manifold solid"
     );
-    assert_builds(
-        &blend(false, cube_20, s, t, 21.0, false),
-        closed,
-        CLOSED_REL,
-        5,
+    let mut gap = 0.0_f64;
+    for e in b.edges().ids().collect::<Vec<_>>() {
+        let ivl = edge::interval(&b, e).unwrap();
+        let c = edge::curve(&b, e).unwrap().unwrap();
+        let (s, t) = (
+            c.evaluate_point(&k, ivl.min()).unwrap(),
+            c.evaluate_point(&k, ivl.max()).unwrap(),
+        );
+        let (sv, ev) = edge::start_end_vertices(&b, e).unwrap();
+        let (sp, ep) = (
+            vertex::point(&b, sv.unwrap()).unwrap(),
+            vertex::point(&b, ev.unwrap()).unwrap(),
+        );
+        gap = gap.max(s.distance(sp).min(s.distance(ep)));
+        gap = gap.max(t.distance(sp).min(t.distance(ep)));
+    }
+    let counts = (
+        b.faces().ids().count(),
+        b.edges().ids().count(),
+        b.vertices().ids().count(),
     );
+    let built = (volume(&k, &mut b), counts, gap);
+    b.use_arena_naming().unwrap();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{r0} -> {r1}: check_brep: {lines:?}");
+    built
+}
+
+/// #17673: the variable round past the box's top (`wr631_cliff_overflow_construction`'s
+/// case and closed forms, Gauss-Legendre to 1e-9), trimmed at its creases, from either
+/// end. The creases meet the sheet's end section at its corners: each crease now ends
+/// where the section's edge crosses the crease's face, and both are fitted to a
+/// thousandth of the body's tolerance, so every edge's curve runs to its own vertices
+/// (the end section's stopped 1.1e-5 short of them) and the volume holds the closed form
+/// to 1e-7 (it was 1.3e-7 off from r 50 to 2). A crease piece run on to its end along an
+/// edge of the face takes in the runs WR-717 also splits the sheet along; each such run
+/// is split along once (in the piece), so the merge is given no overlapping curves. The
+/// face, edge and vertex counts are those the removed subtraction built (this test
+/// compared against it while it was the flag-off path).
+#[test]
+fn a_variable_round_past_a_box_top_trimmed_at_its_creases_keeps_its_closed_form() {
+    for (r1, closed, counts) in [
+        (11.0, 5_802.443_145_423, (7, 15, 10)),
+        (20.0, 5_503.887_121_531, (7, 15, 10)),
+        (30.0, 5_184.057_273_581, (7, 14, 9)),
+        (50.0, 4_693.608_889_860, (7, 15, 10)),
+    ] {
+        for (r0, r1) in [(2.0, r1), (r1, 2.0)] {
+            let (v, n, gap) = variable_round(r0, r1);
+            assert!(
+                (v - closed).abs() <= 1e-7 * closed,
+                "{r0} -> {r1}: volume {v} against {closed} (rel {})",
+                (v - closed).abs() / closed
+            );
+            assert_eq!(
+                n, counts,
+                "{r0} -> {r1}: the subtraction's faces, edges, vertices"
+            );
+            assert!(
+                gap <= 1e-12,
+                "{r0} -> {r1}: an edge's curve {gap} off its vertices"
+            );
+        }
+    }
 }

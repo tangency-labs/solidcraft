@@ -317,11 +317,19 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             );
             layout_check(
                 ui,
+                app.tr("prefs.remember_toolbar_tab"),
+                app.tr("prefs.remember_toolbar_tab_note"),
+                &mut app.preferences.remember_toolbar_tab,
+                "remember_toolbar_tab",
+            );
+            layout_check(
+                ui,
                 app.tr("prefs.tab_double_click_renames"),
                 app.tr("prefs.tab_double_click_renames_note"),
                 &mut app.preferences.tab_double_click_renames,
                 "tab_double_click_renames",
             );
+            windows_smooth_window_drag_row(app, ui, WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE);
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
             crate::scenario::publish_target(&format!("dialog:section:{}", app.tr("prefs.layout")), rect);
@@ -340,6 +348,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
             });
+            layout_check(
+                ui,
+                app.tr("prefs.show_design_view_switcher"),
+                app.tr("prefs.show_design_view_switcher_note"),
+                &mut app.preferences.show_design_view_switcher,
+                "show_design_view_switcher",
+            );
             layout_check(
                 ui,
                 app.tr("prefs.design_sub_tab_sheets"),
@@ -391,6 +406,27 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.history_in_browser,
                 "history_in_browser",
             );
+            layout_check(
+                ui,
+                app.tr("library.show"),
+                app.tr("library.show_help"),
+                &mut app.preferences.show_document_browser,
+                "show_document_browser",
+            );
+            let sizes = crate::library::ThumbnailSize::ALL;
+            let options = [
+                ui_kit::PictureChoice { key: "small", label: app.tr(sizes[0].label()), figure: |p, rect| document_browser_preview(p, rect, 0.2) },
+                ui_kit::PictureChoice { key: "medium", label: app.tr(sizes[1].label()), figure: |p, rect| document_browser_preview(p, rect, 0.25) },
+                ui_kit::PictureChoice { key: "large", label: app.tr(sizes[2].label()), figure: |p, rect| document_browser_preview(p, rect, 0.3) },
+            ];
+            let selected = sizes.iter().position(|size| *size == app.preferences.library_thumbnail_size).unwrap_or(2);
+            if let Some(selected) =
+                ui_kit::settings_picture_choices(ui, "document_browser", app.tr("library.thumbnail_section"), &options, selected, true)
+                && let Some(size) = sizes.get(selected)
+            {
+                app.preferences.library_thumbnail_size = *size;
+            }
+            ui_kit::text(ui, app.tr("library.thumbnail_help"), ui_kit::Text::Note("document_browser_size"));
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.history_sketches"), app.tr("prefs.history_sketches_note"), |ui| {
                     let mut selected = usize::from(app.preferences.history_sketches == HistorySketches::UnderFeature);
@@ -649,6 +685,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
 }
 
+/// Windows: nothing is drawn while the window is dragged by its title bar, so it moves smoothly
+/// (`windows_smooth_window_drag`); drawn only where the choice exists (`available`:
+/// [`WINDOWS_SMOOTH_WINDOW_DRAG_AVAILABLE`]). It applies at once: no restart badge.
+pub(super) fn windows_smooth_window_drag_row(app: &mut SolveApp, ui: &mut egui::Ui, available: bool) {
+    if !available {
+        return;
+    }
+    layout_check(
+        ui,
+        app.tr("prefs.windows_smooth_window_drag"),
+        app.tr("prefs.windows_smooth_window_drag_help"),
+        &mut app.preferences.windows_smooth_window_drag,
+        "windows_smooth_window_drag",
+    );
+}
+
 /// Keep native checkbox responses and one real search target; guidance stays on hover.
 fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str) {
     let t = Tokens::get();
@@ -664,4 +716,36 @@ fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, ke
             })
         });
     });
+}
+
+/// A small window specimen using the same themed card as History and Browser.
+fn document_browser_preview(p: &egui::Painter, rect: egui::Rect, panel_fraction: f32) {
+    let t = Tokens::get();
+    let area = rect.shrink(3.0);
+    let at = |x: f32, y: f32| egui::pos2(area.left() + area.width() * x, area.top() + area.height() * y);
+    let block = |x: f32, y: f32, w: f32, h: f32| egui::Rect::from_min_max(at(x, y), at(x + w, y + h));
+    let stroke = egui::Stroke::new(1.0, t.border);
+    p.rect(area, 2.0, t.field, stroke, egui::StrokeKind::Inside);
+    p.line_segment([at(0.0, 0.14), at(1.0, 0.14)], stroke);
+    for x in [0.04, 0.16, 0.28] {
+        p.line_segment([at(x, 0.07), at(x + 0.08, 0.07)], egui::Stroke::new(1.5, t.text_dim));
+    }
+    let panel = block(0.02, 0.18, panel_fraction, 0.78);
+    p.rect(panel, 2.0, t.panel, egui::Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    let tile = (panel_fraction - 0.06) / 2.0;
+    for row in 0..3 {
+        for column in 0..2 {
+            let card = block(0.04 + column as f32 * (tile + 0.02), 0.23 + row as f32 * (tile + 0.1), tile, tile + 0.04);
+            p.rect(card, 1.0, t.field, stroke, egui::StrokeKind::Inside);
+            p.line_segment([card.left_bottom() + egui::vec2(2.0, -3.0), card.right_bottom() + egui::vec2(-2.0, -3.0)], stroke);
+        }
+    }
+    let view = block(panel_fraction + 0.05, 0.18, 0.93 - panel_fraction, 0.78);
+    p.rect(view, 2.0, t.panel, stroke, egui::StrokeKind::Inside);
+    crate::icons::paint_ink(
+        p,
+        egui::Rect::from_center_size(view.center(), egui::vec2(area.height() * 0.22, area.height() * 0.22)),
+        "box",
+        t.text_dim,
+    );
 }

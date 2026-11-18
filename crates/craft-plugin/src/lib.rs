@@ -12,13 +12,40 @@ use serde_json::Value;
 // The WIT package declaration is the sole source of the API identifier.
 include!(concat!(env!("OUT_DIR"), "/api.rs"));
 pub const WIT: &str = include_str!("../wit/plugin.wit");
-pub const MAX_MANIFEST_BYTES: usize = 16 * 1024;
+pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 pub const MAX_COMPONENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_JSON_BYTES: usize = 1024 * 1024;
+/// An importer's component may be larger: a real converter measured 28 to 42 MB (RFC 0002).
+pub const MAX_IMPORTER_COMPONENT_BYTES: usize = 64 * 1024 * 1024;
+/// The most one `source.read` or `design.write` call moves.
+pub const MAX_IMPORT_CHUNK_BYTES: usize = 1024 * 1024;
+/// The most an importer reads in one call: the file being imported and the files beside it.
+pub const MAX_IMPORT_INPUT_BYTES: u64 = 1024 * 1024 * 1024;
+/// The largest design an importer may write.
+pub const MAX_IMPORT_DESIGN_BYTES: usize = 256 * 1024 * 1024;
+/// A command entry finishes within 30 s; an importer converting a large assembly may take minutes.
+pub const MAX_COMMAND_DEADLINE_MS: u64 = 30_000;
+pub const MAX_IMPORTER_DEADLINE_MS: u64 = 600_000;
+/// The most extensions one importer entry claims.
+pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
 pub const MAX_MEMORY_MIB: usize = 4096;
 
 pub type Result<T> = std::result::Result<T, HostError>;
+
+mod input;
+pub use input::{check_input, strict_input_schema};
+
+/// The host imports that change something outside the design. A `read` entry is refused every
+/// one of them, whatever folders its plugin was granted, as it is refused edit commands.
+pub const WRITING_IMPORTS: &[&str] = &["write-file"];
+
+/// The refusal of a writing host import to a `read` entry: it names the import.
+pub fn read_entry_refusal(import: &str) -> HostError {
+    HostError::PermissionDenied { permission: format!("{READ_ENTRY_IMPORT}{import}") }
+}
+/// How [`read_entry_refusal`]'s permission starts; the import's name follows it.
+pub const READ_ENTRY_IMPORT: &str = "read entry may not use the host import ";
 
 /// Failures are actionable data at the app boundary, including failures before instantiation.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema, thiserror::Error)]
@@ -41,12 +68,58 @@ pub enum HostError {
     /// The plugin needs a capability, or a version of one, that this host does not serve.
     #[error("{reason}")]
     UnsupportedCapability { capability: String, reason: String },
+    /// The input is valid, but this plugin does not handle it (WIT `plugin-error.unsupported`,
+    /// from API 0.2): a file it can't convert, an option value it doesn't offer.
+    #[error("not supported: {reason}")]
+    Unsupported { reason: String },
+    /// The plugin asks for more of a budget than the app lets plugins have, so it was not run.
+    /// `limit` is the manifest field (`fuel`, `memory_mib`); `requested` and `allowed` are in its
+    /// unit.
+    #[error("{}", over_ceiling(limit, *requested, *allowed))]
+    OverCeiling { limit: String, requested: u64, allowed: u64 },
+    /// The plugin ran into one of its budgets and was stopped. `limit` is `fuel`, `memory_mib`,
+    /// `deadline_ms` or `stack_kib` (the manifest's own budgets) or `design_mib` (the most an
+    /// importer may hand over); `allowed` is that budget, in its unit.
+    #[error("{}", exhausted(limit, *allowed))]
+    Exhausted { limit: String, allowed: u64 },
+}
+
+fn over_ceiling(limit: &str, requested: u64, allowed: u64) -> String {
+    match limit {
+        "memory_mib" => format!(
+            "asks for {requested} MiB of memory, more than the {allowed} MiB plugins may use; allow its memory request when you install it, or raise the memory ceiling for plugins"
+        ),
+        "fuel" => format!("asks for {requested} fuel, more than the {allowed} plugins may use; raise the fuel ceiling for plugins"),
+        _ => format!("asks for {requested} {limit}, more than the {allowed} plugins may use"),
+    }
+}
+
+fn exhausted(limit: &str, allowed: u64) -> String {
+    match limit {
+        "fuel" => format!("used all {allowed} fuel it asks for and was stopped"),
+        "memory_mib" => format!("needed more than the {allowed} MiB of memory it asks for and was stopped"),
+        "deadline_ms" if allowed == 0 => "ran longer than its time limit and was stopped".into(),
+        "deadline_ms" => format!("ran longer than its time limit of {allowed} ms and was stopped"),
+        "stack_kib" => format!("ran out of its {allowed} KiB stack and was stopped"),
+        "design_mib" => format!("made a design larger than {allowed} MiB, the most an importer may hand over"),
+        _ => format!("went over its {limit} limit of {allowed} and was stopped"),
+    }
 }
 
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2)), ("storage", (0, 1))];
+/// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
+/// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
+pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
+/// The WIT versions a host runs, newest first: [`API`]'s and the frozen 0.1 one.
+pub const WIT_VERSIONS: &[&str] = &["0.2.0", "0.1.0"];
+/// `craft:plugin@0.1.0`, unchanged, for plugins built before 0.2.
+pub const WIT_0_1: &str = include_str!("../wit-0.1/plugin.wit");
+
+/// The highest data format number a plugin may declare (`runtime.data_format`).
+pub const MAX_DATA_FORMAT: u32 = 1_000_000;
 
 fn capability_version(text: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
@@ -79,6 +152,9 @@ pub fn check_capabilities(requested: &[String], app: &str) -> Result<()> {
             return Err(unsupported(format!("needs {name} {major}.{minor}, which this version of {app} does not have; update {app} or the plugin")));
         };
         let (have_major, have_minor) = (*have_major, *have_minor);
+        if OLDER_CAPABILITIES.iter().any(|(known, version)| *known == name && *version == (major, minor)) {
+            continue;
+        }
         if (major, minor) > (have_major, have_minor) {
             return Err(unsupported(format!("needs {name} {major}.{minor}; update {app} or the plugin")));
         }
@@ -98,9 +174,13 @@ fn invalid(field: impl Into<String>, reason: impl Into<String>) -> HostError {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Effect {
+    /// Reads the open design and changes nothing.
     Read,
+    /// Changes the open design.
     #[default]
     Edit,
+    /// Opens a file as a new design and leaves the open one as it is: every importer's effect.
+    Open,
 }
 
 /// The app supplies the same contracts it exposes to its other programmatic clients.
@@ -166,6 +246,19 @@ pub trait PluginHost {
     fn is_cancelled(&self) -> bool {
         false
     }
+    /// Opens `design`, a design file an importer made, in a private session apart from every open
+    /// design and every file, for [`PluginHost::evaluate_run`] (capability `evaluate@0.1`). An app
+    /// that doesn't check designs refuses, as here.
+    fn evaluate_open(&mut self, _design: &[u8]) -> Result<()> {
+        Err(HostError::PermissionDenied { permission: "evaluate: this app does not check imported designs".into() })
+    }
+    /// Runs one of the app's read-only commands on the design [`PluginHost::evaluate_open`] opened.
+    /// A command that fails is an answer (`{"error": ...}`), not an error.
+    fn evaluate_run(&mut self, command: &str, _args: &Value) -> Result<Value> {
+        Err(HostError::PermissionDenied { permission: format!("evaluate: {command} is not available") })
+    }
+    /// Discards the session [`PluginHost::evaluate_open`] opened.
+    fn evaluate_close(&mut self) {}
 }
 
 /// User-owned ceilings, separate from the package's exact content-approved request.
@@ -191,10 +284,14 @@ impl HostLimits {
         self.validate()?;
         requested.validate()?;
         if requested.fuel > self.max_fuel {
-            return Err(HostError::LimitExceeded { limit: "fuel exceeds user host limits".into() });
+            return Err(HostError::OverCeiling { limit: "fuel".into(), requested: requested.fuel, allowed: self.max_fuel });
         }
         if requested.memory_mib > self.max_memory_mib {
-            return Err(HostError::LimitExceeded { limit: "memory exceeds user host limits".into() });
+            return Err(HostError::OverCeiling {
+                limit: "memory_mib".into(),
+                requested: requested.memory_mib as u64,
+                allowed: self.max_memory_mib as u64,
+            });
         }
         Ok(())
     }
@@ -206,10 +303,13 @@ pub struct Limits {
     pub fuel: u64,
     pub memory_mib: usize,
     pub deadline_ms: u64,
+    /// The guest stack in KiB, when the default is too small (a real decoder needed about 16 MiB).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stack_kib: Option<u32>,
 }
 impl Default for Limits {
     fn default() -> Self {
-        Self { fuel: 10_000_000, memory_mib: 64, deadline_ms: 5000 }
+        Self { fuel: 10_000_000, memory_mib: 64, deadline_ms: 5000, stack_kib: None }
     }
 }
 impl Limits {
@@ -220,8 +320,11 @@ impl Limits {
         if !(1..=MAX_MEMORY_MIB).contains(&self.memory_mib) {
             return Err(invalid("runtime.limits.memory_mib", "must be 1..4096 (Wasm32)"));
         }
-        if !(1..=30_000).contains(&self.deadline_ms) {
-            return Err(invalid("runtime.limits.deadline_ms", "must be 1..30000"));
+        if !(1..=MAX_IMPORTER_DEADLINE_MS).contains(&self.deadline_ms) {
+            return Err(invalid("runtime.limits.deadline_ms", "must be 1..600000"));
+        }
+        if self.stack_kib.is_some_and(|kib| !(64..=65_536).contains(&kib)) {
+            return Err(invalid("runtime.limits.stack_kib", "must be 64..65536 (64 KiB to 64 MiB)"));
         }
         Ok(())
     }
@@ -235,6 +338,9 @@ pub struct Permissions {
     /// Sensitive command groups the plugin asks for, such as `file` or `doc`. Each is refused
     /// unless the app grants it too; which groups exist is the app's.
     pub command_groups: BTreeSet<String>,
+    /// An importer may read the other files in the folder of the file it imports (an assembly's
+    /// parts), through `source`. Nothing outside that folder, and only during that one import.
+    pub input_folder: bool,
     /// Reserved: refused in this API regardless of app grants.
     pub net: bool,
 }
@@ -281,13 +387,34 @@ fn empty_input_schema() -> Value {
     serde_json::json!({"type":"object","properties":{}})
 }
 
+/// What an entry is: a command the plugin runs on the open design, or an importer that turns a
+/// file of a claimed extension into a new design.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EntryKind {
+    #[default]
+    Command,
+    Importer,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(from = "EntryDeclaration")]
 pub struct Entry {
     pub name: String,
+    pub kind: EntryKind,
+    /// The file extensions an importer claims: lowercase, without the dot. Empty for a command.
+    pub extensions: Vec<String>,
     pub effect: Effect,
     pub input_schema: Value,
     pub slots: Vec<UiSlot>,
+}
+
+impl Entry {
+    /// Whether this importer claims `path`'s extension (ignoring case).
+    pub fn claims(&self, path: &Path) -> bool {
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+        self.kind == EntryKind::Importer && !extension.is_empty() && self.extensions.iter().any(|e| e.eq_ignore_ascii_case(extension))
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -301,7 +428,13 @@ enum EntryDeclaration {
 struct DeclaredEntry {
     name: String,
     #[serde(default)]
-    effect: Effect,
+    kind: EntryKind,
+    #[serde(default)]
+    extensions: Vec<String>,
+    /// A command's effect is `edit` unless it says `read`; an importer's is `open`. An importer that
+    /// says `edit` (the only effect it could state before `open` existed) still opens a new design.
+    #[serde(default)]
+    effect: Option<Effect>,
     #[serde(default = "empty_input_schema")]
     input_schema: Value,
     #[serde(default)]
@@ -310,10 +443,26 @@ struct DeclaredEntry {
 impl From<EntryDeclaration> for Entry {
     fn from(value: EntryDeclaration) -> Self {
         match value {
-            EntryDeclaration::Legacy(name) => Self { name, effect: Effect::Edit, input_schema: empty_input_schema(), slots: Vec::new() },
-            EntryDeclaration::Declared(value) => {
-                Self { name: value.name, effect: value.effect, input_schema: value.input_schema, slots: value.slots }
-            }
+            EntryDeclaration::Legacy(name) => Self {
+                name,
+                kind: EntryKind::Command,
+                extensions: Vec::new(),
+                effect: Effect::Edit,
+                input_schema: empty_input_schema(),
+                slots: Vec::new(),
+            },
+            EntryDeclaration::Declared(value) => Self {
+                name: value.name,
+                kind: value.kind,
+                extensions: value.extensions,
+                effect: match (value.kind, value.effect) {
+                    (EntryKind::Importer, None | Some(Effect::Edit)) => Effect::Open,
+                    (_, Some(effect)) => effect,
+                    (EntryKind::Command, None) => Effect::Edit,
+                },
+                input_schema: value.input_schema,
+                slots: value.slots,
+            },
         }
     }
 }
@@ -347,8 +496,27 @@ pub struct RuntimeManifest {
     pub limits: Limits,
     #[serde(default)]
     pub permissions: Permissions,
+    /// The format number of the data the plugin keeps in a design (capability `storage@0.1`),
+    /// 1 or more. The app stamps it on what the plugin saves; data saved with a higher number
+    /// (by a newer version of the plugin) is read-only to this version, and a lower one tells the
+    /// plugin to migrate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_format: Option<u32>,
 }
 impl RuntimeManifest {
+    /// Whether this runtime is an importer (world `importer-plugin`). A runtime's entries are all
+    /// commands or all importers.
+    pub fn is_importer(&self) -> bool {
+        self.entries.first().is_some_and(|e| e.kind == EntryKind::Importer)
+    }
+    /// The largest component this runtime may ship.
+    pub fn max_component_bytes(&self) -> usize {
+        if self.is_importer() { MAX_IMPORTER_COMPONENT_BYTES } else { MAX_COMPONENT_BYTES }
+    }
+    /// The importer entry that claims `path`'s extension, if any.
+    pub fn importer_for(&self, path: &Path) -> Option<&Entry> {
+        self.entries.iter().find(|e| e.claims(path))
+    }
     pub fn validate(&self) -> Result<()> {
         if !valid_id(self.module.strip_suffix(".wasm").unwrap_or("")) {
             return Err(invalid("runtime.module", "must be one lowercase .wasm file name"));
@@ -361,6 +529,7 @@ impl RuntimeManifest {
             if !valid_id(&entry.name) || !names.insert(&entry.name) {
                 return Err(invalid("runtime.entries", "requires 1..32 distinct ids"));
             }
+            validate_kind(self, entry)?;
             let field = format!("runtime.entries.{}.input_schema", entry.name);
             if !entry.input_schema.is_object() || entry.input_schema.get("type").and_then(Value::as_str) != Some("object") {
                 return Err(invalid(&field, "entry inputs must be an object schema"));
@@ -378,7 +547,113 @@ impl RuntimeManifest {
             return Err(invalid("runtime.commands", "requires at most 128 exact command names"));
         }
         self.permissions.validate()?;
-        self.limits.validate()
+        self.limits.validate()?;
+        if self.is_importer() {
+            if !self.commands.is_empty() {
+                return Err(invalid("runtime.commands", "an importer runs no app commands; leave the list empty"));
+            }
+            if !self.permissions.files.is_empty() || !self.permissions.command_groups.is_empty() {
+                return Err(invalid("runtime.permissions", "an importer reads only its file and, with input_folder, the files beside it"));
+            }
+        } else {
+            if self.permissions.input_folder {
+                return Err(invalid("runtime.permissions.input_folder", "only an importer reads the folder of the file it imports"));
+            }
+            if self.limits.deadline_ms > MAX_COMMAND_DEADLINE_MS {
+                return Err(invalid("runtime.limits.deadline_ms", "must be 1..30000"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// An importer entry claims 1..32 distinct lowercase extensions and edits (it makes a design);
+/// a command claims none. One runtime does not mix the two: they are different worlds.
+fn validate_kind(runtime: &RuntimeManifest, entry: &Entry) -> Result<()> {
+    let field = format!("runtime.entries.{}", entry.name);
+    if runtime.entries.iter().any(|other| other.kind != entry.kind) {
+        return Err(invalid("runtime.entries", "entries are all commands or all importers; ship an importer as a plugin of its own"));
+    }
+    match entry.kind {
+        EntryKind::Command if !entry.extensions.is_empty() => Err(invalid(format!("{field}.extensions"), "only an importer claims file extensions")),
+        EntryKind::Command if entry.effect == Effect::Open => {
+            Err(invalid(format!("{field}.effect"), "only an importer opens a file as a new design; a command's effect is read or edit"))
+        }
+        EntryKind::Command => Ok(()),
+        EntryKind::Importer => {
+            let mut seen = BTreeSet::new();
+            let valid = |e: &String| (1..=16).contains(&e.len()) && e.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+            if entry.extensions.is_empty() || entry.extensions.len() > MAX_EXTENSIONS || !entry.extensions.iter().all(|e| valid(e) && seen.insert(e))
+            {
+                return Err(invalid(
+                    format!("{field}.extensions"),
+                    "an importer claims 1..32 distinct lowercase extensions without the dot, such as \"f3d\"",
+                ));
+            }
+            if entry.effect != Effect::Open {
+                return Err(invalid(format!("{field}.effect"), "an importer opens a file as a new design: its effect is open"));
+            }
+            Ok(())
+        }
+    }
+}
+
+/// How bad one loss is: kept with a note, carried over in a lesser form, or left out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LossSeverity {
+    Info,
+    Degraded,
+    Dropped,
+}
+
+/// One thing an importer could not carry over as it was.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LossItem {
+    pub severity: LossSeverity,
+    /// What kind of loss it is, in the user's words, the same for every item of that kind
+    /// ("Parts of the file kept as they are"): the host shows one line per title with its count.
+    /// May be empty; the item then stands on its own.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    /// What it is about: a feature, body or part name. May be empty.
+    #[serde(default)]
+    pub subject: String,
+    pub message: String,
+    /// The importer's stable code for this kind of loss, for bug reports. Shown under Details.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub code: String,
+}
+
+/// What an importer returns besides the design: what it could not carry over. The host shows
+/// the summary and items to the user; `details` is the importer's own data, kept for programs.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LossReport {
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub items: Vec<LossItem>,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub details: Value,
+}
+pub const MAX_LOSS_ITEMS: usize = 4096;
+impl LossReport {
+    pub fn validate(&self) -> Result<()> {
+        let text = |value: &str, max: usize| value.chars().count() <= max && !value.chars().any(char::is_control);
+        if !text(&self.summary, 240) {
+            return Err(HostError::InvalidInput { field: "loss_report.summary".into(), reason: "at most 240 printable characters".into() });
+        }
+        if self.items.len() > MAX_LOSS_ITEMS
+            || !self.items.iter().all(|i| text(&i.subject, 256) && plain(&i.message, 1024) && text(&i.title, 120) && text(&i.code, 128))
+        {
+            return Err(HostError::InvalidInput {
+                field: "loss_report.items".into(),
+                reason: "at most 4096 items, each a printable message of at most 1024 characters, a subject of at most 256, a title of at most 120 and a code of at most 128".into(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -412,6 +687,33 @@ fn plain(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.chars().count() <= max && !value.chars().any(char::is_control)
 }
 
+/// A plugin that keeps data in designs asks for `storage@0.1` and says its data's format number;
+/// only a command plugin does: an importer makes a new design and keeps nothing in the open one.
+fn check_storage(manifest: &Manifest) -> Result<()> {
+    let storage = manifest.capabilities.iter().any(|capability| capability.starts_with("storage@"));
+    let runtime = manifest.runtime.as_ref();
+    let format = runtime.and_then(|runtime| runtime.data_format);
+    if !storage {
+        if format.is_some() {
+            return Err(invalid(
+                "runtime.data_format",
+                "only a plugin that keeps data in designs has a data format: add \"storage@0.1\" to capabilities",
+            ));
+        }
+        return Ok(());
+    }
+    if runtime.is_none_or(RuntimeManifest::is_importer) {
+        return Err(invalid(
+            "capabilities",
+            "storage keeps a command plugin's data in the open design; an importer or a plugin without a runtime has none",
+        ));
+    }
+    if !format.is_some_and(|format| (1..=MAX_DATA_FORMAT).contains(&format)) {
+        return Err(invalid("runtime.data_format", "a plugin with storage says its data's format number, 1 to 1000000, e.g. \"data_format\": 1"));
+    }
+    Ok(())
+}
+
 pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
     parse_manifest_for(text, folder, "the app")
 }
@@ -419,7 +721,7 @@ pub fn parse_manifest(text: &[u8], folder: &str) -> Result<Manifest> {
 /// [`parse_manifest`], naming the host `app` in a capability refusal.
 pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manifest> {
     if text.len() > MAX_MANIFEST_BYTES {
-        return Err(HostError::LimitExceeded { limit: "manifest size exceeds 16 KiB".into() });
+        return Err(HostError::LimitExceeded { limit: "manifest size exceeds 64 KiB".into() });
     }
     // A plugin from before capabilities names its API in `runtime.api`: say so plainly.
     if let Ok(value) = serde_json::from_slice::<Value>(text)
@@ -428,7 +730,7 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
         return Err(HostError::UnsupportedCapability {
             capability: api.clone(),
-            reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.1\"]); update the plugin"),
+            reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.2\"]); update the plugin"),
         });
     }
     let mut manifest: Manifest = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
@@ -452,11 +754,18 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
     }
     check_capabilities(&manifest.capabilities, app)?;
     if let Some(runtime) = &manifest.runtime {
-        if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
+        if runtime.is_importer() {
+            if !manifest.capabilities.iter().any(|capability| capability.starts_with("formats@")) {
+                return Err(invalid("capabilities", "an importer needs the formats capability: \"capabilities\": [\"formats@0.1\"]"));
+            }
+        } else if manifest.capabilities.iter().any(|capability| capability.starts_with("evaluate@")) {
+            return Err(invalid("capabilities", "evaluate checks an importer's result: only an importer (formats) asks for it"));
+        } else if !manifest.capabilities.iter().any(|capability| capability.starts_with("commands@")) {
             return Err(invalid("capabilities", "a plugin with a runtime needs the commands capability: \"capabilities\": [\"commands@0.1\"]"));
         }
         runtime.validate()?;
     }
+    check_storage(&manifest)?;
     Ok(manifest)
 }
 

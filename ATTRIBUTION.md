@@ -782,7 +782,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | tests/kernel-cases/import/4561-convert-box-mesh-with-a-zero-area-triangle/box-degenerate.stl | SolidCraft contributors | synthetic ASCII STL written by hand: a box with one zero-area triangle, for the kernel regression case of tangency-labs/solidcraft#4561 | MIT OR Apache-2.0 |
 | assets/locales/pending/theme-blur-ui.json | SolidCraft contributors | Original blur controls, notices and translations | MIT OR Apache-2.0 |
 | crates/ui-egui/tests/fixtures/theme-blur.json | SolidCraft contributors | Original theme for blur option scenarios and manager review | MIT OR Apache-2.0 |
-| assets/locales/ka.json | David Machakhelidze (devius) | Original Georgian translation of SolidCraft's English catalog, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/ka.json | Davit Matchakhelidze (devius) | Original Georgian translation of SolidCraft's English catalog, written with Claude Code from the meaning of each English string; terminology and doubtful strings decided by a native Georgian speaker; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/branding/logo/solidcraft-mark.svg | SolidCraft contributors | static SolidCraft mark: the five faces and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg (the final frame of assets/styles/web/loading-logo.svg), cropped to the mark's bounds; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/branding/logo/solidcraft-mark-mono-black.svg | SolidCraft contributors | one-colour (black) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
 | assets/branding/logo/solidcraft-mark-mono-white.svg | SolidCraft contributors | one-colour (white) version of assets/branding/logo/solidcraft-mark.svg, same paths; original artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
@@ -884,6 +884,22 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | crates/look/icons/design/svg/flat/discord.svg | Discord Inc. | the Discord Symbol (white) from the official Discord brand assets, https://discord.com/branding (https://cdn.discordapp.com/assets/content/a736b95923ddbc155e828651c92471292e40727655d770a06cec89c48ba0b41f.zip, Discord_Symbol_White/Discord-Symbol-White.svg); the path is unaltered apart from re-expression in absolute coordinates on the 64 grid, and it is drawn in white on a Discord-blurple pill; used only to link to SolidCraft's Discord server, as Discord's branding page allows | Discord trademark and brand asset, used under Discord's brand guidelines (https://discord.com/branding); not covered by LICENSE-BRAND, MIT or Apache-2.0 |
 | crates/look/icons/design/svg/flat/kofi.svg | Ko-fi Labs Limited | the Ko-fi symbol (the cup) from the official Ko-fi brand asset kit, https://more.ko-fi.com/brand-assets (https://storage.ko-fi.com/cdn/brandasset/v2/kofi_brandasset.zip, kofi_brandasset/kofi_symbol.svg); the paths and their layering are unaltered apart from re-expression in absolute coordinates on the 64 grid, and the white, dark and orange layers are drawn as one white mark on a coral pill, with the dark and orange layers cut out; used only to link to the SolidCraft Ko-fi page, as Ko-fi's brand assets page invites | Ko-fi trademark and brand asset, used under Ko-fi's brand asset terms (https://more.ko-fi.com/brand-assets); not covered by LICENSE-BRAND, MIT or Apache-2.0 |
 | tests/step-regressions/cylinder_rim_off_its_wall.step | SolidCraft contributors | written entity by entity from formulas (a cylinder whose upper rim lies 0.2 um outside its wall); import regression fixture | MIT OR Apache-2.0 |
+| assets/locales/pending/history-suppress-selected.json | SolidCraft contributors | Original History menu entries for suppressing several selected features | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/airfoil.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/panel_reset_height.svg | SolidCraft contributors | original flat panel menu icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| `assets/locales/pending/pinned-constraints-in-grid.json` | SolidCraft contributors | Original label and note for the pinned-constraints-in-grid preference | MIT OR Apache-2.0 |
+| `assets/locales/pending/plugins-review-commands.json` | SolidCraft contributors | Original plugin removal command labels and translations | MIT OR Apache-2.0 |
+| `assets/locales/pending/plugins-review-ui.json` | SolidCraft contributors | Original plugin installation approval and manager messages and translations | MIT OR Apache-2.0 |
+| tests/step-regressions/thread_crest_band.step | SolidCraft contributors | written entity by entity from formulas (a cylinder face round a helical groove two turns long); import regression fixture | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/briefcase.svg | SolidCraft contributors | original icon master (64 grid) | SolidCraft Brand and Interface Licence (LICENSE-BRAND) |
+| crates/look/icons/design/svg/flat/refresh.svg | SolidCraft contributors | original monochrome reload icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/flat/document_browser.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/look/icons/design/svg/model/insert_mesh.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| crates/io/tests/fixtures/pcb/treasure_hunt_pth.drl | Kikomali (SolidCraft contributor) | Plated drill file of the contributor's own "Treasure hunt" printed circuit board, exported unchanged as Excellon; Excellon import test fixture | MIT OR Apache-2.0 |
+| assets/locales/pending/extrude-cut-targets.json | SolidCraft contributors | Original Extrude Cut target tooltip and translations | MIT OR Apache-2.0 |
+| crates/io/tests/fixtures/pcb/treasure_hunt_outline.gko | Kikomali (SolidCraft contributor) | Board outline layer of the contributor's own "Treasure hunt" printed circuit board, exported unchanged as Gerber; Gerber import test fixture | MIT OR Apache-2.0 |
+| solidcore/crates/solidcore-ops/tests/data/issue_17595_imported_corner.smb | HuggingAI4Engineering | a 3 mm cube cut by the kernel from the part of CADGenBench task 248 (https://huggingface.co/datasets/HuggingAI4Engineering/cadgenbench-data, revision f76f9655), written as a native body file; boolean regression fixture | ODC-By-1.0 |
+| solidcore/crates/solidcore-ops/tests/data/issue_17595_imported_edge_off_its_face.record.json | HuggingAI4Engineering | a second 3 mm cube cut by the kernel from the same part (CADGenBench task 248, revision f76f9655), as a body record with one edge at the tolerance the STEP import gave it; boolean regression fixture | ODC-By-1.0 |
 
 ## Code adapted from sibling projects
 
@@ -957,9 +973,11 @@ copied into SolidCraft.
 
 ## Vendored renderer compatibility fix
 
-`vendor/egui-wgpu` is egui-wgpu 0.37.0 from https://github.com/emilk/egui
-(MIT OR Apache-2.0; both original licence texts are included). Rust sources and
-its original `egui.wgsl` shader are retained; no images or other artwork are copied.
+`vendor/egui` is egui 0.37.0 from https://github.com/emilk/egui, added whole with
+`git subtree` (MIT OR Apache-2.0; both original licence texts are included). It is a third-party
+project SolidCraft depends on, kept as upstream has it, with its own licences, images (as Git LFS
+pointers, never downloaded) and fonts. The egui-wgpu crate in it carries the
+compatibility fix below (`vendor/README.md` lists every change).
 SolidCraft's narrow patch selects a safe 1x MSAA path on the chosen OpenGL adapter
 and shares that effective count with the surface attachments and CAD callbacks.
 Vulkan, DirectX 12, Metal and WebGPU retain their requested multisampling.

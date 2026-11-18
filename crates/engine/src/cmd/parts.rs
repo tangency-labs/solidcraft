@@ -1,4 +1,4 @@
-//! Standard parts: ISO metric and ASME/ANSI inch fasteners, dowel pins and ball bearings,
+//! Standard parts: ISO and GOST metric and ASME/ANSI inch fasteners, dowel pins and ball bearings,
 //! generated in code from the dimensions in the public standards tables (no vendor geometry).
 //! Inch parts are tabled in inches and built in millimetres like the rest. Each part is inserted as
 //! its own component, built by ordinary features (so it stays parametric and editable), with a
@@ -18,13 +18,17 @@ use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_, vec3};
-use crate::schema::parts::{InsertedPart, PartFamily, PartsInsertParams, PartsLibrary, PartsLibraryParams, PartsResizeParams, ResizedPart};
+use crate::schema::parts::{
+    BoreOrigin, BorePick, BorePickKind, BoreSeat, InsertedPart, PartFamily, PartsInsertParams, PartsLibrary, PartsLibraryParams, PartsResizeParams,
+    PartsSeats, PartsSeatsParams, ResizedPart,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const LIBRARY_CONTRACT: TypedContract<PartsLibraryParams> = TypedContract::new();
 const INSERT_CONTRACT: TypedContract<PartsInsertParams> = TypedContract::new();
 const RESIZE_CONTRACT: TypedContract<PartsResizeParams> = TypedContract::new();
+const SEATS_CONTRACT: TypedContract<PartsSeatsParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parts.library", "Standard Parts", crate::checked!("parts.library", library))
@@ -45,7 +49,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<InsertedPart>)
         .params(
             "family (socket_head_cap_screw | button_head_cap_screw | countersunk_socket_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing | \
-         hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
+         hex_bolt_gost | socket_head_cap_screw_gost | set_screw_gost | hex_nut_gost | hex_nut_thin_gost | washer_gost | washer_large_gost | \
+         dowel_pin_gost | hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
          \"1/2\" for inch washers); length? (mm, inch parts too; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
          at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint, head on the picked face and \
          shank into the hole, whichever way the face points) or on a flat face (seated at that point, head out of the face), or a list of \
@@ -55,6 +60,13 @@ pub static COMMANDS: &[CommandSpec] = &[
          with point); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
          chosen), and with at: occurrences, joints (one per pick, in pick order)",
         ),
+    CommandSpec::new("parts.seats", "Resolve Fastener Seats", crate::checked!("parts.seats", resolve_seats))
+        .icon("fastener")
+        .noundo()
+        .read_only()
+        .contract(&SEATS_CONTRACT)
+        .output(output_schema_for::<PartsSeats>)
+        .params("picks: face or edge selections on bore walls or rims; countersunk_shank_diameter?: mm for a 90-degree countersink → one named joint origin, world point and axes and signed shank offset per distinct hole"),
     CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
         .icon("scale")
         .contract(&RESIZE_CONTRACT)
@@ -73,6 +85,14 @@ const FAMILIES: &[(&str, &str, &str)] = &[
     ("set_screw", "Hex socket set screw, flat point", "ISO 4026"),
     ("dowel_pin", "Parallel pin (dowel)", "ISO 8734"),
     ("bearing", "Deep groove ball bearing (envelope)", "ISO 15 (6000/6200/600 series)"),
+    ("hex_bolt_gost", "Hex head bolt", "GOST 7798-70"),
+    ("socket_head_cap_screw_gost", "Socket head cap screw", "GOST 11738-84"),
+    ("set_screw_gost", "Hex socket set screw, flat point", "GOST 11074-93"),
+    ("hex_nut_gost", "Hex nut", "GOST 5915-70"),
+    ("hex_nut_thin_gost", "Thin hex nut", "GOST 5916-70"),
+    ("washer_gost", "Plain washer, product grade A", "GOST 11371-78"),
+    ("washer_large_gost", "Large plain washer, product grade A", "GOST 6958-78"),
+    ("dowel_pin_gost", "Parallel pin, unhardened", "GOST 3128-70"),
     ("hex_cap_screw_inch", "Hex cap screw (inch)", "ASME B18.2.1"),
     ("hex_nut_inch", "Hex nut (inch)", "ASME B18.2.2"),
     ("washer_sae", "Plain washer, SAE (narrow)", "ANSI B18.22.1 Type A"),
@@ -239,6 +259,202 @@ const BEARINGS: [(&str, f64, f64, f64); 13] = [
     ("6203", 17.0, 40.0, 12.0),
     ("6204", 20.0, 47.0, 14.0),
 ];
+
+/// GOST 7798-70 hex head bolts and GOST 5915-70 hex nuts, both product grade B, with the coarse
+/// thread of GOST 24705: (size, d, pitch, width across flats S, bolt head height k, nut height m).
+/// The two standards share S; the bolts start at M6, so the smaller sizes have no k. M3.5, M14,
+/// M18, M22 and M27 are the sizes both standards put in brackets (not recommended).
+///
+/// S is the main table's. Each standard's appendix 2 also allows the widths older hardware has:
+/// 17, 19, 22 and 32 for M10, M12, M14 and M22. Those are not built here.
+const GOST_HEX: &[(&str, f64, f64, f64, Option<f64>, f64)] = &[
+    ("M1.6", 1.6, 0.35, 3.2, None, 1.3),
+    ("M2", 2.0, 0.4, 4.0, None, 1.6),
+    ("M2.5", 2.5, 0.45, 5.0, None, 2.0),
+    ("M3", 3.0, 0.5, 5.5, None, 2.4),
+    ("M3.5", 3.5, 0.6, 6.0, None, 2.8),
+    ("M4", 4.0, 0.7, 7.0, None, 3.2),
+    ("M5", 5.0, 0.8, 8.0, None, 4.7),
+    ("M6", 6.0, 1.0, 10.0, Some(4.0), 5.2),
+    ("M8", 8.0, 1.25, 13.0, Some(5.3), 6.8),
+    ("M10", 10.0, 1.5, 16.0, Some(6.4), 8.4),
+    ("M12", 12.0, 1.75, 18.0, Some(7.5), 10.8),
+    ("M14", 14.0, 2.0, 21.0, Some(8.8), 12.8),
+    ("M16", 16.0, 2.0, 24.0, Some(10.0), 14.8),
+    ("M18", 18.0, 2.5, 27.0, Some(12.0), 16.4),
+    ("M20", 20.0, 2.5, 30.0, Some(12.5), 18.0),
+    ("M22", 22.0, 2.5, 34.0, Some(14.0), 19.8),
+    ("M24", 24.0, 3.0, 36.0, Some(15.0), 21.5),
+    ("M27", 27.0, 3.0, 41.0, Some(17.0), 23.6),
+    ("M30", 30.0, 3.5, 46.0, Some(18.7), 25.6),
+    ("M36", 36.0, 4.0, 55.0, Some(22.5), 31.0),
+    ("M42", 42.0, 4.5, 65.0, Some(26.0), 34.0),
+    ("M48", 48.0, 5.0, 75.0, Some(30.0), 38.0),
+];
+
+/// GOST 5916-70 thin hex nuts, product grade B: (size, d, pitch, width across flats S, height m).
+/// M1, M1.4, M3.5, M14, M18, M22 and M27 are the sizes the standard puts in brackets. S is the
+/// main table's, as for the nuts above.
+const GOST_THIN_NUT: &[(&str, f64, f64, f64, f64)] = &[
+    ("M1", 1.0, 0.25, 3.2, 0.8),
+    ("M1.4", 1.4, 0.3, 3.2, 0.8),
+    ("M1.6", 1.6, 0.35, 3.2, 1.0),
+    ("M2", 2.0, 0.4, 4.0, 1.2),
+    ("M2.5", 2.5, 0.45, 5.0, 1.6),
+    ("M3", 3.0, 0.5, 5.5, 1.8),
+    ("M3.5", 3.5, 0.6, 6.0, 2.0),
+    ("M4", 4.0, 0.7, 7.0, 2.2),
+    ("M5", 5.0, 0.8, 8.0, 2.7),
+    ("M6", 6.0, 1.0, 10.0, 3.2),
+    ("M8", 8.0, 1.25, 13.0, 4.0),
+    ("M10", 10.0, 1.5, 16.0, 5.0),
+    ("M12", 12.0, 1.75, 18.0, 6.0),
+    ("M14", 14.0, 2.0, 21.0, 7.0),
+    ("M16", 16.0, 2.0, 24.0, 8.0),
+    ("M18", 18.0, 2.5, 27.0, 9.0),
+    ("M20", 20.0, 2.5, 30.0, 10.0),
+    ("M22", 22.0, 2.5, 34.0, 11.0),
+    ("M24", 24.0, 3.0, 36.0, 12.0),
+    ("M27", 27.0, 3.0, 41.0, 13.5),
+    ("M30", 30.0, 3.5, 46.0, 15.0),
+    ("M36", 36.0, 4.0, 55.0, 18.0),
+    ("M42", 42.0, 4.5, 65.0, 21.0),
+    ("M48", 48.0, 5.0, 75.0, 24.0),
+];
+
+/// GOST 11738-84 socket head cap screws, product grade A: (size, d, pitch, head diameter D, head
+/// height k, socket S, socket depth t, the last being the standard's minimum). The standard gives
+/// no pitch of its own: the thread is GOST 24705's, here with the coarse pitch. M14, M18, M22,
+/// M27 and M33 are the sizes it puts in brackets.
+const GOST_SHCS: &[(&str, f64, f64, f64, f64, f64, f64)] = &[
+    ("M3", 3.0, 0.5, 5.5, 3.0, 2.5, 1.3),
+    ("M4", 4.0, 0.7, 7.0, 4.0, 3.0, 2.0),
+    ("M5", 5.0, 0.8, 8.5, 5.0, 4.0, 2.5),
+    ("M6", 6.0, 1.0, 10.0, 6.0, 5.0, 3.0),
+    ("M8", 8.0, 1.25, 13.0, 8.0, 6.0, 4.0),
+    ("M10", 10.0, 1.5, 16.0, 10.0, 8.0, 5.0),
+    ("M12", 12.0, 1.75, 18.0, 12.0, 10.0, 6.0),
+    ("M14", 14.0, 2.0, 21.0, 14.0, 12.0, 7.0),
+    ("M16", 16.0, 2.0, 24.0, 16.0, 14.0, 8.0),
+    ("M18", 18.0, 2.5, 27.0, 18.0, 14.0, 9.0),
+    ("M20", 20.0, 2.5, 30.0, 20.0, 17.0, 10.0),
+    ("M22", 22.0, 2.5, 33.0, 22.0, 17.0, 11.0),
+    ("M24", 24.0, 3.0, 36.0, 24.0, 19.0, 12.0),
+    ("M27", 27.0, 3.0, 40.0, 27.0, 19.0, 13.5),
+    ("M30", 30.0, 3.5, 45.0, 30.0, 22.0, 15.5),
+    ("M33", 33.0, 3.5, 50.0, 33.0, 24.0, 17.5),
+    ("M36", 36.0, 4.0, 54.0, 36.0, 27.0, 19.0),
+];
+
+/// GOST 11074-93 hex socket set screws with a flat point: (size, d, pitch, socket S, socket
+/// depth t). t is the standard's minimum key engagement for the shorter screws of each size (the
+/// longer ones have a deeper socket), as in the ISO 4026 table above.
+const GOST_SET_SCREW: &[(&str, f64, f64, f64, f64)] = &[
+    ("M1.6", 1.6, 0.35, 0.7, 0.7),
+    ("M2", 2.0, 0.4, 0.9, 0.8),
+    ("M2.5", 2.5, 0.45, 1.3, 1.2),
+    ("M3", 3.0, 0.5, 1.5, 1.2),
+    ("M4", 4.0, 0.7, 2.0, 1.5),
+    ("M5", 5.0, 0.8, 2.5, 2.0),
+    ("M6", 6.0, 1.0, 3.0, 2.0),
+    ("M8", 8.0, 1.25, 4.0, 3.0),
+    ("M10", 10.0, 1.5, 5.0, 4.0),
+    ("M12", 12.0, 1.75, 6.0, 4.8),
+    ("M16", 16.0, 2.0, 8.0, 6.4),
+    ("M20", 20.0, 2.5, 10.0, 8.0),
+    ("M24", 24.0, 3.0, 12.0, 10.0),
+];
+
+/// GOST 11371-78 plain washers, version 1 (no chamfer), product grade A: (size, the thread
+/// diameter it is for; inner d1, outer d2, thickness s). Grade C has the same d2 and s and a
+/// wider hole.
+const GOST_WASHER: &[(&str, f64, f64, f64)] = &[
+    ("M1", 1.1, 3.5, 0.3),
+    ("M1.2", 1.3, 4.0, 0.3),
+    ("M1.4", 1.5, 4.0, 0.3),
+    ("M1.6", 1.7, 4.0, 0.3),
+    ("M2", 2.2, 5.0, 0.3),
+    ("M2.5", 2.7, 6.0, 0.5),
+    ("M3", 3.2, 7.0, 0.5),
+    ("M3.5", 3.7, 8.0, 0.5),
+    ("M4", 4.3, 9.0, 0.8),
+    ("M5", 5.3, 10.0, 1.0),
+    ("M6", 6.4, 12.0, 1.6),
+    ("M8", 8.4, 16.0, 1.6),
+    ("M10", 10.5, 20.0, 2.0),
+    ("M12", 13.0, 24.0, 2.5),
+    ("M14", 15.0, 28.0, 2.5),
+    ("M16", 17.0, 30.0, 3.0),
+    ("M18", 19.0, 34.0, 3.0),
+    ("M20", 21.0, 37.0, 3.0),
+    ("M22", 23.0, 39.0, 3.0),
+    ("M24", 25.0, 44.0, 4.0),
+    ("M27", 28.0, 50.0, 4.0),
+    ("M30", 31.0, 56.0, 4.0),
+    ("M33", 34.0, 60.0, 5.0),
+    ("M36", 37.0, 66.0, 5.0),
+    ("M39", 40.0, 72.0, 6.0),
+    ("M42", 43.0, 78.0, 7.0),
+    ("M48", 50.0, 92.0, 8.0),
+];
+
+/// GOST 6958-78 large plain washers, product grade A: (size, inner d1, outer d2, thickness s).
+/// The standard's M42 and M48 washers exist in grade C only, so they are not here.
+const GOST_LARGE_WASHER: &[(&str, f64, f64, f64)] = &[
+    ("M1", 1.1, 4.0, 0.3),
+    ("M1.2", 1.3, 4.0, 0.3),
+    ("M1.6", 1.7, 5.0, 0.3),
+    ("M2", 2.2, 6.0, 0.5),
+    ("M2.5", 2.7, 8.0, 0.5),
+    ("M3", 3.2, 9.0, 0.8),
+    ("M3.5", 3.7, 11.0, 0.8),
+    ("M4", 4.3, 12.0, 1.0),
+    ("M5", 5.3, 15.0, 1.2),
+    ("M6", 6.4, 18.0, 1.6),
+    ("M8", 8.4, 24.0, 2.0),
+    ("M10", 10.5, 30.0, 2.5),
+    ("M12", 13.0, 37.0, 3.0),
+    ("M14", 15.0, 44.0, 3.0),
+    ("M16", 17.0, 50.0, 3.0),
+    ("M18", 19.0, 56.0, 4.0),
+    ("M20", 21.0, 60.0, 4.0),
+    ("M22", 23.0, 66.0, 5.0),
+    ("M24", 25.0, 72.0, 5.0),
+    ("M27", 28.0, 85.0, 6.0),
+    ("M30", 31.0, 92.0, 6.0),
+    ("M36", 37.0, 110.0, 8.0),
+];
+
+/// GOST 3128-70 unhardened parallel pins: the diameters. The standard also allows 1.6 for 1.5
+/// and 32 for 30, in brackets.
+const GOST_PIN: [f64; 20] = [0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0, 40.0, 50.0];
+
+/// GOST 7798-70 bolt lengths (mm), without the ones the standard puts in brackets.
+const GOST_BOLT_LENGTHS: [f64; 35] = [
+    8.0, 10.0, 12.0, 14.0, 16.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 90.0, 100.0, 110.0, 120.0, 130.0,
+    140.0, 150.0, 160.0, 170.0, 180.0, 190.0, 200.0, 220.0, 240.0, 260.0, 280.0, 300.0,
+];
+
+/// GOST 11738-84 screw lengths (mm).
+const GOST_SCREW_LENGTHS: [f64; 32] = [
+    5.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 90.0, 100.0, 110.0, 120.0,
+    130.0, 140.0, 150.0, 160.0, 170.0, 180.0, 190.0, 200.0,
+];
+
+/// GOST 11074-93 set screw lengths (mm).
+const GOST_SET_SCREW_LENGTHS: [f64; 23] =
+    [2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0, 70.0, 80.0, 90.0, 100.0];
+
+/// GOST 3128-70 pin lengths (mm), without the 36 the standard puts in brackets.
+const GOST_PIN_LENGTHS: [f64; 43] = [
+    2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 25.0, 26.0, 28.0, 30.0, 32.0, 35.0, 40.0, 45.0, 50.0, 55.0,
+    60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 100.0, 110.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0, 250.0, 280.0,
+];
+
+/// The first of a family's standard lengths at or above `at_least`, else its longest.
+fn first_length(lengths: &[f64], at_least: f64) -> f64 {
+    lengths.iter().copied().find(|l| *l >= at_least).or(lengths.last().copied()).unwrap_or(at_least)
+}
 
 /// Standard lengths for screws, bolts and pins (mm).
 const LENGTHS: [f64; 22] =
@@ -470,6 +686,43 @@ fn shape(family: &str, size: &str, length: Option<f64>) -> std::result::Result<S
             let (_, s, m) = HEX_NUT.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("ISO 4032"))?;
             Shape::Nut { d, pitch: Some(pitch), s, m }
         }
+        "hex_bolt_gost" => {
+            let row = GOST_HEX.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied();
+            let Some((_, d, pitch, s, Some(k), _)) = row else { return Err(need("GOST 7798-70")) };
+            let len = length.unwrap_or_else(|| first_length(&GOST_BOLT_LENGTHS, 2.5 * d));
+            Shape::Screw { d, pitch: Some(pitch), len, head: Head::Hex { s, k }, socket: None }
+        }
+        "socket_head_cap_screw_gost" => {
+            let (_, d, pitch, dk, k, s, t) =
+                GOST_SHCS.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("GOST 11738-84"))?;
+            let len = length.unwrap_or_else(|| first_length(&GOST_SCREW_LENGTHS, 2.5 * d));
+            Shape::Screw { d, pitch: Some(pitch), len, head: Head::Round { dk, k }, socket: Some((s, t)) }
+        }
+        "set_screw_gost" => {
+            let (_, d, pitch, s, t) = GOST_SET_SCREW.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("GOST 11074-93"))?;
+            let len = length.unwrap_or_else(|| first_length(&GOST_SET_SCREW_LENGTHS, d));
+            Shape::Rod { d, pitch: Some(pitch), len, socket: Some((s, t)) }
+        }
+        "hex_nut_gost" => {
+            let (_, d, pitch, s, _, m) = GOST_HEX.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("GOST 5915-70"))?;
+            Shape::Nut { d, pitch: Some(pitch), s, m }
+        }
+        "hex_nut_thin_gost" => {
+            let (_, d, pitch, s, m) = GOST_THIN_NUT.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need("GOST 5916-70"))?;
+            Shape::Nut { d, pitch: Some(pitch), s, m }
+        }
+        "washer_gost" | "washer_large_gost" => {
+            let (table, standard) = if family == "washer_gost" { (GOST_WASHER, "GOST 11371-78") } else { (GOST_LARGE_WASHER, "GOST 6958-78") };
+            let (_, d1, d2, h) = table.iter().find(|r| r.0.eq_ignore_ascii_case(size)).copied().ok_or_else(|| need(standard))?;
+            Shape::Ring { d_in: d1, d_out: d2, h }
+        }
+        "dowel_pin_gost" => {
+            let d: f64 = size.trim_start_matches(['d', 'D', 'Ø']).trim().parse().map_err(|_| need("dowel pin"))?;
+            if !GOST_PIN.contains(&d) {
+                return Err(need("GOST 3128-70"));
+            }
+            Shape::Rod { d, pitch: None, len: length.unwrap_or_else(|| first_length(&GOST_PIN_LENGTHS, 4.0 * d)), socket: None }
+        }
         "hex_cap_screw_inch" => {
             let (nominal, d, _) = unified(size).ok_or_else(|| need("UNC/UNF"))?;
             let (_, f, h) = INCH_HEX_CAP.iter().find(|r| r.0 == nominal).copied().ok_or_else(|| need("ASME B18.2.1"))?;
@@ -679,6 +932,16 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
             "set_screw" => SET_SCREW.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "socket": r.1, "socket_depth": r.2})).collect(),
             "dowel_pin" => DOWEL.iter().map(|d| json!({"size": format!("{d}"), "d": d})).collect(),
             "bearing" => BEARINGS.iter().map(|r| json!({"size": r.0, "bore": r.1, "outer": r.2, "width": r.3})).collect(),
+            "hex_bolt_gost" => GOST_HEX.iter().filter_map(|r| r.4.map(|k| json!({"size": r.0, "d": r.1, "pitch": r.2, "across_flats": r.3, "head_height": k}))).collect(),
+            "socket_head_cap_screw_gost" => GOST_SHCS.iter().map(|r| json!({"size": r.0, "d": r.1, "pitch": r.2, "head_diameter": r.3, "head_height": r.4, "socket": r.5, "socket_depth": r.6})).collect(),
+            "set_screw_gost" => GOST_SET_SCREW.iter().map(|r| json!({"size": r.0, "d": r.1, "pitch": r.2, "socket": r.3, "socket_depth": r.4})).collect(),
+            "hex_nut_gost" => GOST_HEX.iter().map(|r| json!({"size": r.0, "d": r.1, "pitch": r.2, "across_flats": r.3, "height": r.5})).collect(),
+            "hex_nut_thin_gost" => GOST_THIN_NUT.iter().map(|r| json!({"size": r.0, "d": r.1, "pitch": r.2, "across_flats": r.3, "height": r.4})).collect(),
+            "washer_gost" | "washer_large_gost" => {
+                let table = if id == "washer_gost" { GOST_WASHER } else { GOST_LARGE_WASHER };
+                table.iter().map(|r| json!({"size": r.0, "inner": r.1, "outer": r.2, "thickness": r.3})).collect()
+            }
+            "dowel_pin_gost" => GOST_PIN.iter().map(|d| json!({"size": format!("{d}"), "d": d})).collect(),
             "hex_cap_screw_inch" => INCH_HEX_CAP
                 .iter()
                 .flat_map(|r| unified_sizes(r.0).into_iter().map(move |t| json!({"size": t.designation, "d": t.major_diameter, "pitch": t.pitch, "across_flats": r.1 * INCH, "head_height": r.2 * INCH})))
@@ -698,6 +961,10 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
             "socket_head_cap_screw" | "button_head_cap_screw" | "countersunk_socket_screw" | "hex_bolt" | "set_screw" | "dowel_pin" => {
                 Some(LENGTHS.to_vec())
             }
+            "hex_bolt_gost" => Some(GOST_BOLT_LENGTHS.to_vec()),
+            "socket_head_cap_screw_gost" => Some(GOST_SCREW_LENGTHS.to_vec()),
+            "set_screw_gost" => Some(GOST_SET_SCREW_LENGTHS.to_vec()),
+            "dowel_pin_gost" => Some(GOST_PIN_LENGTHS.to_vec()),
             "hex_cap_screw_inch" => Some(inch_lengths()),
             _ => None,
         };
@@ -737,7 +1004,7 @@ fn part_name(family: &str, size: &str, sh: &Shape) -> String {
 }
 
 /// A standard part's part number and description: its standard and size (`ISO 4762 M6x20`,
-/// `ASME B18.2.1 1/2-13 UNC x 2`, an inch washer with its series: `ANSI B18.22.1 1/2 N`), or a
+/// `GOST 7798-70 M12x60`, `ASME B18.2.1 1/2-13 UNC x 2`, an inch washer with its series: `ANSI B18.22.1 1/2 N`), or a
 /// bearing's designation, and the family's name with the size.
 fn identity(family: &str, size: &str, sh: &Shape) -> (String, String) {
     let size = match sh {
@@ -753,6 +1020,14 @@ fn identity(family: &str, size: &str, sh: &Shape) -> (String, String) {
         "washer" => "ISO 7089",
         "set_screw" => "ISO 4026",
         "dowel_pin" => "ISO 8734",
+        "hex_bolt_gost" => "GOST 7798-70",
+        "socket_head_cap_screw_gost" => "GOST 11738-84",
+        "set_screw_gost" => "GOST 11074-93",
+        "hex_nut_gost" => "GOST 5915-70",
+        "hex_nut_thin_gost" => "GOST 5916-70",
+        "washer_gost" => "GOST 11371-78",
+        "washer_large_gost" => "GOST 6958-78",
+        "dowel_pin_gost" => "GOST 3128-70",
         "hex_cap_screw_inch" => "ASME B18.2.1",
         "hex_nut_inch" => "ASME B18.2.2",
         "washer_sae" | "washer_uss" => "ANSI B18.22.1",
@@ -789,14 +1064,16 @@ fn set_identity(s: &mut Session, comp: u64, now: (String, String), was: Option<(
 /// The short label a family's parts are named with: `SHCS` in `SHCS M6x20`, `CSK` in `CSK M6x20`.
 fn label(family: &str) -> &'static str {
     match family {
-        "socket_head_cap_screw" => "SHCS",
+        "socket_head_cap_screw" | "socket_head_cap_screw_gost" => "SHCS",
         "button_head_cap_screw" => "BHCS",
         "countersunk_socket_screw" => "CSK",
-        "hex_bolt" => "Hex Bolt",
-        "hex_nut" => "Hex Nut",
-        "washer" => "Washer",
-        "set_screw" => "Set Screw",
-        "dowel_pin" => "Dowel Pin",
+        "hex_bolt" | "hex_bolt_gost" => "Hex Bolt",
+        "hex_nut" | "hex_nut_gost" => "Hex Nut",
+        "washer" | "washer_gost" => "Washer",
+        "set_screw" | "set_screw_gost" => "Set Screw",
+        "dowel_pin" | "dowel_pin_gost" => "Dowel Pin",
+        "hex_nut_thin_gost" => "Thin Hex Nut",
+        "washer_large_gost" => "Large Washer",
         "hex_cap_screw_inch" => "Hex Cap Screw",
         "hex_nut_inch" => "Hex Nut",
         "washer_sae" => "SAE Washer",
@@ -839,34 +1116,13 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     // Each hole's occurrence is found before the part exists, so a pick off every body fails the
     // insert before anything is made.
     let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
-    let mut holes: Vec<(Vec3, u64)> = Vec::new();
-    let mut seats: Vec<(u64, HoleWall)> = Vec::new();
-    // Picks on a flat face, off every hole: the point and the face's outward normal (world).
-    let mut faces: Vec<Option<Vec3>> = Vec::new();
-    for a in hole_picks(p, cmd)? {
+    let mut seats = Vec::new();
+    for (i, a) in hole_picks(p, cmd)?.into_iter().enumerate() {
         let found = hole_wall(s, a);
-        let face = if found.is_none() { outward_normal(s, a) } else { None };
+        let flat = if found.is_none() { outward_normal(s, a) } else { None };
         let wall = found.unwrap_or(HoleWall { at: a, seat: a, axis: None, ends: None, open: true, radius: 0.0 });
         let host = super::joints::occurrence_at(s, wall.at).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?;
-        // A rim is drawn as more than one edge, and one click on it picks them all; a hole can
-        // also be picked at both its ends (#12191). The picks of one hole seat one part, at an
-        // open end: seated at a blind hole's floor it would stand on its head in the material.
-        match seats.iter().position(|(h, w)| *h == host && w.same_hole(&wall)) {
-            Some(i) => {
-                if !seats.get(i).is_some_and(|(_, w)| w.open)
-                    && wall.open
-                    && let (Some(seat), Some(hole)) = (seats.get_mut(i), holes.get_mut(i))
-                {
-                    *hole = (wall.at, host);
-                    seat.1 = wall;
-                }
-            }
-            None => {
-                holes.push((wall.at, host));
-                seats.push((host, wall));
-                faces.push(face);
-            }
-        }
+        add_seat(&mut seats, i, host, wall, flat);
     }
     let name = str_(p, "name").map(str::to_string).unwrap_or_else(|| part_name(&family, &size, &sh));
     let active = s.active_component;
@@ -889,12 +1145,12 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // The part's −z (its shank) mates with the seat's outward z; flipped, its +z does.
     let part_z = if flip { [0.0, 0.0, 1.0] } else { [0.0, 0.0, -1.0] };
-    if !holes.is_empty() {
+    if !seats.is_empty() {
         // The first hole has the placement the component came with; each further hole places the
         // same part again. All are made before any is seated, while each is still at the part's
         // own origin, where the joint below takes the part's seating point to be.
         let mut occurrences = vec![occ];
-        for _ in 1..holes.len() {
+        for _ in 1..seats.len() {
             occurrences.push(
                 run(s, "occurrence.copy", json!({"component": comp}))?["occurrence"]
                     .as_u64()
@@ -902,7 +1158,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
             );
         }
         let mut joints = Vec::new();
-        for (i, (((a, h), o), face)) in holes.into_iter().zip(&occurrences).zip(faces).enumerate() {
+        for (i, ((_, h, wall, face), o)) in seats.into_iter().zip(&occurrences).enumerate() {
             // Seat it: its axis on the hole's, its seating plane on the hole's face, the shank
             // going into the hole (the joint mates the part's −z with the face's outward z).
             let seat = if i == 0 { format!("{name} seat") } else { format!("{name} seat {}", i + 1) };
@@ -913,17 +1169,11 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
             // signed: a clearance hole is wider than the shank and the cone goes deeper, a tap
             // drill is narrower and the cone goes higher. With no bore known, there is no move.
             let at_rim = match sh {
-                Shape::Screw { d, head: Head::Countersunk { k, .. }, .. } => {
-                    let clearance = seats.get(i).map_or(0.0, |(_, w)| if w.radius > 0.0 { w.radius - d / 2.0 } else { 0.0 });
-                    [0.0, 0.0, -k + clearance]
-                }
+                Shape::Screw { d, head: Head::Countersunk { k, .. }, .. } => [0.0, 0.0, -k - wall.shank_offset(Some(d))],
                 _ => [0.0, 0.0, 0.0],
             };
             // On a flat face: seated at the picked point, its z the face's outward normal.
-            let host = match face {
-                Some(n) => json!({"occurrence": h, "point": [a.x, a.y, a.z], "z": [n.x, n.y, n.z]}),
-                None => json!({"occurrence": h, "circle": a}),
-            };
+            let host = wall.origin(h, face);
             let j = run(s, "joint.create", json!({"type": "rigid", "a": host, "b": {"occurrence": o, "point": at_rim, "z": part_z}, "name": seat}))?;
             joints.push(j["joint"].as_u64().ok_or_else(|| bad(cmd, "the joint has no id"))?);
         }
@@ -1025,6 +1275,17 @@ struct HoleWall {
 }
 
 impl HoleWall {
+    fn origin(&self, occurrence: u64, flat: Option<Vec3>) -> Value {
+        match flat {
+            Some(n) => json!({"occurrence": occurrence, "point": self.at, "z": n}),
+            None => json!({"occurrence": occurrence, "circle": self.at}),
+        }
+    }
+
+    fn shank_offset(&self, diameter: Option<f64>) -> f64 {
+        diameter.filter(|_| self.radius > 0.0).map_or(0.0, |d| d / 2.0 - self.radius)
+    }
+
     /// The two picks seat on one hole: at one point, or on one axis line with walls that meet.
     /// Two blind holes drilled towards each other from opposite faces share an axis, but solid
     /// material between their walls keeps them two holes.
@@ -1058,26 +1319,117 @@ fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
                     let along = v.dot(c.axis);
                     let on_wall = ((v - c.axis * along).len() - c.radius).abs() < 1e-3 && along > c.start && along < c.end;
                     if on_wall {
-                        let axis: Vec3 = c.axis * 1.0;
-                        // The end of the wall nearer the pick, and a point on the axis just past it.
-                        let (end, out) = if along - c.start < c.end - along { (c.start, -1.0) } else { (c.end, 1.0) };
-                        let past = c.axis_point + axis * (end + out * (c.end - c.start).min(1.0) * 0.25);
-                        let open = !matches!(b.body.classify_point(past), Ok(solidcraft_doc::kernel::PointClass::Inside));
-                        let ends = [c.axis_point + axis * c.start, c.axis_point + axis * c.end];
-                        return Some(HoleWall {
-                            at: q,
-                            seat: c.axis_point + axis * along,
-                            axis: Some(axis),
-                            ends: Some(ends),
-                            open,
-                            radius: c.radius,
-                        });
+                        return Some(wall_from_cylinder(&b.body, c, q));
                     }
                 }
             }
         }
     }
     None
+}
+
+/// Keep the first pick's position in the batch. Prefer an open end over a blind floor.
+fn add_seat<K: PartialEq, T>(seats: &mut Vec<(usize, K, HoleWall, T)>, index: usize, key: K, wall: HoleWall, details: T) {
+    if let Some((_, _, prior, extra)) = seats.iter_mut().find(|(_, k, w, _)| *k == key && w.same_hole(&wall)) {
+        if !prior.open && wall.open {
+            *prior = wall;
+            *extra = details;
+        }
+    } else {
+        seats.push((index, key, wall, details));
+    }
+}
+
+fn wall_from_cylinder(body: &solidcraft_kernel::Body, c: solidcraft_kernel::CylinderFace, q: Vec3) -> HoleWall {
+    let axis = Vec3::from(c.axis);
+    let along = (q - c.axis_point).dot(axis);
+    let (end, out) = if along - c.start < c.end - along { (c.start, -1.0) } else { (c.end, 1.0) };
+    let past = c.axis_point + axis * (end + out * (c.end - c.start).min(1.0) * 0.25);
+    HoleWall {
+        at: q,
+        seat: c.axis_point + axis * along,
+        axis: Some(axis),
+        ends: Some([c.axis_point + axis * c.start, c.axis_point + axis * c.end]),
+        open: !matches!(body.classify_point(past), Ok(solidcraft_kernel::PointClass::Inside)),
+        radius: c.radius,
+    }
+}
+
+/// A structured pick identifies the surface and placement, including coincident copies.
+fn picked_wall(body: &solidcraft_doc::ModelBody, pick: &BorePick) -> Option<(HoleWall, usize)> {
+    let tol = body.display_tol().max(1e-6);
+    let faces: Vec<usize> = match pick.kind {
+        BorePickKind::Face => vec![pick.index],
+        BorePickKind::Edge => {
+            let rim = solidcraft_kernel::edge_circle(&body.body, pick.index)?;
+            let v = pick.point.0 - rim.center;
+            if v.dot(rim.axis).abs() > tol || (v.len() - rim.radius).abs() > tol {
+                return None;
+            }
+            body.body.record().edges.get(pick.index)?.uses.iter().map(|u| u.face as usize).collect()
+        }
+    };
+    for face in faces {
+        let Some(c) = solidcraft_kernel::cylinder_between_rims(&body.body, face).filter(|c| c.internal) else { continue };
+        let Some(on) = body.body.point_lies_on_face(face, pick.point.0, tol).ok().flatten() else { continue };
+        let along = (on - c.axis_point).dot(c.axis);
+        // A point just inside the wall makes a rim pick unambiguous for the circle joint.
+        let inset = (c.end - c.start).min(1.0) * 0.1;
+        let q = on + c.axis * (along.clamp(c.start + inset, c.end - inset) - along);
+        return Some((wall_from_cylinder(&body.body, c, q), face));
+    }
+    None
+}
+
+fn resolve_seats(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "parts.seats";
+    let args: PartsSeatsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if args.picks.is_empty() || args.picks.len() > MAX_HOLES {
+        return Err(bad(cmd, "`picks` takes 1 to 1000 bore wall or rim picks"));
+    }
+    if args.countersunk_shank_diameter.is_some_and(|d| !d.is_finite() || d <= 0.0) {
+        return Err(bad(cmd, "`countersunk_shank_diameter` must be positive"));
+    }
+    let world = s.world_state()?;
+    let st = s.model.state();
+    let placements = s.doc.body_frames_with_source(&st);
+    let mut distinct = Vec::new();
+    for (i, pick) in args.picks.iter().enumerate() {
+        let body = world.body(&pick.body).ok_or_else(|| bad(cmd, format!("no body `{}`", pick.body)))?;
+        let (wall, face) = picked_wall(body, pick).ok_or_else(|| bad(cmd, format!("pick {} must be on a bore wall or its rim", i + 1)))?;
+        add_seat(&mut distinct, i, &pick.body, wall, face);
+    }
+    let mut seats = Vec::new();
+    for (pick_index, body, wall, face) in distinct {
+        let (_, source, component, path, _) =
+            placements.iter().find(|(name, ..)| name == body).ok_or_else(|| bad(cmd, "the picked placement is missing"))?;
+        let source_body = st.body(source).ok_or_else(|| bad(cmd, "the picked bore body is missing"))?;
+        let circle = solidcraft_doc::naming::face_names(source_body)
+            .get(face)
+            .filter(|n| !n.is_empty())
+            .cloned()
+            .ok_or_else(|| bad(cmd, "the bore needs a named cylindrical wall"))?;
+        let inv =
+            s.doc.path_transform(*component, path).and_then(|m| solidcraft_doc::mat_inverse(&m)).ok_or_else(|| bad(cmd, "invalid bore placement"))?;
+        let mut snap =
+            solidcraft_doc::joints::Snap::CircleCenter { pick: solidcraft_doc::apply_point(&inv, wall.at), face: Some(circle), end: None, x: None };
+        solidcraft_doc::joints::pin_end(&s.doc, &st, *component, &mut snap);
+        let solidcraft_doc::joints::Snap::CircleCenter { face: Some(circle), end: Some(end), .. } = snap else {
+            return Err(bad(cmd, "the bore needs a named end face"));
+        };
+        let origin = BoreOrigin { body: source.clone(), occurrence: path.last().copied().unwrap_or(0), path: path.clone(), circle, end };
+        let resolved = super::joints::origin_param(s, Some(&reply(cmd, &origin)?), cmd)?;
+        let m = s.doc.origin_world(&st, &resolved)?;
+        seats.push(BoreSeat {
+            pick_index,
+            origin,
+            point: [m[3][0], m[3][1], m[3][2]],
+            normal: [m[2][0], m[2][1], m[2][2]],
+            x_dir: [m[0][0], m[0][1], m[0][2]],
+            shank_offset: wall.shank_offset(args.countersunk_shank_diameter),
+        });
+    }
+    reply(cmd, PartsSeats { seats, param_warnings: Vec::new() })
 }
 
 fn shape_len(sh: &Shape) -> Option<f64> {
@@ -1158,6 +1510,8 @@ mod tests {
     use solidcraft_geom::prelude::*;
 
     use crate::Session;
+    use crate::params::vec3;
+    use solidcore_record::Vec3;
 
     fn run(s: &mut Session, id: &str, p: Value) -> Value {
         match s.execute(id, &p) {
@@ -1175,6 +1529,64 @@ mod tests {
             .filter(|b| s.doc.model_body_component(b) == comp)
             .fold(solidcraft_geom::Aabb3::EMPTY, |a, b| a.union(&b.mesh().bounds()));
         (b.min, b.max)
+    }
+
+    #[test]
+    fn bore_seats_choose_the_open_end_and_return_a_reusable_origin() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40, "width":30, "height":20, "body_name":"Block"}));
+        run(&mut s, "solid.hole", json!({"position":[20,15,20], "diameter":6.4, "depth":10}));
+        let st = s.model.state();
+        let b = &st.body("Block").unwrap().body;
+        let rim_pick = |z: f64| {
+            let (index, rim) = (0..b.record().edges.len())
+                .find_map(|i| {
+                    let rim = solidcraft_kernel::edge_circle(b, i)?;
+                    ((rim.center.z - z).abs() < 1e-6).then_some((i, rim))
+                })
+                .unwrap();
+            json!({"body":"Block", "type":"edge", "index":index, "point":rim.start})
+        };
+        let (floor, rim) = (rim_pick(10.0), rim_pick(20.0));
+        let before = s.doc.clone();
+        let r = run(&mut s, "parts.seats", json!({"picks":[floor, rim], "countersunk_shank_diameter":6.0}));
+        assert_eq!(before, s.doc);
+        let seats = r["seats"].as_array().unwrap();
+        assert_eq!(seats.len(), 1);
+        let seat = &seats[0];
+        assert_eq!(seat["pick_index"], 0);
+        assert!(vec3(&seat["point"]).unwrap().dist(Vec3::new(20., 15., 20.)) < 1e-6, "{seat}");
+        assert!(vec3(&seat["normal"]).unwrap().dist(Vec3::Z) < 1e-6, "{seat}");
+        assert!((seat["shank_offset"].as_f64().unwrap() + 0.2).abs() < 1e-6);
+        let origin = super::super::joints::origin_param(&s, Some(&seat["origin"]), "joint.create").unwrap();
+        let frame = s.doc.origin_world(&st, &origin).unwrap();
+        assert_eq!(seat["point"], json!(&frame[3][..3]));
+        assert_eq!(seat["x_dir"], json!(&frame[0][..3]));
+    }
+
+    #[test]
+    fn bore_seats_reject_flat_faces_and_exterior_cylinders() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40, "width":30, "height":20, "body_name":"Block"}));
+        run(&mut s, "solid.hole", json!({"position":[20,15,20], "diameter":6.4, "depth":10}));
+        let st = s.model.state();
+        let b = &st.body("Block").unwrap().body;
+        let face = (0..b.face_count())
+            .find(|&face| {
+                matches!(solidcraft_kernel::face_surface(b, face),
+            Some(solidcraft_kernel::FaceSurface::Plane { normal, .. }) if normal.z > 0.99)
+            })
+            .unwrap();
+        let err = s.execute("parts.seats", &json!({"picks":[{"body":"Block", "type":"face", "index":face, "point":[23.2,15.,20.]}]})).unwrap_err();
+        assert!(err.to_string().contains("bore wall"), "{err}");
+
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":5, "height":12,"body_name":"Boss"}));
+        let st = s.model.state();
+        let b = &st.body("Boss").unwrap().body;
+        let face = (0..b.face_count()).find(|&f| solidcraft_kernel::cylinder_between_rims(b, f).is_some()).unwrap();
+        let err = s.execute("parts.seats", &json!({"picks":[{"body":"Boss", "type":"face", "index":face, "point":[5.,0.,1.]}]})).unwrap_err();
+        assert!(err.to_string().contains("bore wall"), "{err}");
     }
 
     #[test]
@@ -1299,6 +1711,153 @@ mod tests {
             ("hex_nut_inch", "1/2"),
             ("washer_sae", "9/16"),
             ("washer_uss", "1/2-13 UNC"),
+        ] {
+            assert!(Session::default().execute("parts.insert", &json!({"family": family, "size": size})).is_err(), "{family} {size}");
+        }
+    }
+
+    /// The GOST families are metric families of their own: hex bolts (GOST 7798-70), socket head cap
+    /// screws (GOST 11738-84), set screws (GOST 11074-93), hex nuts (GOST 5915-70), thin hex nuts
+    /// (GOST 5916-70), plain and large washers (GOST 11371-78, GOST 6958-78) and parallel pins
+    /// (GOST 3128-70). Their sizes, lengths and part numbers are their standards', which run further
+    /// than the ISO tables here and differ from them at some sizes.
+    #[test]
+    fn gost_parts_follow_the_gost_tables() {
+        let across_corners = |af: f64| af / (std::f64::consts::PI / 6.0).cos();
+        let part_number = |s: &Session, component: &Value| {
+            let comp = component.as_u64().unwrap_or(0);
+            s.doc.components.iter().find(|c| c.id == comp).and_then(|c| c.metadata.text(solidcraft_doc::metadata::PART_NUMBER)).map(str::to_string)
+        };
+        let library = |family: &str| run(&mut Session::default(), "parts.library", json!({"family": family}));
+        // A family's standard, its first and last size and how many it has, and the same of its lengths.
+        let range = |l: &Value| -> (String, String, String, usize, Option<(f64, f64, usize)>) {
+            let sizes: Vec<&str> = l["sizes"].as_array().map(|a| a.iter().filter_map(|x| x["size"].as_str()).collect()).unwrap_or_default();
+            let lengths: Vec<f64> = l["lengths"].as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+            (
+                l["standard"].as_str().unwrap_or_default().to_string(),
+                sizes.first().copied().unwrap_or_default().to_string(),
+                sizes.last().copied().unwrap_or_default().to_string(),
+                sizes.len(),
+                lengths.first().zip(lengths.last()).map(|(a, b)| (*a, *b, lengths.len())),
+            )
+        };
+        let row = |l: &Value, size: &str| l["sizes"].as_array().and_then(|a| a.iter().find(|x| x["size"] == size)).cloned().unwrap_or_default();
+        // They are listed with the metric families, after the ISO ones.
+        let all = run(&mut Session::default(), "parts.library", json!({}));
+        let metric: Vec<&str> = all["families"]
+            .as_array()
+            .map(|a| a.iter().filter(|f| f["system"] == "metric").filter_map(|f| f["family"].as_str()).collect())
+            .unwrap_or_default();
+        let gost = [
+            "hex_bolt_gost",
+            "socket_head_cap_screw_gost",
+            "set_screw_gost",
+            "hex_nut_gost",
+            "hex_nut_thin_gost",
+            "washer_gost",
+            "washer_large_gost",
+            "dowel_pin_gost",
+        ];
+        assert_eq!(metric[metric.len() - gost.len()..], gost, "{metric:?}");
+        // Each family's range is its standard's.
+        for (family, standard, first, last, sizes, lengths) in [
+            ("hex_bolt_gost", "GOST 7798-70", "M6", "M48", 15, Some((8.0, 300.0, 35))),
+            ("socket_head_cap_screw_gost", "GOST 11738-84", "M3", "M36", 17, Some((5.0, 200.0, 32))),
+            ("set_screw_gost", "GOST 11074-93", "M1.6", "M24", 13, Some((2.0, 100.0, 23))),
+            ("hex_nut_gost", "GOST 5915-70", "M1.6", "M48", 22, None),
+            ("hex_nut_thin_gost", "GOST 5916-70", "M1", "M48", 24, None),
+            ("washer_gost", "GOST 11371-78", "M1", "M48", 27, None),
+            ("washer_large_gost", "GOST 6958-78", "M1", "M36", 22, None),
+            ("dowel_pin_gost", "GOST 3128-70", "0.6", "50", 20, Some((2.0, 280.0, 43))),
+        ] {
+            let l = library(family);
+            assert_eq!(range(&l), (standard.to_string(), first.to_string(), last.to_string(), sizes, lengths), "{family}");
+            assert_eq!(l["system"], "metric", "{family}");
+        }
+        let m12 = row(&library("hex_bolt_gost"), "M12");
+        assert_eq!((m12["pitch"].as_f64(), m12["across_flats"].as_f64(), m12["head_height"].as_f64()), (Some(1.75), Some(18.0), Some(7.5)));
+        let m22 = row(&library("socket_head_cap_screw_gost"), "M22");
+        let dims = [&m22["head_diameter"], &m22["head_height"], &m22["socket"], &m22["socket_depth"]].map(|v| v.as_f64());
+        assert_eq!(dims, [Some(33.0), Some(22.0), Some(17.0), Some(11.0)]);
+        // An M12 x 60 bolt: 18 across flats, head 7.5 high, shank 60 long, an M12 thread on it.
+        let mut s = Session::default();
+        let out = run(&mut s, "parts.insert", json!({"family": "hex_bolt_gost", "size": "M12", "length": 60}));
+        assert_eq!(out["name"], "Hex Bolt M12x60");
+        assert_eq!(part_number(&s, &out["component"]).as_deref(), Some("GOST 7798-70 M12x60"));
+        let (lo, hi) = bbox(&s, "Hex Bolt M12x60");
+        let w = (hi.x - lo.x).max(hi.y - lo.y);
+        assert!((w - across_corners(18.0)).abs() < 1e-6 && (lo.z + 60.0).abs() < 1e-6 && (hi.z - 7.5).abs() < 1e-6, "{lo:?} {hi:?}");
+        assert!(s.model.state().threads.iter().any(|t| t.designation.starts_with("M12")), "{:?}", s.model.state().threads);
+        // A default length is the first of the standard's at or above 2.5 d for a bolt or a screw
+        // (120 for an M48 bolt, where the ISO families' lengths stop), d for a set screw and 4 d for
+        // a pin.
+        for (family, size, name) in [
+            ("hex_bolt_gost", "M12", "Hex Bolt M12x30"),
+            ("hex_bolt_gost", "M48", "Hex Bolt M48x120"),
+            ("socket_head_cap_screw_gost", "M36", "SHCS M36x90"),
+            ("set_screw_gost", "M16", "Set Screw M16x16"),
+            ("dowel_pin_gost", "0.6", "Dowel Pin 0.6x2.5"),
+            ("dowel_pin_gost", "50", "Dowel Pin 50x200"),
+        ] {
+            assert_eq!(run(&mut Session::default(), "parts.insert", json!({"family": family, "size": size}))["name"], name, "{family} {size}");
+        }
+        // An M22 x 60 socket head cap screw: head Ø33 x 22, shank 60 long.
+        let mut c = Session::default();
+        let out = run(&mut c, "parts.insert", json!({"family": "socket_head_cap_screw_gost", "size": "M22", "length": 60}));
+        assert_eq!(part_number(&c, &out["component"]).as_deref(), Some("GOST 11738-84 M22x60"));
+        let (lo, hi) = bbox(&c, "SHCS M22x60");
+        assert!((hi.x - lo.x - 33.0).abs() < 1e-6 && (lo.z + 60.0).abs() < 1e-6 && (hi.z - 22.0).abs() < 1e-6, "{lo:?} {hi:?}");
+        // An M16 x 16 set screw and a 10 x 40 pin: plain rods below the seating plane.
+        for (family, size, name, number, d, len) in [
+            ("set_screw_gost", "M16", "Set Screw M16x16", "GOST 11074-93 M16x16", 16.0, 16.0),
+            ("dowel_pin_gost", "10", "Dowel Pin 10x40", "GOST 3128-70 10x40", 10.0, 40.0),
+        ] {
+            let mut r = Session::default();
+            let out = run(&mut r, "parts.insert", json!({"family": family, "size": size}));
+            assert_eq!(part_number(&r, &out["component"]).as_deref(), Some(number));
+            let (lo, hi) = bbox(&r, name);
+            assert!((hi.x - lo.x - d).abs() < 1e-6 && (lo.z + len).abs() < 1e-6 && hi.z.abs() < 1e-6, "{family}: {lo:?} {hi:?}");
+        }
+        // Nuts: an M27 nut is 41 across flats and 23.6 high (ISO 4032 has 23.8), an M12 thin nut
+        // 18 across flats and 6 high.
+        for (family, size, name, number, af, m) in [
+            ("hex_nut_gost", "M27", "Hex Nut M27", "GOST 5915-70 M27", 41.0, 23.6),
+            ("hex_nut_thin_gost", "M12", "Thin Hex Nut M12", "GOST 5916-70 M12", 18.0, 6.0),
+        ] {
+            let mut n = Session::default();
+            let out = run(&mut n, "parts.insert", json!({"family": family, "size": size}));
+            assert_eq!(part_number(&n, &out["component"]).as_deref(), Some(number));
+            let (lo, hi) = bbox(&n, name);
+            let (w, h) = ((hi.x - lo.x).max(hi.y - lo.y), hi.z - lo.z);
+            assert!((w - across_corners(af)).abs() < 1e-6 && (h - m).abs() < 1e-6, "{family}: {w} {h}");
+        }
+        // Washers: M42 is Ø78 x 7, and a large M12 washer Ø37 x 3 where the plain one is Ø24 x 2.5.
+        for (family, size, name, number, od, t) in [
+            ("washer_gost", "M42", "Washer M42", "GOST 11371-78 M42", 78.0, 7.0),
+            ("washer_gost", "M12", "Washer M12", "GOST 11371-78 M12", 24.0, 2.5),
+            ("washer_large_gost", "M12", "Large Washer M12", "GOST 6958-78 M12", 37.0, 3.0),
+        ] {
+            let mut w = Session::default();
+            let out = run(&mut w, "parts.insert", json!({"family": family, "size": size}));
+            assert_eq!(part_number(&w, &out["component"]).as_deref(), Some(number));
+            let (lo, hi) = bbox(&w, name);
+            assert!((hi.x - lo.x - od).abs() < 1e-6 && (hi.z - lo.z - t).abs() < 1e-6, "{family} {size}: {lo:?} {hi:?}");
+        }
+        // Resizing keeps the family, and a size its standard does not have is refused: the bolts
+        // start at M6, the screws at M3, the large grade A washers stop at M36.
+        let r = run(&mut s, "parts.resize", json!({"component": "Hex Bolt M12x60", "size": "M16", "length": 80}));
+        assert_eq!(r["name"], "Hex Bolt M16x80");
+        assert_eq!(part_number(&s, &r["component"]).as_deref(), Some("GOST 7798-70 M16x80"));
+        for (family, size) in [
+            ("hex_bolt_gost", "M5"),
+            ("hex_bolt_gost", "M33"),
+            ("socket_head_cap_screw_gost", "M2"),
+            ("set_screw_gost", "M14"),
+            ("hex_nut_gost", "M33"),
+            ("hex_nut_thin_gost", "M33"),
+            ("washer_gost", "1/2"),
+            ("washer_large_gost", "M42"),
+            ("dowel_pin_gost", "7"),
         ] {
             assert!(Session::default().execute("parts.insert", &json!({"family": family, "size": size})).is_err(), "{family} {size}");
         }
@@ -1750,6 +2309,14 @@ mod tests {
             ("set_screw", "M6", "M8"),
             ("dowel_pin", "6", "8"),
             ("bearing", "608", "6200"),
+            ("hex_bolt_gost", "M6", "M8"),
+            ("socket_head_cap_screw_gost", "M6", "M8"),
+            ("set_screw_gost", "M6", "M8"),
+            ("hex_nut_gost", "M6", "M8"),
+            ("hex_nut_thin_gost", "M6", "M8"),
+            ("washer_gost", "M6", "M8"),
+            ("washer_large_gost", "M6", "M8"),
+            ("dowel_pin_gost", "6", "8"),
             ("hex_cap_screw_inch", "1/2-13 UNC", "5/8-11 UNC"),
             ("hex_nut_inch", "1/2-13 UNC", "5/8-18 UNF"),
             ("washer_sae", "1/2", "5/8"),

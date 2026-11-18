@@ -1,0 +1,82 @@
+{
+  "de": {
+    "ui.drawing_sheets.active": "Aktives Blatt",
+    "ui.drawing_sheets.add": "Blatt hinzufügen",
+    "ui.drawing_sheets.always": "Immer anzeigen",
+    "ui.drawing_sheets.legacy": "Schwebende Blattleiste",
+    "ui.drawing_sheets.multiple": "Nur bei mehreren Blättern",
+    "ui.drawing_sheets.off": "Aus",
+    "ui.drawing_sheets.title": "Blätter",
+    "ui.drawing_sheets.visibility": "Blattbereich"
+  },
+  "en": {
+    "ui.drawing_sheets.active": "Active sheet",
+    "ui.drawing_sheets.add": "Add sheet",
+    "ui.drawing_sheets.always": "Always show",
+    "ui.drawing_sheets.legacy": "Floating sheet strip",
+    "ui.drawing_sheets.multiple": "Multiple sheets only",
+    "ui.drawing_sheets.off": "Off",
+    "ui.drawing_sheets.title": "Sheets",
+    "ui.drawing_sheets.visibility": "Sheets section"
+  },
+  "ja": {
+    "ui.drawing_sheets.active": "アクティブシート",
+    "ui.drawing_sheets.add": "シートを追加",
+    "ui.drawing_sheets.always": "常に表示",
+    "ui.drawing_sheets.legacy": "フローティングシートバー",
+    "ui.drawing_sheets.multiple": "複数のシートがある場合のみ",
+    "ui.drawing_sheets.off": "オフ",
+    "ui.drawing_sheets.title": "シート",
+    "ui.drawing_sheets.visibility": "シートセクション"
+  },
+  "ko": {
+    "ui.drawing_sheets.active": "활성 시트",
+    "ui.drawing_sheets.add": "시트 추가",
+    "ui.drawing_sheets.always": "항상 표시",
+    "ui.drawing_sheets.legacy": "떠 있는 시트 표시줄",
+    "ui.drawing_sheets.multiple": "시트가 여러 개일 때만",
+    "ui.drawing_sheets.off": "끔",
+    "ui.drawing_sheets.title": "시트",
+    "ui.drawing_sheets.visibility": "시트 섹션"
+  },
+  "zh": {
+    "ui.drawing_sheets.active": "当前图纸",
+    "ui.drawing_sheets.add": "添加图纸",
+    "ui.drawing_sheets.always": "始终显示",
+    "ui.drawing_sheets.legacy": "浮动图纸栏",
+    "ui.drawing_sheets.multiple": "仅在有多张图纸时",
+    "ui.drawing_sheets.off": "关闭",
+    "ui.drawing_sheets.title": "图纸",
+    "ui.drawing_sheets.visibility": "图纸区域"
+  },
+  "ar": {
+    "ui.drawing_sheets.active": "اللوحة النشطة",
+    "ui.drawing_sheets.add": "إضافة لوحة",
+    "ui.drawing_sheets.always": "دائمًا",
+    "ui.drawing_sheets.legacy": "الشريط العائم",
+    "ui.drawing_sheets.multiple": "عند وجود عدة لوحات",
+    "ui.drawing_sheets.off": "إيقاف",
+    "ui.drawing_sheets.title": "اللوحات",
+    "ui.drawing_sheets.visibility": "قسم اللوحات"
+  },
+  "he": {
+    "ui.drawing_sheets.active": "גיליון פעיל",
+    "ui.drawing_sheets.add": "הוספת גיליון",
+    "ui.drawing_sheets.always": "תמיד",
+    "ui.drawing_sheets.legacy": "סרגל צף",
+    "ui.drawing_sheets.multiple": "כשיש כמה גיליונות",
+    "ui.drawing_sheets.off": "כבוי",
+    "ui.drawing_sheets.title": "גיליונות",
+    "ui.drawing_sheets.visibility": "מקטע גיליונות"
+  },
+  "vi": {
+    "ui.drawing_sheets.active": "Tờ đang mở",
+    "ui.drawing_sheets.add": "Thêm tờ",
+    "ui.drawing_sheets.always": "Luôn hiện",
+    "ui.drawing_sheets.legacy": "Thanh nổi",
+    "ui.drawing_sheets.multiple": "Khi có nhiều tờ",
+    "ui.drawing_sheets.off": "Tắt",
+    "ui.drawing_sheets.title": "Các tờ",
+    "ui.drawing_sheets.visibility": "Mục các tờ"
+  }
+}

@@ -249,6 +249,13 @@ impl JointForm {
         TYPES.get(self.kind).and_then(|t| JointKind::parse(t)).unwrap_or(JointKind::Rigid)
     }
 
+    /// Assembly constraints keep their reference geometry until converted to a plain joint.
+    fn lateral_offsets(&self, doc: &solidcraft_engine::doc::Document) -> bool {
+        self.editing
+            .and_then(|id| doc.assembly.joints.iter().find(|j| j.id == id))
+            .is_none_or(|j| j.constraint.is_none() || j.kind != self.joint_kind())
+    }
+
     /// Limits rows sized to the joint's values.
     fn fit_limits(&mut self, doc: &solidcraft_engine::doc::Document) {
         let k = self.joint_kind();
@@ -420,7 +427,7 @@ pub(crate) fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
             let name = match plane.as_ref() {
                 solidcraft_engine::doc::PlaneRef::Origin { name } => Some(name.clone()),
                 solidcraft_engine::doc::PlaneRef::Datum { datum } => Some(datum.key()),
-                solidcraft_engine::doc::PlaneRef::Construction { feature } => {
+                solidcraft_engine::doc::PlaneRef::Construction { feature, .. } => {
                     let id = feature.0;
                     s.doc
                         .feature(id)
@@ -572,6 +579,9 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     // the joint keeps following its parameters.
     f.angle = j.exprs.angle.clone().unwrap_or_else(|| num(j.angle.to_degrees(), "deg"));
     f.angle_shown = f.angle.clone();
+    for (text, value) in f.offset.iter_mut().zip(j.offset_xy) {
+        *text = crate::length_input::model(&app.session.doc, value);
+    }
     f.offset[2] = j.exprs.offset.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset));
     f.fit_limits(&app.session.doc);
     for (i, l) in f.limits.iter_mut().enumerate() {
@@ -1200,11 +1210,10 @@ fn snap_hovered(app: &SolveApp, sel: &Sel) -> Option<SnapPt> {
     face_point_source(app, true, sel).and_then(|(kind, from)| face_tied(&app.session, sel, kind, &from)).or_else(|| picked_snap(app, sel))
 }
 
-/// A snap moved across its own plane by (x, y) (the joint's offset), as an explicit frame.
-fn shifted(s: &SnapPt, x: f64, y: f64) -> Value {
+/// The frame used for lateral offsets, with the same axes as the original shifted snap.
+fn offset_frame(s: &SnapPt) -> Value {
     let ax = s.z.any_perp();
-    let ay = s.z.cross(ax);
-    let mut p = json!({"frame": {"origin": pt(s.at + ax * x + ay * y), "z": pt(s.z), "x": pt(ax)}});
+    let mut p = json!({"frame": {"origin": pt(s.at), "z": pt(s.z), "x": pt(ax)}});
     if let Some(path) = s.param.get("path") {
         p["path"] = path.clone();
     }
@@ -1270,9 +1279,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             f.fit_limits(&app.session.doc);
             if !f.as_built {
                 enter |= expr_row(ui, "Angle", &mut f.angle);
+                let lateral = f.lateral_offsets(&app.session.doc);
                 crate::ui_kit::section(ui, "joint_position", "Position", false, |ui| {
                     for (l, v) in ["Offset X", "Offset Y", "Offset Z"].iter().zip(f.offset.iter_mut()) {
-                        if f.editing.is_some() && *l != "Offset Z" {
+                        if !lateral && *l != "Offset Z" {
                             continue;
                         }
                         enter |= expr_row(ui, l, v);
@@ -1958,6 +1968,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
                 let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2]});
+                if f.lateral_offsets(&app.session.doc) {
+                    p["offset_x"] = json!(eval(&f.offset[0], ValueKind::Length)?);
+                    p["offset_y"] = json!(eval(&f.offset[1], ValueKind::Length)?);
+                }
                 if !custom_name.is_empty() {
                     p["name"] = json!(custom_name);
                 }
@@ -2003,11 +2017,12 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Err("the two origins are on the same component".into());
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);
-            let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { shifted(&a, x, y) } else { a.param };
+            let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { offset_frame(&a) } else { a.param };
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
-            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip,
+                "offset_x": x, "offset_y": y, "offset": f.offset[2], "angle": f.angle, "limits": limits});
             if !custom_name.is_empty() {
                 p["name"] = json!(custom_name);
             }
@@ -2387,7 +2402,8 @@ fn grouped(app: &SolveApp, count: usize) -> bool {
 fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
     !grouped(app, count)
         || match run {
-            JointRun::Loose => crate::browser::is_open(app, &run.key(), false),
+            // The History's own fold: a Browser search filters the Browser's rows, not these.
+            JointRun::Loose => crate::browser::fold_open(app, &run.key(), false),
             // Folder ids are numbered in each design: its choice stays with the design, as the
             // folder's own fold does.
             JointRun::Folder { .. } => crate::history_folds::is_open(app, &run.key(), false),
@@ -2396,7 +2412,7 @@ fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
 
 fn toggle_joints(app: &mut SolveApp, run: JointRun) {
     match run {
-        JointRun::Loose => crate::browser::toggle(app, &run.key(), false),
+        JointRun::Loose => crate::browser::toggle_fold(app, &run.key(), false),
         JointRun::Folder { .. } => {
             let open = crate::history_folds::is_open(app, &run.key(), false);
             crate::history_folds::set_open(app, &run.key(), !open);
@@ -2620,9 +2636,14 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 /// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
 pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, depth: usize) -> Option<u64> {
     use crate::browser::{Row, Spec, is_open, node_row, toggle};
-    let joints: Vec<(u64, String, JointKind, bool)> =
+    let mut joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
+    // A search keeps the joints that match (the folder's eye stays the folder's own).
+    let searching = app.tree.search.on();
+    if let Some(hits) = app.tree.search.hits() {
+        joints.retain(|j| hits.joint(j.0));
+    }
     if joints.is_empty() {
         return None;
     }
@@ -2636,7 +2657,15 @@ pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Row
     let r = node_row(
         rows,
         Spec { key, ..Default::default() },
-        Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
+        Row {
+            depth,
+            fold: Some(open),
+            eye: Some(folder_shown),
+            icon: "folder",
+            label: "Joints",
+            dim: !folder_shown || searching,
+            ..Default::default()
+        },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);
@@ -2652,6 +2681,7 @@ pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Row
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
         let joint_key = format!("joint:{id}");
+        let emphasis = app.tree.search.hits().and_then(|h| h.span(&name));
         let r = node_row(
             rows,
             Spec { key: &joint_key, ..Default::default() },
@@ -2664,6 +2694,7 @@ pub fn browser_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Row
                 rename: true,
                 selected,
                 dim: suppressed || !visible || !folder_shown,
+                emphasis,
                 ..Default::default()
             },
         );
@@ -2852,6 +2883,10 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// Returns the joint whose row is under the pointer.
 pub fn component_joints(app: &mut SolveApp, rows: &mut crate::ui_kit::browser::Rows<'_>, path: &[u64], key: &str, depth: usize) -> Option<u64> {
     use crate::browser::{Row, Spec, is_open, node_row, toggle};
+    // A search lists the joints it finds in the root folder.
+    if app.tree.search.on() {
+        return None;
+    }
     let joints = placement_joints(&app.session.doc, path);
     if joints.is_empty() {
         return None;
@@ -3069,7 +3104,7 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
         std::borrow::Cow::Owned(d)
     };
     let st = s.model.state();
-    let v: Vec<_> = doc.assembly.joints.iter().filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, m))).collect();
+    let v: Vec<_> = doc.assembly.joints.iter().filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, j.offset_frame_a(m)))).collect();
     JOINT_FRAMES.with(|o| *o.borrow_mut() = Some((key, v.clone())));
     v
 }

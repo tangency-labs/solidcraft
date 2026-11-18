@@ -14,6 +14,163 @@ mod planar_sources;
 #[path = "shell_groups.rs"]
 pub(crate) mod shell_groups;
 
+/// A body's record ([`Body::record`]): its own, or another body's record moved by a rigid motion,
+/// moved the first time it is read ([`crate::ops::transform_matrix`]). A part placed many times
+/// keeps one record until a placement's own geometry is needed (an operation on it, a measure,
+/// an export): moved for every placement as it was placed, the copies of a large assembly placed
+/// a hundred times took tens of gigabytes. Reads as the record either way.
+#[derive(Clone, Debug)]
+pub(crate) enum RecordCell {
+    Ready(std::sync::Arc<Brep>),
+    Moved(std::sync::Arc<LazyMove>),
+}
+
+/// How a record moves by a rigid motion ([`solidcraft_geom::brep::placement::moved`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Movable {
+    /// It does not: it is moved by mapping it, or in SMLib.
+    No,
+    /// By a motion orthonormal to rounding only: a blend face by its definition moves with its
+    /// net only then.
+    Exactly,
+    /// By any rigid motion: no face is a blend by its definition (an imported part's are not).
+    Any,
+}
+
+impl Movable {
+    /// Whether the record moves by `motion`.
+    fn by(self, motion: &solidcraft_geom::brep::placement::Rigid) -> bool {
+        match self {
+            Movable::No => false,
+            Movable::Exactly => motion.is_exact(),
+            Movable::Any => true,
+        }
+    }
+}
+
+/// What placing a record needs, worked out once for the record and every copy placed from it:
+/// how it moves ([`Movable`]) and the history of a move, which only its topology gives.
+#[derive(Debug, Default)]
+pub(crate) struct Placing {
+    movable: std::sync::OnceLock<Movable>,
+    identity: std::sync::OnceLock<std::sync::Arc<crate::history::History>>,
+}
+
+/// A record moved by a rigid motion when first read ([`RecordCell::Moved`]).
+#[derive(Debug)]
+pub(crate) struct LazyMove {
+    source: std::sync::Arc<Brep>,
+    motion: solidcraft_geom::brep::placement::Rigid,
+    matrix: [[f64; 4]; 4],
+    made: std::sync::OnceLock<std::sync::Arc<Brep>>,
+}
+
+/// How many lazily moved records have been moved ([`RecordCell::Moved`]), for diagnostics.
+static LAZY_MOVES_MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many records placed lazily have been moved since the process started: a placement's
+/// geometry needed exactly ([`crate::ops::transform_matrix`]).
+pub fn lazy_moves_made() -> usize {
+    LAZY_MOVES_MADE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+impl LazyMove {
+    pub(crate) fn new(source: std::sync::Arc<Brep>, motion: solidcraft_geom::brep::placement::Rigid, matrix: [[f64; 4]; 4]) -> LazyMove {
+        LazyMove { source, motion, matrix, made: std::sync::OnceLock::new() }
+    }
+
+    fn record(&self) -> &std::sync::Arc<Brep> {
+        self.made.get_or_init(|| {
+            LAZY_MOVES_MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // The record was checked to move exactly before it was placed this way; should that
+            // fail after all, it is mapped, and as a last resort kept where it is (logged).
+            let moved = solidcraft_geom::brep::placement::moved(&self.source, &self.motion)
+                .or_else(|| solidcraft_geom::brep::placement::mapped(&self.source, &self.matrix));
+            match moved {
+                Some(r) => std::sync::Arc::new(r),
+                None => {
+                    log::error!("a lazily placed record could not be moved; it is drawn where its part is");
+                    self.source.clone()
+                }
+            }
+        })
+    }
+
+    /// The record it moves (the part's), for what a rigid motion leaves as it is: its topology,
+    /// its counts, its size.
+    pub(crate) fn source(&self) -> &std::sync::Arc<Brep> {
+        &self.source
+    }
+}
+
+impl RecordCell {
+    /// The record as an `Arc` (moved first, when it is moved lazily).
+    pub(crate) fn arc(&self) -> &std::sync::Arc<Brep> {
+        match self {
+            RecordCell::Ready(r) => r,
+            RecordCell::Moved(m) => m.record(),
+        }
+    }
+
+    /// The record whose topology this one has, without moving it: the record itself, or the
+    /// part's a lazily moved one moves. Faces, edges and vertices, their order and counts are
+    /// the same; positions are not.
+    pub(crate) fn topology(&self) -> &Brep {
+        match self {
+            RecordCell::Ready(r) => r,
+            RecordCell::Moved(m) => m.source(),
+        }
+    }
+
+    /// The very same record: the same `Arc`, or the same part's record by the same motion,
+    /// decided without moving either.
+    pub(crate) fn same(&self, other: &RecordCell) -> bool {
+        match (self, other) {
+            (RecordCell::Ready(a), RecordCell::Ready(b)) => std::sync::Arc::ptr_eq(a, b),
+            (RecordCell::Moved(a), RecordCell::Moved(b)) => {
+                std::sync::Arc::ptr_eq(a, b) || (std::sync::Arc::ptr_eq(&a.source, &b.source) && a.motion == b.motion)
+            }
+            (RecordCell::Moved(m), RecordCell::Ready(r)) | (RecordCell::Ready(r), RecordCell::Moved(m)) => {
+                m.made.get().is_some_and(|made| std::sync::Arc::ptr_eq(made, r))
+            }
+        }
+    }
+
+    /// An address naming the record while it lives, without moving it.
+    pub(crate) fn key(&self) -> usize {
+        match self {
+            RecordCell::Ready(r) => std::sync::Arc::as_ptr(r) as usize,
+            RecordCell::Moved(m) => std::sync::Arc::as_ptr(m) as *const u8 as usize,
+        }
+    }
+
+    /// Whether the record is moved lazily and not moved yet.
+    pub(crate) fn lazy(&self) -> Option<&LazyMove> {
+        match self {
+            RecordCell::Moved(m) => Some(m),
+            RecordCell::Ready(_) => None,
+        }
+    }
+
+    /// Whether the record is moved lazily and not moved yet.
+    pub(crate) fn pending(&self) -> bool {
+        matches!(self, RecordCell::Moved(m) if m.made.get().is_none())
+    }
+}
+
+impl std::ops::Deref for RecordCell {
+    type Target = Brep;
+    fn deref(&self) -> &Brep {
+        self.arc()
+    }
+}
+
+impl From<std::sync::Arc<Brep>> for RecordCell {
+    fn from(r: std::sync::Arc<Brep>) -> RecordCell {
+        RecordCell::Ready(r)
+    }
+}
+
 /// A solid body (one or more closed shells), or a mesh body (triangles only, like an imported
 /// 3MF or STL: it renders, measures and exports, but B-rep features cannot use it). Cheap to
 /// clone; never mutated in place.
@@ -23,7 +180,10 @@ pub(crate) mod shell_groups;
 /// SMLib works on the same body built from that record, made once and shared by clones.
 #[derive(Clone, Debug)]
 pub struct Body {
-    pub(crate) record: std::sync::Arc<Brep>,
+    pub(crate) record: RecordCell,
+    /// What placing the record needs, worked out once and shared by clones and lazily placed
+    /// copies because they share its topology ([`Placing`]).
+    pub(crate) placing: std::sync::Arc<Placing>,
     /// The body in SMLib, built from `record` on first use (or kept from the operation that
     /// made it), shared by clones because they share the record.
     pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, Refusal>>>,
@@ -148,7 +308,7 @@ impl DisplayShare {
 /// transforms take it): positions, normals and edge polylines move, everything indexed stays.
 /// `None` for anything but a rotation and translation (a reflection would turn the triangles
 /// inside out).
-fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
+pub fn placed_mesh(m: &Mesh, t: &[[f64; 4]; 4]) -> Option<Mesh> {
     let r = |v: Vec3, w: f64| {
         Vec3::new(
             t[0][0] * v.x + t[1][0] * v.y + t[2][0] * v.z + w * t[3][0],
@@ -221,6 +381,17 @@ pub type CapSignature = (Vec<String>, Vec<Vec<String>>);
 type FaceSources = std::sync::Arc<Vec<Option<FaceSource>>>;
 
 impl FaceSource {
+    /// Whether the source holds a plane, which a move moves.
+    fn has_plane(&self) -> bool {
+        match self {
+            Self::ExtrudeSide { plane, .. } | Self::CertifiedExtrudeSide { plane, .. } => plane.is_some(),
+            Self::ExtrudeCap { .. } | Self::CertifiedExtrudeCap { .. } | Self::Box { .. } | Self::CylinderCap { .. } | Self::ShellPlanar { .. } => {
+                true
+            }
+            Self::Imported { .. } => false,
+        }
+    }
+
     fn plane_mut(&mut self) -> Option<&mut solidcore_record::Plane> {
         match self {
             Self::ExtrudeSide { plane, .. } | Self::CertifiedExtrudeSide { plane, .. } => plane.as_mut(),
@@ -292,6 +463,8 @@ pub struct FaceInfo {
 /// How closely [`Body::mesh`] follows the exact surfaces, and the facet angle a viewport draws
 /// at: the mesher's own (solidcore-tess).
 pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
+/// How [`Body::export_mesh`] meshes (the mesh path's spec and its default smallest angle), and what it reports.
+pub use solidcore_tess::{MESH_MIN_ANGLE, MeshSpec, PlanStats};
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -389,6 +562,23 @@ pub struct Refusal {
     pub internal: bool,
 }
 
+/// Where a ray first meets a body ([`Body::fire_ray`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RayPick {
+    /// The face it meets, by its index in the record (0 for a mesh body).
+    pub face: usize,
+    /// The edge it meets, when it passes through one.
+    pub edge: Option<usize>,
+    /// The vertex it meets, when it passes through one.
+    pub vertex: Option<usize>,
+    /// The point on the ray.
+    pub point: Vec3,
+    /// The face's outward unit normal there.
+    pub normal: Vec3,
+    /// The distance from the ray's origin to the point.
+    pub depth: f64,
+}
+
 /// Where a point lies against a body ([`Body::classify_point`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PointClass {
@@ -462,7 +652,8 @@ impl Body {
     fn bare(record: Brep, mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>) -> Body {
         let size = span_of(&record);
         Body {
-            record: std::sync::Arc::new(record),
+            record: std::sync::Arc::new(record).into(),
+            placing: std::sync::Arc::default(),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             ops: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
@@ -482,10 +673,10 @@ impl Body {
         }
     }
 
-    /// This body with `result`, the SMLib result of the step `what` it was decoded from, whose
-    /// check that step left to the end of its feature ([`crate::validation::check_kept`]).
-    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep) -> Body {
-        let unchecked = crate::validation::Unchecked::new(&self.record, what, how, result);
+    /// This body with `result`, the SMLib result of the step `what` (of `operands`) it was decoded
+    /// from, whose check that step left to the end of its feature ([`crate::validation::check_kept`]).
+    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep, operands: &[&Body]) -> Body {
+        let unchecked = crate::validation::Unchecked::new(self.record.arc(), what, how, result, operands);
         Body { unchecked: Some(std::sync::Arc::new(unchecked)), ..self }
     }
 
@@ -564,7 +755,7 @@ impl Body {
 
     /// The very same shape (shared record or mesh), whatever its colour, paint or face splits.
     pub fn same_shape(&self, other: &Body) -> bool {
-        std::sync::Arc::ptr_eq(&self.record, &other.record)
+        self.record.same(&other.record)
             && match (&self.mesh, &other.mesh) {
                 (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
                 (None, None) => true,
@@ -759,12 +950,22 @@ impl Body {
         if let Some(kept) = self.ops.get() {
             return kept.as_ref();
         }
+        // solidcore-ops' calls on this body run with the kernel's fix set.
+        solidcraft_smlib::start();
         // Converted outside the cell: a failure callback that asked about this body again
         // would otherwise reenter the cell while it is being filled.
         match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
             Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled) => None,
             made => self.ops.get_or_init(|| made.ok()).as_ref(),
         }
+    }
+
+    /// The face of `self` nearest `p` and its exact distance, or `None` for a mesh body or empty body.
+    pub fn nearest_face(&self, p: Vec3) -> Option<(f64, usize)> {
+        let (ops, order) = self.ops_body()?;
+        let reach = self.size().max(1.0) * 100.0;
+        let dists = ops.face_distances_within(order, &[[p.x, p.y, p.z]], reach).ok()?;
+        dists.into_iter().enumerate().filter_map(|(f, row)| Some((row.first().copied().flatten()?, f))).min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
@@ -862,6 +1063,10 @@ impl Body {
 
     pub(crate) fn transformed_sources(&self, m: [[f64; 4]; 4]) -> Result<Option<FaceSources>> {
         let Some(sources) = &self.face_sources else { return Ok(None) };
+        // Sources with no plane (an imported part's) do not move: every placement shares them.
+        if !sources.iter().flatten().any(FaceSource::has_plane) {
+            return Ok(Some(sources.clone()));
+        }
         let vector = |p: Vec3| {
             Vec3::new(
                 m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z,
@@ -986,10 +1191,78 @@ impl Body {
         self.with_display_of(share.0.clone(), t)
     }
 
+    /// This body moved by `motion` (`matrix`), its record moved only when first read
+    /// ([`RecordCell::Moved`]); `None` when it is not sure to move exactly that way (a mesh body,
+    /// a rounded part by a rotation orthonormal only to the looser bound, geometry
+    /// `placement::moved` does not move), for the caller to move it now. A body moved lazily
+    /// already is moved by both motions at once, without moving its record in between. The body
+    /// keeps what a rigid move keeps (face order, sources, colour, paint, the display it shares
+    /// with its part's other copies); its history is the identity.
+    pub(crate) fn moved_lazily(&self, motion: solidcraft_geom::brep::placement::Rigid, matrix: [[f64; 4]; 4]) -> Option<Body> {
+        if self.mesh.is_some() {
+            return None;
+        }
+        let movable = *self.placing.movable.get_or_init(|| {
+            let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+            let source = self.record.lazy().map_or_else(|| self.record.arc().clone(), |m| m.source().clone());
+            let moves = solidcraft_geom::brep::placement::Rigid::of_matrix(&identity)
+                .and_then(|id| solidcraft_geom::brep::placement::moved(&source, &id))
+                .is_some();
+            let blended = source.faces.iter().any(|f| matches!(f.surface, solidcore_record::brep::Surface::Blend { .. }));
+            match (moves, blended) {
+                (false, _) => Movable::No,
+                (true, true) => Movable::Exactly,
+                (true, false) => Movable::Any,
+            }
+        });
+        if !movable.by(&motion) {
+            return None;
+        }
+        // Moved lazily already and not moved yet: both motions from the part's record.
+        // A placed copy of a part another body shows (an assembly's instance) still shows it,
+        // placed by both: it is meshed and planned from the part's, not on its own.
+        let display_of = match self.display_of.as_deref() {
+            Some((shared, t)) => Some(std::sync::Arc::new((shared.clone(), solidcore_ops::affine::then(t, &matrix).ok()?))),
+            None => None,
+        };
+        let (source, matrix) = match self.record.lazy().filter(|_| self.record.pending()) {
+            Some(inner) => (inner.source().clone(), solidcore_ops::affine::then(&inner.matrix, &matrix).ok()?),
+            None => (self.record.arc().clone(), matrix),
+        };
+        let motion = solidcraft_geom::brep::placement::Rigid::of_matrix(&matrix).filter(|m| movable.by(m))?;
+        Some(Body {
+            record: RecordCell::Moved(std::sync::Arc::new(LazyMove::new(source, motion, matrix))),
+            placing: self.placing.clone(),
+            smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
+            ops: std::sync::Arc::new(std::sync::OnceLock::new()),
+            // A rigid motion keeps the size and the volume.
+            size: self.size,
+            volume: self.volume.clone(),
+            bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            mesh: None,
+            color: self.color,
+            paint: self.paint.clone(),
+            splits: None,
+            face_sources: None,
+            regularization_protected: self.regularization_protected,
+            // A move keeps every face and edge where it was: one history for every placement.
+            history: Some(
+                self.placing
+                    .identity
+                    .get_or_init(|| std::sync::Arc::new(<crate::history::History as crate::history::BodyHistory>::identity(self)))
+                    .clone(),
+            ),
+            display_of,
+            meshes: None,
+            unchecked: None,
+            rounds: None,
+        })
+    }
+
     /// Identity of the solid: clones of a body (and bodies a feature passed through unchanged)
     /// share it.
     pub fn solid_id(&self) -> usize {
-        std::sync::Arc::as_ptr(&self.record) as usize
+        self.record.key()
     }
 
     pub fn with_split_lines(mut self, s: Option<std::sync::Arc<Vec<Vec<Vec3>>>>) -> Body {
@@ -1063,13 +1336,22 @@ impl Body {
             }
             return b;
         }
-        for v in &self.record.vertices {
-            b.add(v3(v.point));
+        // Placed lazily and not moved yet: the part's box with its corners moved, a little
+        // larger than the moved body's for a turned part. Read from the moved record, every
+        // placement of a large assembly was moved to frame the view while it opened.
+        // (A box that does not move to finite numbers is read from the moved record instead.)
+        if let Some(lazy) = self.record.lazy().filter(|_| self.record.pending()) {
+            let part = record_outline(lazy.source());
+            if part.is_empty() {
+                return part;
+            }
+            if let Ok((lo, hi)) =
+                solidcore_ops::affine::moved_box(&lazy.matrix, [part.min.x, part.min.y, part.min.z], [part.max.x, part.max.y, part.max.z])
+            {
+                return Aabb3 { min: v3(lo), max: v3(hi) };
+            }
         }
-        for e in &self.record.edges {
-            curve_hull(e.parameters(), e.interval, &mut b);
-        }
-        b
+        record_outline(&self.record)
     }
 
     /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's
@@ -1145,7 +1427,7 @@ impl Body {
                 return Ok(placed);
             }
         }
-        match self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.record, &self.record)) {
+        match self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.record, self.record.arc())) {
             Some(memo) => {
                 let kept: std::sync::Arc<Mesh> = remembered(&memo.made, t, || self.mesh_of(&self.mesh_plan_untimed(t)?))?;
                 Ok(Mesh::clone(&kept))
@@ -1192,11 +1474,31 @@ impl Body {
         self.flagged(solidcraft_geom::tess::EvaluateMesh::evaluate_mesh(plan))
     }
 
+    /// The body meshed on the mesh path (solidcore-tess's `mesh`) to `spec`, with what it reported
+    /// about the faces: for export, never the viewport ([`Body::mesh`]). Strict: a face it cannot
+    /// mesh or evaluate is an error naming it. A mesh body gives its own triangles.
+    pub fn export_mesh(&self, spec: &MeshSpec) -> Result<(Mesh, PlanStats)> {
+        crate::profile::timed(crate::profile::Kind::Tessellate, "export_mesh", || {
+            if let Some(m) = &self.mesh {
+                return Ok((m.to_mesh(), PlanStats::default()));
+            }
+            let (plan, stats) = guard("export mesh", || solidcore_tess::mesh(&self.record, spec, self.size(), None).map_err(KernelError::from))?;
+            let (mesh, refused) = plan.evaluate();
+            match refused.first() {
+                Some(f) => Err(KernelError::Failed(format!("mesh: face {}: {}", f.face, f.reason))),
+                None => Ok((mesh, stats)),
+            }
+        })
+    }
+
     /// A copy of this body that keeps the meshes made of it for reuse, for as long as the copy
     /// (or a clone of it) lives: for many operations on one large body at the same tolerance,
     /// such as cutting it down to the region of each of many contacts.
     pub fn keeping_meshes(&self) -> Body {
-        Body { meshes: Some(std::sync::Arc::new(MeshMemo { record: self.record.clone(), made: std::sync::Mutex::new(Vec::new()) })), ..self.clone() }
+        Body {
+            meshes: Some(std::sync::Arc::new(MeshMemo { record: self.record.arc().clone(), made: std::sync::Mutex::new(Vec::new()) })),
+            ..self.clone()
+        }
     }
 
     /// Planar faces whose boundary crosses itself: two of its loops crossing each other, or a
@@ -1321,21 +1623,114 @@ impl Body {
 
     /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
     /// arcs, single free-form segments, and a free-form curve of several spans as the one
-    /// B-spline it is, for a sketch to project them. `None` for an edge that doesn't lie in a
-    /// plane parallel to `plane`, isn't read exactly or isn't there, and for every edge of a mesh
-    /// body.
+    /// B-spline it is, for a sketch to project them. An edge out of the plane that lies on a
+    /// cylinder whose axis is `plane`'s normal (a hole's rim on a curved wall) projects onto that
+    /// cylinder's circle: the arc of it ([`Body::projected_on_cylinder`]). `None` for any other
+    /// edge that doesn't lie in a plane parallel to `plane`, one that isn't read exactly or isn't
+    /// there, and for every edge of a mesh body.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
         let tol = self.planar_edges_tolerance();
+        let mut faces = None;
         indices
             .iter()
             .map(|i| {
                 let mut work = 262_144usize;
-                crate::prism_curve::Run::of(&self.record, *i, true).and_then(|run| crate::prism_curve::projected_curves(&run, plane, tol, &mut work))
+                let run = crate::prism_curve::Run::of(&self.record, *i, true)?;
+                crate::prism_curve::projected_curves(&run, plane, tol, &mut work).or_else(|| {
+                    let faces = faces.get_or_insert_with(|| crate::history::edge_faces(&self.record));
+                    let segs = self.projected_on_cylinder(plane, *i, faces.get(*i)?, tol)?;
+                    Some(segs.into_iter().map(crate::PlanarPiece::Seg).collect())
+                })
             })
             .collect()
+    }
+
+    /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it
+    /// bounds (one of `faces`) whose axis is `plane`'s normal: everything on that cylinder
+    /// projects onto its circle, so the arc is exact where the edge itself is held only
+    /// approximately (a hole's rim on a round wall is an intersection curve). The arc runs from
+    /// the projection of the edge's start vertex as far round as the edge goes; a closed edge
+    /// is one arc right round, which a sketch takes as the circle, as it took the rim fitted.
+    /// `None` when no such cylinder holds the edge within `tol`, or the edge turns back round
+    /// the axis.
+    fn projected_on_cylinder(&self, plane: &solidcore_record::Plane, edge: usize, faces: &[usize], tol: f64) -> Option<Vec<solidcore_record::Seg2>> {
+        use solidcraft_geom::brep::eval::CurveEval;
+        const SAMPLES: u16 = 32;
+        let e = self.record.edges.get(edge)?;
+        let curve = CurveEval::new(e.parameters()).ok()?;
+        let [t0, t1] = e.interval;
+        let pts: Vec<Vec3> = (0..=SAMPLES).map(|k| curve.point(t0 + (t1 - t0) * f64::from(k) / f64::from(SAMPLES))).collect::<Option<_>>()?;
+        let n = plane.normal();
+        let size = self.size().max(1.0);
+        faces.iter().find_map(|&f| {
+            let Some(crate::FaceSurface::Cylinder { origin, axis, radius }) = crate::surface_kind::surface_of(&self.record, f) else { return None };
+            let axis = Vec3::from(axis);
+            // The axis off the normal by an angle moves the edge's projection by that angle
+            // times its distance along the axis, at most the body's size.
+            if !(radius > tol) || axis.cross(n).len() * size > tol * 0.1 {
+                return None;
+            }
+            let off_axis = |p: Vec3| {
+                let d = p - origin;
+                (d - axis * d.dot(axis)).len()
+            };
+            if pts.iter().any(|p| (off_axis(*p) - radius).abs() > tol) {
+                return None;
+            }
+            let first = *pts.first()?;
+            let center = plane.to_local(origin + axis * (first - origin).dot(axis));
+            // A quick reject on the samples: their angle must keep going one way, and no more
+            // than once round.
+            let angles: Vec<f64> = pts.iter().map(|p| (plane.to_local(*p) - center).angle()).collect();
+            let mut sign = 0.0;
+            let mut sampled = 0.0;
+            for w in angles.windows(2) {
+                let [a, b] = w else { continue };
+                let d = (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                if d.abs() * radius <= tol * 1e-3 {
+                    continue;
+                }
+                if sign * d < 0.0 {
+                    return None;
+                }
+                sign = d.signum();
+                sampled += d;
+            }
+            if sampled.abs() > std::f64::consts::TAU + tol / radius {
+                return None;
+            }
+            // The proof (solidcore): the edge turns one way round the axis all along its
+            // interval, the same way the samples went; else no arc, and the caller fits.
+            let turn = solidcore_ops::curve_knots::turn_about_axis(e.parameters(), e.interval, [origin.x, origin.y, origin.z], [n.x, n.y, n.z])
+                .ok()
+                .flatten()?;
+            if turn != sign {
+                return None;
+            }
+            // The arc runs from the start vertex to the end vertex that way round (a closed
+            // edge all the way round).
+            let at = |v: u32| self.record.vertices.get(v as usize).map(|x| (plane.to_local(Vec3::from(x.point)) - center).angle());
+            let [v0, v1] = e.vertices;
+            let start = at(v0)?;
+            let sweep = if v0 == v1 {
+                turn * std::f64::consts::TAU
+            } else {
+                let d = (at(v1)? - start).rem_euclid(std::f64::consts::TAU);
+                if d * radius <= tol {
+                    return None;
+                }
+                if turn > 0.0 { d } else { d - std::f64::consts::TAU }
+            };
+            // The vertices' sweep is only taken where the samples agree with it: an edge that
+            // winds past a full turn (a helix seen along its axis) is no arc.
+            if (sampled - sweep).abs() > std::f64::consts::FRAC_PI_2 {
+                return None;
+            }
+            Some(vec![solidcore_record::Seg2::Arc { center, radius, start, sweep }])
+        })
     }
 
     /// Faces with area and centroid.
@@ -1466,17 +1861,66 @@ impl Body {
         classes.into_iter().map(|c| c.map(point_class).map_err(|e| KernelError::smlib("SMLib point classification", e))).collect()
     }
 
+    /// Where the ray from `origin` along `dir` first meets the body, decided exactly on its faces'
+    /// surfaces, edges' curves and vertices (solidcore's ray fire at the body's own tolerance, no
+    /// mesh). `None` where the ray meets nothing in front of its origin. A mesh body's triangles
+    /// are its exact shape.
+    ///
+    /// The point is on the ray at the hit's distance, the normal the outward unit normal of the
+    /// face there. A ray through an edge or a vertex names it, and the face is the one of its
+    /// faces that turns most toward the ray.
+    pub fn fire_ray(&self, origin: Vec3, dir: Vec3) -> Result<Option<RayPick>> {
+        let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        let d = dir.normalized().filter(|d| finite(origin) && finite(*d)).ok_or_else(|| {
+            KernelError::Invalid(format!("ray: the origin {origin:?} and direction {dir:?} must be finite, the direction not zero"))
+        })?;
+        if let Some(m) = &self.mesh {
+            return Ok(crate::meshbody::mesh_ray(m, origin, d).map(|(t, normal)| RayPick {
+                face: 0,
+                edge: None,
+                vertex: None,
+                point: origin + d * t,
+                normal,
+                depth: t,
+            }));
+        }
+        let (ops, order) = self.ops_body().ok_or_else(|| KernelError::Failed("ray: the body has no solidcore form".into()))?;
+        let hit = ops.fire_ray(order, [origin.x, origin.y, origin.z], [d.x, d.y, d.z]).map_err(|e| KernelError::Failed(format!("ray: {e}")))?;
+        let Some(hit) = hit else { return Ok(None) };
+        let faces = crate::blend::Faces::of(self)?;
+        let point = origin + d * hit.distance;
+        let (edge, vertex, candidates): (_, _, Vec<usize>) = match hit.entity {
+            solidcore_ops::RayEntity::Face(f) => (None, None, vec![f]),
+            solidcore_ops::RayEntity::Edge(e) => (Some(e), None, faces.faces_of(e).into_iter().map(|f| f as usize).collect()),
+            solidcore_ops::RayEntity::Vertex(v) => {
+                let on: std::collections::BTreeSet<u32> = (0..faces.rec.edges.len())
+                    .filter(|e| faces.rec.edges.get(*e).is_some_and(|x| x.vertices.contains(&(v as u32))))
+                    .flat_map(|e| faces.faces_of(e))
+                    .collect();
+                (None, Some(v), on.into_iter().map(|f| f as usize).collect())
+            }
+        };
+        // How far the hit may lie off a face's surface: the body's own tolerance and its edges'.
+        let accept = faces.rec.edges.iter().map(|e| e.tolerance).fold(self.record.tolerance, f64::max).max(self.size() * 1e-9) * 10.0;
+        let best = candidates
+            .iter()
+            .filter_map(|&f| faces.normal_at(f, point, accept).map(|n| (f, n)))
+            .min_by(|(_, a), (_, b)| a.dot(d).total_cmp(&b.dot(d)));
+        let (face, normal) = best.ok_or_else(|| KernelError::Failed("ray: no outward normal of the face it meets".into()))?;
+        Ok(Some(RayPick { face, edge, vertex, point, normal, depth: hit.distance }))
+    }
+
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).
     pub fn face_count(&self) -> usize {
-        if self.mesh.is_some() { 1 } else { self.record.faces.len() }
+        if self.mesh.is_some() { 1 } else { self.record.topology().faces.len() }
     }
     /// B-rep edges (none for a mesh body).
     pub fn edge_count(&self) -> usize {
-        self.record.edges.len()
+        self.record.topology().edges.len()
     }
     /// B-rep vertices (none for a mesh body).
     pub fn vertex_count(&self) -> usize {
-        self.record.vertices.len()
+        self.record.topology().vertices.len()
     }
 
     /// What is wrong with the body as a solid: face shells that aren't closed, faces that don't
@@ -1666,3 +2110,15 @@ mod display_mesh_tests;
 #[cfg(test)]
 #[path = "regularization_protection_tests.rs"]
 mod regularization_protection_tests;
+
+/// The box of a record's vertices and its edges' control hulls ([`Body::outline_bounds`]).
+fn record_outline(record: &Brep) -> Aabb3 {
+    let mut b = Aabb3::EMPTY;
+    for v in &record.vertices {
+        b.add(v3(v.point));
+    }
+    for e in &record.edges {
+        curve_hull(e.parameters(), e.interval, &mut b);
+    }
+    b
+}

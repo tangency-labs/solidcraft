@@ -26,8 +26,7 @@
 //!   evaluates a blend by its definition as its certified net where the net's bound is
 //!   within its approximation tolerance
 //!   ([`crate::surface::procedural_blend::NetScope::within`]).
-//! - **Rail end on the continued surface (WR-630, #960).** With
-//!   `fixes.fillet_rail_end_on_continued_surface`, `CalcRailIntEdgeuse` evaluates the
+//! - **Rail end on the continued surface (WR-630, #960).** `CalcRailIntEdgeuse` evaluates the
 //!   rail's end on its base surface with out-of-bounds evaluation on (the fork's
 //!   tangency-labs/smlib@3f22e97).
 //! - **A closed curve between two points (not upstream).** `SrfSrfIntersection` trims a
@@ -48,6 +47,16 @@
 //!   crossing cylinders, whose offsets continued as themselves are whole circles, hold the
 //!   round of each crossing) let a guess away from the corner solve onto the other ball. The
 //!   rest of upstream's guesses follow unchanged.
+//! - **Two rails' crossing on an edge shorter than twice the radius (#17511, not upstream).**
+//!   `CalcRailIntRail`'s guess is the midpoint of the points twice the radius along each edge.
+//!   Where that length runs past an edge's far end, the point is not on the edge (a quarter
+//!   circle of radius 10 rounded 8: it lay by the arc's far end, and the solve found the rails'
+//!   other crossing, a ball past the arc's end). There, and only there, the guess is the rails'
+//!   crossing to second order at the vertex (`second_order_rail_guess`, `rails_crossing`): each
+//!   rail its edge's osculating circle on the edge's own span, offset as far as the round's
+//!   centre stands off the side face (the side's offset surface), the crossing ahead of the
+//!   vertex along both nearest the rails' points there, else the midpoint of those points. For
+//!   straight and circular edges on a plane between square faces it is the crossing itself.
 //! - **Rails rolled over a smooth far edge, the whole length (#15767, solidcore-native).** A
 //!   solver's rail rolled before the trace onto the face beyond a smooth far edge of its face
 //!   (`FilletSolver::rolled_faces`, [`crate::blend::fillet_tangent_rollover`]) has its section's
@@ -1464,6 +1473,13 @@ pub fn srf_srf_intersection_with_context(
                 c3: &mut Vec<Curve>,
                 u1: &mut Vec<Option<Curve>>,
                 u2: &mut Vec<Option<Curve>>| {
+        // A surface of extrusion lying in the plane answers its coincident patch's
+        // boundary; that is no section curve, so this search goes on to the paths
+        // below as it did when the special case asked for more.
+        let r = r.filter(|(_, xs)| {
+            !xs.curve_types
+                .contains(&crate::surface::surface::p2::TsectCurveType::RegionBoundary)
+        });
         if let Some((_, xs)) = r {
             c3.extend(xs.curves_3d);
             if swap {
@@ -1639,11 +1655,12 @@ pub fn srf_srf_intersection_with_context(
 
     // general surf/surf intersector
     if curves_3d.is_empty() {
-        let xs = if let Some((context, handles)) = context {
+        let mut context = context;
+        let xs = if let Some((context, handles)) = context.as_mut() {
             surf1.global_surface_intersect_with_context(
                 k,
-                handles,
-                context,
+                *handles,
+                &mut **context,
                 &domain1,
                 surf2,
                 &domain2,
@@ -1661,6 +1678,37 @@ pub fn srf_srf_intersection_with_context(
                 Some(ssi_tol),
                 Some(angle_tol),
             )?
+        };
+        // The plane / extrusion dispatch answers an extrusion lying in the plane with
+        // its coincident region's boundary, no section curve (as for the special cases
+        // above): the general intersection, as that dispatch ran when the special case
+        // asked for more (with its tolerance: the plane's dispatch passes it on, the
+        // extrusion's converts it).
+        let plane_extrusion = match (surf1.kind(), surf2.kind()) {
+            (SurfaceKind::Plane(_), SurfaceKind::SurfOfExtrusion(_)) => Some(Some(ssi_tol)),
+            (SurfaceKind::SurfOfExtrusion(_), SurfaceKind::Plane(_)) => {
+                Some(Some(approx_tol3d(k, ssi_tol)))
+            }
+            _ => None,
+        };
+        let region = xs
+            .curve_types
+            .contains(&crate::surface::surface::p2::TsectCurveType::RegionBoundary);
+        let xs = match plane_extrusion {
+            Some(tol) if region => crate::surface::surface::p2::base_global_surface_intersect_in(
+                k,
+                surf1,
+                &domain1,
+                surf2,
+                &domain2,
+                [true, true],
+                tol,
+                Some(angle_tol),
+                context.map(|(solver, handles)| {
+                    crate::surface::surface::p1::SurfaceIntersectContext { solver, handles }
+                }),
+            )?,
+            _ => xs,
         };
         curves_3d.extend(xs.curves_3d);
         surface1_uv_curves.extend(xs.surface1_uv_curves);
@@ -1938,6 +1986,215 @@ fn as_edgeuse(obj: Option<EntityRef>, op: &'static str) -> Result<Option<Edgeuse
     }
 }
 
+/// One rail of a corner, to second order at the common vertex: where the filleted edge leaves the
+/// vertex (`point`), its unit direction leaving it (`leaving`), the unit direction in the common
+/// face from the edge to the rail (`binormal`), the edge's curvature in the face along it
+/// (`curvature`, positive where the edge turns towards the rail) and the rail's distance from the
+/// edge (`offset`).
+#[derive(Debug, Clone, Copy)]
+struct RailAtVertex {
+    point: Point3,
+    leaving: Vec3,
+    binormal: Vec3,
+    curvature: f64,
+    offset: f64,
+}
+
+/// A rail's osculating circle at the vertex in a plane frame, as the generalised circle
+/// `k |X - q|^2 - 2 (X - q) . b = 0`: its point at the vertex `q`, the unit normal `b` towards
+/// its centre side, its curvature `k` (`0` for a line) and the unit direction it leaves the
+/// vertex along (`leaving`).
+#[derive(Debug, Clone, Copy)]
+struct PlaneRail {
+    q: Point2,
+    b: Point2,
+    k: f64,
+    leaving: Point2,
+}
+
+impl PlaneRail {
+    fn value(self, x: Point2) -> f64 {
+        let d = x - self.q;
+        self.k * d.dot(d) - 2.0 * d.dot(self.b)
+    }
+}
+
+/// Where the rails of two rounds meeting at a vertex cross, to second order: each rail is its
+/// edge's osculating circle (a line where the edge is straight) offset into the face, the
+/// round's contact line with the face for a straight or circular edge on a plane exactly. Of
+/// their crossings (two for a circle) the one ahead of the vertex along both rails and nearest
+/// their points at the vertex is taken. The other is a ball past an edge's end (#17511) or,
+/// where the edges run on tangent at the vertex, behind both. Where no crossing lies ahead
+/// along both (a concave corner, whose rails cross behind the vertex, or rails that run on
+/// into each other, as round a rim split into arcs) the guess is the midpoint of the rails'
+/// points at the vertex, which those rails meet at or next to.
+fn rails_crossing(rails: [RailAtVertex; 2]) -> Point3 {
+    let [r0, r1] = rails;
+    let at_vertex = |r: RailAtVertex| r.point + r.binormal * r.offset;
+    let mid = (at_vertex(r0) + at_vertex(r1)) * 0.5;
+    let origin = r0.point;
+    let (eu, ev) = (r0.leaving, r0.binormal);
+    let to2 = |w: Vec3| Point2::new(w.dot(eu), w.dot(ev));
+    let plane = |r: RailAtVertex| -> Option<PlaneRail> {
+        // the rail's curvature: the edge's over the offset's shrink, its direction reversed
+        // where the offset passes the edge's centre (none where it shrinks to a point)
+        let shrink = 1.0 - r.curvature * r.offset;
+        if shrink == 0.0 {
+            return None;
+        }
+        let leaving = to2(r.leaving) * shrink.signum();
+        Some(PlaneRail {
+            q: to2(at_vertex(r) - origin),
+            b: to2(r.binormal),
+            k: r.curvature / shrink,
+            leaving,
+        })
+    };
+    let (Some(p0), Some(p1)) = (plane(r0), plane(r1)) else {
+        return mid;
+    };
+    let m = to2(mid - origin);
+    let best = plane_rail_crossings(p0, p1)
+        .into_iter()
+        .flatten()
+        .filter(|x| {
+            x.x.is_finite()
+                && x.y.is_finite()
+                && (*x - p0.q).dot(p0.leaving) > 0.0
+                && (*x - p1.q).dot(p1.leaving) > 0.0
+        })
+        .min_by(|a, b| a.distance(m).total_cmp(&b.distance(m)));
+    match best {
+        Some(x) => origin + eu * x.x + ev * x.y,
+        None => mid,
+    }
+}
+
+/// The crossings of two generalised circles in the plane ([`PlaneRail`]): at most two, none
+/// for coincident, parallel or apart ones.
+fn plane_rail_crossings(a: PlaneRail, b: PlaneRail) -> [Option<Point2>; 2] {
+    let cross = |u: Point2, v: Point2| u.x * v.y - u.y * v.x;
+    // b.k a - a.k b is linear: X . w = h
+    let w = (a.q - b.q) * (a.k * b.k) + a.b * b.k - b.b * a.k;
+    let h =
+        0.5 * (a.k * b.k * (a.q.dot(a.q) - b.q.dot(b.q))) + b.k * a.q.dot(a.b) - a.k * b.q.dot(b.b);
+    if a.k == 0.0 && b.k == 0.0 {
+        // two lines: X . a.b = a.q . a.b and X . b.b = b.q . b.b
+        let det = cross(a.b, b.b);
+        if det == 0.0 {
+            return [None, None];
+        }
+        let (ha, hb) = (a.q.dot(a.b), b.q.dot(b.b));
+        let x = Point2::new(
+            (ha * b.b.y - hb * a.b.y) / det,
+            (a.b.x * hb - b.b.x * ha) / det,
+        );
+        return [Some(x), None];
+    }
+    let ww = w.dot(w);
+    if ww == 0.0 {
+        return [None, None];
+    }
+    // the line X = x0 + t m, met with the rail of the larger curvature (where one rail is a
+    // line, the line is that rail and the other is the circle it meets)
+    let x0 = w * (h / ww);
+    let m = Point2::new(-w.y, w.x) * (1.0 / ww.sqrt());
+    let c = if a.k.abs() >= b.k.abs() { a } else { b };
+    let d = x0 - c.q;
+    let qa = c.k;
+    let qb = 2.0 * (c.k * d.dot(m) - m.dot(c.b));
+    let qc = c.value(x0);
+    if qa == 0.0 {
+        if qb == 0.0 {
+            return [None, None];
+        }
+        return [Some(x0 + m * (-qc / qb)), None];
+    }
+    let disc = qb * qb - 4.0 * qa * qc;
+    if disc < 0.0 {
+        return [None, None];
+    }
+    // the root of the larger magnitude first, the other from the product (no cancellation)
+    let big = -0.5 * (qb + qb.signum() * disc.sqrt());
+    let t0 = big / qa;
+    let t1 = if big == 0.0 { 0.0 } else { qc / big };
+    [Some(x0 + m * t0), Some(x0 + m * t1)]
+}
+
+/// Not upstream (#17511): `CalcRailIntRail`'s guess where an edge is shorter than twice the
+/// radius, in the common face's parameters: the rails' crossing to second order at the vertex
+/// ([`rails_crossing`]). Each rail is its edge's osculating circle there (a line for a straight
+/// edge), on the edge's own span of its curve (`ends`: the edge, its parameter at the vertex
+/// and whether it leaves the vertex forwards), offset as far as the round's centre stands off
+/// the side face, read from that face's offset surface and taken within the common face.
+///
+/// # Errors
+/// [`BlendFailure::StageFailed`] for an edge curve without a second derivative or a point
+/// that drops onto a face nowhere; those of the evaluations, drops and unitisations.
+fn second_order_rail_guess(
+    k: &Kernel,
+    target: &Brep,
+    face: Option<FaceId>,
+    pairs: [(&FilletSolver, usize); 2],
+    ends: [Option<(EdgeId, f64, bool)>; 2],
+) -> Result<Point2> {
+    const OP: &str = OP_RAIL_RAIL;
+    let stage = || SolidError::blend(OP, BlendFailure::StageFailed);
+    let common = face_surface(target, face, OP)?;
+    let uv_at = |srf: &Surface, p: Point3| -> Result<Point2> {
+        let domain = srf.natural_uv_domain_with_nurb(k)?;
+        let dropped = srf.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
+        if !dropped.success {
+            return Err(stage());
+        }
+        Ok(dropped.result_uv)
+    };
+    let mut rails = [RailAtVertex {
+        point: Point3::new(0.0, 0.0, 0.0),
+        leaving: Vec3::new(0.0, 0.0, 0.0),
+        binormal: Vec3::new(0.0, 0.0, 0.0),
+        curvature: 0.0,
+        offset: 0.0,
+    }; 2];
+    for ((slot, (fs, index)), end) in rails.iter_mut().zip(pairs).zip(ends) {
+        let (e, vertex_param, from_min) = end.ok_or_else(stage)?;
+        let ivl = edge::interval(target, e)?;
+        let curve = edge::curve(target, e)?.ok_or_else(stage)?;
+        // the span the edge runs along from the vertex (the flag picks the span that starts
+        // at the parameter; an edge's curve can run on past its end, into the next edge's)
+        let pv = curve.evaluate(k, vertex_param, 2, from_min, true)?;
+        let (Some(&at), Some(&d1), Some(&d2)) = (pv.first(), pv.get(1), pv.get(2)) else {
+            return Err(stage());
+        };
+        // the way the edge leaves the vertex: towards its middle
+        let unit = d1.unitize()?;
+        let mid = curve.evaluate_point(k, ivl.mid())?;
+        let leaving = if unit.dot(mid - at) < 0.0 {
+            -unit
+        } else {
+            unit
+        };
+        // the round's centre lies on the side face's offset surface: its point over the
+        // vertex is the vertex moved by the offset, taken within the common face
+        let side = solver_surface(fs, usize::from(index == 0), OP)?;
+        let side_offset = side.evaluate_point(k, uv_at(side.base_surface(), at)?)? - at;
+        let common_normal =
+            common.evaluate_normal(k, uv_at(common, at)?, Side::Left, Side::Left)?;
+        let in_face = side_offset - common_normal * side_offset.dot(common_normal);
+        let binormal = in_face.unitize()?;
+        // the edge's curvature towards the rail side (either direction of travel)
+        let curvature = (d2 - unit * d2.dot(unit)).dot(binormal) / d1.dot(d1);
+        *slot = RailAtVertex {
+            point: at,
+            leaving,
+            binormal,
+            curvature,
+            offset: in_face.length(),
+        };
+    }
+    uv_at(common, rails_crossing(rails))
+}
+
 /// The surface of a target face (`pFace->GetSurface()`, dereferenced).
 fn face_surface<'b>(
     target: &'b Brep,
@@ -2081,8 +2338,10 @@ impl FilletBrep {
         // Figure a guess uv for the intersection of the rail curves in the face: twice
         // the fillet radius along each filleted edge from the common vertex.
         let mut uv = [Point3::new(0.0, 0.0, 0.0); 2];
+        let mut ends: [Option<(EdgeId, f64, bool)>; 2] = [None, None];
+        let mut past_end = false;
         let pairs = [(fs1, rail_index1), (fs2, rail_index2)];
-        for (slot, (fs, index)) in uv.iter_mut().zip(pairs) {
+        for ((slot, end), (fs, index)) in uv.iter_mut().zip(ends.iter_mut()).zip(pairs) {
             let offset_distance = solver_surface(fs, index, OP)?.offset_distance().abs();
             let eu = solver_edgeuse(fs, index, OP)?;
             let e = eu1::edge(target, eu)?
@@ -2096,9 +2355,9 @@ impl FilletBrep {
                 .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's vertex use"))?;
             let pv = vertexuse_unit::vertex(target, vu)?;
             let orient = eu1::orientation(target, eu)?;
-            let offset_param = if (pv == cp_vertex && orient == OrientType::Same)
-                || (pv != cp_vertex && orient == OrientType::Opposite)
-            {
+            let from_min = (pv == cp_vertex && orient == OrientType::Same)
+                || (pv != cp_vertex && orient == OrientType::Opposite);
+            let offset_param = if from_min {
                 arc_length_param(
                     k,
                     curve,
@@ -2117,6 +2376,9 @@ impl FilletBrep {
                     OP,
                 )?
             };
+            // Not upstream (#17511): whether twice the radius runs past the edge's far end
+            past_end |= offset_param < ivl.min() || offset_param > ivl.max();
+            *end = Some((e, if from_min { ivl.min() } else { ivl.max() }, from_min));
             let fetch = get_or_create_uv_trim_curve(k, target, eu, false, false, true)?;
             fetch.status?;
             let trim_curve = eu1::uv_trim_curve(target, eu)?
@@ -2128,10 +2390,25 @@ impl FilletBrep {
             *slot = trim_curve.evaluate_point(k, offset_param)?;
         }
 
-        // Their midpoint is the guess.
-        let [uv0, uv1] = uv;
-        let mid_uv = (uv0 + uv1) * 0.5;
-        let uv_guess = Point2::new(mid_uv.x, mid_uv.y);
+        // Their midpoint is the guess. Not upstream (#17511): where an edge is shorter than
+        // twice the radius, that point lies past the edge's end and so does not exist on it
+        // (a round of 8 on a quarter circle of radius 10: the midpoint lay by the arc's far
+        // end and the solve found the rails' other crossing, a ball past the arc's end);
+        // there the guess is where the rails cross to second order at the vertex
+        // ([`rails_crossing`]).
+        let uv_guess = if past_end {
+            second_order_rail_guess(
+                k,
+                target,
+                face,
+                [(fs1, rail_index1), (fs2, rail_index2)],
+                ends,
+            )?
+        } else {
+            let [uv0, uv1] = uv;
+            let mid_uv = (uv0 + uv1) * 0.5;
+            Point2::new(mid_uv.x, mid_uv.y)
+        };
 
         // Get the TsectPnts and call the solver.
         let (vu1, mut tsect1) = self.rail_end_tsect(v, Some(fillet_geom1), None, OP)?;
@@ -2421,11 +2698,8 @@ impl FilletBrep {
         if let Some(g1) = fillet_geom1 {
             // its status is ignored upstream (lRailIndex stays 0); fork 9b7cd48 passes
             // this on (SER)
-            let rail_index = ignore_status(crate::error::passed_on(
-                self.rail_index_of_side_eu_resolved(g1, side_eu1, target, &|id| solvers.solver(id)),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?
-            .unwrap_or(0);
+            let rail_index = self
+                .rail_index_of_side_eu_resolved(g1, side_eu1, target, &|id| solvers.solver(id))?;
 
             // Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled over a smooth far
             // edge of its solver's face, the whole length, lies on the face beyond, which the
@@ -2598,6 +2872,24 @@ impl FilletBrep {
             }
             self.fillet_vertexuse_mut(vu1)?.set_tsect_pnt(&tsect1);
 
+            // Not upstream (#10876): in the Roll-over's second pass (its corner at V), a
+            // rail's end found on a straight side edge's line continued past its far end (the
+            // end away from the corner's vertex) is not on the side edge: it is looked for
+            // across the cliff's tangent seam there (below). One found behind the corner's
+            // vertex stays as any pass takes it.
+            if found && corners.corner(corner)?.roll_over {
+                let slack = EFF_ZERO * (1.0 + ivl.length());
+                let far_is_max = edge::start_vertex(target, side_edge)? == cp_vertex;
+                let past_far = if far_is_max {
+                    edgeuse_parameter > ivl.max() + slack
+                } else {
+                    edgeuse_parameter < ivl.min() - slack
+                };
+                if past_far {
+                    found = false;
+                }
+            }
+
             // SolidCraft change (the fork's 63c7962): a side edge
             // split only by a seam ending on it (a cylinder's seam on its rim) continues
             // across that vertex: the rail that runs past the edge's far end ends on the next
@@ -2612,12 +2904,36 @@ impl FilletBrep {
                     None
                 };
                 let tol_deg = crate::math::rad_to_deg(corners.corner(corner)?.tangency_tol_radians);
-                let next = match far {
+                let mut next = match far {
                     Some(far) => crate::blend::blend_corner::end::side_edgeuse_across_seam_vertex(
                         k, target, side_eu1, far, tol_deg,
                     )?,
                     None => None,
                 };
+                // Not upstream (#10876): the Roll-over's concave chain ends on the cliff,
+                // whose faces run on tangentially across a seam that meets the side edge's
+                // far end; the rail that runs past that end ends on the next edge, between
+                // the face beyond the seam and the same face of the rail (the edge the
+                // rolled-over rail's search takes, `side_edgeuse_across_rolled_edge`), its
+                // use on the face that corresponds to the side edge use's
+                if next.is_none() && corners.corner(corner)?.roll_over {
+                    let tol_rad = corners.corner(corner)?.tangency_tol_radians;
+                    let beyond = match far {
+                        Some(far) => {
+                            crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge(
+                                k, target, side_eu1, far, None, tol_rad,
+                            )?
+                        }
+                        None => None,
+                    };
+                    if let Some(b) = beyond {
+                        next = if eu1::face(target, b)? == eu1::face(target, side_eu1)? {
+                            Some(b)
+                        } else {
+                            eu1::radial(target, b)?
+                        };
+                    }
+                }
                 if let (Some(next), Some(far)) = (next, far) {
                     if depth >= crate::blend::blend_corner::end::SIDE_EDGE_CHAIN_STEPS {
                         return Err(SolidError::blend_failed(
@@ -2662,16 +2978,12 @@ impl FilletBrep {
                 .offset_surface(self, g1, rail_index)?
                 .ok_or_else(|| SolidError::blend_missing(OP, "the rail's offset surface"))?
                 .base_surface();
-            // Opt-in, not upstream (`fixes.fillet_rail_end_on_continued_surface`, WR-630;
+            // Not upstream (WR-630;
             // the fork's tangency-labs/smlib@3f22e97): on the base surface continued, as
             // the solve found it (over the surface's extended domain). Clamped to the
             // surface's own domain, a rail meeting a side edge's line just past the
             // edge's end (a cliff overflow) was placed on the edge's end vertex instead.
-            let pnt = if k.fixes.fillet_rail_end_on_continued_surface {
-                with_out_of_bounds_enabled_in_place(base, || base.evaluate_point(k, uv))?
-            } else {
-                base.evaluate_point(k, uv)?
-            };
+            let pnt = with_out_of_bounds_enabled_in_place(base, || base.evaluate_point(k, uv))?;
 
             // project it onto the side edge's curve
             let side_e = eu1::edge(target, side_eu1)?
@@ -2742,16 +3054,12 @@ impl FilletBrep {
             // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
             let other_rail_index =
                 // upstream dereferences a NULL side edge use there
-                ignore_status(crate::error::passed_on(
-                    match side_eu2 {
+                match side_eu2 {
                         Some(eu) => self.rail_index_of_side_eu_resolved(g2, eu, target, &|id| {
                             solvers.solver(id)
                         }),
                         None => Err(SolidError::blend_missing(OP, "the second side edge use")),
-                    },
-                    k.fixes.fillet_statuses_pass_on,
-                )?)?
-                .unwrap_or(0);
+                }?;
             let side_eu2 = side_eu2
                 .ok_or_else(|| SolidError::blend_missing(OP, "the second side edge use"))?;
 
@@ -2977,12 +3285,7 @@ impl FilletBrep {
                     // its status is ignored upstream (the point is then whatever the
                     // call left; here the previous value); fork 9b7cd48 passes this on
                     // (SER)
-                    if let Some(uv) = ignore_status(crate::error::passed_on(
-                        vertexuse_unit::compute_uv_point(k, target, vu, true),
-                        k.fixes.fillet_statuses_pass_on,
-                    )?)? {
-                        *slot = uv;
-                    }
+                    *slot = vertexuse_unit::compute_uv_point(k, target, vu, true)?;
                     break;
                 }
             }
@@ -3915,10 +4218,7 @@ impl FilletBrep {
         } else {
             let mut uv = new_curve;
             // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
-            ignore_status(crate::error::passed_on(
-                uv.convert_to_2d(),
-                k.fixes.fillet_statuses_pass_on,
-            )?)?;
+            uv.convert_to_2d()?;
             uv_curve = Some(Curve::from(uv));
             curve_3d = None;
         }
@@ -4191,6 +4491,114 @@ mod tests {
         domain.set_min_max_coords(0.0, 0.0, 360.0, 40.0).unwrap();
         cylinder.adjust_step_uv_domain(k, &domain).unwrap();
         Surface::from(cylinder)
+    }
+
+    /// The ends of a curve.
+    fn curve_ends(k: &Kernel, c: &Curve) -> (Point3, Point3) {
+        let ivl = c.natural_interval();
+        (
+            c.evaluate_point(k, ivl.min()).unwrap(),
+            c.evaluate_point(k, ivl.max()).unwrap(),
+        )
+    }
+
+    /// Review r2 M3 of #18352: an extrusion lying in a plane reaches the general
+    /// intersector here (no end points: neither tracer runs), whose plane / extrusion
+    /// dispatch answers the coincident region's boundary. The intersection keeps the
+    /// general intersection's answer instead, in both orders, as before that
+    /// dispatch answered the region.
+    #[test]
+    fn plane_and_extrusion_in_it_keep_the_general_intersection() {
+        use crate::geom::vector2d::Vec2;
+        use crate::nurbs::crv_basic::Curve as NurbCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::surface::plane::Plane;
+        use crate::surface::surf_of_extrusion::SurfOfExtrusion;
+        use crate::surface::surface::p1::SurfaceIntersectContext;
+        use crate::surface::surface::p2::{base_global_surface_intersect_in, TsectCurveType};
+        use crate::surface::surface::p4::NoObject;
+        let k = Kernel::default();
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(1.0, 0.0, 0.0, NOW),
+            CPoint::new(2.0, 0.0, 1.0, NOW),
+        ];
+        let nurb = NurbCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 2.0, 2.0]).unwrap();
+        let gen = Curve::from(BSplineCurve::from_nurb(nurb, 3, false));
+        let ext = Surface::from(SurfOfExtrusion::create_canonical(&k, gen, Vec3::Y).unwrap());
+        let dom = Extent2d::from_bounds(-5.0, -5.0, 5.0, 5.0);
+        let mut plane = Plane::new(Point3::ZERO, Vec3::X, Vec3::Y, Vec2::new(1.0, 1.0), &dom);
+        plane.make_nurb().unwrap();
+        let plane = Surface::from(plane);
+        let (tol, ang) = (1e-6, 0.1);
+        for (s1, s2) in [(&plane, &ext), (&ext, &plane)] {
+            let d1 = s1.natural_uv_domain_with_nurb(&k).unwrap();
+            let d2 = s2.natural_uv_domain_with_nurb(&k).unwrap();
+            // the dispatch the general intersector reaches answers the region
+            let dispatched = s1
+                .global_surface_intersect(&k, &d1, s2, &d2, [true, true], Some(tol), Some(ang))
+                .unwrap();
+            assert!(dispatched
+                .curve_types
+                .contains(&TsectCurveType::RegionBoundary));
+            // the general intersection, as the dispatch ran before
+            let tol_in = match s1.kind() {
+                SurfaceKind::Plane(_) => tol,
+                _ => approx_tol3d(&k, tol),
+            };
+            let general = base_global_surface_intersect_in::<NoObject>(
+                &k,
+                s1,
+                &d1,
+                s2,
+                &d2,
+                [true, true],
+                Some(tol_in),
+                Some(ang),
+                None::<SurfaceIntersectContext<'_, NoObject>>,
+            )
+            .unwrap();
+            assert!(!general
+                .curve_types
+                .contains(&TsectCurveType::RegionBoundary));
+            assert!(!general.curves_3d.is_empty());
+            let got = srf_srf_intersection_with_context(
+                &k,
+                None,
+                None,
+                None,
+                None,
+                s1,
+                s2,
+                tol,
+                ang,
+                // nearest the origin: the region's directrix x = 0 there, which the
+                // general intersection does not hold
+                SrfSrfOptions {
+                    ref_point: Some(Point3::ZERO),
+                    ..SrfSrfOptions::default()
+                },
+                None,
+            );
+            let wanted: Vec<_> = general
+                .curves_3d
+                .iter()
+                .map(|c| curve_ends(&k, c))
+                .collect();
+            match got.ok().and_then(|g| g.curve_3d) {
+                Some(c) => {
+                    let (a, b) = curve_ends(&k, &c);
+                    assert!(
+                        wanted
+                            .iter()
+                            .any(|&(p, q)| (a.distance(p) <= 1e-9 && b.distance(q) <= 1e-9)
+                                || (a.distance(q) <= 1e-9 && b.distance(p) <= 1e-9)),
+                        "{a:?}-{b:?} not among {wanted:?}"
+                    );
+                }
+                None => panic!("no curve: {wanted:?}"),
+            }
+        }
     }
 
     /// The point at `deg` degrees on the cylinder's circle at height 5.

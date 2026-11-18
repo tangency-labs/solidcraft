@@ -24,10 +24,16 @@
 //! scan resumes past the count of distributed face uses; the port keeps that. A deleted
 //! region (`delete pRegion`, after `SM_NO_DESTRUCTION`) leaves its arena like a deleted
 //! shell; the infinite region moves to the head of the region list.
-//! Opt-in (WR-584, fork tangency-labs/smlib@69c5198):
-//! [`UpstreamFixes::boolean_new_face_closure_both_sides`](crate::kernel::UpstreamFixes::boolean_new_face_closure_both_sides)
-//! makes the closure test search from the face use and its mate at once
-//! ([`tr::closure_traversal_from_both_sides`]): the same answer without marks.
+//! Not upstream (WR-584, fork tangency-labs/smlib@69c5198): the closure test searches
+//! from the face use and its mate at once ([`tr::closure_traversal_from_both_sides`]):
+//! the same answer without marks, where upstream walks the shell from one side.
+//! Not upstream (WR-18287): after the split the inner shell, the side of the closed
+//! boundary that encloses its region, is put first in its region's list; upstream leaves
+//! the old region's list as it was, a void's shell possibly ahead of it.
+//! Not upstream (WR-797): a shell to nest is sampled at its first edge use, in stored
+//! order, whose step of 20 edge tolerances stays in its face's UV domain; upstream steps
+//! off the first edge use of the first face use only and fails where that face is
+//! narrower than the step.
 //! `MakeFaceTopology`: the caller's [`Marks`] hold the objects' mark values (the
 //! `SmNewMarkAndLock` block claims and releases a new mark, also on error). New objects
 //! get their `SmTopology` record in the [`NotifyEnv`] under its identity, which also
@@ -1321,10 +1327,7 @@ fn assign_uv_curves(
             // set pUVCurve->ParameterRange = assoc Edgeuse->Edge->ParamRange
             let edge = deref(brep.edgeuse(e)?.edge)?;
             let interval = crate::topology::edge::interval(brep, edge)?;
-            ignore_status(crate::error::passed_on(
-                curve.edit_parameterization(&interval),
-                k.fixes.brep_edit_statuses_pass_on,
-            )?)?;
+            curve.edit_parameterization(&interval)?;
 
             ignore_status(
                 crate::topology::edgeuse::p2::check_and_set_uv_trim_curve(
@@ -1486,15 +1489,11 @@ fn split_closed(
     lock: &MarkLock,
     attempt: &mut RegionSplitAttempt,
 ) -> Result<()> {
-    // WR-584 (opt-in, fork tangency-labs/smlib@69c5198): search from both sides at
-    // once. Same answer; no walk across the whole shell, no marks (nothing below
-    // reads the walk's marks: the replacement claims a new mark before it moves).
-    let closed = if k.fixes.boolean_new_face_closure_both_sides {
-        tr::closure_traversal_from_both_sides(brep, start)?
-    } else {
-        tr::closure_traversal(k, brep, marks, start, lock, None)?
-    };
-    if !closed {
+    // Not upstream (WR-584, fork tangency-labs/smlib@69c5198): search from both sides
+    // at once. Same answer; no walk across the whole shell, no marks (nothing below
+    // reads the walk's marks: the replacement claims a new mark before it moves). A
+    // missing radial the search meets fails here, before the new shell and region exist.
+    if !tr::closure_traversal_from_both_sides(brep, start)? {
         return Ok(());
     }
     let new_shell = brep.add_shell_record(Shell {
@@ -1657,6 +1656,21 @@ fn split_closed(
     if shells.len() > 1 {
         let rays = split_link(shells_for_rays)?;
         nest_shells(k, brep, &query, &split, rays, &shells)?;
+    }
+
+    // Not upstream (WR-18287): the inner shell's region lies inside the split's closed
+    // boundary, so the inner shell encloses that region's other shells and comes first
+    // (`SmBrep::AssertValid` test 12). Upstream leaves the old region's list as it was, where
+    // a shell that stayed in the region, such as a void's, can come first.
+    if let Some(rays) = shells_for_rays {
+        let region = split_link(brep.shell(rays.inner)?.region)?;
+        let list = &mut brep.region_mut(region)?.shells;
+        if let Some(at) = list.iter().position(|&s| s == rays.inner) {
+            // SmRegion::SetList(InnerShell): the circular list now starts at it
+            if let (Some(tail), Some(head)) = (list.get(at..), list.get(..at)) {
+                *list = tail.iter().chain(head).copied().collect();
+            }
+        }
     }
 
     remove_empty_split_objects(k, brep, env, old_shell, new_shell)
@@ -2026,10 +2040,9 @@ fn nest_shells(
 /// `nest_shells` fires), tells whether it lies inside. A candidate inside exactly one
 /// other, itself inside none, has its outside shell moved into that solid's region,
 /// its own region marked void and its faces swapped to point into the cavity.
-/// Deeper nesting is left as built. With `Kernel::fixes.revolve_holed_profile_void`
-/// (WR-529), a B-rep whose infinite region holds one shell, more than two regions and
-/// only closed face-use shells gets its void flags from the nesting instead
-/// ([`super::p1::set_region_is_void_flags_for_nested_solids`]).
+/// Deeper nesting is left as built. A B-rep whose infinite region holds one shell, more
+/// than two regions and only closed face-use shells gets its void flags from the nesting
+/// instead (WR-529, [`super::p1::set_region_is_void_flags_for_nested_solids`]).
 pub(crate) fn nest_closed_shells_as_cavities(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -2038,12 +2051,12 @@ pub(crate) fn nest_closed_shells_as_cavities(
     let Some(infinite) = brep.infinite_region() else {
         return Ok(());
     };
-    // Not upstream (WR-529, opt-in `revolve_holed_profile_void`; the fork's
-    // tangency-labs/smlib@38b4212): the stitch may have nested the shells itself (a hole in
-    // the profile: the ring it turns into lies inside the ring around it, in that ring's
-    // region) and left the region inside the inner shell material. Where every shell is
-    // closed the regions alternate material and void from the infinite region in.
-    if k.fixes.revolve_holed_profile_void && brep.region(infinite)?.shells.len() < 2 {
+    // Not upstream (WR-529; the fork's tangency-labs/smlib@38b4212): the stitch may have
+    // nested the shells itself (a hole in the profile: the ring it turns into lies inside
+    // the ring around it, in that ring's region) and left the region inside the inner shell
+    // material. Where every shell is closed the regions alternate material and void from
+    // the infinite region in.
+    if brep.region(infinite)?.shells.len() < 2 {
         let regions = super::p1::regions(brep, None)?;
         if regions.len() <= 2 {
             return Ok(());
@@ -2178,28 +2191,44 @@ pub(crate) fn nest_closed_shells_as_cavities(
     Ok(())
 }
 
-// A point on a shell to classify: a point stepped off the first edge of its first
-// face use (or the vertex of its vertex loop), a point on its wire, or its vertex.
+// A point on a shell to classify: a point stepped off the first edge use, in stored
+// order, whose step stays in its face's UV domain (or the vertex of the first face
+// use's vertex loop), a point on its wire, or its vertex.
 fn shell_point(k: &Kernel, brep: &mut Brep, shell_id: ShellId) -> Result<Point3> {
     let shell = brep.shell(shell_id)?;
     if shell.is_faceuse_shell() {
         let fu = shell
             .first_faceuse()?
             .ok_or_else(|| SolidError::topology_missing(OP, "the shell's first face use"))?;
-        let edgeuses = eu::faceuse_edgeuses(brep, fu, false, None)?;
-        if let Some(&first_eu) = edgeuses.first() {
-            let edge = split_link(brep.edgeuse(first_eu)?.edge)?;
-            let step_dist = 20.0 * crate::topology::edge::tolerance(brep, edge)?;
-            let parameter = brep.edge(edge)?.interval.evaluate(0.4567);
-            return Ok(eu2::evaluate_binormal_step_off(
-                k,
-                brep,
-                first_eu,
-                parameter,
-                step_dist,
-                &StepOffOptions::default(),
-            )?
-            .point);
+        let faceuses = shell.get_faceuses()?;
+        if !eu::faceuse_edgeuses(brep, fu, false, None)?.is_empty() {
+            // Not upstream (WR-797), which steps off the first edge use only and fails
+            // where its face is narrower than the step. Any point of the shell serves, so
+            // the point is taken at the first edge use, in stored order, whose step of 20
+            // edge tolerances stays in its face's UV domain.
+            let mut first_left_face = None;
+            for fu in faceuses {
+                for edgeuse in eu::faceuse_edgeuses(brep, fu, false, None)? {
+                    let edge = split_link(brep.edgeuse(edgeuse)?.edge)?;
+                    let step_dist = 20.0 * crate::topology::edge::tolerance(brep, edge)?;
+                    let parameter = brep.edge(edge)?.interval.evaluate(0.4567);
+                    match eu2::evaluate_binormal_step_off_or_left_face(
+                        k,
+                        brep,
+                        edgeuse,
+                        parameter,
+                        step_dist,
+                        &StepOffOptions::default(),
+                    )? {
+                        Ok(stepped) => return Ok(stepped.point),
+                        Err(left_face) => first_left_face = first_left_face.or(Some(left_face)),
+                    }
+                }
+            }
+            // no face of the shell is wide enough: the first edge use's error, as before
+            return Err(first_left_face.unwrap_or_else(|| {
+                SolidError::topology_missing(OP, "the shell's first edge use")
+            }));
         }
         let loopuses = eu::faceuse_loopuses(brep, fu, false, None)?;
         let Some(&lu) = loopuses.first() else {

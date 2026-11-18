@@ -475,6 +475,10 @@ fn allocate(ui: &mut Ui, id: &str, width: f32, height: f32, label: &str) -> (Rec
     if response.clicked() {
         response.request_focus();
     }
+    // Request this while the containing scroll area is still open.
+    if response.gained_focus() {
+        response.scroll_to_me(None);
+    }
     if response.enabled() && response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }

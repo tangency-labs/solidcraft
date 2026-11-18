@@ -338,6 +338,15 @@ impl ExecutiveAccess<Handle> for Access {
             .ok_or_else(missing_error)?;
         orient_brep(k, b, outward, maybe_not_solid, just_unify, faces_to_swap_uv)
     }
+    fn keeps_open_result(
+        &mut self,
+        _: &mut Kernel,
+        _: Handle,
+        _: &SolidError,
+    ) -> SolidResult<bool> {
+        // never asked: this harness does not stitch (`do_stitching` is missing)
+        missing()
+    }
     fn do_stitching(
         &mut self,
         _: &mut Kernel,
@@ -871,6 +880,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         open_ends: Vec::new(),
         overflow_first: false,
         classify_only: false,
+        roll_over_pass: false,
         overflow_edges: Vec::new(),
         mitred_edges: Vec::new(),
         fan_split_points: Vec::new(),

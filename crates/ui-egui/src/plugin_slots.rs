@@ -13,6 +13,10 @@ pub(crate) struct Item {
     pub entry: String,
     pub label: String,
     pub slot: Slot,
+    /// An importer chooses its own file, so it needs no open design.
+    pub importer: bool,
+    /// The command's icon: its own from the package, else the generic plugin icon.
+    pub icon: String,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Slot {
@@ -91,6 +95,8 @@ fn declared(plugin: &plugins::Plugin) -> Vec<Item> {
                 entry: entry.name.clone(),
                 label: format!("{} · {}", plugin.name, entry.name),
                 slot,
+                importer: entry.kind == solidcraft_engine::plugin::EntryKind::Importer,
+                icon: crate::plugin_menu::command_icon(plugin, entry).to_owned(),
             });
         }
     }
@@ -184,7 +190,7 @@ pub(crate) fn menu_rows(app: &mut SolveApp, ui: &mut egui::Ui, name: &'static st
     }
     ui.separator();
     for item in entries {
-        let row = ui_kit::Item::action(&item.command, &item.label, "prefs_plugins");
+        let row = ui_kit::Item::action(&item.command, &item.label, &item.icon);
         if ui_kit::menu::list_row(ui, &row).is_some() {
             begin(app, &item.command);
             return true;
@@ -234,6 +240,7 @@ impl RibbonGroup {
                     name: &entry.label,
                     icon: "prefs_plugins",
                     size: ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &entry.entry), min_width: ribbon::BUTTON_MIN_WIDTH },
+                    planned: false,
                     enabled: true,
                     pressed: false,
                     exit: false,
@@ -287,7 +294,7 @@ impl RibbonGroup {
                 ui_kit::Menu::show_frame(ui, ui_kit::Menu::frame(), |ui| {
                     ui_kit::Menu::heading(ui, &self.name);
                     for item in &self.entries {
-                        if ui_kit::menu::list_row(ui, &ui_kit::Item::action(&item.command, &item.label, "prefs_plugins")).is_some() {
+                        if ui_kit::menu::list_row(ui, &ui_kit::Item::action(&item.command, &item.label, &item.icon)).is_some() {
                             chosen = Some(item.command.clone());
                         }
                     }
@@ -358,6 +365,7 @@ mod tests {
             approval: String::new(),
             disabled: false,
             groups: Default::default(),
+            images: Default::default(),
             entries: serde_json::from_value(json!([
                 {"name":"report","effect":"read","slots":[
                     {"kind":"menu","name":"Manufacturing"}, {"kind":"menu","name":"Plugins"},
@@ -400,11 +408,11 @@ mod tests {
         assert_eq!(preferences[0].entries[0].name, "report");
         assert_eq!(preferences[0].path, dir.to_string_lossy());
         begin(&mut h.app, "helper.report");
-        let slot = h.app.plugin_menu.dialog.take().unwrap();
+        let slot = h.app.plugin_menu.dialogs.pop().unwrap();
         assert!(slot.ready(&h.app).unwrap_err().contains("file"));
         assert!(h.app.control_held.is_empty(), "missing grants never queue a run");
         crate::plugin_menu::open_entry(&mut h.app, 0, 0);
-        let menu = h.app.plugin_menu.dialog.as_ref().unwrap();
+        let menu = h.app.plugin_menu.dialog().unwrap();
         assert_eq!(slot.fields, menu.fields);
         assert_eq!(slot.plugin.approval, menu.plugin.approval);
         assert_eq!(slot.ready(&h.app), menu.ready(&h.app));
@@ -412,17 +420,17 @@ mod tests {
         assert_eq!(menu.ready(&h.app), Ok(json!({"count":3})));
         h.app.preferences.disabled_plugins.insert("helper".into());
         assert!(menu.ready(&h.app).is_err(), "disabling an already open dialog prevents running it");
-        h.app.plugin_menu.dialog = None;
+        h.app.plugin_menu.dialogs.clear();
         assert!(items(&h.app, Slot::Menu("Help")).is_empty());
         begin(&mut h.app, "helper.report");
-        assert!(h.app.plugin_menu.dialog.is_none());
+        assert!(h.app.plugin_menu.dialogs.is_empty());
         h.app.preferences.disabled_plugins.clear();
         for command in ["helper.missing", "missing.report", "solid.box", "helper.report.extra"] {
             begin(&mut h.app, command);
-            assert!(h.app.plugin_menu.dialog.is_none(), "{command}");
+            assert!(h.app.plugin_menu.dialogs.is_empty(), "{command}");
         }
         std::fs::remove_file(dir.join("plugin.wasm")).unwrap();
         begin(&mut h.app, "helper.report");
-        assert!(h.app.plugin_menu.dialog.is_none(), "a package the shared reader refuses cannot open a slot dialog");
+        assert!(h.app.plugin_menu.dialogs.is_empty(), "a package the shared reader refuses cannot open a slot dialog");
     }
 }

@@ -26,6 +26,120 @@ fn near(a: Vec3, b: Vec3) -> bool {
     a.dist(b) < 1e-6
 }
 
+/// A knob built from a linked circle in a separate, grounded skeleton component.
+fn knob_from_linked_sketch(foreign_plane: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"radius", "expression":"2 mm"}));
+    run(&mut s, "component.create", json!({"name":"Base", "grounded":true}));
+    run(&mut s, "solid.box", json!({"length":2, "width":2, "height":2, "body_name":"BaseBody"}));
+    run(&mut s, "component.create", json!({"name":"Skeleton", "parent":"root", "grounded":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Source"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[10,0], "radius":2}));
+    run(&mut s, "sketch.dimension", json!({"entities":["c1"], "type":"radius", "value":"radius"}));
+    run(&mut s, "sketch.finish", json!({}));
+    if foreign_plane {
+        run(&mut s, "construct.plane.offset", json!({"base":"XY", "offset":0, "name":"SkeletonPlane"}));
+    }
+    run(&mut s, "component.create", json!({"name":"Knob", "parent":"root", "grounded":false}));
+    let plane = if foreign_plane { "SkeletonPlane" } else { "XY" };
+    run(&mut s, "sketch.create", json!({"plane":plane, "name":"Profile"}));
+    run(&mut s, "sketch.project", json!({"refs":[{"sketch":"Source", "curve":"c1"}], "projection_link":true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Profile", "distance":4, "operation":"new", "body_name":"KnobBody"}));
+    if foreign_plane {
+        run(&mut s, "sketch.create", json!({"plane":plane, "name":"Peg"}));
+        run(&mut s, "sketch.circle.center", json!({"center":[5,0], "radius":1}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch":"Peg", "distance":4, "operation":"new", "body_name":"PegBody"}));
+    }
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type":"revolute", "name":"Hinge", "a":"Base", "b":"Knob",
+        "at":{"occurrence":"Base", "point":[0,0,0], "z":[0,0,1]}}),
+    );
+    s
+}
+
+fn check_linked_knob(s: &mut Session, center: [f64; 3], radius: f64) {
+    let measured = run(s, "inspect.measure", json!({"bodies":["KnobBody"]}));
+    let body = &measured["bodies"][0];
+    for (i, expected) in center.into_iter().enumerate() {
+        let actual = body["center_of_mass"][i].as_f64().unwrap();
+        assert!((actual - expected).abs() < 1e-6, "center[{i}]: {actual} != {expected}");
+    }
+    let volume = body["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 4. * std::f64::consts::PI * radius * radius).abs() < 1e-6, "volume: {volume}");
+}
+
+#[test]
+fn linked_sketch_projection_moves_with_its_joint_and_keeps_source_edits() {
+    for foreign_plane in [false, true] {
+        let mut s = knob_from_linked_sketch(foreign_plane);
+        check_linked_knob(&mut s, [10., 0., 2.], 2.);
+        let result = run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+        assert_eq!(result["moved"], true);
+        check_linked_knob(&mut s, [0., 10., 2.], 2.);
+        run(&mut s, "parameters.change", json!({"name":"radius", "expression":"3 mm"}));
+        check_linked_knob(&mut s, [0., 10., 2.], 3.);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        check_linked_knob(&mut reopened, [0., 10., 2.], 3.);
+        if foreign_plane {
+            let peg = run(&mut reopened, "inspect.measure", json!({"bodies":["PegBody"]}));
+            let center = &peg["bodies"][0]["center_of_mass"];
+            assert!(center[0].as_f64().unwrap().abs() < 1e-6, "{center}");
+            assert!((center[1].as_f64().unwrap() - 5.).abs() < 1e-6, "{center}");
+        }
+        run(&mut reopened, "joint.drive", json!({"joint":"Hinge", "value":180}));
+        check_linked_knob(&mut reopened, [-10., 0., 2.], 3.);
+    }
+}
+
+#[test]
+fn older_sketch_references_capture_the_saved_assembly_pose() {
+    for foreign_plane in [false, true] {
+        let mut s = knob_from_linked_sketch(foreign_plane);
+        run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+        let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        as_last_release_saved(&mut file);
+        for feature in file["features"].as_array_mut().unwrap() {
+            if feature["type"] != "sketch" {
+                continue;
+            }
+            if let Some(plane) = feature.get_mut("plane").and_then(Value::as_object_mut) {
+                plane.remove("placement");
+            }
+            for link in feature.get_mut("sketch").and_then(|sketch| sketch.get_mut("links")).and_then(Value::as_array_mut).into_iter().flatten() {
+                link.as_object_mut().unwrap().remove("sketch_placements");
+            }
+        }
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&file.to_string()).unwrap());
+        // Older cold builds anchored the circle in world space. Preserve that saved shape,
+        // then move it rigidly relative to the pose at which the old file was saved.
+        check_linked_knob(&mut reopened, [10., 0., 2.], 2.);
+        run(&mut reopened, "joint.drive", json!({"joint":"Hinge", "value":180}));
+        check_linked_knob(&mut reopened, [0., 10., 2.], 2.);
+    }
+}
+
+#[test]
+fn pasting_a_captured_plane_and_its_sketch_applies_the_paste_transform_once() {
+    let mut s = knob_from_linked_sketch(true);
+    run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+    run(&mut s, "timeline.copy", json!({"features":["SkeletonPlane", "Peg"]}));
+    run(&mut s, "timeline.paste", json!({"component":"root", "translate":[2,3,0]}));
+    let id = s.doc.features.last().unwrap().id;
+    let check = |s: &Session| {
+        let state = s.model.state();
+        let ss = state.sketch(id).unwrap();
+        let solidcraft_sketch::CurveKind::Circle { c, .. } = ss.sketch.curves[0].kind else { panic!("expected circle") };
+        let center = ss.plane.to_world(ss.sketch.points[c].pos);
+        assert!(center.dist(Vec3::new(2., 8., 0.)) < 1e-6, "{center:?}");
+    };
+    check(&s);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+}
+
 #[test]
 fn joint_creation_rejects_reversed_limits_without_changing_the_design() {
     for command in ["joint.create", "joint.as_built"] {
@@ -274,6 +388,56 @@ fn two_cubes() -> Session {
 }
 
 #[test]
+fn unground_reports_a_joint_whose_origin_was_removed() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 3, "corner": [22, 2, -2], "operation": "join", "name": "Foot"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let joint = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Foot joint", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, -2]}}),
+    )["joint"]
+        .clone();
+    run(&mut s, "timeline.suppress", json!({"feature": "Foot"}));
+    let before = s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform;
+    let reply = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(reply["grounded"], false);
+    assert_eq!(reply["errors"][0]["joint"], joint, "{reply}");
+    assert_eq!(reply["errors"][0]["name"], "Foot joint", "{reply}");
+    assert!(reply["errors"][0]["why"].as_str().unwrap().contains("no longer exists"), "{reply}");
+    assert_eq!(reply["moved"], json!([]), "{reply}");
+    assert_eq!(reply["transform"], json!(before), "{reply}");
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform, before);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().grounded);
+}
+
+#[test]
+fn unground_reports_the_solved_placement_and_moves() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}}));
+    super::solve_counts::take();
+    let reply = run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert_eq!(reply["moved"], json!(["B:1"]), "{reply}");
+    assert_eq!(reply["errors"], json!([]), "{reply}");
+    assert_eq!(reply["conflicts"], json!([]), "{reply}");
+    assert_eq!(reply["transform"], json!(s.doc.occurrences.iter().find(|o| o.id == b).unwrap().transform));
+    assert!(near(place(&s, "B", Vec3::new(25., 5., 0.)), Vec3::new(5., 5., 10.)));
+    assert_eq!(super::solve_counts::take(), (1, 0), "unground and refresh share one placement solve");
+    // An already placed part does not need to move. That is not a failed placement.
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    let settled = run(&mut s, "occurrence.ground", json!({"occurrence": b}));
+    assert_eq!(settled["moved"], json!([]), "{settled}");
+    assert_eq!(settled["errors"], json!([]), "{settled}");
+    assert_eq!(settled["conflicts"], json!([]), "{settled}");
+    assert_eq!(settled["transform"], reply["transform"]);
+}
+
+#[test]
 fn slider_limits_clamp() {
     let mut s = two_cubes();
     // B's bottom face onto A's top face (faces meet), sliding along their common normal.
@@ -304,6 +468,203 @@ fn slider_limits_clamp() {
         .unwrap_or_default();
     run(&mut s, "parameters.change", json!({"name": h, "expression": "15"}));
     assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(5.0, 5.0, 19.0)), "{:?}", place(&s, "B", Vec3::new(25.0, 5.0, 0.0)));
+}
+
+/// X and Y remain separate from A's saved snap, so a reopened joint can edit either one.
+#[test]
+fn lateral_joint_offsets_reopen_edit_independently_and_undo() {
+    let mut s = two_cubes();
+    let result = run(
+        &mut s,
+        "joint.create",
+        json!({"type":"rigid", "name":"Offset joint", "flip":true, "angle":0,
+            "a":{"occurrence":"A", "point":[5,5,10], "z":[0,0,1], "x":[1,0,0]},
+            "b":{"occurrence":"B", "point":[25,5,0], "z":[0,0,1], "x":[1,0,0]},
+            "offset_x":"10 mm", "offset_y":"30 mm", "offset":30}),
+    );
+    assert_eq!(result["errors"], json!([]), "{result}");
+    let original_a = s.doc.assembly.joints[0].a.clone();
+    let probe = Vec3::new(25.0, 5.0, 0.0);
+    assert!(near(place(&s, "B", probe), Vec3::new(15.0, 35.0, 40.0)));
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let mut reopened = Session::new(doc);
+    assert_eq!(reopened.doc.assembly.joints[0].offset_xy, [10.0, 30.0]);
+    let before = reopened.doc.assembly.joints[0].clone();
+    run(&mut reopened, "joint.edit", json!({"joint":"Offset joint", "offset_x":"-2 mm"}));
+    assert_eq!(reopened.doc.assembly.joints[0].offset_xy, [-2.0, 30.0]);
+    assert_eq!(reopened.doc.assembly.joints[0].a, original_a);
+    assert!(near(place(&reopened, "B", probe), Vec3::new(3.0, 35.0, 40.0)));
+    for command in ["joint.list", "joint.inspect"] {
+        let report = run(&mut reopened, command, json!({}));
+        assert_eq!(report["joints"][0]["offset_xy"], json!([-2.0, 30.0]), "{report}");
+        let frame = if command == "joint.list" { &report["joints"][0]["frame_a"] } else { &report["joints"][0]["a"]["frame"] };
+        assert_eq!(frame["origin"], json!([3.0, 35.0, 10.0]), "{report}");
+    }
+    run(&mut reopened, "edit.undo", json!({}));
+    assert_eq!(reopened.doc.assembly.joints[0], before);
+    assert!(near(place(&reopened, "B", probe), Vec3::new(15.0, 35.0, 40.0)));
+    run(&mut reopened, "joint.edit", json!({"joint":"Offset joint", "offset_y":0}));
+    assert_eq!(reopened.doc.assembly.joints[0].offset_xy, [10.0, 0.0]);
+    assert!(near(place(&reopened, "B", probe), Vec3::new(15.0, 5.0, 40.0)));
+}
+
+/// A rotated attachment uses its own X/Y axes, and turning a hinge leaves its offset pivot fixed.
+#[test]
+fn lateral_joint_offsets_follow_the_attachment_axes_and_keep_the_hinge_pivot() {
+    let mut s = two_cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type":"revolute", "name":"Hinge", "flip":true, "angle":0,
+            "a":{"occurrence":"A", "point":[5,5,10], "z":[1,0,0], "x":[0,0,1]},
+            "b":{"occurrence":"B", "point":[25,5,0], "z":[1,0,0], "x":[0,0,1]},
+            "offset_x":2, "offset_y":3, "offset":4}),
+    );
+    // A's local x is world +Z, its y is world -Y, and its z is world +X.
+    let pivot = Vec3::new(9.0, 2.0, 12.0);
+    let point = Vec3::new(25.0, 5.0, 0.0);
+    assert!(near(place(&s, "B", point), pivot), "{:?}", place(&s, "B", point));
+    let before = place(&s, "B", point + Vec3::Z) - pivot;
+    run(&mut s, "joint.drive", json!({"joint":"Hinge", "value":90}));
+    assert!(near(place(&s, "B", point), pivot), "the lateral pivot must not orbit");
+    let after = place(&s, "B", point + Vec3::Z) - pivot;
+    assert!((before.len() - 1.0).abs() < 1e-9 && (after.len() - 1.0).abs() < 1e-9);
+    assert!(before.dot(after).abs() < 1e-9, "the off-axis point turns 90 degrees");
+}
+
+/// Older files saved X/Y in an explicit A frame and have no recoverable separate offset values.
+#[test]
+fn legacy_joint_frames_keep_their_baked_lateral_position() {
+    let mut s = two_cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type":"rigid", "name":"Legacy", "flip":true, "angle":0,
+            "a":{"occurrence":"A", "frame":{"origin":[15,35,10],"z":[0,0,1],"x":[1,0,0]}},
+            "b":{"occurrence":"B", "point":[25,5,0], "z":[0,0,1], "x":[1,0,0]}, "offset":30}),
+    );
+    let before = s.doc.assembly.joints[0].clone();
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    saved["assembly"]["joints"][0].as_object_mut().unwrap().remove("offset_xy");
+    let doc = solidcraft_doc::Document::from_json(&saved.to_string()).unwrap();
+    let mut reopened = Session::new(doc);
+    assert_eq!(reopened.doc.assembly.joints[0], before);
+    run(&mut reopened, "joint.edit", json!({"joint":"Legacy", "offset_x":0,"offset_y":0,"offset":30}));
+    assert_eq!(reopened.doc.assembly.joints[0].a, before.a);
+    assert!(near(place(&reopened, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(15.0, 35.0, 40.0)));
+}
+
+/// An invalid lateral value must refuse the entire edit, including other valid changes.
+#[test]
+fn invalid_lateral_joint_offsets_leave_the_design_unchanged() {
+    let mut s = two_cubes();
+    let params = json!({"type":"rigid", "name":"Seat", "a":{"occurrence":"A","point":[0,0,0]},
+        "b":{"occurrence":"B","point":[20,0,0]}, "offset_x":2,"offset_y":3});
+    run(&mut s, "joint.create", params.clone());
+    for key in ["offset_x", "offset_y"] {
+        for value in [json!(null), json!(true), json!([]), json!({}), json!(1e9), json!("1e200 mm"), json!("30 deg"), json!("missing_parameter")] {
+            let before = s.doc.to_json();
+            let mut edit = json!({"joint":"Seat", "name":"Wrong", "offset":12});
+            edit[key] = value.clone();
+            assert!(s.execute("joint.edit", &edit).is_err(), "{edit}");
+            assert_eq!(s.doc.to_json(), before, "failed edit changed the design");
+            let mut create = params.clone();
+            create[key] = value;
+            assert!(s.execute("joint.create", &create).is_err(), "{create}");
+            assert_eq!(s.doc.to_json(), before, "failed creation changed the design");
+        }
+    }
+}
+
+/// A part on a revolute joint, nested in the part a slider moves, moves as far as the slider
+/// does (#17305). The part is made before the slider's part and then moved into it, so its
+/// occurrence has the lower id. A solve stored the placements in id order: the part in the frame
+/// its parent was leaving, then the parent, which moved the part a second time. A slider whose
+/// offset follows a parameter shows it in one solve: changing the parameter by 10 mm moved the
+/// slider's part 10 mm and the part inside it 20 mm.
+#[test]
+fn a_part_nested_in_a_slider_part_moves_as_far_as_the_slider() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("C", 40), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name, "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    let (a, b, c) = (occ(&s, "A"), occ(&s, "B"), occ(&s, "C"));
+    assert!(c < b, "C's occurrence {c} is older than B's {b}");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "occurrence.reparent", json!({"occurrence": c, "parent": "B"}));
+    // B's bottom onto A's top, sliding up and down; C rides inside B and moves with it.
+    let r = run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
+    let (corner_b, corner_c) = (Vec3::new(20.0, 0.0, 0.0), Vec3::new(40.0, 0.0, 0.0));
+    assert!(near(place(&s, "C", corner_c), Vec3::new(20.0, 0.0, 10.0)), "C follows B onto A: {:?}", place(&s, "C", corner_c));
+    // C's bottom onto B's top, turning about their common normal.
+    let r = run(&mut s, "joint.create", json!({"type": "revolute", "a": {"face": [5, 5, 20]}, "b": {"face": [25, 5, 10]}, "name": "Turn"}));
+    assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{r}");
+    run(&mut s, "parameters.add", json!({"name": "lift", "expression": "5 mm"}));
+    run(&mut s, "joint.edit", json!({"joint": "Rail", "offset": "lift"}));
+    let moved = |s: &Session, b0: Vec3, c0: Vec3| (place(s, "B", corner_b) - b0, place(s, "C", corner_c) - c0);
+    for (lift, by) in [("15 mm", 10.0), ("1 mm", -14.0), ("31 mm", 30.0)] {
+        let (b0, c0) = (place(&s, "B", corner_b), place(&s, "C", corner_c));
+        run(&mut s, "parameters.change", json!({"name": "lift", "expression": lift}));
+        let (db, dc) = moved(&s, b0, c0);
+        assert!(near(db, Vec3::new(0.0, 0.0, by)), "lift {lift}: B moves with the slider by {by}: {db:?}");
+        assert!(near(dc, db), "lift {lift}: C moves as far as B ({db:?}), not {dc:?}");
+    }
+    // Driving the slider moves both by the same distance too.
+    for travel in [10.0, -4.0] {
+        let (b0, c0) = (place(&s, "B", corner_b), place(&s, "C", corner_c));
+        let now =
+            solidcraft_doc::joints::joint_values(&s.doc.assembly).get(&s.doc.assembly.joints[0].id).and_then(|q| q.first().copied()).unwrap_or(0.0);
+        run(&mut s, "joint.drive", json!({"joint": "Rail", "value": now + travel}));
+        let (db, dc) = moved(&s, b0, c0);
+        assert!(near(db, Vec3::new(0.0, 0.0, travel)) && near(dc, db), "drive by {travel}: B {db:?}, C {dc:?}");
+    }
+}
+
+/// The box an occurrence is shown in (`occurrence.properties`, which reads a move not captured).
+fn shown_box(s: &mut Session, component: &str) -> [Vec3; 2] {
+    let id = occ(s, component);
+    let r = run(s, "occurrence.properties", json!({"occurrence": id}));
+    let corner =
+        |k: &str| serde_json::from_value::<[f64; 3]>(r["total"]["bbox"][k].clone()).map_or(Vec3::new(f64::NAN, f64::NAN, f64::NAN), Vec3::from);
+    [corner("min"), corner("max")]
+}
+
+fn shown_at(s: &mut Session, component: &str, min: [f64; 3], max: [f64; 3]) -> bool {
+    let [lo, hi] = shown_box(s, component);
+    near(lo, Vec3::from(min)) && near(hi, Vec3::from(max))
+}
+
+/// A joint solve that moves a part drops the part's move not captured, so the part is shown where
+/// the joints put it; an exploded view's placement stays shown.
+#[test]
+fn a_joint_solve_drops_the_move_not_captured_of_a_part_it_moves() {
+    let mut s = two_cubes();
+    let b = occ(&s, "B");
+    run(&mut s, "occurrence.move", json!({"occurrence": b, "translate": [0, 30, 0], "capture": false}));
+    assert!(shown_at(&mut s, "B", [20.0, 30.0, 0.0], [30.0, 40.0, 10.0]), "{:?}", shown_box(&mut s, "B"));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 35, 0]}, "name": "Stack"}),
+    );
+    assert!(shown_at(&mut s, "B", [0.0, 0.0, 10.0], [10.0, 10.0, 20.0]), "{:?}", shown_box(&mut s, "B"));
+    assert!(!s.pending_moves.contains_key(&b));
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": true}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": "B", "translate": [0, 0, 20]}]}));
+    run(&mut s, "explode.show", json!({"view": "Apart"}));
+    let shown = s.pending_moves.get(&b).copied();
+    assert!(shown.is_some() && shown == s.exploded.get(&b).copied());
+    let mut doc = (*s.doc).clone();
+    if let Some(o) = doc.occurrences.iter_mut().find(|o| o.id == b) {
+        o.transform = solidcraft_doc::rigid(Vec3::new(40.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    }
+    *s.doc_mut() = doc;
+    run(&mut s, "occurrence.ground", json!({"occurrence": b, "grounded": false}));
+    assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 0.0)), Vec3::new(5.0, 5.0, 10.0)), "the solve puts B back on A");
+    assert_eq!(s.pending_moves.get(&b).copied(), shown);
 }
 
 #[test]
@@ -542,6 +903,35 @@ fn omitted_sides_stay() {
     assert!(after.flip && after.name == "Flipped");
 }
 
+/// A joint's new name counts characters, as the other renames do: a hundred `ł` (200 bytes) is
+/// taken. A new name over 128 characters is refused with the reason and changes nothing, not
+/// dropped while the rest of the edit goes through. joint.create still takes any name, and a
+/// joint keeps its own name through an edit whatever its length; a blank name changes nothing.
+#[test]
+fn joint_names_count_characters_and_a_new_long_one_is_refused() {
+    let mut s = two_cubes();
+    let given = "x".repeat(200);
+    run(&mut s, "joint.create", json!({"type": "rigid", "name": given, "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}}));
+    assert_eq!(s.doc.assembly.joints[0].name, given);
+    run(&mut s, "joint.edit", json!({"joint": given, "flip": true, "name": given}));
+    assert!(s.doc.assembly.joints[0].flip, "the edit with the joint's own name goes through");
+    run(&mut s, "joint.edit", json!({"joint": given, "name": " "}));
+    assert_eq!(s.doc.assembly.joints[0].name, given, "a blank name changes nothing");
+    // A stored name with spaces round it is the joint's own name too.
+    let spaced = format!(" {given} ");
+    s.doc_mut().assembly.joints[0].name = spaced.clone();
+    let id = s.doc.assembly.joints[0].id;
+    run(&mut s, "joint.edit", json!({"joint": id, "flip": false, "name": given}));
+    assert_eq!(s.doc.assembly.joints[0].name, spaced, "kept as it is");
+    let long = "ł".repeat(100);
+    run(&mut s, "joint.edit", json!({"joint": id, "name": long}));
+    assert_eq!(s.doc.assembly.joints[0].name, long);
+    let doc = s.doc.clone();
+    let error = s.execute("joint.edit", &json!({"joint": long, "flip": false, "name": "ł".repeat(129)})).unwrap_err().to_string();
+    assert!(error.contains("joint.edit") && error.contains("at most 128 characters"), "{error}");
+    assert_eq!(s.doc, doc, "a refused name changes nothing");
+}
+
 /// One undo step puts the sides back, and the parts with them.
 #[test]
 fn one_undo_restores_the_old_sides() {
@@ -692,11 +1082,11 @@ fn a_to_object_extrude_to_another_component_moves_rigidly_with_its_slider() {
     }
 }
 
-/// The design as the last release saved it, before the pending changes: its format number one
-/// back and no list of the changes it has, so each pending step runs as it opens.
+/// The design as it was saved before the format that pins a To Object extrude's placements
+/// (format 57, `v57/extrude-to-object-keeps-picked-placements.rs`): that step runs as it opens,
+/// whatever changes are pending after it, and no list of the changes it has says otherwise.
 fn as_last_release_saved(file: &mut Value) {
-    let number = file["format"].as_str().and_then(|f| f.rsplit('/').next()).and_then(|n| n.parse::<u32>().ok()).unwrap_or(1);
-    file["format"] = json!(format!("solidcraft/{}", number.saturating_sub(1)));
+    file["format"] = json!("solidcraft/56");
     if let Some(o) = file.as_object_mut() {
         o.remove("format_pending");
     }
@@ -1216,7 +1606,7 @@ fn slider_crank_moves_the_piston() {
 /// (Slot: its frame at the shaft, x along the slot towards the pin). Every joint of the loop
 /// moves when it does, the slot's included. The pin's face sits `gap` mm off the arm's along
 /// the axes: a gap no value of the loop takes out, within the conflict check.
-fn slotted_arm(yaw_first: bool, gap: f64) -> Session {
+pub(crate) fn slotted_arm(yaw_first: bool, gap: f64) -> Session {
     let mut s = Session::default();
     for (name, x) in [("Ground", 0.0), ("Clamp", 26.0), ("Motor", 52.0), ("Arm", 40.0)] {
         part(&mut s, name, [x - 1.0, -1.0, -5.0]);
@@ -3846,4 +4236,29 @@ fn a_rigid_joint_with_a_lost_origin_still_holds_its_part() {
     let fix = run(&mut s, "joint.inspect", json!({"joint": "Fix"}))["joints"][0].clone();
     assert!(!fix["errors"].as_array().is_none_or(Vec::is_empty), "{fix}");
     assert!(same(&pose(&s), &saved), "and after the drive: {:?}", pose(&s));
+}
+
+/// A drive moves the parts it carries by their placement alone: the faces the joint's origins
+/// were picked on are not searched again, however many times the joints are solved (#17074).
+#[test]
+fn driving_a_slider_does_not_resolve_its_face_origins_again() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    let a = occ(&s, "A");
+    run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"}));
+    let probe = Vec3::new(25.0, 5.0, 5.0);
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 5}));
+    let (resolved, before) = (s.model.state().origin_resolutions(), place(&s, "B", probe));
+    assert!(resolved > 0, "the first solve found the origins");
+    for value in [6.0, 7.0, 8.0] {
+        let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": value}));
+        assert_eq!(r["moved"], true, "{r}");
+    }
+    assert_eq!(s.model.state().origin_resolutions(), resolved, "origins resolved again by a drive that only moved a part");
+    assert!(near(place(&s, "B", probe), before + Vec3::new(3.0, 0.0, 0.0)), "B follows the slider: {:?}", place(&s, "B", probe));
 }

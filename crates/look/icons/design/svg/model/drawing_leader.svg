@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Drawing leader</title>
+  <path d="M8.5 34L33.5 34A2.5 2.5 0 0 1 36 36.5L36 51.5A2.5 2.5 0 0 1 33.5 54L8.5 54A2.5 2.5 0 0 1 6 51.5L6 36.5A2.5 2.5 0 0 1 8.5 34Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18 45L39 18L56 18" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15 49L19 35L26 41Z" fill="#236ead"/>
+</svg>

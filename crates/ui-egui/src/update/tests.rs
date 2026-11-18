@@ -27,6 +27,16 @@ fn nightlies_count_as_the_release_they_follow() {
     assert!(is_newer("v0.10.0", "0.9.0-nightly.20261014.36.1"));
 }
 
+#[test]
+fn test_builds_are_recognised() {
+    assert!(is_test_version("0.43.0-test+abc1234"));
+    assert!(is_test_version("0.43.0-test"));
+    assert!(!is_test_version("0.43.0"));
+    assert!(!is_test_version("0.43.0-rc.1"));
+    assert!(!is_test_version("0.43.0-nightly.20261115.7.1"));
+    assert!(!is_test_version("not a version"));
+}
+
 fn probe(os: &str, release: bool, env: &[(&str, &str)], exe: &str, files: &[&str]) -> InstallKind {
     let env: BTreeMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
@@ -356,6 +366,88 @@ fn turning_off_automatic_checks_stops_the_launch_check() {
     h.frames(3);
     assert_eq!(h.app.updater.status, Status::Idle);
     assert!(h.app.updater.release.is_none());
+}
+
+/// A computer whose administrator set `CheckForUpdates` to `on` (#10260).
+fn update_policy(on: bool) -> crate::policy::Policy {
+    crate::policy::Policy { mandatory: crate::policy::Layer { check_for_updates: Some(on), ..Default::default() }, ..Default::default() }
+}
+
+#[test]
+fn an_organizations_policy_turns_update_checks_off_whatever_the_preference_says() {
+    let dir = scratch();
+    let (feed, _) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.app.policy, crate::policy::Policy::default(), "no policy unless the host loads one");
+    h.app.preferences.check_updates = true;
+    h.app.updater.feed = Some(feed);
+    h.app.policy = update_policy(false);
+    h.frames(3);
+    assert!(!available(&mut h.app));
+    assert_eq!(h.app.updater.status, Status::Idle);
+    // Check now (Help, Preferences) asks nobody either.
+    let ctx = h.ctx.clone();
+    check_now(&mut h.app, &ctx);
+    h.frames(3);
+    assert!(h.app.updater.rx.is_none() && h.app.updater.release.is_none());
+    assert!(h.app.preferences.check_updates, "the person's own choice is kept for when the policy goes");
+}
+
+#[test]
+fn an_organizations_policy_keeps_update_checks_on_whatever_the_preference_says() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.updater.feed = Some(feed);
+    h.app.policy = update_policy(true);
+    h.frame();
+    wait_for_check(&mut h);
+    assert_eq!(h.app.updater.release.as_ref().map(|r| r.version().to_string()), Some(version));
+    assert!(!h.app.preferences.check_updates);
+}
+
+#[test]
+fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() {
+    use egui::accesskit::{Role, Toggled};
+    let _language = solidcraft_ui_text::scope("en");
+    for on in [false, true] {
+        let dir = scratch();
+        let (feed, _) = next_release_feed(&dir.0);
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.app.preferences.check_updates = !on;
+        h.app.updater.feed = Some(feed);
+        h.app.policy = update_policy(on);
+        let reply = h.call("ui.prefs", json!({"open":"General"}));
+        assert_eq!(reply["result"]["policy"], json!({"locked": ["check_updates"], "check_updates": on}), "{reply}");
+        assert_eq!(reply["result"]["check_updates"], json!(!on), "the stored preference is reported as stored");
+        crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        let boxes: Vec<_> =
+            tree.nodes.iter().filter(|(_, n)| n.role() == Role::CheckBox && n.label() == Some("Check at start and once a day")).collect();
+        assert_eq!(boxes.len(), 1);
+        assert!(boxes[0].1.is_disabled(), "policy {on}: the checkbox is locked");
+        assert_eq!(boxes[0].1.toggled(), Some(if on { Toggled::True } else { Toggled::False }), "it shows the organization's value");
+        assert!(h.widget("Set by your organization").is_some(), "the row says who set it");
+        assert_eq!(h.widget("Your organization turned off update checks on this computer.").is_some(), !on);
+        // The control channel cannot change it; sending back what it read is not a change.
+        let refused = h.call("ui.prefs", json!({"check_updates": on}));
+        assert_eq!(refused["ok"], json!(false), "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("set by your organization's policy"), "{refused}");
+        assert_eq!(h.call("ui.prefs", json!({"check_updates": !on}))["ok"], json!(true));
+        assert_eq!(h.app.preferences.check_updates, !on);
+        // Restore page defaults leaves it too: the person's choice outlives the policy.
+        assert_eq!(h.call("ui.prefs", json!({"button":"defaults"}))["ok"], json!(true));
+        assert_eq!(h.app.preferences.check_updates, !on, "policy {on}: defaults keep the stored choice");
+    }
+    // Without a policy the reply names none, and the setting changes as before.
+    let mut h = crate::scenario::Harness::new();
+    let reply = h.call("ui.prefs", json!({"check_updates": false}));
+    assert_eq!(reply["ok"], json!(true));
+    assert!(reply["result"].get("policy").is_none());
+    assert!(!h.app.preferences.check_updates);
 }
 
 #[test]

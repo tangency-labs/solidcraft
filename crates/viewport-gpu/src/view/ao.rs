@@ -297,6 +297,7 @@ impl Resources {
         size_px: [f32; 2],
         reversed: bool,
         layers: &[(&wgpu::BindGroup, &Batches)],
+        timer: Option<&super::pass_times::PassTimer>,
     ) {
         let enabled = radius.is_finite() && radius > 0.0;
         // Bound memory at large window sizes; normalized coordinates also handle downsampling.
@@ -325,7 +326,7 @@ impl Resources {
                 depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(far_depth(reversed)), store: wgpu::StoreOp::Store }),
                 stencil_ops: None,
             }),
-            timestamp_writes: None,
+            timestamp_writes: timer.and_then(|t| t.writes("sc_ao_prepass")),
             occlusion_query_set: None,
             multiview_mask: None,
         });
@@ -339,7 +340,7 @@ impl Resources {
                 depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
                 stencil_ops: None,
             }),
-            timestamp_writes: None,
+            timestamp_writes: timer.and_then(|t| t.writes("sc_ao_term")),
             occlusion_query_set: None,
             multiview_mask: None,
         });
@@ -350,7 +351,7 @@ impl Resources {
             label: Some("sc_ao_blur"),
             color_attachments: &[term_target(&self.maps.smooth)],
             depth_stencil_attachment: None,
-            timestamp_writes: None,
+            timestamp_writes: timer.and_then(|t| t.writes("sc_ao_blur")),
             occlusion_query_set: None,
             multiview_mask: None,
         });

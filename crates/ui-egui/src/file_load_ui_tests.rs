@@ -122,7 +122,7 @@ fn the_window_keeps_drawing_and_moving_while_a_large_design_opens() {
         assert!(w.app.file_load.busy(), "frames finish before the file worker is released");
         assert!(std::sync::Arc::ptr_eq(&w.app.session.doc, &blank), "the old design stays intact");
     }
-    let bar = pos2(500.0, 17.0);
+    let bar = pos2(900.0, 17.0);
     let viewport = w.app.viewport.rect.map_or(pos2(800.0, 500.0), |r| r.center());
     let cmds = w.gesture(&[bar, bar + vec2(12.0, 4.0), bar + vec2(40.0, 10.0)]);
     assert!(cmds.iter().any(|c| matches!(c, ViewportCommand::StartDrag)), "the title bar drag was handled during the open");
@@ -1112,6 +1112,31 @@ fn a_newer_design_opens_with_a_notice_and_no_dialog() {
     let (text, _, error) = app.status.clone().unwrap();
     assert!(error && text.contains("gyroid_lattice"), "{text}");
     assert!(app.dialog.is_none() && !app.ui.palette_open);
+}
+
+/// A design with the data of a plugin that isn't installed opens as usual: the status line names
+/// the plugin, and the data is kept as it came.
+#[test]
+fn a_design_with_a_missing_plugins_data_opens_and_names_the_plugin() {
+    let mut app = SolveApp::new(Session::default(), Default::default());
+    let dir = scratch("missing_plugin_data");
+    app.session.plugin_state.plugins_dir = Some(dir.join("plugins"));
+    let mut design = Session::default();
+    design.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
+    let b64 = solidcraft_engine::doc::canvas::base64_encode;
+    let meta = b64(br#"{"plugin":"manufacture","name":"Manufacture","plugin_version":"1.4","format":3}"#);
+    let data = design.doc_mut();
+    data.plugin_data.insert("manufacture/meta.json".into(), meta.into());
+    data.plugin_data.insert("manufacture/data.json".into(), b64(br#"{"setups":[]}"#).into());
+    let path = dir.join("with-data.json");
+    std::fs::write(&path, design.doc.to_json()).unwrap();
+
+    app.open_path(&path.to_string_lossy());
+
+    let (text, _, error) = app.status.clone().unwrap();
+    assert_eq!(text, "Contains Manufacture data (plugin 1.4). Install it to edit.");
+    assert!(!error && app.dialog.is_none());
+    assert_eq!(app.session.doc.plugin_data, design.doc.plugin_data);
 }
 
 /// Imported STEP bodies have no editor. Both edit entry points explain this without opening

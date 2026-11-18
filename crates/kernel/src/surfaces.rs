@@ -30,7 +30,16 @@ use crate::{KernelError, Result, record};
 impl Body {
     /// A surface body: some shell does not close (an edge bounds a face on one side only).
     pub fn is_surface(&self) -> bool {
-        !self.is_mesh() && self.record().edges.iter().any(|e| e.uses.len() == 1)
+        // Topology only: a placed copy answers from its part's record without moving its own.
+        !self.is_mesh() && self.record.topology().edges.iter().any(|e| e.uses.len() == 1)
+    }
+
+    /// The number of open boundary edges, read from exact topology. A face's periodic seam
+    /// is used twice and is not open. Mesh bodies and topology the kernel cannot read are errors.
+    pub fn open_edge_count(&self) -> Result<usize> {
+        self.require_brep("open boundary edges")?;
+        let (body, _) = self.ops_body().ok_or_else(|| failed("open boundary edges: the body's topology could not be read"))?;
+        solidcore_ops::stitch::open_edges(body).map(|edges| edges.len()).map_err(|e| failed(format!("open boundary edges: {e}")))
     }
 }
 
@@ -1144,6 +1153,14 @@ pub fn sweep_sheet_points_with(plane: &Plane, chains: &[Vec<Seg2>], path: &[Vec3
     sweep_sheet_with(plane, chains, &segs, ctl)
 }
 
+/// A surface swept from chains of sketch segments on `plane` along a path through 3D sketch curves
+/// ([`crate::PointPath`]): each drawn 3D spline exactly, as its spans, and each polyline as the
+/// lines between its points, as the solid sweep follows them ([`crate::sweep_point_path_with`]).
+/// A smooth spline is one smooth run, so each chain sweeps to one wall along it (#17828).
+pub fn sweep_sheet_point_path_with(plane: &Plane, chains: &[Vec<Seg2>], path: &crate::PointPath, ctl: &crate::SweepControl) -> Result<Body> {
+    sweep_sheet_with(plane, chains, &path.segs()?, ctl)
+}
+
 /// A surface lofted through two or more sections, each a chain of sketch segments on its plane,
 /// all open or all closed: ruled between two sections, smooth through three or more. Closed
 /// sections are matched as the solid loft matches them; open ones are split to the same number of
@@ -1759,6 +1776,43 @@ mod tests {
         assert_eq!(two.edge_count(), 2 * 41 + 3 * 40, "the walls share their seams");
     }
 
+    /// A line swept along a closed 3D sketch spline (eight fit points round a circle of radius 20)
+    /// follows the spline exactly: one wall, closed round the path, not a wall along each line of
+    /// the spline's samples (#17828). In a plane, the line square to it, the wall is a band of the
+    /// line's length times the spline's: its length from its exact spans, not its samples.
+    #[test]
+    fn sweep_sheet_along_a_closed_spline_is_one_closed_wall() {
+        use crate::{PathPiece, PointPath, SpaceBezier, SweepControl};
+        let ring = |z: &dyn Fn(usize) -> f64| -> Vec<Vec3> {
+            (0..=8)
+                .map(|i| {
+                    let t = std::f64::consts::TAU * (i % 8) as f64 / 8.0;
+                    Vec3::new(20.0 * t.cos(), 20.0 * t.sin(), z(i % 8))
+                })
+                .collect()
+        };
+        let line = vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(0.0, 5.0) }];
+        let flat = ring(&|_| 0.0);
+        let path = PointPath { pieces: vec![PathPiece::Spline { fit: flat.clone(), reversed: false }] };
+        // The profile stands on the path's start, square to it: x out from the centre, y up.
+        let plane = Plane { origin: Vec3::new(20.0, 0.0, 0.0), x: Vec3::X, y: Vec3::Z };
+        let band = sweep_sheet_point_path_with(&plane, std::slice::from_ref(&line), &path, &SweepControl::default()).unwrap();
+        let length: f64 =
+            solidcraft_geom::catmull_rom::beziers(&flat).unwrap().into_iter().map(|p| SpaceBezier::cubic(p).unwrap().length().unwrap()).sum();
+        // One wall, its two ends one seam: the seam and the line's two ends round the path.
+        assert!(band.is_surface() && band.face_count() == 1 && band.edge_count() == 3, "{} faces, {} edges", band.face_count(), band.edge_count());
+        let area = measure(&band).unwrap().area;
+        assert!(rel(area, 5.0 * length) < 1e-6, "{area} vs {}", 5.0 * length);
+        // As the reported path: the fit points up and down by 5 in turn, a line out from it in
+        // the plane of the path's start. Its frame closes round the path, so the wall does too.
+        let wavy = ring(&|i| if i % 2 == 0 { 9.0 } else { 4.0 });
+        let path = PointPath { pieces: vec![PathPiece::Spline { fit: wavy, reversed: false }] };
+        let flat_at = Plane { origin: Vec3::new(0.0, 0.0, 9.0), x: Vec3::X, y: Vec3::Y };
+        let radial = vec![Seg2::Line { a: Vec2::new(20.0, 0.0), b: Vec2::new(28.0, 0.0) }];
+        let wall = sweep_sheet_point_path_with(&flat_at, &[radial], &path, &SweepControl::default()).unwrap();
+        assert!(wall.is_surface() && wall.face_count() == 1 && wall.edge_count() == 3, "{} faces, {} edges", wall.face_count(), wall.edge_count());
+    }
+
     #[test]
     fn sweep_sheet_refuses_bad_input() {
         use crate::PathSeg;
@@ -1771,6 +1825,8 @@ mod tests {
         assert!(sweep_sheet(&Plane::XY, std::slice::from_ref(&line), &[no_axis]).is_err());
         assert!(sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &[Vec3::ZERO]).is_err());
         assert!(sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &[Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 0.0)]).is_err());
+        let nan = crate::PointPath::polyline(vec![Vec3::ZERO, Vec3::new(0.0, 0.0, f64::NAN), Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 10.0)]);
+        assert!(sweep_sheet_point_path_with(&Plane::XY, std::slice::from_ref(&line), &nan, &crate::SweepControl::default()).is_err());
     }
 
     /// Sheets lofted between open lines and closed loops: a ruled strip (even when the second
@@ -1948,6 +2004,53 @@ mod tests {
             let t = thicken(&corner, t, symmetric).unwrap();
             let v = measure(&t).unwrap().volume;
             assert!(rel(v, want) < 1e-9 && t.validity().is_empty(), "{v} vs {want}");
+        }
+    }
+
+    /// A half circle of radius 5 extruded 10 as a sheet on each origin plane, thickened by 1, 2
+    /// and 4 out, in and half each way: a half tube between radii r0 and r1, π/2·(r1² − r0²)·10,
+    /// closed by a half ring at each end and a strip along each side (6 faces, 12 edges, 8
+    /// vertices), that every check accepts. The end rings lie square to the extrusion whatever
+    /// axis it runs along (#13348: off the XY plane the rings went onto planes through the axis).
+    #[test]
+    fn thicken_a_half_tube_on_every_origin_plane() {
+        use std::f64::consts::PI;
+        let arc = vec![Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: 0.0, sweep: PI }];
+        for (name, plane) in [("XY", Plane::XY), ("YZ", Plane::YZ), ("XZ", Plane::XZ)] {
+            let sheet = extrude_sheet(&plane, std::slice::from_ref(&arc), 0.0, 10.0).unwrap();
+            for t in [1.0, 2.0, 4.0] {
+                for (thickness, symmetric, r0, r1) in [(t, false, 5.0, 5.0 + t), (-t, false, 5.0 - t, 5.0), (t, true, 5.0 - t / 2.0, 5.0 + t / 2.0)] {
+                    let what = format!("{name}, {thickness} mm, symmetric {symmetric}");
+                    let b = thicken(&sheet, thickness, symmetric).unwrap_or_else(|e| panic!("{what}: {e}"));
+                    assert!(!b.is_surface() && b.shell_count() == 1, "{what}");
+                    assert_eq!((b.face_count(), b.edge_count(), b.vertex_count()), (6, 12, 8), "{what}");
+                    assert!(b.validity().is_empty(), "{what}: {:?}", b.validity());
+                    let (v, want) = (measure(&b).unwrap().volume, PI / 2.0 * (r1 * r1 - r0 * r0) * 10.0);
+                    assert!(rel(v, want) < 1e-9, "{what}: {v} vs {want}");
+                    // The four flat faces: the rings square to the extrusion at 0 and 10 along it,
+                    // the strips in the sketch's x axis' plane through the axis.
+                    let n = plane.normal().normalized().unwrap();
+                    let mut rings = Vec::new();
+                    let mut strips = 0;
+                    for f in (0..b.face_count()).filter_map(|i| b.planar_face(i)) {
+                        let m = f.normal().normalized().unwrap();
+                        if (m.dot(n).abs() - 1.0).abs() < 1e-9 {
+                            rings.push(f.origin.dot(n));
+                        } else {
+                            assert!(
+                                (m.dot(plane.y).abs() - 1.0).abs() < 1e-9 && f.origin.dot(plane.y).abs() < 1e-9,
+                                "{what}: a strip off the axis plane: {f:?}"
+                            );
+                            strips += 1;
+                        }
+                    }
+                    rings.sort_by(f64::total_cmp);
+                    assert!(
+                        rings.len() == 2 && rings[0].abs() < 1e-9 && (rings[1] - 10.0).abs() < 1e-9 && strips == 2,
+                        "{what}: rings at {rings:?}, {strips} strips"
+                    );
+                }
+            }
         }
     }
 
