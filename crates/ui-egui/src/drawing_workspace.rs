@@ -55,6 +55,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         if !active(app) {
             app.drawing_workspace.previous_tab = Some(app.ui.tab.clone());
             app.ui.tab = "DRAWING LAYOUT".into();
+            open_a_drawing(app);
         }
     } else if active(app) {
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
@@ -74,6 +75,19 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
     app.ui.ribbon_context = None;
     app.cancel_view_animation();
     Ok(())
+}
+
+/// Entering Drawing with no drawing open opens the design's first drawing, on its first sheet. A
+/// design without drawings starts on the page that makes one.
+fn open_a_drawing(app: &mut SolveApp) {
+    if app.session.open_drawing.is_some() {
+        return;
+    }
+    let Some(id) = app.session.doc.drawings.first().map(|d| d.id) else { return };
+    match app.run("drawing.open", serde_json::json!({"drawing": solidcraft_engine::doc::ids::encode(id)})) {
+        Ok(_) => crate::drawing_sheet_page::fit(app),
+        Err(error) => app.set_status(error, true),
+    }
 }
 
 pub fn reset_document(app: &mut SolveApp) {
@@ -860,6 +874,38 @@ mod tests {
         assert_eq!(h.app.preferences.default_units, "in");
         crate::workspace::enter(&mut h.app, "drawing").unwrap();
         assert!(active(&h.app));
+    }
+
+    /// A box in Drawing, with a drawing of one base view open: its id.
+    fn drawing_with_a_view(h: &mut Harness) -> Option<u64> {
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length":40,"width":20,"height":3})).unwrap();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.app.run("drawing.create", serde_json::json!({})).unwrap();
+        h.app.run("drawing.view.base", serde_json::json!({"sheet":"Sheet 1","scale":"1:1","position_mm":[150,150]})).unwrap();
+        h.app.session.open_drawing
+    }
+
+    /// A design saved with a drawing and opened again shows that drawing when Drawing is entered,
+    /// on its first sheet, not the page that starts a new drawing.
+    #[test]
+    fn a_saved_drawing_opens_again_when_drawing_is_entered() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-drawing-reopen-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.solidcraft").to_string_lossy().into_owned();
+        let mut h = Harness::new();
+        let drawing = drawing_with_a_view(&mut h);
+        assert!(drawing.is_some());
+        h.app.run("file.save", serde_json::json!({"path": path})).unwrap();
+        h.app.run("doc.open", serde_json::json!({"path": path})).unwrap();
+        assert!(!active(&h.app) && h.app.session.open_drawing.is_none(), "a design opens in Design");
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
+        h.frames(4);
+        assert_eq!(h.app.session.open_drawing, drawing, "entering Drawing opens the design's drawing");
+        let first = h.app.session.drawing("test").unwrap().sheets[0].id;
+        assert_eq!(active_sheet(&h.app), Some(first), "on its first sheet");
+        assert!(crate::scenario::handle_at("drawing:first:standard").is_none(), "not the new-drawing page");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
