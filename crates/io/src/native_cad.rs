@@ -46,6 +46,20 @@ pub fn native_cad_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel
     )
 }
 
+/// Read a STEP file (`file` is its name) with cadmpeg's STEP decoder into an import kept as
+/// B-rep records, as FreeCAD and Rhino files are read: an alternative to SolidCraft's own STEP
+/// reader, chosen by the caller ([`crate::StepReader`]), to compare the two. Panics inside cadmpeg
+/// or the reader become errors.
+pub fn cadmpeg_step_records(bytes: &[u8], file: &str) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    solidcraft_kernel::guard("cadmpeg STEP import", || convert::step_records(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid)).map_err(
+        |e| match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        },
+    )
+}
+
 /// A FreeCAD file's design history rebuilt as features (sketches, Pad and Pocket, Revolution and
 /// Groove, Fillet and Chamfer), checked against the file's own solids: each rebuilt body has the
 /// volume and extent of one of them. The error says why the history was not rebuilt; the file's
@@ -310,7 +324,22 @@ mod convert {
         if !super::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
             return Err(format!("{name}: not supported (FreeCAD .FCStd and Rhino .3dm only)"));
         }
-        let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
+        records_of(name, &ext, bytes, &ACCEPTED)
+    }
+
+    /// A STEP file (`name`) read by cadmpeg's STEP decoder into an import kept as records.
+    pub(super) fn step_records(name: &str, bytes: &[u8]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+        let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+        if !matches!(ext.as_str(), "step" | "stp") {
+            return Err(format!("{name}: not a STEP file (.step or .stp)"));
+        }
+        records_of(name, &ext, bytes, &["step"])
+    }
+
+    /// `bytes` decoded by the cadmpeg codec they are, if it is one of `accepted`, and read into
+    /// records.
+    fn records_of(name: &str, ext: &str, bytes: &[u8], accepted: &[&str]) -> Result<(solidcraft_kernel::ImportRecords, Vec<String>, bool), String> {
+        let (format, decoded) = decode_at(name, ext, bytes, accepted, DecodeDepth::Full)?;
         let policy = policy();
         let (mut ir, report, _) = decoded.into_parts();
         hide_body_members(&mut ir);
@@ -333,6 +362,7 @@ mod convert {
         let system = match format.as_str() {
             "fcstd" => "FreeCAD",
             "rhino" => "Rhino",
+            "step" => "",
             other => other,
         };
         let records = super::cadir_records(&ir, &product, system);

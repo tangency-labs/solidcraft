@@ -415,9 +415,12 @@ fn same_bodies(a: &[(bool, usize, f64, [f64; 6])], b: &[(bool, usize, f64, [f64;
         })
 }
 
-/// The parts compared between the two routes: every FreeCAD and Rhino fixture.
+/// The parts compared between the two routes: every FreeCAD and Rhino fixture, and every
+/// step-conformance part decoded by cadmpeg's STEP decoder (as the cadmpeg STEP reader reads it),
+/// and the import kernel cases whose surfaces the records once read differently
+/// ([`KERNEL_CASES`]).
 fn compared_parts() -> Vec<(String, Vec<u8>)> {
-    [
+    let mut parts: Vec<(String, Vec<u8>)> = [
         ("block.FCStd", BLOCK_FCSTD),
         ("block.3dm", BLOCK_3DM),
         ("bracket.FCStd", BRACKET_FCSTD),
@@ -426,11 +429,29 @@ fn compared_parts() -> Vec<(String, Vec<u8>)> {
     ]
     .into_iter()
     .map(|(n, b)| (n.to_string(), b.to_vec()))
-    .collect()
+    .collect();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let mut steps: Vec<_> =
+        std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|e| e == "step")).collect();
+    steps.sort();
+    assert!(steps.len() >= 17, "{} step-conformance parts", steps.len());
+    parts.extend(steps.iter().map(|p| (p.file_name().unwrap().to_string_lossy().to_string(), std::fs::read(p).unwrap())));
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/kernel-cases/import");
+    parts.extend(KERNEL_CASES.iter().map(|c| (format!("{c}.step"), std::fs::read(cases.join(c).join("input.step")).unwrap())));
+    parts
 }
 
-/// The compared parts whose bodies differ between the two routes, with why.
-const DIFFER: [(&str, &str); 0] = [];
+/// Import kernel cases on surfaces whose record form depends on the face, which the records route
+/// once refused: a SURFACE_OF_LINEAR_EXTRUSION of an ellipse across the ellipse's parameter origin
+/// (cadmpeg reads it as a procedural surface with no solved form), and a cone of nearly a right
+/// angle that is a plane.
+const KERNEL_CASES: [&str; 2] = ["3208-extruded-ellipse-face-over-parameter-seam", "4006-plane-written-as-cone-of-nearly-right-angle"];
+
+/// The compared parts whose bodies differ between the two routes, with why: the records do not
+/// yet follow CADIR occurrences, so a part placed in an assembly comes in once and unplaced
+/// (`docs/step-import.md`). None of the FreeCAD and Rhino fixtures has occurrences.
+const DIFFER: [(&str, &str); 2] =
+    [("cylinder_placed.step", "not yet at its assembly placement"), ("cylinder_twice.step", "one body, not one per placement")];
 
 /// Reading the neutral model into records builds the bodies the STEP route built (cadmpeg's
 /// STEP writer, then our STEP reader): the same bodies, each as whole, with as many faces, the
@@ -449,6 +470,25 @@ fn records_build_the_bodies_the_step_route_built() {
         }
     }
     assert_eq!(differ, DIFFER.map(|(n, _)| n.to_string()), "parts whose bodies differ between the two routes");
+}
+
+/// The import kernel cases read into records build what each case expects: one whole body, its
+/// faces and volume as `expected.json` gives them.
+#[test]
+fn kernel_cases_read_into_records_build_their_expected_bodies() {
+    let cases = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/kernel-cases/import");
+    for c in KERNEL_CASES {
+        let expected: serde_json::Value = serde_json::from_slice(&std::fs::read(cases.join(c).join("expected.json")).unwrap()).unwrap();
+        let ir = neutral(&std::fs::read(cases.join(c).join("input.step")).unwrap(), &format!("{c}.step"));
+        let (imp, warnings) = by_records(&ir);
+        let bodies = built(&imp.unwrap_or_else(|e| panic!("{c}: {e} {warnings:?}")));
+        assert_eq!(bodies.len(), 1, "{c}: {bodies:?} {warnings:?}");
+        let (whole, faces, volume, _) = bodies[0];
+        assert!(whole, "{c}: {warnings:?}");
+        assert_eq!(faces as u64, expected["faces"].as_u64().unwrap(), "{c}");
+        let want = expected["volume_mm3"].as_f64().unwrap();
+        assert!((volume - want).abs() < 1e-3 * want, "{c}: {volume} vs {want}");
+    }
 }
 
 /// What the STEP route did with what the records now leave out, each with the reason. A body placed
