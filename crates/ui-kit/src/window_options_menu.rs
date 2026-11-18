@@ -193,7 +193,7 @@ fn contents(ui: &mut Ui, id: Id, menu: &WindowMenu<'_>, height: f32, state: &mut
         }
     });
     ui.add_space(6.0);
-    let preview_height = (height - 26.0 - 2.0 * ROW_HEIGHT - 110.0).clamp(0.0, 208.0);
+    let preview_height = (height - 26.0 - 2.0 * ROW_HEIGHT - 80.0).clamp(0.0, 208.0);
     crate::window_preview::show(ui, menu.card_headers, preview_height);
     let middle_height = (height - ui.min_rect().height() - 2.0 * ROW_HEIGHT - 26.0).max(0.0);
     let mut focus = FocusRows::new(state.scroll_focus);
