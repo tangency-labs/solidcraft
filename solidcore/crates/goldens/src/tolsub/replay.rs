@@ -84,6 +84,11 @@
 //! line to the bit (its hash, taken from main's expected file, which holds these four lines
 //! unchanged) and this branch's committed line. (The hashes their [`TRIM_COVER`] entries held
 //! were of an older main's run, not of the line main now commits.)
+//!
+//! #17739's vertex step raises a vertex whose gap is over half its new tolerance to
+//! `zone_tol3d(gain * 2 * gap)`. Its raises on these reads were recorded the same way
+//! against #18230's healer and carried into [`DATA`]: a listed vertex holds #17739's bits,
+//! and a vertex only #17739 moved is listed with #18230's (main's) bits.
 
 use std::collections::BTreeMap;
 

@@ -13,7 +13,9 @@
 //!
 //! [`corpus_reads_change_only_the_covered_tolerances`] and
 //! [`moved_fillet_rows_keep_main_geometry_and_mass`] replay the goldens rows the fix moved
-//! against main 3a0f49b09's values (tables made by this file's functions on main).
+//! against main 3a0f49b09's values (tables made by this file's functions on main). With
+//! #17739 a read vertex whose gap is over half its tolerance rises to cover twice the gap;
+//! the replay checks those vertices against that rule.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -455,13 +457,29 @@ fn entries(table: &[(&str, &'static [(u32, u64)])], name: &str) -> &'static [(u3
         .map_or(&[], |(_, t)| *t)
 }
 
+/// The largest vertex/edge or vertex/face gap of `v`'s uses (`0` without one).
+fn vertex_gap(k: &Kernel, b: &mut Brep, v: solidcore::topology::VertexId) -> f64 {
+    use solidcore::topology::{vertex, vertexuse};
+    let mut gap = 0.0f64;
+    for vu in vertex::vertexuses(b, v).unwrap() {
+        if let Some(g) = vertexuse::vertex_edge_gap(k, b, vu, false).unwrap() {
+            gap = gap.max(g.gap_3d);
+        }
+        if let Some(g) = vertexuse::vertex_face_gap(k, b, vu, false).unwrap() {
+            gap = gap.max(g.gap_3d);
+        }
+    }
+    gap
+}
+
 /// Replays one read of `name` against main 3a0f49b09, recording every disagreement in
 /// `failures`:
 /// - each edge in `raised` (index, main's tolerance bits) had main's tolerance under its
 ///   edge/face gap `g`, and now has `zone_tol3d(gain * g)`, which covers `g`;
 /// - each vertex in `moved` (index, main's bits) rose above main's tolerance to its
 ///   largest edge tolerance (the healer's vertex step, `CalcVertexZoneTol3d`, with the
-///   raised edges as input);
+///   raised edges as input), or, when `zone_tol3d(gain * 2 * g)` for its largest gap `g`
+///   is over that, to it (#17739), recorded in `floored`;
 /// - every edge covers its gap.
 ///
 /// Returns the digest of the read with main's tolerances put back on those entries:
@@ -474,6 +492,7 @@ fn replay(
     raised: &[(u32, u64)],
     moved: &[(u32, u64)],
     lazy: bool,
+    floored: &mut Vec<String>,
     failures: &mut Vec<String>,
 ) -> (u64, u64) {
     use solidcore::geom::tol::{gap_gain, zone_tol3d};
@@ -529,9 +548,28 @@ fn replay(
                     .into_iter()
                     .map(|e| b.edge(e).unwrap().tolerance)
                     .fold(0.0f64, f64::max);
-                if !(main < tol && tol.to_bits() == largest.to_bits()) {
+                // (#17739: a vertex whose gap needs more than its largest edge tolerance
+                // rises to `zone_tol3d(gain * 2 * gap)`, so the check's half rule holds)
+                let gap = vertex_gap(&k, &mut b, v);
+                let cover = zone_tol3d(&k, gain * 2.0 * gap);
+                let step = if cover > largest {
+                    let read = if rebuild { "rebuilding read" } else { "read" };
+                    floored.push(format!("{name} {read} v{}", v.index()));
+                    cover
+                } else {
+                    largest
+                };
+                // (the rebuilding read measures the gap on the trims rebuilt after the heal,
+                // 6e-10 relative off the gap the heal saw on `open_shell` v14)
+                let held = if rebuild && step == cover {
+                    (tol - cover).abs() <= 1e-9 * cover
+                } else {
+                    tol.to_bits() == step.to_bits()
+                };
+                if !(main < tol && held) {
                     failures.push(format!(
-                        "{name}: {v:?} main {main:e}, now {tol:e}, largest edge {largest:e}"
+                        "{name}: {v:?} main {main:e}, now {tol:e}, largest edge {largest:e}, \
+                         gap {gap:e}, cover {cover:e}"
                     ));
                 }
                 d.f64(main);
@@ -976,6 +1014,7 @@ fn corpus_reads_change_only_the_covered_tolerances() {
     let mut moved = 0;
     let mut moved_volumes = Vec::new();
     let mut volume_classes = Vec::new();
+    let mut floored = Vec::new();
     for (name, [read_main, lazy_main, rebuild_main, area_main, volume_main]) in MAIN {
         let edges = entries(RAISED_EDGES, name);
         let vertices = entries(MOVED_VERTICES, name);
@@ -988,13 +1027,23 @@ fn corpus_reads_change_only_the_covered_tolerances() {
             // the found spheres keep the file's NURB and trims, so these reads are not
             // main's (asserted; the replays' own checks hold on them as on every file),
             // and with upstream's fitted NURB put back they are, as every other file is
-            let (read_digest, _) = replay(name, false, edges, vertices, true, &mut failures);
+            let mut unfitted = Vec::new();
+            let (read_digest, _) = replay(
+                name,
+                false,
+                edges,
+                vertices,
+                true,
+                &mut unfitted,
+                &mut failures,
+            );
             let (rebuild_digest, _) = replay(
                 name,
                 true,
                 rebuild_edges,
                 rebuild_vertices,
                 false,
+                &mut unfitted,
                 &mut failures,
             );
             if read_digest == read_main || rebuild_digest == rebuild_main {
@@ -1011,13 +1060,22 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         };
         let (mut read_digest, mut lazy_digest, mut rebuild_digest) = (0, 0, 0);
         fit(&mut || {
-            (read_digest, lazy_digest) = replay(name, false, edges, vertices, true, &mut failures);
+            (read_digest, lazy_digest) = replay(
+                name,
+                false,
+                edges,
+                vertices,
+                true,
+                &mut floored,
+                &mut failures,
+            );
             (rebuild_digest, _) = replay(
                 name,
                 true,
                 rebuild_edges,
                 rebuild_vertices,
                 false,
+                &mut floored,
                 &mut failures,
             );
         });
@@ -1079,6 +1137,16 @@ fn corpus_reads_change_only_the_covered_tolerances() {
         }
     }
     assert_eq!((raised, moved), (206, 296));
+    assert_eq!(
+        floored,
+        [
+            "Fillet/bottle.smb read v22",
+            "Fillet/open_shell.smb read v2",
+            "Fillet/open_shell.smb read v14",
+            "Fillet/open_shell.smb rebuilding read v14",
+        ],
+        "{failures:#?}"
+    );
     assert_eq!(moved_volumes, ["Fillet/corner_box.smb"], "{failures:#?}");
     assert_eq!(wr493, WR493_READS);
     let classes: Vec<_> = volume_classes.iter().map(|&(n, c, ..)| (n, c)).collect();
@@ -1770,8 +1838,10 @@ const REBUILD_RAISED_EDGES: &[(&str, &[(u32, u64)])] = &[
     ),
 ];
 /// [`MOVED_VERTICES`] of the read that rebuilds the UV trims.
-const REBUILD_MOVED_VERTICES: &[(&str, &[(u32, u64)])] =
-    &[("Fillet/open_shell.smb", &[(12, 0x3efa4fff2e7e0c33)])];
+const REBUILD_MOVED_VERTICES: &[(&str, &[(u32, u64)])] = &[(
+    "Fillet/open_shell.smb",
+    &[(12, 0x3efa4fff2e7e0c33), (14, 0x3f0fb68913522a08)],
+)];
 
 // ---- the fillets of `blend.fillet_executive_p3`'s moved rows ----------------------------
 
@@ -1869,10 +1939,12 @@ fn fillet_result(name: &str, edge: usize, radius: f64) -> (u64, Vec<u64>) {
 }
 
 /// Main 3a0f49b09's [`fillet_result`] digests per [`FILLETS`] entry, made by this file's
-/// functions on main; entry 7 (`open_shell` e5) is main bcfb4b98e's, after #18402 moved
-/// that fillet's result (the other 28 are unchanged there). Entry 14 (`bottle` e8 r0.1) is #18401's:
-/// that PR moves this fillet's digest and mass in their last bits, and its tree before
-/// #18230 makes the same digest and mass bit for bit. The 19 equal digests (`0xb5382d964fe60518`) are bottle
+/// functions on main; entry 7 (`open_shell` e5) is #17739's: #18402 moved that fillet's
+/// result, and with its vertex tolerances covering twice their gaps the check passes and
+/// the fillet builds (`end_to_end.rs`, `stubs4-open_shell-e5-r0.5`; the other 27 are
+/// unchanged). Entry 14 (`bottle` e8 r0.1) is #18401's: that PR moves this fillet's digest
+/// and mass in their last bits, and its tree before #18230 makes the same digest and mass
+/// bit for bit. The 19 equal digests (`0xb5382d964fe60518`) are bottle
 /// fillets: main refuses each (status 1001) and leaves the read body, so all digest the
 /// same body and status. #17896 moved those 19 digests and entry 14's (main's were
 /// `0x30d463838d7fca03` and `0x7442b43a428ea1ca`) through the bottle's read alone (see
@@ -1893,7 +1965,7 @@ const FILLET_MAIN: [u64; 29] = [
     0xc0013e51f46a74a,
     0x357c96c0893f37a2,
     0x2dd7a7af4ca5bb1e,
-    0x51f6abb34e90bff2,
+    0x9362785e2dee39d1,
     0xb716929faf389955,
     0xb5382d964fe60518,
     0xb5382d964fe60518,
