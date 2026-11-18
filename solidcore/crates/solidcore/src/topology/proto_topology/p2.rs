@@ -5104,7 +5104,8 @@ mod tests {
                                           // the first crossing records its sine; the second, closer one places `b` again
         for sine in [0.5, 1.0] {
             let (pc1, pc2) = (vertex_pc_at(0, 0.0), vertex_pc_at(1, 0.0));
-            m.add_crossing(&k, &geo, pv, &pc1, &pc2, sine).unwrap();
+            m.add_crossing(&k, &geo, pv, &pc1, &pc2, sine, None)
+                .unwrap();
         }
         let v = m.proto_vertex(pv).unwrap();
         assert!(v.position().distance(P) > 1e-6, "the crossing moved it");

@@ -23,7 +23,8 @@ use crate::*;
 /// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
 /// go), unions run to tell the tools of a cut apart, face surfaces classified for a hole's
 /// direction, joins made of bodies that are all apart without running the kernel's union, and the
-/// holes whose tools were built (not moved from another copy's).
+/// holes whose tools were built (not moved from another copy's), and the tight boxes the kernel
+/// was asked for.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -48,6 +49,7 @@ pub(super) struct Counts {
     pub thread_cuts: usize,
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
+    pub tight_boxes: usize,
 }
 
 thread_local! {
@@ -75,6 +77,7 @@ thread_local! {
             thread_cuts: 0,
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
+            tight_boxes: 0,
         })
     };
 }
@@ -3098,4 +3101,57 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert_eq!(st.bodies.len(), 1);
     assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 1);
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
+}
+
+/// A cut measures the tight box of its tool, and the body's only when the box can show
+/// the tool apart of it (#18821): the kernel takes minutes to work out the tight box of
+/// a body with many faces (347 s for the cup of the report), against 30 s for the cut
+/// the box was measured for. A tool inside the body is not apart from it.
+#[test]
+fn a_cut_measures_the_tight_box_of_its_tool_only() {
+    // A tool inside the body: the body's tight box cannot show it apart of the body,
+    // so it is not measured, and the cut is made all the same.
+    let mut doc = Document::new("a cut inside");
+    block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::new(5.0, 5.0, 5.0)),
+        length: "10".into(),
+        width: "10".into(),
+        height: "10".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    let cut = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(cut).is_some_and(|r| r.error.is_none()), "{:?}", model.result(cut));
+    // The tool's tight box, and no other.
+    assert_eq!(work.tight_boxes, 1, "{work:?}");
+    // The cut is made all the same.
+    assert_eq!(work.cut, 1, "{work:?}");
+    assert_eq!(model.state().bodies.len(), 1);
+
+    // A tool that reaches out of the body: the box can show it apart of the body, so
+    // it is measured.
+    let mut doc = Document::new("a cut through");
+    block(&mut doc, "A", Vec3::ZERO, [20.0, 20.0, 20.0]);
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::new(5.0, 5.0, 15.0)),
+        length: "10".into(),
+        width: "10".into(),
+        height: "10".into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    let cut = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(cut).is_some_and(|r| r.error.is_none()), "{:?}", model.result(cut));
+    // The tool's tight box and the body's.
+    assert_eq!(work.tight_boxes, 2, "{work:?}");
+    assert_eq!(work.cut, 1, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    // The tool crosses the top face: it takes 500 mm3 of the block with it.
+    assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - (8000.0 - 500.0)).abs() < 1e-6);
 }

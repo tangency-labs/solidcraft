@@ -366,12 +366,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         ],
         Target::Body { name } => {
             let mut v = body_items(app, std::slice::from_ref(name), true);
-            // A selected browser body hands every selected body to the mesh dialogs (#12334).
-            // A row outside the selection still opens them with only the body right-clicked.
+            // A selected browser body hands every selected body to Export as well as the
+            // mesh dialogs (#18902). A row outside the selection still targets only that row.
             let selected = sel_bodies(app);
             if selected.len() > 1 && selected.contains(name) {
                 for item in &mut v {
-                    if item.id == "ui.saveMesh" || item.id == "ui.sendToSlicer" {
+                    if matches!(item.id.as_str(), "ui.export" | "ui.saveMesh" | "ui.sendToSlicer") {
                         item.params = Some(json!({ "bodies": selected }));
                     }
                 }
