@@ -7,7 +7,7 @@ use super::{
 use crate::Session;
 use crate::schema::tab_windows::{
     TabViewMoveToWindowParams, TabWindowCleanParams, TabWindowCloseReply, TabWindowIdParams, TabWindowListParams, TabWindowListReply,
-    TabWindowMoveReply,
+    TabWindowMoveReply, TabWindowOptionParams, TabWindowOptionsReply, TabWindowSetOptionsParams,
 };
 use crate::schema::tests::{assert_keys, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -130,6 +130,8 @@ fn window_commands_check_and_echo_requests_without_editing_the_design() {
     assert_keys(input_schema_for::<TabViewWindowParams>(), &["window"]);
     assert_keys(input_schema_for::<TabViewLinkParams>(), &["mode", "window"]);
     assert_keys(input_schema_for::<TabWindowCleanParams>(), &["on", "window"]);
+    assert_keys(input_schema_for::<TabWindowOptionParams>(), &["window"]);
+    assert_keys(input_schema_for::<TabWindowSetOptionsParams>(), &["card_headers", "keep_on_top", "window"]);
 
     let mut session = Session { param_check: ParamCheck::Strict, ..Session::default() };
     let before = session.doc.to_json();
@@ -167,6 +169,14 @@ fn window_commands_check_and_echo_requests_without_editing_the_design() {
         ("tab.window.clean", Value::Null, json!({}), output_schema_for::<TabWindowCleanParams>()),
         ("tab.window.clean", json!({"window": 1, "on": false}), json!({"window": 1, "on": false}), output_schema_for::<TabWindowCleanParams>()),
         ("tab.window.list", Value::Null, json!({}), output_schema_for::<TabWindowListReply>()),
+        ("tab.window.options", Value::Null, json!({}), output_schema_for::<TabWindowOptionsReply>()),
+        (
+            "tab.window.set_options",
+            json!({"window": 1, "card_headers":"hover", "keep_on_top": true}),
+            json!({"window": 1, "card_headers":"hover", "keep_on_top": true}),
+            output_schema_for::<TabWindowOptionsReply>(),
+        ),
+        ("window.options.use_as_default", json!({"window": 1}), json!({"window": 1}), output_schema_for::<TabWindowOptionsReply>()),
         ("tab.window.focus", json!({"window": 0}), json!({"window": 0}), output_schema_for::<TabWindowIdParams>()),
         ("tab.window.close", json!({"window": 1}), json!({"window": 1}), output_schema_for::<TabWindowCloseReply>()),
     ] {
@@ -188,6 +198,7 @@ fn window_schemas_cover_host_replies() {
             output_schema_for::<TabWindowListReply>(),
         ),
         (json!({"returned":[2,3]}), output_schema_for::<TabWindowCloseReply>()),
+        (json!({"window": 1, "options": {"card_headers": "hidden", "keep_on_top": false}}), output_schema_for::<TabWindowOptionsReply>()),
     ] {
         let schema = schema.as_value();
         assert!(conforms(schema, schema, &value), "{value} doesn't match {schema}");
@@ -229,6 +240,10 @@ fn window_commands_refuse_malformed_requests() {
         ("tab.window.clean", json!({"on": "yes"})),
         ("tab.window.clean", json!({"window": 1, "unknown": true})),
         ("tab.window.list", json!({"window": 1})),
+        ("tab.window.options", json!({"window": -1})),
+        ("tab.window.set_options", json!({"card_headers":"sometimes"})),
+        ("tab.window.set_options", json!({"keep_on_top":"yes"})),
+        ("window.options.use_as_default", json!({"keep_on_top":true})),
         ("tab.window.focus", json!({})),
         ("tab.window.focus", json!({"window": 4_294_967_296_u64})),
         ("tab.window.focus", json!({"window": 1, "unknown": true})),
