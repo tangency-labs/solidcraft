@@ -183,7 +183,7 @@ pub(crate) fn tools(
     };
     // Sheet metal cuts become cut-outs of the flat pattern, which slots cut through a solid are not.
     let (_, scope) = boolean_scope(st, f, &crate::plain(targets));
-    if st.sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
+    if st.surface_sheets.iter().any(|sheet| scope.contains(&sheet.body)) {
         return Err(DocError::Invalid("not supported yet: a living hinge cannot cut sheet metal".into()));
     }
     let inputs = spec_and_field(doc, vals, f, st)?;
