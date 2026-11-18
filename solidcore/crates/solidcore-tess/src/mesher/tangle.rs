@@ -2,6 +2,7 @@
 //! parameters, that cross another chord of the face although the curves they stand for do not
 //! (two curves running closer together than their chords sag).
 
+use solidcore::Vec3;
 use super::comp;
 use super::seam;
 use super::uv;
@@ -17,6 +18,8 @@ struct Chord {
     at: (usize, usize),
     a: [f64; 2],
     b: [f64; 2],
+    /// The chord's end nodes in space, where the loop has them.
+    ends: [Option<Vec3>; 2],
 }
 
 impl Chord {
@@ -116,7 +119,13 @@ pub(crate) fn events(s: &super::poles::Face, reach: f64, loops: &[seam::Loop]) -
                 *ad -= back;
                 *bd -= back;
             }
-            chords.push(Chord { at: (li, k), a, b });
+            let ends = [l.pts.get(k).copied(), l.pts.get(next).copied()];
+            chords.push(Chord {
+                at: (li, k),
+                a,
+                b,
+                ends,
+            });
         }
     }
     // With every chord starting in one period, two chords' copies can only cross where one of
@@ -131,11 +140,28 @@ pub(crate) fn events(s: &super::poles::Face, reach: f64, loops: &[seam::Loop]) -
                     *ad += per;
                     *bd += per;
                 }
-                Chord { at: c.at, a, b }
+                Chord {
+                    at: c.at,
+                    a,
+                    b,
+                    ends: c.ends,
+                }
             })
             .collect();
         chords.extend(along);
     }
+    // Two chords that end on one node, the same point in space (edges meeting at a vertex end on
+    // its point to the last bit), meet there and nowhere else, as adjacent chords do: two segments
+    // from one point cross only along one line, which `along` leaves out anyway. Their (u, v)
+    // ends may differ by a rounding (a seam's two copies, a period apart), which is no crossing
+    // and no node lying on the other chord: a split there would put a node a rounding from the
+    // vertex, the next round the same again, and the mesh would weld them into one.
+    let meet = |x: &Chord, y: &Chord| {
+        x.ends
+            .iter()
+            .flatten()
+            .any(|p| y.ends.iter().flatten().any(|q| p == q))
+    };
     let adjacent = |p: (usize, usize), q: (usize, usize)| {
         let n = loops.get(p.0).map_or(0, |l| l.uv.len());
         p == q || (p.0 == q.0 && ((p.1 + 1) % n == q.1 || (q.1 + 1) % n == p.1))
@@ -148,7 +174,11 @@ pub(crate) fn events(s: &super::poles::Face, reach: f64, loops: &[seam::Loop]) -
             if y.lo(0) > x.hi(0) {
                 break;
             }
-            if y.lo(1) > x.hi(1) || x.lo(1) > y.hi(1) || adjacent(x.at, y.at) {
+            if y.lo(1) > x.hi(1)
+                || x.lo(1) > y.hi(1)
+                || adjacent(x.at, y.at)
+                || meet(x, y)
+            {
                 continue;
             }
             if cross(x.a, x.b, y.a, y.b) {

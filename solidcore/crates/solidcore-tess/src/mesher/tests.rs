@@ -651,15 +651,24 @@ fn a_sliver_whose_vertices_come_twice_is_still_drawn() {
     }
 }
 
-
 /// A crossing near an end is an event, not a request to bisect the whole segment. Sixteen
 /// midpoint splits can still miss it. Keep its fraction on both chords (and on a reversed
 /// use), so the edge sampler can evaluate a new point on each real curve there.
 #[test]
 fn crossing_refinement_keeps_the_crossing_parameter_near_an_end() {
-    let s = poles::Face::new(EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y }, 0.0);
+    let s = poles::Face::new(
+        EvalSurface::Plane {
+            origin: Vec3::ZERO,
+            du: Vec3::X,
+            dv: Vec3::Y,
+        },
+        0.0,
+    );
     let f = 2.0_f64.powi(-20);
-    let loop_at = |uv: Vec<[f64; 2]>| seam::Loop { pts: uv.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect(), uv };
+    let loop_at = |uv: Vec<[f64; 2]>| seam::Loop {
+        pts: uv.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect(),
+        uv,
+    };
     for reversed in [false, true] {
         let mut a = vec![[0.0, 0.0], [1.0, 0.0], [1.0, -2.0], [0.0, -2.0]];
         if reversed {
@@ -668,7 +677,11 @@ fn crossing_refinement_keeps_the_crossing_parameter_near_an_end() {
         }
         let b = vec![[f, -1.0], [f, 1.0], [-1.0, 1.0], [-1.0, -1.0]];
         let events = tangle::splits(&s, 0.0, &[loop_at(a), loop_at(b)]);
-        let fraction = events.iter().find(|(l, k, _)| (*l, *k) == (0, 0)).expect("the first chord crosses").2;
+        let fraction = events
+            .iter()
+            .find(|(l, k, _)| (*l, *k) == (0, 0))
+            .expect("the first chord crosses")
+            .2;
         assert_eq!(fraction, if reversed { 1.0 - f } else { f });
         assert!(events.contains(&(1, 0, 0.5)), "{events:?}");
     }
@@ -818,4 +831,39 @@ fn terminal_touch_keeps_a_strictly_interior_near_end_node() {
                 .any(|event| event.at == (0, at) && event.end.is_some())
         );
     }
+}
+
+/// Two chords that end on one vertex (the same point in space) meet only there, even where
+/// their (u, v) ends differ by a rounding, as a seam's two copies do: no crossing and no node on
+/// the other chord, which would split a segment a rounding from the vertex round after round
+/// (the bowl rim cut by a cylinder, #1753, welded those nodes into over-shared mesh edges).
+#[test]
+fn chords_ending_on_one_vertex_never_cross() {
+    let s = poles::Face::new(
+        EvalSurface::Plane {
+            origin: Vec3::ZERO,
+            du: Vec3::X,
+            dv: Vec3::Y,
+        },
+        0.0,
+    );
+    let a = seam::Loop {
+        uv: vec![[0.0, 0.0], [1.0, 0.0], [1.0, -1.0], [0.0, -1.0]],
+        pts: vec![
+            Vec3::ZERO,
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(0.0, -1.0, 0.0),
+        ],
+    };
+    let b = seam::Loop {
+        uv: vec![[1e-13, 0.0], [0.0, 1.0], [-1.0, 1.0], [-1.0, 0.0]],
+        pts: vec![
+            Vec3::ZERO,
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(-1.0, 0.0, 0.0),
+        ],
+    };
+    assert!(tangle::events(&s, 0.0, &[a, b]).is_empty());
 }
