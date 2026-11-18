@@ -162,6 +162,15 @@ fn covers_crossing(
     Ok(on)
 }
 
+/// Whether every direction in `dirs` lies within 30 degrees (the width of a probe's
+/// direction cluster) of one line through the point: one curve passing through it, not
+/// branches meeting there.
+fn along_one_line(dirs: &[Vec3]) -> bool {
+    let cos30 = deg2rad(30.0).cos();
+    dirs.first()
+        .is_none_or(|&d0| dirs.iter().all(|d| d.dot(d0).abs() > cos30))
+}
+
 /// Removes curve `ii` from the five output arrays (`delete pC; RemoveAt(ii)` and the
 /// guarded `RemoveAt`s of the associated arrays).
 pub(super) fn remove_curve(out: &mut TsectCurves, ii: usize) {
@@ -345,13 +354,17 @@ pub(crate) fn find_tangent_curves(
         }
         if num_dirs == 0 {
             // no tangential curve here: a touching point, or a point where crossing
-            // branches meet (a saddle-like contact)
+            // branches meet (a saddle-like contact). One curve passing through (two
+            // opposite directions) is not a node (#18930): where two surfaces touch only to
+            // within their tolerance, along a fillet's rail, the contact holds along the
+            // rail with normals not quite parallel, so no tangential curve is found there
+            // but the crossing directions along it are.
             tr.tangent = false;
             let mut cross_dirs = Vec::new();
             let num_cross = tr.probe(k, &p, &mut cross_dirs)?;
             tr.tangent = true;
             let node_known = nodes.iter().any(|n| len(n.p - p.p) < near_tol);
-            if num_cross >= 2 && !node_known {
+            if num_cross >= 2 && !node_known && !along_one_line(&cross_dirs) {
                 nodes.push(p);
                 node_dirs.push(cross_dirs);
             }
