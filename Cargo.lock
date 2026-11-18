@@ -5859,6 +5859,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-cadir"
+version = "0.1.0"
+dependencies = [
+ "cadmpeg-ir",
+ "solidcore",
+ "solidcore-ops",
+ "solidcore-record",
+ "solidcore-step",
+]
+
+[[package]]
 name = "solidcore-convert"
 version = "0.1.0"
 dependencies = [
@@ -6154,6 +6165,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2 0.10.9",
+ "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
  "solidcore-tess",
