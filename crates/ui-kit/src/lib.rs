@@ -144,7 +144,7 @@ pub use preferences_figure_data::{
 pub use preferences_figures::{ThemeSample, paint_theme_thumbnail_rounded};
 pub use preferences_navigation::*;
 pub use preferences_small::*;
-pub use radial::{RADIAL_RADIUS, radial_menu};
+pub use radial::{RADIAL_RADIUS, radial_menu, radial_menu_preview};
 pub use reports::*;
 pub use review::ReviewAndApply;
 pub use search::{CommandSearch, SearchBadge, SearchFieldGeometry};

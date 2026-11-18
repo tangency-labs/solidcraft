@@ -169,6 +169,9 @@ pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
 /// Menu state kept between frames. The anchor is `app.viewport.context_menu`.
 #[derive(Default)]
 pub struct MenuState {
+    /// The radial tools editor is open; its menu can be edited without an active sketch.
+    pub(crate) radial_editor: bool,
+    pub(crate) radial_editor_sketch: bool,
     pub target: Target,
     /// The list row chosen with the arrow keys (Enter runs it).
     pub key_row: Option<usize>,
@@ -322,34 +325,7 @@ pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
 
 /// The eight radial commands, clockwise from the top.
 pub fn radial_items(app: &SolveApp) -> Vec<Item> {
-    let key = crate::keymap::display_for(app, "edit.repeat").unwrap_or_default();
-    let repeat = match &app.last_command {
-        Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(&key),
-        None => act("ui.repeat", "Repeat", "redo").key(&key).on(false),
-    };
-    let delete = act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty());
-    if app.session.active_sketch.is_some() {
-        return vec![
-            repeat,
-            delete,
-            cmd(app, "sketch.line", "Line"),
-            cmd(app, "sketch.rectangle.two_point", "Rectangle"),
-            act("ui.finishSketch", "Finish Sketch", "finish"),
-            cmd(app, "sketch.circle.center", "Circle"),
-            cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()),
-            cmd(app, "sketch.dimension", "Sketch Dimension"),
-        ];
-    }
-    vec![
-        repeat,
-        delete,
-        cmd(app, "solid.press_pull", "Press Pull"),
-        cmd(app, "solid.hole", "Hole"),
-        cmd(app, "sketch.create", "Create Sketch"),
-        cmd(app, "solid.extrude", "Extrude"),
-        cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()),
-        cmd(app, "solid.move", "Move/Copy"),
-    ]
+    app.preferences.radial_tools.tools(app.session.active_sketch.is_some()).iter().filter_map(|id| crate::radial_context::item(app, id)).collect()
 }
 
 /// The list of a menu (under the ring for the viewport).
@@ -3185,6 +3161,103 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn radial_customization_keeps_defaults_and_saves_independent_menu_orders() {
+        let mut config = crate::radial_context::Config::default();
+        assert_eq!(
+            config.tools(false),
+            ["repeat", "delete", "solid.press_pull", "solid.hole", "sketch.create", "solid.extrude", "undo", "solid.move"]
+        );
+        let sketch = config.tools(true);
+        config.set_tools(false, vec!["solid.hole".into(), "undo".into()]);
+        let saved = serde_json::to_value(&config).unwrap();
+        let restored: crate::radial_context::Config = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.tools(false), ["solid.hole", "undo"]);
+        assert_eq!(restored.tools(true), sketch);
+        config.set_tools(false, Vec::new());
+        assert!(config.tools(false).is_empty(), "removing the last tool is an explicit empty menu");
+        config.reset(false);
+        assert_eq!(config, crate::radial_context::Config::default());
+    }
+
+    #[test]
+    fn radial_customization_bounds_unknown_duplicate_and_excessive_tools() {
+        let config: crate::radial_context::Config = serde_json::from_value(json!({"model":["missing.command", "undo", "undo", "delete", "repeat", "view.front", "view.back", "view.top", "view.bottom", "view.left", "view.right"]})).unwrap();
+        let tools = config.tools(false);
+        assert_eq!(tools.len(), 8);
+        assert_eq!(&tools[..3], ["undo", "delete", "repeat"]);
+        assert!(!tools.contains(&"missing.command".to_string()));
+    }
+
+    #[test]
+    fn customized_radial_items_keep_dynamic_enablement_and_repeat_shortcut() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.radial_tools.set_tools(false, vec!["undo".into(), "repeat".into(), "delete".into()]);
+        let items = radial_items(&h.app);
+        assert_eq!(items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["edit.undo", "ui.repeat", "ui.delete"]);
+        assert!(items.iter().all(|i| !i.enabled));
+        assert_eq!(items[1].shortcut, crate::keymap::display_for(&h.app, "edit.repeat").unwrap_or_default());
+    }
+
+    #[test]
+    fn radial_customization_editor_removes_reorders_adds_and_restores_tools() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.resize", json!({"width":1280,"height":720}));
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.app.menu.radial_editor = true;
+        h.settle();
+        let restore = crate::scenario::rect_of("radial:restore").expect("editor restore button");
+        assert_eq!(
+            h.ctx.layer_id_at(restore.center()),
+            Some(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("sc_radial_editor"))),
+            "the editor must be above Preferences, not merely registered behind it"
+        );
+        let defaults = h.app.preferences.radial_tools.tools(false);
+        h.step(&json!({"click":{"handle":"radial:remove:0"}})).unwrap();
+        assert_eq!(h.app.preferences.radial_tools.tools(false), defaults[1..]);
+        h.step(&json!({"click":{"handle":"radial.down:0"}})).unwrap();
+        assert_eq!(h.app.preferences.radial_tools.tools(false).first(), defaults.get(2));
+        h.step(&json!({"click":{"handle":"radial:add"}})).unwrap();
+        assert_eq!(h.app.preferences.radial_tools.tools(false).len(), 8);
+        h.step(&json!({"click":{"handle":"radial:restore"}})).unwrap();
+        assert_eq!(h.app.preferences.radial_tools, crate::radial_context::Config::default());
+    }
+
+    #[test]
+    fn radial_customization_button_opens_the_editor_from_home() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = true;
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        for _ in 0..16 {
+            let page = crate::scenario::rect_of("dialog:page_body").expect("Navigation page body");
+            if crate::scenario::rect_of("prefs:radial_customize").is_some_and(|rect| page.contains(rect.center())) {
+                break;
+            }
+            h.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":-100}));
+            h.frames(20);
+        }
+        h.step(&json!({"click":{"handle":"prefs:radial_customize"}})).unwrap();
+        assert!(h.app.menu.radial_editor);
+        assert!(crate::scenario::rect_of("radial:restore").is_some(), "the editor is drawn on Home as well as the model");
+        h.step(&json!({"click":{"handle":"radial:remove:0"}})).unwrap();
+        assert_ne!(h.app.preferences.radial_tools, crate::radial_context::Config::default());
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        h.frames(2);
+        assert!(!h.app.menu.radial_editor, "Cancel closes the child editor");
+        assert_eq!(h.app.preferences.radial_tools, crate::radial_context::Config::default());
+    }
+
+    #[test]
+    fn customized_radial_workspace_action_returns_to_design() {
+        let mut h = crate::scenario::Harness::new();
+        crate::render_workspace::enter(&mut h.app, true).unwrap();
+        assert!(crate::render_workspace::active(&h.app));
+        let item = crate::radial_context::item(&h.app, "ui.workspace.design").unwrap();
+        run_item(&mut h.app, &item, Pos2::ZERO);
+        assert!(!crate::render_workspace::active(&h.app));
+        assert!(!crate::radial_context::item(&h.app, "ui.finishSketch").unwrap().enabled);
+    }
 
     /// #320: a selected sketch dimension gets the Toggle Driven Dimension item, it round-trips
     /// driving -> driven -> driving, and non-dimension selections get no such item.
