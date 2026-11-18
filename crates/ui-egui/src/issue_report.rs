@@ -2612,7 +2612,7 @@ mod tests {
         frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
         // The step that went unanswered is named (#17932), after one more try.
         assert!(
-            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable") && why.contains("at POST /api/drafts")),
+            matches!(&app.tickets.outcome, Some(tickets::Outcome::Queued(why)) if why.contains("network unreachable") && why.contains("at create report draft (POST /api/drafts)")),
             "{:?}",
             app.tickets.outcome
         );
@@ -2662,7 +2662,7 @@ mod tests {
         assert_eq!(app.tickets.outcome, Some(tickets::Outcome::Opened(draft_page())));
         assert!(tickets::queue::list(&dir).is_empty(), "nothing kept");
         assert!(
-            app.session.log.iter().any(|l| l.contains("no answer to PUT /api/uploads/") && l.contains("timeout: global")),
+            app.session.log.iter().any(|l| l.contains("no answer to upload part 1 of log.txt (PUT /api/uploads/") && l.contains("timeout: global")),
             "{:?}",
             app.session.log
         );

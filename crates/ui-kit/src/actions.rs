@@ -409,13 +409,8 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     };
     // Style after add_enabled sets the state, preserving the native button's ID and layout.
     let response = ui.add_enabled(live, |ui: &mut Ui| {
-        ui.add(
-            styled_button(ui, if primary && ok_enabled { text.bold_face().into() } else { text.into() }, tone)
-                .selected(marked && !primary)
-                .wrap_mode(egui::TextWrapMode::Extend)
-                .corner_radius(t.control_radius)
-                .min_size(vec2(min_width, t.form_button_height)),
-        )
+        let text = if primary && ok_enabled { text.bold_face() } else { text };
+        ui.add(form_action_widget(ui, text, tone, marked && !primary, vec2(min_width, t.form_button_height)))
     });
     t.button_bevel(ui, &response, false);
     pointer_on_hover(ui, &response);
@@ -426,6 +421,34 @@ fn action_button(ui: &mut Ui, label: &str, kind: Action, look: &ActionLook, padd
     };
     solidcraft_ui_registry::publish_target(key, response.rect);
     solidcraft_ui_registry::publish_handle(&format!("dialog:{label}"), response.rect.center());
+    response
+}
+
+fn form_action_widget(ui: &Ui, text: RichText, tone: ButtonTone, selected: bool, min_size: egui::Vec2) -> egui::Button<'static> {
+    styled_button(ui, text.into(), tone)
+        .selected(selected)
+        .wrap_mode(egui::TextWrapMode::Extend)
+        .corner_radius(Tokens::get().control_radius)
+        .min_size(min_size)
+}
+
+/// A full-width form action for entry cards, with the same control styling as dialog actions.
+pub fn wide_form_button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) -> Response {
+    let t = Tokens::get();
+    let size = vec2(dimension(ui.available_width()), t.form_button_height + t.space_8);
+    let response = ui
+        .allocate_ui_with_layout(size, egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+            ui.spacing_mut().button_padding = vec2(t.space_12, 0.0);
+            ui.add_enabled(enabled, |ui: &mut Ui| {
+                let text = RichText::new(label).size(t.font_button);
+                let text = if primary && enabled { text.semibold() } else { text };
+                let tone = if primary && enabled { ButtonTone::Primary } else { ButtonTone::Normal };
+                ui.add(form_action_widget(ui, text, tone, false, size))
+            })
+        })
+        .inner;
+    t.button_bevel(ui, &response, false);
+    pointer_on_hover(ui, &response);
     response
 }
 

@@ -2170,3 +2170,83 @@ fn a_loft_of_arches_offset_to_97_and_193_points_runs_foot_to_foot_and_cuts_its_l
         assert!((left.volume + legs - m.volume).abs() < 1e-6 * m.volume, "{case}: {} + {legs} vs {}", left.volume, m.volume);
     }
 }
+
+/// Two hollowed twisted vanes crossing at right angles join into one valid body. Each vane is a
+/// 3 mm thickened ruled loft between two 40 mm lines a quarter turn apart, 50 mm apart in z,
+/// shelled 3 mm with both broad faces removed; the second is the first turned a quarter turn
+/// about z. The join itself builds, but SMLib's final check refuses it for tight-curvature
+/// warnings on the intersection curves (Bad CurveCusp, Bad CurveKink)
+/// ([T-69](https://tickets.solidcraft.io/t/69), #14150).
+#[test]
+fn crossed_hollow_twisted_vanes_join() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Low"})),
+        ("sketch.line", json!({"points": [[20, 0], [-20, 0]]})),
+        ("sketch.finish", json!({})),
+        ("sketch.create", json!({"plane": {"origin": [0, 0, 50], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "High"})),
+        ("sketch.line", json!({"points": [[0, 20], [0, -20]]})),
+        ("sketch.finish", json!({})),
+        ("surface.loft", json!({"sections": [{"sketch": "Low", "curves": ["l1"]}, {"sketch": "High", "curves": ["l1"]}]})),
+        ("surface.thicken", json!({"bodies": ["Body1"], "thickness": "3 mm", "symmetric": true, "body_name": "Vane"})),
+        ("solid.move", json!({"bodies": ["Vane"], "angle": "90 deg", "origin": [0, 0, 25], "copy": true})),
+        ("solid.shell", json!({"body": "Vane (2)", "faces": ["F4:inner(F3:side:l1)#1@F5.1", "F4:inner(F3:side:l1)#2@F5.1"], "thickness": "3 mm"})),
+        ("solid.shell", json!({"body": "Vane", "faces": ["F4:inner(F3:side:l1)#2", "F4:inner(F3:side:l1)#1"], "thickness": "3 mm"})),
+    ] {
+        s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+    }
+    let (a, b) = (volume(&s, "Vane"), volume(&s, "Vane (2)"));
+    assert!(a > 0.0 && (a - b).abs() < 1e-6 * a, "{a} vs {b}");
+    s.execute("solid.combine", &json!({"target": "Vane", "tools": ["Vane (2)"], "operation": "join"})).unwrap();
+    let state = s.model.state();
+    let joined = state.body("Vane").unwrap();
+    assert!(joined.body.validity().is_empty(), "{:?}", joined.body.validity());
+    assert!(state.body("Vane (2)").is_none());
+    // The two cross near the z axis, so the union is more than either and less than both.
+    let v = volume(&s, "Vane");
+    assert!(v > a && v < a + b, "{v} vs {a} + {b}");
+}
+
+/// A cube with a 20 mm bore through its middle, cut by a Two Sides revolve, 90° each way, of
+/// the bore's own circle about the cube's bottom edge 40 mm away. The torus meets the bore
+/// tangentially along that circle, and the boolean refuses it ("no radial sector of the edge
+/// takes the new edge use"), as it does at 100°/100°, while 120°/80° works
+/// ([T-73](https://tickets.solidcraft.io/t/73)). The same cuts made the other way round (the
+/// revolve first, then the bore) build, so the volume must match that.
+#[test]
+fn two_sided_revolve_cut_tangent_to_a_bore_matches_the_other_order() {
+    let revolve = json!({"sketch": "S", "profiles": [{"curves": ["c1"]}], "axis": "l4", "angle": "90 deg", "angle2": "90 deg", "operation": "cut", "targets": ["Cube"]});
+    let sketch = |s: &mut Session| {
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "S"})),
+            ("sketch.rectangle.two_point", json!({"p0": [-40, -40], "p1": [40, 40]})),
+            ("sketch.circle.center", json!({"center": [0, 0], "radius": 20})),
+            ("sketch.finish", json!({})),
+        ] {
+            s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
+        }
+    };
+    // The other order: the plain cube, the revolve cut, then the bore.
+    let mut reference = Session::default();
+    sketch(&mut reference);
+    reference.execute("solid.box", &json!({"length": 80, "width": 80, "height": 80, "corner": [-40, -40, 0], "body_name": "Cube"})).unwrap();
+    let solid = volume(&reference, "Cube");
+    assert!((solid - 512000.0).abs() < 1e-6 * solid, "{solid}");
+    reference.execute("solid.revolve", &revolve).unwrap();
+    reference.execute("solid.cylinder", &json!({"radius": 20, "height": 80, "operation": "cut", "targets": ["Cube"]})).unwrap();
+    let want = volume(&reference, "Cube");
+    // The cube drawn with the circle as its hole, as the sketch's outer profile makes it.
+    let mut s = Session::default();
+    sketch(&mut s);
+    s.execute("solid.extrude", &json!({"sketch": "S", "profiles": [{"curves": ["l1", "l2", "l3", "l4"]}], "distance": 80, "body_name": "Cube"}))
+        .unwrap();
+    let bored = volume(&s, "Cube");
+    let bore = std::f64::consts::PI * 20.0 * 20.0 * 80.0;
+    assert!((bored - (512000.0 - bore)).abs() < 1e-6 * bored, "{bored}");
+    s.execute("solid.revolve", &revolve).unwrap();
+    let state = s.model.state();
+    let cube = state.body("Cube").unwrap();
+    assert!(cube.body.validity().is_empty(), "{:?}", cube.body.validity());
+    let got = volume(&s, "Cube");
+    assert!((got - want).abs() < 1e-6 * want, "{got} vs {want}");
+}
