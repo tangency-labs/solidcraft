@@ -1,7 +1,8 @@
 //! `cargo xtask test`: build the workspace's tests once, then run every test binary.
-//! By default they all run at once, with sequential doc/wasm `side` jobs alongside.
-//! SOLIDCRAFT_TEST_JOBS opts into a shared bound for test binaries and those side jobs, and
-//! splits each binary's libtest threads and action-matrix workers across the binaries in flight.
+//! By default half as many run at once as the machine has cores (at least two), sequential
+//! doc/wasm `side` jobs counted among them, and each binary's libtest threads and action-matrix
+//! workers are split across the binaries in flight. SOLIDCRAFT_TEST_JOBS sets another bound, or
+//! `all` runs every binary at once.
 
 use std::ffi::OsStr;
 use std::process::{Command, Stdio};
@@ -21,8 +22,9 @@ struct TestBin {
 /// the `side` jobs in order. A configured job bound includes the sequential side-job worker.
 /// Each prints a line when it ends; a failure prints its whole output and does not cancel work.
 pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>) -> Result<(), String> {
-    let limit = job_limit(std::env::var_os("SOLIDCRAFT_TEST_JOBS").as_deref())?;
-    let split = thread_split(limit, std::thread::available_parallelism().map_or(1, |n| n.get()));
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let limit = job_limit(std::env::var_os("SOLIDCRAFT_TEST_JOBS").as_deref(), cpus)?;
+    let split = thread_split(limit, cpus);
     let bins = build(cargo_args)?;
     let start = Instant::now();
     let side_count = side.len();
@@ -58,15 +60,22 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     if failed.is_empty() { Ok(()) } else { Err(format!("failed: {}", failed.join(", "))) }
 }
 
-/// An absent limit preserves the existing unbounded default; invalid input fails before the test build.
-fn job_limit(value: Option<&OsStr>) -> Result<Option<usize>, String> {
-    let Some(value) = value else { return Ok(None) };
+/// How many top-level commands run at once; `None` for all of them. Absent, half the `cpus`
+/// (at least two): with every one of 116 binaries at once a 10-core Mac reached a load of 95, and
+/// tests that start a freshly built program (the CLI, the test binary itself) ran out of time
+/// waiting for it, minutes at a time. `all` keeps that unbounded run. Invalid input fails before
+/// the test build.
+fn job_limit(value: Option<&OsStr>, cpus: usize) -> Result<Option<usize>, String> {
+    let Some(value) = value else { return Ok(Some((cpus / 2).max(2))) };
+    if value == "all" {
+        return Ok(None);
+    }
     value
         .to_str()
         .and_then(|v| v.parse::<usize>().ok())
         .filter(|n| *n > 0)
         .map(Some)
-        .ok_or_else(|| "SOLIDCRAFT_TEST_JOBS must be a positive integer".into())
+        .ok_or_else(|| "SOLIDCRAFT_TEST_JOBS must be a positive integer or `all`".into())
 }
 
 /// The per-binary worker count that keeps the whole run inside the machine's parallelism:
@@ -194,13 +203,16 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn job_limit_is_opt_in_and_rejects_invalid_values() {
-        assert_eq!(job_limit(None).unwrap(), None);
+    fn job_limit_defaults_to_half_the_cores_and_rejects_invalid_values() {
+        assert_eq!(job_limit(None, 10).unwrap(), Some(5));
+        assert_eq!(job_limit(None, 3).unwrap(), Some(2));
+        assert_eq!(job_limit(None, 1).unwrap(), Some(2));
+        assert_eq!(job_limit(Some(OsStr::new("all")), 10).unwrap(), None);
         for value in [1, 2, usize::MAX] {
-            assert_eq!(job_limit(Some(OsStr::new(&value.to_string()))).unwrap(), Some(value));
+            assert_eq!(job_limit(Some(OsStr::new(&value.to_string())), 10).unwrap(), Some(value));
         }
-        for value in ["", "0", "-1", "two", "1.5", " 2", "2 ", "184467440737095516150"] {
-            assert!(job_limit(Some(OsStr::new(value))).is_err(), "{value:?}");
+        for value in ["", "0", "-1", "two", "1.5", " 2", "2 ", "ALL", "184467440737095516150"] {
+            assert!(job_limit(Some(OsStr::new(value)), 10).is_err(), "{value:?}");
         }
     }
 

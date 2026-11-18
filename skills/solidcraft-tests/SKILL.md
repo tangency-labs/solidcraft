@@ -22,8 +22,8 @@ The long form is `docs/book/src/dev/testing.md`.
 A failing test cannot merge without its fix (it turns `main` red): include it, or list the test and cause in `tests/KNOWN_FAILING_TESTS` (`cargo xtask known-failing`); the fix drops the line.
 
 ## Running
-- `cargo xtask test` builds with the `ci` profile and runs every test binary at once; arguments after `--` go to each binary (`cargo xtask test -- shell`). It builds several times faster than `--release`; a test failing only in a debug build: say so in the PR.
-- `SOLIDCRAFT_TEST_JOBS=N` bounds concurrent commands. `cargo xtask fast` before a commit (kernel: `--units <id,...>`); CI runs `cargo xtask ci`.
+- `cargo xtask test` builds with the `ci` profile and runs test binaries in parallel; arguments after `--` go to each binary (`cargo xtask test -- shell`). It builds several times faster than `--release`; a test failing only in a debug build: say so in the PR.
+- `SOLIDCRAFT_TEST_JOBS=N|all` bounds concurrent commands. `cargo xtask fast` before a commit (kernel: `--units <id,...>`); CI runs `cargo xtask ci`.
 - Tests run in their own processes: no shared state, no wall-clock timing.
 
 ## Goldens, matrices and skipped tests
