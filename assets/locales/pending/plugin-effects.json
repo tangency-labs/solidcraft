@@ -6,7 +6,8 @@
     "prefs.ui_effect_panels": "RGB wave on UI panels",
     "prefs.ui_effect_length": "RGB wave length",
     "prefs.ui_effect_speed": "RGB wave speed",
-    "plugin_install.effects": "Visual effects: {names}"
+    "plugin_install.effects": "Visual effects: {names}",
+    "plugin_effects.sky_off": "The sky is off, the graphics card refused it: {error}"
   },
   "ar": {
     "prefs.ui_effect": "تأثير",
@@ -15,7 +16,8 @@
     "prefs.ui_effect_panels": "موجة RGB على لوحات الواجهة",
     "prefs.ui_effect_length": "طول موجة RGB",
     "prefs.ui_effect_speed": "سرعة موجة RGB",
-    "plugin_install.effects": "مؤثرات مرئية: {names}"
+    "plugin_install.effects": "مؤثرات مرئية: {names}",
+    "plugin_effects.sky_off": "السماء متوقفة، رفضتها بطاقة الرسومات: {error}"
   },
   "de": {
     "prefs.ui_effect": "Effekt",
@@ -24,7 +26,8 @@
     "prefs.ui_effect_panels": "RGB-Welle auf Oberflächenfeldern",
     "prefs.ui_effect_length": "RGB-Wellenlänge",
     "prefs.ui_effect_speed": "RGB-Wellengeschwindigkeit",
-    "plugin_install.effects": "Visuelle Effekte: {names}"
+    "plugin_install.effects": "Visuelle Effekte: {names}",
+    "plugin_effects.sky_off": "Der Himmel ist aus, die Grafikkarte hat ihn abgelehnt: {error}"
   },
   "he": {
     "prefs.ui_effect": "אפקט",
@@ -33,7 +36,8 @@
     "prefs.ui_effect_panels": "גל RGB בלוחות הממשק",
     "prefs.ui_effect_length": "אורך גל RGB",
     "prefs.ui_effect_speed": "מהירות גל RGB",
-    "plugin_install.effects": "אפקטים חזותיים: {names}"
+    "plugin_install.effects": "אפקטים חזותיים: {names}",
+    "plugin_effects.sky_off": "השמיים כבויים, כרטיס המסך דחה אותם: {error}"
   },
   "ja": {
     "prefs.ui_effect": "エフェクト",
@@ -42,7 +46,8 @@
     "prefs.ui_effect_panels": "UIパネルにRGBウェーブ",
     "prefs.ui_effect_length": "RGBウェーブの長さ",
     "prefs.ui_effect_speed": "RGBウェーブの速度",
-    "plugin_install.effects": "視覚効果: {names}"
+    "plugin_install.effects": "視覚効果: {names}",
+    "plugin_effects.sky_off": "空はオフです。グラフィックスカードが拒否しました: {error}"
   },
   "ko": {
     "prefs.ui_effect": "효과",
@@ -51,7 +56,8 @@
     "prefs.ui_effect_panels": "UI 패널의 RGB 웨이브",
     "prefs.ui_effect_length": "RGB 웨이브 길이",
     "prefs.ui_effect_speed": "RGB 웨이브 속도",
-    "plugin_install.effects": "시각 효과: {names}"
+    "plugin_install.effects": "시각 효과: {names}",
+    "plugin_effects.sky_off": "하늘이 꺼졌습니다. 그래픽 카드가 거부했습니다: {error}"
   },
   "vi": {
     "prefs.ui_effect": "Hiệu ứng",
@@ -60,7 +66,8 @@
     "prefs.ui_effect_panels": "Sóng RGB trên các bảng giao diện",
     "prefs.ui_effect_length": "Độ dài sóng RGB",
     "prefs.ui_effect_speed": "Tốc độ sóng RGB",
-    "plugin_install.effects": "Hiệu ứng hình ảnh: {names}"
+    "plugin_install.effects": "Hiệu ứng hình ảnh: {names}",
+    "plugin_effects.sky_off": "Bầu trời đã tắt, card đồ họa đã từ chối nó: {error}"
   },
   "zh": {
     "prefs.ui_effect": "效果",
@@ -69,6 +76,7 @@
     "prefs.ui_effect_panels": "界面面板的RGB波浪",
     "prefs.ui_effect_length": "RGB波浪长度",
     "prefs.ui_effect_speed": "RGB波浪速度",
-    "plugin_install.effects": "视觉效果：{names}"
+    "plugin_install.effects": "视觉效果：{names}",
+    "plugin_effects.sky_off": "天空已关闭，显卡拒绝了它：{error}"
   }
 }

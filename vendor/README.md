@@ -218,6 +218,16 @@ Glass surfaces (blur, refraction, tint, bevel) for glass themes, from commit
   backdrop, so glass over the view refracts the model. Every fourth copy a level at most 96 px
   wide is read back (`SceneBrightness`, `SceneLuma`), so the app knows how bright the picture is
   under its text.
+- `src/sky.rs` (new): a picture drawn window-sized behind the app's view, so glass over it refracts
+  the picture: `SkyView` (a panorama the camera turns, or a flat picture), `set_sky_image` (upload
+  the picture and its mip pyramid, with the sky's own `MipGen`) and `draw_sky` (draw it into a
+  target the glass reads as its backdrop). `guarded` runs a closure inside wgpu error scopes and
+  returns the error, so a card that refuses the sky turns it off instead of crashing.
+- `src/scene.rs`: `scene_backdrop_over_sky` and the `fs_over` pipelines, which draw the 3D view
+  over the sky (a view with no model shows the sky), and `view_part`, which takes the part of the
+  window-sized sky a view covers.
+- `src/lib.rs`: exports `SkyView`, `set_sky_image`, `draw_sky`, `guarded` and
+  `scene_backdrop_over_sky`.
 - `src/glass.wgsl`: the lens is a smooth ramp instead of a circular falloff (whose bend ended in a
   sharp line at the rim), and the blur grows from 0.65× in the middle to 1.35× at the rim.
 - `src/style.rs`, `src/renderer.rs`, `src/glass.wgsl`: `GlassStyle::reach` (in the uniform's

@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 /// to 64 MiB) beside its manifest. A command plugin's component stays within 16 MiB (checked
 /// once the manifest says which it is).
 pub const MAX_ZIP_BYTES: usize = 80 << 20;
+/// The largest picture an effect may carry.
+pub const MAX_PICTURE_BYTES: usize = 8 << 20;
 pub const LIMITS: safe_zip::Limits =
     safe_zip::Limits { max_entries: 256, max_entry_bytes: craft_plugin::MAX_IMPORTER_COMPONENT_BYTES as u64, max_total_bytes: MAX_ZIP_BYTES as u64 };
 
@@ -112,6 +114,10 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
         let Some(file) = files.iter().find(|f| f.path == *picture) else {
             return Err(InstallError::Manifest(HostError::InvalidManifest { field, reason: format!("no file {picture} in the package") }));
         };
+        if file.bytes.len() > MAX_PICTURE_BYTES {
+            let reason = format!("{picture} is over {} MiB", MAX_PICTURE_BYTES >> 20);
+            return Err(InstallError::Manifest(HostError::InvalidManifest { field, reason }));
+        }
         if !(file.bytes.starts_with(b"\x89PNG\r\n\x1a\n") || file.bytes.starts_with(b"\xff\xd8\xff")) {
             return Err(InstallError::Manifest(HostError::InvalidManifest { field, reason: format!("{picture} is not a PNG or JPEG picture") }));
         }

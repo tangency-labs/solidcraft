@@ -1837,6 +1837,20 @@ mod install_zip {
     }
 
     #[test]
+    fn a_picture_over_the_size_limit_is_refused_at_install() {
+        let (mut s, root) = session("galaxy-big-picture");
+        let mut picture = b"\x89PNG\r\n\x1a\n".to_vec();
+        picture.resize(crate::plugin::install::MAX_PICTURE_BYTES + 1, 0);
+        let big = put(&root, "big.zip", &sky_zip(Some("stars.png"), &[("stars.png", &picture[..])]));
+        let err = s.execute("plugin.install", &json!({"path": big})).unwrap_err().to_string();
+        assert!(err.contains("effects.stars.picture") && err.contains("8 MiB"), "{err}");
+        picture.truncate(crate::plugin::install::MAX_PICTURE_BYTES);
+        let fits = put(&root, "fits.zip", &sky_zip(Some("stars.png"), &[("stars.png", &picture[..])]));
+        assert!(s.execute("plugin.install", &json!({"path": fits})).is_ok(), "a picture at the limit installs");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn a_hue_wave_only_plugin_installs_and_reads_back_exactly_as_before() {
         let (mut s, root) = session("legacy-hue-wave");
         let manifest = serde_json::to_vec(&json!({"id": "wave", "name": "Wave", "version": "1.0.0", "capabilities": ["effects@0.1"],

@@ -97,7 +97,7 @@ pub(crate) fn paint_sky(app: &mut crate::SolveApp, painter: &egui::Painter, rect
                 }
                 Err(error) => {
                     picture.state = PictureState::Failed;
-                    app.set_status(format!("The sky is off, the graphics card refused it: {error}"), true);
+                    app.set_status(solidcraft_ui_text::format("plugin_effects.sky_off", &[("error", &error)]), true);
                 }
             }
         }
@@ -123,7 +123,7 @@ pub(crate) fn paint_sky(app: &mut crate::SolveApp, painter: &egui::Painter, rect
         Ok(None) => return false,
         Err(error) => {
             ctx.data_mut(|d| d.insert_temp(id, SkyPicture { state: PictureState::Failed, ..picture }));
-            app.set_status(format!("The sky is off, the graphics card refused it: {error}"), true);
+            app.set_status(solidcraft_ui_text::format("plugin_effects.sky_off", &[("error", &error)]), true);
             return false;
         }
     };
