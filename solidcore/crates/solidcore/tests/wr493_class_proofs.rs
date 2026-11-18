@@ -21,13 +21,11 @@
 //!   Green in UV agree to 1e-11), to 2e-9; the old areas were 5.5e-9 to 2.9e-8 off.
 //! - `box_w_slot_volume_and_mass_are_those_their_trims_bound`: integrated tightly, each
 //!   corner's volume and moments are those its trims bound (Stokes and Green agree), so
-//!   the geometry is exact. The `corpus.parity` volume is 5.1e-12 off the trims-bound
-//!   reference (old 9.8e-11). The `blend.fillet_executive_p3` mass row is closer in area,
-//!   volume, cx, the inertia and Pzx. cy, Pyz and Pxy are EQUAL under RULING 3: 7.3e-10,
-//!   7.1e-10 and 7.1e-10 relative off, against 1.7e-10, 2.5e-10 and 2.5e-10 before (the
-//!   corners' quadrature of the first moment in y at the row's requested accuracy 1e-4),
-//!   all within the reference's certified bound, which the gaps between the file's faces
-//!   hold over 1e5 times wider (the y moment's enclosure floor, 2.0e-4).
+//!   the geometry is exact. The `corpus.parity` volume is the trims-bound reference to
+//!   the bit (old 9.8e-11 off). The `blend.fillet_executive_p3` mass row is closer in
+//!   every component but cz, which no corner moves: the integrator now ends its trim
+//!   pieces where a trim crosses an interior v knot line of its surface on every face,
+//!   not only on a banded one (#18195; without that, cy, Pyz and Pxy were farther).
 //! - `point_just_outside_the_sphere_pole_is_in_the_infinite_region`: the
 //!   `query.brep` `sphere_vertex3_off_region` point lies outside the sphere exactly.
 #![allow(
@@ -139,6 +137,27 @@ fn face_area(k: &Kernel, b: &mut Brep, f: FaceId) -> f64 {
     p.area.abs()
 }
 
+/// The area `corpus.parity` records for `b`: its runner's calls in its order (the counts,
+/// loops, kind and shells, then each face's [`face_area`] summed in face order), so the
+/// value is the committed row's bit for bit.
+fn parity_area(k: &mut Kernel, b: &mut Brep) -> f64 {
+    let faces = bl::faces(b, None).unwrap();
+    bl::edges(b, None).unwrap();
+    bl::vertices(b, None).unwrap();
+    for f in &faces {
+        solidcore::topology::face::p2::loops(b, *f, false, None).unwrap();
+    }
+    if !solidcore::topology::brep::p2::is_manifold_solid(b).unwrap() {
+        solidcore::topology::brep::p2::is_sheet(k, b).unwrap();
+    }
+    bl::shells(k, b, None).unwrap();
+    let mut area = 0.0;
+    for f in &faces {
+        area += face_area(k, b, *f);
+    }
+    area
+}
+
 /// The `SmBSplineSurface` part of a surface derived from it.
 fn b_spline_part(s: &Surface) -> Option<&BSplineSurface> {
     match s.kind() {
@@ -193,7 +212,7 @@ fn face_of(b: &Brep, eu: &solidcore::topology::Edgeuse) -> Option<FaceId> {
 /// so its UV parameters are the file's. Returns the number of found faces and of the UV
 /// trims on them that are the file's own (same interval, same points bit for bit), so a
 /// file without any cannot pass vacuously.
-fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize) {
+fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize, Vec<u32>) {
     let mut k = Kernel::default();
     let data = BrepData::read_from_file(&k, bytes(name), FileType::Ascii).unwrap();
     let file: Vec<Bits> = data
@@ -226,42 +245,76 @@ fn assert_found_faces_keep_file_nurbs(name: &str) -> (usize, usize) {
         );
     }
     let mut trims = 0;
-    for (_, eu) in b.edgeuses().iter() {
+    let mut remade = Vec::new();
+    for (id, eu) in b.edgeuses().iter() {
         if !face_of(&b, eu).is_some_and(|f| found.contains(&f)) {
             continue;
         }
-        // (the healer still rebuilds a file trim that misses its edge, as on any surface)
         if eu
             .uv_trim_curve
             .as_ref()
             .is_some_and(|t| file_trims.contains(&curve_bits(&k, t)))
         {
             trims += 1;
+        } else {
+            remade.push(id.index());
         }
     }
-    (found.len(), trims)
+    (found.len(), trims, remade)
 }
 
 #[test]
 fn found_spheres_and_tori_keep_the_file_nurb_and_trims() {
-    let files = [
-        "Fillet/box_w_slot.smb",
-        "Fillet/sphere_diff_3cylinders.smb",
-        "Fillet/sphere_plane.smb",
-        "Solids/nurb_fillet.smb",
-        "Solids/revolution_360.smb",
-        "Solids/revolution_mold.smb",
-        "Solids/sphere.smb",
-        "sphere.smb",
-        "surf_sphere150.smb",
+    // (file, the edge uses on found faces whose UV trim is not one of the file's)
+    let files: [(&str, &[u32]); 9] = [
+        (
+            "Fillet/box_w_slot.smb",
+            &[
+                149, 151, 153, 155, 157, 159, 161, 163, 165, 167, 169, 171, 173, 175, 177, 179,
+                181, 183, 185, 187, 189, 191, 193, 195,
+            ],
+        ),
+        (
+            "Fillet/sphere_diff_3cylinders.smb",
+            &[
+                1, 3, 4, 5, 7, 9, 10, 11, 13, 15, 17, 19, 21, 23, 25, 26, 27, 29, 31, 33, 34, 35,
+                37, 39,
+            ],
+        ),
+        ("Fillet/sphere_plane.smb", &[0, 1, 3, 4, 5, 7, 9]),
+        (
+            "Solids/nurb_fillet.smb",
+            &[
+                55, 57, 58, 59, 61, 63, 65, 67, 68, 69, 71, 73, 75, 77, 79, 81,
+            ],
+        ),
+        (
+            "Solids/revolution_360.smb",
+            &[
+                23, 25, 26, 27, 28, 29, 30, 31, 33, 34, 35, 37, 38, 39, 40, 41, 42, 43, 45, 47, 48,
+                49, 51,
+            ],
+        ),
+        (
+            "Solids/revolution_mold.smb",
+            &[
+                150, 151, 153, 155, 157, 159, 161, 163, 165, 166, 167, 169, 171, 173,
+            ],
+        ),
+        ("Solids/sphere.smb", &[1, 2, 3]),
+        ("sphere.smb", &[1, 2, 3]),
+        ("surf_sphere150.smb", &[1, 2, 3]),
     ];
-    for name in files {
-        let (found, trims) = assert_found_faces_keep_file_nurbs(name);
-        assert!(
-            found > 0 && trims > 0,
-            "{name}: {found} spheres or tori found, {trims} trims"
-        );
+    let mut failures = Vec::new();
+    for (name, want) in files {
+        let (found, trims, remade) = assert_found_faces_keep_file_nurbs(name);
+        if found == 0 || trims == 0 || remade != want {
+            failures.push(format!(
+                "{name}: {found} found, {trims} file trims, remade {remade:?} (want {want:?})"
+            ));
+        }
     }
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 /// Gauss-Legendre nodes and weights on [-1, 1] (Newton on the Legendre recurrence).
@@ -347,18 +400,30 @@ fn loop_area(k: &Kernel, b: &Brep, centre: Vec3, radius: f64, inside: Vec3, n: u
     radius * radius * total.abs()
 }
 
-/// `corpus.parity` `ss_plane_sph1..4`: the area moved from 25.21534708166 (refit sphere,
-/// trims rebuilt) to 25.1445667451; the face's edge loop bounds 25.1445668449 on the sphere.
+/// `corpus.parity` `ss_plane_sph1..4`: the sphere face's row moved from 25.21534728577917
+/// (refit sphere, trims rebuilt) to 25.14456696301113 (sph1, sph4) and 25.144566963011123
+/// (sph2, sph3): the area the face's UV trims bound (Green's theorem in UV, to 1e-12).
+/// The face's edge loop bounds 25.1445668449 on the sphere (Gauss-Bonnet along the
+/// edges), 4.7e-9 relative off, the trims' gap to their edges. The plane
+/// face's row moved from 25.000000000000004 to 25, the area of its square of side 5.
 #[test]
 fn ss_plane_sph_area_is_the_area_its_edges_bound() {
-    for name in [
-        "ss_plane_sph1.smp",
-        "ss_plane_sph2.smp",
-        "ss_plane_sph3.smp",
-        "ss_plane_sph4.smp",
+    let mut rows = Vec::new();
+    for (name, row) in [
+        ("ss_plane_sph1.smp", 25.144_566_963_011_13),
+        ("ss_plane_sph2.smp", 25.144_566_963_011_123),
+        ("ss_plane_sph3.smp", 25.144_566_963_011_123),
+        ("ss_plane_sph4.smp", 25.144_566_963_011_13),
     ] {
         let mut k = Kernel::default();
         let mut breps = read_part(&mut k, name);
+        // the committed row, measured as the runner does, B-rep by B-rep
+        let area = parity_area(&mut k, &mut breps[0]);
+        if area.to_bits() != f64::to_bits(row) {
+            rows.push(format!("{name}: area {area}, row {row}"));
+        }
+        let plane = parity_area(&mut k, &mut breps[1]);
+        assert_eq!(plane, 25.0, "{name}: plane {plane}");
         let b = &mut breps[0];
         let faces = bl::faces(b, None).unwrap();
         assert_eq!(faces.len(), 1, "{name}");
@@ -380,21 +445,75 @@ fn ss_plane_sph_area_is_the_area_its_edges_bound() {
             (cert - cert2).abs() <= 1e-12 * cert,
             "{name}: quadrature not converged: {cert} {cert2}"
         );
-        let area = face_area(&k, b, f);
+        // the Green-boundary cross-check: the face's own UV trims bound the row's area (to
+        // 1e-12; Green in UV, an independent line integral), and the edge loop's area
+        // within the trims' 9.2e-4 gap to their edges (4.7e-9 relative here)
+        let green = sphere_face_trim_area(&k, b, f, 64, centre).green;
+        assert!(
+            (green - area).abs() <= 1e-12 * green,
+            "{name}: Green {green}, row {area}"
+        );
+        assert!(
+            (green - cert).abs() <= 1e-8 * cert,
+            "{name}: Green {green}, Gauss-Bonnet {cert}"
+        );
         assert!(
             (area - cert).abs() <= 1e-6 * cert,
-            "{name}: area {area}, edges bound {cert}"
+            "{name}: row {area}, edges bound {cert}"
         );
-        let old = 25.21534708166;
+        // #18230's row, 25.21534728577917 (sph1, sph4) or 25.21534728577921 (sph2, sph3)
+        let old = 25.215_347_285_779_17;
         assert!((old - cert).abs() > 1e3 * (area - cert).abs(), "{name}");
+        // the plane: its square of side 5 (#18230's row 25.000000000000004)
+        let square = plane_polygon_area(&breps[1]);
+        assert_eq!(square, 25.0, "{name}: plane square {square}");
+        assert!((plane - square).abs() < (25.000_000_000_000_004_f64 - square).abs());
     }
+    assert!(rows.is_empty(), "{rows:#?}");
+}
+
+/// The area of the planar face of `b`, a polygon of straight edges, from its vertices
+/// (the shoelace formula in the plane's own axes, here axis-aligned).
+fn plane_polygon_area(b: &Brep) -> f64 {
+    let mut pts: Vec<[f64; 3]> = b
+        .vertices()
+        .iter()
+        .map(|(_, v)| v.point.to_array())
+        .collect();
+    for (_, e) in b.edges().iter() {
+        let c = e.curve.as_ref().unwrap();
+        assert!(
+            matches!(c.kind(), solidcore::curve::curve::CurveKind::Line(_)),
+            "the plane's edges are lines"
+        );
+    }
+    // the plane's normal axis: the coordinate all vertices share
+    let n = (0..3)
+        .find(|&i| pts.iter().all(|p| p[i] == pts[0][i]))
+        .expect("an axis-aligned plane");
+    let (a, c) = ((n + 1) % 3, (n + 2) % 3);
+    let m = pts.len() as f64;
+    let (ca, cc) = (
+        pts.iter().map(|p| p[a]).sum::<f64>() / m,
+        pts.iter().map(|p| p[c]).sum::<f64>() / m,
+    );
+    pts.sort_by(|p, q| {
+        let ap = (p[c] - cc).atan2(p[a] - ca);
+        let aq = (q[c] - cc).atan2(q[a] - ca);
+        ap.total_cmp(&aq)
+    });
+    let mut twice = 0.0;
+    for i in 0..pts.len() {
+        let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+        twice += p[a] * q[c] - q[a] * p[c];
+    }
+    twice.abs() / 2.0
 }
 
 /// `corpus.parity` `Fillet__sphere_plane.smb`: a sphere of radius 5 between z = +-h
-/// (h = 4.98097..., the file's pole vertices) less its cap beyond the plane x = -4, plus
-/// the disk of radius 3 in that plane. The area moved from 309.82222399413644 to
-/// 309.8222080702443; the circle edge lies 1.7e-5 off the sphere, so it can be no closer
-/// than that scale.
+/// (h = 4.98097..., the height of the file's two vertices on the sphere) less its cap beyond the plane x = -4, plus
+/// the disk of radius 3 in that plane. The committed row moved from #18230's
+/// 309.8222156047109 (1.4e-5 off the closed form) to 309.8222012093527 (6.4e-7 off).
 #[test]
 fn sphere_plane_area_is_closed_form() {
     use std::f64::consts::PI;
@@ -402,16 +521,26 @@ fn sphere_plane_area_is_closed_form() {
     let exact = 2.0 * PI * 5.0 * 2.0 * h - 2.0 * PI * 5.0 * 1.0 + PI * 9.0;
     let mut k = Kernel::default();
     let mut b = read(&mut k, "Fillet/sphere_plane.smb");
-    let faces = bl::faces(&b, None).unwrap();
-    let area: f64 = faces.iter().map(|&f| face_area(&k, &mut b, f)).sum();
-    let old = 309.822_223_994_136_44;
+    // the file's two vertices on the sphere at z = +-h (each a seam end, off the axis)
+    for z in [h, -h] {
+        assert!(
+            b.vertices()
+                .iter()
+                .any(|(_, x)| x.point.z == z && (x.point.length() - 5.0).abs() < 1e-14),
+            "no vertex on the sphere at z = {z}"
+        );
+    }
+    let row = 309.822_201_209_352_7;
+    let area = parity_area(&mut k, &mut b);
+    assert_eq!(area.to_bits(), f64::to_bits(row), "area {area}");
+    let old = 309.822_215_604_710_9;
     assert!(
-        (area - exact).abs() < (old - exact).abs(),
-        "area {area}, closed form {exact}"
+        (row - exact).abs() < (old - exact).abs(),
+        "row {row}, #18230 {old}, closed form {exact}"
     );
     assert!(
-        (area - exact).abs() <= 1e-5,
-        "area {area}, closed form {exact}"
+        (row - exact).abs() <= 1e-6,
+        "row {row}, closed form {exact}"
     );
 }
 
@@ -690,7 +819,7 @@ fn sphere_face_trim_area(k: &Kernel, b: &Brep, f: FaceId, n: usize, origin: Vec3
     }
 }
 
-/// `corpus.parity` `Fillet__box_w_slot.smb` area (5.914389913639413 to 5.914390008545681)
+/// `corpus.parity` `Fillet__box_w_slot.smb` area (5.914389913639413 to 5.914390008524208)
 /// and the `blend.fillet_executive_p3` `source-file-box_w_slot-all-edges` area (the
 /// fillet is refused, so the body is the file as read). Only the eight sphere corner faces
 /// (radius 0.06) move: they now keep the file's NURB and trims. Each face's area bounded by
@@ -761,7 +890,7 @@ fn box_w_slot_sphere_corners_are_the_area_their_trims_bound() {
     assert_eq!(spheres, 8);
     // the corpus row, replayed
     assert!(
-        (total - 5.914_390_008_545_681).abs() <= 1e-15 * total,
+        (total - 5.914_390_008_524_208).abs() <= 1e-15 * total,
         "{total}"
     );
     assert!((total - reference).abs() <= 5e-11, "{total} {reference}");
@@ -849,7 +978,6 @@ fn sphere_face_shares(
 /// the integrator's on both sides.
 #[test]
 fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
-    use solidcore::mass::enclosure::{enclose_mass_properties, enclose_quantity, Quantity};
     use solidcore::mass::integrator::properties::{
         brep_mass_properties_default, brep_volume_default,
     };
@@ -880,7 +1008,7 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     let mut v = read(&mut k, name);
     let bbox = calculate_bounding_box(&k, &mut v, BoundingBoxOptions::default()).unwrap();
     let row = brep_volume_default(&k, &mut v, 1e-6).unwrap();
-    assert_eq!(row, 0.680_748_106_613_681_7);
+    assert_eq!(row, 0.680_748_106_608_586);
     let mut m = read(&mut k, name);
     let mut delta = 0.0;
     for &f in &spheres {
@@ -889,8 +1017,8 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
     }
     let reference = row - delta;
     let old_row = 0.680_748_106_510_291_7;
-    // CLOSER: the new row is 5.1e-12 off, the old row 9.8e-11 (the reference is good to
-    // 8 * 2e-13, the Stokes/Green agreement above).
+    // CLOSER: the new row is the reference to the bit, the old row 9.8e-11 off (the
+    // reference is good to 8 * 2e-13, the Stokes/Green agreement above).
     assert!((row - reference).abs() * 10.0 < (old_row - reference).abs());
     assert!((row - reference).abs() <= 1e-11 * reference.abs());
 
@@ -919,18 +1047,18 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
         ]
     };
     let new_row = [
-        5.9143900085407815,
-        0.6807481065898701,
-        0.6807481065898701,
+        5.914390008549578,
+        0.6807481066085856,
+        0.6807481066085856,
         1.9999999999999853,
-        -0.2194908416672513,
+        -0.21949084150645912,
         0.19830878452084486,
-        0.31582474683781425,
-        2.796768143574872,
-        3.0415735197131566,
-        -0.029630896983776557,
-        0.26999665916540555,
-        -0.29883594975758043,
+        0.3158247468053984,
+        2.796768143654571,
+        3.0415735197585216,
+        -0.02963089696288452,
+        0.2699966591728285,
+        -0.29883594954687837,
     ];
     let old_row = [
         5.9143899129759,
@@ -1010,51 +1138,18 @@ fn box_w_slot_volume_and_mass_are_those_their_trims_bound() {
             new_row[i],
             reference[i]
         );
+        // every other component CLOSER: the corners' trims cross their NURB's interior v
+        // knot lines, and the integrator now ends its trim pieces there on every face
+        // (#18195; before, only on a banded face, so cy, Pyz and Pxy were 7.3e-10, 7.1e-10
+        // and 7.1e-10 relative off the reference against the old row's 1.7e-10, 2.5e-10
+        // and 2.5e-10)
         match i {
             // cz: no corner moves it
             5 => assert_eq!(new_off, old_off),
-            // cy, Pyz, Pxy: EQUAL to the reference's certified bound (below)
-            4 | 9 | 11 => {}
-            // area, volume, cx, inertia and Pzx: CLOSER
             _ => assert!(
                 new_off.abs() < old_off.abs(),
                 "mass[{i}]: new off {new_off:e} old off {old_off:e}"
             ),
         }
-    }
-
-    // cy, Pyz and Pxy are nearer the reference before (1.7e-10, 2.5e-10 and 2.5e-10
-    // relative) than now (7.3e-10, 7.1e-10 and 7.1e-10): the corners' quadrature at the
-    // requested 1e-4, about 1e-10 of the first moment in y. The reference is no nearer the
-    // body's true values than its certified bound, and that bound is set by the gaps
-    // between the file's faces: the certified enclosure of the body's y moment
-    // (`enclose_quantity`, the faces, the ruled strips across the edge gaps and the caps
-    // at the vertices) cannot be narrowed below its floor, 2.0e-4, as no cut narrows a
-    // strip's share. So every row within the certified bands is EQUAL under RULING 3: the
-    // bands hold the new row, the old row and the reference, each over 1e5 times
-    // wider than the rows' distance from the reference.
-    let mut g = read(&mut k, name);
-    let y = enclose_quantity(&k, &mut g, Quantity::Moment { x: 0, y: 1, z: 0 }, 3e-4).unwrap();
-    // (the y moment's error from cy's offset: the volume times cy's offset)
-    let moment_off = (new_row[4] - reference[4]).abs() * reference[1];
-    assert!(
-        y.floor > 1e5 * moment_off,
-        "the y moment's floor {:e}, the corners' quadrature {moment_off:e}",
-        y.floor
-    );
-    let e = enclose_mass_properties(&k, &mut g, 1e-3).unwrap();
-    for (i, band) in [(4, e.centroid[1]), (9, e.products[0]), (11, e.products[2])] {
-        for (what, v) in [
-            ("new", new_row[i]),
-            ("old", old_row[i]),
-            ("reference", reference[i]),
-        ] {
-            assert!(band.contains(v), "mass[{i}]: {what} {v} off {band:?}");
-        }
-        let off = (new_row[i] - reference[i]).abs();
-        assert!(
-            band.width() > 1e5 * off,
-            "mass[{i}]: band {band:?} against the offset {off:e}"
-        );
     }
 }

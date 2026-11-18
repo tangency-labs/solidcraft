@@ -34,6 +34,7 @@
 //! | [`Sphere::intersect_with_cone`]              | `IntersectWithCone`                          |
 //! | [`Sphere::create_trimmed_circle_segments`]   | `CreateTrimmedCircleSegments`                |
 //! | [`Sphere::is_nurb_surface_sphere`]           | `IsNurbSurfaceSphere`                        |
+//! | [`Sphere::fitted_nurb_surface_sphere`]       | `IsNurbSurfaceSphere` as upstream returns it (the fitted circles' NURB) |
 //! | [`Sphere::rebuild_step_from_nurb_parameters`] | `RebuildSTEPFromNURBParameters`             |
 //! | [`Sphere::is_closed`], [`Sphere::is_closed_u`], [`Sphere::is_closed_v`] | `IsClosed`, `IsClosedU`, `IsClosedV` |
 //! | [`Sphere::step_inversion`]                   | `STEPInversion`                              |
@@ -2100,6 +2101,33 @@ impl Sphere {
         tolerance_scale: f64,
         this: Option<&Surface>,
     ) -> Result<Option<Self>> {
+        Self::keep_tested_nurb_on(k, test, tolerance_scale, this)
+    }
+
+    /// The sphere `IsNurbSurfaceSphere` fits to `test` as upstream returns it: its NURB
+    /// the one made from the fitted circles (reparameterised to `test`'s NURB domain),
+    /// ~1e-11 off `test`'s, where [`Self::is_nurb_surface_sphere`] keeps `test`'s own
+    /// (WR-493). The tests take it to replay rows against the fitted NURB.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::is_nurb_surface_sphere`].
+    pub fn fitted_nurb_surface_sphere(
+        k: &Kernel,
+        test: &BSplineSurface,
+        tolerance_scale: f64,
+    ) -> Result<Option<Self>> {
+        Self::fit_on(k, test, tolerance_scale, None)
+    }
+
+    /// [`Self::fitted_nurb_surface_sphere`] with `this` evaluating the corners (as
+    /// [`Self::is_nurb_surface_sphere_on`]).
+    fn fit_on(
+        k: &Kernel,
+        test: &BSplineSurface,
+        tolerance_scale: f64,
+        this: Option<&Surface>,
+    ) -> Result<Option<Self>> {
         let corner = |uv| match this {
             Some(s) => s.evaluate_point(k, uv),
             None => test.evaluate_point(uv),
@@ -2301,9 +2329,24 @@ impl Sphere {
             Err(_) => return Ok(None), // [B414]
             Ok(()) => {}
         }
+        Ok(Some(sphere))
+    }
 
+    /// [`Self::fitted_nurb_surface_sphere`] of `test` as `this` evaluates its corners
+    /// ([`Self::is_nurb_surface_sphere_on`]), then the sphere keeps a copy of `test`'s NURB.
+    fn keep_tested_nurb_on(
+        k: &Kernel,
+        test: &BSplineSurface,
+        tolerance_scale: f64,
+        this: Option<&Surface>,
+    ) -> Result<Option<Self>> {
+        let Some(mut sphere) = Self::fit_on(k, test, tolerance_scale, this)? else {
+            return Ok(None);
+        };
         // not upstream (WR-493; tangency-labs/smlib@7ea6a96): the sphere keeps the NURB
-        // tested (SetFromGwNurb, whose rebuild's status is ignored)
+        // tested (SetFromGwNurb, whose rebuild's status is ignored). (`test` has a NURB:
+        // without one its degrees are 0 and the fit returned `None`; the error is kept
+        // for a NURB-less surface all the same.)
         let nurb = test
             .gw_nurb()
             .ok_or_else(|| SolidError::surface_missing(OP_NURB_SPHERE, "the tested NURB"))?;

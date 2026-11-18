@@ -1284,7 +1284,9 @@ impl Torus {
         ignore_status(torus.reparameterize(k, &test.natural_uv_domain()))?;
 
         // not upstream (WR-493; the SolidCraft fork's tangency-labs/smlib@7ea6a96): the
-        // torus keeps the NURB tested (SetFromGwNurb, whose rebuild's status is ignored)
+        // torus keeps the NURB tested (SetFromGwNurb, whose rebuild's status is ignored).
+        // (`test` has a NURB: without one its degrees are 0 and the degree test above
+        // returned `None`; the error is kept for a NURB-less surface all the same.)
         let nurb = test
             .gw_nurb()
             .ok_or_else(|| SolidError::surface_missing(OP_NURB_TORUS, "the tested NURB"))?;

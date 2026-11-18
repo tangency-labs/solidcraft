@@ -41,8 +41,8 @@
 //! each level with its own bounds of 48 levels and 100,000 pieces (so the work is bounded
 //! by their product), cancel polled in both, and no recursion. Neither level has a node
 //! at a piece's end, so the WR-670 one-sided end evaluation (#2091) is not needed on this
-//! path; a trim that crosses a surface v knot inside a piece (an unbanded face) leaves a
-//! kink in the outer integrand, which the bisection resolves.
+//! path; every trim piece also ends where its trim crosses a surface v knot line, banded
+//! or not (#18195), as the outer integrand has a kink there.
 //! An edge's tube area, volume and moments each have an error scale of their own size
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
 //! Not upstream (#16735): `brep_properties` closes every volume-bounding face onto its
@@ -1100,10 +1100,15 @@ pub fn boundary_properties(
     let mut floors = vec![base_v];
     let lines = surface_knots_inside(k, surface, SurfParamType::V, base_v, top_v)?;
     if lines.len() >= MIN_BANDS {
-        floors.extend(lines);
+        floors.extend(lines.iter().copied());
     }
     let banded = floors.len() > 1;
-    let v_lines = floors.get(1..).unwrap_or_default();
+    // Every trim piece ends where its trim crosses a surface v knot line, banded or not
+    // (#18195): across one the iso-u integrand's v derivatives jump, so the outer
+    // integrand along the trim is not smooth there and a piece's error estimate, the
+    // leading term of an expansion that holds only where it is smooth, may not bound
+    // the piece's error.
+    let v_lines = lines.as_slice();
     let band_of = |v: f64| floors.partition_point(|&f| f <= v).saturating_sub(1);
     let floor = |band: usize| floors.get(band).copied().unwrap_or(base_v);
 
@@ -1195,9 +1200,8 @@ pub fn boundary_properties(
             // pair a level cost at least 144 samples a piece, and an iso-u line long in v
             // (a cylinder's quarter turns) hundreds a sample; the 7-point rule takes 49 a
             // piece when no piece is halved. Neither level's nodes reach a piece's ends,
-            // so no sample is read at a knot of the trim, or at a piece's end on a band's
-            // knot line; inside an unbanded piece a surface knot is a kink the bisection
-            // resolves.
+            // so no sample is read at a knot of the trim, or at a piece's end on a surface
+            // knot line.
             let base = floor(band);
             span_y.fill(0.0);
             kronrod_integrate(k, a, b, accuracy / 10.0, &scale, &mut span_y, |t, dy| {
@@ -1975,6 +1979,65 @@ pub fn brep_properties_in_box(
     attributes: &PropertyAttributes<'_>,
     bbox: &Extent3d,
 ) -> Result<PreciseProperties> {
+    properties_in_box(k, b, accuracy, origin, behavior, attributes, bbox, None)
+}
+
+/// [`brep_properties_in_box`] and its summands: each face use's, closure's and wire
+/// edge's contribution as it is added to the total, in order (#18195: the rounding of the
+/// total is at most `gamma_(n-1)` times the sum of the summands' magnitudes, per
+/// component). The total is the same, bit for bit.
+///
+/// # Errors
+///
+/// Those of [`brep_properties_in_box`]; [`SolidError::Unsupported`] for a body with a
+/// shell vertex, whose ball is not recorded as a summand.
+pub fn brep_properties_in_box_terms(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    origin: Point3,
+    behavior: MassPropertyBehavior,
+    attributes: &PropertyAttributes<'_>,
+    bbox: &Extent3d,
+) -> Result<(PreciseProperties, Vec<PreciseProperties>)> {
+    let mut terms = Vec::new();
+    let total = properties_in_box(
+        k,
+        b,
+        accuracy,
+        origin,
+        behavior,
+        attributes,
+        bbox,
+        Some(&mut terms),
+    )?;
+    Ok((total, terms))
+}
+
+/// Pushes on `terms`, when recording, the summand `add` adds to a zero total.
+fn record(
+    terms: &mut Option<&mut Vec<PreciseProperties>>,
+    add: impl FnOnce(&mut PreciseProperties),
+) {
+    if let Some(terms) = terms.as_deref_mut() {
+        let mut term = PreciseProperties::default();
+        add(&mut term);
+        terms.push(term);
+    }
+}
+
+/// [`brep_properties_in_box`], recording its summands on `terms` when given.
+#[allow(clippy::too_many_arguments)] // brep_properties_in_box's inputs and the record
+fn properties_in_box(
+    k: &Kernel,
+    b: &mut Brep,
+    accuracy: f64,
+    origin: Point3,
+    behavior: MassPropertyBehavior,
+    attributes: &PropertyAttributes<'_>,
+    bbox: &Extent3d,
+    mut terms: Option<&mut Vec<PreciseProperties>>,
+) -> Result<PreciseProperties> {
     let size = bbox.size();
     let estimated = size.z.max(size.x.max(size.y));
     let estimated = estimated * estimated / 100.0;
@@ -2057,6 +2120,9 @@ pub fn brep_properties_in_box(
                     // face between two solid regions bounds both volumes but is no part of
                     // the area
                     add_selected(&mut total, &delta, mass.x, do_volume, do_area);
+                    record(&mut terms, |t| {
+                        add_selected(t, &delta, mass.x, do_volume, do_area);
+                    });
                     // Not upstream (#16735): the strips and corners closing the face onto
                     // its edges, the use's way round as its volume
                     if do_volume {
@@ -2075,10 +2141,12 @@ pub fn brep_properties_in_box(
                                 *m *= sign;
                             }
                             add_selected(&mut total, &c, mass.x, true, false);
+                            record(&mut terms, |t| add_selected(t, &c, mass.x, true, false));
                         }
                     }
                 } else {
                     add(&mut total, &delta, mass.x);
+                    record(&mut terms, |t| add(t, &delta, mass.x));
                 }
                 if !separating {
                     break;
@@ -2099,10 +2167,17 @@ pub fn brep_properties_in_box(
             mass.x = 1.0;
         }
         add(&mut total, &delta.properties, mass.x);
+        record(&mut terms, |t| add(t, &delta.properties, mass.x));
     }
     for v in vertices(b)? {
         if !vertex::is_shell_vertex(b, v)? {
             continue;
+        }
+        if terms.is_some() {
+            return Err(SolidError::Unsupported {
+                operation: OP,
+                reason: "a shell vertex's ball is not recorded as a summand",
+            });
         }
         let mut mass = attributes.mass_vector(
             EntityRef::Vertex(v),

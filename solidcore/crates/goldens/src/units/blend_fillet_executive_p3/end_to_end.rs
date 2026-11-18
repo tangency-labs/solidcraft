@@ -658,6 +658,24 @@ pub(super) fn topology(b: &Brep, out: &mut Vec<f64>) -> SolidResult<()> {
     }
     Ok(())
 }
+/// The body the full-checkpoint case `name` ends with, as [`rust`] makes it before its
+/// record (tests only, #18195).
+#[cfg(test)]
+pub(crate) fn result_body_of(k: &mut Kernel, name: &str) -> Brep {
+    let case = crate::case::regression_case(&super::Runner, name);
+    let inputs: super::Inputs = case.parse().expect("inputs");
+    let input = inputs.real_solid.expect("a real_solid case");
+    assert!(input.shell.is_none() && input.checkpoint == Checkpoint::Full, "{name}");
+    let mut body = build(k, &input).expect("fixture").expect("body");
+    let Ok((selected, _)) = select_edges(k, &body, &input) else {
+        panic!("{name}: the selected edges");
+    };
+    // (a refused fillet leaves the body the record measures, as `run_rust` records it)
+    let Ok(_) = fillet_selected(k, &mut body, &selected, &input) else {
+        panic!("{name}: the fillet's fixture");
+    };
+    body
+}
 /// The Rust body of `input`'s source (the box by default).
 fn build(k: &mut Kernel, input: &RealSolid) -> Result<SolidResult<Brep>, HarnessError> {
     use solidcore::primitive::api_primitives as primitives;
@@ -2737,18 +2755,23 @@ mod wr56_certificates {
 /// centre on x = -3.5 at distance 4.5 from the origin, so the round is the torus about the
 /// x axis with major radius sqrt(8) and minor radius 0.5, through the circle x = -4,
 /// rho = sqrt(8) on the plane and the circle on the sphere at 10/9 of the centre circle.
-/// The round face is that torus to rounding on both sides; its contact edges on the plane
-/// and on the sphere are each closer to it than before (CLOSER against the closed form:
-/// 7.2e-12 and 1.9e-6, before 3.5e-11 and 4.1e-6), and each lies within its own tolerance.
+/// The round face's net and its contact edges on the plane and on the sphere are each
+/// closer to it than before (CLOSER against the closed form, enclosed over every rational
+/// Bezier piece: at most 2.3e-6, 8.8e-12 and 2.1e-6 here, at least 4.1e-6, 3.5e-11 and
+/// 4.1e-6 on #18230's tree), and each lies within its own tolerance (4e-5).
 #[cfg(test)]
 mod wr493_certificates {
-    use super::{apply, build, RealSolid};
+    use super::{apply, build, eu, face, loopuse, RealSolid};
+    use crate::interval::{exact_sum, homogeneous, two_prod, Bern, Iv};
+    use crate::refit::state::{self, Refit};
+    use solidcore::curve::curve::CurveKind;
     use solidcore::kernel::Kernel;
-    use solidcore::math::Vec3;
+    use solidcore::nurbs::math::CPoint;
+    use solidcore::nurbs::srf_tool::p1::decompose_to_bez;
+    use solidcore::topology::{edge, Brep, EdgeId, FaceId};
     use solidcore::surface::surface::SurfaceKind;
     use solidcore::topology::brep::p1;
     use solidcore::topology::brep::validation::{check_brep, CheckLevel};
-    use solidcore::topology::face::p1::calculate_uv_domain_from_uv_trim_curves;
 
     const NAME: &str = "stubs4-sphere_plane-e3-r0.5";
 
@@ -2758,17 +2781,12 @@ mod wr493_certificates {
         inputs.real_solid.expect("a real_solid case")
     }
 
-    /// Distance from the exact round, the torus about the x axis through (-3.5, sqrt(8)).
-    fn off_torus(p: Vec3) -> f64 {
-        let a = (p.y * p.y + p.z * p.z).sqrt() - 8.0_f64.sqrt();
-        let b = p.x + 3.5;
-        ((a * a + b * b).sqrt() - 0.5).abs()
-    }
-
-    #[test]
-    fn the_round_is_closer_to_its_torus() {
-        let off_plane = |p: Vec3| (p.x + 4.0).abs();
-        let off_sphere = |p: Vec3| (p.length() - 5.0).abs();
+    /// The round on `NAME`'s body, as is or with the refit (#18230's tree: the file's
+    /// sphere given upstream's fitted NURB before its topology is made).
+    fn round(refit: bool) -> (Kernel, Brep) {
+        if refit {
+            state::set(Some(Refit::default()));
+        }
         let input = load();
         let mut k = Kernel::default();
         let mut body = build(&mut k, &input).expect("fixture").expect("file");
@@ -2780,86 +2798,471 @@ mod wr493_certificates {
             .map(|&i| *edges.get(i).expect("selected edge"))
             .collect();
         apply(&mut k, &mut body, &selected, &input).expect("the round");
-        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+        if refit {
+            let seen = state::take().expect("the refit");
+            assert!(
+                seen.replaced == 1 && seen.failures.is_empty(),
+                "{NAME}: {seen:?}"
+            );
+        }
+        (k, body)
+    }
+
+    /// What a face of the rounded body is: the file's plane (0), its sphere (1) or the
+    /// round (2).
+    fn role(b: &Brep, f: FaceId) -> usize {
+        match b.face(f).expect("face").surface.as_ref().expect("surface").kind() {
+            SurfaceKind::Plane(_) => 0,
+            SurfaceKind::Sphere(_) => 1,
+            SurfaceKind::ProceduralBlend(_) => 2,
+            other => panic!("{NAME}: a face {other:?}"),
+        }
+    }
+
+    /// The faces an edge's uses lie on, by [`role`], sorted.
+    fn sides(b: &Brep, e: EdgeId) -> Vec<usize> {
+        let mut out: Vec<usize> = edge::edgeuses(b, e, None, None)
+            .expect("uses")
+            .into_iter()
+            .map(|u| role(b, eu::face(b, u).expect("face").expect("a face")))
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// The round face and its edges: on the plane, on the sphere, and its seam.
+    struct Parts {
+        face: FaceId,
+        on_plane: EdgeId,
+        on_sphere: EdgeId,
+        seam: EdgeId,
+    }
+
+    fn parts(b: &Brep) -> Parts {
+        let faces = p1::faces(b, None).expect("faces");
+        let round: Vec<_> = faces.iter().copied().filter(|&f| role(b, f) == 2).collect();
+        let &[face] = round.as_slice() else {
+            panic!("{NAME}: {} round faces, not one", round.len());
+        };
+        let edges = p1::edges(b, None).expect("edges");
+        let find = |want: &[usize]| {
+            let found: Vec<_> = edges
+                .iter()
+                .copied()
+                .filter(|&e| {
+                    let mut s = sides(b, e);
+                    s.dedup();
+                    s == want
+                })
+                .collect();
+            let &[e] = found.as_slice() else {
+                panic!("{NAME}: {} edges between {want:?}", found.len());
+            };
+            e
+        };
+        Parts {
+            face,
+            on_plane: find(&[0, 2]),
+            on_sphere: find(&[1, 2]),
+            seam: find(&[2]),
+        }
+    }
+
+    /// The exact round's torus: about the x axis, its centre circle at `x = CX` of radius
+    /// `sqrt(R2)`, its tube radius `TUBE`.
+    const CX: f64 = -3.5;
+    /// `R^2`.
+    const R2: f64 = 8.0;
+    /// `r`.
+    const TUBE: f64 = 0.5;
+
+    /// A proved upper bound of the distance from the torus over a rational Bezier piece
+    /// (`net[i][j]`, a curve's as one row of one column each).
+    ///
+    /// With `q = p - (CX, 0, 0)`, `rho^2 = q_y^2 + q_z^2` and `s` the distance from the
+    /// centre circle (the distance from the torus is `|s - r|`), the torus's implicit
+    /// function factors:
+    /// `F = (|q|^2 + R^2 - r^2)^2 - 4 R^2 rho^2 = (s - r) (s + r) G`,
+    /// `G = (rho + R)^2 + q_x^2 - r^2`, so `|s - r| = |F| / ((s + r) G)`. On the piece
+    /// `p = X / W` and, with `Y = X - (CX, 0, 0) W`,
+    /// `F W^4 = (|Y|^2 + (R^2 - r^2) W^2)^2 - 4 R^2 W^2 (Y_y^2 + Y_z^2)`: a polynomial whose
+    /// Bernstein coefficients, in interval arithmetic from the exact control points, bound
+    /// it over the piece. The piece is halved `depth` times each way (de Casteljau, `X`,
+    /// `W` and `F W^4` together); on each part `W >= min w > 0` (its weights' hull), the
+    /// point lies in the box of its control points `X_i / W_i` (a convex combination,
+    /// the weights positive), and `(s + r) G` is bounded below over that box in interval
+    /// arithmetic. The part's bound is `max |F W^4| / (min W^4 min (s + r) G)`.
+    fn torus_bound(net: &[Vec<CPoint>], depth: u32) -> f64 {
+        let [x, y, z, w] = homogeneous(net);
+        let yx = x.zip(&w, |a, b| a.sub(b.mul(Iv::exact(CX))));
+        let k = R2 - TUBE * TUBE;
+        let ww = w.mul(&w);
+        let rho2 = y.mul(&y).zip(&z.mul(&z), Iv::add);
+        let a = yx.mul(&yx).zip(&rho2, Iv::add).zip(&ww.scale(k), Iv::add);
+        let f = a.mul(&a).zip(&ww.mul(&rho2).scale(4.0 * R2), Iv::sub);
+        let mut parts = vec![[x, y, z, w, f]];
+        for _ in 0..depth {
+            let mut next = Vec::new();
+            for part in parts {
+                let curve = part[0].q == 0;
+                let halves = |p: &[Bern; 5], along_u: bool| {
+                    let s = p.each_ref().map(|b| b.split(along_u));
+                    [s.clone().map(|h| h.0), s.map(|h| h.1)]
+                };
+                for half in halves(&part, true) {
+                    if curve {
+                        next.push(half);
+                    } else {
+                        next.extend(halves(&half, false));
+                    }
+                }
+            }
+            parts = next;
+        }
+        let square = |v: Iv| {
+            let m = v.mul(v);
+            if v.mig() == 0.0 {
+                Iv { lo: 0.0, hi: m.hi }
+            } else {
+                m
+            }
+        };
+        let (r, big_r) = (Iv::exact(TUBE), Iv::exact(R2).sqrt());
+        let mut out = 0.0_f64;
+        for [x, y, z, w, f] in &parts {
+            let wmin = w.c.iter().map(|c| c.lo).fold(f64::INFINITY, f64::min);
+            assert!(wmin > 0.0, "weights not positive");
+            let hull = |b: &Bern, shift: f64| {
+                b.c.iter()
+                    .zip(&w.c)
+                    .map(|(&c, &wc)| c.div(wc).sub(Iv::exact(shift)))
+                    .reduce(|p, q| Iv {
+                        lo: p.lo.min(q.lo),
+                        hi: p.hi.max(q.hi),
+                    })
+                    .expect("control points")
+            };
+            let (qx, py, pz) = (hull(x, CX), hull(y, 0.0), hull(z, 0.0));
+            let rho = square(py).add(square(pz)).sqrt();
+            let qx2 = square(qx);
+            let s = square(rho.sub(big_r)).add(qx2).sqrt();
+            let g = square(rho.add(big_r)).add(qx2).sub(r.mul(r));
+            let den = s.add(r).mul(g);
+            assert!(den.lo > 0.0, "(s + r) G not proved positive");
+            let w4 = Iv::exact(wmin).mul(Iv::exact(wmin));
+            let bound = Iv::exact(f.hull_mag(0)).div(w4.mul(w4).mul(den));
+            out = out.max(bound.hi);
+        }
+        out
+    }
+
+    /// A proved lower bound of the distance from the torus at `(u, v)` of a rational
+    /// Bezier piece: the point in interval arithmetic, then `|s - r|`.
+    fn torus_distance_below(net: &[Vec<CPoint>], u: f64, v: f64) -> f64 {
+        let [x, y, z, w] = homogeneous(net).map(|b| b.at(u, v));
+        let (px, py, pz) = (x.div(w).sub(Iv::exact(CX)), y.div(w), z.div(w));
+        let rho = py.mul(py).add(pz.mul(pz)).sqrt();
+        let a = rho.sub(Iv::exact(R2).sqrt());
+        let s = a.mul(a).add(px.mul(px)).sqrt();
+        s.sub(Iv::exact(TUBE)).mig()
+    }
+
+    /// An edge's curve as rational Bezier pieces, each with its parameter span; its
+    /// interval is its NURB's whole knot domain (asserted).
+    fn edge_pieces(b: &Brep, e: EdgeId) -> Vec<Vec<Vec<CPoint>>> {
+        let edge = b.edge(e).expect("edge");
+        let CurveKind::BSpline(curve) = edge.curve.as_ref().expect("curve").kind() else {
+            panic!("{NAME}: edge {e:?} not a B-spline");
+        };
+        let nurb = curve.gw_nurb().expect("nurb");
+        let knots = nurb.knots();
+        let (a, z) = (knots[nurb.degree()], knots[knots.len() - 1 - nurb.degree()]);
+        assert_eq!(
+            (edge.interval.min(), edge.interval.max()),
+            (a, z),
+            "{NAME}: edge {e:?} interval"
+        );
+        nurb.decompose_bez()
+            .expect("pieces")
+            .iter()
+            .map(|p| p.cpts().iter().map(|&c| vec![c]).collect())
+            .collect()
+    }
+
+    /// The round face's net as rational Bezier pieces, and the net's certified distance
+    /// from the round's definition, which the face evaluates.
+    fn face_pieces(b: &Brep, f: FaceId) -> (Vec<Vec<Vec<CPoint>>>, f64) {
+        let surface = b.face(f).expect("face").surface.as_ref().expect("surface");
+        let SurfaceKind::ProceduralBlend(blend) = surface.kind() else {
+            panic!("{NAME}: the round not a procedural blend");
+        };
+        let nurb = blend.net().gw_nurb().expect("net");
+        let pieces = decompose_to_bez(nurb)
+            .expect("pieces")
+            .into_iter()
+            .flatten()
+            .map(|p| p.cpts())
+            .collect();
+        (pieces, blend.bound())
+    }
+
+    /// The largest proved lower bound of the distance from the torus at `samples + 1`
+    /// parameters each way per piece: a lower bound of the pieces' largest distance.
+    fn largest_below(pieces: &[Vec<Vec<CPoint>>], samples: u32) -> f64 {
+        let mut lower = 0.0_f64;
+        for net in pieces {
+            let ns = if net[0].len() == 1 { 0 } else { samples };
+            for i in 0..=samples {
+                for j in 0..=ns {
+                    let u = f64::from(i) / f64::from(samples);
+                    let v = f64::from(j) / f64::from(ns.max(1));
+                    lower = lower.max(torus_distance_below(net, u, v));
+                }
+            }
+        }
+        lower
+    }
+
+    /// The largest [`torus_bound`] over pieces.
+    fn largest_above(pieces: &[Vec<Vec<CPoint>>], depth: u32) -> f64 {
+        pieces
+            .iter()
+            .map(|net| torus_bound(net, depth))
+            .fold(0.0, f64::max)
+    }
+
+    /// The distance of `p` from the circle `x = x0`, `y^2 + z^2 = rho0^2`, with
+    /// `x0 = xn / xd` and `rho0^2 = qn / qd` (`xd`, `qd` small integers): from
+    /// `(xd x - xn) / xd` and `(qd rho^2 - qn) / (qd (rho + rho0))`, each numerator summed
+    /// exactly from exact products ([`exact_sum`], [`two_prod`]), the rest in interval
+    /// arithmetic.
+    fn off_circle(p: [f64; 3], xn: f64, xd: f64, qn: f64, qd: f64) -> Iv {
+        let (a, b) = two_prod(xd, p[0]);
+        let dx = exact_sum(&[a, b, -xn]).div(Iv::exact(xd));
+        let mut terms = Vec::new();
+        for c in [p[1], p[2]] {
+            let (h, l) = two_prod(c, c);
+            for part in [h, l] {
+                let (s, e) = two_prod(qd, part);
+                terms.extend([s, e]);
+            }
+        }
+        terms.push(-qn);
+        let rho = Iv::exact(p[1])
+            .mul(Iv::exact(p[1]))
+            .add(Iv::exact(p[2]).mul(Iv::exact(p[2])))
+            .sqrt();
+        let rho0 = Iv::exact(qn).div(Iv::exact(qd)).sqrt();
+        let dr = exact_sum(&terms).div(Iv::exact(qd).mul(rho.add(rho0)));
+        let d = dx.mul(dx).add(dr.mul(dr)).sqrt();
+        Iv {
+            lo: d.lo.max(0.0),
+            hi: d.hi,
+        }
+    }
+
+    /// One body's topology record ([`super::topology`]'s format) with its edges in the
+    /// order `order` and each edge's uses sorted: equal for two bodies exactly when they
+    /// are the same topology up to the edges' labels and the order uses are listed in.
+    fn canonical(b: &Brep, order: &[EdgeId]) -> Vec<f64> {
+        let vertices = p1::vertices(b, None).expect("vertices");
+        let faces = p1::faces(b, None).expect("faces");
+        let mut out = vec![order.len() as f64];
+        for &id in order {
+            let e = b.edge(id).expect("edge");
+            out.push(e.curve.as_ref().map_or(0.0, |c| c.type_code() as f64));
+            let ends = edge::vertices(b, id, None).expect("ends");
+            out.push(ends.len() as f64);
+            out.extend(ends.into_iter().map(|v| super::label(&vertices, v)));
+            let mut uses: Vec<(f64, f64)> = edge::edgeuses(b, id, None, None)
+                .expect("uses")
+                .into_iter()
+                .map(|u| {
+                    (
+                        super::label(&faces, eu::face(b, u).expect("face")),
+                        f64::from(eu::orientation(b, u).expect("orientation") as i32),
+                    )
+                })
+                .collect();
+            uses.sort_by(|p, q| p.partial_cmp(q).expect("labels"));
+            out.push(uses.len() as f64);
+            out.extend(uses.into_iter().flat_map(|(f, o)| [f, o]));
+        }
+        out.push(faces.len() as f64);
+        for &id in &faces {
+            let f = b.face(id).expect("face");
+            out.push(f.surface.as_ref().map_or(0.0, |s| s.type_code() as f64));
+            let loops = face::loops(b, id, false, None).expect("loops");
+            out.push(loops.len() as f64);
+            for l in loops {
+                let uses = loopuse::loop_edgeuses(b, l).expect("loop");
+                out.push(uses.len() as f64);
+                for u in uses {
+                    let u = b.edgeuse(u).expect("edgeuse");
+                    out.extend([
+                        super::label(order, u.edge),
+                        f64::from(u.orientation as i32),
+                    ]);
+                }
+            }
+        }
+        out
+    }
+
+    /// The `sphere_plane` round against its exact torus (about the x axis, centre circle
+    /// `x = -3.5`, `y^2 + z^2 = 8`, tube 0.5: the ball of radius 0.5 touching the plane
+    /// `x = -4` and, inside, the sphere of radius 5 about the origin), here and replayed
+    /// on #18230's tree ([`round`]: the file's sphere given upstream's fitted NURB).
+    ///
+    /// - The contact edges' curves and the round face's net (rational Bezier pieces): each
+    ///   piece's distance from the torus is enclosed ([`torus_bound`]), and the largest
+    ///   bound here is below a proved lower bound of #18230's largest distance (its pieces
+    ///   at 65 parameters for the edges, 17 each way for the net,
+    ///   [`torus_distance_below`]): CLOSER. The seam (a circle
+    ///   of the torus, one piece) is within `1e-12` in both.
+    /// - Topology: the same up to the edges' labels and the order an edge's uses are
+    ///   listed in ([`canonical`]). #18230's tree replaced the sphere's NURB, made its
+    ///   contact edge last (`EdgeId(8)` after the seam's 7; the plane's is 6), listing
+    ///   its uses the other way round; here it is made first (`EdgeId(5)`), so the
+    ///   record lists the round's edges sphere, plane, seam where #18230's listed plane,
+    ///   seam, sphere: the `result_topology` blocks' sum is unchanged and their weighted
+    ///   sum moves.
+    /// - Geometry (`util::primitive::append`, entity by entity, matched by role): the
+    ///   file's edges, the plane face and the two pole vertices are bit for bit
+    ///   #18230's. What moves: the round's tolerance and its edges' (`1.4249e-4` to
+    ///   `4e-5`, the tolerance the net and curves are made to), the contact edges'
+    ///   parameter spans and samples (on the closer curves), the round face's domain and
+    ///   samples, the sphere face's samples (the same fractions of the same domain of
+    ///   the file's NURB here, of upstream's fitted NURB on #18230's tree), and the
+    ///   two round vertices: the one on the sphere is closer to its exact contact circle
+    ///   (proved), the one on the plane is `4.3e-15` from its circle where #18230's was
+    ///   `1.4e-15` (both a few units in the last place of `sqrt(8)`; proved and pinned).
+    #[test]
+    fn the_round_is_closer_to_its_torus() {
+        let (_, old) = round(true);
+        let (mut k, mut new) = round(false);
+        let lines = check_brep(&mut k, &mut new, CheckLevel::Level2)
             .expect("check")
             .lines();
         assert!(lines.is_empty(), "{NAME}: Level 2: {lines:?}");
+        let (po, pn) = (parts(&old), parts(&new));
 
-        // the round face: the one neither the file's plane nor its sphere
-        let faces = p1::faces(&body, None).expect("faces");
-        let round: Vec<_> = faces
-            .iter()
-            .copied()
-            .filter(|&f| {
-                let s = body.face(f).expect("face").surface.as_ref().expect("surface");
-                !matches!(s.kind(), SurfaceKind::Sphere(_) | SurfaceKind::Plane(_))
-            })
-            .collect();
-        let &[f] = round.as_slice() else {
-            panic!("{NAME}: {} round faces, not one", round.len());
+        // the curves and the net
+        for (what, eo, en) in [
+            ("edge on the plane", po.on_plane, pn.on_plane),
+            ("edge on the sphere", po.on_sphere, pn.on_sphere),
+        ] {
+            let before = largest_below(&edge_pieces(&old, eo), 64);
+            let now = largest_above(&edge_pieces(&new, en), 8);
+            let tol = new.edge(en).expect("edge").tolerance;
+            eprintln!("{NAME}: {what} at most {now:e} off the torus (tol {tol:e}), #18230 at least {before:e}");
+            assert!(now < before, "{NAME}: {what} {now:e}, #18230 {before:e}");
+            assert!(now <= tol, "{NAME}: {what} {now:e} beyond its tolerance {tol:e}");
+        }
+        for b in [&old, &new] {
+            let seam = parts(b).seam;
+            let off = largest_above(&edge_pieces(b, seam), 4);
+            assert!(off <= 1e-12, "{NAME}: the seam {off:e} off the torus");
+        }
+        let (old_net, _) = face_pieces(&old, po.face);
+        let (new_net, net_bound) = face_pieces(&new, pn.face);
+        let before = largest_below(&old_net, 16);
+        let now = largest_above(&new_net, 3);
+        let tol = new.face(pn.face).expect("face").tolerance;
+        eprintln!("{NAME}: net at most {now:e} off the torus, from its definition {net_bound:e} (tol {tol:e}), #18230 at least {before:e}");
+        assert!(now < before, "{NAME}: the net {now:e}, #18230 {before:e}");
+        assert!(now + net_bound <= tol, "{NAME}: the net beyond the face's tolerance");
+
+        // topology
+        let roles = |b: &Brep, p: &Parts| {
+            let mut order: Vec<EdgeId> = p1::edges(b, None)
+                .expect("edges")
+                .into_iter()
+                .filter(|&e| ![p.on_plane, p.on_sphere, p.seam].contains(&e))
+                .collect();
+            order.extend([p.on_plane, p.on_sphere, p.seam]);
+            order
         };
-        let domain = calculate_uv_domain_from_uv_trim_curves(&k, &mut body, f, false, false, false)
-            .expect("domain")
-            .domain;
-        let face = body.face(f).expect("face");
-        let (surface, face_tol) = (face.surface.clone().expect("surface"), face.tolerance);
-        let mut face_off = 0.0_f64;
-        for i in 0..=64 {
-            for j in 0..=64 {
-                let uv = domain.evaluate(f64::from(i) / 64.0, f64::from(j) / 64.0);
-                face_off = face_off.max(off_torus(surface.evaluate_point(&k, uv).expect("point")));
-            }
-        }
-
-        // the edges, each sampled at 257 points: (torus, plane, sphere, tolerance)
-        let mut contact_plane = None;
-        let mut contact_sphere = None;
-        for e in p1::edges(&body, None).expect("edges") {
-            let edge = body.edge(e).expect("edge");
-            let curve = edge.curve.as_ref().expect("curve");
-            let (mut t, mut pl, mut sp) = (0.0_f64, 0.0_f64, 0.0_f64);
-            for i in 0..=256 {
-                let p = curve
-                    .evaluate_point(&k, edge.interval.evaluate(f64::from(i) / 256.0))
-                    .expect("point");
-                t = t.max(off_torus(p));
-                pl = pl.max(off_plane(p));
-                sp = sp.max(off_sphere(p));
-            }
-            if t > 1e-3 {
-                continue; // an edge of the sphere's or the plane's own
-            }
-            if pl <= 1e-12 {
-                contact_plane = Some((t, edge.tolerance));
-            } else if sp <= 1e-3 {
-                contact_sphere = Some((t.max(sp), edge.tolerance));
-            }
-        }
-        let (plane_off, plane_tol) = contact_plane.expect("the contact edge on the plane");
-        let (sphere_off, sphere_tol) = contact_sphere.expect("the contact edge on the sphere");
-        eprintln!(
-            "{NAME}: face {face_off:e} (tol {face_tol:e}), on plane {plane_off:e} \
-             (tol {plane_tol:e}), on sphere {sphere_off:e} (tol {sphere_tol:e})"
+        let (ro, rn) = (roles(&old, &po), roles(&new, &pn));
+        assert_eq!(&ro[..3], &rn[..3], "{NAME}: the file's edges");
+        assert_eq!(canonical(&old, &ro), canonical(&new, &rn), "{NAME}: topology");
+        let head = |b: &Brep| p1::edges(b, None).expect("edges")[3..].to_vec();
+        assert_eq!(head(&old), [po.on_plane, po.seam, po.on_sphere]);
+        assert_eq!(
+            [po.on_plane, po.seam, po.on_sphere],
+            [6, 7, 8].map(EdgeId::from_index)
+        );
+        assert_eq!(head(&new), [pn.on_sphere, pn.on_plane, pn.seam]);
+        assert_eq!(
+            [pn.on_sphere, pn.on_plane, pn.seam],
+            [5, 6, 7].map(EdgeId::from_index)
         );
 
-        // The round face is the torus itself, to rounding (before: 5.1e-15).
-        assert!(face_off <= 1e-13, "{NAME}: face {face_off:e} off the torus");
-        assert!(face_off <= face_tol);
-        // Before (the refit sphere's rebuilt trims), the contact edges were 3.50e-11 (plane)
-        // and 4.13e-6 (sphere) off the torus.
-        for (now, before, tol, what) in [
-            (plane_off, 3.502_098_611_107_84e-11, plane_tol, "edge on the plane"),
-            (sphere_off, 4.132_889_777_963_555e-6, sphere_tol, "edge on the sphere"),
-        ] {
-            assert!(
-                now < before,
-                "{NAME}: {what} {now:e} off the torus, before {before:e}"
-            );
-            assert!(
-                now <= tol,
-                "{NAME}: {what} {now:e} off the torus, beyond its tolerance {tol:e}"
-            );
+        // geometry, entity by entity
+        let entities = |b: &Brep, order: &[EdgeId]| {
+            let mut g = Vec::new();
+            crate::util::primitive::append(&Kernel::default(), b, &mut g).expect("geometry");
+            let edges = p1::edges(b, None).expect("edges");
+            assert_eq!(g.len(), 4 * 4 + 6 * 18 + 3 * 18, "{NAME}: geometry length");
+            let vertices: Vec<Vec<f64>> = g[..16].chunks(4).map(<[f64]>::to_vec).collect();
+            let by_role: Vec<Vec<f64>> = order
+                .iter()
+                .map(|e| {
+                    let at = 16 + 18 * edges.iter().position(|x| x == e).expect("edge");
+                    g[at..at + 18].to_vec()
+                })
+                .collect();
+            let faces: Vec<Vec<f64>> = g[124..].chunks(18).map(<[f64]>::to_vec).collect();
+            (vertices, by_role, faces)
+        };
+        let (vo, eo, fo) = entities(&old, &ro);
+        let (vn, en, fnn) = entities(&new, &rn);
+        let moved = |a: &[f64], b: &[f64]| -> Vec<usize> {
+            (0..a.len()).filter(|&i| a[i].to_bits() != b[i].to_bits()).collect()
+        };
+        let (old_tol, new_tol) = (1.424_937_159_614_344_5e-4, 4e-5);
+        // the poles; the file's three edges; the plane face (faces: sphere, plane, round)
+        for i in 0..2 {
+            assert_eq!(moved(&vo[i], &vn[i]), [0_usize; 0], "{NAME}: vertex {i}");
         }
+        for i in 0..3 {
+            assert_eq!(moved(&eo[i], &en[i]), [0_usize; 0], "{NAME}: file edge {i}");
+        }
+        assert_eq!(moved(&fo[1], &fnn[1]), [0_usize; 0], "{NAME}: the plane face");
+        // the round's edges: tolerance, span and samples (the seam's span is kept)
+        for (i, span) in [(3, true), (4, true), (5, false)] {
+            assert_eq!((eo[i][0], en[i][0]), (old_tol, new_tol), "{NAME}: edge {i} tolerance");
+            let mut want = vec![0, 5, 6, 7, 9, 10, 11, 13, 14, 15];
+            if span {
+                want.insert(1, 2);
+            }
+            assert_eq!(moved(&eo[i], &en[i]), want, "{NAME}: round edge {i}");
+        }
+        // the round face: tolerance, domain and samples
+        assert_eq!((fo[2][0], fnn[2][0]), (old_tol, new_tol));
+        assert_eq!(moved(&fo[2], &fnn[2]), [0, 3, 8, 9, 12, 13, 15, 16, 17]);
+        // the sphere face: its samples at the same fractions of the same domain, of the
+        // file's NURB here and of upstream's fitted NURB on #18230's tree (one sphere, two
+        // parametrisations)
+        assert_eq!(moved(&fo[0], &fnn[0]), [7, 8, 9, 11, 12, 13, 15, 16, 17]);
+        // the round's vertices: tolerance and position
+        for i in 2..4 {
+            assert_eq!((vo[i][3], vn[i][3]), (old_tol, new_tol), "{NAME}: vertex {i} tolerance");
+        }
+        let point = |v: &[f64]| [v[0], v[1], v[2]];
+        assert!(vo[2][0] == -4.0 && vn[2][0] == -4.0, "{NAME}: the plane vertex off x = -4");
+        let (before, now) = (
+            off_circle(point(&vo[2]), -4.0, 1.0, 8.0, 1.0),
+            off_circle(point(&vn[2]), -4.0, 1.0, 8.0, 1.0),
+        );
+        eprintln!("{NAME}: plane vertex {now:?} off its circle, #18230 {before:?}");
+        assert!(now.lo > before.hi && now.hi < 4.4e-15, "{NAME}: plane vertex {now:?}, #18230 {before:?}");
+        let (before, now) = (
+            off_circle(point(&vo[3]), -35.0, 9.0, 800.0, 81.0),
+            off_circle(point(&vn[3]), -35.0, 9.0, 800.0, 81.0),
+        );
+        eprintln!("{NAME}: sphere vertex {now:?} off its circle, #18230 {before:?}");
+        assert!(now.hi < before.lo, "{NAME}: sphere vertex {now:?}, #18230 {before:?}");
     }
 }
 

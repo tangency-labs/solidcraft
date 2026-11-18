@@ -93,3 +93,43 @@ fn small_corner_spheres_pass_the_check_with_the_tested_nurb_kept() {
         }
     }
 }
+
+/// The corner spheres' sweep interval is their polar curve's, bit for bit (#2073): each
+/// corner face's NURB, found a sphere (`Sphere::is_nurb_surface_sphere`, as the fillet's
+/// exact-surface test and the implicit form call it), keeps that NURB, and the rebuild from
+/// it takes the sweep interval from another iso circle, which differs on these small
+/// spheres, so without that step this fails.
+#[test]
+fn corner_spheres_sweep_their_polar_curves_interval() {
+    use solidcore::surface::sphere::Sphere;
+    use solidcore::surface::surface::SurfaceKind;
+    let mut spheres = 0;
+    for deg in [45.0, 90.0, 120.0, 140.0, 155.0] {
+        for r in [0.02, 0.07, 0.15] {
+            let mut k = Kernel::default();
+            let b = rounded_wedge(&mut k, deg, r);
+            for (fid, f) in b.faces().iter() {
+                let Some(SurfaceKind::BSpline(nurb)) = f.surface.as_ref().map(|s| s.kind()) else {
+                    continue;
+                };
+                let Some(sp) = Sphere::is_nurb_surface_sphere(&k, nurb, 1.0).unwrap() else {
+                    continue;
+                };
+                spheres += 1;
+                let polar = sp
+                    .base()
+                    .polar_curve()
+                    .expect("a polar curve")
+                    .step_interval();
+                let d = sp.base().step_uv_domain();
+                assert_eq!(
+                    [d.min().x.to_bits(), d.max().x.to_bits()],
+                    [polar.min().to_bits(), polar.max().to_bits()],
+                    "{deg} deg, r {r}, {fid:?}: sweep {d:?}, polar curve {polar:?}"
+                );
+            }
+        }
+    }
+    assert!(spheres > 0, "no corner sphere found");
+    eprintln!("{spheres} corner spheres");
+}

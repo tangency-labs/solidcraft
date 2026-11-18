@@ -133,7 +133,19 @@ fn replay(unit_id: &str) -> usize {
             already: 0,
             failures: Vec::new(),
         }));
+        // (a row the WR-493 retirement moves too, #18195: main's found spheres had the
+        // fitted NURB, so the replay puts that back as well)
+        let refit = WR493_REFIT.contains(&(unit_id, name));
+        if refit {
+            crate::refit::state::set(Some(crate::refit::state::Refit::default()));
+        }
         let line = run(u.as_ref(), case);
+        if refit {
+            let r = crate::refit::state::take().expect("refit lost");
+            if r.replaced == 0 || !r.failures.is_empty() {
+                failures.push(format!("{name}: refit {r:?}"));
+            }
+        }
         let Some(Mode::Substitute {
             reads: seen,
             applied,
@@ -174,6 +186,17 @@ fn replay(unit_id: &str) -> usize {
     assert!(failures.is_empty(), "{unit_id}:\n{}", failures.join("\n"));
     n
 }
+
+/// The rows here that the WR-493 retirement (#18195) moves as well: replayed with the
+/// found spheres' fitted NURB put back too (`crate::refit`).
+const WR493_REFIT: &[(&str, &str)] = &[
+    ("topology.brep_p10", "read_Fillet_sphere_plane"),
+    ("topology.brep_p10", "read_Solids_revolution_mold"),
+    ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu21"),
+    ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu33"),
+    ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu45"),
+    ("topology.edgeuse_p3", "own_reader_sphere_plane_create_eu9"),
+];
 
 macro_rules! replay_tests {
     ($($test:ident: $unit:literal, $rows:literal;)*) => {$(
