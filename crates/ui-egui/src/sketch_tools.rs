@@ -1990,9 +1990,9 @@ fn constraint_matches_selection(
         solidcraft_engine::Sel::SketchPoint { id } => {
             points.iter().any(|&index| sk.points.get(index).is_some_and(|point| point.id == *id))
                 || curves.iter().any(|&index| {
-                    sk.curves.get(index).is_some_and(|curve| {
-                        curve.kind.point_ids().into_iter().any(|p| sk.points.get(p).is_some_and(|point| point.id == *id))
-                    })
+                    sk.curves
+                        .get(index)
+                        .is_some_and(|curve| curve.kind.point_ids().into_iter().any(|p| sk.points.get(p).is_some_and(|point| point.id == *id)))
                 })
         }
         _ => false,
@@ -2042,11 +2042,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         if app.preferences.constraint_glyphs_selected_only
             && !ss.report.failing.contains(&c.id)
             && picked.as_deref() != Some(c.id.as_str())
-            && !app
-                .session
-                .selection
-                .iter()
-                .any(|sel| matches!(sel, solidcraft_engine::Sel::SketchConstraint { id } if id == &c.id))
+            && !app.session.selection.iter().any(|sel| matches!(sel, solidcraft_engine::Sel::SketchConstraint { id } if id == &c.id))
             && !constraint_matches_selection(&ss.sketch, &c.kind, &app.session.selection)
         {
             continue;
