@@ -9,7 +9,6 @@
 //! spacing.
 
 use serde_json::json;
-use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 
@@ -18,46 +17,78 @@ use crate::scenario::Harness;
 use crate::selection::{AXES, CURVES, POINTS, SelInput};
 use crate::sketch_modify_ui::{Mod, commands};
 
-/// A click at 50 splits at 50 by default or at 40 and 70 with the intersection preference.
-/// The selected line keeps its first piece and undo restores the entire sketch in one step.
 #[test]
-fn break_click_uses_the_line_split_preference() {
-    for (crossings, at_intersections, pick) in [(true, false, 50.0), (false, false, 50.0), (true, false, 40.0), (true, true, 50.0)] {
-        let cuts: &[f64] = if at_intersections { &[40.0, 70.0] } else { std::slice::from_ref(&pick) };
-        let mut h = Harness::new();
-        h.app.home.open = false;
-        if at_intersections {
-            h.call("ui.prefs", json!({"sketch_break_at_intersections": true}));
-        }
-        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
-        h.app.run("sketch.line", json!({"points": [[0,0], [100,0]], "ids": ["target"], "infer": false})).unwrap();
-        if crossings {
-            for x in [20, 40, 70] {
-                h.app.run("sketch.line", json!({"points": [[x,-10], [x,10]], "infer": false})).unwrap();
-            }
-        }
-        h.call("ui.view", json!({"view": "top"}));
-        h.call("ui.view", json!({"view": "fit"}));
-        h.settle();
-        let sid = h.app.session.active_sketch.unwrap();
-        let before = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
-        h.step(&json!({"start": "sketch.break"})).unwrap();
-        h.step(&json!({"click": {"sketch": [pick,0]}})).unwrap();
-        let state = h.app.session.model.state();
-        let after = &state.sketch(sid).unwrap().sketch;
-        assert_eq!(after.curves.len(), before.curves.len() + cuts.len(), "click at {pick}, expected cuts {cuts:?}");
-        let target = after.curve_index("target").unwrap();
-        let (start, mut end) = after.curves[target].kind.ends().unwrap();
-        for (piece, &x) in after.curves[before.curves.len()..].iter().zip(cuts) {
-            let (next_start, next_end) = piece.kind.ends().unwrap();
-            assert_eq!(end, next_start);
-            assert!(after.point(end).unwrap().dist(Vec2::new(x, 0.0)) < 1e-6, "expected a split at {x}");
-            end = next_end;
-        }
-        assert_eq!((start, end), before.curves[target].kind.ends().unwrap());
-        h.app.run("edit.undo", json!({})).unwrap();
-        assert_eq!(h.app.session.model.state().sketch(sid).unwrap().sketch, before);
+fn break_and_trim_click_select_the_same_piece() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0,0], [100,0]], "ids": ["target"], "infer": false})).unwrap();
+    for x in [20, 70] {
+        h.app.run("sketch.line", json!({"points": [[x,-10], [x,10]], "infer": false})).unwrap();
     }
+    h.app.run("sketch.point", json!({"point": "on:target:40,0"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [60,0], "connect": false})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+
+    // The second pick is within the snap radius of the constrained point, on its left.
+    for (pick, lo, hi) in [(50.0, 40.0, 70.0), (39.5, 20.0, 40.0)] {
+        let outer = [(0.0, lo), (hi, 100.0)];
+        let all = [outer[0], (lo, hi), outer[1]];
+        for (command, expected) in [("sketch.break", all.as_slice()), ("sketch.trim", outer.as_slice())] {
+            h.step(&json!({"start": command})).unwrap();
+            if command == "sketch.trim" {
+                h.step(&json!({"move": {"sketch": [pick,0]}})).unwrap();
+                let preview = crate::sketch_tools::trim_hover_piece(&h.app, sid, "target").unwrap();
+                assert!((preview.first().unwrap().x - lo).abs() < 1e-6 && (preview.last().unwrap().x - hi).abs() < 1e-6, "{pick}: {preview:?}");
+            }
+            h.step(&json!({"click": {"sketch": [pick,0]}})).unwrap();
+            let state = h.app.session.model.state();
+            let sk = &state.sketch(sid).unwrap().sketch;
+            let mut pieces: Vec<_> = sk
+                .curves
+                .iter()
+                .filter_map(|c| {
+                    let (a, b) = c.kind.ends()?;
+                    let (a, b) = (sk.point(a)?, sk.point(b)?);
+                    (a.y.abs() < 1e-6 && b.y.abs() < 1e-6).then_some((a.x.min(b.x), a.x.max(b.x)))
+                })
+                .collect();
+            pieces.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert_eq!(pieces.len(), expected.len(), "{command} at {pick}: {pieces:?}");
+            for ((a, b), (lo, hi)) in pieces.iter().zip(expected) {
+                assert!((a - lo).abs() < 1e-6 && (b - hi).abs() < 1e-6, "{command} at {pick}: {pieces:?}");
+            }
+            h.step(&json!({"key": "Escape"})).unwrap();
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(h.app.session.model.state().sketch(sid).unwrap().sketch, before);
+        }
+    }
+}
+
+#[test]
+fn break_can_still_pick_a_shared_endpoint() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0,0], [20,0], [20,10]], "ids": ["first", "second"], "infer": false})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let shared = |h: &Harness| {
+        let state = h.app.session.model.state();
+        let sk = &state.sketch(sid).unwrap().sketch;
+        assert_eq!(sk.curves.len(), 2);
+        sk.curves[0].kind.ends().unwrap().1 == sk.curves[1].kind.ends().unwrap().0
+    };
+    assert!(shared(&h));
+    h.step(&json!({"start": "sketch.break"})).unwrap();
+    h.step(&json!({"click": {"sketch": [19.95,0]}})).unwrap();
+    assert!(!shared(&h));
 }
 
 #[test]

@@ -226,11 +226,13 @@ fn renumbered(nodes: &[StepNode], kept: &[Option<usize>], made: &[ImportedBody])
 pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>> {
     let text = records_text(records)?;
     let key = super::text_key(&text);
-    if let Some(imp) = super::recent(key) {
+    // Records are made into bodies as they are, whatever the heal preference
+    // ([`crate::heals_tolerance_defects`]): never healed, so cached as a read that does not heal.
+    if let Some(imp) = super::recent(key, false) {
         return Ok(imp);
     }
     let imp = Arc::new(records_import(records)?);
-    super::remember(key, &imp, text.len() <= super::KEEP_SMALL_BYTES);
+    super::remember(key, false, &imp, text.len() <= super::KEEP_SMALL_BYTES);
     Ok(imp)
 }
 

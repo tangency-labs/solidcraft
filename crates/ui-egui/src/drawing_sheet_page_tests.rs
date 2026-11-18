@@ -261,7 +261,7 @@ fn sheet_colour_is_screen_only() {
 #[test]
 fn sheet_backdrop_is_a_screen_only_preference() {
     let (mut h, _) = plate_sheet();
-    assert_eq!(h.app.preferences.drawing_sheet_backdrop, "datum_cloud");
+    assert_eq!(h.app.preferences.drawing_sheet_backdrop, "none");
     let before = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
     let svg = |h: &mut Harness| h.app.run("drawing.export", json!({"sheet": "Sheet 1"})).unwrap()["svg"].as_str().unwrap().to_owned();

@@ -268,21 +268,15 @@ fn nearer_boundary_witness(k: &Kernel, c: &Call<'_>, p: Vec3, main_lo: f64) -> b
         .is_some_and(|(_, hi)| (hi + tol) * (1.0 + f64::EPSILON) < main_lo)
 }
 
-/// The certificate classes of `blend.fillet_executive_p3`'s substituted calls.
+/// The certificate classes of `blend.fillet_executive_p3`'s substituted calls (its two
+/// rows left; see the module doc of the parent).
 pub(super) const EXECUTIVE_P3: &[(&str, usize)] = &[
-    (
-        "ARGUED invert: main refuses, this branch answers not farther than the guess",
-        46,
-    ),
-    ("degen: aligned equally to the rounding", 130),
-    ("degen: proven more aligned", 9),
-    ("invert: as near to the rounding", 12),
-    ("invert: both refuse", 112),
+    ("degen: aligned equally to the rounding", 3),
     (
         "invert: main refuses, this branch answers, proven nearer than the guess",
-        4920,
+        8,
     ),
-    ("invert: proven nearer", 1204),
+    ("invert: proven nearer", 240),
 ];
 /// Of `blend.fillet_geom_p2`'s.
 pub(super) const GEOM_P2: &[(&str, usize)] = &[
