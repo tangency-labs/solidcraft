@@ -45,6 +45,7 @@ pub(crate) struct WindowChoice {
     pub(crate) label: String,
     pub(crate) name: String,
     pub(crate) number: u32,
+    pub(crate) custom_name: Option<String>,
     pub(crate) display_label: Option<String>,
     display: Option<String>,
 }
@@ -221,20 +222,35 @@ pub(crate) fn strip_views(app: &SolveApp) -> Vec<(WindowId, &DesignView)> {
     views
 }
 
-pub(crate) fn window_name(app: &SolveApp, id: WindowId) -> String {
-    if let Some(name) = app.docs.views.views_of(id).and_then(ViewSet::window_name) {
-        return name.to_owned();
-    }
-    if app.view_windows.is_child()
-        && let Some(choice) = app.view_windows.choices.iter().find(|choice| choice.id == id)
-    {
-        return choice.name.clone();
-    }
-    let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+fn window_number(app: &SolveApp, id: WindowId) -> u32 {
     if id == 0 {
-        locale.text("view_tab.main_window").to_owned()
+        return 1;
+    }
+    if app.view_windows.is_child() {
+        return app.view_windows.choices.iter().find(|window| window.id == id).map_or(2, |window| window.number);
+    }
+    app.docs.views.windows().iter().position(|window| window.id == id).map_or(2, |index| index as u32 + 2)
+}
+
+fn assigned_window_name(app: &SolveApp, id: WindowId) -> Option<&str> {
+    app.docs.views.views_of(id).and_then(ViewSet::window_name).or_else(|| {
+        if app.view_windows.is_child() {
+            app.view_windows.choices.iter().find(|choice| choice.id == id).and_then(|choice| choice.custom_name.as_deref())
+        } else {
+            None
+        }
+    })
+}
+
+pub(crate) fn window_name(app: &SolveApp, id: WindowId) -> String {
+    let label = window_number(app, id).to_string();
+    if let Some(name) = assigned_window_name(app, id) {
+        format!("{label} {name}")
+    } else if id == 0 {
+        let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+        format!("{label} · {}", locale.text("view_tab.main_window"))
     } else {
-        locale.format("view_tab.window_number", &[("n", &id.saturating_add(1).to_string())])
+        label
     }
 }
 
@@ -480,7 +496,15 @@ fn collect_choices(app: &SolveApp) -> Vec<WindowChoice> {
         let name = if app.preferences.clear_view_tabs { window_name(app, id) } else { fallback.to_owned() };
         let display_label = display_label(label_display);
         let label = display_label.as_ref().map_or_else(|| name.clone(), |display| format!("{name} · {display}"));
-        WindowChoice { id, label, name, number: id.saturating_add(1), display, display_label }
+        WindowChoice {
+            id,
+            label,
+            name,
+            number: window_number(app, id),
+            custom_name: app.docs.views.views_of(id).and_then(ViewSet::window_name).map(str::to_owned),
+            display,
+            display_label,
+        }
     };
     std::iter::once(choice(0, &app.session.doc.name, None, root_display.map(|display| display.name.as_str())))
         .chain(app.docs.views.windows().iter().map(|window| {
@@ -1117,7 +1141,7 @@ fn window_rename_id(ctx: &Context) -> egui::Id {
 
 fn start_window_rename(app: &SolveApp, ctx: &Context, id: WindowId) {
     let key = window_rename_id(ctx);
-    let name = window_name(app, id);
+    let name = assigned_window_name(app, id).unwrap_or_default().to_owned();
     ctx.data_mut(|data| data.insert_temp(key, (name, true)));
 }
 
@@ -1167,7 +1191,7 @@ struct PanelContext<'a> {
     layout: &'a Option<Value>,
 }
 
-const GRIP_SIZE: egui::Vec2 = egui::vec2(104.0, 10.0);
+const GRIP_SIZE: egui::Vec2 = egui::vec2(68.0, 6.0);
 const REVEAL_EDGE: f32 = 6.0;
 
 #[derive(Default)]
@@ -1266,22 +1290,30 @@ fn window_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, rect: egui::Rect, c
     window_menu(app, ui, id, response.backing_on_hover_text(menu_tip), context_open || chrome.grip_menu);
     let mut left = brand_end + 12.0;
     let right = menu.left() - 6.0;
-    let name = window_name(app, id);
     let font = crate::ui_kit::type_face::semibold(tokens.font_small);
-    let name = ui.painter().layout_no_wrap(name, font, tokens.app_bar_text);
-    let width = 16.0 + tokens.space_6 + name.size().x;
-    if right - left >= width + 200.0 {
+    let name = ui.painter().layout_no_wrap(window_number(app, id).to_string(), font.clone(), tokens.app_bar_text);
+    let icon_width = 16.0 + tokens.space_6;
+    let width = icon_width + name.size().x;
+    if right - left >= width {
         let icon = egui::Rect::from_center_size(egui::pos2(left + 8.0, content.center().y), egui::Vec2::splat(16.0));
         crate::ui_kit::icons::paint_ink(ui.painter(), icon, crate::ui_kit::icons::window_icon(true), tokens.app_bar_text);
         let at = egui::pos2(icon.right() + tokens.space_6, content.center().y - name.size().y / 2.0);
         ui.painter().galley(at, name, tokens.app_bar_text);
         left += width + tokens.space_12;
+        if let Some(name) = assigned_window_name(app, id) {
+            let ink = tokens.app_bar_text.gamma_multiply(0.63);
+            let name = ui.painter().layout_no_wrap(name.to_owned(), font, ink);
+            if right - left >= name.size().x + tokens.space_12 + documents::preferred_tab_width(ui.ctx()) {
+                ui.painter().galley(egui::pos2(left, content.center().y - name.size().y / 2.0), name.clone(), ink);
+                left += name.size().x + tokens.space_12;
+            }
+        }
     }
     if right > left {
         documents::tabs(app, ui, rect, left, right);
     }
 
-    if app.custom_titlebar && !chrome.edge {
+    if app.custom_titlebar {
         let action = crate::window_chrome::caption_buttons(ui, rect);
         bar_action(app, ui.ctx(), action);
     }
@@ -1294,11 +1326,8 @@ fn overlay_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, canvas: egui::Rect
     let slide = chrome.slide();
     let fixed = Rect::from_min_size(canvas.min, vec2(canvas.width(), crate::app_bar::HEIGHT));
     let rect = fixed.translate(vec2(0.0, -slide));
-    let mut clip = canvas;
-    if app.custom_titlebar {
-        clip.max.x -= crate::window_chrome::WIDTH;
-    }
-    let bar = rect.intersect(egui::Rect::from_min_max(egui::pos2(clip.left(), rect.top()), clip.right_bottom()));
+    let clip = canvas;
+    let bar = rect;
     let visible = bar.intersect(canvas);
     let grip = bar_grip(canvas);
     let grip_visible = visible.bottom() < grip.bottom();
@@ -1306,16 +1335,10 @@ fn overlay_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, canvas: egui::Rect
     app.shell.top_bar_overlays = [
         visible.is_positive().then_some(visible),
         grip_visible.then_some(grip),
-        app.custom_titlebar.then(|| Rect::from_min_max(pos2(fixed.right() - crate::window_chrome::WIDTH, fixed.top()), fixed.right_bottom())),
+        app.custom_titlebar
+            .then(|| Rect::from_min_max(pos2(rect.right() - crate::window_chrome::WIDTH, rect.top()), rect.right_bottom()).intersect(canvas))
+            .filter(|rect| rect.is_positive()),
     ];
-    if let Some(captions) = app.shell.top_bar_overlays[2] {
-        host.area(layer.id.with("caption_buttons")).order(egui::Order::Foreground).fixed_pos(captions.min).constrain(false).show(ui.ctx(), |ui| {
-            ui.set_min_size(captions.size());
-            ui.painter().rect_filled(captions, 0, t.app_bar);
-            let action = crate::window_chrome::caption_buttons(ui, fixed);
-            bar_action(app, ui.ctx(), action);
-        });
-    }
     if visible.is_positive() {
         host.area(layer.id).order(layer.order).fixed_pos(visible.min).constrain(false).show(ui.ctx(), |ui| {
             ui.set_min_size(visible.size());
@@ -1324,6 +1347,9 @@ fn overlay_bar(app: &mut SolveApp, ui: &mut Ui, id: WindowId, canvas: egui::Rect
             Container::paint_frame(ui.painter(), frame, bar);
             window_bar(app, ui, id, rect, chrome);
         });
+    }
+    if !visible.is_positive() {
+        crate::view_window_drag::hover(app, ui.ctx(), None);
     }
     if grip_visible {
         let grip_id = bar_grip_id(ui.ctx());
@@ -1373,8 +1399,11 @@ fn window_content(app: &mut SolveApp, ui: &mut Ui, id: WindowId, chrome: Chrome,
     let rect = ui.available_rect_before_wrap();
     app.shell.content = Some(rect);
     if child_options(app).ribbon {
-        let slide = chrome.edge.then(|| chrome.slide());
-        crate::toolbar::pop_out_ribbon(app, ui, rect, chrome.ribbon.0, chrome.ribbon.1, slide);
+        let reveal_top = chrome.edge.then(|| {
+            let bar_bottom = rect.top() + crate::app_bar::HEIGHT * chrome.bar_fraction;
+            bar_bottom.max(bar_grip(rect).bottom() + 4.0).min(rect.bottom())
+        });
+        crate::toolbar::pop_out_ribbon(app, ui, rect, chrome.ribbon.0, chrome.ribbon.1, reveal_top);
     } else {
         app.shell.ribbon_overlay = None;
     }
@@ -1476,23 +1505,21 @@ impl Host {
             self.top_bar_focus_pending = false;
             return Chrome { ribbon: self.ribbon(app, ctx), ..Chrome::default() };
         }
-        let stack_ribbon = options.ribbon && options.ribbon_auto_hide;
+
         let bar_height = crate::app_bar::HEIGHT;
-        let stack_height = bar_height + if stack_ribbon { crate::toolbar::ribbon_height(app.preferences.ribbon_labels) } else { 0.0 };
+        let stack_height = bar_height;
         let (pointer, window_focused, now) = ctx.input(|i| (i.pointer.hover_pos(), i.viewport().focused.unwrap_or(i.focused), i.time));
         let f10 = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F10));
         let reduced_motion = solidcraft_theme::panel_motion_duration(ctx, false) == 0.0;
         let own_popup = crate::ui_kit::window_options_menu::is_open(ctx, bar_menu_id(ctx))
-            || crate::app_bar::tab_popup_open(ctx, documents::tab_strip_id(ctx.viewport_id()))
-            || ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some());
-        let popup = own_popup || ctx.any_popup_open() || app.viewport.context_menu.is_some();
+            || crate::app_bar::tab_popup_open(ctx, documents::tab_strip_id(ctx.viewport_id()));
+        let ribbon_popup = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some());
+        let popup = own_popup || ribbon_popup || ctx.any_popup_open() || app.viewport.context_menu.is_some();
         let focus = ctx.memory(|memory| memory.focused());
         let grip_focused = focus == Some(bar_grip_id(ctx));
         let bar_focused = window_focused
             && (focus == Some(bar_menu_id(ctx))
                 || focus.and_then(|id| ctx.read_response(id)).is_some_and(|response| response.layer_id == bar_layer(ctx)));
-        let ribbon_focused = crate::toolbar::pop_out_ribbon_focus(ctx);
-
         let visible_height = stack_height * self.top_bar_reveal.fraction(now);
         let grip = bar_grip(canvas);
         let grip_menu = visible_height < (stack_height - bar_height) + grip.bottom() - canvas.top()
@@ -1503,39 +1530,33 @@ impl Host {
             || grip_menu
             || (visible_height > 0.0 && ctx.any_popup_open())
             || (visible_height > 0.0 && crate::view_window_drag::active(app));
-        if !popup && !bar_focused && !(stack_ribbon && window_focused && ribbon_focused) {
+        if !popup && !bar_focused {
             self.top_bar_reveal.release_keyboard();
         }
         let escape = !popup
             && (visible_height > 0.0 || self.top_bar_reveal.keyboard())
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         self.top_bar_focus_pending = keyboard_show || (self.top_bar_focus_pending && window_focused && !bar_focused && !escape);
-        if escape && (bar_focused || grip_focused || (stack_ribbon && ribbon_focused)) {
+        if escape && (bar_focused || grip_focused) {
             surrender_chrome_focus(ctx);
         }
         self.top_bar_reveal = reveal_step(
             self.top_bar_reveal,
             Input {
                 hovered,
-                focused: bar_focused || (stack_ribbon && window_focused && ribbon_focused),
+                focused: bar_focused,
                 held,
                 keyboard_show,
                 escape,
                 dismiss_on_escape: true,
                 reduced_motion: reduced_motion || keyboard_show || grip_menu,
+                ..Input::default()
             },
             now,
         );
         schedule_reveal(ctx, self.top_bar_reveal, now);
         let bar_fraction = self.top_bar_reveal.fraction(now);
-        let ribbon_fraction = if stack_ribbon {
-            bar_fraction
-        } else if options.ribbon {
-            1.0
-        } else {
-            0.0
-        };
-        Chrome { edge: true, bar_fraction, stack_height, bar_focus: self.top_bar_focus_pending, grip_menu, ribbon: (ribbon_fraction, false) }
+        Chrome { edge: true, bar_fraction, stack_height, bar_focus: self.top_bar_focus_pending, grip_menu, ribbon: self.ribbon(app, ctx) }
     }
 
     fn ribbon(&mut self, app: &SolveApp, ctx: &Context) -> (f32, bool) {
@@ -1563,11 +1584,11 @@ impl Host {
                 }
             });
         }
-        let held = popup_open || ctx.dragged_id().is_some();
+        let held = focused && (popup_open || ctx.dragged_id().is_some());
         let reduced_motion = keyboard_show || solidcraft_theme::panel_motion_duration(ctx, false) == 0.0;
         self.ribbon_reveal = reveal_step(
             self.ribbon_reveal,
-            Input { hovered, focused, held, keyboard_show, escape: escape || !focused, reduced_motion, ..Input::default() },
+            Input { hovered, focused, held, keyboard_show, escape: escape || !focused, reduced_motion, hide_delay: Some(0.12), ..Input::default() },
             now,
         );
         if options.ribbon_auto_hide {
@@ -1644,11 +1665,14 @@ pub fn show(app: &mut SolveApp, ctx: &Context, render_state: Option<&egui_wgpu::
         let panel_workspace = crate::panel_runtime::panel_workspace(app);
         let Some(mut window) = app.docs.views.take_window(id) else { continue };
         let os_id = viewport_id(tab, id);
-        let custom = !cfg!(target_os = "macos");
+        let custom = !cfg!(target_os = "macos") || window.options.top_bar == TopBar::Edge;
         let level = if window.options.keep_on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal };
         let mut builder = crate::window_chrome::viewport("SolidCraft", solidcraft_engine::io::APP_ID, custom)
             .with_min_inner_size([640.0, 420.0])
             .with_window_level(level);
+        if cfg!(target_os = "macos") {
+            builder = builder.with_titlebar_buttons_shown(!custom);
+        }
         // The shared builder carries the main window's size. Only ask for a child size at startup,
         // so subsequent frames leave user resizing alone.
         builder.inner_size = None;

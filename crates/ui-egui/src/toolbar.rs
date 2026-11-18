@@ -1065,36 +1065,51 @@ pub(crate) fn pop_out_ribbon_focus(ctx: &egui::Context) -> bool {
 
 /// The usual full ribbon, painted in its own clipped layer. Its bounding box is an
 /// input shield, never an anchored shell card or an obstacle for fit.
-pub(crate) fn pop_out_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, fraction: f32, keyboard: bool, stack_slide: Option<f32>) {
-    use crate::ui_kit::LayoutMode;
+pub(crate) fn pop_out_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, content: Rect, fraction: f32, keyboard: bool, reveal_top: Option<f32>) {
     if fraction <= 0.0 || !content.is_positive() {
         app.shell.ribbon_overlay = None;
         return;
     }
     crate::workspace::sync_context(app);
     let t = Tokens::get();
+    let layout = shell_layout(app);
+    let floating = Container::for_layout(layout, Surface::Panel).floating();
     let height = ribbon_height(app.preferences.ribbon_labels);
-    let slide = stack_slide.unwrap_or(height * (1.0 - fraction));
-    let top = content.top() + if stack_slide.is_some() { crate::app_bar::HEIGHT } else { 0.0 };
-    let r = Rect::from_min_size(egui::pos2(content.left(), top - slide), vec2(content.width(), height));
-    let visible = content.intersect(r);
+    let margin = Container::for_layout(layout, Surface::Chrome).gap();
+    let top = reveal_top.unwrap_or(content.top());
+    let slide = (height + 2.0 * margin) * (1.0 - fraction);
+    let available = Rect::from_min_max(egui::pos2(content.left(), top - slide), content.right_bottom());
+    let cards = crate::ui_kit::Cards::new(available, layout, height, WORKSPACE_WIDTH);
+    let r = if floating {
+        Rect::from_min_max(cards.workspace.min, cards.ribbon.max)
+    } else {
+        Rect::from_min_size(available.min, vec2(content.width(), height))
+    };
+    let clip = Rect::from_min_max(egui::pos2(content.left(), top), content.right_bottom());
+    let visible = clip.intersect(r);
     if !visible.is_positive() {
         app.shell.ribbon_overlay = None;
         return;
     }
-    let cards = crate::ui_kit::Cards::new(r, LayoutMode::Docked, height, WORKSPACE_WIDTH);
-    let ws = Rect::from_min_size(r.min, vec2(WORKSPACE_WIDTH.min(r.width()), height - 1.0));
-    let host = Container::for_layout(LayoutMode::Docked, Surface::Chrome);
+    let ws = cards.workspace;
+    let host = Container::for_layout(layout, Surface::Chrome);
     let previous_cards = std::mem::take(&mut app.shell.cards);
     host.area(pop_out_ribbon_id(ui.ctx())).fixed_pos(visible.min).constrain(false).show(ui.ctx(), |ui| {
         ui.set_min_size(visible.size());
-        ui.set_clip_rect(ui.clip_rect().intersect(content));
+        ui.set_clip_rect(ui.clip_rect().intersect(clip));
         let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
-        Container::paint_frame(ui.painter(), frame, r);
+        if !floating {
+            Container::paint_frame(ui.painter(), frame, r);
+        }
         if keyboard && ui.is_visible() && !ui.is_sizing_pass() {
             ui.memory_mut(|memory| memory.request_focus(ui.scope_id().with("workspace_switcher")));
         }
-        ribbon_contents(app, ui, RibbonShape { floating: false, cards, r, ws, folded: false });
+        ribbon_contents(app, ui, RibbonShape { floating, cards, r, ws, folded: false });
+        if floating {
+            for card in [cards.workspace, cards.ribbon] {
+                Container::paint_inset(ui.painter(), frame.widget_rect(card), frame);
+            }
+        }
     });
     app.shell.cards = previous_cards;
     app.shell.ribbon_overlay = Some(visible);
@@ -5504,21 +5519,31 @@ mod fill_width_tests {
     /// and neither the tab row nor the title bar's own controls run into each other.
     #[test]
     fn pop_out_ribbon_overlays_without_changing_view_bounds() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        h.app.shell.cards.clear();
-        let rect = Rect::from_min_size(pos2(0.0, 42.0), vec2(900.0, 650.0));
-        let expected = crate::shell::panel_bounds(&h.app, rect);
-        for fraction in [0.0, 0.2, 1.0, 0.0] {
-            let _ = h.ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_max(egui::Pos2::ZERO, rect.max)), ..Default::default() }, |ui| {
-                pop_out_ribbon(&mut h.app, ui, rect, fraction, false, None);
-                assert_eq!(crate::shell::panel_bounds(&h.app, rect), expected);
-                assert_eq!(h.app.shell.ribbon_overlay.is_some(), fraction > 0.0);
-                if let Some(overlay) = h.app.shell.ribbon_overlay {
-                    assert_eq!(overlay.top(), rect.top());
-                    assert!(crate::shell::covered(&h.app, overlay.center()));
-                }
-            });
+        for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.ui.layout = layout;
+            h.app.shell.cards.clear();
+            let rect = Rect::from_min_size(pos2(0.0, 42.0), vec2(900.0, 650.0));
+            let expected = crate::shell::panel_bounds(&h.app, rect);
+            for fraction in [0.0, 0.2, 1.0, 0.0] {
+                let _ =
+                    h.ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_max(egui::Pos2::ZERO, rect.max)), ..Default::default() }, |ui| {
+                        pop_out_ribbon(&mut h.app, ui, rect, fraction, false, None);
+                        assert_eq!(crate::shell::panel_bounds(&h.app, rect), expected);
+                        assert_eq!(h.app.shell.ribbon_overlay.is_some(), fraction > 0.0);
+                        if let Some(overlay) = h.app.shell.ribbon_overlay {
+                            assert!(overlay.top() >= rect.top());
+                            assert!(crate::shell::covered(&h.app, overlay.center()));
+                            if fraction == 1.0 {
+                                let gap = Container::for_layout(layout, Surface::Chrome).gap();
+                                assert_eq!(overlay.top(), rect.top() + gap);
+                                assert_eq!(overlay.left(), rect.left() + gap);
+                                assert_eq!(overlay.right(), rect.right() - gap);
+                            }
+                        }
+                    });
+            }
         }
     }
 

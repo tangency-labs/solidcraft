@@ -2683,7 +2683,7 @@ fn view_tab<'a>(
         on_screen,
         tip,
         to_window,
-        window_name: window.map(|window| window.name.as_str()),
+        window_name: window.and_then(|window| window.custom_name.as_deref()),
         window_number: window.map(|window| window.number),
     }
 }
@@ -2763,7 +2763,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .iter()
                 .map(|(view, _, _, window)| {
                     let other = window.and_then(|id| window_choices.iter().find(|choice| choice.id == id));
-                    if let Some(other) = other.filter(|_| app.preferences.clear_view_tabs) {
+                    if let Some(other) = other {
                         locale.format("view_tab.elsewhere", &[("view", &view.name), ("window", &other.name)])
                     } else if window.is_some() {
                         format!("{} · {}", view.name, app.tr("multi_window.window_mark"))
@@ -2874,6 +2874,37 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             switcher_menu: &switcher_menu,
             tear_off_below: TEAR_OFF_BELOW,
         };
+        if child {
+            let width = crate::app_bar::preferred_pill_width(ui, &strip);
+            let key = strip.id.with("preferred_width");
+            let changed = ui.ctx().data_mut(|data| {
+                let previous = data.get_temp::<f32>(key);
+                data.insert_temp(key, width);
+                previous != Some(width)
+            });
+            if changed {
+                ui.ctx().request_repaint();
+            }
+        }
+        let linked = crate::view_window_drag::hovered_view(app)
+            .and_then(|id| design_views.get(selected)?.iter().position(|(view, _, _, window)| view.id == id && window.is_none()));
+        let detached = design_views.get(selected).and_then(|views| {
+            views.iter().position(|(view, _, _, window)| window.is_none() && crate::view_window_drag::unanchored(app, ui.ctx(), view.id))
+        });
+        ui.ctx().data_mut(|data| {
+            let detached_key = strip.id.with("unanchored_view");
+            if let Some(detached) = detached {
+                data.insert_temp(detached_key, detached);
+            } else {
+                data.remove::<usize>(detached_key);
+            }
+            let key = strip.id.with("linked_view_hover");
+            if let Some(linked) = linked {
+                data.insert_temp(key, linked);
+            } else {
+                data.remove::<usize>(key);
+            }
+        });
         crate::app_bar::tabs_with_view_drop_zones(ui, &mut strip, r, x0, x1)
     };
     let drop_zones = drop_zones
@@ -2884,6 +2915,11 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             Some((tab, count, zone))
         })
         .collect();
+    let hovered = ui
+        .ctx()
+        .data(|data| data.get_temp::<usize>(tab_strip_id(ui.ctx().viewport_id()).with("view_hover")))
+        .and_then(|view| strip_view_id(app, view));
+    crate::view_window_drag::hover(app, ui.ctx(), hovered);
     let drag_continues = !app.file_load_holds() && actions.iter().any(|action| matches!(action, crate::app_bar::TabAction::DockView { .. }));
     crate::view_window_drag::record(app, ui.ctx(), drop_zones, drag_continues);
     // The name typed into the selected tab: kept when it changed and isn't blank, given up on
@@ -3289,6 +3325,12 @@ pub(crate) fn file_guard_sessions(app: &SolveApp) -> Vec<Session> {
 pub(crate) fn uses_file(app: &SolveApp, path: &str) -> bool {
     solidcraft_engine::session_uses_file(&app.session, path)
         || app.docs.slots.iter().flatten().any(|slot| solidcraft_engine::session_uses_file(&slot.session, path))
+}
+
+/// The last measured width of a pop-out's complete view strip, before labels collapse.
+/// Until the first layout, reserve all available space for the views.
+pub(crate) fn preferred_tab_width(ctx: &egui::Context) -> f32 {
+    ctx.data(|data| data.get_temp::<f32>(tab_strip_id(ctx.viewport_id()).with("preferred_width"))).unwrap_or(f32::INFINITY)
 }
 
 /// Where SolidCraft's document tab strip keeps its state.
