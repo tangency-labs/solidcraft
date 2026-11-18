@@ -752,7 +752,7 @@ pub(crate) fn sync_views(app: &mut SolveApp) {
 
 /// Change the shown design's views with `change`; when that changes the active view, the app
 /// shows the new one ([`apply_view`]).
-fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -> T {
+pub(crate) fn change_views<T>(app: &mut SolveApp, change: impl FnOnce(&mut ViewSet) -> T) -> T {
     let before = app.docs.views.active().id;
     keep_look(app);
     let result = change(&mut app.docs.views);
@@ -2966,6 +2966,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             }
         }
     }
+    crate::view_setups_ui::show(app, ui.ctx());
     crate::view_window_drag::keyboard(app, ui.ctx());
     match (shut, pick) {
         _ if !idle => {}
@@ -3353,6 +3354,60 @@ mod tests {
         reattach_window_views(&mut app, tab, child);
         assert!(app.docs.views.get(other).is_some());
         assert_eq!(app.docs.views.active().id, model);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn named_layout_reuses_live_views_and_keeps_extra_views_in_main() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.clear_view_tabs = true;
+        let first = app.docs.views.active().id;
+        let second = view_duplicate(&mut app, first).unwrap();
+        let third = view_duplicate(&mut app, second).unwrap();
+        assert!(view_rename(&mut app, third, "Original angle"));
+        app.run("tab.view.move_to_window", json!({"view":third})).unwrap();
+        app.run("tab.view.layout", json!({"window":0,"layout":"side_by_side"})).unwrap();
+        assert_eq!(app.run("tab.layout.save", json!({"name":"Side monitors"})).unwrap()["layouts"], json!(["Side monitors"]));
+        assert_eq!(crate::view_setups::matching_name(&app).as_deref(), Some("Side monitors"));
+        let stored = serde_json::to_value(&app.preferences).unwrap();
+        assert!(!stored["view_window_setups"].to_string().contains("Original angle"));
+        let prefs = crate::prefs::lenient(&stored);
+
+        let mut target = SolveApp::new(Session::default(), prefs);
+        let uid = target.session.uid;
+        let main = target.docs.views.active().id;
+        let a = view_duplicate(&mut target, main).unwrap();
+        let b = view_duplicate(&mut target, a).unwrap();
+        let extra = view_duplicate(&mut target, b).unwrap();
+        assert!(view_rename(&mut target, b, "Keep this name"));
+        target.run("tab.layout.apply", json!({"name":"Side monitors"})).unwrap();
+        assert_eq!(target.session.uid, uid);
+        assert_eq!(target.docs.views.ids().collect::<Vec<_>>(), [main, a, extra]);
+        assert_eq!(target.docs.views.tiles().unwrap().views(), [main, a]);
+        let child = target.docs.views.windows().first().unwrap();
+        assert_eq!(child.views.ids().collect::<Vec<_>>(), [b]);
+        assert_eq!(child.views.active().name, "Keep this name");
+        let id = child.id;
+        target.run("tab.layout.apply", json!({"name":"Side monitors"})).unwrap();
+        assert_eq!(target.docs.views.windows().first().unwrap().id, id);
+        assert!(target.docs.views.check());
+        assert_eq!(target.run("tab.layout.rename", json!({"name":"Side monitors","new_name":"Review"})).unwrap()["layouts"], json!(["Review"]));
+        assert_eq!(target.run("tab.layout.remove", json!({"name":"Review"})).unwrap()["layouts"], json!([]));
+    }
+
+    #[test]
+    fn malformed_saved_layout_is_hidden_and_cannot_change_the_design() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        app.preferences.view_window_setups.insert(
+            "Broken".to_owned(),
+            json!({"windows":[{
+                "views":1, "level":"full", "placement":null, "tiles":{"view":3}
+            }]}),
+        );
+        let before = app.docs.views.clone();
+        assert_eq!(app.run("tab.layout.list", json!({})).unwrap()["layouts"], json!([]));
+        assert_eq!(app.run("tab.layout.apply", json!({"name":"Broken"})).unwrap_err(), "no_such_layout");
+        assert_eq!(app.docs.views, before);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

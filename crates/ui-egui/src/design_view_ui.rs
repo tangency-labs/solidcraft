@@ -128,7 +128,7 @@ fn view_id(app: &SolveApp, index: usize) -> Option<u64> {
 }
 
 /// Carry out one of the strip's view actions. False for an action that is not a view action.
-pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bool {
+pub fn handle(app: &mut SolveApp, ctx: &egui::Context, action: TabAction) -> bool {
     match action {
         TabAction::SelectView(i) => {
             if let Some(id) = view_id(app, i) {
@@ -160,7 +160,7 @@ pub fn handle(app: &mut SolveApp, _ctx: &egui::Context, action: TabAction) -> bo
         }
         TabAction::ViewMenu { view, id } => return view_menu(app, view, &id),
         TabAction::PlusMenu { id } => return plus_row(app, &id),
-        TabAction::LayoutMenu { id } => return layout_action(app, &id),
+        TabAction::LayoutMenu { id } => return crate::view_setups_ui::handle(app, ctx, &id) || layout_action(app, &id),
         TabAction::SwitcherMenu { id } => return switcher_menu(app, &id),
         TabAction::TearOff(i) => {
             if !app.file_picker_busy() {
@@ -246,7 +246,11 @@ pub(crate) fn window_layout(app: &SolveApp) -> solidcraft_ui_kit::view_layout_me
         CameraLinkMode::Zoom => "zoom",
         CameraLinkMode::Both => "both",
     };
+    let saved = crate::view_setups::names(app);
+    let matching_saved = crate::view_setups::matching_name(app);
     LayoutMenu {
+        saved,
+        matching_saved,
         design: crate::i18n::tr_name(&documents::tab_name(app, &app.session)),
         window: app.view_windows.current_window(),
         native: crate::view_windows::supports_pop_out(app) && crate::view_windows::can_create(app),

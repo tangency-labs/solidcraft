@@ -463,6 +463,11 @@ storage.list                      plugins: a plugin's own data in the design, no
 storage.patch                     plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.put_blob                  plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
 storage.set                       plugins: a plugin's own data in the design, no geometry; crates/engine/src/plugin/tests.rs
+tab.layout.apply                   manages an application view layout; no geometry, tested in the engine and UI
+tab.layout.list                    manages an application view layout; no geometry, tested in the engine and UI
+tab.layout.remove                  manages an application view layout; no geometry, tested in the engine and UI
+tab.layout.rename                  manages an application view layout; no geometry, tested in the engine and UI
+tab.layout.save                    manages an application view layout; no geometry, tested in the engine and UI
 tab.view.activate                 shows a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
 tab.view.beside                   puts a view beside another in the tiling: no geometry, tested in the views crate and the UI's documents tests
 tab.view.close                    closes a view of the design: no geometry, tested in the engine's tab_views tests and the UI's documents tests
