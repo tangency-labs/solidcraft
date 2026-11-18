@@ -50,6 +50,15 @@ pub struct TabSlotParams {
     /// How far a tab stands out past the slot plate's far face. Default: 0.
     #[serde(default)]
     pub protrusion: Option<LengthExpr>,
+    /// Seed of the tab width variation, a whole number from 0. The same seed gives the same
+    /// widths. Default: 1000.
+    #[serde(default)]
+    pub seed: Option<NumberExpr>,
+    /// Vary each tab's width by up to this much either way, 0 or more. Default: 0 (off). A tab is
+    /// never under a tenth of the tab width and the layout keeps its end distances and spaces;
+    /// the slots follow the tabs, so both plates carry the same layout.
+    #[serde(default)]
+    pub width_jitter: Option<LengthExpr>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

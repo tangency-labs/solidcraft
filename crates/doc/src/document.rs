@@ -1653,6 +1653,16 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Protrusion")]
         protrusion: Option<Expr>,
+        /// Seed of the tab width variation: the same seed gives the same widths (a whole number,
+        /// default 1000). Only matters with a width jitter.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Seed")]
+        seed: Option<Expr>,
+        /// Vary each tab's width by up to this much either way (default 0: all tabs as wide as
+        /// the tab width). Never under a tenth of the tab width, never past the end distances.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Width Jitter")]
+        width_jitter: Option<Expr>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).

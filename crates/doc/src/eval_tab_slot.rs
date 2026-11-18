@@ -27,11 +27,30 @@ pub(crate) const MAX_TABS_PER_STRETCH: u32 = 10_000;
 /// refused here too, and a protrusion is at least its negative.
 pub(crate) const MAX_LENGTH: f64 = 100_000.0;
 
+/// The seed a feature without one uses.
+pub(crate) const DEFAULT_SEED: u64 = 1000;
+/// The largest seed the feature takes (exact in an f64).
+pub(crate) const MAX_SEED: f64 = 9_007_199_254_740_992.0;
+
+/// One joint's seed: the feature's seed mixed with the tab and slot plates' keys.
+pub(crate) fn joint_seed(seed: u64, (tab, slot): (u32, u32)) -> u64 {
+    kernel_ts::stretch_seed(seed ^ (u64::from(tab) << 32 | u64::from(slot)), 0x5EED)
+}
+
 /// The recipe's settings for one plate pair: the tab plate `t_tab` and the slot plate `t_slot`
 /// thick. The defaults are per pair: the tab width is three times the tab plate's thickness, the
 /// end distance is the tab width and the overshoot half the slot plate's thickness.
-pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f64, t_slot: f64) -> Result<TabSlotSpec> {
-    let FeatureKind::TabSlot { count, spacing, tab_width, end_distance, clearance, protrusion, .. } = k else {
+///
+/// `joint_keys` are the tab and slot plates' keys: the joint's seed is hashed from the feature's
+/// seed and both, so adding or removing a joint does not reshuffle the others' widths.
+pub(crate) fn spec_of(
+    vals: &BTreeMap<String, Value>,
+    k: &FeatureKind,
+    t_tab: f64,
+    t_slot: f64,
+    joint_keys: (u32, u32),
+) -> Result<TabSlotSpec> {
+    let FeatureKind::TabSlot { count, spacing, tab_width, end_distance, clearance, protrusion, seed, width_jitter, .. } = k else {
         return Err(DocError::Invalid("not a tab and slot".into()));
     };
     let length = |e: &str, what: &str, least: f64| -> Result<f64> {
@@ -81,6 +100,20 @@ pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f6
         }
         None => 0.0,
     };
+    let seed = match seed {
+        Some(e) => {
+            let v = val(vals, e, Kind::Unitless)?;
+            if !(v.is_finite() && v.fract() == 0.0 && (0.0..=MAX_SEED).contains(&v)) {
+                return Err(DocError::Invalid(format!("the seed is a whole number from 0 to {MAX_SEED}, not {v}")));
+            }
+            v as u64
+        }
+        None => DEFAULT_SEED,
+    };
+    let width_jitter = match width_jitter {
+        Some(e) => length(e, "width jitter", 0.0)?,
+        None => 0.0,
+    };
     Ok(TabSlotSpec {
         layout,
         width,
@@ -89,6 +122,8 @@ pub(crate) fn spec_of(vals: &BTreeMap<String, Value>, k: &FeatureKind, t_tab: f6
         min_land: MIN_LAND,
         protrusion,
         overshoot: CUT_OVERSHOOT_PER_THICKNESS * t_slot,
+        seed: joint_seed(seed, joint_keys),
+        width_jitter,
     })
 }
 
@@ -424,7 +459,7 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
                     continue;
                 }
             };
-            specs.push(spec_of(vals, k, joint.faces.thickness, extent_along(slot, &p)?)?);
+            specs.push(spec_of(vals, k, joint.faces.thickness, extent_along(slot, &p)?, (t.key.unwrap_or(0), s.key.unwrap_or(0)))?);
             list.push((ti, si, p));
         }
     }
@@ -506,7 +541,25 @@ mod tests {
     }
 
     fn spec(v: serde_json::Value) -> Result<TabSlotSpec> {
-        spec_of(&BTreeMap::new(), &kind(v), 6.0, 4.0)
+        spec_of(&BTreeMap::new(), &kind(v), 6.0, 4.0, (1, 2))
+    }
+
+    #[test]
+    fn tab_slot_spec_of_takes_a_seed_and_a_width_jitter() {
+        let off = spec(serde_json::json!({"clearance": "0.1"})).unwrap();
+        assert_eq!(off.width_jitter, 0.0);
+        let a = spec(serde_json::json!({"clearance": "0.1", "width_jitter": "2", "seed": "7"})).unwrap();
+        assert_eq!(a.width_jitter, 2.0);
+        let b = spec(serde_json::json!({"clearance": "0.1", "width_jitter": "2", "seed": "8"})).unwrap();
+        assert_ne!(a.seed, b.seed);
+        // The joint's own keys feed the seed, so another pair draws other widths.
+        let k = kind(serde_json::json!({"clearance": "0.1", "seed": "7"}));
+        let at = |keys| spec_of(&BTreeMap::new(), &k, 6.0, 4.0, keys).unwrap().seed;
+        assert_eq!(at((1, 2)), at((1, 2)));
+        assert_ne!(at((1, 2)), at((1, 3)));
+        assert!(spec(serde_json::json!({"clearance": "0.1", "seed": "1.5"})).is_err());
+        assert!(spec(serde_json::json!({"clearance": "0.1", "seed": "-1"})).is_err());
+        assert!(spec(serde_json::json!({"clearance": "0.1", "width_jitter": "-1"})).is_err());
     }
 
     #[test]

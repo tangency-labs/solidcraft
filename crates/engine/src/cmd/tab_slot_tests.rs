@@ -48,6 +48,30 @@ fn a_tab_slot_cuts_fixture_f() {
 }
 
 #[test]
+fn a_width_jitter_is_seeded_and_the_slots_follow_the_tabs() {
+    let vol = |extra: Value| {
+        let mut s = fixture_f();
+        tab_slot(&mut s, extra).unwrap();
+        (volume(&s, "Wall"), volume(&s, "Bottom"))
+    };
+    let plain = vol(json!({}));
+    let a = vol(json!({"width_jitter": 4, "seed": 5}));
+    assert_eq!(a, vol(json!({"width_jitter": 4, "seed": 5})));
+    assert_ne!(a, vol(json!({"width_jitter": 4, "seed": 6})));
+    assert_ne!(a, plain);
+    // Tabs gained and slots lost are the same widths: 6 thick tab plate x 6 deep slots, with the
+    // clearance each side of the slot.
+    let width_gain = (a.0 - plain.0) / 36.0;
+    let slot_loss = (plain.1 - a.1) / (6.2 * 6.0);
+    assert!((width_gain - slot_loss).abs() < 1e-6, "{width_gain} {slot_loss}");
+    let mut s = fixture_f();
+    for (extra, words) in [(json!({"seed": 1.5}), "seed"), (json!({"width_jitter": -1}), "width_jitter")] {
+        let e = tab_slot(&mut s, extra).unwrap_err().to_string();
+        assert!(e.contains(words), "{e}");
+    }
+}
+
+#[test]
 fn a_tab_slot_refuses_what_cannot_be_cut() {
     let mut s = fixture_f();
     let n = s.doc.features.len();

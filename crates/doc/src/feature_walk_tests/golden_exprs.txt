@@ -294,7 +294,9 @@ tab_slot
     End Distance = tab_slot.end_distance (Length)
     Clearance = tab_slot.clearance (Length)
     Protrusion = tab_slot.protrusion (Length)
-  expressions: tab_slot.count, tab_slot.spacing, tab_slot.tab_width, tab_slot.end_distance, tab_slot.clearance, tab_slot.protrusion
+    Seed = tab_slot.seed (Unitless)
+    Width Jitter = tab_slot.width_jitter (Length)
+  expressions: tab_slot.count, tab_slot.spacing, tab_slot.tab_width, tab_slot.end_distance, tab_slot.clearance, tab_slot.protrusion, tab_slot.seed, tab_slot.width_jitter
 sheet_base
 sheet_contour
   inputs:

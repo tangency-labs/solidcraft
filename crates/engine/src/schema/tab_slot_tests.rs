@@ -18,10 +18,12 @@ fn schemas_and_the_key_check_agree() {
             "name",
             "participants",
             "protrusion",
+            "seed",
             "slot_plates",
             "spacing",
             "tab_plates",
             "tab_width",
+            "width_jitter",
         ],
     );
 }

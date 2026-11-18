@@ -150,7 +150,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         (
             "tab_slot",
-            json!({"type": "tab_slot", "tab_plates": [], "slot_plates": [], "next_plate_key": 3, "count": "tab_slot.count", "spacing": "tab_slot.spacing", "tab_width": "tab_slot.tab_width", "end_distance": "tab_slot.end_distance", "clearance": "tab_slot.clearance", "protrusion": "tab_slot.protrusion"}),
+            json!({"type": "tab_slot", "tab_plates": [], "slot_plates": [], "next_plate_key": 3, "count": "tab_slot.count", "spacing": "tab_slot.spacing", "tab_width": "tab_slot.tab_width", "end_distance": "tab_slot.end_distance", "clearance": "tab_slot.clearance", "protrusion": "tab_slot.protrusion", "seed": "tab_slot.seed", "width_jitter": "tab_slot.width_jitter"}),
         ),
         ("sheet_base", json!({"type": "sheet_base", "sketch": 1, "profiles": {"type": "all"}})),
         ("sheet_contour", json!({"type": "sheet_contour", "sketch": 1, "curves": ["l1"], "distance": "contour.distance"})),
