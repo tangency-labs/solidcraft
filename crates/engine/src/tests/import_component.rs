@@ -197,6 +197,126 @@ fn a_step_assembly_comes_in_as_nested_components_with_its_instances() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The import's bodies by name, sorted.
+fn body_names(s: &Session) -> Vec<String> {
+    let mut names: Vec<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    names.sort();
+    names
+}
+
+/// `flatten` brings an assembly in as bodies of the import's one component: no subcomponents,
+/// occurrences or joints, a part placed twice one body per placement where the file places it,
+/// and each body named after the part it belongs to, an exporter's placeholder name (Open
+/// CASCADE names its sub-shapes `Open CASCADE STEP translator …`) giving way to its part's. The
+/// design opens, undoes, redoes and rebuilds to the same bodies.
+#[test]
+fn a_flattened_step_assembly_is_one_component_of_bodies_where_the_file_places_them() {
+    let dir = temp_dir("flatten");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "flatten": true, "folder": true}));
+    assert!(r.get("subcomponents").is_none() && r.get("rigid_joints").is_none() && r.get("group").is_none(), "{r}");
+    assert_eq!(s.doc.components.len(), 1, "only the import's own component");
+    assert_eq!(s.doc.occurrences.len(), 1, "and its one occurrence");
+    assert!(s.doc.assembly.joints.is_empty());
+    let list = components(&mut s);
+    assert_eq!(component(&list, "rig")["bodies"].as_array().unwrap().len(), 6, "{list:?}");
+    // Every placement is a body, where the file puts it.
+    assert_eq!(shown_boxes(&s), file_boxes(&path));
+    let names = ["Arm: Beam", "Arm: Beam (2)", "Arm: Pin", "Arm: Pin (2)", "Base", "Pin"];
+    assert_eq!(body_names(&s), names);
+
+    let again = |s: &Session| (body_names(s), shown_boxes(s));
+    let before = again(&s);
+    run(&mut s, "timeline.compute_all", json!({}));
+    assert_eq!(again(&s), before, "rebuilt");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().bodies.is_empty() && s.doc.components.is_empty(), "undo takes it away");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(again(&s), before, "redone");
+    let design = dir.join("flat.sc").to_string_lossy().to_string();
+    run(&mut s, "file.save_as", json!({"path": design}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": design}));
+    assert_eq!(again(&opened), before, "opened");
+    assert_eq!((opened.doc.components.len(), opened.doc.occurrences.len()), (1, 1));
+
+    // Saved by a reader that left out a body a nested import skips (a later placement of a
+    // part, #13382), the flat import still builds it: a nested one's skip is not carried over.
+    let nested = {
+        let mut n = Session::default();
+        run(&mut n, "file.insert_step", json!({"path": path}));
+        match &n.doc.features[0].kind {
+            solidcraft_doc::FeatureKind::Import { skip, .. } => skip.clone(),
+            _ => panic!("no Import"),
+        }
+    };
+    let gone = *nested.last().expect("the rig's later placements are skipped nested") as usize;
+    let mut older = (*s.doc).clone();
+    let f = older.features.iter_mut().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. })).unwrap();
+    f.body_names.remove(gone);
+    fn renumber(nodes: &mut [solidcraft_doc::kernel::StepNode], gone: usize) {
+        for n in nodes {
+            n.bodies = n.bodies.iter().filter(|b| **b != gone).map(|b| if *b > gone { b - 1 } else { *b }).collect();
+            renumber(&mut n.children, gone);
+        }
+    }
+    if let solidcraft_doc::FeatureKind::Import { components, skip, .. } = &mut f.kind {
+        renumber(components, gone);
+        assert!(skip.is_empty(), "a flat import skips nothing: {skip:?}");
+    }
+    let older = Session::opened(older, None);
+    assert_eq!(shown_boxes(&older), file_boxes(&path), "every placement is built");
+
+    // A sub-shape the exporter names for itself, in a part placed twice, is named after the part.
+    let pin = box_solid(Vec3::ZERO, Vec3::new(2.0, 2.0, 10.0)).unwrap();
+    let products = vec![
+        ExportProduct {
+            name: "Board".into(),
+            bodies: Vec::new(),
+            children: vec![(1, at(0.0, 0.0, 0.0), "U1".into()), (1, at(5.0, 0.0, 0.0), "U2".into())],
+        },
+        ExportProduct { name: "U1".into(), bodies: Vec::new(), children: vec![(2, at(0.0, 0.0, 0.0), "Shape".into())] },
+        ExportProduct {
+            name: "Open CASCADE STEP translator 7.5 1.1".into(),
+            bodies: vec![ExportBody { name: String::new(), body: &pin, color: None }],
+            children: Vec::new(),
+        },
+    ];
+    let board = dir.join("board.step");
+    std::fs::write(&board, step_export_products(&products, 0, &StepHeader::default()).unwrap()).unwrap();
+    let mut s = Session::default();
+    let plain = run(&mut s, "file.insert_step", json!({"path": board.to_string_lossy()}));
+    assert!(plain["bodies"].to_string().contains("translator"), "nested, the reader's name stays: {plain}");
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": board.to_string_lossy(), "flatten": true}));
+    assert_eq!(body_names(&s), ["U1", "U1 (2)"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `flatten` with `reader: "cadmpeg"`: the records route's product tree is flattened the same
+/// way, every placement a body of the import's one component where the file places it, named
+/// after its part as with SolidCraft's reader, and it rebuilds to the same bodies.
+#[test]
+fn a_flattened_step_assembly_read_by_cadmpeg_is_the_same_bodies() {
+    let dir = temp_dir("flatten-cadmpeg");
+    let path = rig_file(&dir);
+    let mut ours = Session::default();
+    run(&mut ours, "file.insert_step", json!({"path": path, "flatten": true}));
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": path, "flatten": true, "reader": "cadmpeg"}));
+    assert!(r.get("subcomponents").is_none() && r.get("rigid_joints").is_none(), "{r}");
+    assert_eq!((s.doc.components.len(), s.doc.occurrences.len()), (1, 1), "only the import's own component");
+    assert!(s.doc.assembly.joints.is_empty());
+    assert!(matches!(&s.doc.features[0].kind, solidcraft_doc::FeatureKind::Import { skip, .. } if skip.is_empty()), "a flat import skips nothing");
+    assert_eq!(shown_boxes(&s), file_boxes(&path));
+    assert_eq!(body_names(&s), body_names(&ours));
+    let before = (body_names(&s), shown_boxes(&s));
+    run(&mut s, "timeline.compute_all", json!({}));
+    assert_eq!((body_names(&s), shown_boxes(&s)), before, "rebuilt");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Each occurrence's degrees of freedom, as `joint.list` gives them.
 fn dofs(s: &mut Session) -> (std::collections::BTreeMap<u64, u64>, Value) {
     let r = run(s, "joint.list", json!({}));

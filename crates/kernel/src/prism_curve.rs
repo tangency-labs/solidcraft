@@ -483,7 +483,13 @@ fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool, w
         return None;
     }
     if a.dist(b) > tol && spans.iter().all(|s| line_span(s, a, b, tol, error, work).is_some()) {
-        return Some(vec![Seg2::Line { a, b }]);
+        // Within `tol` of its chord the piece is that line, unless the kernel says it is read as
+        // the arc it is proved on within `tol` first (a circle's or a conic's piece bending off
+        // its chord by more than the zone tolerance, #17707); one that is no arc stays the line.
+        let zone = solidcore_ops::sweep::zone_tolerance().unwrap_or(f64::INFINITY);
+        let bends = solidcore_ops::prism::arc_before_line(&spans, zone);
+        let proved = if bends { arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole) } else { None };
+        return Some(proved.unwrap_or_else(|| vec![Seg2::Line { a, b }]));
     }
     arc(&eval, (ts, te), &spans, plane, a, b, tol, error, work, whole)
         .or_else(|| free_form(&spans, a, b, tol))
@@ -852,6 +858,48 @@ mod tests {
         let arc = quarter();
         for tol in [1e-5, 2e-3] {
             assert!(matches!(segment(&run(&arc, true), &Plane::XY, tol, &mut 2_000_000).unwrap()[..], [Seg2::Arc { .. }]));
+        }
+    }
+
+    /// #17707: a few hundredths of a millimetre of a circle or an ellipse bends off its chord by
+    /// about 1e-5 mm. That is under the tolerance a part's edges are read with (1e-6 of its size,
+    /// 7.7e-5 mm for the report's part) but over the 1e-5 mm an edge may lie off its face. Read
+    /// as a line, it gave an Extrude To Object prism a flat side off the cylinder it lies on, and
+    /// the join was refused. It is read as an arc (within the reading tolerance, the ellipse's as
+    /// its circle of curvature); a rational piece within the zone tolerance of its chord, or on
+    /// it, stays a line.
+    #[test]
+    fn a_short_piece_of_a_circle_or_an_ellipse_is_not_a_line() {
+        let tol = 7.7e-5;
+        // A rational quadratic piece of the ellipse (a cos t, b sin t) from t0 to t0 + 2h.
+        let piece = |a: f64, b: f64, t0: f64, h: f64| {
+            let (w, mid, t1) = (h.cos(), t0 + h, t0 + 2. * h);
+            let homogeneous = vec![[a * t0.cos(), b * t0.sin(), 0., 1.], [a * mid.cos(), b * mid.sin(), 0., w], [a * t1.cos(), b * t1.sin(), 0., 1.]];
+            Curve::RationalSpline { knots: bezier_knots(2), homogeneous }
+        };
+        // 0.036 mm of a circle of radius 15 (its sagitta 1.08e-5), and 0.08 mm of an ellipse of
+        // semi-axes 30 and 15 about the end of its minor axis, where its radius of curvature is
+        // 60 (its sagitta 1.33e-5).
+        let h = 0.0012;
+        let k = 0.04 / 30.;
+        for (c, mid) in [
+            (piece(15., 15., 0., h), Vec2::new(15. * h.cos(), 15. * h.sin())),
+            (piece(30., 15., std::f64::consts::FRAC_PI_2 - k, k), Vec2::new(0., 15.)),
+        ] {
+            for forward in [true, false] {
+                let segs = segment(&run(&c, forward), &Plane::XY, tol, &mut 2_000_000).unwrap();
+                let [seg] = segs.as_slice() else { panic!("one segment: {segs:?}") };
+                assert!(!matches!(seg, Seg2::Line { .. }), "read as a line: {seg:?}");
+                assert!(seg.mid().dist(mid) < 1e-9, "{seg:?} misses the curve's middle {mid:?}");
+            }
+        }
+        // A rational quadratic whose middle control point lies on its chord, or 2e-7 off it (well
+        // within the 1e-5 zone tolerance; as an arc, its radius would be some 190 km), is that line.
+        for off in [0., 2e-7] {
+            let line =
+                Curve::RationalSpline { knots: bezier_knots(2), homogeneous: vec![[0., 0., 0., 1.], [2.5, 0.5 * off, 0., 0.5], [10., 0., 0., 1.]] };
+            let segs = segment(&run(&line, true), &Plane::XY, tol, &mut 2_000_000).unwrap();
+            assert!(matches!(segs[..], [Seg2::Line { .. }]), "{off}: {segs:?}");
         }
     }
 

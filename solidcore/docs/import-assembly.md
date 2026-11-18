@@ -2,7 +2,7 @@
 
 # Import assembly
 
-This page describes the stage that turns the faces, edges and vertices an importer has read into a finished B-rep record (schema 4, `solidcore_record::brep`). It is `solidcore_step::assembly`. The STEP reader uses it, and any other reader of a B-rep file format can use it too. The stage keeps one implementation of the work every reader needs: two readers that hand it the same geometry get the same record.
+This page describes the stage that turns the faces, edges and vertices an importer has read into a finished B-rep record (schema 4, `solidcore_record::brep`). It is `solidcore_step::assembly`. The STEP reader uses it, and any other reader of a B-rep file format can use it too. The CADIR reader (`solidcore-cadir`) is the second one. The stage keeps one implementation of the work every reader needs: two readers that hand it the same geometry get the same record.
 
 ## What a reader gives
 
@@ -11,6 +11,8 @@ A reader creates an `Assembly` with a tolerance (mm) and, optionally, a `Trims`:
 - **Vertices** (`add_vertex`): a point each.
 - **Edges**, each on a record curve between two vertices:
   - `add_edge` takes the edge's interval on the curve, from min to max. It keeps whichever way round puts the vertices nearer the curve's points at the interval's ends, and notes an edge it turns. Each vertex's tolerance grows to cover its gap; a vertex too far off refuses the edge.
+  - `add_edge_on` is for a producer that bounds an edge by its vertices alone. It finds the interval where the vertices lie on the curve, and starts a closed curve at its vertex.
+  - `periodic_edge`, `parabola_curve` and `hyperbola_curve` give the record curve and interval for an edge on a periodic spline, a parabola or a hyperbola.
 - **Faces** (`add_face`), each on a record surface with its bounds. A bound is a closed chain of edge uses (`Bound::Edges`) or one vertex (`Bound::Vertex`: a pole or an apex). Bounds are relative to the surface's natural normal: seen from that normal, an outer loop runs counter-clockwise. `forward` says whether the face's side is that normal. `origin` is the reader's name for the face; refusals name the face by it, and the record keeps it (`Solid::face_origin`).
 - **Spline curves and surfaces** come from full knot vectors through `spline_curve` and `spline_surface`. These refuse knots that are not finite or decrease, an empty domain, coordinates or weighted coordinates that are not finite, and weights that are not positive. Unclamped knots are clamped exactly, by knot insertion.
 
@@ -30,7 +32,7 @@ What the record holds:
 - A circle swept along its axis is the cylinder it is, and a circle revolved in a plane through the axis the ring torus it is.
 - A cone that stays within the tolerance of the plane through its frame's origin across its axis, over the face's boundary points (and its apex, should the face hold the axis), is that plane: a cone a whisker short of a right angle, as some writers give a plane, has no area in its own parameters.
 
-The STEP reader reads its own surfaces of linear extrusion and of revolution, and its cones, by the same code.
+The STEP reader reads its own surfaces of linear extrusion and of revolution, and its cones, by the same code. The CADIR reader gives its cones this way, and its procedural linear sweeps, extrusions and revolutions that carry no solved form (STEP's swept surfaces and FreeCAD's, as cadmpeg reads them).
 
 
 ## What `finish` does

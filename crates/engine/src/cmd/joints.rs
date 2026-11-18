@@ -20,7 +20,7 @@ use crate::schema::joints::{
     DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
     InspectJointResult, JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo,
     ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams,
-    MotionLinkResult, NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams,
+    MotionLinkResult, NamedValue, OccurrenceDof, Omitted, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams,
     RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
 };
 use crate::schema::{TypedContract, output_schema_for};
@@ -44,6 +44,8 @@ const RACK_PINION_CONTRACT: TypedContract<RackPinionParams> = TypedContract::new
 const SCREW_CONTRACT: TypedContract<ScrewParams> = TypedContract::new();
 const CAM_CONTRACT: TypedContract<CamParams> = TypedContract::new();
 
+#[path = "joints_filter.rs"]
+mod filter;
 #[path = "joints_inspect.rs"]
 mod inspect;
 
@@ -188,8 +190,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIST_CONTRACT)
         .output(output_schema_for::<ListJointsResult>)
         .params(
-        "→ joints (type, occurrences, values, limits, offset_xy: [x,y] in mm; expressions: {offset?, angle?, values?} when they were typed as expressions), origins, links, degrees of freedom, conflicts, floating: [{occurrences, joints}] \
-         (joint chains joined to nothing grounded: the solver places none of them, so driving them moves nothing)",
+        "quiet?, filters (a joint is kept when it passes every one given): kinds?: [types], exclude_rigid?, exclude_rigid_groups? (the rigid \
+         joints holding a component's contents together, as an imported assembly's placements), moving_only? (no rigid or suppressed joints), \
+         occurrences?: [id|name] (an end at one of them or inside one; dof narrowed to them too); dof_free_only? (dof lists only occurrences \
+         that can still move); summary? → joints (type, occurrences, values, limits, offset_xy: [x,y] in mm; expressions: {offset?, angle?, values?} when they were \
+         typed as expressions), origins, links, degrees of freedom, conflicts, floating: [{occurrences, joints}] (joint chains joined to \
+         nothing grounded: the solver places none of them, so driving them moves nothing), omitted?: {joints, by_type, floating, dof} (what \
+         the filters left out), summary?: {joints, by_type, suppressed, rigid_groups: [{component, name, joints, members}] (the 20 largest), more_rigid_groups?: {groups, joints}}",
     ),
     CommandSpec::new("joint.inspect", "Inspect Joint", crate::checked!("joint.inspect", inspect::inspect))
         .icon("inspect")
@@ -197,7 +204,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectJointResult>)
         .params(
-        "joint?: id|name (default: every joint) → joints: [{id, name, type, suppressed, visible, flip, offset (mm), offset_xy: [x,y] (mm), angle (deg), values: as joint.list \
+        "joint?: id|name (default: every joint, narrowed by the filters joint.list takes: kinds?, exclude_rigid?, exclude_rigid_groups?, moving_only?, occurrences?; omitted?: what they left out) → joints: [{id, name, type, suppressed, visible, flip, offset (mm), offset_xy: [x,y] (mm), angle (deg), values: as joint.list \
          gives them, dofs, expressions?: {offset?, angle?, values?}, a, b: {occurrence, occurrence_name, component, component_name, path \
          (occurrence names from the top, `/` between), snap (as saved: type, pick, face, end, edge, corner, x, point, z, in the component's \
          coordinates), references: [{role: face|end|x|edge|corner, name, role_in_feature?: (top, side:c1…), feature?: {id, name, type} (the feature that made the face; \
@@ -209,7 +216,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("compute")
         .contract(&SOLVE_CONTRACT)
         .output(output_schema_for::<SolveResult>)
-        .params("re-place the occurrences from the joints → conflicts, errors, dof"),
+        .params("re-place the occurrences from the joints; quiet?, dof_free_only? (dof lists only occurrences that can still move; omitted.dof counts the rest) → conflicts, errors, dof"),
     CommandSpec::new("inspect.interference", "Interference", crate::checked!("inspect.interference", super::interference::interference))
         .contract(&crate::schema::TypedContract::<crate::schema::interference::InterferenceParams>::new())
         .output(crate::schema::output_schema_for::<crate::schema::interference::InterferenceResult>)
@@ -317,13 +324,24 @@ fn solution(s: &Session, held: &joints::Held, analysis: joints::Analysis) -> joi
     joints::solve_holding_with_analysis(&s.doc, &s.model.state(), held, analysis)
 }
 
+/// Applies the solve. A part it moves loses its move not captured, which would hide where the
+/// joints put it; an exploded view's placement stays shown.
 fn resolve_with_analysis(s: &mut Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
     let sol = solution(s, held, analysis);
     if !sol.world.is_empty() {
         let mut next = (*s.doc).clone();
         if next.apply_joint_solution(&sol) {
+            let moved: BTreeSet<u64> = next
+                .occurrences
+                .iter()
+                .zip(&s.doc.occurrences)
+                .filter(|(n, o)| n.id != o.id || n.transform != o.transform)
+                .map(|(n, _)| n.id)
+                .collect();
             *s.doc_mut() = next;
             s.revision += 1;
+            let exploded = &s.exploded;
+            s.pending_moves.retain(|id, m| !moved.contains(id) || exploded.get(id) == Some(m));
         }
     }
     sol
@@ -435,7 +453,7 @@ pub(crate) fn cannot_move(s: &Session, sol: &joints::Solution, id: u64) -> Optio
 
 /// Joint chains joined to nothing grounded, which the solver places none of: each chain's
 /// occurrences and joints, by name.
-fn floating_chains(s: &Session, sol: &joints::Solution) -> Vec<FloatingChain> {
+fn floating_chains(s: &Session, sol: &joints::Solution) -> Vec<(BTreeSet<u64>, FloatingChain)> {
     let placed = |o: u64| o == 0 || sol.world.contains_key(&o);
     let errors: BTreeSet<u64> = sol.errors.iter().map(|e| e.0).collect();
     let mut next: BTreeMap<u64, Vec<(u64, &Joint)>> = BTreeMap::new();
@@ -461,10 +479,13 @@ fn floating_chains(s: &Session, sol: &joints::Solution) -> Vec<FloatingChain> {
                 }
             }
         }
-        out.push(FloatingChain {
-            occurrences: occs.iter().map(|o| occurrence_name(s, *o)).collect(),
-            joints: js.iter().map(|(_, n)| (*n).to_string()).collect(),
-        });
+        out.push((
+            js.iter().map(|(id, _)| *id).collect(),
+            FloatingChain {
+                occurrences: occs.iter().map(|o| occurrence_name(s, *o)).collect(),
+                joints: js.iter().map(|(_, n)| (*n).to_string()).collect(),
+            },
+        ));
     }
     out
 }
@@ -2189,11 +2210,27 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     joints::clamp(j, &mut q);
     j.values = q;
     let sol = resolve(s);
-    reply(cmd, SolveResult { solved: solve_report(&sol, p), param_warnings: Vec::new() })
+    reply(cmd, SolveResult { solved: solve_report(&sol, p), omitted: None, param_warnings: Vec::new() })
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     edit_joint(s, p, true)
+}
+
+/// The new name `p` gives joint `id` in an edit, if it changes it. A new name over 128 characters
+/// is refused before anything changes, as the other renames refuse it, in the name of the command
+/// `called`; the joint's own name (joint.create takes any) is kept whatever its length, spaces
+/// round it or not, and a blank one changes nothing.
+fn edited_name(s: &Session, id: u64, p: &Value, called: &str) -> Result<Option<String>> {
+    let Some(n) = str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) else { return Ok(None) };
+    let own = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.name.trim());
+    if own == Some(n) {
+        return Ok(None);
+    }
+    if n.chars().count() > 128 {
+        return Err(bad(called, "`name` must be at most 128 characters"));
+    }
+    Ok(Some(n.to_string()))
 }
 
 /// joint.edit's change, also run by `assembly.constraint.edit`. `plain`: a change of kind makes a
@@ -2215,6 +2252,7 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
         Some(v) => Some(value(s, v, true, cmd)?),
         None => None,
     };
+    let name = edited_name(s, id, p, if plain { cmd } else { "assembly.constraint.edit" })?;
     // The sides, read as joint.create reads them; a side left out keeps its place.
     let a = p.get("a").map(|v| origin_param(s, Some(v), cmd)).transpose()?;
     let b = p.get("b").map(|v| origin_param(s, Some(v), cmd)).transpose()?;
@@ -2285,8 +2323,8 @@ pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Valu
     if let Some(f) = bool_(p, "flip") {
         j.flip = f;
     }
-    if let Some(n) = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128) {
-        j.name = n.to_string();
+    if let Some(n) = name {
+        j.name = n;
     }
     if let Some(x) = bool_(p, "suppressed") {
         suppress_joints(s.doc_mut(), &[id], x);
@@ -2389,6 +2427,11 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn list(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "joint.list";
+    let rows = filter::RowFilter::read(s, p, cmd)?;
+    let want_summary = bool_(p, "summary").unwrap_or(false);
+    let groups = if rows.needs_groups() || want_summary { filter::contents_groups(&s.doc) } else { Default::default() };
+    let mut omitted = Omitted::default();
     let st = s.model.state();
     let sol = joints::solve(&s.doc, &st);
     let vals = joints::joint_values(&s.doc.assembly);
@@ -2397,6 +2440,15 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         .assembly
         .joints
         .iter()
+        .filter(|j| {
+            let ends = filter::ends(j);
+            let row = filter::Row { kind: j.kind, suppressed: j.suppressed, ends: &ends, holds_contents: groups.contains_key(&j.id) };
+            let keep = rows.keeps(&row);
+            if !keep {
+                filter::omit(&mut omitted, j.kind);
+            }
+            keep
+        })
         .map(|j| {
             let world = |o: &JointOrigin, is_a: bool| {
                 s.doc
@@ -2424,15 +2476,28 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
             }
         })
         .collect();
+    let mut solved = solve_report(&sol, p);
+    filter::narrow_dof(&mut solved.dof, rows.occurrence_set(), bool_(p, "dof_free_only").unwrap_or(false), &mut omitted);
+    let mut floating = floating_chains(s, &sol);
+    if rows.any() {
+        // Only the chains holding a joint the filters keep, by id: two joints can share a name.
+        let kept: BTreeSet<u64> = js.iter().map(|j| j.id).collect();
+        let before = floating.len();
+        floating.retain(|(ids, _)| ids.iter().any(|id| kept.contains(id)));
+        omitted.floating = before - floating.len();
+    }
+    let floating = floating.into_iter().map(|(_, c)| c).collect();
     let out = ListJointsResult {
-        solved: solve_report(&sol, p),
+        solved,
         joints: js,
         links: s.doc.assembly.links.iter().map(|l| link_info(s, &st, l)).collect(),
         origins: s.doc.assembly.origins.iter().map(|o| ListedOrigin { name: o.name.clone(), occurrence: o.origin.occurrence }).collect(),
-        floating: floating_chains(s, &sol),
+        floating,
+        omitted: omitted.some(),
+        summary: want_summary.then(|| filter::summary(&s.doc, &groups)),
         param_warnings: Vec::new(),
     };
-    reply("joint.list", out)
+    reply(cmd, out)
 }
 
 /// A motion link as `joint.list` and `joint.inspect` give it: ratio per degree, offset in b's
@@ -2462,7 +2527,10 @@ fn link_info(s: &Session, st: &solidcraft_doc::ModelState, l: &MotionLink) -> Li
 
 fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let sol = resolve(s);
-    reply("joint.solve", SolveResult { solved: solve_report(&sol, p), param_warnings: Vec::new() })
+    let mut solved = solve_report(&sol, p);
+    let mut omitted = Omitted::default();
+    filter::narrow_dof(&mut solved.dof, None, bool_(p, "dof_free_only").unwrap_or(false), &mut omitted);
+    reply("joint.solve", SolveResult { solved, omitted: omitted.some(), param_warnings: Vec::new() })
 }
 
 /// Index pairs `(i, j)`, `i < j`, whose boxes overlap or touch (sort and sweep along X), at most
@@ -2561,7 +2629,7 @@ pub(in crate::cmd) fn revert_values(s: &mut Session) -> usize {
 
 #[cfg(test)]
 #[path = "joints_tests.rs"]
-mod tests;
+pub(crate) mod tests;
 #[cfg(test)]
 #[path = "joints_turn_tests.rs"]
 mod turn_tests;

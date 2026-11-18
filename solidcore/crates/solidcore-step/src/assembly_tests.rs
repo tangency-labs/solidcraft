@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 
 use super::*;
+use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface};
 
 /// The box's corner `c`: bit 0 is x (10 mm), bit 1 y (20 mm), bit 2 z (30 mm).
@@ -339,4 +340,76 @@ fn a_cone_of_nearly_a_right_angle_is_its_plane_and_a_steeper_one_a_cone() {
     let (steep, reversed) =
         asm.swept_surface(&SweptSurface::Cone { frame, radius: 1.0, half_angle: std::f64::consts::FRAC_PI_4 }, &[Bound::Vertex(corners[0])]).unwrap();
     assert!(matches!(steep, BSurface::Cone { .. }) && !reversed, "{steep:?}");
+}
+
+/// An edge on a periodic spline whose interval runs past the spline's range and across its seam
+/// (a producer evaluating it modulo its period) is the same piece of curve: a degree-one square
+/// on knots -1..5 is at (5, 0, 0) at parameter 4.5, a period on from 0.5.
+#[test]
+fn an_edge_across_a_periodic_splines_seam_keeps_its_points() {
+    let square = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]];
+    let curve = spline_curve(1, vec![-1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0], &square, None).unwrap();
+    for (interval, ends) in [([3.5, 4.5], [[0.0, 5.0, 0.0], [5.0, 0.0, 0.0]]), ([4.25, 4.75], [[2.5, 0.0, 0.0], [7.5, 0.0, 0.0]])] {
+        let (c, [t0, t1]) = periodic_edge(curve.clone(), interval).unwrap();
+        let eval = crate::kernel::CurveEval::new(&c).unwrap();
+        for (t, want) in [(t0, ends[0]), (t1, ends[1])] {
+            let p = eval.point(t).unwrap();
+            assert!(p.dist(Vec3::new(want[0], want[1], want[2])) < 1e-12, "{interval:?} at {t}: {p:?}");
+        }
+    }
+    assert!(periodic_edge(curve, [0.0, 4.5]).is_err(), "longer than one period");
+}
+
+/// A parabola edge is the exact spline over its interval, its ends where the parabola is at the
+/// interval's ends (`f t² x + 2 f t y` from its vertex); a hyperbola's likewise.
+#[test]
+fn parabola_and_hyperbola_edges_lie_on_their_conics() {
+    let (o, z, x) = ([1.0, 2.0, 3.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let (f, [t0, t1]) = (2.0, [-1.5, 0.5]);
+    let c = parabola_curve(o, z, x, f, [t0, t1]);
+    let eval = crate::kernel::CurveEval::new(&c).unwrap();
+    for t in [t0, t1] {
+        let want = Vec3::new(1.0 + f * t * t, 2.0 + 2.0 * f * t, 3.0);
+        assert!(eval.point(t).unwrap().dist(want) < 1e-9, "parabola at {t}");
+    }
+    let (r, [t0, t1]) = ([3.0, 2.0], [-0.5, 1.0]);
+    let c = hyperbola_curve(o, z, x, r, [t0, t1]);
+    let eval = crate::kernel::CurveEval::new(&c).unwrap();
+    for t in [t0, t1] {
+        let want = Vec3::new(1.0 + r[0] * f64::cosh(t), 2.0 + r[1] * f64::sinh(t), 3.0);
+        assert!(eval.point(t).unwrap().dist(want) < 1e-9, "hyperbola at {t}");
+    }
+}
+
+/// An edge bounded by its vertices alone (`add_edge_on`) on a closed spline whose vertex is not
+/// where the spline starts runs all the way round from that vertex: no gap at its ends. So does
+/// one between two vertices at that one point.
+#[test]
+fn a_closed_spline_edge_starts_at_its_vertex() {
+    let square = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]];
+    let curve = spline_curve(1, vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0], &square, None).unwrap();
+    for two in [false, true] {
+        let mut asm = Assembly::new(1e-6, None);
+        let v = asm.add_vertex([10.0, 10.0, 0.0]).unwrap();
+        let w = if two { asm.add_vertex([10.0, 10.0, 0.0]).unwrap() } else { v };
+        let (e, _) = asm.add_edge_on(1, curve.clone(), [v, w]).unwrap_or_else(|m| panic!("two vertices {two}: {m}"));
+        let edge = &asm.edges[e as usize];
+        let eval = crate::kernel::CurveEval::new(&edge.curve).unwrap();
+        for t in edge.interval {
+            assert!(eval.point(t).unwrap().dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-12, "two vertices {two}: at {t}");
+        }
+        assert!((edge.interval[1] - edge.interval[0] - 4.0).abs() < 1e-12, "two vertices {two}: the whole square, {:?}", edge.interval);
+    }
+}
+
+/// A line edge bounded by its vertices alone is as long as the vertices are apart, whatever the
+/// line's parameter scale: a 1 mm edge on a line 1e13 mm long between its points is taken.
+#[test]
+fn a_line_edges_length_does_not_depend_on_its_parameter_scale() {
+    for end in [1.0, 1e13] {
+        let mut asm = Assembly::new(1e-6, None);
+        let (a, b) = (asm.add_vertex([0.0, 0.0, 0.0]).unwrap(), asm.add_vertex([1.0, 0.0, 0.0]).unwrap());
+        let line = BCurve::Line { start: [0.0, 0.0, 0.0], end: [end, 0.0, 0.0] };
+        assert!(asm.add_edge_on(1, line, [a, b]).is_ok(), "a line to {end}");
+    }
 }

@@ -1,0 +1,88 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b2"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "thicken",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "symmetric": false,
+        "thickness": 250.0
+      }
+    }
+  ],
+  "case": "15513-thicken-two-span-loft-sheet-bent-seam-250",
+  "expected": {
+    "body_count": 1,
+    "edges": 20,
+    "faces": 10,
+    "method": "Steiner's formula over the record's patches, plus the wedge where the two slabs open at the seam, the integral of d^2 tan(theta/2) along it (523918.10 mm^3). 2 + 2 faces, 6 side walls: 10 faces, 20 edges, 12 vertices",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#15513"
+    ],
+    "tolerance": {
+      "rel": 1e-07
+    },
+    "vertices": 12,
+    "volume_mm3": 281958824449.0699,
+    "what": "a surface loft between two three-point fit splines that are not mirror images, so its two faces meet in a seam tangent at its ends that bends by up to 0.048 degrees in between. Thickened 250 along its normals it was refused as 'not a closed solid' (the two offsets of the seam up to 0.21 mm apart)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "15513-thicken-two-span-loft-sheet-bent-seam-250.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcraft#15513"
+  ],
+  "ungraded": [],
+  "what": "a surface loft between two three-point fit splines that are not mirror images, so its two faces meet in a seam tangent at its ends that bends by up to 0.048 degrees in between. Thickened 250 along its normals it was refused as 'not a closed solid' (the two offsets of the seam up to 0.21 mm apart)",
+  "why_not": []
+}

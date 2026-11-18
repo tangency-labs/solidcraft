@@ -428,7 +428,8 @@ impl<'a> InsertionGeometry<'a> {
     }
     /// The edge of an actual face between the same-body vertices `start` and `end` that
     /// is proved to be `curve` over `interval` within `tolerance` plus its own
-    /// ([`crate::geom::tools::find_edge_proved_along`]).
+    /// ([`crate::geom::tools::find_edge_proved_along`]); `crossing` is the face whose
+    /// surface cuts `face` in the curve, if any.
     /// # Errors
     /// Invalid/cross-body operands, topology walks and the proof's cancellation.
     #[allow(clippy::too_many_arguments)] // the search's in-params
@@ -441,6 +442,7 @@ impl<'a> InsertionGeometry<'a> {
         curve: &Curve,
         interval: crate::geom::extent1d::Extent1d,
         tolerance: f64,
+        crossing: Option<FilletObject>,
     ) -> Result<Option<FilletObject>> {
         let (role, EntityRef::Face(face)) =
             Self::topology(face).ok_or_else(|| invalid("unknown Face role"))?
@@ -453,6 +455,12 @@ impl<'a> InsertionGeometry<'a> {
         };
         let (start, end) = (vertex(start)?, vertex(end)?);
         let body = self.body(role);
+        let crossing = match crossing.and_then(Self::topology) {
+            Some((other, EntityRef::Face(f))) => {
+                crate::topology::face::p2::surface(self.body(other), f)?
+            }
+            _ => None,
+        };
         let edges = crate::topology::face::p4::edges(body, face, None, false, None)?;
         let query = crate::geom::tools::CoincidentEdgeQuery {
             start_vertex: start,
@@ -463,7 +471,7 @@ impl<'a> InsertionGeometry<'a> {
             tolerance,
         };
         Ok(
-            crate::geom::tools::find_edge_proved_along(k, body, &query, &edges)?
+            crate::geom::tools::find_edge_proved_along(k, body, face, &query, &edges, crossing)?
                 .and_then(|found| edges.get(found))
                 .map(|&edge| Self::handle(role, EntityRef::Edge(edge))),
         )

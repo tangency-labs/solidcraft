@@ -449,7 +449,10 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
         healer_enabled,
     };
     match make_topology_from_data(&mut k, &mut b, &mut data, &mut env, options) {
-        Ok(()) => out.push(Item::Int(0)),
+        Ok(()) => {
+            crate::tolsub::after_read(&mut b);
+            out.push(Item::Int(0));
+        }
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
         Err(e) => {
             out.push(Item::Int(status(&e)));

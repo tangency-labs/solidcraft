@@ -3,7 +3,7 @@
 //! leg 5.5, straight on the Boolean's direct body, fails with error code 3 "Fillet Corner
 //! Error: Corner Edge Computation Failure" now that the Boolean keeps the operand's exact
 //! UV trims (WR-361, always on since its flag was retired), with the fillet fixes SolidCraft runs with (`fillet_trace_reaches_rails`,
-//! `fillet_mitre_concave_face_corners`; the refusal of rails leaving their faces, the rail
+//! the WR-642 mitre; the refusal of rails leaving their faces, the rail
 //! end on the continued surface and the cliff overflow, once flags too, are the only path).
 //!
 //! The Boolean copied the cut box's trims: its faces at x = 15 and y = 30 carry the exact
@@ -46,7 +46,6 @@ fn expected() -> f64 {
 fn kernel() -> Kernel {
     let mut k = Kernel::default();
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_mitre_concave_face_corners = true;
     k
 }
 

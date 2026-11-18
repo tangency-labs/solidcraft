@@ -2208,6 +2208,47 @@ mod tests {
         }
     }
 
+    /// #18708: a Combine cut or intersect with an open (non-closed) tool body is refused up front
+    /// with an informative message instead of failing in kernel export; bodies are left unchanged.
+    #[test]
+    fn a_cut_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "cut"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't cut. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
+    /// #18708: a Combine intersect with an open tool body is refused up front and names the tool.
+    #[test]
+    fn an_intersect_with_an_open_tool_body_is_refused_and_names_it() {
+        let mut s = Session::default();
+        box_and_tube(&mut s);
+        let err = match s.execute("solid.combine", &json!({"target": "Block", "tools": ["Tube"], "operation": "intersect"})) {
+            Err(e) => e.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(
+            err.contains(
+                "\"Tube\" isn't a closed solid (it has open edges), so it can't intersect. Close it with Stitch, or use a closed body as the tool"
+            ),
+            "{err}"
+        );
+        let Some(st) = s.world_state().ok() else { panic!("world state") };
+        assert!(st.body("Tube").is_some_and(|b| b.body.is_surface()));
+        assert!((volume(&s, "Block") - 1000.0).abs() < 1e-6);
+    }
+
     /// #15913 negative control: a join of overlapping solids still makes one body of the union.
     #[test]
     fn a_join_of_solids_is_unchanged() {
