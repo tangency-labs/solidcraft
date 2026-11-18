@@ -1684,6 +1684,7 @@ fn boundary_edge<O: ClassObject>(
     face: FaceId,
     edge: EdgeId,
     has_big_gaps: bool,
+    seam_free: bool,
 ) -> Result<BoundaryEdge<O>> {
     let face_gap = if has_big_gaps {
         match crate::topology::edge::edgeuse_of_face(objects.brep(), edge, Some(face))? {
@@ -1703,7 +1704,12 @@ fn boundary_edge<O: ClassObject>(
         interval: record.interval,
         zone_tol_3d: record.tolerance,
         face_gap,
-        seam: seam_ends(objects.brep(), edge, face)?,
+        // (a face known to have no seam edge has no seam to find)
+        seam: if seam_free {
+            None
+        } else {
+            seam_ends(k, objects.brep(), edge, face)?
+        },
     })
 }
 
@@ -1711,7 +1717,8 @@ fn boundary_edge<O: ClassObject>(
 /// that bound material: a vertex that is no pole of the face
 /// ([`crate::topology::vertex::inside_face`]), with its point and tolerance
 /// (docs/booleans.md, "Seams and poles"). `None` for an edge that is no seam.
-fn seam_ends(b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<SeamEnds>> {
+fn seam_ends(k: &Kernel, b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<SeamEnds>> {
+    k.work_counters.add_seam_test();
     if !crate::topology::edge::face_on_both_sides(b, edge, face)? {
         return Ok(None);
     }
@@ -1723,6 +1730,7 @@ fn seam_ends(b: &Brep, edge: EdgeId, face: FaceId) -> Result<Option<SeamEnds>> {
     let mut ends = [None, None];
     for (slot, v) in ends.iter_mut().zip([first, second]) {
         let Some(v) = v else { continue };
+        k.work_counters.add_seam_test();
         if !crate::topology::vertex::inside_face(b, v, face)? {
             *slot = Some((
                 b.vertex(v)?.point,
@@ -2095,7 +2103,7 @@ fn boundary_loops<O: ClassObject>(
             };
             edges.push(BoundaryEdgeuse {
                 edgeuse: objects.edgeuse(eu),
-                edge: boundary_edge(k, objects, face, edge, false)?,
+                edge: boundary_edge(k, objects, face, edge, false, false)?,
                 trim_curve,
             });
         }
@@ -2188,6 +2196,81 @@ pub(crate) fn curve_on_classify_cached<O: ClassObject>(
 /// As [`curve_on_classify`].
 #[allow(clippy::fn_params_excessive_bools)] // upstream's SmBoolean arguments
 pub fn curve_on_classify_mut<O: ClassObject>(
+    k: &Kernel,
+    f: FaceId,
+    objects: &mut impl CurveOnClassifyBrep<O>,
+    do_point_classify: bool,
+    cc: &mut CurveClassification<O>,
+    has_big_gaps: bool,
+    do_check_3d: bool,
+    uv_space_okay: bool,
+) -> Result<bool> {
+    curve_on_classify_mut_with_seams(
+        k,
+        f,
+        objects,
+        do_point_classify,
+        cc,
+        has_big_gaps,
+        do_check_3d,
+        uv_space_okay,
+        None,
+    )
+}
+
+/// Not upstream: whether face `f` has a seam edge (an edge with the face on both sides,
+/// [`crate::topology::edge::face_on_both_sides`]); `None` where its edges cannot be read,
+/// so the vertices and edges test for themselves as before.
+pub(crate) fn face_has_seam(k: &Kernel, b: &Brep, f: FaceId) -> Option<bool> {
+    let mut seam = false;
+    for e in face_edges(b, f, false, None).ok()? {
+        k.work_counters.add_seam_test();
+        seam = seam || crate::topology::edge::face_on_both_sides(b, e, f).ok()?;
+    }
+    Some(seam)
+}
+
+/// Not upstream: [`curve_on_classify_mut`] told whether face `f` has a seam edge
+/// ([`face_has_seam`]; `None`: not known, and every edge and vertex is asked as in
+/// [`curve_on_classify_mut`]). A face's seam is one of its own edges, and a pole's edges
+/// are all seams, so on a face without one no edge is a seam and no vertex a pole: their
+/// tests are skipped instead of each asking again (#18705). The classification's earlier
+/// hint is restored before returning.
+///
+/// # Errors
+///
+/// As [`curve_on_classify_mut`].
+#[allow(clippy::fn_params_excessive_bools, clippy::too_many_arguments)]
+pub fn curve_on_classify_mut_with_seams<O: ClassObject>(
+    k: &Kernel,
+    f: FaceId,
+    objects: &mut impl CurveOnClassifyBrep<O>,
+    do_point_classify: bool,
+    cc: &mut CurveClassification<O>,
+    has_big_gaps: bool,
+    do_check_3d: bool,
+    uv_space_okay: bool,
+    face_has_seam_known: Option<bool>,
+) -> Result<bool> {
+    let earlier = cc.seam_hint();
+    cc.set_seam_hint(face_has_seam_known.map(|s| (objects.face(f), s)));
+    let result = curve_on_classify_body(
+        k,
+        f,
+        objects,
+        do_point_classify,
+        cc,
+        has_big_gaps,
+        do_check_3d,
+        uv_space_okay,
+    );
+    cc.set_seam_hint(earlier);
+    result
+}
+
+/// The body of [`curve_on_classify_mut_with_seams`].
+#[allow(clippy::fn_params_excessive_bools)]
+fn curve_on_classify_body<O: ClassObject>(
     k: &Kernel,
     f: FaceId,
     objects: &mut impl CurveOnClassifyBrep<O>,
@@ -2498,7 +2581,7 @@ fn cached_ts_bound<O: ClassObject>(
             }
         }
         // SmTol::GetZoneTol3d(pE) as it is now
-        edgeuse.edge = boundary_edge(k, objects, face, edge, false)?;
+        edgeuse.edge = boundary_edge(k, objects, face, edge, false, false)?;
         let surface = objects
             .classify_surface(face)?
             .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
@@ -2540,10 +2623,11 @@ fn intersect_edges<O: ClassObject>(
     }
     // IntersectEdges reads the edge/face gaps with the surface's owner cleared
     // (SmTemporaryChangeValue on m_pOwner)
+    let seam_free = cc.face_known_seam_free();
     let rescue = clear_surface_owner(objects.brep_mut(), face)?;
     let mut views = Ok(Vec::new());
     for &edge in edges {
-        match boundary_edge(k, objects, face, edge, has_big_gaps) {
+        match boundary_edge(k, objects, face, edge, has_big_gaps, seam_free) {
             Ok(view) => {
                 if let Ok(v) = views.as_mut() {
                     v.push(view);

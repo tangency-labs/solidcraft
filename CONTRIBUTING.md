@@ -1,6 +1,6 @@
 # Contributing to SolidCraft
 
-Agents: start from the router in [AGENTS.md](AGENTS.md), which points to a short skill in [`skills/`](skills/README.md) for each kind of work. This page stays the full human guide.
+Agents: start from the router in [AGENTS.md](AGENTS.md), which points to a short skill in [`.agents/skills/`](.agents/skills/README.md) for each kind of work. This page stays the full human guide.
 
 SolidCraft is an open-source parametric 3D CAD app written in pure Rust.
 You sketch on a plane, constrain the sketch, turn profiles into solids, and
@@ -22,7 +22,7 @@ Questions, ideas or want to say what you're working on? Join the [Discord](https
 Kernel and geometry work is welcome: booleans, fillets, chamfers, shell, offsets, sweeps and lofts,
 threads and holes, STEP/IGES import and export, tessellation. It goes in `solidcore/`, the vendored
 solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.md) and
-`skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
+`.agents/skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
 A kernel pull request targets `main` like any other; there is no kernel branch, and the

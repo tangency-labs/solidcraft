@@ -112,6 +112,10 @@ const LIMITS: Limits = Limits {
     cancelled: Some(crate::safe_write::cancelled),
 };
 
+/// The budgets of a save. The file limit guards opening untrusted files; a design that grew past it
+/// is still written in full, never refused (data loss), and the caller says it is over the limit.
+const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_| usize::MAX, ..LIMITS };
+
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
 /// compression is what makes it fit. Everything else is level 1.
@@ -149,7 +153,7 @@ fn part_limit(name: &str) -> usize {
 
 impl PackageWriter {
     fn new() -> PackageWriter {
-        PackageWriter(Writer::new(LIMITS))
+        PackageWriter(Writer::new(SAVE_LIMITS))
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self.0.finish()?)
@@ -384,14 +388,6 @@ fn write_container(
         thumbnail::write(&mut writer, png, &metadata)?;
     }
     let bytes = writer.finish()?;
-    if bytes.len() > max_design() {
-        return Err(invalid(format!(
-            "the design would be {} MB, over the {} MB a design file may hold. {}",
-            bytes.len() >> 20,
-            max_design() >> 20,
-            crate::limits::how_to_raise()
-        )));
-    }
     Ok(bytes)
 }
 
@@ -1455,6 +1451,26 @@ mod tests {
         assert!(DesignContainerReader::new(Oversized).is_err());
     }
 
+    /// #18686 (was #3221's refusal): the file limit guards opening, not keeping. A design past it is
+    /// still written in full, where it used to be refused and left Save, Save As and autosave failing.
+    /// A 1 MB limit for this thread stands in for the real one.
+    #[test]
+    fn a_design_over_the_open_limit_is_still_written_not_refused() {
+        let mut doc = Document::new("Past the limit");
+        // A 1 MB limit for this thread; the design is a couple of MB of noise, which barely deflates.
+        crate::limits::test_cap::set(Some(1 << 20));
+        let step = noise(2_600_000);
+        doc.add_feature(
+            FeatureKind::Import { file: "huge.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
+        let bytes = write_design_container(&doc).unwrap();
+        assert!(bytes.len() > max_design(), "{} bytes is not past the limit", bytes.len());
+        assert!(is_design_container(&bytes));
+        crate::limits::test_cap::set(None);
+    }
+
     #[test]
     fn seekable_preview_defers_large_source_blob_until_document_read() {
         let mut doc = Document::new("Deferred source");
@@ -1659,6 +1675,7 @@ mod tests {
             path: vec!["block".into()],
             instance: None,
             color: Some([0.2, 0.4, 0.6]),
+            paint: None,
             hidden: false,
             placement: None,
             face_origin: (0..brep.faces.len() as u64).collect(),
@@ -2428,6 +2445,7 @@ mod tests {
             path: Vec::new(),
             instance: None,
             color: None,
+            paint: None,
             hidden: false,
             placement: None,
             brep: Some(brep),
@@ -2998,22 +3016,6 @@ mod tests {
         let step = padded_step(500 << 20, true);
         assert!(step.len() <= crate::MAX_STEP_BYTES, "the STEP is within the import limit");
         check_step_importable(&step).unwrap_or_else(|e| panic!("a STEP within the import limit is refused: {e}"));
-    }
-
-    /// #3221: a STEP that no design file may hold is refused with a clear message, when the
-    /// design is saved: the import limit governs the import and the design file limit governs
-    /// the design (#2721).
-    #[test]
-    fn step_that_cannot_be_saved_even_compressed_is_refused_when_the_design_is_saved() {
-        let step = padded_step(crate::MAX_DESIGN_BYTES + (80 << 20), true);
-        let mut doc = Document::new("Noisy import");
-        doc.add_feature(
-            FeatureKind::Import { file: "noisy.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None },
-            None,
-        )
-        .unwrap();
-        let message = write_design_container(&doc).err().unwrap().to_string();
-        assert!(message.contains("the design would be") && message.contains("a design file may hold"), "{message}");
     }
 
     #[test]
