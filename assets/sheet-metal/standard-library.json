@@ -1,0 +1,755 @@
+{
+  "format": "solidcraft-sheet-rules",
+  "version": 1,
+  "name": "SolidCraft standard materials and gauges",
+  "note": "Generic engineering values for a first part. Your shop's press brake, tooling and stock decide the real K-factor and inside radius: ask them, or import their rule pack.",
+  "sources": [
+    {
+      "id": "msg",
+      "title": "Manufacturers' Standard Gauge for sheet steel: thickness = weight (lb/ft²) / 41.82, rounded to 0.0001 in, as published gauge tables list it",
+      "url": "https://en.wikipedia.org/wiki/Sheet_metal#Gauge"
+    },
+    {
+      "id": "uss",
+      "title": "United States Standard Gauge for sheet and plate iron and steel, 15 U.S.C. 206 (Act of March 3, 1893); stainless sheet is gauged by it (for example Protocase's bend chart: 304 16 ga 0.063 in, 14 ga 0.078 in)",
+      "url": "https://www.law.cornell.edu/uscode/text/15/206"
+    },
+    {
+      "id": "awg",
+      "title": "Brown & Sharpe (American Wire Gauge), ASTM B258: d = 0.005 in × 92^((36 − n) / 39), rounded to 0.0001 in; the gauge for aluminium, copper and brass sheet",
+      "url": "https://en.wikipedia.org/wiki/American_wire_gauge"
+    },
+    {
+      "id": "kfactor",
+      "title": "Generic air-bending K-factor chart: inside radius 0 to T: 0.33 soft (aluminium), 0.38 medium (steel), 0.40 hard (stainless); T to 3T: 0.40, 0.43, 0.45; over 3T: 0.50. Copper and brass are read as soft. Reproduced in METU MECH 114, Sheet Metal Work",
+      "url": "https://users.metu.edu.tr/sonmez/MECH%20114/Sheet%20Metal%20Work.pdf"
+    },
+    {
+      "id": "al-radii",
+      "title": "Approximate minimum radius for 90° cold bend, by alloy, temper and thickness (the chart in Aircraft Spruce's aluminium catalog page): the upper end of the range for the next listed thickness at or above the sheet, and never under 1T",
+      "url": "https://www.aircraftspruce.com/pdf/2026Individual/Cat26041.pdf"
+    },
+    {
+      "id": "radius-1t",
+      "title": "Inside radius of one thickness, as SolidCraft's default rule has it: Protocase's published radii for cold-rolled steel and 304 at 14 to 20 gauge are at or under 1T, so shops form it in these gauges. Ask yours for copper and brass",
+      "url": "https://www.protocase.com/resources/Protocase-Bend-Radii-Bend-Sizes.pdf"
+    }
+  ],
+  "rules": [
+    {
+      "name": "Mild steel (cold-rolled), 10 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "10 ga",
+      "thickness": "0.1345 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Mild steel (cold-rolled), 11 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "11 ga",
+      "thickness": "0.1196 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Mild steel (cold-rolled), 12 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "12 ga",
+      "thickness": "0.1046 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Mild steel (cold-rolled), 13 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "13 ga",
+      "thickness": "0.0897 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Mild steel (cold-rolled), 14 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "14 ga",
+      "thickness": "0.0747 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Mild steel (cold-rolled), 16 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "16 ga",
+      "thickness": "0.0598 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Mild steel (cold-rolled), 18 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "18 ga",
+      "thickness": "0.0478 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Mild steel (cold-rolled), 20 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "20 ga",
+      "thickness": "0.0359 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Mild steel (cold-rolled), 22 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "22 ga",
+      "thickness": "0.0299 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Mild steel (cold-rolled), 24 ga",
+      "material": "Mild steel (cold-rolled)",
+      "gauge": "24 ga",
+      "thickness": "0.0239 in",
+      "k_factor": "0.43",
+      "bend_radius": "Thickness",
+      "source": [
+        "msg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Stainless steel 304, 10 ga",
+      "material": "Stainless steel 304",
+      "gauge": "10 ga",
+      "thickness": "0.140625 in",
+      "k_factor": "0.45",
+      "bend_radius": "Thickness",
+      "source": [
+        "uss",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Stainless steel 304, 11 ga",
+      "material": "Stainless steel 304",
+      "gauge": "11 ga",
+      "thickness": "0.125 in",
+      "k_factor": "0.45",
+      "bend_radius": "Thickness",
+      "source": [
+        "uss",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Stainless steel 304, 12 ga",
+      "material": "Stainless steel 304",
+      "gauge": "12 ga",
+      "thickness": "0.109375 in",
+      "k_factor": "0.45",
+      "bend_radius": "Thickness",
+      "source": [
+        "uss",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Stainless steel 304, 14 ga",
+      "material": "Stainless steel 304",
+      "gauge": "14 ga",
+      "thickness": "0.078125 in",
+      "k_factor": "0.45",
+      "bend_radius": "Thickness",
+      "source": [
+        "uss",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Stainless steel 304, 16 ga",
+      "material": "Stainless steel 304",
+      "gauge": "16 ga",
+      "thickness": "0.0625 in",
+      "k_factor": "0.45",
+      "bend_radius": "Thickness",
+      "source": [
+        "uss",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Stainless steel 304, 18 ga",
+      "material": "Stainless steel 304",
+      "gauge": "18 ga",
+      "thickness": "0.05 in",
+      "k_factor": "0.45",
+      "bend_radius": "Thickness",
+      "source": [
+        "uss",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Stainless steel 304, 20 ga",
+      "material": "Stainless steel 304",
+      "gauge": "20 ga",
+      "thickness": "0.0375 in",
+      "k_factor": "0.45",
+      "bend_radius": "Thickness",
+      "source": [
+        "uss",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Stainless steel 304, 22 ga",
+      "material": "Stainless steel 304",
+      "gauge": "22 ga",
+      "thickness": "0.03125 in",
+      "k_factor": "0.45",
+      "bend_radius": "Thickness",
+      "source": [
+        "uss",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Stainless steel 304, 24 ga",
+      "material": "Stainless steel 304",
+      "gauge": "24 ga",
+      "thickness": "0.025 in",
+      "k_factor": "0.45",
+      "bend_radius": "Thickness",
+      "source": [
+        "uss",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 8 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "8 ga",
+      "thickness": "0.1285 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 10 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "10 ga",
+      "thickness": "0.1019 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 11 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "11 ga",
+      "thickness": "0.0907 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 12 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "12 ga",
+      "thickness": "0.0808 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 14 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "14 ga",
+      "thickness": "0.0641 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 16 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "16 ga",
+      "thickness": "0.0508 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 18 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "18 ga",
+      "thickness": "0.0403 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 20 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "20 ga",
+      "thickness": "0.0320 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 22 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "22 ga",
+      "thickness": "0.0253 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 5052-H32, 24 ga",
+      "material": "Aluminium 5052-H32",
+      "gauge": "24 ga",
+      "thickness": "0.0201 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 8 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "8 ga",
+      "thickness": "0.1285 in",
+      "k_factor": "0.50",
+      "bend_radius": "4 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 10 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "10 ga",
+      "thickness": "0.1019 in",
+      "k_factor": "0.40",
+      "bend_radius": "3 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 11 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "11 ga",
+      "thickness": "0.0907 in",
+      "k_factor": "0.40",
+      "bend_radius": "3 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 12 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "12 ga",
+      "thickness": "0.0808 in",
+      "k_factor": "0.40",
+      "bend_radius": "3 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 14 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "14 ga",
+      "thickness": "0.0641 in",
+      "k_factor": "0.40",
+      "bend_radius": "3 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 16 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "16 ga",
+      "thickness": "0.0508 in",
+      "k_factor": "0.40",
+      "bend_radius": "2 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 18 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "18 ga",
+      "thickness": "0.0403 in",
+      "k_factor": "0.40",
+      "bend_radius": "2 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 20 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "20 ga",
+      "thickness": "0.0320 in",
+      "k_factor": "0.40",
+      "bend_radius": "2 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 22 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "22 ga",
+      "thickness": "0.0253 in",
+      "k_factor": "0.40",
+      "bend_radius": "1.5 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Aluminium 6061-T6, 24 ga",
+      "material": "Aluminium 6061-T6",
+      "gauge": "24 ga",
+      "thickness": "0.0201 in",
+      "k_factor": "0.40",
+      "bend_radius": "1.5 * Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "al-radii"
+      ]
+    },
+    {
+      "name": "Copper C110, 10 ga",
+      "material": "Copper C110",
+      "gauge": "10 ga",
+      "thickness": "0.1019 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Copper C110, 12 ga",
+      "material": "Copper C110",
+      "gauge": "12 ga",
+      "thickness": "0.0808 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Copper C110, 14 ga",
+      "material": "Copper C110",
+      "gauge": "14 ga",
+      "thickness": "0.0641 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Copper C110, 16 ga",
+      "material": "Copper C110",
+      "gauge": "16 ga",
+      "thickness": "0.0508 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Copper C110, 18 ga",
+      "material": "Copper C110",
+      "gauge": "18 ga",
+      "thickness": "0.0403 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Copper C110, 20 ga",
+      "material": "Copper C110",
+      "gauge": "20 ga",
+      "thickness": "0.0320 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Copper C110, 22 ga",
+      "material": "Copper C110",
+      "gauge": "22 ga",
+      "thickness": "0.0253 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Copper C110, 24 ga",
+      "material": "Copper C110",
+      "gauge": "24 ga",
+      "thickness": "0.0201 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Brass C260, 10 ga",
+      "material": "Brass C260",
+      "gauge": "10 ga",
+      "thickness": "0.1019 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Brass C260, 12 ga",
+      "material": "Brass C260",
+      "gauge": "12 ga",
+      "thickness": "0.0808 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Brass C260, 14 ga",
+      "material": "Brass C260",
+      "gauge": "14 ga",
+      "thickness": "0.0641 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Brass C260, 16 ga",
+      "material": "Brass C260",
+      "gauge": "16 ga",
+      "thickness": "0.0508 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Brass C260, 18 ga",
+      "material": "Brass C260",
+      "gauge": "18 ga",
+      "thickness": "0.0403 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Brass C260, 20 ga",
+      "material": "Brass C260",
+      "gauge": "20 ga",
+      "thickness": "0.0320 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Brass C260, 22 ga",
+      "material": "Brass C260",
+      "gauge": "22 ga",
+      "thickness": "0.0253 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    },
+    {
+      "name": "Brass C260, 24 ga",
+      "material": "Brass C260",
+      "gauge": "24 ga",
+      "thickness": "0.0201 in",
+      "k_factor": "0.40",
+      "bend_radius": "Thickness",
+      "source": [
+        "awg",
+        "kfactor",
+        "radius-1t"
+      ]
+    }
+  ]
+}

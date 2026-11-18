@@ -720,6 +720,59 @@ pub struct ManageRulesParams {
     /// Delete the named saved rule instead of editing it. Default: false. Deleting the active
     /// rule clears that choice; listing then uses the first remaining rule, else built-in steel.
     pub delete: Option<bool>,
+    /// The material the rule is for: a label of at most 128 characters on one line, saved with
+    /// the rule; empty clears it. With `gauge`, a material of the standard library
+    /// (`sheet.rule_library`). Ignored when deleting.
+    pub material: Option<String>,
+    /// A gauge of `material` in the standard library (`16`, `16 ga`): the rule takes that gauge's
+    /// thickness, K-factor and bend radius, except the ones given here. Needs `material`.
+    /// Ignored when deleting.
+    pub gauge: Option<String>,
+}
+
+/// The standard library of sheet metal materials and gauges, each value with its sources.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RuleLibraryParams {
+    /// Only this material's gauges (ignoring case). Default: every material.
+    pub material: Option<String>,
+}
+
+/// A source of the library's values.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct LibrarySource {
+    pub id: String,
+    pub title: String,
+    pub url: String,
+}
+
+/// One material in one gauge: the rule `sheet.manage_rules` makes from `material` and `gauge`.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct LibraryRule {
+    pub name: String,
+    pub material: String,
+    pub gauge: String,
+    /// Expressions, as the rule takes them.
+    pub thickness: String,
+    pub k_factor: String,
+    pub bend_radius: String,
+    /// The thickness and inside radius worked out, in millimetres.
+    pub thickness_mm: f64,
+    pub bend_radius_mm: f64,
+    /// Ids of the sources of these values.
+    pub sources: Vec<String>,
+}
+
+/// The library and where its values come from.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct RuleLibraryResult {
+    pub name: String,
+    pub note: String,
+    pub materials: Vec<String>,
+    pub sources: Vec<LibrarySource>,
+    pub rules: Vec<LibraryRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// A rule name, checked by the handler's reader.
@@ -781,6 +834,9 @@ pub struct RuleReply {
     pub hem_gap: String,
     pub gap: String,
     pub angle_display: String,
+    /// The material the rule is for; left out when none is set.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub material: String,
 }
 
 impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
@@ -797,6 +853,7 @@ impl From<&solidcraft_doc::sheet::SheetRule> for RuleReply {
             hem_gap: r.hem_gap.clone(),
             gap: r.gap.clone(),
             angle_display: r.angle_display.clone(),
+            material: r.material.clone(),
         }
     }
 }

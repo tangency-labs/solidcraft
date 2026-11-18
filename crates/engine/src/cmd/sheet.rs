@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::sheet::{self, SheetRule};
+use solidcraft_doc::sheet_library as library;
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{FacePick, Position};
 use solidcraft_doc::{FeatureKind, FlangeEdge, FlangeSegment};
@@ -17,9 +18,9 @@ use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list,
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
     BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams, FlatCircle,
-    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult,
-    MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleReply, RulesParams, RulesResult, SheetBodyMeasure,
-    UnfoldParams,
+    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams,
+    ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult,
+    RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -35,6 +36,7 @@ const MEASURE_BODY_CONTRACT: TypedContract<MeasureBodyParams> = TypedContract::n
 
 const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
 const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
+const RULE_LIBRARY_CONTRACT: TypedContract<RuleLibraryParams> = TypedContract::new();
 
 const PATH_FLANGE_CONTRACT: TypedContract<PathFlangeParams> = TypedContract::new();
 const FLAT_PATTERN_CONTRACT: TypedContract<FlatPatternParams> = TypedContract::new();
@@ -161,8 +163,21 @@ pub static COMMANDS: &[CommandSpec] = &[
          `corner_relief` across; tear none, each bend's end is cut straight from the corner to its flange's end; default notch); \
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
-         active?: bool; delete?: bool",
+         active?: bool; delete?: bool; material?: text (the material the rule is for, a label saved with it); \
+         gauge?: with material, a gauge of the standard library (sheet.rule_library): the rule takes its thickness, K-factor and bend radius, \
+         except those given here",
     ),
+    CommandSpec::new("sheet.rule_library", "Sheet Metal Standard Library", crate::checked!("sheet.rule_library", rule_library))
+        .contract(&RULE_LIBRARY_CONTRACT)
+        .output(output_schema_for::<RuleLibraryResult>)
+        .icon("sheet_rules")
+        .noundo()
+        .doc_only()
+        .params(
+            "material? → the standard library: common materials in standard gauges, each with its thickness, K-factor and bend radius \
+             (expressions and millimetres) and the ids of the published tables they come from (sources). Generic values: a shop's own \
+             are better. sheet.manage_rules {name, material, gauge} makes a rule of one",
+        ),
     CommandSpec::new("sheet.rules", "List Sheet Metal Rules", crate::checked!("sheet.rules", list_rules))
         .contract(&RULES_CONTRACT).output(output_schema_for::<RulesResult>).icon("sheet_rules").noundo().doc_only().params("→ rules with their expressions and values, and the active one"),
     CommandSpec::new("sheet.flat_pattern", "Create Flat Pattern", crate::checked!("sheet.flat_pattern", flat_pattern))
@@ -975,6 +990,7 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut rule =
         s.doc.sheet.rules.iter().find(|r| r.name == name).cloned().unwrap_or_else(|| SheetRule { name: name.clone(), ..s.doc.sheet_rule(None) });
+    library_material(cmd, p, &mut rule)?;
     for (k, slot) in rule.fields_mut() {
         if let Some(e) = expr(p, k) {
             *slot = e.into();
@@ -1013,6 +1029,85 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: Vec::new(),
     })
     .map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// A rule's `material`, and with `gauge` the standard library's thickness, K-factor and bend
+/// radius for it (#18304); the values given beside them are set after, so they win.
+fn library_material(cmd: &str, p: &Value, rule: &mut SheetRule) -> Result<()> {
+    let material = match p.get("material").filter(|v| !v.is_null()) {
+        None => None,
+        Some(v) => Some(
+            v.as_str()
+                .map(str::trim)
+                .filter(|m| m.len() <= 128 && !m.chars().any(char::is_control))
+                .ok_or_else(|| bad(cmd, "`material` must be text of at most 128 characters on one line"))?,
+        ),
+    };
+    let Some(gauge) = str_(p, "gauge").map(str::trim).filter(|g| !g.is_empty()) else {
+        if let Some(material) = material {
+            rule.material = material.into();
+        }
+        return Ok(());
+    };
+    let Some(material) = material.filter(|m| !m.is_empty()) else {
+        return Err(bad(cmd, "`gauge` needs `material`: the standard library's gauges are by material"));
+    };
+    let Some(entry) = library::standard_rule(material, gauge) else {
+        let gauges: Vec<&str> = library::standard_gauges(material).iter().map(|r| r.gauge.as_str()).collect();
+        return Err(bad(
+            cmd,
+            if gauges.is_empty() {
+                format!("`{material}` is not in the standard library; it has {}", library::standard_materials().join(", "))
+            } else {
+                format!("the standard library has no gauge `{gauge}` of {material}; it has {}", gauges.join(", "))
+            },
+        ));
+    };
+    rule.material.clone_from(&entry.rule.material);
+    rule.thickness.clone_from(&entry.rule.thickness);
+    rule.k_factor.clone_from(&entry.rule.k_factor);
+    rule.bend_radius.clone_from(&entry.rule.bend_radius);
+    Ok(())
+}
+
+fn rule_library(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.rule_library";
+    let lib = library::standard();
+    let only = str_(p, "material").map(str::trim);
+    if let Some(m) = only
+        && library::standard_gauges(m).is_empty()
+    {
+        return Err(bad(cmd, format!("`{m}` is not in the standard library; it has {}", library::standard_materials().join(", "))));
+    }
+    let none = std::collections::BTreeMap::new();
+    let rules = lib
+        .rules
+        .iter()
+        .filter(|r| only.is_none_or(|m| r.rule.material.eq_ignore_ascii_case(m)))
+        .filter_map(|r| {
+            let v = s.doc.rule_values(&none, &r.rule).ok()?;
+            Some(LibraryRule {
+                name: r.rule.name.clone(),
+                material: r.rule.material.clone(),
+                gauge: r.gauge.clone(),
+                thickness: r.rule.thickness.clone(),
+                k_factor: r.rule.k_factor.clone(),
+                bend_radius: r.rule.bend_radius.clone(),
+                thickness_mm: v.thickness,
+                bend_radius_mm: v.bend_radius,
+                sources: r.sources.clone(),
+            })
+        })
+        .collect();
+    let reply = RuleLibraryResult {
+        name: lib.name.clone(),
+        note: lib.note.clone(),
+        materials: library::standard_materials().into_iter().map(str::to_string).collect(),
+        sources: lib.sources.iter().map(|x| LibrarySource { id: x.id.clone(), title: x.title.clone(), url: x.url.clone() }).collect(),
+        rules,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {

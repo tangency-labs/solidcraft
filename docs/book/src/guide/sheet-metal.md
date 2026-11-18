@@ -62,6 +62,20 @@ its flat size and a table of bends to export as DXF or CSV.
 
 ## Rules and tools
 
+**Standard library**, at the top of Sheet Metal Rules, has common materials in standard gauges:
+mild steel and stainless 304 (their sheet gauges), aluminium 5052-H32 and 6061-T6, copper and
+brass (Brown & Sharpe gauges). Pick a **Material**, then a **Gauge**, and the manager shows a rule
+of that name with the gauge's thickness and the material's K-factor and inside bend radius;
+**OK** adds it to the design. These are generic values from published tables (the library file
+cites each one); your shop's press brake decides the real ones, so ask them. A rule's
+**Material** is a label saved with it, and can be typed for any rule.
+
+**Import pack…** reads a JSON or CSV file of rules, from you or your shop, into your personal
+rules, and **Export pack…** writes them as one. The format is in
+`docs/formats/sheet-rule-packs.md`. Over MCP, `sheet.rule_library` lists the library and
+`sheet.manage_rules {"name": "AL", "material": "Aluminium 5052-H32", "gauge": "14"}` makes a rule of
+one gauge.
+
 A rule is saved in its design, and a new design starts with only the default steel rule. To use
 the same rules in every design, keep them as **personal rules**, saved in your profile: open
 **Personal rules** at the top of Sheet Metal Rules.

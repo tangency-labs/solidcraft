@@ -472,8 +472,9 @@ fn rule_commands_publish_contracts_and_refuse_unknown_keys() {
 
 #[test]
 fn rule_contract_keys_and_readers_match() {
-    use super::{AngleDisplayParam, ManageRulesParams, RuleName, RulesParams};
+    use super::{AngleDisplayParam, ManageRulesParams, RuleLibraryParams, RuleName, RulesParams};
     assert_keys(input_schema_for::<RulesParams>(), &[]);
+    assert_keys(input_schema_for::<RuleLibraryParams>(), &["material"]);
     assert_keys(
         input_schema_for::<ManageRulesParams>(),
         &[
@@ -484,8 +485,10 @@ fn rule_contract_keys_and_readers_match() {
             "corner_relief_shape",
             "delete",
             "gap",
+            "gauge",
             "hem_gap",
             "k_factor",
+            "material",
             "name",
             "relief_depth",
             "relief_width",

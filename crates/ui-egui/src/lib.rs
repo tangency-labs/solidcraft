@@ -292,6 +292,7 @@ pub mod semantic_content;
 pub mod settings_profiles;
 #[cfg(test)]
 mod settings_profiles_tests;
+pub mod sheet_rule_library;
 pub mod shell;
 #[cfg(test)]
 mod shell_face_sketch_ui_tests;
