@@ -56,7 +56,7 @@ pub fn strict_input_schema(schema: &Value) -> Value {
 // These keywords can describe fields outside `properties`, which this checker cannot resolve.
 // Branches also constrain an existing object rather than declaring all its fields.
 fn defaults_closed(schema: &Map<String, Value>, closed: bool) -> bool {
-    const UNSUPPORTED: [&str; 11] = [
+    const UNSUPPORTED: &[&str] = &[
         "allOf",
         "$ref",
         "$dynamicRef",
