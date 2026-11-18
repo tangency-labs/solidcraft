@@ -114,7 +114,8 @@ pub(super) fn slot_for(session: &Session, kind: EntryKind, path: &str, format: O
 
 /// The package behind `slot`, checked as it is now: still enabled, the same plugin, its grants for
 /// this exact package and its limits within the user's.
-pub(super) fn checked_package(session: &Session, slot: &FormatSlot) -> Result<Package> {
+pub(super) fn checked_package(session: &mut Session, slot: &FormatSlot) -> Result<Package> {
+    session.plugin_state.refresh_stored();
     let package = read_package(&slot.folder)?;
     if package.manifest.id != slot.plugin_id || session.disabled_plugins.contains(&slot.plugin_id) {
         return Err(error("plugin is disabled or was replaced; try again"));

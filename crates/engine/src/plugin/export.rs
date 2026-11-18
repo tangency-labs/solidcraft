@@ -46,7 +46,7 @@ pub(super) fn refuse_unreadable(runtime: &RuntimeManifest) -> Result<()> {
 /// Write the open design to `path` with `exporter`. Nothing is written unless the whole export
 /// succeeds, and then in one step: an export that fails, traps or runs out of fuel leaves the file
 /// that was there (or no file) as it was. The design is never changed.
-pub fn export_file(session: &Session, exporter: &FormatSlot, path: &str, options: &Value) -> Result<ExportedFile> {
+pub fn export_file(session: &mut Session, exporter: &FormatSlot, path: &str, options: &Value) -> Result<ExportedFile> {
     if !options.is_object() {
         return Err(HostError::InvalidInput { field: "options".into(), reason: "the exporter's options are an object".into() }.into());
     }

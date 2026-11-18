@@ -1,7 +1,8 @@
 //! `solidcraft-cli plugin check` and `plugin test`: a plugin author's tools.
 //!
 //! `check` runs the app's `plugin.check`: what Install and a call would refuse, each with its fix.
-//! `test` installs the package into a scratch plugins folder with the app's own installer, then
+//! `test` installs the package into a scratch plugins folder with the app's own installer, stores
+//! each case's approvals in that folder's grant store as an install does, then
 //! runs the plugin's test cases (`tests/*.json` in the package) through `plugin.run`,
 //! `file.import` and `file.export` on the real host, with its real limits, and compares what comes back.
 
@@ -452,9 +453,17 @@ fn run_case(
             .as_str()
             .unwrap_or_default()
             .to_string();
-        let grants = case_grants(manifest, &approval, tests, work, case)?;
+        let mut grants = case_grants(manifest, &approval, tests, work, case)?;
+        grants.folders.sort_by(|a, b| a.name.cmp(&b.name));
         let folders = grants.folders.clone();
-        s.plugin_state.grants.insert(manifest.id.clone(), grants);
+        // Approved as an install would store it: in the scratch plugins folder's grant store, which
+        // the session reads back before the call, as a later run of the command line does.
+        solidcraft_engine::plugin::grant_store::write(plugins, &manifest.id, &grants).map_err(|e| format!("grants: {e}"))?;
+        s.plugin_state.stored = Some(Default::default());
+        s.plugin_state.refresh_stored();
+        if s.plugin_state.grants.get(&manifest.id) != Some(&grants) {
+            return Err("grants: the stored approval did not read back".into());
+        }
         let params = case.params.clone().unwrap_or_else(|| json!({}));
         let reply = match entry.kind {
             EntryKind::Command => {
