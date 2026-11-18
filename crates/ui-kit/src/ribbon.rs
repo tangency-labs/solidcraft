@@ -1332,6 +1332,29 @@ pub fn menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOn
     }
     let ctx = ui.ctx();
     let tip_id = resp.id.with("sc_dropdown_tip_area");
+    // Last pass's size; the first pass assumes the tip fits on the right.
+    let size = ctx.read_response(tip_id).map(|r| r.rect.size()).unwrap_or(egui::Vec2::ZERO);
+    let screen = ctx.content_rect();
+    let gap = 6.0;
+    let x = if menu.right() + gap + size.x <= screen.right() { menu.right() + gap } else { (menu.left() - gap - size.x).max(screen.left()) };
+    let y = resp.rect.top().min((screen.bottom() - size.y).max(screen.top()));
+    let area = Container::new(ctx, Surface::Popup)
+        .area(tip_id)
+        .order(egui::Order::Tooltip)
+        .interactable(false)
+        .fixed_pos(pos2(x, y))
+        .show(ctx, |ui| Container::new(ctx, Surface::Popup).show_frame(ui, Container::menu_frame(), ui.max_rect(), add));
+    Some(area.inner.response.rect)
+}
+
+/// Keep an illustrated tip beside its menu and fit the media within the available screen space.
+pub fn illustrated_menu_tip(ui: &egui::Ui, menu: Rect, resp: &egui::Response, add: impl FnOnce(&mut egui::Ui)) -> Option<Rect> {
+    use crate::{Container, Surface};
+    if !tip_ready(ui, resp) {
+        return None;
+    }
+    let ctx = ui.ctx();
+    let tip_id = resp.id.with("sc_dropdown_tip_area");
     // Keep the outer edge anchored beside the menu even before the first size is known.
     let size = ctx.read_response(tip_id).map(|r| r.rect.size()).unwrap_or(egui::Vec2::ZERO);
     let screen = ctx.content_rect();

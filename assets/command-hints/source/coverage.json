@@ -1,6 +1,9 @@
 {
   "tabs": {
     "ASSEMBLE": {
+      "assembly.constraint.create": {
+        "text_only": "Chooses a mating relation and references; each relation depends on the selected assembly geometry."
+      },
       "component.capture_position": {
         "text_only": "Records placement state; no model geometry changes."
       },
@@ -614,6 +617,9 @@
       },
       "sketch.infinite": {
         "text_only": "A line-type toggle whose picked-line behavior is explained by text."
+      },
+      "sketch.insert_airfoil": {
+        "text_only": "Imports a profile from a chosen airfoil data file; the source file determines its shape."
       },
       "sketch.insert_dxf": {
         "text_only": "A file-import workflow whose result depends on the file."

@@ -105,7 +105,11 @@ python3 -B assets/command-hints/tools/capture.py --port 54940 \
 
 `--only chamfer,plane-offset` regenerates selected slugs. Intermediate captures
 and measurement reports stay under `target/command-illustrations/model-captures`.
-The tool verifies its scratch document, clean timeline, declared counts, volumes and joint values. It never replaces the original design,
+The tool verifies its scratch document, clean timeline, declared counts, volumes, closed bodies,
+bounding boxes, construction geometry and joint values. Named `expected.bodies` entries can
+check `center_of_mass` to distinguish a moved body from an unchanged one. Bounds and positions
+use `bbox_tolerance_mm` or `geometry_tolerance_mm` (0.02 mm by default). Crops must contain at
+least 960 × 600 source pixels; insufficient display density is refused. It never replaces the original design,
 and restores the original view and reference display setting after each sample.
 Python and ImageMagick are needed only for authoring these assets.
 

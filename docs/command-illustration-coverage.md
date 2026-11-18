@@ -4,11 +4,11 @@ The six covered contexts use original SolidCraft captures in both themes. A comm
 
 | Context | Illustrated | Text-only |
 | --- | ---: | ---: |
-| Assemble | 16 | 14 |
+| Assemble | 16 | 15 |
 | Inspect | 15 | 6 |
 | Model | 65 | 11 |
 | Sheet Metal | 10 | 6 |
-| Sketch | 74 | 23 |
+| Sketch | 74 | 24 |
 | Surface | 16 | 5 |
 
 The catalog contains **193 unique illustrated commands**. Shared commands reuse their existing artwork.
@@ -25,6 +25,7 @@ Native As-Built joints keep the components in place. Motion couplings are demons
 
 | Command | Reason |
 | --- | --- |
+| `assembly.constraint.create` | Chooses a mating relation and references; each relation depends on the selected assembly geometry. |
 | `component.capture_position` | Records placement state; no model geometry changes. |
 | `component.create` | Creates an empty hierarchy entry rather than visible geometry. |
 | `component.from_bodies` | Changes component ownership while preserving visible geometry. |
@@ -99,6 +100,7 @@ Native As-Built joints keep the components in place. Motion couplings are demons
 | `sketch.finish` | Ends the current editing context without a characteristic geometry operation. |
 | `sketch.finish_auto_constrain` | Combines constraint inference and leaving the editor; the text explains both. |
 | `sketch.infinite` | A line-type toggle whose picked-line behavior is explained by text. |
+| `sketch.insert_airfoil` | Imports a profile from a chosen airfoil data file; the source file determines its shape. |
 | `sketch.insert_dxf` | A file-import workflow whose result depends on the file. |
 | `sketch.insert_svg` | A file-import workflow whose result depends on the file. |
 | `sketch.inspect` | A sketch analysis report; the report is the useful content. |

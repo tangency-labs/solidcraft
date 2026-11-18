@@ -15,6 +15,8 @@ import time
 
 REPO = Path(__file__).resolve().parents[3]
 SIZE = (960, 600)
+# Keep the connection alive past the control server's 3600-second batch wait.
+BATCH_TIMEOUT = 3720
 
 
 class Control:
@@ -44,7 +46,8 @@ class Control:
             raise RuntimeError('Capture window has pending work; refusing to change it')
 
     def call(self, method, params=None):
-        with socket.create_connection(('127.0.0.1', self.port), timeout=120) as sock:
+        timeout = BATCH_TIMEOUT if method == 'engine.batch' else 120
+        with socket.create_connection(('127.0.0.1', self.port), timeout=timeout) as sock:
             message = {'id': 1, 'token': self.token, 'method': method, 'params': params or {}}
             sock.sendall((json.dumps(message) + '\n').encode())
             with sock.makefile() as stream:
@@ -88,13 +91,13 @@ def scratch_document(control):
     finally:
         errors = []
         for method, params in [
-            ('ui.documents', {'action': 'close', 'index': created['active'], 'force': True}),
-            ('ui.documents', {'action': 'switch', 'index': documents['active']}),
             ('ui.set', original['ui']),
             ('ui.set', {'showOrigin': None if origin_hidden is None else not origin_hidden}),
             ('ui.hint_capture', hint_style),
             ('ui.prefs', {'reference_geometry_through_bodies': through_bodies}),
             ('ui.camera', original['camera']),
+            ('ui.documents', {'action': 'close', 'index': created['active'], 'force': True}),
+            ('ui.documents', {'action': 'switch', 'index': documents['active']}),
             ('ui.home', {'open': original['home']}),
         ]:
             try:
@@ -136,6 +139,8 @@ def shot(control, path, crop_scale=1.0):
     if abs(info['height'] / scale - 998.0) > 2:
         raise RuntimeError('Capture window size differs from the 1728 x 998 specification')
     width, height = 960 * crop_scale, 600 * crop_scale
+    if round(width * scale) < SIZE[0] or round(height * scale) < SIZE[1]:
+        raise RuntimeError('Screenshot density is too low for this crop; capture at a higher display scale')
     left, top = 384 + (960 - width) / 2, 216 + (600 - height) / 2
     geometry = f'{round(width * scale)}x{round(height * scale)}+{round(left * scale)}+{round(top * scale)}'
     cropped = path.with_name(path.stem + '-crop.png')
@@ -207,12 +212,80 @@ def compose(sample, before, after, output):
             ], check=True)
 
 
+def vector(value, label):
+    if (not isinstance(value, (list, tuple)) or len(value) != 3
+            or any(not isinstance(part, (int, float)) or not math.isfinite(part) for part in value)):
+        raise RuntimeError(f'{label}: expected a finite three-dimensional vector, got {value}')
+    return value
+
+
+def unit(value, label):
+    value = vector(value, label)
+    length = math.hypot(*value)
+    if length == 0:
+        raise RuntimeError(f'{label}: direction must not be zero')
+    return [part / length for part in value]
+
+
+def check_vector(actual, expected, tolerance, label):
+    if math.dist(vector(actual, label), vector(expected, label)) > tolerance:
+        raise RuntimeError(f'{label}: expected {expected}, got {actual}')
+
+
+def verify_body_geometry(bodies, expected, tolerance, label):
+    for key in ('closed', 'all_closed'):
+        if key in expected and (not bodies and expected[key] is False
+                                or any(body.get('closed') is not expected[key] for body in bodies)):
+            raise RuntimeError(f'{label}: {key}: expected {expected[key]} for every body')
+    if 'bbox' in expected:
+        if not bodies or any('bbox' not in body for body in bodies):
+            raise RuntimeError(f'{label}: bbox: body measurements are missing')
+        for bound, combine in [('min', min), ('max', max)]:
+            bounds = [vector(body['bbox'].get(bound), f'{label} bbox.{bound}') for body in bodies]
+            actual = [combine(values) for values in zip(*bounds)]
+            check_vector(actual, expected['bbox'][bound], tolerance, f'{label} bbox.{bound}')
+
+
+def verify_construction(control, expected, tolerance, label):
+    kind = expected['type']
+    selection = {'type': 'construction_point' if kind == 'point' else kind, 'name': expected['name']}
+    items = control.execute('inspect.measure', {'items': [selection]})['items']
+    if len(items) != 1 or items[0].get('type') != kind:
+        raise RuntimeError(f'{label}: expected construction type {kind}, got {items}')
+    actual = items[0]
+    for key in ('point', 'origin', 'position'):
+        if key in expected:
+            check_vector(actual.get(key), expected[key], tolerance, f'{label} {key}')
+    for key in ('normal', 'normal_parallel', 'direction_parallel'):
+        if key not in expected:
+            continue
+        field = 'direction' if key == 'direction_parallel' else 'normal'
+        got, wanted = unit(actual.get(field), label), unit(expected[key], label)
+        distance = math.dist(got, wanted)
+        if key.endswith('_parallel'):
+            distance = min(distance, math.dist(got, [-part for part in wanted]))
+        if distance > 1e-6:
+            raise RuntimeError(f'{label} {key}: expected {expected[key]}, got {actual.get(field)}')
+    for key in ('point_on_plane', 'other_point_on_plane', 'origin_on_axis'):
+        if key not in expected:
+            continue
+        on_axis = key == 'origin_on_axis'
+        origin = vector(actual.get('origin' if on_axis else 'point'), label)
+        direction = unit(actual.get('direction' if on_axis else 'normal'), label)
+        offset = [a - b for a, b in zip(vector(expected[key], label), origin)]
+        along = sum(a * b for a, b in zip(offset, direction))
+        distance = math.dist(offset, [along * part for part in direction]) if on_axis else abs(along)
+        if distance > tolerance:
+            raise RuntimeError(f'{label} {key}: {expected[key]} is {distance} mm from the construction')
+    return actual
+
+
 def verify(control, sample, state):
     document = control.execute('document.inspect', {'measure': False})
     errors = [feature for feature in document['timeline'] if feature.get('error')]
     if errors:
         raise RuntimeError(f'{sample["slug"]}: feature errors: {errors}')
-    measurement = control.execute('inspect.measure', {'summary': True})
+    measurement = control.execute('inspect.measure')
     expected = sample.get('expected', {})
     expected = expected.get(state, expected)
     for key, actual in [('body_count', measurement['body_count']),
@@ -228,7 +301,21 @@ def verify(control, sample, state):
         actual = measurement['total']['volume_mm3']
         if not math.isclose(actual, expected['volume_mm3'], rel_tol=tolerance, abs_tol=0.01):
             raise RuntimeError(f'{sample["slug"]} {state}: expected volume {expected["volume_mm3"]}, got {actual}')
+    label = f'{sample["slug"]} {state}'
+    root = sample.get('expected', {})
+    tolerance = expected.get('bbox_tolerance_mm', root.get('bbox_tolerance_mm',
+                            expected.get('geometry_tolerance_mm', root.get('geometry_tolerance_mm', 0.02))))
+    verify_body_geometry(measurement['bodies'], expected, tolerance, label)
+    for name, wanted in expected.get('bodies', {}).items():
+        body = next((body for body in measurement['bodies'] if body['name'] == name), None)
+        if body is None:
+            raise RuntimeError(f'{label}: missing body {name}')
+        verify_body_geometry([body], wanted, tolerance, f'{label} {name}')
+        if 'center_of_mass' in wanted:
+            check_vector(body.get('center_of_mass'), wanted['center_of_mass'], tolerance, f'{label} {name} center_of_mass')
     report = {'measurement': measurement, 'sketches': document['sketches']}
+    if 'construction' in expected:
+        report['construction'] = verify_construction(control, expected['construction'], tolerance, f'{label} construction')
     if 'joint_values' in expected:
         joints = control.execute('joint.list')['joints']
         report['joints'] = joints

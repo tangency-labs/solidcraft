@@ -446,3 +446,4 @@
 | assets/command-hints/source/surface-menu.json | SolidCraft contributors | Original analytic SolidCraft command and camera recipe | MIT OR Apache-2.0 |
 | assets/command-hints/tools/capture-sketch-animation.py | SolidCraft contributors | Original SolidCraft-only capture and composition authoring tool | MIT OR Apache-2.0 |
 | assets/command-hints/tools/capture.py | SolidCraft contributors | Original SolidCraft-only capture and composition authoring tool | MIT OR Apache-2.0 |
+| assets/command-hints/tools/test_capture.py | SolidCraft contributors | Original command illustration verifier regression tests | MIT OR Apache-2.0 |

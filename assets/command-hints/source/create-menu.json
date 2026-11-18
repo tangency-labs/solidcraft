@@ -956,7 +956,12 @@
             ],
             "designation": "M16x2",
             "length": 24,
-            "modeled": true
+            "modeled": true,
+            "from": [
+              8,
+              0,
+              0
+            ]
           }
         }
       ],

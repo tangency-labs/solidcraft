@@ -1311,7 +1311,16 @@
               12.0
             ]
           },
-          "all_closed": true
+          "all_closed": true,
+          "bodies": {
+            "Block": {
+              "center_of_mass": [
+                -14,
+                0,
+                6
+              ]
+            }
+          }
         },
         "after": {
           "body_count": 2,
@@ -1329,7 +1338,16 @@
               12.0
             ]
           },
-          "all_closed": true
+          "all_closed": true,
+          "bodies": {
+            "Block": {
+              "center_of_mass": [
+                14,
+                0,
+                6
+              ]
+            }
+          }
         },
         "volume_relative_tolerance": 0.001,
         "validated_cli": "target/ci/solidcraft-cli"

@@ -490,6 +490,41 @@ fn each_newly_hovered_row_waits_the_full_tip_delay() {
 }
 
 #[test]
+fn text_only_plain_and_help_tips_keep_their_original_narrow_window_position() {
+    fn show(width: f32, x: f32, help: bool) -> Rect {
+        let ctx = crate::test_support::context();
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 480.0));
+        let menu = Rect::from_min_size(pos2(x, 20.0), vec2(220.0, 64.0));
+        let text = "Move the selected body to the chosen destination in the design";
+        let tip = if help { RowTip::Help { text, help: Some("The body keeps its original shape and size.") } } else { RowTip::Plain(text) };
+        let entry = MenuEntry { tip: Some(tip), ..entry("text", true) };
+        let mut shown = None;
+        for time in [0.0, 0.1, 0.3, 1.0, 1.2, 1.4, 1.6] {
+            let raw = RawInput {
+                screen_rect: Some(screen),
+                events: vec![Event::PointerMoved(menu.min + vec2(10.0, 16.0))],
+                time: Some(time),
+                ..Default::default()
+            };
+            crate::test_support::raw_frame(&ctx, raw, |_| {
+                crate::Container::new(&ctx, crate::Surface::Popup).area(egui::Id::unique("text_dropdown")).fixed_pos(menu.min).show(&ctx, |ui| {
+                    let (_, resp) = menu_row(ui, &entry, menu.width(), None, &menu_style());
+                    shown = ctx.read_response(resp.id.with("sc_dropdown_tip_area")).map(|response| response.rect);
+                });
+            });
+        }
+        shown.expect("hovered text-only hint")
+    }
+    for help in [false, true] {
+        let ordinary = show(1280.0, 20.0, help);
+        let narrow = show(640.0, 260.0, help);
+        assert_eq!(ordinary.width(), narrow.width(), "text hints retain their original width");
+        assert_eq!(narrow.left(), 0.0, "the original left placement clamps a wide text hint to the screen edge: {narrow:?}");
+        assert_eq!(narrow.top(), 20.0, "text hints keep their row alignment");
+    }
+}
+
+#[test]
 fn illustrated_tip_stays_beside_a_menu_in_a_narrow_window() {
     for x in [20.0, 400.0] {
         let ctx = crate::test_support::context();
@@ -506,7 +541,7 @@ fn illustrated_tip_stays_beside_a_menu_in_a_narrow_window() {
             crate::test_support::raw_frame(&ctx, raw, |_| {
                 crate::Container::new(&ctx, crate::Surface::Popup).area(egui::Id::unique("narrow_dropdown")).fixed_pos(menu.min).show(&ctx, |ui| {
                     let resp = ui.interact(menu, egui::Id::unique("illustrated_row"), Sense::hover());
-                    shown = menu_tip(ui, menu, &resp, |ui| {
+                    shown = illustrated_menu_tip(ui, menu, &resp, |ui| {
                         ui.allocate_exact_size(vec2(ui.available_width().min(480.0), 300.0), Sense::hover());
                     });
                 });

@@ -2150,7 +2150,7 @@ fn dropdown_row(
     let (action, resp) = ribbon::menu_row(ui, &entry, width, revealed, &menu_style(app));
     if illustrated && let Some(tip) = row.tip.as_deref() {
         let menu = egui::containers::AreaState::load(ui.ctx(), ui.layer_id().id).map(|state| state.rect()).unwrap_or(resp.rect);
-        ribbon::menu_tip(ui, menu, &resp, |ui| dropdown_command_hint(app, ui, c, tip));
+        ribbon::illustrated_menu_tip(ui, menu, &resp, |ui| dropdown_command_hint(app, ui, c, tip));
     }
     if revealed.is_some() {
         reveal_tooltip(app, ui, resp.rect, c, egui::RectAlign::RIGHT_START);
@@ -2399,7 +2399,7 @@ fn illustrated_grid_hint(
     let shortcut = crate::keymap::display_for(app, command.id);
     let reason = disabled.map(|reason| app.tr_label(reason));
     if let Some(tip) = crate::command_help::row_tip(command.id, label, shortcut.as_deref(), reason) {
-        ribbon::menu_tip(ui, menu, response, |ui| dropdown_command_hint(app, ui, command, &tip));
+        ribbon::illustrated_menu_tip(ui, menu, response, |ui| dropdown_command_hint(app, ui, command, &tip));
         return true;
     }
     false

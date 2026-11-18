@@ -2455,7 +2455,13 @@
         "showSketches": false
       },
       "expected": {
-        "body_count": 3
+        "body_count": 3,
+        "joint_values": {
+          "Thread": [
+            450,
+            15
+          ]
+        }
       },
       "explanation": "The native screw relation couples a 450-degree turn with 15 mm of axial travel; the nut is an asymmetric indexed block."
     },
