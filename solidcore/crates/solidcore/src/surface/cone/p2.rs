@@ -1392,8 +1392,10 @@ impl Cone {
         // Not upstream (#17462, #18415 review): the chord recovery holds the arcs to the
         // circle and to the plane square to the ruling only within `pt_tol`, so the copied
         // net is kept as this cylinder's form only when `implicit::lies_on` certifies it on
-        // the cylinder, to the rounding of storing it. Otherwise the surface is no cylinder
-        // here and stays a B-spline.
+        // the cylinder, to the rounding of storing it. That tolerance does not also cover the
+        // rounding of the recovered origin and radius or of the Bezier decomposition's knot
+        // insertion, so a net off by only those may be refused: conservative, never unsound.
+        // Otherwise the surface is no cylinder here and stays a B-spline.
         if from_chord {
             let certificate = implicit::Implicit::Cone {
                 origin,

@@ -22,7 +22,6 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::ZONE_TOL_3D;
-use solidcore::mass::enclosure::enclose_volume;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point2;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
@@ -472,24 +471,21 @@ fn sagitta(r: f64, theta: f64) -> f64 {
 /// A segment whose width is under the zone tolerance is a sliver: its arc and chord are one
 /// edge within the zone at each end of the sweep, and its caps are no faces, so the body is
 /// the wall and the chord's face on four edges (the two merged ends and the two swept
-/// vertices' lines). Its volume is known only to a zone-wide band: a certified enclosure
-/// that wide holds `want`.
-fn assert_sliver(
-    k: &mut Kernel,
-    b: &mut Brep,
-    r: f64,
-    theta: f64,
-    distance: f64,
-    want: f64,
-    case: &str,
-) {
+/// vertices' lines). Its volume is checked against `want` by the integrator (see below).
+fn assert_sliver(k: &mut Kernel, b: &mut Brep, r: f64, theta: f64, want: f64, case: &str) {
     assert!(sagitta(r, theta) < ZONE_TOL_3D, "{case}: not a sliver");
     assert_eq!(counts(b), [2, 4, 4], "{case}: {:?}", kinds(b));
-    let chord = 2.0 * r * (theta / 2.0).sin();
-    let e = enclose_volume(k, b, ZONE_TOL_3D * chord * distance).unwrap();
+    // MEASURED, not certified: `brep_volume` at its finest accuracy agrees with the closed
+    // form to 8.3e-6 (short arc), 4.9e-7 (tilt 1e-3) and 4.9e-5 (tilt 1e-2) relative, the
+    // same at every requested accuracy from 1e-2 to 1e-8 (the merged ends leave no caps, so
+    // its residual is not the requested accuracy). 1e-3 keeps a 20x margin over the worst
+    // and still fails a volume of 0, twice `want`, or a tilted row without its strip term
+    // (which is 98% of `want` there). A certified `enclose_volume` is no check here: at a
+    // zone-band width it holds 0, and asking it for less exhausts its cell budget first.
+    let volume = integrated_volume(k, b);
     assert!(
-        e.lo <= want && want <= e.hi,
-        "{case}: {want:e} not in {e:?}"
+        (volume - want).abs() <= 1e-3 * want,
+        "{case}: volume {volume:e}, want {want:e}"
     );
 }
 
@@ -536,9 +532,13 @@ fn issue_17462_a_short_arc_tilted_about_its_chord_stays_on_its_cylinder() {
         let want = c * distance * segment_area(r, theta)
             + c * s * r * theta.sin() * distance * distance / 2.0;
         if sagitta(r, theta) < ZONE_TOL_3D {
-            assert_sliver(&mut k, &mut b, r, theta, distance, want, &case);
+            assert_sliver(&mut k, &mut b, r, theta, want, &case);
         } else {
             assert_eq!(counts(&b), [4, 6, 4], "{case}: {:?}", kinds(&b));
+            // MEASURED, not certified: the r 50 row agrees to 2.1e-14 and the r 1000 row to
+            // 4.2e-9, a 2.4x margin under 1e-8. That is the integrator's requested accuracy,
+            // so the bound cannot be tighter, and the run is deterministic, so not flaky.
+            // Without the strip term the rows are off by 3.9e-6 and 6.3%, both caught.
             let volume = integrated_volume(&mut k, &mut b);
             assert!(
                 (volume - want).abs() <= 1e-8 * want,
@@ -626,7 +626,7 @@ fn issue_17462_a_very_short_arc_swept_square_is_a_cylinder_about_the_sweep_direc
     // The segment swept square to its plane; 8.4e-8 wide, a sliver.
     let (r, theta) = (88.295_980_686, 0.005_f64.to_radians());
     let want = segment_area(r, theta) * 53.0;
-    assert_sliver(&mut k, &mut b, r, theta, 53.0, want, "short arc");
+    assert_sliver(&mut k, &mut b, r, theta, want, "short arc");
     let (placement, radius) = the_cylinder(&b);
     let axis = placement.z_axis();
     assert!(
