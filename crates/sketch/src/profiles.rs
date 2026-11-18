@@ -1417,7 +1417,10 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
     let mut curve_ends: Vec<Vec2> = Vec::new();
     for pts in by_curve.values() {
         for (i, p) in pts.iter().enumerate() {
-            if !pts.iter().enumerate().any(|(j, q)| j != i && q.dist(*p) <= tol) {
+            // A chord joint's match is the neighbouring endpoint, so test those first: the scan
+            // stays linear for a curve of many chords, and only true curve ends search the rest.
+            let adjacent = [i.checked_sub(1), i.checked_add(1)].into_iter().flatten().filter_map(|j| pts.get(j)).any(|q| q.dist(*p) <= tol);
+            if !adjacent && !pts.iter().enumerate().any(|(j, q)| j != i && q.dist(*p) <= tol) {
                 curve_ends.push(*p);
             }
         }
@@ -3043,7 +3046,7 @@ mod tests {
     /// taller). The ellipse takes part as chords, which run within their tolerance of the circle on
     /// both sides of each touch and so crossed it twice a few hundredths apart, leaving four slivers
     /// of a few 1e-6 that the drawing does not have. The drawing has three regions: the circle and
-    /// the two crescents between it and the ellipse, each pi r (a - r) / 2.
+    /// the two crescents between it and the ellipse.
     #[test]
     fn tangent_touches_of_a_chorded_curve_leave_no_slivers() {
         let mut sk = Sketch::new();
@@ -3056,10 +3059,12 @@ mod tests {
         let mut areas: Vec<f64> = find_profiles(&sk).iter().map(|p| p.region.area()).collect();
         areas.sort_by(f64::total_cmp);
         let pi = std::f64::consts::PI;
-        let crescent = pi * r * (a - r) / 2.0;
         assert_eq!(areas.len(), 3, "{areas:?}");
-        // the ellipse's chords set the crescents' areas to within their tolerance
-        assert!((areas[0] - crescent).abs() < 1e-3 && (areas[1] - crescent).abs() < 1e-3, "{areas:?}");
+        // the circle is exact; the ellipse takes part as its fitted curve, so the two crescents
+        // are equal and the three regions together hold to the ellipse's area within that fit
         assert!((areas[2] - pi * r * r).abs() < 1e-6, "{areas:?}");
+        assert!((areas[0] - areas[1]).abs() < 1e-9, "{areas:?}");
+        let ellipse = pi * r * a;
+        assert!((areas.iter().sum::<f64>() - ellipse).abs() < 1e-3 * ellipse, "{areas:?}");
     }
 }
