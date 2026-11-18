@@ -2,49 +2,41 @@
   "en": {
     "browser.canvas_anchored": "The canvas follows points of a sketch. Change that sketch instead.",
     "cmd.canvas_frame_sketch": "Frame Sketch",
-    "prefs.frame_images_in_sketch": "Images placed in a sketch follow a frame in it",
-    "prefs.frame_images_in_sketch_note": "A canvas or decal placed on the plane of the sketch being edited gets a construction rectangle around it in that sketch, so its constraints and dimensions place and size the image. Off: the image is placed on its own, and Frame Sketch ties it to a rectangle."
+    "ui.palette_frame_image": "Frame the image in the sketch"
   },
   "ar": {
     "browser.canvas_anchored": "تتبع اللوحة نقاط رسم. غيّر ذلك الرسم بدلًا من ذلك.",
     "cmd.canvas_frame_sketch": "رسم إطار",
-    "prefs.frame_images_in_sketch": "الصور الموضوعة في رسم تتبع إطارًا فيه",
-    "prefs.frame_images_in_sketch_note": "تحصل اللوحة أو الملصق الموضوع على مستوى الرسم الجاري تحريره على مستطيل إنشائي حوله في ذلك الرسم، فتحدد قيوده وأبعاده موضع الصورة وحجمها. عند الإيقاف: توضع الصورة وحدها، ويربطها «رسم إطار» بمستطيل."
+    "ui.palette_frame_image": "تأطير الصورة في الرسم"
   },
   "de": {
     "browser.canvas_anchored": "Die Leinwand folgt Punkten einer Skizze. Ändern Sie stattdessen diese Skizze.",
     "cmd.canvas_frame_sketch": "Rahmenskizze",
-    "prefs.frame_images_in_sketch": "In einer Skizze platzierte Bilder folgen einem Rahmen darin",
-    "prefs.frame_images_in_sketch_note": "Eine Leinwand oder ein Aufkleber auf der Ebene der bearbeiteten Skizze erhält in dieser Skizze ein Konstruktionsrechteck, sodass deren Bedingungen und Bemaßungen das Bild platzieren und skalieren. Aus: Das Bild wird für sich platziert, und Rahmenskizze bindet es an ein Rechteck."
+    "ui.palette_frame_image": "Bild in der Skizze einrahmen"
   },
   "he": {
     "browser.canvas_anchored": "הקנבס עוקב אחר נקודות של סקיצה. שנה את הסקיצה במקום זאת.",
     "cmd.canvas_frame_sketch": "סקיצת מסגרת",
-    "prefs.frame_images_in_sketch": "תמונות שממוקמות בסקיצה עוקבות אחר מסגרת בה",
-    "prefs.frame_images_in_sketch_note": "קנבס או מדבקה שממוקמים על מישור הסקיצה הנערכת מקבלים מלבן בנייה סביבם באותה סקיצה, כך שהאילוצים והמידות שלה ממקמים את התמונה וקובעים את גודלה. כבוי: התמונה ממוקמת לבדה, וסקיצת מסגרת קושרת אותה למלבן."
+    "ui.palette_frame_image": "מסגור התמונה בסקיצה"
   },
   "ja": {
     "browser.canvas_anchored": "キャンバスはスケッチの点に従っています。代わりにそのスケッチを変更してください。",
     "cmd.canvas_frame_sketch": "フレームスケッチ",
-    "prefs.frame_images_in_sketch": "スケッチに配置した画像をその中の枠に従わせる",
-    "prefs.frame_images_in_sketch_note": "編集中のスケッチの平面に配置したキャンバスやデカールは、そのスケッチ内に周りを囲む補助線の長方形を持ち、スケッチの拘束と寸法が画像の位置と大きさを決めます。オフ: 画像は単独で配置され、フレームスケッチで長方形に結び付けます。"
+    "ui.palette_frame_image": "スケッチ内で画像を枠で囲む"
   },
   "ko": {
     "browser.canvas_anchored": "캔버스가 스케치의 점을 따릅니다. 대신 그 스케치를 변경하세요.",
     "cmd.canvas_frame_sketch": "프레임 스케치",
-    "prefs.frame_images_in_sketch": "스케치에 놓은 이미지가 그 안의 프레임을 따름",
-    "prefs.frame_images_in_sketch_note": "편집 중인 스케치의 평면에 놓은 캔버스나 데칼은 그 스케치 안에 둘레의 구성선 사각형을 갖게 되어, 스케치의 구속 조건과 치수가 이미지의 위치와 크기를 정합니다. 끄면: 이미지는 단독으로 놓이고, 프레임 스케치가 사각형에 연결합니다."
+    "ui.palette_frame_image": "스케치 안에서 이미지에 프레임 두르기"
   },
   "vi": {
     "browser.canvas_anchored": "Canvas đi theo các điểm của một bản phác thảo. Hãy thay đổi bản phác thảo đó.",
     "cmd.canvas_frame_sketch": "Phác thảo khung",
-    "prefs.frame_images_in_sketch": "Ảnh đặt trong bản phác thảo đi theo một khung trong đó",
-    "prefs.frame_images_in_sketch_note": "Canvas hoặc decal đặt trên mặt phẳng của bản phác thảo đang sửa sẽ có một hình chữ nhật dựng hình bao quanh trong bản phác thảo đó, để các ràng buộc và kích thước của nó đặt vị trí và kích cỡ ảnh. Tắt: ảnh được đặt riêng, và Phác thảo khung gắn nó vào một hình chữ nhật."
+    "ui.palette_frame_image": "Đóng khung ảnh trong bản phác thảo"
   },
   "zh": {
     "browser.canvas_anchored": "画布跟随草图中的点。请改为修改该草图。",
     "cmd.canvas_frame_sketch": "框架草图",
-    "prefs.frame_images_in_sketch": "放置在草图中的图像跟随其中的边框",
-    "prefs.frame_images_in_sketch_note": "放置在正在编辑的草图平面上的画布或贴花，会在该草图中获得一个围绕它的构造矩形，草图的约束和尺寸由此确定图像的位置和大小。关闭：图像单独放置，由框架草图将其绑定到矩形。"
+    "ui.palette_frame_image": "在草图中为图像加边框"
   }
 }
