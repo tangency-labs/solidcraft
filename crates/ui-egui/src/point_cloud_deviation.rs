@@ -426,7 +426,8 @@ pub(crate) fn probe(app: &SolveApp, painter: &Painter, proj: &Proj) {
     let Some(pointer) = painter.ctx().pointer_hover_pos().filter(|p| proj.rect.contains(*p)) else {
         return;
     };
-    let kept = shown_points(c, app.viewport.gpu.is_some(), |k| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(c.id, k)));
+    let view = if app.viewport.gpu.is_some() { View::Gpu } else { View::Cpu { stride: crate::point_clouds::cpu_stride(app) } };
+    let kept = shown_points(c, view, |k| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(c.id, k)));
     let Some((index, k, at)) = nearest(c, &shown.report, &kept, proj, pointer) else { return };
     let (Some(d), Some(closest)) = (shown.report.distances.get(k).copied().flatten(), shown.report.closest.get(k).copied().flatten()) else {
         return;
@@ -457,12 +458,22 @@ pub(crate) fn probe(app: &SolveApp, painter: &Painter, proj: &Proj) {
     painter.galley(rect.min + vec2(4.0, 4.0), galley, t.text);
 }
 
-/// Which of a cloud's points the view shows, as [`nearest`] reads it (empty: all of them). The GPU
+/// How the viewport draws point clouds.
+#[derive(Clone, Copy, Debug)]
+enum View {
+    /// On the GPU: every point the filters keep.
+    Gpu,
+    /// On the CPU: every `stride`th point, unfiltered.
+    Cpu { stride: usize },
+}
+
+/// Which of a cloud's points the view draws, as [`nearest`] reads it (empty: all of them). The GPU
 /// view applies the first [`FILTERS`](solidcraft_viewport_gpu::view::FILTERS) filters, one
-/// `playing` in the Edit Point Cloud card at its range now; the CPU view applies none.
-fn shown_points(c: &PointCloud, gpu: bool, playing: impl Fn(usize) -> Option<[f64; 2]>) -> Vec<bool> {
-    if !gpu {
-        return Vec::new();
+/// `playing` in the Edit Point Cloud card at its range now; the CPU view applies none and draws
+/// every `stride`th point.
+fn shown_points(c: &PointCloud, view: View, playing: impl Fn(usize) -> Option<[f64; 2]>) -> Vec<bool> {
+    if let View::Cpu { stride } = view {
+        return if stride <= 1 { Vec::new() } else { (0..c.len()).map(|i| i % stride == 0).collect() };
     }
     let drawn = crate::point_clouds::as_drawn(c, playing);
     let filters: Vec<_> = drawn.filters.iter().take(solidcraft_viewport_gpu::view::FILTERS).cloned().collect();
@@ -589,19 +600,43 @@ mod tests {
 
     #[test]
     fn the_probe_reads_the_points_the_view_shows() {
+        use super::View::{Cpu, Gpu};
         let mut h = crate::scenario::Harness::new();
         let id = cloud(&mut h, "shown", &[[5.0, 0.0, 0.0], [10.0, 0.0, 0.0], [15.0, 0.0, 0.0]]);
         let c = |h: &crate::scenario::Harness| h.app.session.doc.point_clouds.iter().find(|c| c.id == id).unwrap().clone();
-        assert!(super::shown_points(&c(&h), true, |_| None).is_empty(), "no filters: every point");
+        assert!(super::shown_points(&c(&h), Gpu, |_| None).is_empty(), "no filters: every point");
         // Four filters drawn; a fifth, which would hide everything, is not drawn and not read.
         let x = |range: [f64; 2]| json!({"property": "x", "range": range});
         let filters = json!([x([0.0, 12.0]), x([0.0, 100.0]), x([0.0, 100.0]), x([0.0, 100.0]), x([50.0, 60.0])]);
         h.app.run("pointcloud.edit", json!({"cloud": id, "filters": filters})).unwrap();
-        assert_eq!(super::shown_points(&c(&h), true, |_| None), [true, true, false]);
+        assert_eq!(super::shown_points(&c(&h), Gpu, |_| None), [true, true, false]);
         // A filter playing in the Edit Point Cloud card, at its range now.
-        assert_eq!(super::shown_points(&c(&h), true, |k| (k == 0).then_some([0.0, 7.0])), [true, false, false]);
-        // The CPU view draws every point, filtered or not.
-        assert!(super::shown_points(&c(&h), false, |_| None).is_empty());
+        assert_eq!(super::shown_points(&c(&h), Gpu, |k| (k == 0).then_some([0.0, 7.0])), [true, false, false]);
+        // The CPU view draws every point, filtered or not, or every `stride`th one.
+        assert!(super::shown_points(&c(&h), Cpu { stride: 1 }, |_| None).is_empty());
+        assert_eq!(super::shown_points(&c(&h), Cpu { stride: 2 }, |_| None), [true, false, true]);
+    }
+
+    #[test]
+    fn the_probe_picks_the_nearest_drawn_point() {
+        let mut h = crate::scenario::Harness::new();
+        // Two points a hair apart, both under the pointer, and one far off.
+        let id = cloud(&mut h, "nearest", &[[0.0, 0.0, 0.0], [0.01, 0.0, 0.0], [50.0, 0.0, 0.0]]);
+        let c = h.app.session.doc.point_clouds.iter().find(|c| c.id == id).unwrap().clone();
+        let report: super::Report = serde_json::from_value(json!({
+            "signed": true, "tolerance_mm": 0.1, "cloud_points": 3, "sample_step": 1, "sampled": 3, "measured": 3,
+            "failed": 0, "mean_abs_mm": null, "mean_signed_mm": null, "rms_mm": null, "max_abs_mm": null,
+            "within_tolerance": 0, "within_tolerance_fraction": null, "distances": [0.1, 0.2, 0.3]
+        }))
+        .unwrap();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let cam = h.app.cam;
+        let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
+        let pointer = proj.to_screen(c.world_point(0).unwrap()).unwrap();
+        let pick = |kept: &[bool]| super::nearest(&c, &report, kept, &proj, pointer).map(|(index, k, _)| (index, k));
+        assert_eq!(pick(&[]), Some((0, 0)), "everything drawn: the point under the pointer");
+        assert_eq!(pick(&[false, true, true]), Some((1, 1)), "the first not drawn: the next nearest drawn point");
+        assert_eq!(pick(&[false, false, true]), None, "no drawn point near the pointer");
     }
 
     #[test]
