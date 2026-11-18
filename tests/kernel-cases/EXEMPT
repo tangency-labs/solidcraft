@@ -537,6 +537,7 @@ view.render_stage                 the view: camera, layout, display
 view.ribbon_tabs_only             the view: camera, layout, display
 view.right                        the view: camera, layout, display
 view.save                         the view: camera, layout, display
+view.set_compass                  per-view UI visibility, no geometry
 view.shots_strip                  the view: camera, layout, display
 view.spin                         the view: camera, layout, display
 view.status_details               the view: camera, layout, display

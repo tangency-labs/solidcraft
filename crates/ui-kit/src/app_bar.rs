@@ -607,6 +607,7 @@ pub enum ViewState {
 /// each its icon and colours.
 #[derive(Clone, Copy, Debug)]
 pub struct ViewTab<'a> {
+    pub compass: Option<bool>,
     pub name: &'a str,
     /// What its icon draws: `model`, `sketch`, `sheet`, `render` or `animation` ([`paint_view_glyph`]).
     pub icon: &'a str,
@@ -1350,7 +1351,7 @@ pub fn paint_view_glyph(p: &Painter, r: Rect, icon: &str, ink: egui::Color32) {
 /// off without `others`, and the row `off` is off; each row's centre is published under `prefix` and its id.
 fn menu_rows<'a>(
     ui: &mut egui::Ui,
-    rows: &'a [TabMenuRow<'a>],
+    rows: &[TabMenuRow<'a>],
     keys: bool,
     others: bool,
     off: &str,
@@ -1383,7 +1384,7 @@ fn menu_rows<'a>(
         }
         item.enabled = (!row.needs_others || others) && (!row.needs_remote_view || !local_view) && row.id != off && row.disabled_tip.is_none();
         let mut control = crate::MenuItem::from_item(&item, flyout.as_ref().is_some_and(|f| f.open == Some(i)));
-        control.checked = row.checked.then_some(true);
+        control.checked = if row.id == "view.compass" { Some(row.checked) } else { row.checked.then_some(true) };
         control.submenu = !row.children.is_empty();
         let response = control.show(ui);
         if let Some(tip) = row.disabled_tip {
@@ -2345,7 +2346,13 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                 Popup::View(k) => {
                     let locals = views.iter().filter(|view| view.to_window.is_none()).count();
                     let off = if views.iter().skip(k + 1).any(|view| view.to_window.is_none()) { "" } else { strip.view_right_row };
-                    menu_rows(ui, strip.view_menu, true, locals > 1, off, h.menu_row, Some(&mut flyout)).map(|id| TabAction::ViewMenu { view: k, id })
+                    let compass = views.get(k).and_then(|view| view.compass);
+                    let rows: Vec<_> = strip
+                        .view_menu
+                        .iter()
+                        .filter_map(|row| if row.id == "view.compass" { compass.map(|checked| TabMenuRow { checked, ..*row }) } else { Some(*row) })
+                        .collect();
+                    menu_rows(ui, &rows, true, locals > 1, off, h.menu_row, Some(&mut flyout)).map(|id| TabAction::ViewMenu { view: k, id })
                 }
                 Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, None).map(|id| TabAction::PlusMenu { id }),
                 Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
