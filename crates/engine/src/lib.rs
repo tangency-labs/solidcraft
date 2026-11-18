@@ -1026,10 +1026,14 @@ impl Session {
     }
 
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
+    /// A model evaluated with the tolerance heal preference ([`solidcraft_kernel::heals_tolerance_defects`])
+    /// set the other way holds other results (its imports healed or as read, Repair healing first
+    /// or not): evaluated again.
     pub(crate) fn saved_model(doc: &Arc<Document>, saved: Option<&solidcraft_doc::SavedModel>) -> Option<Model> {
         saved
             .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
             .and_then(|saved| Model::adopt(doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok())
+            .filter(|model| model.heals() == solidcraft_kernel::heals_tolerance_defects())
     }
 
     /// A session on `doc` evaluated as `model`, with what it hides.
@@ -1757,6 +1761,17 @@ impl Session {
 
     pub fn refresh(&mut self) {
         let _ = self.refresh_with_joint_report();
+    }
+
+    /// Settle what the imports' background checks found ([`solidcraft_doc::Model::settle_import_checks`]),
+    /// and when they healed parts the design does not show yet, evaluate it again: except during
+    /// a live edit, which a refresh would end (a later call does it). Returns whether it refreshed.
+    pub fn settle_import_checks(&mut self) -> bool {
+        if self.model.settle_import_checks() && self.live_links.is_none() {
+            self.refresh();
+            return true;
+        }
+        false
     }
 
     /// Refresh normally, retaining the last joint solve for commands that report its outcome.

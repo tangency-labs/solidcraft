@@ -867,12 +867,47 @@ pub struct Kernel {
     /// tree.
     #[cfg(feature = "profile")]
     pub profiler: crate::profile::Profiler,
+    /// Test-only seam of the curved coincident strip's drop ([`StripProbe`]); shared with
+    /// the kernel copies an operation makes.
+    #[cfg(test)]
+    pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
     /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-57
     /// substitution replay ([`crate::surface::surface::replay`]). No hook by default, and
     /// then it changes nothing. Shared with the kernel copies an operation makes for its
     /// caches, which call through the same seam.
     #[cfg(feature = "wr57-replay")]
     pub replay: crate::surface::surface::replay::ReplaySeam,
+}
+
+/// Test-only seam of `boolean::topology_intersector::curved_strip`
+/// (tangency-labs/solidcraft#18166): where an operation's topology intersector drops the
+/// curves over curved coincident strips, each run in `runs` is made first on a copy of the
+/// operation's real intersection list, and the number of intervals it drops appended to
+/// `dropped`. `active` is the run being made; its perturbations are read by the drop's
+/// checks.
+#[cfg(test)]
+#[derive(Debug, Default)]
+pub(crate) struct StripProbe {
+    /// The runs still to make (taken by the first drop reached).
+    pub(crate) runs: Vec<StripProbeRun>,
+    /// The intervals each run dropped, in order.
+    pub(crate) dropped: Vec<usize>,
+    /// The run being made.
+    pub(crate) active: Option<StripProbeRun>,
+}
+
+/// One run of [`StripProbe`]: the drop at tolerance `tol`, with `extra` added to the
+/// strip's enclosure, the dropped curve's gap and N's piece's gap (in that order), and,
+/// with `event_on_n`, a synthetic interval end on N at the middle of its piece.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct StripProbeRun {
+    /// The tolerance the drop is called with.
+    pub(crate) tol: f64,
+    /// Added to the strip's bound, the curve's gap and N's piece's gap.
+    pub(crate) extra: [f64; 3],
+    /// A synthetic interval end on N inside its piece.
+    pub(crate) event_on_n: bool,
 }
 
 impl Default for Kernel {
@@ -915,6 +950,8 @@ impl Kernel {
             coons_tangency_log: RefCell::new(None),
             #[cfg(feature = "profile")]
             profiler: crate::profile::Profiler::default(),
+            #[cfg(test)]
+            strip_probe: Arc::default(),
             #[cfg(feature = "wr57-replay")]
             replay: crate::surface::surface::replay::ReplaySeam::default(),
         }
