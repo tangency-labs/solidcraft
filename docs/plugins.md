@@ -662,6 +662,10 @@ lets an importer check its result, and `storage@0.1` keeps data in a design (bel
 `viewport` arrive later as their own
 versioned interfaces. While a version is 0.x, a minor version may break the one before it.
 
+`themes@0.1` lets a plugin add colour themes to Preferences > Appearance > Theme from
+`solidcraft-theme/1` files it ships; it needs no runtime. A plugin that does not list it is not
+affected. See [plugin themes](plugin-themes.md).
+
 0.2 added one error, `plugin-error.unsupported(string)`: the input is valid, but this plugin does
 not handle it, such as a file with no solids or a newer version of its format. Use it instead of
 `invalid-input`, which means the input is broken; SolidCraft then says "Sample does not support

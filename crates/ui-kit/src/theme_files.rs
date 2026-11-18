@@ -1428,7 +1428,45 @@ pub fn read_builtin(sources: &[(&str, &str)]) -> Result<Vec<ThemeFile>, String> 
 /// The theme a `theme` preference names: built in, or imported. `None` for dark, light, system
 /// or an unknown id.
 pub fn find<'a>(id: &str, custom: &'a [ThemeFile]) -> Option<&'a ThemeFile> {
-    builtin().iter().find(|t| t.id == id).or_else(|| custom.iter().find(|t| t.id == id))
+    builtin().iter().find(|t| t.id == id).or_else(|| custom.iter().find(|t| t.id == id)).or_else(|| plugin_theme(id))
+}
+
+thread_local! {
+    /// The plugin themes on offer to this thread's window: `(id, file text, theme)`, the id
+    /// `plugin:<plugin>/<theme>`. A theme is leaked once per distinct file text, so [`find`] can
+    /// return a reference to it; a plugin theme changes only when its plugin does.
+    static PLUGIN_THEMES: std::cell::RefCell<Vec<(String, String, &'static ThemeFile)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn plugin_theme(id: &str) -> Option<&'static ThemeFile> {
+    PLUGIN_THEMES.with(|offered| offered.borrow().iter().find(|(key, _, _)| key == id).map(|(_, _, theme)| *theme))
+}
+
+/// Replaces the offer with `offers`, `(id, theme file text)`; a file that does not read is left out and named.
+pub fn set_plugin_themes(offers: Vec<(String, String)>) -> Vec<String> {
+    let previous: Vec<_> = PLUGIN_THEMES.with(|offered| offered.take());
+    let mut errors = Vec::new();
+    let mut kept = Vec::new();
+    for (id, text) in offers {
+        if let Some(same) = previous.iter().find(|(key, old, _)| *key == id && *old == text) {
+            kept.push(same.clone());
+            continue;
+        }
+        match parse(&text) {
+            Ok(theme) => {
+                let leaked: &'static ThemeFile = Box::leak(Box::new(ThemeFile { id: id.clone(), ..theme }));
+                kept.push((id, text, leaked));
+            }
+            Err(error) => errors.push(format!("{id}: {error}")),
+        }
+    }
+    PLUGIN_THEMES.with(|offered| *offered.borrow_mut() = kept);
+    errors
+}
+
+/// The plugin themes on offer, `(id, name)`, in the order they were set.
+pub fn plugin_theme_choices() -> Vec<(String, String)> {
+    PLUGIN_THEMES.with(|offered| offered.borrow().iter().map(|(key, _, theme)| (key.clone(), theme.name.clone())).collect())
 }
 
 /// Retired built-in cards now select a contrast value on their light/dark family.

@@ -3961,7 +3961,8 @@ fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     // Built-in names are UI labels; a custom theme keeps the name its author gave it.
     let builtins = crate::theme_files::builtin().iter().map(|t| (t.id.clone(), solidcraft_ui_text::tr_label(&t.name).to_string()));
     let custom = app.preferences.custom_themes.iter().map(|t| (t.id.clone(), t.name.clone()));
-    let mut choices: Vec<_> = modes.chain(builtins).chain(custom).collect();
+    let plugins = crate::theme_files::plugin_theme_choices().into_iter();
+    let mut choices: Vec<_> = modes.chain(builtins).chain(custom).chain(plugins).collect();
     choices.sort_by_key(|(id, _)| match id.as_str() {
         "light" => 0,
         "dark" => 1,

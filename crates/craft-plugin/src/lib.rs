@@ -31,6 +31,8 @@ pub const MAX_EXTENSIONS: usize = 32;
 /// Memory32 has at most 65536 pages of 64 KiB.
 pub const MAX_MEMORY_MIB: usize = 4096;
 
+pub mod theme;
+
 pub type Result<T> = std::result::Result<T, HostError>;
 
 /// An open document session and its committed history state, kept outside authored document data.
@@ -155,6 +157,7 @@ pub const CAPABILITIES: &[(&str, (u32, u32))] = &[
     ("formats", (0, 2)),
     ("forms", (0, 1)),
     ("storage", (0, 1)),
+    ("themes", (0, 1)),
 ];
 /// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
 /// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
@@ -544,6 +547,9 @@ pub struct Manifest {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeManifest>,
+    /// Colour themes for the theme picker (`themes@0.1`); a plugin may ship themes and no runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub themes: Vec<theme::ThemeDecl>,
 }
 
 /// A read-only entry called after a coalesced whole-document invalidation. Listeners refresh
@@ -875,6 +881,15 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         return Err(invalid("runtime.listeners", "design listeners require capability design@0.1"));
     }
     check_storage(&manifest)?;
+    let themed = manifest.capabilities.iter().any(|capability| capability.starts_with("themes@"));
+    if !manifest.themes.is_empty() {
+        if !themed {
+            return Err(invalid("capabilities", "a plugin with themes needs the themes capability: \"capabilities\": [\"themes@0.1\"]"));
+        }
+        theme::validate(&manifest.themes)?;
+    } else if themed {
+        return Err(invalid("themes", "the themes capability needs at least one theme"));
+    }
     Ok(manifest)
 }
 

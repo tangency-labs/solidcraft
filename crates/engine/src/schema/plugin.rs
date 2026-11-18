@@ -316,6 +316,9 @@ pub struct InstallResult {
     /// For an importer: the file extensions it opens, lowercase, without the dot.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opens: Vec<String>,
+    /// For a plugin with `themes@0.1`: the colour themes it adds to the theme picker.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub themes: Vec<craft_plugin::theme::ThemeDecl>,
     /// The installed plugin of the same id, `name version`, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaces: Option<String>,
