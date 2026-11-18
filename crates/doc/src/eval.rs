@@ -10197,7 +10197,11 @@ fn shares_material(
     let mut all = lines.to_vec();
     all.extend(round_face_axes(tool, MAX_PROBED_FACES));
     all.extend([(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)]);
-    let inside = |b: &Body, p: Vec3| matches!(b.classify_point(p), Ok(kernel::PointClass::Inside));
+    let inside = |b: &Body, p: Vec3| {
+        #[cfg(test)]
+        cost_tests::count(|c| c.classifications += 1);
+        matches!(b.classify_point(p), Ok(kernel::PointClass::Inside))
+    };
     all.iter().any(|&(o, d)| {
         let Some((lo, hi)) = line_in_box(&both, o, d) else { return false };
         (0..SAMPLES_PER_LINE).any(|k| {
