@@ -398,15 +398,29 @@ fn a_half_disc_keeps_its_cone_or_gets_tangent_planes() {
 
 /// A profile curve that is neither a line nor an arc has no exact wall: the
 /// curvature-keeping rule refuses it at its start, and the tangent rule leaves it to
-/// SMLib's offset method.
+/// SMLib's offset method. (A B-spline that is a straight line is a line, #16639.)
 #[test]
 fn a_free_form_corner_is_not_exact() {
-    use solidcore::nurbs::b_spline_curve::p1::BSplineCurve;
+    use solidcore::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
     let mut k = kernel();
-    // the rectangle with its bottom side as a plain B-spline
+    // the rectangle with its bottom side a quadratic B-spline bowed out by 0.25
     let mut curves = rectangle();
-    curves[0] =
-        Curve::from(BSplineCurve::create_line_segment(3, p(0.0, 0.0), p(20.0, 0.0)).unwrap());
+    curves[0] = Curve::from(
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &[p(0.0, 0.0), p(10.0, -0.5), p(20.0, 0.0)],
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap(),
+    );
     let TaperExtrude::Refused(refusal) =
         taper(&mut k, &curves, -10.0, OffsetCornerType::CurveExtension)
     else {

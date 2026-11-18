@@ -83,6 +83,7 @@ use crate::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm, Canonical
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::math::NOW;
 use crate::surface::cone::Cone;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::FaceCurvesInput;
@@ -890,9 +891,29 @@ pub(super) fn has_corner(k: &Kernel, composite: &CompositeCurve, n: Vec3) -> boo
     false
 }
 
+/// Whether `input` is a B-spline whose control points have positive weights (or none) and
+/// lie within `tol` of its chord, which is longer than `tol`: the whole curve lies in their
+/// convex hull, so it is that straight line (#16639; the fork takes only lines).
+fn straight_bspline(input: &Curve, tol: f64) -> bool {
+    let CurveKind::BSpline(c) = input.kind() else {
+        return false;
+    };
+    let Some(nurb) = c.gw_nurb() else {
+        return false;
+    };
+    let pts = nurb.cpts();
+    let (Some(first), Some(last)) = (pts.first(), pts.last()) else {
+        return false;
+    };
+    pts.iter().all(|p| p.w == NOW || p.w > 0.0)
+        && first.to_euclid().distance(last.to_euclid()) > tol
+        && nurb.is_line(tol)
+}
+
 /// The line or circle among `inputs` that the profile's segment `c` is (its copy,
 /// split at tangent breaks, is a plain B-spline; a line or a circle has none, so it is
-/// the one with the same ends and middle), or `None` (`sm_DraftInput`).
+/// the one with the same ends and middle), or `None` (`sm_DraftInput`). A straight
+/// B-spline ([`straight_bspline`]) is a line here.
 fn draft_input<'a>(
     k: &Kernel,
     c: &Curve,
@@ -904,7 +925,10 @@ fn draft_input<'a>(
     let end = c.evaluate_point(k, ivl.max())?;
     let mid = c.evaluate_point(k, ivl.mid())?;
     for input in inputs {
-        if !(input.is_kind_of(CIRCLE_TYPE) || input.is_kind_of(LINE_TYPE)) {
+        if !(input.is_kind_of(CIRCLE_TYPE)
+            || input.is_kind_of(LINE_TYPE)
+            || straight_bspline(input, tol))
+        {
             continue;
         }
         let j = input.natural_interval();
