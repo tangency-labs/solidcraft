@@ -31,15 +31,21 @@
 //! as `corpus.parity` reads them, and remeasured to reproduce this branch's values. The
 //! classes are pinned in [`EXPECTED`] and [`CORPUS_EXPECTED`].
 //!
+//! EQUAL ranks nothing, but bounds the new value's error by `|n - o| / 2 + w`. Each test
+//! also checks that bound against the accuracy the value claims (`within_accuracy`), and
+//! lists the entries whose enclosure is too wide for it ([`WIDE`], [`CORPUS_WIDE`]).
+//!
 //! Result: 616 moved fillet entries (72 rows) are all EQUAL. Their moves are at most 1.5e-9
 //! of their scale, and each enclosure is 8.8e-6 to 1.6e-4 of its scale wide; some bodies'
-//! enclosures spend their cell budget and stay valid, wider. Of the 19 moved corpus entries
-//! (14 files), `test1.smb`'s volume is CLOSER: its enclosure is 6.7e-11 of the volume wide,
-//! against a move of 7.0e-9. 15 are EQUAL; the volume enclosures that spend their budget are
-//! up to 0.13 of the volume wide. `vase1.smb`'s area and volume and `vase3.smb`'s volume
-//! ([`CORPUS_UNENCLOSED`], moves of 1.1e-16, 1.4e-13 and 3.7e-14) have no certified
-//! enclosure, as those bodies have a surface the enclosure has no NURBS form of. No entry is
-//! FARTHER.
+//! enclosures spend their cell budget and stay valid, wider (41 entries past the rows'
+//! accuracy). Of the 19 moved corpus entries (14 files), `test1.smb`'s volume is CLOSER: its
+//! enclosure is 6.7e-11 of the volume wide, against a move of 7.0e-9. The other areas,
+//! enclosed face by face at 1e-10, are EQUAL within the accuracy; `vase1.smb`'s area is
+//! classified by its moved B-spline faces alone ([`CORPUS_MOVED_FACES`]). The other volumes
+//! are EQUAL, those whose enclosure spends its budget too wide for the accuracy. The volumes
+//! of `vase1.smb` and `vase3.smb` ([`CORPUS_UNENCLOSED`], moves of 1.4e-13 and 3.7e-14) have
+//! no certified enclosure: those bodies have offset faces the enclosure has no NURBS form
+//! of, and the volume does not split by face. No entry is FARTHER.
 //!
 //! Run (each body's enclosure is a full sweep, so `#[ignore]`d; the goldens job checks the
 //! rows themselves):
@@ -70,13 +76,16 @@ use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p2::PPF_AREA;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, FaceId, Kernel, Result, SolidError};
 
 const UNIT: &str = "blend.fillet_executive_p3";
 /// The goldens' default `--seeds`.
 const SEEDS: usize = 16;
 /// The width asked of each enclosure, relative to its value's scale.
 const ENCLOSURE_WIDTH: f64 = 1e-5;
+/// The fillet rows' integration accuracy (`brep_mass_properties` at `1e-4`), relative to
+/// each value's scale.
+const FILLET_ACCURACY: f64 = 1e-4;
 /// The tests the fillet rows are split into, by body.
 const PARTS: usize = 4;
 
@@ -149,9 +158,19 @@ fn part_of(index: usize) -> usize {
     first % PARTS
 }
 
-/// Classifies every moved entry of the rows of [`ROWS`] in `part`: `(case, entry, side)` in
-/// order.
-fn classify(part: usize) -> Vec<(&'static str, usize, Side)> {
+/// What an EQUAL entry certifies: the new value is within `|n - o| / 2 + w` of the true one.
+/// Whether that bound is within the record's accuracy (`accuracy * scale`); where it is
+/// not, the enclosure is too wide for EQUAL to say the new value is as good as asked.
+fn within_accuracy(o: f64, n: f64, band: Bounds, accuracy: f64, scale: f64) -> bool {
+    (n - o).abs() / 2.0 + band.width() <= accuracy * scale
+}
+
+/// A classification: `(case, entry, side)` for each moved entry in order, and the entries
+/// whose [`within_accuracy`] bound is not met.
+type Classified = (Vec<(&'static str, usize, Side)>, Vec<(&'static str, usize)>);
+
+/// Classifies every moved entry of the rows of [`ROWS`] in `part`.
+fn classify(part: usize) -> Classified {
     let ctx = CaseContext {
         root: repo_root(),
         seeds: SEEDS,
@@ -160,6 +179,7 @@ fn classify(part: usize) -> Vec<(&'static str, usize, Side)> {
     let unit = reg.iter().find(|u| u.id() == UNIT).unwrap();
     let cases = unit.cases(&ctx).unwrap();
     let mut classes = Vec::new();
+    let mut wide = Vec::new();
     let mut enclosed: Vec<Enclosed> = Vec::new();
     let (mut rows, mut entries, mut equal) = (0_usize, 0_usize, 0_usize);
     for (index, &(name, old, new)) in ROWS.iter().enumerate() {
@@ -244,6 +264,10 @@ fn classify(part: usize) -> Vec<(&'static str, usize, Side)> {
                 band.width() / scales[i]
             );
             classes.push((name, i, class));
+            if !within_accuracy(o, n, band, FILLET_ACCURACY, scales[i]) {
+                eprintln!("KNOTLINE WIDE {name}: {}", NAMES[i]);
+                wide.push((name, i));
+            }
         }
     }
     eprintln!(
@@ -251,22 +275,27 @@ fn classify(part: usize) -> Vec<(&'static str, usize, Side)> {
          {equal} EQUAL",
         enclosed.len()
     );
-    classes
+    (classes, wide)
 }
 
-/// Classifies `part` and checks it against [`EXPECTED`].
-fn check(part: usize) {
-    let classes = classify(part);
-    let expected: Vec<(&str, usize, Side)> = EXPECTED
+/// The entries of `table` whose row is in `part`.
+fn in_part<T: Copy>(table: &[T], part: usize, case: impl Fn(&T) -> &str) -> Vec<T> {
+    table
         .iter()
         .copied()
         .filter(|e| {
-            let index = ROWS.iter().position(|r| r.0 == e.0).unwrap();
+            let index = ROWS.iter().position(|r| r.0 == case(e)).unwrap();
             part_of(index) == part
         })
-        .collect();
+        .collect()
+}
+
+/// Classifies `part` and checks it against [`EXPECTED`] and [`WIDE`].
+fn check(part: usize) {
+    let (classes, wide) = classify(part);
     assert!(classes.iter().all(|c| c.2 != Side::Farther), "{classes:#?}");
-    assert_eq!(classes, expected, "{classes:#?}");
+    assert_eq!(classes, in_part(&EXPECTED, part, |e| e.0), "{classes:#?}");
+    assert_eq!(wide, in_part(&WIDE, part, |e| e.0), "{wide:#?}");
 }
 
 #[test]
@@ -396,12 +425,50 @@ const CORPUS_ROWS: [CorpusRow; 15] = [
     ),
 ];
 
-/// The moved `corpus.parity` entries with no certified enclosure: their bodies have a
-/// surface the enclosure has no NURBS form of. Each moved by less than `values_agree`.
-const CORPUS_UNENCLOSED: [(&str, &str); 3] = [
-    ("Fillet/vase1.smb", "area"),
+/// Main's area share (`corpus.parity`'s per-face magnitude) of each face whose share the
+/// change moved, by index in `bl::faces` order, for a file whose area is classified by its
+/// moved faces alone. `vase1.smb`'s offset faces (7 to 10) have no NURBS form for the
+/// enclosure, but no knot lines either, so the change leaves their shares as they were; its
+/// moved faces are B-spline faces. Main's total is these shares put back into this branch's
+/// per-face sum, in order, bit for bit (asserted).
+const CORPUS_MOVED_FACES: [(&str, &[(usize, f64)]); 1] = [(
+    "Fillet/vase1.smb",
+    &[
+        (11, 1625.6165255730168),
+        (12, 1625.4290821567192),
+        (13, 1625.4190215795325),
+        (14, 1625.4276823035011),
+        (15, 1387.8705788203556),
+        (16, 1387.8724374646633),
+        (17, 1387.8724608831935),
+        (18, 1387.8705996055176),
+    ],
+)];
+
+/// The moved `corpus.parity` volumes with no certified enclosure (ARGUED, not PROVEN):
+/// their bodies have offset faces, which the enclosure has no NURBS form of, and
+/// `brep_volume` does not split into per-face shares (the gap-closure strips and corners
+/// are shared between faces), so the moved part cannot be enclosed alone as an area can.
+/// Each moved by less than `values_agree` (1.4e-13 and 3.7e-14 of the volume).
+const CORPUS_UNENCLOSED: [(&str, &str); 2] = [
     ("Fillet/vase1.smb", "volume"),
     ("Fillet/vase3.smb", "volume"),
+];
+
+/// The classified corpus entries whose enclosure, wider than asked (the volume
+/// enclosures' refinement stopped at its cell budget), leaves `|n - o| / 2 + w` above
+/// [`CORPUS_ACCURACY`] of the value: EQUAL there bounds the new value's error only by that
+/// width.
+const CORPUS_WIDE: [(&str, &str); 9] = [
+    ("Fillet/knife.smb", "volume"),
+    ("Fillet/blade_hub_1.smb", "volume"),
+    ("Fillet/blade_hub_2.smb", "volume"),
+    ("Fillet/blade_hub_3.smb", "volume"),
+    ("Fillet/bottle.smb", "volume"),
+    ("Fillet/box_extrusion2.smb", "volume"),
+    ("Fillet/cliff_1.smb", "volume"),
+    ("Fillet/cliff_2.smb", "volume"),
+    ("Solids/revolution_mold.smb", "volume"),
 ];
 
 /// `corpus.parity`'s integration accuracy.
@@ -409,6 +476,21 @@ const CORPUS_ACCURACY: f64 = 1e-6;
 /// The volume enclosure's width, relative to the volume: narrow enough to rank the moves
 /// (8.0e-9 and 7.0e-9 of the volume) where the enclosure reaches it.
 const CORPUS_VOLUME_WIDTH: f64 = 1e-10;
+/// Each face's area enclosure's width, relative to its area.
+const CORPUS_AREA_WIDTH: f64 = 1e-10;
+
+/// An enclosure of the total area of `faces` of `b`, face by face (each positive), the sum
+/// rounded outward.
+fn enclose_faces_area(k: &Kernel, b: &mut Brep, faces: &[FaceId]) -> Result<Bounds> {
+    let (mut lo, mut hi) = (0.0_f64, 0.0_f64);
+    for &f in faces {
+        let e = enclose_face_area_relative(k, b, &[f], CORPUS_AREA_WIDTH)?;
+        assert!(e.lo > 0.0, "{f:?}: [{}, {}]", e.lo, e.hi);
+        lo = (lo + e.lo).next_down();
+        hi = (hi + e.hi).next_up();
+    }
+    Ok(Bounds { lo, hi })
+}
 
 /// Each moved `corpus.parity` entry, read and measured as that unit measures it. Each run
 /// reproduces this branch's value, and each entry is classified against a certified
@@ -419,6 +501,7 @@ const CORPUS_VOLUME_WIDTH: f64 = 1e-10;
 fn moved_corpus_entries_are_classified() {
     let mut classes = Vec::new();
     let mut unenclosed = Vec::new();
+    let mut wide = Vec::new();
     for (path, old, new) in CORPUS_ROWS {
         let mut k = Kernel::default();
         let mut b = Brep::new_with_infinite_region().unwrap();
@@ -442,6 +525,7 @@ fn moved_corpus_entries_are_classified() {
         read_from_file(&mut k, &mut b, data, FileType::Ascii, false, &mut env).unwrap();
         // corpus.parity's measures, in its order: the area, then the volume
         let mut area = 0.0;
+        let mut shares = Vec::new();
         let faces = bl::faces(&b, None).unwrap();
         for &f in &faces {
             let bbox =
@@ -461,6 +545,7 @@ fn moved_corpus_entries_are_classified() {
             )
             .unwrap();
             area += p.area.abs();
+            shares.push(p.area.abs());
         }
         let store = AttributeStore::new();
         let attrs = PropertyAttributes {
@@ -479,29 +564,39 @@ fn moved_corpus_entries_are_classified() {
                 values_agree(run, n, None),
                 "{path}: the run's {what} {run} does not reproduce this branch's {n}"
             );
-            // the area face by face, as `corpus.parity` sums each face's magnitude (a sheet's
-            // face, such as `shell_fillet2.smb`'s, counts from its upward use, so its
-            // enclosure may be its area negated), the sum rounded outward
-            let band = if what == "area" {
-                let mut sum = Ok((0.0_f64, 0.0_f64));
-                for &f in &faces {
-                    let Ok((lo, hi)) = sum else { break };
-                    sum = enclose_face_area_relative(&k, &mut b, &[f], ENCLOSURE_WIDTH).map(|e| {
-                        let (flo, fhi) = if e.hi <= 0.0 {
-                            (-e.hi, -e.lo)
-                        } else {
-                            assert!(e.lo >= 0.0, "{path} {f:?}: [{}, {}] holds 0", e.lo, e.hi);
-                            (e.lo, e.hi)
-                        };
-                        ((lo + flo).next_down(), (hi + fhi).next_up())
-                    });
+            // The area is `corpus.parity`'s sum of each face's magnitude (a sheet's face, such
+            // as `shell_fillet2.smb`'s, counts from its upward use), so it is enclosed face by
+            // face. Where only some faces' shares moved ([`CORPUS_MOVED_FACES`]), the entry
+            // is classified by those faces' shares alone: main's and this branch's sums of
+            // them, in face order, against an enclosure of those faces' area.
+            let moved = CORPUS_MOVED_FACES
+                .iter()
+                .find(|m| m.0 == path && what == "area");
+            let (oc, nc, band) = if let Some((_, moved)) = moved {
+                let mut main_shares = shares.clone();
+                let (mut o_m, mut n_m) = (0.0, 0.0);
+                for &(i, share) in *moved {
+                    assert_ne!(shares[i], share, "{path}: face {i}'s share did not move");
+                    main_shares[i] = share;
+                    o_m += share;
+                    n_m += shares[i];
                 }
-                sum.map(|(lo, hi)| Bounds { lo, hi })
+                let main_sum = main_shares.iter().fold(0.0, |s, a| s + a);
+                assert_eq!(
+                    main_sum.to_bits(),
+                    o.to_bits(),
+                    "{path}: main's shares do not give main's area"
+                );
+                let ids: Vec<FaceId> = moved.iter().map(|&(i, _)| faces[i]).collect();
+                (o_m, n_m, enclose_faces_area(&k, &mut b, &ids))
+            } else if what == "area" {
+                (o, n, enclose_faces_area(&k, &mut b, &faces))
             } else {
-                enclose_volume(&k, &mut b, CORPUS_VOLUME_WIDTH * n.abs()).map(|e| {
+                let band = enclose_volume(&k, &mut b, CORPUS_VOLUME_WIDTH * n.abs()).map(|e| {
                     eprintln!("{path}: the volume enclosure stopped at {:?}", e.stop);
                     Bounds { lo: e.lo, hi: e.hi }
-                })
+                });
+                (o, n, band)
             };
             // a surface the enclosure has no NURBS form of (an offset surface, say) has no
             // certified enclosure: the entry is listed as unenclosed, with its move
@@ -517,21 +612,27 @@ fn moved_corpus_entries_are_classified() {
                 }
                 band => band.unwrap(),
             };
-            let class = side(o, n, band.lo, band.hi).unwrap();
+            let class = side(oc, nc, band.lo, band.hi).unwrap();
             eprintln!(
-                "KNOTLINE {class:?} {path}: {what} main {o:e}, now {n:e}, move/value {:e}, \
+                "KNOTLINE {class:?} {path}: {what} main {oc:e}, now {nc:e}, move/value {:e}, \
                  enclosure [{:e}, {:e}], w/value {:e}",
-                (n - o).abs() / n.abs(),
+                (nc - oc).abs() / n.abs(),
                 band.lo,
                 band.hi,
                 band.width() / n.abs()
             );
+            // the accuracy the value claims, relative to the whole value
+            if !within_accuracy(oc, nc, band, CORPUS_ACCURACY, n.abs()) {
+                eprintln!("KNOTLINE WIDE {path}: {what}");
+                wide.push((path, what));
+            }
             classes.push((path, what, class));
         }
     }
     assert_eq!(unenclosed, CORPUS_UNENCLOSED.to_vec(), "{unenclosed:#?}");
     assert!(classes.iter().all(|c| c.2 != Side::Farther), "{classes:#?}");
     assert_eq!(classes, CORPUS_EXPECTED.to_vec(), "{classes:#?}");
+    assert_eq!(wide, CORPUS_WIDE.to_vec(), "{wide:#?}");
 }
 
 #[test]

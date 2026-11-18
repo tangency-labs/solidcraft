@@ -618,8 +618,55 @@ static EXPECTED: [(&str, usize, Side); 616] = [
     ("sweep5-sphere_diff_3cylinders-e29-r1.0", 11, Side::Equal),
 ];
 
+// The moved entries whose enclosure, wider than asked (its refinement stopped short), leaves
+// `|n - o| / 2 + w` above the rows' accuracy: EQUAL there bounds the new value's error
+// only by that width.
+static WIDE: [(&str, usize); 41] = [
+    ("stubs4-Heart-all-edges-r0.1", 0),
+    ("stubs4-degenerate-bottle-e0-r0.5", 6),
+    ("stubs4-degenerate-bottle-e0-r0.5", 7),
+    ("stubs4-degenerate-bottle-e10-r0.5", 6),
+    ("stubs4-degenerate-bottle-e10-r0.5", 7),
+    ("stubs4-degenerate-bottle-e13-r0.5", 6),
+    ("stubs4-degenerate-bottle-e13-r0.5", 7),
+    ("stubs4-degenerate-bottle-e2-r0.5", 6),
+    ("stubs4-degenerate-bottle-e2-r0.5", 7),
+    ("stubs4-delete-edge-bottle-e16-r0.5", 6),
+    ("stubs4-delete-edge-bottle-e16-r0.5", 7),
+    ("stubs4-delete-edge-bottle-e19-r0.5", 6),
+    ("stubs4-delete-edge-bottle-e19-r0.5", 7),
+    ("stubs4-delete-edge-bottle-e27-r0.5", 6),
+    ("stubs4-delete-edge-bottle-e27-r0.5", 7),
+    ("stubs4-delete-edge-bottle-e27-r2.0", 6),
+    ("stubs4-delete-edge-bottle-e27-r2.0", 7),
+    ("stubs4-delete-edge-bottle-e29-r2.0", 6),
+    ("stubs4-delete-edge-bottle-e29-r2.0", 7),
+    ("stubs4-delete-edge-bottle-e30-r0.1", 6),
+    ("stubs4-delete-edge-bottle-e30-r0.1", 7),
+    ("stubs4-delete-edge-bottle-e30-r2.0", 6),
+    ("stubs4-delete-edge-bottle-e30-r2.0", 7),
+    ("stubs4-delete-edge-bottle-e32-r0.1", 6),
+    ("stubs4-delete-edge-bottle-e32-r0.1", 7),
+    ("stubs4-delete-edge-bottle-e32-r2.0", 6),
+    ("stubs4-delete-edge-bottle-e32-r2.0", 7),
+    ("stubs4-delete-edge-bottle-e4-r0.5", 6),
+    ("stubs4-delete-edge-bottle-e4-r0.5", 7),
+    ("stubs4-delete-edge-bottle-e6-r0.5", 6),
+    ("stubs4-delete-edge-bottle-e6-r0.5", 7),
+    ("stubs4-delete-edge-bottle-e7-r0.1", 6),
+    ("stubs4-delete-edge-bottle-e7-r0.1", 7),
+    ("stubs4-delete-edge-bottle-e8-r0.1", 6),
+    ("stubs4-delete-edge-bottle-e8-r0.1", 7),
+    ("stubs4-delete-edge-bottle-e8-r0.5", 6),
+    ("stubs4-delete-edge-bottle-e8-r0.5", 7),
+    ("sweep4-bottle-e29-r0.1", 6),
+    ("sweep4-bottle-e29-r0.1", 7),
+    ("sweep5-bottle-e29-r1.0", 6),
+    ("sweep5-bottle-e29-r1.0", 7),
+];
+
 // Every moved `corpus.parity` entry with its class against the certified enclosure.
-const CORPUS_EXPECTED: [(&str, &str, Side); 16] = [
+const CORPUS_EXPECTED: [(&str, &str, Side); 17] = [
     ("Fillet/knife.smb", "area", Side::Equal),
     ("Fillet/knife.smb", "volume", Side::Equal),
     ("Fillet/test1.smb", "volume", Side::Closer),
@@ -634,6 +681,7 @@ const CORPUS_EXPECTED: [(&str, &str, Side); 16] = [
     ("Fillet/shell_fillet2.smb", "area", Side::Equal),
     ("Fillet/sphere_dif_box.smb", "area", Side::Equal),
     ("Fillet/sphere_plane.smb", "area", Side::Equal),
+    ("Fillet/vase1.smb", "area", Side::Equal),
     ("Solids/revolution_mold.smb", "area", Side::Equal),
     ("Solids/revolution_mold.smb", "volume", Side::Equal),
 ];
