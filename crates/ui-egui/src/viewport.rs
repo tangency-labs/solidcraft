@@ -10508,6 +10508,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         orbiting,
         snap_hint: !app.preferences.free_orbit,
         home_label: solidcraft_ui_text::tr_label("Home view").to_owned(),
+        turn_around_label: app.preferences.navigator_turn_around.then(|| app.tr("ui.navigator_turn_around").to_owned()),
     };
     // The compass returns a tip or Home; its drag came from `axis_view_orbit` above.
     match crate::view_compass::show(ui, &compass) {
@@ -10522,6 +10523,10 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
             app.animate_turn(to);
         }
         Some(crate::view_compass::ViewAction::Home) => app.animate_view("home"),
+        Some(crate::view_compass::ViewAction::TurnAround) => {
+            let camera = app.cam_anim.as_ref().map_or(app.cam, |animation| animation.to);
+            let _ = app.run("view.navigate", json!({"camera":camera,"action":"turn_around","fit":app.preferences.navigator_fit}));
+        }
         None => {}
     }
 }

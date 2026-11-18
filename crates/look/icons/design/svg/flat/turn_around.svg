@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Turn around</title>
+  <path d="M13 52L13 27A15 15 0 0 1 43 27L43 40" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M33 40L43 52L53 40Z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

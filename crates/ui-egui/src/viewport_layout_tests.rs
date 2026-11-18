@@ -851,6 +851,80 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
 }
 
 #[test]
+fn turn_around_button_reverses_the_view_and_can_restore_the_old_navigator() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        for (width, height, scale) in [(1280, 720, 1.0), (720, 480, 1.0), (1000, 720, 1.5)] {
+            let mut h = Harness::new();
+            h.call("ui.set", json!({"layout":mode}));
+            h.call("ui.resize", json!({"width":width,"height":height}));
+            h.call("ui.prefs", json!({"navigator_style":"axes","navigator_fit":false,"look_at_anim":false,"ui_scale":scale}));
+            let before = Camera { yaw: 0.8, pitch: 0.6, roll: 0.4, distance: 123.0, target: Vec3::new(4.0, 5.0, 6.0), ..Default::default() };
+            h.app.cam = before;
+            h.frames(2);
+            let document = h.app.session.doc.to_json();
+            let undo = h.app.session.undo.len();
+            let turn = crate::scenario::rect_of("axis_view:turn_around").unwrap();
+            let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+            let home = crate::scenario::rect_of("axis_view:home").unwrap();
+            assert!(outer.contains_rect(turn) && !turn.intersects(home));
+            h.call("ui.move", json!({"x":turn.center().x,"y":turn.center().y}));
+            assert_eq!(h.output.cursor_icon, egui::CursorIcon::PointingHand);
+            h.call("ui.click", json!({"x":turn.center().x,"y":turn.center().y}));
+            assert!(h.app.cam.back().dist(-before.back()) < 1e-9);
+            assert!(h.app.cam.basis().1.dist(before.basis().1) < 1e-9);
+            assert_eq!((h.app.cam.target, h.app.cam.distance, h.app.cam.fov), (before.target, before.distance, before.fov));
+            h.call("ui.click", json!({"x":turn.center().x,"y":turn.center().y}));
+            assert!(h.app.cam.back().dist(before.back()) < 1e-9 && h.app.cam.basis().0.dist(before.basis().0) < 1e-9);
+            assert_eq!(h.app.session.doc.to_json(), document);
+            assert_eq!(h.app.session.undo.len(), undo);
+            assert!(h.app.session.selection.is_empty());
+            h.call("ui.prefs", json!({"navigator_turn_around":false}));
+            assert!(crate::scenario::rect_of("axis_view:turn_around").is_none());
+            assert_eq!(crate::scenario::rect_of("axis_view:home"), Some(home), "hiding the new button restores the old layout");
+        }
+    }
+}
+
+#[test]
+fn turn_around_clicks_compose_with_the_animation_target_and_keep_fitting_and_locks() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"navigator_fit":false,"look_at_anim":true}));
+    let before = Camera { yaw: 0.8, pitch: 0.6, roll: 0.4, distance: 123.0, ..Default::default() };
+    h.app.cam = before;
+    h.frames(2);
+    let at = crate::scenario::handle_at("axis_view:turn_around").unwrap();
+    let tap = |h: &mut Harness| {
+        for pressed in [true, false] {
+            h.frame_with(crate::test_support::pointer(at, pressed));
+        }
+    };
+    tap(&mut h);
+    let first = h.app.cam_anim.unwrap();
+    assert!(first.is_screen_up_turn() && first.to.back().dist(-before.back()) < 1e-9);
+    tap(&mut h);
+    let second = h.app.cam_anim.unwrap();
+    assert!(second.is_screen_up_turn() && second.to.back().dist(before.back()) < 1e-9, "a second quick click reverses the pending view");
+    h.settle();
+    assert!(h.app.cam.back().dist(before.back()) < 1e-9);
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.preferences.navigator_fit = true;
+    h.app.run("view.navigate", json!({"camera":before,"action":"turn_around","fit":true})).unwrap();
+    assert!(h.app.pending_fit.is_some());
+    h.frame();
+    assert!(h.app.pending_fit.is_none());
+    assert!(h.app.cam_anim.unwrap().is_screen_up_turn(), "the measured fit retains the turn's interpolation");
+    h.settle();
+    assert_navigator_shared_zoom(&h.app, h.app.cam);
+    h.app.ui.view_angles_lock_yaw = true;
+    h.app.ui.view_angles_lock_pitch = true;
+    h.app.ui.view_angles_lock_roll = true;
+    let locked = h.app.cam;
+    h.app.run("view.navigate", json!({"camera":locked,"action":"turn_around"})).unwrap();
+    h.settle();
+    assert!(h.app.cam.back().dist(locked.back()) < 1e-9 && h.app.cam.basis().1.dist(locked.basis().1) < 1e-9);
+}
+
+#[test]
 fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
     for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
