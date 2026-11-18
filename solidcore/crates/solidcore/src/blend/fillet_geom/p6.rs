@@ -102,6 +102,7 @@ use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, RolloverGue
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
+use crate::curve::line::Line;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::context::{MarkLock, MarkType};
 use crate::geom::extent1d::Extent1d;
@@ -189,13 +190,12 @@ pub(crate) fn corner_of<'c>(
         .ok_or_else(|| invalid(op, "fillet corner id not in the corner table"))
 }
 
-/// `SM_CAST_PTR(SmBSplineCurve, pCopy)` after an ignored `Copy`: the copy when it is a
-/// B-spline curve, else `NULL`. Every caller's `Copy` is one fork 9b7cd48 passes on
-/// (SER): with `fillet_statuses_pass_on` its error is returned.
+/// `SM_CAST_PTR(SmBSplineCurve, pCopy)` after a `Copy`: the copy when it is a
+/// B-spline curve, else `NULL`. Upstream ignores the `Copy` status; fork 9b7cd48 passes
+/// it on (SER) and so does this (WR-661).
 fn copy_as_b_spline(k: &Kernel, curve: &Curve) -> Result<Option<Curve>> {
     // fork 9b7cd48 passes this on (SER)
-    let copy = crate::error::passed_on(curve.copy(k), k.fixes.fillet_statuses_pass_on)?;
-    Ok(ignored(copy)?.filter(|c| c.is_kind_of(BSPLINE_CURVE_TYPE)))
+    Ok(Some(curve.copy(k)?).filter(|c| c.is_kind_of(BSPLINE_CURVE_TYPE)))
 }
 
 /// The `SmBSplineCurve` a curve of a B-spline class is (`SM_CAST_PTR(SmBSplineCurve, ..)`):
@@ -251,6 +251,62 @@ fn first_uv<O: SolutionObject>(solutions: &SolutionArray<O>, op: &'static str) -
     Ok(Point2::new(s.start.param(0)?, s.start.param(1)?))
 }
 
+/// Not the fork's: the segment from `start` to `end` when `curve`
+/// (the side edge's) is a line, both points lie on its line within the edge's tolerance,
+/// and both lie at or past the same end of the edge, one past it, where their drops would
+/// both clamp to that end; `None` otherwise (the points drop onto the edge as upstream does).
+fn continued_line_segment(
+    k: &Kernel,
+    target: &Brep,
+    orig_edge: EdgeId,
+    curve: &Curve,
+    start: Point3,
+    end: Point3,
+) -> Result<Option<Curve>> {
+    // every test below accepts only on a positive, finite result
+    if ![start.x, start.y, start.z, end.x, end.y, end.z]
+        .iter()
+        .all(|v| v.is_finite())
+    {
+        return Ok(None);
+    }
+    let Some(orig) = target.edge(orig_edge)?.curve.as_ref() else {
+        return Ok(None);
+    };
+    if !orig.is_kind_of(crate::curve::curve::p2::LINE_TYPE) {
+        return Ok(None);
+    }
+    let tol = edge::tolerance(target, orig_edge)?;
+    let ivl = edge::interval(target, orig_edge)?;
+    let a = curve.evaluate_point(k, ivl.min())?;
+    let b = curve.evaluate_point(k, ivl.max())?;
+    let d = b - a;
+    let len2 = d.dot(d);
+    if len2 <= tol * tol {
+        return Ok(None);
+    }
+    // both points at or past the same end, one of them past it: their drops would both clamp
+    // to that end
+    let reach = tol / len2.sqrt();
+    let mut ts = [0.0f64; 2];
+    for (slot, p) in ts.iter_mut().zip([start, end]) {
+        let t = (p - a).dot(d) / len2;
+        let foot = a + d * t;
+        let off = (p - foot).length();
+        if !off.is_finite() || !t.is_finite() || off > tol {
+            return Ok(None);
+        }
+        *slot = t;
+    }
+    let past_high = ts.iter().all(|&t| t >= 1.0 - reach) && ts.iter().any(|&t| t > 1.0 + reach);
+    let past_low = ts.iter().all(|&t| t <= reach) && ts.iter().any(|&t| t < -reach);
+    let span = (end - start).length();
+    if !(past_high || past_low) || !span.is_finite() || span <= tol {
+        return Ok(None);
+    }
+    Ok(Some(Curve::from(Line::from_points(start, end, 3))))
+}
+
 /// `SmCurve::DropPoint(ivl, pnt, NULL, dTol, NULL, bSuccess, dParam, dDist)` with the
 /// default `SM_SO_MINIMIZE`: the parameter when the call succeeds and finds a point,
 /// `None` otherwise ([`SolidError::Unported`] propagates).
@@ -268,18 +324,17 @@ fn drop_param(
     }
 }
 
-/// `SM_CAST_PTR(SmBSplineSurface, pCopy)` after an ignored `Copy`: the copy when it
-/// `IsKindOf(SmBSplineSurface_TYPE)`, else `NULL`. Its one caller's `Copy` is one fork
-/// 9b7cd48 passes on (SER): with `fillet_statuses_pass_on` its error is returned.
+/// `SM_CAST_PTR(SmBSplineSurface, pCopy)` after a `Copy`: the copy when it
+/// `IsKindOf(SmBSplineSurface_TYPE)`, else `NULL`. Upstream ignores the `Copy` status;
+/// fork 9b7cd48 passes it on (SER) and so does this (WR-661).
 fn copy_as_b_spline_surface(k: &Kernel, surface: &Surface) -> Result<Option<Surface>> {
     // fork 9b7cd48 passes this on (SER)
-    match ignored(crate::error::passed_on(
-        surface.copy(k),
-        k.fixes.fillet_statuses_pass_on,
-    )?)? {
-        Some(s) if s.is_kind_of(B_SPLINE_SURFACE_TYPE)? => Ok(Some(s)),
-        _ => Ok(None),
-    }
+    let s = surface.copy(k)?;
+    Ok(if s.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
+        Some(s)
+    } else {
+        None
+    })
 }
 
 /// `sm_MoveTSP(rTsectPnts, lFrom, lTo)`: when the points at `from` and `to` are out of
@@ -957,7 +1012,7 @@ impl FilletBrep {
             .ok_or_else(|| nul("the original edge's curve"))?;
         let new_3d_curve = copy_as_b_spline(k, orig_curve)?
             .ok_or_else(|| nul("the original curve's B-spline copy"))?;
-        self.finish_edge_on_edge(k, e, target, new_3d_curve, false)
+        self.finish_edge_on_edge(k, e, target, new_3d_curve, false, false)
     }
 
     /// [`Self::calc_edge_on_edge`] of an edge of a corner at `corner_vertex` (the fork's
@@ -1150,12 +1205,14 @@ impl FilletBrep {
             joined = true;
             break;
         }
-        self.finish_edge_on_edge(k, e, target, new_3d_curve, joined)
+        self.finish_edge_on_edge(k, e, target, new_3d_curve, joined, !roll_over)
     }
 
     /// The rest of `CalcEdgeOnEdge` after the curve's copy: the trim between the end
     /// points' drops (on the joined curve's natural interval when `joined`, else on the
-    /// original edge's interval), the reversal and the curve's setting.
+    /// original edge's interval), the reversal and the curve's setting. `continue_line`:
+    /// at a corner that is not a roll-over, where a straight side edge may be continued past its
+    /// end ([`continued_line_segment`]).
     fn finish_edge_on_edge(
         &mut self,
         k: &Kernel,
@@ -1163,6 +1220,7 @@ impl FilletBrep {
         target: &Brep,
         mut new_3d_curve: Curve,
         joined: bool,
+        continue_line: bool,
     ) -> Result<()> {
         let nul = |what| SolidError::blend_missing(OP_ON_EDGE, what);
         // get filletEdge vertices
@@ -1171,6 +1229,22 @@ impl FilletBrep {
             .fillet_edge(e)?
             .original_edge()
             .ok_or_else(|| nul("the fillet edge's original edge"))?;
+
+        // Not the fork's: on a straight side edge
+        // continued past its end (a cliff overflow at a concave crease), the segment of its line
+        if !joined && continue_line {
+            if let Some(line) = continued_line_segment(
+                k,
+                target,
+                orig_edge,
+                &new_3d_curve,
+                self.vertex_point(start_fv)?,
+                self.vertex_point(end_fv)?,
+            )? {
+                set_rail_curve(self.brep_mut(), e, line)?;
+                return Ok(());
+            }
+        }
 
         // Trim ThisFilletEdge->OrigCurveCopy by Start and End FilletPoints
         let mut trim_ivl = if joined {
@@ -1904,19 +1978,14 @@ impl FilletBrep {
 
             // when given an OffsetSurface to copy - copy it
             if let Some(off) = other_off_surf {
-                // SmOffsetSurface::Copy(); a failed copy leaves the slot unchanged; fork
-                // 9b7cd48 passes this on (SER)
-                if let Some(surface) = ignored(crate::error::passed_on(
-                    off.surface.copy(k),
-                    k.fixes.fillet_statuses_pass_on,
-                )?)? {
-                    let new_off = OffsetSurface {
-                        surface,
-                        base_id: off.base_id,
-                    };
-                    if let Some(slot) = self.geom_mut(g)?.off_surfs.get_mut(i) {
-                        *slot = Some(new_off);
-                    }
+                // SmOffsetSurface::Copy(); upstream ignores a failed copy (the slot is
+                // left unchanged); fork 9b7cd48 passes it on (SER), as does this
+                let new_off = OffsetSurface {
+                    surface: off.surface.copy(k)?,
+                    base_id: off.base_id,
+                };
+                if let Some(slot) = self.geom_mut(g)?.off_surfs.get_mut(i) {
+                    *slot = Some(new_off);
                 }
             }
 

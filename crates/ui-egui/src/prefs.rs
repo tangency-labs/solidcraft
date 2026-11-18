@@ -1096,10 +1096,6 @@ preference_settings! {
     library_thumbnail_size: crate::library::ThumbnailSize = crate::library::ThumbnailSize::Large, PAGE_LAYOUT;
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
-    /// Drawings (preview): the Drawing workspace and its settings. Off by default, so the app shows
-    /// no Drawing workspace until it is turned on; a design's drawings are kept as they are either
-    /// way.
-    drawings_preview: bool = false, PAGE_DESIGN => check_id_help("prefs.drawings_preview", "prefs.drawings_preview_help");
     /// First or third angle for new drawings (third when not set, or set to one this version
     /// doesn't know).
     default_projection: Projection = Projection::Third, PAGE_DESIGN;
@@ -1178,6 +1174,9 @@ preference_settings! {
     navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
+    /// The quick menu (`quick_menu`) also opens by itself shortly after a click in the viewport
+    /// selects something a command takes (#5501). Off by default: a click only selects.
+    quick_menu_after_selection: bool = false, PAGE_NAVIGATION => check_tr("prefs.quick_menu_after_selection");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
     direct_interaction: bool = false, PAGE_TOOLS;
     /// Mouse gestures: a ring of tools on the right button.
@@ -1403,6 +1402,12 @@ preference_settings! {
     /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
     /// its solids as one Import feature, as before.
     freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");
+    /// Import with cadmpeg: a STEP, FreeCAD or Rhino file is read from cadmpeg's model straight
+    /// into B-rep records: a STEP file decoded by cadmpeg's STEP decoder instead of SolidCraft's
+    /// own STEP reader, and a FreeCAD or Rhino file's solids instead of restated as STEP by
+    /// cadmpeg's STEP writer and read by SolidCraft's STEP reader. Off (the default) keeps
+    /// SolidCraft's STEP reader for all three, as before.
+    cadmpeg_import: bool = false, PAGE_GENERAL => check_id("settings.cadmpeg_import");
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
     /// Degrees per step near the assembly Move ring.
@@ -1984,6 +1989,9 @@ preference_settings! {
     move_drag_highlights: bool = false, PAGE_TOOLS => check_id("prefs.move_drag_highlights");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
+    /// Remember a moved plugin command window's position for the current design, until the
+    /// application closes (#18684). Off keeps the previously centred reopen behaviour.
+    plugin_remember_dialog_position: bool = false, PAGE_PLUGINS;
     /// Approved install permissions survive page resets and Cancel, like installed files.
     plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
     /// User ceilings, not automatic increases to a package's approved execution budget.

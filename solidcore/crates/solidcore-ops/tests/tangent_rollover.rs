@@ -19,6 +19,9 @@
     clippy::indexing_slicing
 )] // test
 
+#[path = "../../solidcore/tests/support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 mod common;
 
 use std::f64::consts::PI;
@@ -26,17 +29,16 @@ use std::f64::consts::PI;
 use common::edge_at;
 use solidcore_ops::blend::{blend, Blend, Corners};
 use solidcore_ops::boolean::boolean;
-use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error, RoomReason};
+use solidcore_ops::{
+    blend_with, make_box, session, BlendOptions, Body, BooleanOp, CheckLevel, Contract, Error,
+    RoomReason,
+};
 
 const LENGTH: f64 = 10.0;
 
-/// The corpus's fix set (`kernel_cases/fixes.json`, the set SolidCraft runs).
+/// SolidCraft's fix set (`solidcraft_fixes.rs`, the set SolidCraft runs).
 fn fixes() {
-    let fixes: Vec<String> = serde_json::from_str(include_str!(
-        "../../solidcore/tests/kernel_cases/fixes.json"
-    ))
-    .unwrap();
-    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(solidcraft_fixes::solidcraft_fix_names()).unwrap();
 }
 
 /// The L step with a strip `w` wide.
@@ -1351,13 +1353,18 @@ fn a_corner_round_whose_rail_ends_on_the_top_s_edge_builds() {
 const CORNER_ROUND_REACHES_W: f64 = 25.0 - 14.317_821_063_276_353;
 
 /// The corner round `r4` on [`arm_boss_foot_only`] (or on `b`), with the corpus's fix set
-/// (`corpus`) or none: its result, the fix set restored after.
+/// (`corpus`) or none, under [`Contract::Proved`]: its result, the fix set restored after.
 fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
     let e = edge_at(b, [-36.0, -65.0, 2.5]);
     if !corpus {
         session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
     }
-    let result = blend(b, Blend::Round, &[e], &[r4], &[], Corners::Filled);
+    // proved: the contract under which a blend refuses rounds that cross
+    let proved = BlendOptions {
+        contract: Contract::Proved,
+        ..BlendOptions::default()
+    };
+    let result = blend_with(b, Blend::Round, &[e], &[r4], &[], Corners::Filled, proved);
     fixes();
     result.map(|_| ())
 }
@@ -2364,7 +2371,8 @@ fn a_lone_round_between_a_plane_and_a_cylinder_rolls_over_the_seam() {
                 && matches!(
                     &built,
                     Err(Error::BlendFailed { status: 1001, phrase, .. })
-                        if phrase == "the faces the rails enclose reach past the rails"
+                        // the kernel's statement, then what the session noted of the step
+                        if phrase.starts_with("the faces the rails enclose reach past the rails")
                 )
             {
                 continue;
