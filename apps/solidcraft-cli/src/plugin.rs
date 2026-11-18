@@ -324,7 +324,9 @@ fn read_cases(tests: &Path) -> Result<Vec<(String, Result<Case, String>)>, Strin
     let mut files = Vec::new();
     for entry in entries {
         let path = entry.map_err(|e| format!("could not read the tests folder {}: {e}", tests.display()))?.path();
-        if path.extension().is_some_and(|e| e == "json") && path.is_file() {
+        if path.extension().is_some_and(|e| e == "json")
+            && std::fs::metadata(&path).map_err(|e| format!("could not check the test case {}: {e}", path.display()))?.is_file()
+        {
             files.push(path);
             if files.len() > MAX_CASES {
                 return Err(format!("{} holds more than {MAX_CASES} test cases", tests.display()));
@@ -426,6 +428,10 @@ fn case_grants(manifest: &Manifest, approval: &str, tests: &Path, work: &Path, c
 fn unlinked_in_tests(tests: &Path, from: &str) -> Result<PathBuf, String> {
     let path = in_tests(tests, from, "from")?;
     let mut at = tests.to_path_buf();
+    let meta = std::fs::symlink_metadata(&at).map_err(|e| format!("from `{from}`: {}: {e}", at.display()))?;
+    if meta.file_type().is_symlink() {
+        return Err(format!("from `{from}`: {} is a link; copy the files into the tests folder instead", at.display()));
+    }
     for part in Path::new(from).components() {
         at.push(part);
         let meta = std::fs::symlink_metadata(&at).map_err(|e| format!("from `{from}`: {}: {e}", at.display()))?;

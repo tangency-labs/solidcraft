@@ -249,9 +249,34 @@ fn a_cases_grants_and_fixtures_stay_inside_its_tests_and_scratch_folders() {
         assert!(!output.status.success() && stdout.contains("FAIL  seeded (make)") && stdout.contains("is a link"), "{stdout}");
         std::fs::remove_file(tests.join("seeded.json")).unwrap();
         std::fs::remove_file(tests.join("linked")).unwrap();
+        // The tests root itself must not redirect the fixture copy outside the package.
+        std::fs::write(tests.join("seeded.json"), seeded.to_string()).unwrap();
+        let external = scratch.0.join("external-tests");
+        std::fs::rename(&tests, &external).unwrap();
+        std::os::unix::fs::symlink(&external, &tests).unwrap();
+        let output = cli(&["plugin", "test", &path]);
+        std::fs::remove_file(&tests).unwrap();
+        std::fs::rename(&external, &tests).unwrap();
+        let stdout = text(&output.stdout);
+        assert!(!output.status.success() && stdout.contains("FAIL  seeded (make)") && stdout.contains("is a link"), "{stdout}");
+        // Listing a folder without search permission must not silently drop its cases.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tests, std::fs::Permissions::from_mode(0o400)).unwrap();
+        let metadata_denied = std::fs::metadata(tests.join("seeded.json")).is_err();
+        let output = cli(&["plugin", "test", &path, "--require-cases"]);
+        std::fs::set_permissions(&tests, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if metadata_denied {
+            assert!(!output.status.success() && text(&output.stderr).contains("could not check the test case"), "{}", text(&output.stderr));
+        }
+        std::fs::remove_file(tests.join("seeded.json")).unwrap();
+        // A dangling case link also reports its metadata error, even with elevated rights.
+        std::os::unix::fs::symlink(tests.join("missing.json"), tests.join("broken.json")).unwrap();
+        let output = cli(&["plugin", "test", &path, "--require-cases"]);
+        std::fs::remove_file(tests.join("broken.json")).unwrap();
+        let stderr = text(&output.stderr);
+        assert!(!output.status.success() && stderr.contains("could not check the test case") && stderr.contains("broken.json"), "{stderr}");
         // A tests folder that can't be read is an error, not an empty suite (unless this runs
         // with the rights to read it anyway).
-        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tests, std::fs::Permissions::from_mode(0o000)).unwrap();
         let unreadable = std::fs::read_dir(&tests).is_err();
         let output = cli(&["plugin", "test", &path]);

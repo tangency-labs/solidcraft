@@ -65,12 +65,11 @@ pub fn run(root: &Path, run_tests: bool) -> Result<(), String> {
             let component = wrap(&read_bytes(&module)?)?;
             let package = dir.join(package);
             let installed = package.join(module_file(&package)?);
-            std::fs::write(&installed, component).map_err(|e| format!("{}: {e}", installed.display()))?;
-            let mut c = crate::cargo();
-            c.args(["run", "--profile", "ci", "-p", "solidcraft-cli", "--", "plugin", "test", "--require-cases"]).arg(&package);
-            let result = crate::run(c, &format!("solidcraft-cli plugin test {}", package.display()));
-            let _ = std::fs::remove_file(&installed);
-            result?;
+            with_component(&installed, &component, || {
+                let mut c = crate::cargo();
+                c.args(["run", "--profile", "ci", "-p", "solidcraft-cli", "--", "plugin", "test", "--require-cases"]).arg(&package);
+                crate::run(c, &format!("solidcraft-cli plugin test {}", package.display()))
+            })?;
         }
     }
     println!("plugin-examples: {} examples match the guide and build", EXAMPLES.len());
@@ -126,9 +125,85 @@ fn wrap(module: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn read(path: &Path) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
+    std::fs::read_to_string(path).map(|text| text.replace("\r\n", "\n")).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn read_bytes(path: &Path) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Install the test component temporarily, restoring a developer's component on either result.
+fn with_component(path: &Path, component: &[u8], run: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+    let original = match std::fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    let result = std::fs::write(path, component).map_err(|error| format!("{}: {error}", path.display())).and_then(|()| run());
+    let restored = match original {
+        Some(bytes) => std::fs::write(path, bytes),
+        None => std::fs::remove_file(path),
+    };
+    restored.map_err(|error| format!("restoring {}: {error}", path.display()))?;
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    fn scratch() -> PathBuf {
+        let path = std::env::temp_dir().join(format!("solidcraft-plugin-examples-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir(&path).expect("create scratch directory");
+        path
+    }
+
+    #[test]
+    fn crlf_examples_and_manifests_match_guide_blocks() {
+        let dir = scratch();
+        let guide = dir.join("guide.md");
+        let example = dir.join("lib.rs");
+        let manifest = dir.join("Cargo.toml");
+        std::fs::write(&guide, "```rust\r\nfn main() {}\r\n```\r\n```toml\r\n[dependencies]\r\n```\r\n").unwrap();
+        std::fs::write(&example, "fn main() {}\r\n").unwrap();
+        std::fs::write(&manifest, "[package]\r\nname = \"example\"\r\n[dependencies]\r\n").unwrap();
+        let blocks = fenced_blocks(&read(&guide).unwrap());
+        assert!(blocks.iter().any(|(language, body)| language == "rust" && *body == read(&example).unwrap()));
+        assert!(blocks.iter().any(|(language, body)| language == "toml" && read(&manifest).unwrap().contains(body)));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn component_is_restored_after_success_and_failure() {
+        let dir = scratch();
+        let path = dir.join("example.wasm");
+        for succeeds in [true, false] {
+            std::fs::write(&path, b"developer component").unwrap();
+            let result = with_component(&path, b"test component", || {
+                assert_eq!(std::fs::read(&path).unwrap(), b"test component");
+                if succeeds { Ok(()) } else { Err("test failed".into()) }
+            });
+            assert_eq!(result, if succeeds { Ok(()) } else { Err("test failed".into()) });
+            assert_eq!(std::fs::read(&path).unwrap(), b"developer component");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn new_component_is_removed_after_success_and_failure() {
+        let dir = scratch();
+        let path = dir.join("example.wasm");
+        for succeeds in [true, false] {
+            let result = with_component(&path, b"test component", || {
+                assert_eq!(std::fs::read(&path).unwrap(), b"test component");
+                if succeeds { Ok(()) } else { Err("test failed".into()) }
+            });
+            assert_eq!(result.is_ok(), succeeds);
+            assert!(!path.exists());
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
