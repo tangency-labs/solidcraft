@@ -60,11 +60,13 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// `SM_ERR`: a stage of the gap search failed with no reason the kernel names
-/// ([`OffsetFailure::StageFailed`], a defect).
+/// `SM_ERR`: a failed stage of the gap search, keeping the condition that stopped it.
+/// The stage's class and status stay unchanged; its cause names the failed check.
 #[track_caller]
-fn sm_err() -> SolidError {
-    SolidError::offset_stage_failed(OP, crate::error::SM_ERR)
+fn sm_err(reason: &'static str) -> SolidError {
+    Failure::new(OP, OffsetFailure::StageFailed)
+        .caused_by(Failure::new(OP, OffsetFailure::Failed(reason)).into_error())
+        .into_error()
 }
 
 /// The mate of an edge use.
@@ -393,7 +395,9 @@ impl OffsetExecutive {
                 closed = false;
                 passes += 1;
                 if passes > MAX_GAP_PASSES {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "the offset face's loop-gap search exhausted its pass limit",
+                    ));
                 }
                 let fu =
                     face2::upward_faceuse(b, f)?.ok_or_else(|| null("face without face use"))?;
@@ -470,7 +474,9 @@ impl OffsetExecutive {
                                 closed_edges,
                             )?
                         } else {
-                            return Err(sm_err());
+                            return Err(sm_err(
+                                "an offset loop gap has no unique end at its shared vertex",
+                            ));
                         };
                         if let Some((from, to)) = segment {
                             segments.push(GapSegment {
@@ -711,7 +717,9 @@ impl OffsetExecutive {
         // Where they join: the parameter of the gap end on the joined curve.
         let joined = curve.natural_interval();
         let joint = closest_on(kernel, &curve, &joined, gap_end, tol)?
-            .ok_or_else(sm_err)?
+            .ok_or_else(|| {
+                sm_err("the gap bridge joint could not be located on the joined offset edge")
+            })?
             .0;
 
         // The edge takes the joined curve and is split at the joint.
@@ -732,7 +740,9 @@ impl OffsetExecutive {
             notifications.result_curve_ref,
         )?;
         if !output.split {
-            return Err(sm_err());
+            return Err(sm_err(
+                "the joined offset edge could not be split at the gap bridge joint",
+            ));
         }
         output.vertex.ok_or_else(|| null("split without vertex"))?;
         // the segment as the face's loop runs: from the vertex to the gap where the gap is
@@ -878,7 +888,7 @@ impl OffsetExecutive {
                     notifications.result_curve_ref,
                 )?;
                 if !output.split {
-                    return Err(sm_err());
+                    return Err(sm_err("an offset edge could not be split at a step corner"));
                 }
             }
         }
@@ -1612,8 +1622,14 @@ mod tests {
 
     #[test]
     fn a_gap_search_that_cannot_continue_is_a_stage_failure() {
-        let e = sm_err();
+        let reason = "an offset loop gap has no unique end at its shared vertex";
+        let e = sm_err(reason);
         assert_eq!(e.offset_failure(), Some(&OffsetFailure::StageFailed));
+        assert_eq!(
+            e.root_cause().offset_failure(),
+            Some(&OffsetFailure::Failed(reason))
+        );
+        assert!(e.to_string().contains(reason));
         assert!(e.is_defect());
         assert_eq!(e.operation(), OP);
         assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));

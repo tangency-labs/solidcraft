@@ -53,15 +53,29 @@ const INVALID_INPUT: i32 = 1007;
 /// ([`solidcore_ops::offset::refusal`], the routing of ops' own offsets): walls that touch
 /// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`] with the largest
 /// wall it names, solidcore#2367), a vertex moved past an edge's other end
-/// (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4: `SMLIB_ERR_UNSUPPORTED`); anything else as the
-/// blends pass it on, which carries ops' other offset refusals as they are.
-fn status(e: SolidError) -> Error {
+/// (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4: `SMLIB_ERR_UNSUPPORTED`); ops' other offset
+/// refusals keep their type and reason. Phrase failures keep the complete kernel diagnostic,
+/// including their entity and cause chain. Other failures pass through the blend mapper,
+/// retaining that diagnostic wherever it would otherwise give only a numeric status.
+pub(super) fn status(e: SolidError) -> Error {
     use solidcore_ops::Error as Ops;
     match solidcore_ops::offset::refusal(&e) {
         Some(Ops::WallsTouch) => Error::WallsTouch,
         Some(Ops::WallFolds { largest }) => Error::WallFolds { largest },
         Some(Ops::Unsupported(_)) => Error::Unsupported,
-        _ => blend_status(e),
+        Some(mut refused) => {
+            if let Ops::OffsetRefused { why: solidcore_ops::OffsetRefusal::Phrase { phrase, .. }, .. } = &mut refused {
+                *phrase = e.to_string();
+            }
+            Error::Refused(refused)
+        }
+        None => {
+            let detail = e.to_string();
+            match blend_status(e) {
+                Error::Status(_) => Error::Solidcore(detail),
+                other => other,
+            }
+        }
     }
 }
 

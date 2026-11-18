@@ -16,13 +16,75 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
 
-use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, shell, thicken};
+use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, shell, status, thicken};
 use super::{Body, area, bounds, counts, make_box, make_cylinder, make_sphere, run, to_arrays, volume};
 use crate::export::native;
 use crate::{BooleanOp, Error};
 
 /// A case longer than this is a hang.
 const TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Stress corpus S0790 (#18802): a frustum with two blind holes, one separated from its
+/// top rim by 0.00002 mm, shelled inward by 1.2 mm. A refusal must keep its named cause.
+#[test]
+fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
+    let error = timed("S0790", || {
+        let cone = super::make_cone([0.0; 3], 25.0, 10.0, 50.0).unwrap();
+        let rim_hole = make_cylinder([8.79998, 0.0, 40.0], 1.2, 10.0).unwrap();
+        let centre_hole = make_cylinder([0.0, 0.0, 42.0], 1.0, 8.0).unwrap();
+        let drilled = super::boolean::boolean(&cone, &rim_hole, BooleanOp::Subtract).unwrap().unwrap();
+        let drilled = super::boolean::boolean(&drilled, &centre_hole, BooleanOp::Subtract).unwrap().unwrap();
+        shell(&drilled, &[], TOL, -1.2).expect_err("the shell is currently refused")
+    });
+    let words = error.to_string();
+    assert!(matches!(error, Error::Refused(_) | Error::Solidcore(_)) && !words.contains("upstream status"), "{words}");
+    assert!(!words.contains("stage_failed") || words.contains("; caused by "), "{words}");
+    eprintln!("{words}");
+}
+
+#[test]
+fn offset_failures_keep_the_kernel_reason_and_class() {
+    use solidcore::EntityRef;
+    use solidcore::error::Failure;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::topology::FaceId;
+    use solidcore_ops::{Error as Ops, OffsetRefusal};
+
+    for why in [
+        OffsetFailure::Failed("the offset edge has no intersection"),
+        OffsetFailure::Missing("the face's surface"),
+        OffsetFailure::InvalidValue("the offset distance is zero"),
+        OffsetFailure::Inconsistent("the edge's mate is absent"),
+    ] {
+        let error = Failure::new("offset::offset_executive::crossing_loops", why).at(EntityRef::Face(FaceId::from_index(2))).into_error();
+        let expected = Error::Refused(Ops::OffsetRefused {
+            face: None,
+            why: OffsetRefusal::Phrase { class: why.kind(), defect: why.is_defect(), phrase: error.to_string() },
+        });
+        assert_eq!(status(error), expected);
+    }
+}
+
+/// Shelling also calls intersections and the Boolean. Their named failures, including the
+/// cause beneath an offset stage, must reach the caller instead of only their numeric status.
+#[test]
+fn offset_substages_keep_their_failure_reason() {
+    use solidcore::error::intersect::IntersectFailure;
+    use solidcore::error::offset::OffsetFailure;
+    use solidcore::error::{Failure, Reason};
+
+    let cause = Failure::new("intersect::surface_surface", IntersectFailure::Failed("the two face trims do not cross")).into_error();
+    let offset = Failure::new("offset::offset_executive", OffsetFailure::StageFailed).caused_by(cause.clone()).into_error();
+    let boolean = Failure::new("boolean::merge::p3", Reason::Failed("a Boolean of the tree failed")).caused_by(cause.clone()).into_error();
+    for error in [cause, offset, boolean] {
+        let words = status(error).to_string();
+        assert!(words.contains("the two face trims do not cross"), "{words}");
+    }
+    let unported = Failure::new("boolean::merge::p3", Reason::Failed("a Boolean of the tree failed"))
+        .caused_by(solidcore::SolidError::unported("test::callee", "test.unit"))
+        .into_error();
+    assert_eq!(status(unported), Error::Unsupported);
+}
 
 /// How near a pick point must be.
 const TOL: f64 = 0.01;
