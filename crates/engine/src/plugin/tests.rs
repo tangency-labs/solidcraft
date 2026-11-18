@@ -176,6 +176,7 @@ fn a_command_in_another_spelling_is_never_granted() {
         session: Session::default(),
         transaction: None,
         sketch_exits: Vec::new(),
+        view: None,
         groups: BTreeSet::new(),
         file_folders: Vec::new(),
         evaluation: None,
