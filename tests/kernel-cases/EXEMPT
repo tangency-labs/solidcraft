@@ -489,7 +489,9 @@ tab.window.clean                  presents a window without chrome; no geometry,
 tab.window.close                  returns views to the main window; no geometry, tested in the engine and UI
 tab.window.focus                  focuses a window of the active design; no geometry, tested in the engine and UI
 tab.window.list                   lists the active design windows; no geometry, tested in the engine and UI
+tab.window.move_to_display        positions a native window; no geometry
 tab.window.options                reads pop-out presentation settings; no geometry
+tab.window.rename                 changes a window label; no geometry
 tab.window.set_options            changes pop-out presentation settings; no geometry
 timeline.dependents               a listing of dependents
 timeline.export_script            writes the history as a script

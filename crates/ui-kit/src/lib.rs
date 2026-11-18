@@ -25,6 +25,8 @@ pub mod toast;
 pub mod view_compass;
 pub mod view_layout_menu;
 pub mod window_chrome;
+pub mod window_options_menu;
+mod window_preview;
 
 mod actions;
 mod assistant;
