@@ -1756,9 +1756,6 @@ preference_settings! {
     view_dxf_dashed: bool = false;
     /// Model-space chord tolerance for current-view DXF curves, in millimetres.
     view_dxf_tolerance: f64 = 0.01;
-    /// Current-view DXF: write a tessellated circle or arc as one `CIRCLE`/`ARC` (true) or as the
-    /// line chords of the drawing (false, the earlier output), #17917.
-    view_dxf_curves: bool = true;
     /// Where the current-view DXF drawing puts its 0,0: "target" (the point the camera looks
     /// at) or "origin" (the model's origin as seen from the camera).
     view_dxf_zero: String = "target".into();
