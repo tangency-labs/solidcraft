@@ -2163,9 +2163,11 @@ impl GnSectionFsg {
                             "the span does not have two stations",
                         ));
                     };
+                    // a bound over the target is only ever halved below, never read
                     let mut reuse = SpanReuse {
                         inherit: lj.as_deref(),
                         start: hint,
+                        over_is_halved: true,
                         ..SpanReuse::default()
                     };
                     *bj = gn_certify_span_reusing(
