@@ -1133,6 +1133,16 @@ impl FilletCorner {
                                     BlendCornerEvent::Join,
                                     BlendEnd::OnEndFace,
                                 ))
+                            } else if p1::check_nx1_degeneracy(k, b, vertex, eu0)? {
+                                // Not upstream (#16654): two edges of one pair of faces meet
+                                // at an angle only where those faces touch tangentially (two
+                                // tubes of one radius), and both blends shrink to the vertex
+                                // there: the blend corner's Turn, its mitre the vertex
+                                Some(blend_corner(
+                                    FilletCornerKind::NByTwo,
+                                    BlendCornerEvent::Turn,
+                                    BlendEnd::OnEndFace,
+                                ))
                             } else {
                                 None // MSG: Corner Case Not Implemented
                             }

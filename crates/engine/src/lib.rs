@@ -66,9 +66,10 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
+pub use cmd::sketch_selection;
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
-    find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
+    Addition, CommandInfo, CommandSpec, FromSelection, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles,
+    extrude_reach, find_command, normalize_command_id, resolve_design_links, shown_scope, standard_view, use_import_cache_dir,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -1025,14 +1026,34 @@ impl Session {
     }
 
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
+    /// A model evaluated with the tolerance heal preference ([`solidcraft_kernel::heals_tolerance_defects`])
+    /// set the other way holds other results (its imports healed or as read, Repair healing first
+    /// or not): evaluated again.
     pub(crate) fn saved_model(doc: &Arc<Document>, saved: Option<&solidcraft_doc::SavedModel>) -> Option<Model> {
         saved
             .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
             .and_then(|saved| Model::adopt(doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok())
+            .filter(|model| model.heals() == solidcraft_kernel::heals_tolerance_defects())
     }
 
-    /// A session on `doc` evaluated as `model`, with what it hides.
+    /// `doc` with each fold that keeps no side of its line that stays (a design saved before
+    /// folds kept one) given the side it folds now, and `model` evaluated on it: from then on that
+    /// side stays, wherever the fold's line moves. As they are where every fold keeps its side.
+    fn with_fold_sides(doc: Arc<Document>, mut model: Model) -> (Arc<Document>, Model) {
+        match doc.with_fold_sides(&model) {
+            Some(settled) => {
+                let doc = Arc::new(settled);
+                model.evaluate_shared(&doc);
+                (doc, model)
+            }
+            None => (doc, model),
+        }
+    }
+
+    /// A session on `doc` evaluated as `model`, with what it hides. A design opened from before
+    /// folds kept which side stays has each fold's side settled first ([`Self::with_fold_sides`]).
     pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
+        let (doc, model) = Self::with_fold_sides(doc, model);
         Session {
             stop: Default::default(),
             is_copy: false,
@@ -1756,6 +1777,17 @@ impl Session {
 
     pub fn refresh(&mut self) {
         let _ = self.refresh_with_joint_report();
+    }
+
+    /// Settle what the imports' background checks found ([`solidcraft_doc::Model::settle_import_checks`]),
+    /// and when they healed parts the design does not show yet, evaluate it again: except during
+    /// a live edit, which a refresh would end (a later call does it). Returns whether it refreshed.
+    pub fn settle_import_checks(&mut self) -> bool {
+        if self.model.settle_import_checks() && self.live_links.is_none() {
+            self.refresh();
+            return true;
+        }
+        false
     }
 
     /// Refresh normally, retaining the last joint solve for commands that report its outcome.

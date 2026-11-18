@@ -69,6 +69,7 @@ you also need [`trunk`](https://github.com/trunk-rs/trunk)
 git clone https://github.com/tangency-labs/solidcraft && cd solidcraft
 cargo run --release -p solidcraft -- --sample      # desktop app with a sample part
 cargo xtask test                                   # unit, engine and UI-scenario tests
+cargo xtask fast                                   # before a commit: what your change touches
 cargo xtask ci                                     # everything a PR must pass (see below)
 ```
 
@@ -397,8 +398,12 @@ and a fresh CI run:
      comment on it first, then open your own claim.
    - Mark the PR ready for review when it is done.
 2. Branch from `main` and keep the PR to one topic.
-3. Run `cargo xtask ci` before pushing. It runs fmt, the asset, licence and layer checks,
-   clippy (`-D warnings`), then the tests with the wasm build check alongside. A PR has to pass it.
+3. Run `cargo xtask fast` before pushing: it checks what your change touches (for a kernel change
+   in `solidcore/`, add `--units <id,...>` from your PR's `Units:` line to run their goldens). CI
+   runs the rest of `cargo xtask ci` (fmt, the asset, licence and layer checks, clippy
+   `-D warnings`, the tests and the wasm build check), so you need not run that locally. The pull
+   request runs the tests of the packages your change affects; the wasm build, the doc tests and
+   the heavy tests run in the merge queue, so a green pull request run does not show that they pass.
    Heavy CI runs after review: a pull request gets the formatting and repository checks and a
    quick compile (`cargo check`) when you push. Once a maintainer has reviewed it they add the
    `approved-for-ci` label when the PR is ready to merge, which runs the full CI (build, tests,

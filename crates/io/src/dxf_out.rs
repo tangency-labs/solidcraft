@@ -3196,6 +3196,43 @@ mod tests {
         assert!(write_dxf_file(&wrong).unwrap_err().to_string().contains("declared producer"));
     }
 
+    // A rolled flat's ROLL layer holds the roll's lines only, green and continuous, and a flat with
+    // every named role and a pocket under each contour fits the plan's layer count.
+    #[test]
+    fn flat_profile_admits_roll_lines_on_their_own_layer() {
+        let mut file = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let roll = file.declare_layer("ROLL", 3, DxfLinetype::Continuous, None).unwrap();
+        file.push(roll, DxfShape::Line(Vec2::ZERO, Vec2::X), None).unwrap();
+        let written = write_dxf_file(&file).unwrap();
+        assert_eq!(entities(&written).iter().map(|e| field(&e.1, 8)).collect::<Vec<_>>(), ["ROLL"]);
+
+        let mut circle = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let roll = circle.declare_layer("ROLL", 3, DxfLinetype::Continuous, None).unwrap();
+        circle.push(roll, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
+        assert!(write_dxf_file(&circle).unwrap_err().to_string().contains("declared producer"));
+        let mut dashed = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let declared = dashed.declare_layer("ROLL", 3, DxfLinetype::Dashed, None);
+        assert!(declared.unwrap_err().to_string().contains("declared producer"));
+
+        let mut every = DxfFile::for_flat_pattern_export(1, 1, 1).unwrap();
+        for (name, color, linetype) in [
+            ("OUTLINE", 7, DxfLinetype::Continuous),
+            ("CUT", 4, DxfLinetype::Continuous),
+            ("TEXT", 2, DxfLinetype::Continuous),
+            ("ETCH", 6, DxfLinetype::Continuous),
+            ("BEND_UP", 1, DxfLinetype::Dashed),
+            ("BEND_DOWN", 5, DxfLinetype::Dashed),
+            ("BEND_NOTES", 8, DxfLinetype::Continuous),
+            ("PERFORATION", 3, DxfLinetype::Continuous),
+            ("ROLL", 3, DxfLinetype::Continuous),
+            ("POCKET_TOP_Z0.000000_TO_1.000000_MM", 3, DxfLinetype::Continuous),
+        ] {
+            every.declare_layer(name, color, linetype, None).unwrap();
+        }
+        assert_eq!(every.layers().len(), 11);
+        write_dxf_file(&every).unwrap();
+    }
+
     #[test]
     fn legacy_baseline_text_feature_preserves_cap_and_far_unicode_error_with_bounded_work() {
         let layers = [DxfLayer::new("NOTES", 8)];

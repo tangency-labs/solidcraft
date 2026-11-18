@@ -563,7 +563,7 @@ fn fail(e: &SolidError) -> Result<f64, Box<Output>> {
 }
 
 fn rust_generator(i: &Inputs) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     let (res, curves) = match i {
         Inputs::Circ {
@@ -783,7 +783,7 @@ fn slot_offsets(s: &[Option<OffsetSurfaceSlot>; 2]) -> [f64; 2] {
 
 #[allow(clippy::too_many_lines)]
 fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let mut o = Vec::new();
     match i {
         Inputs::Circ { .. } | Inputs::Blend { .. } => return rust_generator(i),
@@ -1266,7 +1266,7 @@ fn rust_edgeuse_body(
     fu: f64,
     fv: f64,
 ) -> Result<Vec<f64>, SolidError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     let radial = if has_prim(b, eu)? {
         eu1::radial(b, eu)?
     } else {

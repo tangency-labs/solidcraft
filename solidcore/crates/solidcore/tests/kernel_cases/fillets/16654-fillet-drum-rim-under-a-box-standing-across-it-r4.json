@@ -1,0 +1,410 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "distance": 40.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                -1.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 30.0,
+              "reference": [
+                1.0,
+                0.0,
+                -0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                8.0,
+                -60.0,
+                20.0
+              ],
+              "start": [
+                -8.0,
+                -60.0,
+                20.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                8.0,
+                -20.0,
+                20.0
+              ],
+              "start": [
+                8.0,
+                -60.0,
+                20.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -8.0,
+                -20.0,
+                20.0
+              ],
+              "start": [
+                8.0,
+                -20.0,
+                20.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -8.0,
+                -60.0,
+                20.0
+              ],
+              "start": [
+                -8.0,
+                -20.0,
+                20.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -8.0,
+                  -40.0,
+                  28.913664589601925
+                ],
+                [
+                  24.53604579473932,
+                  -40.0,
+                  17.262168367805216
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  -8.0,
+                  -40.0,
+                  28.913664589601925
+                ],
+                [
+                  24.53604579473932,
+                  -40.0,
+                  17.262168367805216
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  24.53604579473932,
+                  -40.0,
+                  17.262168367805216
+                ],
+                [
+                  7.999999999999999,
+                  -40.0,
+                  28.91366458960192
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              -10.1038886961567,
+              -40.0,
+              -28.206365555329047
+            ],
+            [
+              -10.1038886961567,
+              -40.0,
+              -28.206365555329047
+            ],
+            [
+              17.262854333667473,
+              -40.0,
+              24.49527465354969
+            ]
+          ],
+          "tolerance": 5.2934562220691594
+        },
+        "kind": "round",
+        "sizes": [
+          4.0,
+          4.0,
+          4.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "16654-fillet-drum-rim-under-a-box-standing-across-it-r4",
+  "expected": {
+    "bbox": {
+      "max": [
+        30,
+        0,
+        40
+      ],
+      "min": [
+        -30,
+        -60,
+        -30
+      ]
+    },
+    "body_count": 1,
+    "method": "Drum pi 900 40 = 113097.34. Box 16 40 20 = 12800, half its length inside the drum's span of y: the part of |x| <= 8, z >= 20 inside the circle R30, Int (sqrt(900 - x^2) - 20) dx = 154.2488, times 20. Union V0 = 122812.36. A convex round takes material: less than V0. Round the whole rim it takes r^2 (1 - pi/4) = 3.4336 swept round at most 2 pi 30: 647.22; the rim outside the box is 329 of 360 degrees (the box covers 2 asin(8/30)), so it takes more than half that. V in [V0 - 647.2, V0 - 323.6]. The round is inside the union's box.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#16654"
+    ],
+    "volume_mm3": [
+      122165.1,
+      122488.7
+    ],
+    "what": "an R4 round on the rim of a drum R30 x 40 (along -y, the rim at y = -40) that a box stands across (x from -8 to 8, y from -60 to -20, z from 20 to 40): the round's rail on the end face, a circle of radius 26, leaves that face across one wall of the box, short of the rim's end there, and comes back across the other wall, at the rim's other end"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 26,
+      "faces": 11,
+      "vertices": 17
+    }
+  },
+  "records": "16654-fillet-drum-rim-under-a-box-standing-across-it-r4.bodies.json.gz",
+  "result": [
+    {
+      "body": "Drum",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 15109.928417455449,
+      "body_count": 1,
+      "edges": 26,
+      "faces": 11,
+      "vertices": 17,
+      "volume_mm3": 122240.06684118981
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#16654"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "an R4 round on the rim of a drum R30 x 40 (along -y, the rim at y = -40) that a box stands across (x from -8 to 8, y from -60 to -20, z from 20 to 40): the round's rail on the end face, a circle of radius 26, leaves that face across one wall of the box, short of the rim's end there, and comes back across the other wall, at the rim's other end",
+  "why_not": []
+}
