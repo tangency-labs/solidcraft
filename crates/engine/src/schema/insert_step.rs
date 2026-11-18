@@ -104,8 +104,8 @@ pub struct InsertStepKeys {
     /// `instance`.
     #[serde(default)]
     pub names: Option<NamesParam>,
-    /// true puts an import that brings more than one item into the history (its Import feature
-    /// and the rigid joints holding its parts) into a new history folder named `Group #N`.
+    /// true puts an assembly's import (one with subcomponents) into a new history folder named
+    /// `Group #N`.
     /// Default: false.
     #[serde(default, deserialize_with = "folder_key", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
@@ -258,14 +258,14 @@ pub struct StepInserted {
     /// there are some.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subcomponents: Option<usize>,
-    /// How many rigid joints hold its contents together. Only when `subcomponents` is given.
+    /// How many occurrences its rigid group holds together. Only when `subcomponents` is given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rigid_joints: Option<usize>,
+    pub rigid_members: Option<usize>,
     /// With `up: y`: the occurrence that was turned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stand_up: Option<u64>,
-    /// With `folder: true`: the history folder the import's feature and joints went into. Only
-    /// when the import has joints to put in one.
+    /// With `folder: true`: the history folder the import's feature went into. Only for an
+    /// assembly's import.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<u64>,
     /// With `matrix`: the import's placement in the active component after the move, as the design
