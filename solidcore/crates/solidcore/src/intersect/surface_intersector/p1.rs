@@ -2956,16 +2956,13 @@ mod tests {
     }
 
     /// tangency-labs/solidcraft#17720: a cone with no height runs over `[apex, 1234567]`
-    /// in v (`[-1234567, apex]` for a negative semi-angle under WR-713), unbounded, so its
+    /// in v (`[-1234567, apex]` for a negative semi-angle, WR-713), unbounded, so its
     /// scale is its cross-section at height 0, the base circle, `4 r` along its u range.
     /// Against a plane over its natural domain (no scale) the default is `4 r / 1000` in
-    /// either order, and it scales with the model. Without WR-713 a negative semi-angle's
-    /// range starts above 0 and is shorter than 1234567: bounded, so its size decides
-    /// (the cut of `an_extrusion_scales_by_its_profile_over_an_unbounded_sweep`).
+    /// either order, and it scales with the model.
     #[test]
     fn an_unbounded_cone_scales_by_its_base_circle() {
-        let mut k = Kernel::default();
-        k.fixes.cone_unbounded_parameterized_as_nurb = true;
+        let k = Kernel::default();
         for s in [1.0, 10.0] {
             for semi_angle in [30.0, -30.0] {
                 let cone = unbounded_cone(&k, s, semi_angle, false);
@@ -2977,13 +2974,6 @@ mod tests {
                 assert_near(got, 4.0 * 2.0 * s / 1000.0);
             }
         }
-        let k = Kernel::default();
-        let cone = unbounded_cone(&k, 1.0, -30.0, false);
-        let dc = cone.natural_uv_domain_with_nurb(&k).unwrap();
-        assert!(
-            dc.v_min() > 0.0 && dc.v_max() - dc.v_min() < INFINITE_PARAMETER,
-            "{dc:?}"
-        );
     }
 
     /// tangency-labs/solidcraft#17720: swapped, the cone's unbounded range is u, and its
