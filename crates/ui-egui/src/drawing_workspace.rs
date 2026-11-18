@@ -149,6 +149,16 @@ pub(crate) fn placing_dimension(app: &SolveApp) -> bool {
     app.drawing_workspace.options == Some(Tool::Dimension(None))
 }
 
+pub(crate) fn placing_parts_list(app: &SolveApp) -> bool {
+    app.drawing_workspace.options == Some(Tool::PartsList(None))
+}
+
+/// A tool that places what it makes with a click on the sheet is open: the sheet's own clicks,
+/// double-clicks and drags wait while it is.
+pub(crate) fn placing_on_sheet(app: &SolveApp) -> bool {
+    placing_view(app) || placing_note(app) || placing_dimension(app) || placing_parts_list(app)
+}
+
 pub fn can_open_options(id: &str) -> bool {
     Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
 }

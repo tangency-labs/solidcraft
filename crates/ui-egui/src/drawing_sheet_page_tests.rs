@@ -955,6 +955,75 @@ fn retype(h: &mut Harness, handle: &str, text: &str) {
     h.frames(2);
 }
 
+/// Parts List places a list for the sheet's design where the sheet is clicked: its outline's top
+/// left at the point, one undo step, and the panel then edits it.
+#[test]
+fn parts_list_tool_places_a_list_where_the_sheet_is_clicked() {
+    use solidcraft_engine::doc::drawing::table::{Kind, Place};
+
+    let mut h = assembly_sheet();
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.parts_list"));
+    h.frames(4);
+    let size = Vec2::new(number(&page(&mut h)["size_mm"][0]), number(&page(&mut h)["size_mm"][1]));
+    let (point, per_point) = paper_point(&mut h, Vec2::new(size.x * 0.3, size.y * 0.6));
+    assert!(!crate::shell::covered(&h.app, pos2(point[0], point[1])), "the point is on the free sheet");
+    let steps = h.app.session.undo.len();
+    h.step(&json!({"move": point})).unwrap();
+    h.step(&json!({"click": point})).unwrap();
+    h.frames(4);
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+    assert_eq!(drawing.tables.len(), 1, "one list placed");
+    let table = &drawing.tables[0];
+    assert!(matches!(table.kind, Kind::PartsList(_)), "{table:?}");
+    let Place::At([x, y]) = table.place else { panic!("a free place: {:?}", table.place) };
+    assert!((x - size.x * 0.3).abs() <= per_point && (y - size.y * 0.6).abs() <= per_point, "at {x}, {y}");
+    assert_eq!(h.app.session.undo.len(), steps + 1);
+    assert!(crate::scenario::handle_at("drawing:parts_list:row_height").is_some(), "its panel edits it");
+}
+
+/// A click near a corner of the drawing border anchors the list to that corner, so a change of
+/// paper takes it along; its outline's corner is the border's.
+#[test]
+fn parts_list_tool_snaps_to_the_border_corner() {
+    use solidcraft_engine::doc::drawing::table::{Corner, Place};
+
+    let mut h = assembly_sheet();
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.parts_list"));
+    h.frames(4);
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap().clone();
+    let sheet = drawing.sheets.iter().find(|sheet| Some(sheet.id) == active_sheet(&h.app)).unwrap().clone();
+    let border = sheet.border.as_ref().unwrap().layout(&sheet.sheet).unwrap().drawing_border;
+    let corners = [
+        (Corner::TopLeft, Vec2::new(border.min.x, border.max.y), Vec2::new(1.0, -1.0)),
+        (Corner::TopRight, border.max, Vec2::new(-1.0, -1.0)),
+        (Corner::BottomLeft, border.min, Vec2::new(1.0, 1.0)),
+        (Corner::BottomRight, Vec2::new(border.max.x, border.min.y), Vec2::new(-1.0, 1.0)),
+    ];
+    // A point two screen points inside a corner the panels and cards leave free.
+    let (corner, at, point) = corners
+        .into_iter()
+        .find_map(|(corner, at, inward)| {
+            let (_, per_point) = paper_point(&mut h, at);
+            let (point, _) = paper_point(&mut h, at + inward * (2.0 * per_point));
+            (!crate::shell::covered(&h.app, pos2(point[0], point[1]))).then_some((corner, at, point))
+        })
+        .unwrap();
+    h.step(&json!({"move": point})).unwrap();
+    h.step(&json!({"click": point})).unwrap();
+    h.frames(4);
+    let table = h.app.session.drawing("drawing.inspect").unwrap().tables[0].clone();
+    assert_eq!(table.place, Place::Anchor { corner, offset_mm: [0.0, 0.0] });
+    let inspected = h.app.run("drawing.table.inspect", json!({"table": solidcraft_engine::doc::ids::encode(table.id)})).unwrap();
+    let outline: Vec<f64> = inspected["outline_mm"].as_array().unwrap().iter().map(number).collect();
+    let (x, y) = match corner {
+        Corner::TopLeft => (outline[0], outline[3]),
+        Corner::TopRight => (outline[2], outline[3]),
+        Corner::BottomLeft => (outline[0], outline[1]),
+        Corner::BottomRight => (outline[2], outline[1]),
+    };
+    assert!((x - at.x).abs() < 1e-9 && (y - at.y).abs() < 1e-9, "{corner:?}: {outline:?} against {at:?}");
+}
+
 /// The panel's heading, row height, shown columns and widths go in with one Apply, as one undo step;
 /// the column only its editor reads stays. OK with nothing changed and Cancel add no step. An undo
 /// while the panel is open is what the panel then shows.

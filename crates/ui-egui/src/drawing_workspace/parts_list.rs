@@ -3,14 +3,26 @@
 //! own rule ([`Table::validate`]) checks whenever it changes; Apply and OK send what differs in one
 //! edit, so each is one undo step.
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::{
-    doc::{drawing::table::Kind, ids},
-    geom::table::{BALLOONED, Heading, Table},
+    doc::{
+        drawing::{
+            Sheet,
+            table::{Corner, Kind, Place},
+        },
+        ids,
+    },
+    geom::{
+        Aabb2,
+        table::{BALLOONED, Heading, Table},
+    },
 };
+use solidcraft_theme::Tokens;
 
 use super::close_panel;
 use crate::{
     SolveApp,
+    drawing_sheet_page::OnScreen,
     ui_kit::{self, BackingTooltipExt as _, Button},
 };
 
@@ -170,5 +182,65 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, selected: Option<u64
         app.set_status(error, true);
     } else if ok {
         close_panel(app);
+    }
+}
+
+/// The placing tool at paper point `point` of `sheet`: a mark where the list's corner goes, on a
+/// corner of the sheet's drawing space when the point is within `band` millimetres of one. A click
+/// places the list there, anchored to that corner or free, and opens its panel.
+pub(crate) fn on_sheet(app: &mut SolveApp, painter: &egui::Painter, at: OnScreen, sheet: &Sheet, point: Vec2, band: f64, clicked: bool) {
+    // The space anchored lists sit in: the drawing border's inside, or the paper without one.
+    let snapped = sheet.drawing_space().ok().and_then(|space| snap(space, point, band));
+    let (corner, mark) = snapped.unwrap_or((Corner::TopLeft, point));
+    paint_mark(painter, at.screen(mark), corner, snapped.is_some());
+    if !clicked {
+        return;
+    }
+    let place = match snapped {
+        Some((corner, _)) => Place::Anchor { corner, offset_mm: [0.0, 0.0] },
+        None => Place::At([point.x, point.y]),
+    };
+    match app.run("drawing.table.add", json!({"sheet": ids::encode(sheet.id), "kind": "parts_list", "set": {"place": place}})) {
+        Ok(reply) => match reply["table"].as_str().and_then(ids::decode) {
+            Some(id) => super::edit_object(app, "parts_list", id),
+            None => {
+                close_panel(app);
+            }
+        },
+        Err(error) => app.set_status(error, true),
+    }
+}
+
+/// The corner of `space` nearest `point`, if it is within `band`.
+fn snap(space: Aabb2, point: Vec2, band: f64) -> Option<(Corner, Vec2)> {
+    [
+        (Corner::TopLeft, Vec2::new(space.min.x, space.max.y)),
+        (Corner::TopRight, space.max),
+        (Corner::BottomLeft, space.min),
+        (Corner::BottomRight, Vec2::new(space.max.x, space.min.y)),
+    ]
+    .into_iter()
+    .map(|(corner, at)| (corner, at, (at.x - point.x).hypot(at.y - point.y)))
+    .filter(|(_, _, distance)| *distance <= band)
+    .min_by(|a, b| a.2.total_cmp(&b.2))
+    .map(|(corner, at, _)| (corner, at))
+}
+
+/// Two short lines from `at` along the edges a list grows along from its `corner`; thicker, with a
+/// dot, when the corner snapped.
+fn paint_mark(painter: &egui::Painter, at: egui::Pos2, corner: Corner, snapped: bool) {
+    let t = Tokens::get();
+    // Screen y grows down: a list anchored at a top corner grows down the screen.
+    let (right, down) = match corner {
+        Corner::TopLeft => (1.0, 1.0),
+        Corner::TopRight => (-1.0, 1.0),
+        Corner::BottomLeft => (1.0, -1.0),
+        Corner::BottomRight => (-1.0, -1.0),
+    };
+    let stroke = egui::Stroke::new(if snapped { t.space_2 } else { 1.0 }, t.accent);
+    painter.line_segment([at, at + egui::vec2(right * t.space_16, 0.0)], stroke);
+    painter.line_segment([at, at + egui::vec2(0.0, down * t.space_16)], stroke);
+    if snapped {
+        painter.circle_filled(at, t.space_4, t.accent);
     }
 }
