@@ -369,8 +369,15 @@ impl Body {
                                 t_s
                             }
                         };
-                        let tab = ts::tab_outline_for(start, width, t_k, spec.protrusion, level, spec.tip_chamfer)
-                            .map_err(status)?;
+                        let tab = ts::tab_outline_for(
+                            start,
+                            width,
+                            t_k,
+                            spec.protrusion,
+                            level,
+                            spec.tip_chamfer,
+                        )
+                        .map_err(status)?;
                         tabs.push(TabPlan {
                             start,
                             width,
@@ -1027,7 +1034,15 @@ mod tests {
         };
         let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
         let plain = wall
-            .tab_slot_cut(&s, p, TabSlotSpec { tip_chamfer: 0.0, ..spec }, TOL)
+            .tab_slot_cut(
+                &s,
+                p,
+                TabSlotSpec {
+                    tip_chamfer: 0.0,
+                    ..spec
+                },
+                TOL,
+            )
             .unwrap()
             .expect("joint");
         let cham = wall.tab_slot_cut(&s, p, spec, TOL).unwrap().expect("joint");
@@ -1035,7 +1050,10 @@ mod tests {
         assert!((v(&plain.tab_plate) - v(&cham.tab_plate) - 2.0 * 24.0).abs() < 1e-6);
         assert!((v(&plain.slot_plate) - v(&cham.slot_plate)).abs() < 1e-9);
         // Half the width (5) or more is refused.
-        let big = TabSlotSpec { tip_chamfer: 5.0, ..spec };
+        let big = TabSlotSpec {
+            tip_chamfer: 5.0,
+            ..spec
+        };
         assert!(wall.tab_slot_plan(&s, p, big, TOL).is_err());
     }
 

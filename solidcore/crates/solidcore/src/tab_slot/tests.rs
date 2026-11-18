@@ -175,7 +175,9 @@ fn laser_outlines() {
 #[test]
 fn a_tip_chamfer_cuts_the_two_free_corners_only() {
     // Tab [30, 50], h 6, level 0, chamfer 2: 20 x 6 minus two 2 x 2 triangles = 120 - 4.
-    let t = tab_outline_chamfered(30.0, 20.0, 6.0, 0.0, 2.0).unwrap().unwrap();
+    let t = tab_outline_chamfered(30.0, 20.0, 6.0, 0.0, 2.0)
+        .unwrap()
+        .unwrap();
     assert_eq!(t.outer.segs.len(), 6);
     assert!((t.signed_area().unwrap().value - 116.0).abs() < 1e-9);
     // Chamfer 0 is the plain rectangle, as tab_outline.
@@ -187,7 +189,9 @@ fn a_tip_chamfer_cuts_the_two_free_corners_only() {
     let slot = slot_outline(30.0, 20.0, (30.0, 36.0), 0.1).unwrap();
     assert_eq!(slot.outer.segs.len(), 4);
     // Via tab_outline_for: t_S 5 + protrusion 1 = 6.
-    let f = tab_outline_for(30.0, 20.0, Some(5.0), 1.0, 0.0, 2.0).unwrap().unwrap();
+    let f = tab_outline_for(30.0, 20.0, Some(5.0), 1.0, 0.0, 2.0)
+        .unwrap()
+        .unwrap();
     assert_eq!(f, t);
 }
 

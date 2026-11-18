@@ -165,8 +165,20 @@ fn length_in(s: &Session, e: Option<&Expr>, key: &str, cmd: &str, least: f64, op
 /// nothing.
 pub(crate) fn check(s: &Session, st: &ModelState, kind: &FeatureKind) -> Result<()> {
     let cmd = "solid.tab_slot";
-    let FeatureKind::TabSlot { tab_plates, slot_plates, count, spacing, tab_width, end_distance, clearance, protrusion, seed, width_jitter, tip_chamfer, .. } =
-        kind
+    let FeatureKind::TabSlot {
+        tab_plates,
+        slot_plates,
+        count,
+        spacing,
+        tab_width,
+        end_distance,
+        clearance,
+        protrusion,
+        seed,
+        width_jitter,
+        tip_chamfer,
+        ..
+    } = kind
     else {
         return Ok(());
     };
