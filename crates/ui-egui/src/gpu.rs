@@ -23,6 +23,117 @@ fn background_uv(image: egui::Vec2, rect: egui::Rect, window: egui::Rect) -> egu
     egui::Rect::from_min_max(uv(rect.min).to_pos2(), uv(rect.max).to_pos2())
 }
 
+/// What a panorama shows: a fixed height of sky whatever the window's width, turned with the camera.
+fn round_view(cam: &solidcraft_viewport::Camera, window: egui::Vec2) -> egui_glass::SkyView {
+    const HALF_HEIGHT: f64 = 0.5;
+    let (right, up, back) = cam.basis();
+    let along = |v: solidcore_record::Vec3, by: f64| [(v.x * by) as f32, (v.y * by) as f32, (v.z * by) as f32];
+    let aspect = f64::from(window.x / window.y.max(1.0));
+    egui_glass::SkyView::Round { right: along(right, HALF_HEIGHT * aspect), up: along(up, HALF_HEIGHT), forward: along(back, -1.0) }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum PictureState {
+    Loading,
+    Shown([u32; 2]),
+    /// The card refused it: not tried again.
+    Failed,
+}
+
+/// The picture, and why the plugin's own could not be read when the host's stands in for it.
+type Decoded = (crate::sky_picture::Picture, Option<String>);
+
+#[derive(Clone)]
+struct SkyPicture {
+    sky: crate::plugin_effects::Sky,
+    decoded: std::sync::Arc<std::sync::Mutex<Option<Decoded>>>,
+    state: PictureState,
+}
+
+const SKY_SHOWN: &str = "sc_sky_shown";
+
+/// Whether this frame's view shows the sky (glass then sees it too).
+pub(crate) fn sky_shown(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::unique(SKY_SHOWN))) == Some(ctx.cumulative_pass_nr())
+}
+
+/// The sky behind the model while a plugin's sky effect is chosen and on. Drawn window-sized into
+/// a texture of its own, which glass panels see; a 2:1 picture wraps round and turns with the view.
+/// The picture is the plugin's own, else the host draws one. False when no sky effect is chosen or
+/// there is no GPU for it, so the view's own background shows as before.
+pub(crate) fn paint_sky(app: &mut crate::SolveApp, painter: &egui::Painter, rect: egui::Rect) -> bool {
+    let Some(sky) = crate::plugin_effects::sky(app) else { return false };
+    let ctx = painter.ctx().clone();
+    let Some(render_state) = app.glass.as_ref().map(|g| g.render_state().clone()) else { return false };
+    let id = egui::Id::unique("sc_sky_picture");
+    let mut picture = ctx.data(|d| d.get_temp::<SkyPicture>(id)).filter(|p| p.sky == sky).unwrap_or_else(|| {
+        let picture = SkyPicture { sky: sky.clone(), decoded: Default::default(), state: PictureState::Loading };
+        let (sky, slot, repaint) = (sky.clone(), picture.decoded.clone(), ctx.clone());
+        let limit = render_state.device.limits().max_texture_dimension_2d;
+        std::thread::spawn(move || {
+            let own = sky
+                .picture
+                .as_ref()
+                .map(|path| std::fs::read(path).map_err(|e| e.to_string()).and_then(|bytes| crate::sky_picture::decode(&bytes, limit)));
+            let result = match own {
+                Some(Ok(picture)) => (picture, None),
+                Some(Err(error)) => (crate::sky_picture::galaxy(2048.min(limit)), Some(error)),
+                None => (crate::sky_picture::galaxy(2048.min(limit)), None),
+            };
+            *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
+            repaint.request_repaint();
+        });
+        picture
+    });
+    if picture.state == PictureState::Loading {
+        let done = picture.decoded.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        if let Some((image, unreadable)) = done {
+            match egui_glass::guarded(&render_state, || egui_glass::set_sky_image(&render_state, image.size, &image.rgba)) {
+                Ok(()) => {
+                    picture.state = PictureState::Shown(image.size);
+                    if let Some(error) = unreadable {
+                        app.set_status(format!("{}: {error}", solidcraft_ui_text::tr("prefs.background_unreadable")), true);
+                    }
+                }
+                Err(error) => {
+                    picture.state = PictureState::Failed;
+                    app.set_status(format!("The sky is off, the graphics card refused it: {error}"), true);
+                }
+            }
+        }
+    }
+    let state = picture.state;
+    ctx.data_mut(|d| d.insert_temp(id, picture.clone()));
+    let size = match state {
+        PictureState::Shown(size) => size,
+        // Still reading: the view's own background for now.
+        PictureState::Loading => return true,
+        PictureState::Failed => return false,
+    };
+    let window = ctx.content_rect();
+    let view = if crate::sky_picture::is_panorama(size) {
+        round_view(&app.cam, window.size())
+    } else {
+        let uv = crate::sky_picture::cover_uv(egui::vec2(size[0] as f32, size[1] as f32), window.size());
+        egui_glass::SkyView::Flat { min: uv.min.into(), max: uv.max.into() }
+    };
+    let px = window.size() * ctx.pixels_per_point();
+    let texture = match egui_glass::guarded(&render_state, || egui_glass::draw_sky(&render_state, [px.x as u32, px.y as u32], view)) {
+        Ok(Some(texture)) => texture,
+        Ok(None) => return false,
+        Err(error) => {
+            ctx.data_mut(|d| d.insert_temp(id, SkyPicture { state: PictureState::Failed, ..picture }));
+            app.set_status(format!("The sky is off, the graphics card refused it: {error}"), true);
+            return false;
+        }
+    };
+    let uv = |p: egui::Pos2| ((p - window.min) / window.size()).to_pos2();
+    painter.image(texture, rect, egui::Rect::from_min_max(uv(rect.min), uv(rect.max)), egui::Color32::WHITE);
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(SKY_SHOWN), pass));
+    true
+}
+
 /// A picture's pixels, at most `limit` on a side (what the GPU takes).
 fn decode_background(bytes: &[u8], limit: u32) -> Result<egui::ColorImage, String> {
     // Upright, as every viewer shows it: a photo stored turned by its EXIF orientation (#19138).

@@ -105,6 +105,17 @@ pub fn from_files(files: Vec<safe_zip::File>, archive: String) -> Result<Unpacke
         let module = runtime.module.clone();
         return Err(if source { InstallError::SourceOnly(module) } else { InstallError::MissingModule(module) });
     }
+    // A picture an effect shows is a PNG or JPEG file of the package.
+    for effect in &manifest.effects {
+        let Some(picture) = &effect.picture else { continue };
+        let field = format!("effects.{}.picture", effect.id);
+        let Some(file) = files.iter().find(|f| f.path == *picture) else {
+            return Err(InstallError::Manifest(HostError::InvalidManifest { field, reason: format!("no file {picture} in the package") }));
+        };
+        if !(file.bytes.starts_with(b"\x89PNG\r\n\x1a\n") || file.bytes.starts_with(b"\xff\xd8\xff")) {
+            return Err(InstallError::Manifest(HostError::InvalidManifest { field, reason: format!("{picture} is not a PNG or JPEG picture") }));
+        }
+    }
     // Removal walks every file and folder up to a fixed count, so an install must not create more.
     let mut folders = std::collections::BTreeSet::new();
     for file in &files {

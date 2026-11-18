@@ -1,6 +1,6 @@
 //! Capability `effects@0.1`: a plugin offers an effect the host draws itself, such as the RGB wave
-//! over the ribbon's icons. The plugin names the kind; the host owns the drawing and the settings,
-//! and draws only while the plugin is on and its effect is chosen.
+//! over the ribbon's icons or a galaxy behind the model. The plugin names the kind; the host owns the
+//! drawing and the settings, and draws only while the plugin is on and its effect is chosen.
 
 use std::collections::BTreeSet;
 
@@ -13,7 +13,23 @@ use crate::{HostError, Result, invalid, plain, valid_id};
 pub const MAX_EFFECTS: usize = 8;
 
 /// The kinds this host draws. An effect of any other kind is refused at install.
-pub const KINDS: &[&str] = &["hue-wave"];
+pub const KINDS: &[&str] = &["hue-wave", "galaxy"];
+
+/// The kinds that may name a picture from the plugin's package.
+pub const PICTURE_KINDS: &[&str] = &["galaxy"];
+
+/// The picture formats an effect's `picture` may be, by file extension.
+pub const PICTURE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg"];
+
+/// Whether `path` names a PNG or JPEG file inside the package: relative, forward slashes, no `.`,
+/// `..` or empty part, and no drive.
+pub fn picture_path_ok(path: &str) -> bool {
+    let parts_ok = !path.is_empty()
+        && path.len() <= 200
+        && !path.contains(['\\', ':'])
+        && path.split('/').all(|part| !part.is_empty() && part != "." && part != ".." && plain(part, 100));
+    parts_ok && path.rsplit_once('.').is_some_and(|(_, ext)| PICTURE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str()))
+}
 
 /// One effect in a plugin's manifest (`"effects": [...]`).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -23,12 +39,17 @@ pub struct EffectDecl {
     pub id: String,
     /// What a person sees on the plugin's card.
     pub name: String,
-    /// What the host draws, one of [`KINDS`] (`"hue-wave"`).
+    /// What the host draws, one of [`KINDS`]: `"hue-wave"` or `"galaxy"`.
     pub kind: String,
+    /// A picture in the plugin's package for the kind to show (`"galaxy"`: a 2:1 panorama of the
+    /// sky), as a PNG or JPEG path inside the package. Without one the host draws its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
 }
 
 /// Checks a manifest's `effects` list against its capabilities: the capability is needed, at most
-/// [`MAX_EFFECTS`], ids valid and distinct, names plain, and every kind one this host draws.
+/// [`MAX_EFFECTS`], ids valid and distinct, names plain, every kind one this host draws, and a
+/// picture only where the kind shows one, named by a safe path to an image file.
 pub fn validate(effects: &[EffectDecl], capabilities: &[String]) -> Result<()> {
     if effects.is_empty() {
         return Ok(());
@@ -53,6 +74,14 @@ pub fn validate(effects: &[EffectDecl], capabilities: &[String]) -> Result<()> {
                 field: format!("{field}.kind"),
                 reason: format!("needs effect kind {}; update SolidCraft or the plugin", effect.kind),
             });
+        }
+        if let Some(picture) = &effect.picture
+            && (!PICTURE_KINDS.contains(&effect.kind.as_str()) || !picture_path_ok(picture))
+        {
+            return Err(invalid(
+                format!("{field}.picture"),
+                "a picture is only for an effect that shows one, as a .png or .jpg path inside the package",
+            ));
         }
     }
     Ok(())

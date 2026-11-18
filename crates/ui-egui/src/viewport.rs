@@ -6974,7 +6974,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.viewport.quiet_motion = still.then(|| QuietMotion::record(app, ui, &resp, rect, axes, proj)).flatten();
     let painter = ui.painter_at(rect);
     solidcraft_viewport_egui::paint_background(&painter, rect, t.viewport_top, t.viewport_bottom);
-    crate::gpu::paint_background_picture(app, &painter, rect);
+    if !crate::gpu::paint_sky(app, &painter, rect) {
+        crate::gpu::paint_background_picture(app, &painter, rect);
+    }
 
     // ---- model ----
     crate::frame_watch::step(app, "viewport before the model");

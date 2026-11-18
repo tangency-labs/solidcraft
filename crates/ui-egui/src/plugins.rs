@@ -795,7 +795,7 @@ fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: b
                 if value != active {
                     app.preferences.ui_effect = if value { key.clone() } else { String::new() };
                 }
-                if active {
+                if active && crate::plugin_effects::wave_set(app).on {
                     ui.indent(("effect_settings", key), |ui| {
                         crate::prefs::setting::ui_effect_icons(app, ui);
                         crate::prefs::setting::ui_effect_buttons(app, ui);

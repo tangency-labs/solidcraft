@@ -2,18 +2,36 @@
 //!
 //! A switch on its plugin's card in Preferences › Plugins chooses one, kept as `plugin-id/effect-id` in
 //! the `ui_effect` preference (`""`: none, the default). The host draws the effect only while that
-//! plugin is turned on and its manifest still declares an effect of a kind the host draws. Today the
-//! only kind is `hue-wave`, the RGB wave over the ribbon, its button blocks and the panels.
+//! plugin is turned on and its manifest still declares an effect of a kind the host draws: `hue-wave`,
+//! the RGB wave over the ribbon, its button blocks and the panels, or `galaxy`, a sky behind the model.
+
+use std::path::PathBuf;
 
 use crate::SolveApp;
 use crate::icons::{Wave, WaveSet};
 
 /// The effect kind the host draws as the RGB wave.
 const HUE_WAVE: &str = "hue-wave";
+/// The effect kind the host draws as a galaxy behind the model.
+const GALAXY: &str = "galaxy";
+
+/// What the sky behind the model is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SkyKind {
+    Galaxy,
+}
+
+/// The sky a chosen effect asks for: its kind, and the picture from its plugin's package if the
+/// effect names one (else the host draws its own).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Sky {
+    pub kind: SkyKind,
+    pub picture: Option<PathBuf>,
+}
 
 /// The wave as the ribbon and panels draw it this frame. Off unless the chosen effect's plugin is on.
 pub(crate) fn wave_set(app: &mut SolveApp) -> WaveSet {
-    let on = chosen_and_installed(app);
+    let on = chosen(app).is_some_and(|chosen| chosen.kind == HUE_WAVE);
     let p = &app.preferences;
     WaveSet {
         on,
@@ -24,43 +42,66 @@ pub(crate) fn wave_set(app: &mut SolveApp) -> WaveSet {
     }
 }
 
-/// Whether the chosen effect is a hue wave of an installed plugin that is turned on. The
-/// installed check reads the plugin's manifest, so its answer is kept for the chosen key.
-fn chosen_and_installed(app: &mut SolveApp) -> bool {
+/// The sky behind the model, if the chosen effect is one of a plugin that is on.
+pub(crate) fn sky(app: &mut SolveApp) -> Option<Sky> {
+    let chosen = chosen(app)?;
+    let kind = match chosen.kind.as_str() {
+        GALAXY => SkyKind::Galaxy,
+        _ => return None,
+    };
+    Some(Sky { kind, picture: chosen.picture })
+}
+
+/// The chosen effect, as its plugin's manifest declares it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Chosen {
+    pub kind: String,
+    pub picture: Option<PathBuf>,
+}
+
+/// The chosen effect when it is of an installed plugin that is turned on and of a kind the host
+/// draws. The installed check reads the plugin's manifest, so its answer is kept for the chosen key.
+pub(crate) fn chosen(app: &mut SolveApp) -> Option<Chosen> {
     let key = app.preferences.ui_effect.clone();
     if key.is_empty() {
-        return false;
+        return None;
     }
-    let Some((plugin, _)) = key.split_once('/') else { return false };
+    let (plugin, _) = key.split_once('/')?;
     if !crate::plugins::enabled(app, plugin) {
-        return false;
+        return None;
     }
-    if let Some((cached, installed)) = &app.plugin_effects.checked
+    if let Some((cached, found)) = &app.plugin_effects.checked
         && *cached == key
     {
-        return *installed;
+        return found.clone();
     }
-    let installed = installed(app, &key);
-    app.plugin_effects.checked = Some((key, installed));
-    installed
+    let found = installed(app, &key);
+    app.plugin_effects.checked = Some((key, found.clone()));
+    found
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn installed(app: &SolveApp, key: &str) -> bool {
-    let Some((plugin, effect)) = key.split_once('/') else { return false };
+fn installed(app: &SolveApp, key: &str) -> Option<Chosen> {
+    let (plugin, effect) = key.split_once('/')?;
     let mut paths: Vec<String> = app.session.plugin_state.packages.get(plugin).cloned().into_iter().collect();
     if let Some(dir) = app.session.plugin_state.plugins_dir() {
         paths.push(dir.join(plugin).to_string_lossy().into_owned());
     }
-    paths.into_iter().any(|path| {
-        solidcraft_engine::plugin::read_package(&path)
-            .is_ok_and(|p| p.manifest.id == plugin && p.manifest.effects.iter().any(|e| e.id == effect && e.kind == HUE_WAVE))
+    paths.into_iter().find_map(|path| {
+        let package = solidcraft_engine::plugin::read_package(&path).ok().filter(|p| p.manifest.id == plugin)?;
+        let declared = package.manifest.effects.iter().find(|e| e.id == effect && matches!(e.kind.as_str(), HUE_WAVE | GALAXY))?;
+        let picture = declared
+            .picture
+            .as_deref()
+            .filter(|picture| solidcraft_engine::plugin::picture_path_ok(picture))
+            .map(|picture| PathBuf::from(&path).join(picture));
+        Some(Chosen { kind: declared.kind.clone(), picture })
     })
 }
 
 #[cfg(target_arch = "wasm32")]
-fn installed(_app: &SolveApp, _key: &str) -> bool {
-    false
+fn installed(_app: &SolveApp, _key: &str) -> Option<Chosen> {
+    None
 }
 
 /// A plugin was removed or replaced: the next frame reads its manifest again.
@@ -68,10 +109,10 @@ pub(crate) fn forget(app: &mut SolveApp) {
     app.plugin_effects.checked = None;
 }
 
-/// What the state keeps between frames: the chosen key and whether its plugin offers it.
+/// What the state keeps between frames: the chosen key and what its plugin offers under it.
 #[derive(Default)]
 pub(crate) struct State {
-    checked: Option<(String, bool)>,
+    checked: Option<(String, Option<Chosen>)>,
 }
 
 #[cfg(test)]

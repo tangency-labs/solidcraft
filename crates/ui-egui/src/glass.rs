@@ -63,6 +63,10 @@ impl GlassState {
     pub(crate) fn install(render_state: &egui_wgpu::RenderState) -> GlassState {
         GlassState { render_state: render_state.clone(), uploaded: None, build: Build::Idle }
     }
+
+    pub(crate) fn render_state(&self) -> &egui_wgpu::RenderState {
+        &self.render_state
+    }
 }
 
 /// The error a popped scope caught. A browser's answer comes later and is not waited for.
@@ -296,7 +300,9 @@ pub(crate) fn frame(app: &mut crate::SolveApp, ctx: &Context) {
     }
     let screen = ctx.content_rect();
     let view = shown_view(ctx);
-    egui_glass::map_backdrop(ctx, view.unwrap_or(screen), t.viewport_bottom);
+    // With a sky the copy is the whole window, so docked panels see it as well.
+    let sky = view.is_some() && crate::gpu::sky_shown(ctx);
+    egui_glass::map_backdrop(ctx, if sky { screen } else { view.unwrap_or(screen) }, t.viewport_bottom);
     let hosts = [t.panel, t.panel_header, t.toolbar, t.timeline, t.dialog_bg, t.dialog_body, t.app_bar, t.overlay];
     // A fill as see-through as the theme and the preference ask: at 0 the theme's own alpha.
     let see_through = (glass.see_through * app.preferences.glass_see_through).clamp(0.0, 1.0);
@@ -361,6 +367,10 @@ pub(crate) fn frame(app: &mut crate::SolveApp, ctx: &Context) {
     // The view's picture becomes the backdrop before the first glass of the frame is prepared;
     // a picture at half the view's pixels will do, as it is blurred.
     let copy = view.filter(|_| !glass_shapes.is_empty()).map(|rect| {
+        if sky {
+            let px = screen.size() * ctx.pixels_per_point() * 0.5;
+            return egui_glass::scene_backdrop_over_sky(screen, rect, [px.x as u32, px.y as u32], std::sync::Arc::new(picture));
+        }
         let px = rect.size() * ctx.pixels_per_point() * 0.5;
         egui_glass::scene_backdrop_shape(rect, [px.x as u32, px.y as u32], std::sync::Arc::new(picture))
     });

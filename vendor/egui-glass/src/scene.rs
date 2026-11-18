@@ -85,34 +85,60 @@ fn vs_main(@builtin(vertex_index) i: u32) -> VOut {
 fn fs_main(in: VOut) -> @location(0) vec4<f32> {
     return vec4<f32>(textureSample(src, samp, in.uv).rgb, 1.0);
 }
+@fragment
+fn fs_over(in: VOut) -> @location(0) vec4<f32> {
+    return textureSample(src, samp, in.uv);
+}
 ";
 
 impl SceneResources {
-    /// Records the picture's copy into the pyramid and its mip chain.
-    fn record(&self, device: &wgpu::Device, view: &wgpu::TextureView, srgb: bool, encoder: &mut wgpu::CommandEncoder) {
+    /// Records the picture's copy into the pyramid and its mip chain. With `sky` (the window's
+    /// picture, and the view's part of the pyramid as x, y, w, h) the pyramid is the whole window:
+    /// the sky, with the view's picture over it.
+    fn record(&self, device: &wgpu::Device, view: Option<(&wgpu::TextureView, bool)>, sky: Option<(&wgpu::TextureView, [f32; 4])>, encoder: &mut wgpu::CommandEncoder) {
         let Some((pyramid, plain)) = &self.target else { return };
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("egui_glass_scene"),
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
-            ],
-        });
-        {
+        let bind = |source: &wgpu::TextureView| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("egui_glass_scene"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(source) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                ],
+            })
+        };
+        let pass = |encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, load: wgpu::LoadOp<wgpu::Color>, pipeline: &wgpu::RenderPipeline, group: &wgpu::BindGroup, part: Option<[f32; 4]>| {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui_glass_scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: if srgb { &pyramid.mip_views[0] } else { plain },
+                    view: target,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
                 })],
                 ..Default::default()
             });
-            pass.set_pipeline(if srgb { &self.srgb } else { &self.plain });
-            pass.set_bind_group(0, &bind, &[]);
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, group, &[]);
+            if let Some([x, y, w, h]) = part {
+                pass.set_viewport(x, y, w, h, 0.0, 1.0);
+            }
             pass.draw(0..3, 0..1);
+        };
+        let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        match (sky, view) {
+            (Some((sky, part)), view) => {
+                pass(encoder, plain, clear, &self.plain, &bind(sky), None);
+                if let Some((view, srgb)) = view.filter(|_| part[2] >= 1.0 && part[3] >= 1.0) {
+                    let (target, pipeline) = if srgb { (&pyramid.mip_views[0], &self.srgb_over) } else { (plain, &self.plain_over) };
+                    pass(encoder, target, wgpu::LoadOp::Load, pipeline, &bind(view), Some(part));
+                }
+            }
+            (None, Some((view, srgb))) => {
+                let (target, pipeline) = if srgb { (&pyramid.mip_views[0], &self.srgb) } else { (plain, &self.plain) };
+                pass(encoder, target, clear, pipeline, &bind(view), None);
+            }
+            (None, None) => return,
         }
         self.mipgen.generate(encoder, pyramid);
     }
@@ -186,6 +212,9 @@ pub(crate) struct SceneResources {
     /// Into the pyramid's sRGB view (an sRGB source) and its plain view (gamma bytes as they are).
     srgb: wgpu::RenderPipeline,
     plain: wgpu::RenderPipeline,
+    /// The same, blending a see-through picture over what is there.
+    srgb_over: wgpu::RenderPipeline,
+    plain_over: wgpu::RenderPipeline,
     target: Option<(Pyramid, wgpu::TextureView)>,
     readback: Option<Readback>,
     shared: SceneBrightness,
@@ -226,15 +255,15 @@ pub fn init_scene_backdrop(render_state: &RenderState) -> SceneBrightness {
     });
     let pipeline_layout =
         device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("egui_glass_scene"), bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
-    let pipeline = |format| {
+    let pipeline = |format, entry, blend| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("egui_glass_scene"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_main"), buffers: &[], compilation_options: Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                entry_point: Some(entry),
+                targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
                 compilation_options: Default::default(),
             }),
             primitive: wgpu::PrimitiveState::default(),
@@ -252,8 +281,10 @@ pub fn init_scene_backdrop(render_state: &RenderState) -> SceneBrightness {
     });
     let resources = SceneResources {
         mipgen,
-        srgb: pipeline(FORMAT),
-        plain: pipeline(wgpu::TextureFormat::Rgba8Unorm),
+        srgb: pipeline(FORMAT, "fs_main", None),
+        plain: pipeline(wgpu::TextureFormat::Rgba8Unorm, "fs_main", None),
+        srgb_over: pipeline(FORMAT, "fs_over", Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
+        plain_over: pipeline(wgpu::TextureFormat::Rgba8Unorm, "fs_over", Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
         layout,
         sampler,
         target: None,
@@ -270,11 +301,27 @@ pub fn init_scene_backdrop(render_state: &RenderState) -> SceneBrightness {
 /// backdrop of that glass, at `size` pixels (smaller than the picture is fine: it is blurred).
 /// Map the backdrop to where the picture shows with [`crate::map_backdrop`].
 pub fn scene_backdrop_shape(rect: Rect, size: [u32; 2], source: SceneSource) -> Shape {
-    Shape::Callback(egui_wgpu::Callback::new_paint_callback(rect, SceneCallback { rect, size, source }))
+    Shape::Callback(egui_wgpu::Callback::new_paint_callback(rect, SceneCallback { rect, view: None, size, source }))
+}
+
+/// As [`scene_backdrop_shape`] for the whole `window`: the sky ([`crate::draw_sky`]) with `source`'s
+/// picture over it at `view`. Glass anywhere in the window then sees the sky.
+pub fn scene_backdrop_over_sky(window: Rect, view: Rect, size: [u32; 2], source: SceneSource) -> Shape {
+    Shape::Callback(egui_wgpu::Callback::new_paint_callback(window, SceneCallback { rect: window, view: Some(view), size, source }))
+}
+
+/// `view`'s part of a pyramid of `size` pixels covering `window`, kept inside the pyramid.
+fn view_part(view: Rect, window: Rect, size: [u32; 2]) -> [f32; 4] {
+    let scale = egui::vec2(size[0] as f32, size[1] as f32) / window.size().max(egui::vec2(1.0, 1.0));
+    let [x0, y0] = [((view.min.x - window.min.x) * scale.x).clamp(0.0, size[0] as f32), ((view.min.y - window.min.y) * scale.y).clamp(0.0, size[1] as f32)];
+    let [x1, y1] = [((view.max.x - window.min.x) * scale.x).clamp(x0, size[0] as f32), ((view.max.y - window.min.y) * scale.y).clamp(y0, size[1] as f32)];
+    [x0, y0, x1 - x0, y1 - y0]
 }
 
 struct SceneCallback {
     rect: Rect,
+    /// Where the source's picture goes, when the copy is the window's sky with the picture over it.
+    view: Option<Rect>,
     size: [u32; 2],
     source: SceneSource,
 }
@@ -288,7 +335,11 @@ impl CallbackTrait for SceneCallback {
         encoder: &mut wgpu::CommandEncoder,
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        let Some((view, srgb)) = (self.source)(resources) else { return Vec::new() };
+        let picture = (self.source)(resources);
+        let sky = self.view.and_then(|_| resources.get::<crate::sky::SkyResources>()?.view());
+        if picture.is_none() && sky.is_none() {
+            return Vec::new();
+        }
         let Some(res) = resources.get_mut::<SceneResources>() else { return Vec::new() };
         let [w, h] = [self.size[0].max(1), self.size[1].max(1)];
         if res.target.as_ref().is_none_or(|(p, _)| p.size != [w, h]) {
@@ -302,7 +353,8 @@ impl CallbackTrait for SceneCallback {
             res.readback = Some(readback(device, &pyramid));
             res.target = Some((pyramid, plain));
         }
-        res.record(device, &view, srgb, encoder);
+        let part = self.view.map(|view| view_part(view, self.rect, [w, h]));
+        res.record(device, picture.as_ref().map(|(view, srgb)| (view, *srgb)), sky.as_ref().zip(part), encoder);
         res.read_back(device, encoder, self.rect);
         let (pyramid, _) = res.target.as_ref().expect("created above");
         let (sample_view, mips) = (pyramid.sample_view.clone(), pyramid.mip_levels());
