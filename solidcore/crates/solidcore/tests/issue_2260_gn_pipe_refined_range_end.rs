@@ -50,7 +50,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "box_face_failures_propagate",
     "bspline_trim_preserves_uv_spans",
     "classify_edge_interval",
-    "corner_patch_face_side_twist",
     "curve_loop_normal_from_area",
     "degen_param_tiebreak_uses_actual_param",
     "edgeuse_convexity_propagates_step_off_failure",

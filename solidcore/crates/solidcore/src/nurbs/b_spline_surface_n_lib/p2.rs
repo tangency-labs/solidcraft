@@ -73,7 +73,10 @@
 //!   helpers `sm_CoonsSideNormal`, `sm_CoonsSideAngle`, `sm_RefineToSpans` and
 //!   `sm_ProjectCoonsSideRows`, all private). Its refinement is bounded (8 to 64 spans).
 //!   `sm_CoonsSideAngle` makes the patch normal unit by its own length, not `Unitize`
-//!   (tangency-labs/smlib@701da4b, same option).
+//!   (tangency-labs/smlib@701da4b, same option). Not the fork's (WR-613):
+//!   `sm_ProjectCoonsSideRows` moves a point next to a face side and a blend side into
+//!   the face side's plane, not onto the two planes' mean, as the Coons corner twist
+//!   there is the blend side's (`create_coons_srf`'s face sides).
 
 use crate::curve::curve::p1::{SpanAccuracy, MAX_APPROX_SPANS};
 use crate::curve::curve::p2::Curve as SmCurve;
@@ -2212,9 +2215,14 @@ fn corner_blend_4(
     // Not upstream (WR-547; tangency-labs/smlib@cae8618): the patch tangent to its sides'
     // surfaces
     if !create_bilinear_patch {
-        if let Some(tangent) =
-            make_coons_patch_tangent_to_sides(k, &coons, &uv_crvs, surfaces, tangency_tol_radians)?
-        {
+        if let Some(tangent) = make_coons_patch_tangent_to_sides(
+            k,
+            &coons,
+            &uv_crvs,
+            surfaces,
+            tangency_tol_radians,
+            face_sides,
+        )? {
             return Ok(vec![tangent]);
         }
     }
@@ -2360,11 +2368,20 @@ fn refine_to_spans(surface: &mut BSplineSurface, param: SurfParamType, spans: us
 /// corner) onto the mean of their planes. Needs at least 5 control points each way, so
 /// that no point is next to two opposite sides. Every plane is read from the unmoved
 /// net before any point is written.
+///
+/// Not the fork's (WR-613): `face_sides` marks the sides on a face of the body (bit
+/// `i` for side `i`: left, bottom, right, top), as `CreateCornerBlend`'s `lFaceSides`.
+/// A point next to exactly one marked side and one unmarked side goes into the marked
+/// side's plane alone, as the Coons corner twist there is the unmarked side's: the patch
+/// keeps its tangency to the body's face exactly and the blend side takes the miss. On
+/// the mean plane the point stood off the face's tangent plane by half the two planes'
+/// separation there, so a patch along a plane face crossed it.
 fn project_coons_side_rows(
     k: &crate::kernel::Kernel,
     patch: &mut BSplineSurface,
     uv_curves: &[Option<BSplineCurve>],
     surfaces: &[Option<&SmSurface>],
+    face_sides: u32,
 ) -> Result<()> {
     const OP: &str = OP_CORNER;
     let nu = patch.number_control_points(SurfParamType::U);
@@ -2432,8 +2449,9 @@ fn project_coons_side_rows(
 
             let (mut pnt, _) = patch.control_point(ControlPointForm::NonRational, i, j)?;
 
-            // each side's plane: unit normal and the signed distance of pnt from it
-            let mut planes: Vec<(Vec3, f64)> = Vec::with_capacity(2);
+            // each side's plane: unit normal, the signed distance of pnt from it, and
+            // whether the side is on a face of the body
+            let mut planes: Vec<(Vec3, f64, bool)> = Vec::with_capacity(2);
             for &(side, anchor_u, anchor_v) in &sides {
                 let Some((uv_curve, surface)) = coons_side(uv_curves, surfaces, side) else {
                     continue;
@@ -2448,12 +2466,20 @@ fn project_coons_side_rows(
                     patch.control_point(ControlPointForm::NonRational, anchor_u, anchor_v)?;
                 let normal =
                     coons_side_normal(k, uv_curve, surface, if along_u { &su } else { &sv }, s)?;
-                planes.push((normal, normal.dot(pnt - anchor)));
+                let on_face = u32::try_from(side)
+                    .ok()
+                    .and_then(|side| 1u32.checked_shl(side))
+                    .is_some_and(|bit| face_sides & bit != 0);
+                planes.push((normal, normal.dot(pnt - anchor), on_face));
             }
             match planes.as_slice() {
                 [] => continue,
-                [(normal, dist)] => pnt -= *normal * *dist,
-                [(normal0, dist0), (normal1, dist1), ..] => {
+                // next to one side, or to a face side and a blend side: into the (face)
+                // side's plane
+                [(normal, dist, _)]
+                | [(normal, dist, true), (_, _, false), ..]
+                | [(_, _, false), (normal, dist, true), ..] => pnt -= *normal * *dist,
+                [(normal0, dist0, _), (normal1, dist1, _), ..] => {
                     // next to two sides at a corner: both planes are near the corner's
                     // tangent plane, their line far off; onto their mean plane, which
                     // leaves each a second-order miss
@@ -2491,13 +2517,15 @@ fn project_coons_side_rows(
 /// way and the control points next to each side moved into the side's tangent planes,
 /// until every side reads within tolerance. Returns the first copy within it, or else
 /// the one nearest it if that is nearer than `patch`; `None` when `patch` is rational,
-/// within tolerance already, or no copy is nearer.
+/// within tolerance already, or no copy is nearer. `face_sides` goes to
+/// [`project_coons_side_rows`] (not the fork's; WR-613).
 fn make_coons_patch_tangent_to_sides(
     k: &crate::kernel::Kernel,
     patch: &BSplineSurface,
     uv_curves: &[Option<BSplineCurve>],
     surfaces: &[Option<&SmSurface>],
     tangency_tol_radians: f64,
+    face_sides: u32,
 ) -> Result<Option<BSplineSurface>> {
     if patch.is_rational() {
         return Ok(None);
@@ -2515,7 +2543,7 @@ fn make_coons_patch_tangent_to_sides(
         let mut attempt = patch.clone();
         refine_to_spans(&mut attempt, SurfParamType::U, spans)?;
         refine_to_spans(&mut attempt, SurfParamType::V, spans)?;
-        project_coons_side_rows(k, &mut attempt, uv_curves, surfaces)?;
+        project_coons_side_rows(k, &mut attempt, uv_curves, surfaces, face_sides)?;
         let angle = coons_side_angle(k, &attempt, uv_curves, surfaces)?;
         if angle < best_angle {
             best_angle = angle;
@@ -2933,6 +2961,92 @@ mod tests {
         let k = &crate::Kernel::default();
         let r = BSplineSurface::create_corner_blend(k, &[], &[], &[], &[], 1e-3, 0.1, true);
         assert!(r.is_err());
+    }
+
+    /// WR-613: a corner control point next to a side on a face of the body and a blend
+    /// side goes into the face side's tangent plane, so the patch keeps its tangency to
+    /// the face exactly; next to two sides of one kind it goes onto their mean plane.
+    #[test]
+    fn wr_613_corner_point_goes_into_the_face_sides_plane() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::plane::Plane;
+
+        let k = crate::Kernel::default();
+        // a bicubic patch over [0, 1]^2, 5 x 5 control points, off both side planes
+        let net: Vec<Vec<CPoint>> = (0..5)
+            .map(|i| {
+                (0..5)
+                    .map(|j| {
+                        let z = 0.01 * f64::from((i + 1) * (j + 2));
+                        CPoint::new(f64::from(i) / 4.0, f64::from(j) / 4.0, z, NOW)
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+        let patch = BSplineSurface::from_nurb(
+            Surface::new(net, 3, 3, knots.clone(), knots).unwrap(),
+            false,
+        );
+        // left side (u = 0) on the plane z = 0, bottom side (v = 0) on a plane tilted
+        // about x, normal (0, -sin a, cos a)
+        let a = 0.3_f64;
+        let flat = SmSurface::from(Plane::create_canonical(&Axis2Placement::default()).unwrap());
+        let tilted = SmSurface::from(
+            Plane::create_canonical(&Axis2Placement::new(
+                Point3::ZERO,
+                Vec3::X,
+                Vec3::new(0.0, a.cos(), a.sin()),
+            ))
+            .unwrap(),
+        );
+        let n_bot = Vec3::new(0.0, -a.sin(), a.cos());
+        let uv = |x: f64| {
+            BSplineCurve::create_line_segment(2, Point3::new(x, 0.0, 0.0), Point3::new(x, 1.0, 0.0))
+                .unwrap()
+        };
+        let uv_curves = [Some(uv(0.0)), Some(uv(0.0)), None, None];
+        let surfaces = [Some(&flat), Some(&tilted), None, None];
+
+        let corner = |face_sides: u32| -> Point3 {
+            let mut p = patch.clone();
+            project_coons_side_rows(&k, &mut p, &uv_curves, &surfaces, face_sides).unwrap();
+            p.control_point(ControlPointForm::NonRational, 1, 1)
+                .unwrap()
+                .0
+        };
+        let anchor = |i, j| {
+            patch
+                .control_point(ControlPointForm::NonRational, i, j)
+                .unwrap()
+                .0
+        };
+        let off_left = |p: Point3| (p - anchor(0, 1)).dot(Vec3::Z);
+        let off_bot = |p: Point3| (p - anchor(1, 0)).dot(n_bot);
+
+        // left on a face, bottom a blend side: in the left side's plane
+        let left = corner(1 << LEFT);
+        assert!(off_left(left).abs() <= 1e-15, "{}", off_left(left));
+        assert!(off_bot(left).abs() > 1e-3, "{}", off_bot(left));
+        // bottom on a face, left a blend side: in the bottom side's plane
+        let bot = corner(1 << BOT);
+        assert!(off_bot(bot).abs() <= 1e-15, "{}", off_bot(bot));
+        assert!(off_left(bot).abs() > 1e-3, "{}", off_left(bot));
+        // no face side, or both: the mean plane, off each side's plane (upstream's)
+        let mean = corner(0);
+        assert_eq!(corner((1 << LEFT) | (1 << BOT)), mean);
+        assert!(off_left(mean).abs() > 1e-3, "{}", off_left(mean));
+        assert!(off_bot(mean).abs() > 1e-3, "{}", off_bot(mean));
+        // a point next to one side only goes into that side's plane either way
+        for face_sides in [0, 1 << LEFT, 1 << BOT] {
+            let mut p = patch.clone();
+            project_coons_side_rows(&k, &mut p, &uv_curves, &surfaces, face_sides).unwrap();
+            let q = p
+                .control_point(ControlPointForm::NonRational, 1, 2)
+                .unwrap()
+                .0;
+            assert!((q - anchor(0, 2)).dot(Vec3::Z).abs() <= 1e-15);
+        }
     }
 
     #[test]

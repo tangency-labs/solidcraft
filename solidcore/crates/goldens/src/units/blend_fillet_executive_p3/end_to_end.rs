@@ -2730,3 +2730,259 @@ mod wr56_certificates {
         }
     }
 }
+
+/// WR-613 (#18640): a fillet corner patch between a face of the body and a round takes
+/// the round's twist at that corner and, once refined (WR-547), keeps the control point
+/// next to both in the face's tangent plane. That moved 24 rows: the face's side of
+/// each corner patch is now tangent to the face exactly, and no patch crosses a plane
+/// face it meets. Each row's body is certified, not compared with main's bits:
+/// - `check_brep` Level 2 reports nothing and the body is one closed manifold solid;
+/// - every face side of a non-rational B-spline patch on a plane face holds the
+///   tangency certificate of [`plane_side_certificates`] (PROVEN up to `1e-12` of
+///   rounding; main misses it on every row, by `1e-10` to `4e-5`);
+/// - the volume is enclosed ([`enclose_volume`]) and the row's volume (the mass
+///   integrator's) lies in the enclosure. Where the enclosure is narrower than the move,
+///   main's volume lies outside it: the move is the patch's, not the integrator's.
+///
+/// [`enclose_volume`]: solidcore::mass::enclosure::enclose_volume
+#[cfg(test)]
+mod wr613_certificates {
+    use super::{apply, build, RealSolid};
+    use solidcore::kernel::Kernel;
+    use solidcore::mass::enclosure::enclose_volume;
+    use solidcore::math::Vec3;
+    use solidcore::surface::surface::p2::SurfaceKind;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::brep::p2::is_manifold_solid;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use solidcore::topology::topology_traverser::face_edges;
+    use solidcore::topology::Brep;
+
+    /// A moved row: its name and main's volume (the golden's before this change).
+    type Row = (&'static str, f64);
+
+    /// How far a control point may lie off a plane and count as in it: rounding of
+    /// `(p - o) . n` on coordinates of at most 30, with ample margin.
+    const IN_PLANE: f64 = 1e-12;
+
+    /// The row's input, read as the goldens gate reads it (upstream file paths resolved).
+    fn load(name: &str) -> RealSolid {
+        let case = crate::case::regression_case(&super::super::Runner, name);
+        let inputs: super::super::Inputs = case.parse().expect("inputs");
+        inputs.real_solid.expect("a real_solid case")
+    }
+
+    /// The face sides of `b`'s non-rational B-spline faces that lie on a plane face they
+    /// share an edge with, each certified. A side lies on a plane when its boundary row of control
+    /// points does (to `1e-9`; the patch's side is then in the plane, as a B-spline curve
+    /// lies in the hull of its control points). Certified: the next row lies in the plane
+    /// too (to [`IN_PLANE`]), so the cross-boundary derivative along the side, a
+    /// combination of the two rows' differences, lies in the plane and the patch is
+    /// tangent to it all along the side; and the whole net lies on one side of the plane,
+    /// so the patch, in the convex hull of its net, does not cross it. Returns the number
+    /// of sides certified, with the largest next-row distance from the plane seen.
+    fn plane_side_certificates(name: &str, b: &Brep) -> (usize, f64) {
+        let faces = p1::faces(b, None).expect("faces");
+        let mut planes = Vec::new();
+        for &f in &faces {
+            let s = solidcore::topology::face::surface(b, f)
+                .expect("surface")
+                .expect("a surface");
+            if let SurfaceKind::Plane(p) = s.kind() {
+                let (o, n, _) = p.is_planar();
+                planes.push((f, o, n));
+            }
+        }
+        let (mut sides, mut worst) = (0, 0.0_f64);
+        for &f in &faces {
+            let s = solidcore::topology::face::surface(b, f)
+                .expect("surface")
+                .expect("a surface");
+            let SurfaceKind::BSpline(patch) = s.kind() else {
+                continue;
+            };
+            if patch.is_rational() {
+                continue;
+            }
+            let net = patch.control_point_net().expect("net");
+            let (nu, nv) = (net.u_count, net.v_count);
+            let at = |i: usize, j: usize| net.points[i * nv + j];
+            // each side: its boundary row and the row next to it
+            let rows: [(&str, Vec<_>, Vec<_>); 4] = [
+                ("u min", (0..nv).map(|j| at(0, j)).collect(), (0..nv).map(|j| at(1, j)).collect()),
+                ("u max", (0..nv).map(|j| at(nu - 1, j)).collect(), (0..nv).map(|j| at(nu - 2, j)).collect()),
+                ("v min", (0..nu).map(|i| at(i, 0)).collect(), (0..nu).map(|i| at(i, 1)).collect()),
+                ("v max", (0..nu).map(|i| at(i, nv - 1)).collect(), (0..nu).map(|i| at(i, nv - 2)).collect()),
+            ];
+            let patch_edges = face_edges(b, f).expect("patch edges");
+            for &(plane, o, n) in &planes {
+                // only the plane face the patch meets across an edge: a side along a
+                // body edge also lies in the other face at that edge, which the patch
+                // does not touch tangentially
+                let plane_edges = face_edges(b, plane).expect("plane edges");
+                if !patch_edges.iter().any(|e| plane_edges.contains(e)) {
+                    continue;
+                }
+                let d = |p: Vec3| (p - o).dot(n);
+                for (side, boundary, next) in &rows {
+                    let on = boundary.iter().all(|&p| d(p).abs() <= 1e-9);
+                    let span = boundary[0].distance(boundary[boundary.len() - 1]);
+                    if !on || span <= 1e-9 {
+                        continue;
+                    }
+                    let off = next.iter().map(|&p| d(p).abs()).fold(0.0, f64::max);
+                    assert!(
+                        off <= IN_PLANE,
+                        "{name}: patch {f:?} side {side} on plane {plane:?}: next row {off:e} off it"
+                    );
+                    let lo = net.points.iter().map(|&p| d(p)).fold(f64::INFINITY, f64::min);
+                    let hi = net.points.iter().map(|&p| d(p)).fold(f64::NEG_INFINITY, f64::max);
+                    assert!(
+                        lo >= -IN_PLANE || hi <= IN_PLANE,
+                        "{name}: patch {f:?} net crosses plane {plane:?}: [{lo:e}, {hi:e}]"
+                    );
+                    sides += 1;
+                    worst = worst.max(off);
+                }
+            }
+        }
+        (sides, worst)
+    }
+
+    /// The row named `name`: valid closed solid, its plane face sides certified, its
+    /// volume enclosed with the row's volume in the enclosure.
+    fn check(name: &str) {
+        let picked: Vec<&Row> = ROWS.iter().filter(|r| r.0 == name).collect();
+        assert_eq!(picked.len(), 1, "{name}: one row of that name");
+        let main_volume = picked[0].1;
+        let input = load(name);
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).expect("fixture").expect("a body");
+        let edges = p1::edges(&body, None).expect("edges");
+        let selected: Vec<_> = if input.all_edges {
+            edges
+        } else {
+            input
+                .edge_indices()
+                .expect("edge indices")
+                .iter()
+                .map(|&i| *edges.get(i).expect("selected edge"))
+                .collect()
+        };
+        apply(&mut k, &mut body, &selected, &input)
+            .unwrap_or_else(|e| panic!("{name}: the round failed: {e:?}"));
+        let lines = check_brep(&mut k, &mut body, CheckLevel::Level2)
+            .expect("check")
+            .lines();
+        assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
+        assert!(
+            is_manifold_solid(&body).expect("manifold check"),
+            "{name}: not one closed manifold solid"
+        );
+        let (sides, worst) = plane_side_certificates(name, &body);
+        eprintln!("{name}: {sides} plane face sides certified, next rows within {worst:e}");
+        assert!(sides >= 1, "{name}: no corner patch side on a plane face");
+
+        let row = super::rust(&input).unwrap_or_else(|e| panic!("{name}: harness: {e:?}"));
+        assert_eq!(row.ints["mass_status"], [0], "{name}: mass status");
+        let volume = *row.values["mass_properties"].get(1).expect("volume");
+        let e = enclose_volume(&k, &mut body, 1e-7 * volume).expect("enclosure");
+        eprintln!(
+            "{name}: volume in [{}, {}] (width {:e}, {:?}), row {volume}, main {main_volume}",
+            e.lo,
+            e.hi,
+            e.width(),
+            e.stop
+        );
+        assert!(
+            e.lo <= volume && volume <= e.hi,
+            "{name}: row volume {volume} not in [{}, {}]",
+            e.lo,
+            e.hi
+        );
+        if e.width() < (volume - main_volume).abs() {
+            assert!(
+                main_volume < e.lo || e.hi < main_volume,
+                "{name}: main's volume {main_volume} in [{}, {}]",
+                e.lo,
+                e.hi
+            );
+        }
+    }
+
+    const ROWS: &[Row] = &[
+        ("corner3x2-union-inset-side-step-edges1-14-r1", 2600.6420851684975),
+        ("corner3x2-union-inset-side-step-edges1-18-r1", 2599.9982794302828),
+        ("corner3x2-union-inset-side-step-edges12-13-r1", 2600.6420849381543),
+        ("corner3x2-union-inset-side-step-edges12-17-r1", 2599.998279429345),
+        ("corner3x2-union-inset-side-step-edges13-19-r1", 2600.6420848954835),
+        ("corner3x2-union-inset-side-step-edges14-27-r1", 2600.6420849393144),
+        ("corner3x2-union-inset-side-step-edges15-19-r1", 2601.071288569648),
+        ("corner3x2-union-inset-side-step-edges15-27-r1", 2601.071288612841),
+        ("corner3x2-union-overhang-corner-edges6-12-r1", 2598.710668595906),
+        ("corner3x2-union-overhang-corner-edges6-13-r1", 2599.5690759416725),
+        ("corner3x2-union-overhang-front-edges15-22-r1", 2599.9982793856775),
+        ("corner3x2-union-overhang-front-edges15-24-r1", 2599.998279427931),
+        ("curve-sih-box_diff_cyl-all-edges-r0.1", 950.6479346142942),
+        ("curve-sih-box_diff_cyl-all-edges-r0.25", 949.2763535526113),
+        ("curve-sih-box_diff_cyl-all-edges-r0.5", 944.4771092314381),
+        ("curve-sih-box_diff_cyl-all-edges-r1.0", 925.9490134066059),
+        ("curve-sih-box_diff_cyl-all-edges-step2", 950.6479346142942),
+        ("source-file-box_diff_cyl-all-edges", 950.648098797075),
+        ("stubs3-union-inset-side-step-edges16-22-r1", 2601.7150940782253),
+        ("stubs3-union-inset-side-step-edges17-22-r1", 2600.6420848961543),
+        ("stubs3-union-overhang-corner-edges14-22-r1", 2599.5690757124057),
+        ("stubs3-union-overhang-corner-edges15-22-r1", 2598.710668410455),
+        ("stubs3-union-overhang-front-edges14-22-r1", 2598.7106683663505),
+        ("stubs4-Heart-all-edges-r0.1", 326.058288507779),
+    ];
+
+    /// One test per moved row, so the test runner spreads them over its threads.
+    macro_rules! row_tests {
+        ($($test:ident => $name:literal,)*) => {
+            $(
+                #[test]
+                fn $test() {
+                    check($name);
+                }
+            )*
+
+            /// The rows the generated tests take, in [`ROWS`]'s order.
+            const ROW_TESTS: &[&str] = &[$($name),*];
+        };
+    }
+
+    row_tests! {
+        corner3x2_union_inset_side_step_edges1_14_r1 => "corner3x2-union-inset-side-step-edges1-14-r1",
+        corner3x2_union_inset_side_step_edges1_18_r1 => "corner3x2-union-inset-side-step-edges1-18-r1",
+        corner3x2_union_inset_side_step_edges12_13_r1 => "corner3x2-union-inset-side-step-edges12-13-r1",
+        corner3x2_union_inset_side_step_edges12_17_r1 => "corner3x2-union-inset-side-step-edges12-17-r1",
+        corner3x2_union_inset_side_step_edges13_19_r1 => "corner3x2-union-inset-side-step-edges13-19-r1",
+        corner3x2_union_inset_side_step_edges14_27_r1 => "corner3x2-union-inset-side-step-edges14-27-r1",
+        corner3x2_union_inset_side_step_edges15_19_r1 => "corner3x2-union-inset-side-step-edges15-19-r1",
+        corner3x2_union_inset_side_step_edges15_27_r1 => "corner3x2-union-inset-side-step-edges15-27-r1",
+        corner3x2_union_overhang_corner_edges6_12_r1 => "corner3x2-union-overhang-corner-edges6-12-r1",
+        corner3x2_union_overhang_corner_edges6_13_r1 => "corner3x2-union-overhang-corner-edges6-13-r1",
+        corner3x2_union_overhang_front_edges15_22_r1 => "corner3x2-union-overhang-front-edges15-22-r1",
+        corner3x2_union_overhang_front_edges15_24_r1 => "corner3x2-union-overhang-front-edges15-24-r1",
+        curve_sih_box_diff_cyl_all_edges_r0_1 => "curve-sih-box_diff_cyl-all-edges-r0.1",
+        curve_sih_box_diff_cyl_all_edges_r0_25 => "curve-sih-box_diff_cyl-all-edges-r0.25",
+        curve_sih_box_diff_cyl_all_edges_r0_5 => "curve-sih-box_diff_cyl-all-edges-r0.5",
+        curve_sih_box_diff_cyl_all_edges_r1_0 => "curve-sih-box_diff_cyl-all-edges-r1.0",
+        curve_sih_box_diff_cyl_all_edges_step2 => "curve-sih-box_diff_cyl-all-edges-step2",
+        source_file_box_diff_cyl_all_edges => "source-file-box_diff_cyl-all-edges",
+        stubs3_union_inset_side_step_edges16_22_r1 => "stubs3-union-inset-side-step-edges16-22-r1",
+        stubs3_union_inset_side_step_edges17_22_r1 => "stubs3-union-inset-side-step-edges17-22-r1",
+        stubs3_union_overhang_corner_edges14_22_r1 => "stubs3-union-overhang-corner-edges14-22-r1",
+        stubs3_union_overhang_corner_edges15_22_r1 => "stubs3-union-overhang-corner-edges15-22-r1",
+        stubs3_union_overhang_front_edges14_22_r1 => "stubs3-union-overhang-front-edges14-22-r1",
+        stubs4_heart_all_edges_r0_1 => "stubs4-Heart-all-edges-r0.1",
+    }
+
+    /// Every row of [`ROWS`] has exactly one test.
+    #[test]
+    fn every_moved_row_has_its_own_test() {
+        let rows: Vec<&str> = ROWS.iter().map(|row| row.0).collect();
+        assert_eq!(rows, ROW_TESTS);
+    }
+}
