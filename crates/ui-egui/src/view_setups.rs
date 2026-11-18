@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use solidcraft_views::{EMPTY, MAX_POPOUTS, MAX_VIEWS, Tiles, WindowArrangement, WindowId, WindowLevel, WindowPlacement};
+use solidcraft_views::{EMPTY, MAX_POPOUTS, MAX_VIEWS, Tiles, WindowArrangement, WindowLevel, WindowPlacement};
 
 use crate::{SolveApp, documents, view_windows};
 
@@ -300,5 +300,5 @@ pub(crate) fn command(app: &mut SolveApp, id: &str, request: Value) -> Result<Va
         }
         _ => return Err("no_such_command".into()),
     }
-    Ok(json!({"layouts": names(app)}))
+    Ok(request)
 }
