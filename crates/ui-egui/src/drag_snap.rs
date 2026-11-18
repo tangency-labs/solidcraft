@@ -258,41 +258,30 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.extend(crate::ui_kit::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
         }
     }
-    if app.preferences.sketch_snap_icons {
-        match &s.target {
-            Target::Point(id) => {
-                if let Some(pt_sp) = ss.sketch.point_index(id).and_then(|pi| ss.sketch.point(pi)).and_then(to) {
+    match &s.target {
+        Target::Point(id) => {
+            if let Some(pt_sp) = ss.sketch.point_index(id).and_then(|pi| ss.sketch.point(pi)).and_then(to) {
+                crate::tools::highlight_point(painter, pt_sp);
+            }
+        }
+        Target::Mid(id) | Target::On(id) => {
+            if let Some(ci) = ss.sketch.curve_index(id) {
+                let mut display_budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
+                crate::tools::highlight_curve(&ss.sketch, ci, &ss.plane, painter, proj, &mut display_budget);
+            }
+        }
+        Target::Align => {
+            for (from, _) in &s.guides {
+                if let Some(pt_sp) = to(*from) {
                     crate::tools::highlight_point(painter, pt_sp);
                 }
             }
-            Target::Mid(id) | Target::On(id) => {
-                if let Some(ci) = ss.sketch.curve_index(id) {
-                    let mut display_budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-                    crate::tools::highlight_curve(&ss.sketch, ci, &ss.plane, painter, proj, &mut display_budget);
-                }
-            }
-            Target::Align => {
-                for (from, _) in &s.guides {
-                    if let Some(pt_sp) = to(*from) {
-                        crate::tools::highlight_point(painter, pt_sp);
-                    }
-                }
-            }
         }
-        let Some(sp) = to(s.at) else { return };
-        let label = s.label();
-        if !label.is_empty() {
-            crate::sketch_tools::paint_snap_badges(app, painter, proj.rect, sp, &[label], false);
-        }
-    } else {
-        let Some(sp) = to(s.at) else { return };
-        painter.circle_stroke(sp, 6.0, Stroke::new(1.5, tk.accent));
-        let label = s.label();
-        if !label.is_empty() {
-            let r = egui::Rect::from_min_size(sp + egui::vec2(12.0, -24.0), egui::vec2(24.0, 14.0));
-            painter.rect_filled(r, tk.radius_sm.saturating_sub(1), tk.accent_soft);
-            painter.text(r.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(tk.font_micro), tk.text);
-        }
+    }
+    let Some(sp) = to(s.at) else { return };
+    let label = s.label();
+    if !label.is_empty() {
+        crate::sketch_tools::paint_snap_badges(app, painter, proj.rect, sp, &[label], false);
     }
     crate::scenario::publish_count("drag_guides", s.guides.len() as f64);
 }

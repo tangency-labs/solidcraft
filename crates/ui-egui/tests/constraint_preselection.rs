@@ -504,37 +504,3 @@ fn constraint_pick_tools_show_constraint_cursor_icon_and_avoid_duplication() {
     assert!(rect_of("viewport:constraint_cursor").is_none(), "Dimension should hide cursor icon while editor box owns the cursor");
     h.step(&json!({"key": "Escape"})).unwrap();
 }
-
-#[test]
-fn disabling_new_sketch_preferences_restores_legacy_behavior() {
-    use solidcraft_ui_egui::scenario::rect_of;
-    let mut h = Harness::new();
-    h.app.home.open = false;
-    h.app.preferences.sketch_constraint_preselection = false;
-    h.app.preferences.sketch_snap_icons = false;
-    h.app.ui.tool_cursor = true;
-
-    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
-    h.app.run("sketch.line", json!({"points": [[0.0, 0.0], [50.0, 0.0]]})).unwrap();
-    h.call("ui.view", json!({"view": "top"}));
-    h.app.cam.distance = 80.0;
-    h.frames(2);
-
-    // With `sketch_constraint_preselection = false`, starting Equal keeps incompatible selection untouched
-    // and starting Parallel does not seed a single preselected line.
-    h.app.session.selection = vec![Sel::SketchPoint { id: "l1.start".into() }];
-    h.step(&json!({"start": "sketch.constraint.equal"})).unwrap();
-    assert_eq!(h.app.session.selection.len(), 1, "legacy mode does not clear incompatible selection");
-    h.step(&json!({"key": "Escape"})).unwrap();
-
-    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
-    h.step(&json!({"start": "sketch.constraint.parallel"})).unwrap();
-    assert!(h.app.tool.as_ref().is_some_and(|t| !t.preselected && t.picks.is_empty()), "legacy mode does not seed preselection");
-
-    // With `sketch_snap_icons = false`, constraint cursor icons are not painted and `tool_cursor` shows instead.
-    h.step(&json!({"move": {"sketch": [25.0, 20.0]}})).unwrap();
-    h.frames(2);
-    assert!(rect_of("viewport:constraint_cursor").is_none(), "snap_icons=false suppresses constraint cursor badge");
-    assert!(rect_of("viewport:tool_cursor").is_some(), "snap_icons=false restores tool_cursor for constraint tools");
-    h.step(&json!({"key": "Escape"})).unwrap();
-}

@@ -48,7 +48,7 @@ pub(crate) fn icon(app: &SolveApp) -> Option<&'static str> {
     if !app.ui.tool_cursor {
         return None;
     }
-    if app.preferences.sketch_snap_icons && app.tool.as_ref().is_some_and(crate::tools::is_constraint_pick_tool) {
+    if app.tool.as_ref().is_some_and(crate::tools::is_constraint_pick_tool) {
         return None;
     }
     command(app).and_then(solidcraft_engine::find_command).map(|spec| spec.icon).filter(|icon| !icon.is_empty())
