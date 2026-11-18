@@ -1,13 +1,29 @@
+# IDE configuration
+.idea/
+.code/
+.vscode/
+
+# AI agents
+.claude/
+.agents/
+
+# Python venv and cache
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+
+# Compiled binaries
 /target*/
 /plan/
 /dist/
+
+# OS stuff
 *~
 .DS_Store
 *.swp
-/.claude/worktrees/
 /target-snapshot
-__pycache__/
-.vscode/
 
 # cargo-mutants output (docs/mutation-testing.md)
 mutants.out*/
