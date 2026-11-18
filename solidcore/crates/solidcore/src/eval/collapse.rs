@@ -1275,7 +1275,7 @@ const RATIONAL_BOUND_LEVELS: u32 = 6;
 ///
 /// Refused where a weight of a piece is not certified positive (past the range a continued
 /// weight can reach zero), where a distance between the `R` is not finite (weights whose
-/// products underflow), where `across` is off its knot range or `along` is empty, and for
+/// products underflow or overflow), where `across` is off its knot range or `along` is empty, and for
 /// knots with an empty span where one is needed or, along `d`, a multiplicity above the degree.
 fn rational_partial_bound(
     s: &EvalSurface,
@@ -1426,12 +1426,25 @@ fn rational_partial_bound(
                 .fold(0.0, f64::max);
             let at = |j: usize, kk: usize| rows.get(j).and_then(|r| r.get(kk)).copied();
             // |R_a − R_b| over every parameter across this span.
+            // Not finite where the weights' products underflow (0 / 0) or overflow (∞ − ∞) or
+            // the net's points overflow; a maximum would drop a NaN, so each term is refused
+            // before one sees it.
+            let finite = |x: f64| -> Result<f64, EvalError> {
+                if x.is_finite() {
+                    Ok(x)
+                } else {
+                    Err(refused(
+                        "a distance on a rational net that is not finite (its weights' \
+                         products underflow or overflow, or its points overflow)",
+                    ))
+                }
+            };
             let apart = |a: usize, b: usize| -> Result<f64, EvalError> {
                 let (mut near, mut cross) = (0.0f64, 0.0f64);
                 for j in 0..rows.len() {
                     let ((ea, xa, wa, va), (eb, xb, wb, vb)) =
                         (at(j, a).ok_or_else(bad)?, at(j, b).ok_or_else(bad)?);
-                    near = near.max((ea - eb).len() * (1.0 + gamma(6)) + xa + xb);
+                    near = near.max(finite((ea - eb).len() * (1.0 + gamma(6)) + xa + xb)?);
                     for l in 0..rows.len() {
                         let ((_, _, wal, val), (_, _, wbl, vbl)) =
                             (at(l, a).ok_or_else(bad)?, at(l, b).ok_or_else(bad)?);
@@ -1444,19 +1457,10 @@ fn rational_partial_bound(
                             + val * wb.abs()
                             + wal.abs() * vb
                             + val * vb;
-                        cross = cross.max(e);
+                        cross = cross.max(finite(e)?);
                     }
                 }
-                // Not finite where the weights' products underflow (0 / 0) or the net overflows;
-                // a maximum would drop a NaN, so it is refused here.
-                let x = near + cross * radius / (low * low);
-                if !x.is_finite() {
-                    return Err(refused(
-                        "a distance on a rational net that is not finite (its weights' \
-                         products underflow or its points overflow)",
-                    ));
-                }
-                Ok(x)
+                finite(near + cross * radius / (low * low))
             };
             let mut top = 0.0f64;
             for kk in 0..p {
