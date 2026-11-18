@@ -132,6 +132,28 @@ fn on_sketch_plane(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
     ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
 }
 
+/// A piece is selected on the side of its boundary under the cursor. Drawing snaps can move
+/// a click across that boundary, so both hover and click use the pointer's plane position.
+pub(super) fn tool_point_at(app: &SolveApp, proj: &Proj, pos: Pos2, cmd: Option<&str>) -> Option<(Vec2, Option<String>)> {
+    if matches!(cmd, Some("sketch.break" | "sketch.trim")) {
+        on_sketch_plane(app, proj, pos).map(|p| (p, None))
+    } else {
+        sketch_point_at(app, proj, pos)
+    }
+}
+
+/// Clicking the selected curve's endpoint with Break can detach it from its neighbour.
+fn picked_shared_end(app: &SolveApp, curve: &str, hits: &[Hit]) -> Option<Vec2> {
+    let sid = active_sketch(app)?;
+    let at = hits.iter().find_map(|hit| match hit {
+        Hit::SketchPoint { sketch, at, .. } if *sketch == sid => Some(*at),
+        _ => None,
+    })?;
+    let solve = solved_sketch(app, sid)?;
+    let sk = &solve.sketch;
+    solidcraft_engine::cmd::break_shared_end(sk, sk.curve_index(curve)?, at).map(|_| at)
+}
+
 /// A press and drag with Trim draws a path from `press`; true when it started one. Each piece
 /// the path crosses is trimmed when it is let go (`sketch.trim.path`).
 pub fn trim_drag_start(app: &mut SolveApp, proj: &Proj, press: Pos2) -> bool {
@@ -1226,8 +1248,8 @@ pub fn periodic_start_snap(app: &SolveApp, tool: &Tool, proj: &Proj, pos: Pos2) 
 pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
     let Some(m) = mode(tool.cmd) else { return };
     let hits = pick(app, proj, pos);
-    let at = sketch_point_at(app, proj, pos);
     let cmd = tool.cmd;
+    let at = tool_point_at(app, proj, pos, Some(cmd));
     match m {
         Mode::Construction => crate::sketch_construction::on_click(app, tool, &hits, at),
         Mode::ModelRef if cmd == "inspect.curvature_comb" => {
@@ -1372,6 +1394,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 } else {
                     tool.picks.clear();
                     tool.point_picks.clear();
+                    let p = if cmd == "sketch.break" { picked_shared_end(app, &id, &hits).unwrap_or(p) } else { p };
                     let _ = app.run(cmd, json!({"curve": id, "at": xy(p)}));
                 }
             }

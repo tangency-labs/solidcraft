@@ -1832,6 +1832,93 @@ fn a_free_form_edge_projects_as_one_spline_with_its_own_knots() {
     assert!((prism - rounded).abs() < rounded * 1e-6, "{prism} vs {rounded}");
 }
 
+/// An imported rational cubic keeps its degree, weights and shape on both sides of a cut.
+#[test]
+fn break_and_trim_preserve_the_intervals_of_a_weighted_cubic() {
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::{CurveKind, Nurbs};
+
+    let controls = [Vec2::new(0., 0.), Vec2::new(4., 8.), Vec2::new(8., 8.), Vec2::new(12., 0.)];
+    let nurbs = Nurbs { knots: vec![3., 3., 3., 3., 9., 9., 9., 9.], weights: vec![1., 2., 2., 1.] };
+    let evaluate = |t| nurbs.point(&controls, 3, t).unwrap();
+    for command in ["sketch.break", "sketch.trim"] {
+        let mut s = Session::default();
+        let sid = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        // Projected splines use the imported degree, control points, knots and weights.
+        let sketch = s.doc_mut().sketch_mut(sid).unwrap();
+        let pts = controls.iter().map(|&p| sketch.add_point(p, None).unwrap()).collect();
+        let kind = CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()), handles: Vec::new() };
+        sketch.add_curve(kind, Some("weighted")).unwrap();
+        let mark = evaluate(0.223);
+        let snap = run(&mut s, "sketch.point", json!({"point":format!("on:weighted:{},{}",mark.x,mark.y)}));
+        let x = evaluate(0.75).x;
+        run(&mut s, "sketch.line", json!({"points":[[x,-10],[x,10]], "infer":false, "connect":false}));
+        let pick = evaluate(0.5);
+        let before = s.doc.sketch(sid).unwrap().clone();
+        let preview = crate::cmd::trim_piece(&before, "weighted", pick).unwrap();
+        assert!(preview.first().unwrap().dist(mark) < 1e-5 && preview.last().unwrap().dist(evaluate(0.75)) < 1e-5);
+        run(&mut s, command, json!({"curve":"weighted", "at":[pick.x,pick.y]}));
+        let sk = s.doc.sketch(sid).unwrap();
+        let point = sk.resolve_point(snap["point"].as_str().unwrap()).unwrap();
+        assert!(
+            sk.curves.iter().any(|c| c.kind.is_freeform() && c.kind.ends().is_some_and(|(a, b)| a == point || b == point)),
+            "the constrained point becomes an endpoint"
+        );
+        let mut pieces: Vec<_> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match &c.kind {
+                CurveKind::Spline { pts, degree: 3, nurbs: Some(n), .. } => Some((pts.iter().map(|&p| sk.point(p).unwrap()).collect::<Vec<_>>(), n)),
+                _ => None,
+            })
+            .collect();
+        pieces.sort_by(|(a, _), (b, _)| a[0].x.total_cmp(&b[0].x));
+        let intervals = if command == "sketch.break" { vec![(0., 0.223), (0.223, 0.75), (0.75, 1.)] } else { vec![(0., 0.223), (0.75, 1.)] };
+        assert_eq!(pieces.len(), intervals.len(), "{command}");
+        for ((points, piece), (a, b)) in pieces.iter().zip(intervals) {
+            assert!(piece.weights.windows(2).any(|pair| pair[0] != pair[1]));
+            for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let actual = piece.point(points, 3, t).unwrap();
+                let expected = evaluate(a + (b - a) * t);
+                assert!(actual.dist(expected) < 1e-5, "{command} [{a}, {b}] at {t}: {actual:?} vs {expected:?}");
+            }
+        }
+    }
+}
+
+/// A piece straddling the old seam of a closed, weighted spline is still a single spline.
+#[test]
+fn break_keeps_a_weighted_spline_piece_that_wraps_across_its_seam() {
+    use solidcore_record::Vec2;
+    use solidcraft_sketch::{CurveKind, Nurbs};
+
+    let mut s = Session::default();
+    let sid = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
+    let sk = s.doc_mut().sketch_mut(sid).unwrap();
+    let controls = [Vec2::new(1., 1.), Vec2::new(9., 1.), Vec2::new(1., 9.), Vec2::new(1., 1.)];
+    let pts = controls.iter().map(|&p| sk.add_point(p, None).unwrap()).collect();
+    let nurbs = Nurbs { knots: vec![0., 0., 0., 0., 1., 1., 1., 1.], weights: vec![1., 2., 2., 1.] };
+    let evaluate = |t| nurbs.point(&controls, 3, t).unwrap();
+    sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()), handles: Vec::new() }, Some("loop"))
+        .unwrap();
+    for t in [0.25, 0.75] {
+        let q = evaluate(t);
+        run(&mut s, "sketch.point", json!({"point": format!("on:loop:{},{}",q.x,q.y)}));
+    }
+    let pick = evaluate(0.125);
+    let preview = crate::cmd::trim_piece(s.doc.sketch(sid).unwrap(), "loop", pick).unwrap();
+    assert!(preview.first().unwrap().dist(evaluate(0.75)) < 1e-5 && preview.last().unwrap().dist(evaluate(0.25)) < 1e-5);
+    run(&mut s, "sketch.break", json!({"curve":"loop","at":[pick.x,pick.y]}));
+    let sk = s.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), 2);
+    let wrapped = sk.curves.iter().find(|c| c.kind.ends().is_some_and(|(a, _)| sk.point(a).unwrap().dist(evaluate(0.75)) < 1e-5)).unwrap();
+    let CurveKind::Spline { pts, degree: 3, nurbs: Some(w), .. } = &wrapped.kind else { panic!("expected one rational cubic") };
+    let points: Vec<_> = pts.iter().map(|&p| sk.point(p).unwrap()).collect();
+    for (t, source) in [(0., 0.75), (0.25, 0.875), (0.5, 0.), (0.75, 0.125), (1., 0.25)] {
+        assert!(w.point(&points, 3, t).unwrap().dist(evaluate(source)) < 1e-5);
+    }
+}
+
 #[test]
 fn intersect_whole_body_can_create_unlinked_section_geometry() {
     let mut s = Session::default();
