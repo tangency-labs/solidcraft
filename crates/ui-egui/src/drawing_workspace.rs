@@ -27,6 +27,8 @@ pub struct State {
     pub settings_open: bool,
     sheet_notice: Option<panels::SheetNotice>,
     options: Option<Tool>,
+    /// The Export window's choices while it is open (`drawing_export_panel`).
+    pub(crate) export: Option<crate::drawing_export_panel::Export>,
     placement: Option<placement::Placement>,
     note: Option<note::Draft>,
     view_edit: Option<panels::ViewEdit>,
@@ -121,11 +123,19 @@ pub(crate) fn placing_dimension(app: &SolveApp) -> bool {
 }
 
 pub fn can_open_options(id: &str) -> bool {
-    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
+    Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set") || id == crate::drawing_export_panel::ID
 }
 
 /// Dismiss the current Drawing inspector without touching source or drawing data.
 pub fn close_panel(app: &mut SolveApp) -> bool {
+    let open = app.drawing_workspace.export.is_some() | reset_panels(app);
+    crate::drawing_export_panel::close(app);
+    open
+}
+
+/// Dismiss every Drawing panel but Export, which stays while it is writing sheets
+/// ([`crate::drawing_export_panel::give_way`]); whether one was open.
+fn reset_panels(app: &mut SolveApp) -> bool {
     let open = app.drawing_workspace.settings_open
         || app.drawing_workspace.options.is_some()
         || app.drawing_workspace.add_sheet.is_some()
@@ -144,12 +154,19 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     open
 }
 
-/// Toolbar clicks inspect options. Engine execution still uses command parameters directly.
+/// Toolbar clicks inspect options. Engine execution still uses command parameters directly. Export
+/// opens its window (`ui.start drawing.export`); `engine.execute` still runs the command alone.
 pub fn start(app: &mut SolveApp, id: &str) -> bool {
     if !active(app) || !can_open_options(id) {
         return false;
     }
-    close_panel(app);
+    if id == crate::drawing_export_panel::ID {
+        reset_panels(app);
+        crate::drawing_export_panel::open(app);
+        return true;
+    }
+    reset_panels(app);
+    crate::drawing_export_panel::give_way(app);
     match id {
         "drawing.sheet.add" => open_add_sheet(app),
         "drawing.sheet.set" => app.drawing_workspace.settings_open = true,
@@ -269,7 +286,8 @@ fn sheet_settings_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn toggle_sheet_settings(app: &mut SolveApp) {
     let open = !app.drawing_workspace.settings_open;
-    close_panel(app);
+    reset_panels(app);
+    crate::drawing_export_panel::give_way(app);
     app.drawing_workspace.settings_open = open;
 }
 
@@ -706,7 +724,7 @@ fn show_delete_sheet(app: &mut SolveApp, ctx: &egui::Context) {
 
 pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.drawing_workspace.settings = None;
-    if !active(app) || (!app.drawing_workspace.settings_open && app.drawing_workspace.options.is_none()) {
+    if !active(app) || !panel_open(app) {
         return;
     }
     let left = app.preferences.drawing_panel_side == "left";
@@ -782,13 +800,21 @@ fn floating_panel(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, width: f32)
 }
 
 fn panel_title(app: &SolveApp) -> &'static str {
+    if app.drawing_workspace.export.is_some() {
+        return solidcraft_ui_text::tr("ui.drawing_export.title");
+    }
     app.drawing_workspace.options.map_or_else(|| solidcraft_ui_text::tr("cmd.drawing_sheet_set"), Tool::title)
 }
 
 pub(crate) fn inspector_visible(app: &SolveApp) -> bool {
     active(app)
         && app.preferences.drawing_sheets_visibility != "legacy"
-        && (app.drawing_workspace.settings_open || app.drawing_workspace.options.is_some())
+        && panel_open(app)
+}
+
+/// A right-hand panel is open: Sheet Settings, a tool's options or Export.
+fn panel_open(app: &SolveApp) -> bool {
+    app.drawing_workspace.settings_open || app.drawing_workspace.options.is_some() || app.drawing_workspace.export.is_some()
 }
 
 pub(crate) fn inspector_title(app: &SolveApp) -> &str {
@@ -802,6 +828,10 @@ pub(crate) fn inspector_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn panel_body(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.drawing_workspace.export.is_some() {
+        crate::drawing_export_panel::body(app, ui);
+        return;
+    }
     let options = app.drawing_workspace.options;
     ui.horizontal(|ui| {
         ui.heading(panel_title(app));
@@ -833,7 +863,9 @@ pub(crate) fn inset<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) 
 }
 
 fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if let Some(placement) = &mut app.drawing_workspace.placement {
+    if app.drawing_workspace.export.is_some() {
+        crate::drawing_export_panel::body(app, ui);
+    } else if let Some(placement) = &mut app.drawing_workspace.placement {
         let finished = inset(ui, |ui| {
             placement.fields(ui, &app.session.doc.name);
             panels::finish_placement(ui)

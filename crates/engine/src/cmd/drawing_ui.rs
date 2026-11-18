@@ -2,9 +2,9 @@
 //!
 //! These entries reserve discoverable homes while the owning Drawing contracts land.
 //! JSON execution always refuses; the UI may show reviewed option layouts separately.
-//! `drawing.export.planned` keeps the disabled UI action separate from `drawing.export`
-//! (the sheet export provider). View previews likewise use `.planned` ids so the
-//! real base-view and projected-view providers keep their executable contracts.
+//! View previews use `.planned` ids so the real base-view and projected-view providers keep
+//! their executable contracts. Export has arrived: `drawing.export` holds its ribbon place, and
+//! its button opens the Export window.
 
 use super::CommandSpec;
 
@@ -84,7 +84,6 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.update.planned", "Update Drawing", "4892").at("DRAWING REVIEW", "CHANGES").icon("drawing_update"),
     planned!("drawing.check.planned", "Check Drawing", "4894").at("DRAWING REVIEW", "CHANGES").icon("drawing_check"),
     planned!("drawing.revision", "Add Drawing Revision", "4894").at("DRAWING REVIEW", "REVISION").icon("drawing_revision"),
-    planned!("drawing.export.planned", "Export Drawing", "4890").at("DRAWING REVIEW", "OUTPUT").icon("export"),
     planned!("drawing.print", "Print Drawing", "4890").at("DRAWING REVIEW", "OUTPUT").icon("drawing_print"),
     planned!("drawing.view.break", "Break View", "7578").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_break"),
     planned!("drawing.view.auxiliary.planned", "Auxiliary View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_auxiliary"),
@@ -120,7 +119,9 @@ mod tests {
         for id in ["drawing.export", "drawing.view.base", "drawing.view.projected", "drawing.view.section", "drawing.view.auxiliary"] {
             assert!(crate::find_command(id).unwrap().planned.is_none(), "the executable provider {id} stays registered");
         }
-        assert!(crate::find_command("drawing.export.planned").unwrap().planned.is_some(), "the scaffold export stays disabled");
+        assert!(crate::find_command("drawing.export.planned").is_none(), "the real export holds its ribbon place");
+        let export = crate::find_command("drawing.export").unwrap();
+        assert_eq!((export.tab, export.panel), ("DRAWING REVIEW", "OUTPUT"));
         for command in super::COMMANDS {
             assert!(command.planned.is_some(), "{}", command.id);
             assert!(!command.info(&session).enabled, "{}", command.id);
