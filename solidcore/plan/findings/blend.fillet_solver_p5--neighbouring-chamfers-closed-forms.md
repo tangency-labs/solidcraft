@@ -71,12 +71,29 @@ end-face boundary was concave. Its ordinary section classification likewise igno
 convex boundaries. The End was consequently handed to a construction requiring the
 section to remain on the original end face.
 
-The boundary test now recognizes sharp convex boundaries for material-removing
-blends as well. Both forms of the crossing use that test. It selects the existing
+The boundary test now recognizes sharp convex boundaries of planar end faces for
+material-removing blends as well. Both forms of the crossing use that test. The
+planarity check uses the existing exact surface query: `cut_fillet_at_open_end`
+requires a plane, so that is the construction's domain. It selects the existing
 overflow construction: cut the removal region by the end face's plane, then subtract
 the region from the actual body. Past the diagonal's far end the continued end plane
 is outside the original body; subtraction clips the chamfer against the front face.
 No second surface construction or retry is introduced.
+
+Passing the side edge's far vertex alone does not prove that the crossing leaves
+the end face: the boundary can turn into an L-shaped face there. The far crossing
+is therefore classified against the end face's own trim loops before admitting a
+new convex cut. The ordinary section check already proves that its interval is off
+the face. Both use the solver's existing approximation tolerance.
+
+The existing `a_round_on_an_arc_running_under_a_block_names_the_radius_that_fits`
+test distinguishes these events. Its radius-12.5 arc meets z = -7.5 at x = -10;
+the side ends at x = -6. For a round of radius 3, the rail's radius is 9.5 and its
+crossing is x = -sqrt(9.5^2 - 7.5^2) = -sqrt(34), greater than -6. That crossing
+lies on the L-shaped end face, so a convex edge at the side's endpoint must not
+select the cut. The existing corner correctly names the limit
+12.5 - sqrt(6^2 + 7.5^2). An isolated run with the original concave-only predicate
+passed that test and returned 2.8953136438499314 as the fitting radius.
 
 Tangent continuations retain the corner's global merge. Existing concave-blend
 classification is retained: the newly recognized convex-boundary event applies only

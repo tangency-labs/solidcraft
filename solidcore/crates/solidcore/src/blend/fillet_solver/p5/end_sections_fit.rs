@@ -5,7 +5,8 @@
 //! `a307480` (WR-631), used
 //! in the executive's cliff-overflow choice: an end section that runs off its end face
 //! under material overflows it, and the blend is built as a cliff overflow is. A
-//! material-removing blend crossing a sharp convex boundary is cut the same way: the
+//! material-removing blend crossing a sharp convex boundary of a planar end face is cut
+//! the same way: the
 //! end face's plane bounds the removal region, and the body clips that region at the
 //! face beyond. A tangent continuation keeps the corner's global merge.
 //!
@@ -28,9 +29,10 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::intersect::curve_class::p1::CurveClassification;
 use crate::intersect::curve_class::p2::ResetOptions;
-use crate::intersect::point_class::PointClassType;
+use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE};
+use crate::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
 use crate::surface::plane::p1::Plane;
 use crate::surface::surface::Surface;
 use crate::topology::{edge, edgeuse::p1 as eu, vertex, Brep, EdgeId, FaceId, VertexId};
@@ -199,18 +201,22 @@ fn side_run(target: &Brep, side: EdgeId, v: VertexId) -> Result<Vec<(EdgeId, Ver
 }
 
 /// Whether crossing an end face's boundary needs the overflow's cut: under material at
-/// a concave edge, or into the open at a sharp convex edge for a material-removing blend.
+/// a concave edge, or into the open at a sharp convex edge of a planar end face for a
+/// material-removing blend. The overflow's open-end cut requires that plane.
+/// `convex_off_face` means the material-removing section is known to leave the face.
 /// Tangent continuations belong to the corner's global merge, not this cut.
 fn boundary_requires_cut(
     k: &Kernel,
     target: &mut Brep,
     e: EdgeId,
-    blend_concave: bool,
+    end_face: FaceId,
+    convex_off_face: bool,
     tangency_tol: f64,
 ) -> Result<bool> {
     Ok(is_concave_edge(k, target, e)?
-        || (!blend_concave
+        || (convex_off_face
             && edge_bounds_material(target, e)?
+            && plane_normal(k, target, end_face)?.is_some()
             && !test_manifold_tangent_rollover(k, target, e, tangency_tol)?.0))
 }
 
@@ -222,14 +228,14 @@ fn boundary_requires_cut_at(
     run: &[(EdgeId, VertexId)],
     at: VertexId,
     g: FaceId,
-    blend_concave: bool,
+    convex_off_face: bool,
     tangency_tol: f64,
 ) -> Result<bool> {
     for e in vertex::edges(target, at, None)? {
         if run.iter().any(|(r, _)| *r == e) || !edge::faces(target, e, None)?.contains(&g) {
             continue;
         }
-        if boundary_requires_cut(k, target, e, blend_concave, tangency_tol)? {
+        if boundary_requires_cut(k, target, e, g, convex_off_face, tangency_tol)? {
             return Ok(true);
         }
     }
@@ -248,7 +254,7 @@ impl FilletSolver {
     /// something stands on it next to the vertex (a lip on a shelled box's rim, the
     /// section running under the lip's foot: off E across a concave edge of it), the
     /// fillet overflows its end face. A material-removing blend whose section crosses a
-    /// sharp convex edge of E is cut by the same construction, clipped to the body beyond
+    /// sharp convex edge of planar E is cut by the same construction, clipped to the body beyond
     /// E. A tangent continuation keeps the corner's global merge. The section is the
     /// surfaces' exact intersection between the two crossings, classified against E.
     /// Judged only where the corner
@@ -445,19 +451,39 @@ impl FilletSolver {
                             };
                             for &(_, far) in &run {
                                 let p = vertex::point(target, far)?;
-                                if crossing.is_some_and(|x| {
-                                    crossing_past_side_edge_end(x, v_point, p, approx_tol)
-                                }) && boundary_requires_cut_at(
-                                    k,
-                                    target,
-                                    &run,
-                                    far,
-                                    g,
-                                    concave,
-                                    tangency_tol,
-                                )? {
-                                    fit = false;
-                                    break;
+                                if let Some(x) = crossing.filter(|x| {
+                                    crossing_past_side_edge_end(*x, v_point, p, approx_tol)
+                                }) {
+                                    // Past P can run into an L-shaped end face instead of
+                                    // leaving it. Only an off-face crossing admits the new
+                                    // convex cut; concave boundaries keep their existing rule.
+                                    let convex_off_face = !concave && {
+                                        let mut pc =
+                                            PointClassification::<EntityRef>::new(approx_tol);
+                                        point_3d_classify(
+                                            k,
+                                            target,
+                                            g,
+                                            x,
+                                            approx_tol,
+                                            true,
+                                            &mut pc,
+                                            Point3dClassifyOptions::default(),
+                                        )?;
+                                        pc.point_class() == PointClassType::Unknown
+                                    };
+                                    if boundary_requires_cut_at(
+                                        k,
+                                        target,
+                                        &run,
+                                        far,
+                                        g,
+                                        convex_off_face,
+                                        tangency_tol,
+                                    )? {
+                                        fit = false;
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -557,7 +583,7 @@ impl FilletSolver {
                                 "the classification's side edge",
                             ));
                         };
-                        if boundary_requires_cut(k, target, e, concave, tangency_tol)? {
+                        if boundary_requires_cut(k, target, e, end_face, !concave, tangency_tol)? {
                             leaves = true;
                         }
                     }

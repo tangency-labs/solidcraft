@@ -45,7 +45,8 @@ fn top_front(b: &Body) -> usize {
     edge_at(b, [15.0, 0.0, 10.0])
 }
 
-/// Closed forms recorded in plan/findings/blend.fillet_solver_p5--neighbouring-chamfers-closed-forms.md.
+/// Closed forms recorded in
+/// `plan/findings/blend.fillet_solver_p5--neighbouring-chamfers-closed-forms.md`.
 /// The overlap of the two removed triangular prisms is integrated over depth w.
 fn neighbouring_chamfer_measures(l: f64, a: f64, b: f64, c: f64, d: f64) -> (f64, f64) {
     let m = b.min(d);
