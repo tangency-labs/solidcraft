@@ -1802,7 +1802,7 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     }
 
     // analyze the classification for problems (Crossing or Missing)
-    let crossed = class.is_crossed_by_edge(&objects)?; // only count seam crossings by an Edge
+    let crossed = seam_is_crossed(k, f, dir, &objects, &class)?;
     let missing = class.is_crossing_face(Some(objects.face(f))); // segments in Face but not on an Edge
     let near_miss = class.has_near_misses(k, &objects, false)?;
     let curves = SeamCurves {
@@ -1810,6 +1810,88 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         uv_curve: seam_uv,
     };
     Ok((class, crossed, missing, near_miss, curves))
+}
+
+/// A tolerance contact inside an edge is only a crossing candidate. For an exact
+/// rational surface its seam is an exact native isocurve. Disjoint whole-curve
+/// enclosures prove that a nearby edge never crosses it; a proof that cannot be
+/// completed grants no relief. In particular no endpoint sample or gap threshold
+/// can excuse a crossing between samples.
+fn seam_is_crossed<O: LoopObject, M: CurveOnClassifyBrep<O>>(
+    k: &Kernel,
+    f: FaceId,
+    dir: SurfParamType,
+    objects: &M,
+    class: &CurveClassification<O>,
+) -> Result<bool> {
+    if !class.is_crossed_by_edge(objects)? {
+        return Ok(false);
+    }
+    let Some(surface) = objects.classify_surface(f)? else {
+        return Ok(true);
+    };
+    if surface.procedural_definition().is_some() {
+        return Ok(true);
+    }
+    let Some(native) = crate::surface::surface::exact_pieces::exact_nurbs_surface(k, surface)?
+    else {
+        return Ok(true);
+    };
+    if native.is_out_of_bounds_enabled() {
+        return Ok(true);
+    }
+    let Some(net) = native.gw_nurb() else {
+        return Ok(true);
+    };
+    let (p, q) = net.degrees();
+    let clamped = crate::nurbs::nurbs_crv::is_clamped(net.u_knots(), p)
+        && crate::nurbs::nurbs_crv::is_clamped(net.v_knots(), q);
+    // Boundary extraction copies a control row only for clamped knots; the
+    // varying direction must also cover the surface's entire natural domain.
+    if !clamped {
+        return Ok(true);
+    }
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let native_domain = native.natural_uv_domain();
+    if domain.min() != native_domain.min() || domain.max() != native_domain.max() {
+        return Ok(true);
+    }
+    let fixed = if dir == SurfParamType::U {
+        domain.min().x
+    } else {
+        domain.min().y
+    };
+    let seam = Curve::from(
+        native
+            .create_iso_parametric_curve(
+                k,
+                dir,
+                fixed,
+                crate::nurbs::b_spline_surface::p2::IsoCurveOptions {
+                    domain: Some(domain),
+                    uv_iso_curve: false,
+                },
+            )?
+            .curve,
+    );
+    let mut checked = Vec::new();
+    class.is_crossed_by_edge_unless(objects, |edge| {
+        if let Some((_, disjoint)) = checked.iter().find(|(e, _)| *e == edge) {
+            return Ok(*disjoint);
+        }
+        let Some((b, EntityRef::Edge(e))) = edge.and_then(|e| objects.topology_entity(e)) else {
+            return Ok(false);
+        };
+        let target = b.edge(e)?;
+        let disjoint = match target.curve.as_ref() {
+            Some(curve) => {
+                seam.proved_disjoint(k, seam.natural_interval(), curve, target.interval)?
+            }
+            None => false,
+        };
+        checked.push((edge, disjoint));
+        Ok(disjoint)
+    })
 }
 
 /// `HasSeamProblem`: whether the seams of the face's periodic surface are badly

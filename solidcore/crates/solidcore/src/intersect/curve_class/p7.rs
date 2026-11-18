@@ -620,6 +620,19 @@ impl<O: ClassObject> CurveClassification<O> {
     /// [`SolidError::Unported`] for an interval end on an edge (`SmEdge::GetInterval`,
     /// unit `topology.edge`).
     pub fn is_crossed_by_edge(&self, geometry: &impl ClassGeometry<O>) -> Result<bool> {
+        self.is_crossed_by_edge_unless(geometry, |_| Ok(false))
+    }
+
+    /// The same topological crossing candidates, excluding only edges for which the
+    /// caller proves geometric separation from the classification curve.
+    ///
+    /// # Errors
+    /// Those of the edge intervals and the separation proof.
+    pub(crate) fn is_crossed_by_edge_unless(
+        &self,
+        geometry: &impl ClassGeometry<O>,
+        mut separated: impl FnMut(Option<O>) -> Result<bool>,
+    ) -> Result<bool> {
         let size = self.size();
 
         // for every classification interval
@@ -656,7 +669,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
 
                 // an Edge was found crossing the Classification Curve
-                return Ok(true);
+                if !separated(edge)? {
+                    return Ok(true);
+                }
             }
 
             // When Interval ends on an Edge
@@ -689,7 +704,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
 
                 // an Edge was found crossing the Classification Curve
-                return Ok(true);
+                if !separated(edge)? {
+                    return Ok(true);
+                }
             }
         }
 

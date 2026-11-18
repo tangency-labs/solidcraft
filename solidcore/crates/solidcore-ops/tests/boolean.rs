@@ -2935,16 +2935,29 @@ fn an_insert_whose_top_is_tangent_to_the_floor_at_a_corner_round_joins_its_bin()
 /// the seam meridian lies in the xz plane on +x and ends at (2.4, 0, 0) on the flat face's
 /// outer edge, which is the profile circle's own seam.
 fn half_torus() -> Body {
+    half_torus_of_radii(1.8, 0.6)
+}
+
+fn half_torus_of_radii(major: f64, tube: f64) -> Body {
+    torus_above(major, tube, 0.0)
+}
+
+fn torus_above(major: f64, tube: f64, bottom: f64) -> Body {
     let profile = [Curve::Arc {
-        center: [1.8, 0.0, 0.0],
+        center: [major, 0.0, 0.0],
         axis: [0.0, -1.0, 0.0],
         reference: [1.0, 0.0, 0.0],
-        radius: 0.6,
+        radius: tube,
         start: 0.0,
         end: TAU,
     }];
     let torus = revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], TAU, true).unwrap();
-    let below = make_box([-3.4, -3.4, -1.6], [6.8, 6.8, 1.6]).unwrap();
+    let outside = major + tube + 1.0;
+    let below = make_box(
+        [-outside, -outside, -tube - 1.0],
+        [2.0 * outside, 2.0 * outside, tube + 1.0 + bottom],
+    )
+    .unwrap();
     boolean(torus, below, BooleanOp::Subtract).unwrap().unwrap()
 }
 
@@ -3017,6 +3030,105 @@ fn a_boss_overhanging_a_half_torus_flat_face_by_a_tolerance_at_its_seam_joins() 
         assert!(gap <= tol, "d {d}: the seam's vertex is {gap} off the seam");
         let v = volume(&r);
         assert!((v - want).abs() <= 1e-8 * want, "d {d}: {v} vs {want}");
+    }
+}
+
+/// Stress corpus S1558/S1746 and S0321/S0583/S1100: a notch beside the seam
+/// of a half torus, at both scales. The cylinder stays on +Y. Tolerant contacts
+/// with the meridian are not crossings: the seam remains on the face boundary.
+#[test]
+#[allow(clippy::disallowed_methods)] // the test's operands and independent measures
+fn a_notch_beside_a_half_torus_seam_keeps_its_boundary_on_the_seam() {
+    all_fixes();
+    for (major, tube, radius, depth) in [(1.8, 0.6, 0.07, 0.3), (500.0, 0.5, 0.06, 0.25)] {
+        let outer = major + tube;
+        // At radius rho the torus is sqrt(tube² - (rho-major)²) high.
+        // The notch subtends 2 acos((rho²+outer²-radius²)/(2 rho outer)).
+        // Integrating height * rho * angle gives its removed volume, independent
+        // of the notch's longitude. The cylinder reaches above this whole overlap.
+        let removed = |step| {
+            tanh_sinh(
+                |rho| {
+                    let height = (tube * tube - (rho - major) * (rho - major))
+                        .max(0.0)
+                        .sqrt();
+                    let cosine =
+                        (rho * rho + outer * outer - radius * radius) / (2.0 * rho * outer);
+                    height * 2.0 * rho * cosine.clamp(-1.0, 1.0).acos()
+                },
+                outer - radius,
+                outer,
+                step,
+            )
+        };
+        let (coarse, fine) = (removed(1.0 / 32.0), removed(1.0 / 64.0));
+        assert!(
+            (coarse - fine).abs() <= 1e-7 * fine,
+            "{major}: {coarse} {fine}"
+        );
+        let want = PI * PI * major * tube * tube - fine;
+        // Other recipes reach the same notch after three blind holes (S2599,
+        // S7577), or with a closed toroidal void (S2104/S5649/S6816).
+        for preparation in 0..3 {
+            if preparation == 1 && major == 500.0 {
+                continue;
+            }
+            let mut prepared = half_torus_of_radii(major, tube);
+            let prior_removed = match preparation {
+                1 => {
+                    for y in [-0.18, 0.0, 0.18] {
+                        prepared = boolean(
+                            round_tripped(&prepared),
+                            round_tripped(&rod([1.32, y, 0.0], 0.06, 0.24)),
+                            BooleanOp::Subtract,
+                        )
+                        .unwrap()
+                        .unwrap();
+                    }
+                    3.0 * PI * 0.06 * 0.06 * 0.24
+                }
+                2 => {
+                    let wall = if major == 1.8 { 0.072 } else { 0.06 };
+                    let inner = tube - wall;
+                    prepared = boolean(
+                        round_tripped(&prepared),
+                        round_tripped(&torus_above(major, inner, wall)),
+                        BooleanOp::Subtract,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    // Revolve the circular segment above z=wall: its area times
+                    // 2 pi R. Its maximum radius is smaller than `outer - radius`,
+                    // so this cavity and the notch have disjoint interiors.
+                    2.0 * PI
+                        * major
+                        * (inner * inner * (wall / inner).acos()
+                            - wall * (inner * inner - wall * wall).sqrt())
+                }
+                _ => 0.0,
+            };
+            for d in [1e-5, 2e-5] {
+                let angle = (radius + d) / outer;
+                let notch = rod(
+                    [outer * angle.cos(), outer * angle.sin(), 0.0],
+                    radius,
+                    depth,
+                );
+                let target = round_tripped(&prepared);
+                let result = boolean(target, round_tripped(&notch), BooleanOp::Subtract)
+                    .unwrap_or_else(|e| panic!("major {major} d {d}: {e:?}"))
+                    .unwrap();
+                let report = result.check(CheckLevel::All).unwrap();
+                assert!(report.is_valid(), "major {major} d {d}: {}", report.text);
+                assert_eq!(result.solid_count().unwrap(), 1, "major {major} d {d}");
+                assert!(
+                    near(volume(&result), want - prior_removed),
+                    "major {major} d {d}: {} vs {}",
+                    volume(&result),
+                    want - prior_removed
+                );
+            }
+        }
     }
 }
 
