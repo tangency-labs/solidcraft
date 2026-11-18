@@ -930,8 +930,10 @@ fn net_of(surface: &Surface) -> Option<(BSplineSurface, f64)> {
 ///
 /// The sub-patch is A's own surface over its domain, by construction: it is cut by
 /// [`extract_patch`] from A's NURB directly, its ends first snapped here as the extraction
-/// would (so the extraction's snap moves nothing and no reparametrisation rounds its
-/// knots), and it is never passed through a knot fixup (`copy_sub_patch` and
+/// would, and refused unless each snapped end is a fixed point of that snap (so the
+/// extraction's snap moves nothing and no reparametrisation rescales or shifts its knots;
+/// where A has knots closer than the snapping, a second snap could move an end to an
+/// earlier knot and shift the patch off A), and it is never passed through a knot fixup (`copy_sub_patch` and
 /// `from_gw_nurb` spread knots closer than 1.2e-8 without moving the control points, a
 /// different surface the bound would not count). Its knots must then be bit-equal to A's
 /// inside its domain and its ends the snapped box's, else `None`.
@@ -990,6 +992,16 @@ fn net_cut(net: &BSplineSurface, box_uv: &Extent2d) -> Option<NurbSurface> {
         vb: snap((lo.y - widen(lo.y)).max(n_lo.y), vk),
         vt: snap((hi.y + widen(hi.y)).min(n_hi.y), vk),
     };
+    // the extraction snaps each end again: only where that snap is the identity is its
+    // patch A over `rect` (a knot within the tolerance of a snapped end would move it,
+    // and the reparametrisation back to `rect` would shift the patch off A)
+    let fixed = snap(rect.ul, uk) == rect.ul
+        && snap(rect.ur, uk) == rect.ur
+        && snap(rect.vb, vk) == rect.vb
+        && snap(rect.vt, vk) == rect.vt;
+    if !fixed {
+        return None;
+    }
     let cut = extract_patch(nurb, rect).ok()?;
     let (_, _, cr, cs) = cut.array_sizes();
     let (p, q) = cut.degrees();
@@ -1414,6 +1426,83 @@ mod tests {
         let cut = net_cut(&net, &snapped).unwrap();
         assert_eq!(cut.u_knots()[0], 0.5);
         assert!(net_bound_over(&net, &snapped, &plane).unwrap().is_some());
+    }
+
+    /// r5 B9: where A has distinct knots closer than the snapping, the extraction would
+    /// snap an end already snapped onto `k_i` again, to an earlier `k_j`, and reparametrise
+    /// `[k_j, k_l]` back to `[k_i, k_m]`: a translation (exact for these dyadic knots) whose
+    /// knots pass the bitwise check while the patch is A shifted in u (2.0 off A here). A
+    /// cubic net with 31 knots 2⁻²⁸ apart, zig-zag points (set without a knot fixup), and
+    /// a box whose widened ends fall 8e-9 above `k_3` and `k_25`: the cut is refused, and
+    /// any cut that were given would have to be A.
+    #[test]
+    fn a_cut_whose_ends_the_extraction_would_snap_again_is_refused() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{BSplineSurfaceForm, CanonicalSurfaceData};
+        use crate::nurbs::knots::Side;
+        let g = 2f64.powi(-28);
+        let interior: Vec<f64> = (0..31).map(|t| 0.5 + f64::from(t) * g).collect();
+        let points: Vec<Point3> = (0..35u32)
+            .flat_map(|i| {
+                (0..2u32).map(move |j| Point3::new(f64::from(i), f64::from(j), f64::from(i % 2)))
+            })
+            .collect();
+        // built with spaced knots, then the dense ones set without a fixup (borrowed)
+        let mut knots = vec![0.0];
+        knots.extend((0..31).map(|t| 0.1 + 0.025 * f64::from(t)));
+        knots.push(1.0);
+        let mut mults = vec![4];
+        mults.extend(std::iter::repeat_n(1, 31));
+        mults.push(4);
+        let base = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 1,
+            control_points: &points,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &mults,
+            v_multiplicities: &[2, 2],
+            u_knots: &knots,
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let mut nurb = base.gw_nurb().unwrap().clone();
+        for (k, &x) in nurb.u_knots_mut()[4..4 + 31].iter_mut().zip(&interior) {
+            *k = x;
+        }
+        let net = BSplineSurface::from_nurb(nurb.clone(), true);
+        // widened ends within the snapping above k_3 and k_25, outside it above k_2, k_24
+        let (kn_i, kn_m) = (interior[3], interior[25]);
+        let mut lo = (kn_i + 8.0e-9 + 2.0e-8) / (1.0 - 2.0e-8);
+        while lo - 2.0e-8 * (1.0 + lo) < kn_i - g + 1.0e-8 {
+            lo += 1e-12;
+        }
+        let mut hi = (kn_m + 8.0e-9 - 2.0e-8) / (1.0 + 2.0e-8);
+        while hi + 2.0e-8 * (1.0 + hi) < kn_m - g + 1.0e-8 {
+            hi += 1e-12;
+        }
+        assert!(lo < hi, "{lo} {hi}");
+        let bx = Extent2d::from_bounds(lo, 0.25, hi, 0.75);
+        if let Some(cut) = net_cut(&net, &bx) {
+            let (_, _, r, _) = cut.array_sizes();
+            let (a, b) = (cut.u_knots()[0], cut.u_knots()[r]);
+            let worst = (0..=20)
+                .map(|t| {
+                    let u = a + (b - a) * f64::from(t) / 20.0;
+                    let on_a = nurb.eval(u, 0.5, Side::Left, Side::Left).unwrap();
+                    let on_cut = cut.eval(u, 0.5, Side::Left, Side::Left).unwrap();
+                    (on_a - on_cut).length()
+                })
+                .fold(0.0f64, f64::max);
+            panic!("a cut over [{a}, {b}] was given, {worst:e} off A");
+        }
+        let plane = Implicit::Plane {
+            origin: crate::math::Vec3::ZERO,
+            normal: crate::math::Vec3::Z,
+        };
+        assert_eq!(net_bound_over(&net, &bx, &plane).unwrap(), None);
     }
 
     /// The fixture of `tests/wr_614_coincident_strip_crossing.rs`
