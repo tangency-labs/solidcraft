@@ -2241,11 +2241,11 @@ fn view_popups(ui: &mut egui::Ui, strip: &TabStrip, pen: &mut Pen) {
                 Popup::Plus => menu_rows(ui, strip.plus_menu, true, true, "", h.menu_row, None).map(|id| TabAction::PlusMenu { id }),
                 Popup::Layout => layout_grid(ui, strip).map(|id| TabAction::LayoutMenu { id }),
                 Popup::More => {
-                    if strip.clear_view_tabs {
-                        if let Some(tab) = strip.tabs.get(strip.selected) {
-                            let caption = solidcraft_ui_text::tr("view_tab.views_in").replace("{design}", tab.name);
-                            crate::menu::Menu::heading(ui, &caption);
-                        }
+                    if strip.clear_view_tabs
+                        && let Some(tab) = strip.tabs.get(strip.selected)
+                    {
+                        let caption = solidcraft_ui_text::tr("view_tab.views_in").replace("{design}", tab.name);
+                        crate::menu::Menu::heading(ui, &caption);
                     }
                     view_list(ui, views, &format!("{}:row:", h.view_more), strip.clear_view_tabs, &mut next_menu).map(TabAction::SelectView)
                 }
