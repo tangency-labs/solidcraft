@@ -3833,9 +3833,23 @@ fn delete_face_without_healing_leaves_an_open_surface_body() {
 }
 
 /// #4510: In Surface tab, Delete Face defaults to heal: false so faces are removed without attempting to close solids.
+/// In Solid tab (and context menu / tool search started from it), it defaults to heal: true.
 #[test]
 fn delete_face_in_surface_tab_defaults_to_heal_false() {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.remember_dialog_values = false;
+
+    // Solid tab default
+    h.app.ui.tab = "SOLID".into();
+    h.app.start("face.delete");
+    h.frames(1);
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: true })),
+        "Delete Face in Solid tab defaults to heal: true"
+    );
+    crate::dialogs::cancel(&mut h.app);
+
+    // Surface tab default
     h.app.ui.tab = "SURFACE".into();
     h.app.start("face.delete");
     h.frames(1);
@@ -3843,6 +3857,18 @@ fn delete_face_in_surface_tab_defaults_to_heal_false() {
         matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: false })),
         "Delete Face in Surface tab defaults to heal: false (#4510)"
     );
+    crate::dialogs::cancel(&mut h.app);
+
+    // Context menu / command search path started while in Surface tab
+    h.app.ui.tab = "SURFACE".into();
+    h.app.command_tab_before_start = Some("SURFACE".into());
+    h.app.start("face.delete");
+    h.frames(1);
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::DeleteFaces { heal: false })),
+        "Delete Face started from search/context menu in Surface tab defaults to heal: false"
+    );
+    crate::dialogs::cancel(&mut h.app);
 }
 
 /// #2494: two planes selected first, Axis Through Two Planes takes both and makes the axis
