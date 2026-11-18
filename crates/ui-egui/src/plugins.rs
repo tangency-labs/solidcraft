@@ -589,6 +589,14 @@ fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
         if app.preferences.plugin_limits_expanded {
             resource_controls(app, ui);
         }
+        // Keep the independent dialog-position preference visible even with
+        // the advanced fuel and memory controls folded.
+        crate::ui_kit::checkbox(
+            ui,
+            solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position"),
+            &mut app.preferences.plugin_remember_dialog_position,
+        )
+        .on_hover_text(solidcraft_ui_text::tr("prefs.plugin_remember_dialog_position_help"));
         ui.add_space(8.0);
         let t = solidcraft_theme::Tokens::get();
         let path = dir.display().to_string();
