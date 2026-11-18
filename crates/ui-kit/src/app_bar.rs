@@ -845,9 +845,15 @@ pub enum TabAction {
         from: usize,
         to: usize,
     },
-    /// A view tab dragged away from its strip. The app decides whether to dock or move it.
+    /// The focused view tab was lifted with Space.
+    LiftView {
+        view: usize,
+        origin: Rect,
+    },
+    /// A view tab being dragged. The app decides whether to dock, reorder or move it.
     DockView {
         view: usize,
+        origin: Rect,
         pointer: Pos2,
         released: bool,
     },
@@ -882,6 +888,8 @@ struct TabDrag {
 struct ViewDrag {
     from: usize,
     grab: f32,
+    origin: Rect,
+    cancelled: bool,
 }
 
 /// How the selected design's tab is drawn.
@@ -1412,6 +1420,32 @@ fn more_button(ui: &mut egui::Ui, strip: &TabStrip, rect: Rect, hidden: usize, p
     }
 }
 
+/// Starts a drag while the primary press still belongs to this tab. Touch needs a dwell
+/// while a mouse uses a movement threshold.
+fn start_view_drag(ui: &egui::Ui, response: &egui::Response, tab: Rect, from: usize) -> Option<ViewDrag> {
+    if !response.is_pointer_button_down_on() {
+        return None;
+    }
+    const MOUSE_TRAVEL: f32 = 4.0;
+    const TOUCH_HOLD: f64 = 0.250;
+    let (origin, dwell) = ui.input(|input| {
+        if !input.pointer.primary_down() || input.key_pressed(egui::Key::Escape) {
+            return (None, None);
+        }
+        let Some(origin) = input.pointer.press_origin() else { return (None, None) };
+        if input.any_touches() {
+            let elapsed = input.pointer.press_start_time().map_or(0.0, |started| input.time - started);
+            return if elapsed >= TOUCH_HOLD { (Some(origin), None) } else { (None, Some(TOUCH_HOLD - elapsed)) };
+        }
+        let moved = input.pointer.interact_pos().is_some_and(|point| origin.distance_sq(point) >= MOUSE_TRAVEL * MOUSE_TRAVEL);
+        (moved.then_some(origin), None)
+    });
+    if let Some(delay) = dwell.and_then(|dwell| std::time::Duration::try_from_secs_f64(dwell).ok()) {
+        ui.ctx().request_repaint_after(delay);
+    }
+    origin.map(|point| ViewDrag { from, grab: point.x - tab.left(), origin: tab, cancelled: false })
+}
+
 /// One view's sub-tab in `vr`: icon, label, the shown view's underline and close button; a click
 /// shows it, a middle click closes it, a right click opens its menu, a drag starts a move.
 fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: Rect, pen: &mut Pen) {
@@ -1422,7 +1456,7 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
     let close = view.active || detached;
     let opacity = if detached { DETACHED_VIEW_OPACITY } else { 1.0 };
     let main = if close { Rect::from_min_max(vr.min, pos2(vr.right() - 20.0, vr.bottom())) } else { vr };
-    let resp = ui.interact(main, ui.scope_id().with(("doc_view", k)), Sense::click_and_drag()).backing_on_hover_text(view.tip);
+    let resp = ui.interact(main, ui.scope_id().with(("doc_view", k)), Sense::click_and_drag());
     solidcraft_ui_registry::publish_target(&format!("{}{k}", h.view), vr);
     resp.widget_info(|| {
         let name = if detached {
@@ -1432,10 +1466,20 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
         };
         egui::WidgetInfo::selected(egui::Role::Tab, true, view.active, name)
     });
+    if !detached && pen.drag.is_none() && !pen.rename.as_ref().is_some_and(|(index, _)| *index == k) {
+        pen.drag = start_view_drag(ui, &resp, vr, k);
+    }
+    let dragged = pen.drag.is_some_and(|drag| drag.from == k);
+    if dragged && pen.drag.is_some_and(|drag| !drag.cancelled) {
+        let dash = Stroke::new(1.0, t.accent);
+        painter.extend(crate::dashed_line(&outline(vr.shrink(0.5)), vr.expand(2.0), dash, 3.0, 2.0));
+        return;
+    }
+    let resp = resp.backing_on_hover_text(view.tip);
     let deleted = view.state == ViewState::Deleted;
     if view.active {
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover_strong);
-    } else if resp.hovered() || pen.drag.is_some_and(|d| d.from == k) {
+    } else if resp.hovered() {
         painter.rect_filled(vr, VIEW_RADIUS, t.app_bar_hover);
     }
     if deleted {
@@ -1505,16 +1549,19 @@ fn draw_view(ui: &mut egui::Ui, strip: &TabStrip, k: usize, view: &ViewTab, vr: 
             return;
         }
     }
-    if resp.middle_clicked() {
+    if !detached
+        && !dragged
+        && resp.has_focus()
+        && ui.input_mut(|i| i.modifiers == egui::Modifiers::NONE && i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+    {
+        pen.actions.push(TabAction::LiftView { view: k, origin: vr });
+    } else if resp.middle_clicked() {
         pen.actions.push(TabAction::CloseView(k));
     } else if resp.secondary_clicked() {
         pen.popup = Some((Popup::View(k), pos2(vr.left(), pen.below), vr, ui.ctx().cumulative_frame_nr()));
-    } else if resp.clicked() {
+    } else if resp.clicked() && !dragged {
+        resp.request_focus();
         pen.actions.push(TabAction::SelectView(k));
-    }
-    if !detached && resp.drag_started_by(egui::PointerButton::Primary) {
-        let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(vr.center());
-        pen.drag = Some(ViewDrag { from: k, grab: origin.x - vr.left() });
     }
 }
 
@@ -1542,36 +1589,45 @@ fn draw_pill(ui: &mut egui::Ui, strip: &TabStrip, tab: &DocTab, pr: Rect, g: &Ge
     let plus = if has_layout { layout.translate(vec2(-LAYOUT_BUTTON, 0.0)) } else { layout };
     let start = name_end + 1.0 + 8.0 + VIEW_GAP;
     let active = tab.views.iter().position(|v| v.active).unwrap_or(0);
-    let (first, count) = view_window(&g.view_ws, active, pr.right() - pill_after(strip) - start, g.more_w + VIEW_GAP);
+    let right = (pr.right() - pill_after(strip)).max(start);
+    let (first, count) = view_window(&g.view_ws, active, right - start, g.more_w + VIEW_GAP);
+    let slot = ui.ctx().data(|data| data.get_temp::<(usize, f32)>(strip.id.with("view_drag_slot")));
+    let source = pen.drag.filter(|drag| !drag.cancelled);
+    let slide_time = if ui.ctx().global_style().animation_time > 0.0 { 0.14 } else { 0.0 };
+    let clip = ui.clip_rect();
+    ui.set_clip_rect(clip.intersect(Rect::from_min_max(pos2(start, pr.top()), pos2(right, pr.bottom()))));
     let mut x = start;
+    let mut local = tab.views.iter().take(first).filter(|view| view.to_window.is_none()).count();
     for (k, view) in tab.views.iter().enumerate().skip(first).take(count) {
         let w = g.view_ws.get(k).copied().unwrap_or(0.0);
         let rect = Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(w, VIEW_HEIGHT));
+        let open = slot.filter(|(index, _)| local >= *index).map_or(0.0, |(_, width)| width + VIEW_GAP);
+        let close = source.filter(|drag| k > drag.from).map_or(0.0, |drag| drag.origin.width() + VIEW_GAP);
+        let offset = ui.ctx().animate_value_with_time(strip.id.with(("view_slide", k)), open - close, slide_time);
         if view.to_window.is_none() {
-            pen.view_centres.push((k, rect.center().x));
+            // A moving neighbour cannot move the zone that chose the move.
+            pen.view_centres.push((local, rect.center().x));
+            local += 1;
         }
+        let rect = rect.translate(vec2(offset, 0.0));
         draw_view(ui, strip, k, view, rect, pen);
         x += w + VIEW_GAP;
     }
+    ui.set_clip_rect(clip);
     if count < tab.views.len() {
         more_button(ui, strip, Rect::from_min_size(pos2(x, cy - VIEW_HEIGHT / 2.0), vec2(g.more_w, VIEW_HEIGHT)), tab.views.len() - count, pen);
     }
     let pointer = ui.ctx().pointer_interact_pos();
     let released = ui.input(|i| i.pointer.primary_released());
     let viewport = ui.ctx().viewport_rect();
-    if let Some((d, pointer)) = pen.drag.zip(pointer).filter(|(_, p)| !viewport.contains(*p) || !pr.expand2(vec2(0.0, 6.0)).contains(*p)) {
-        pen.actions.push(TabAction::DockView { view: d.from, pointer, released });
-    }
-    if let Some(d) = pen.drag.filter(|d| (first..first + count).contains(&d.from))
-        && pointer.is_some_and(|p| p.y <= pen.below + 6.0 && viewport.contains(p))
-    {
-        let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
-        let left = ui.ctx().pointer_latest_pos().map_or(start, |p| p.x) - d.grab;
-        let slot = drop_slot(left, start, &widths, first, d.from);
-        let at = slot_left(start, &widths, first, d.from, slot) - 1.0;
-        painter.line_segment([pos2(at, cy - 10.0), pos2(at, cy + 10.0)], Stroke::new(2.0, t.accent));
-        if released && slot != d.from {
-            pen.actions.push(TabAction::ReorderView { from: d.from, to: slot });
+    if let Some((drag, pointer)) = pen.drag.filter(|drag| !drag.cancelled).zip(pointer) {
+        pen.actions.push(TabAction::DockView { view: drag.from, origin: drag.origin, pointer, released });
+        if released && (first..first + count).contains(&drag.from) && pointer.y <= pen.below + 6.0 && viewport.contains(pointer) {
+            let widths: Vec<f32> = (first..first + count).map(|k| g.view_ws.get(k).copied().unwrap_or(0.0) + VIEW_GAP).collect();
+            let slot = drop_slot(pointer.x - drag.grab, start, &widths, first, drag.from);
+            if slot != drag.from {
+                pen.actions.push(TabAction::ReorderView { from: drag.from, to: slot });
+            }
         }
     }
     if released {
@@ -1859,9 +1915,31 @@ pub struct ViewDropZone {
     pub view_centres: Vec<(usize, f32)>,
 }
 
+/// Leave room for the dragged view before this local insertion index. The caller clears the
+/// slot when the pointer leaves the strip. The reported drop zones stay fixed while tabs slide.
+pub fn set_view_drag_slot(ctx: &egui::Context, strip: egui::Id, index: Option<usize>, width: f32) {
+    let id = strip.with("view_drag_slot");
+    let target = index.filter(|_| width.is_finite() && width > 0.0).map(|index| (index, width));
+    let changed = ctx.data_mut(|data| {
+        if data.get_temp::<(usize, f32)>(id) == target {
+            return false;
+        }
+        if let Some(slot) = target {
+            data.insert_temp(id, slot);
+        } else {
+            data.remove::<(usize, f32)>(id);
+        }
+        true
+    });
+    if changed {
+        ctx.request_repaint();
+    }
+}
+
 /// The strip owns this drag until the user releases the pointer or cancels it.
 pub fn view_drag_active(ctx: &egui::Context, strip: egui::Id) -> bool {
-    ctx.data(|d| d.get_temp::<ViewDrag>(strip.with("view_drag")).is_some()) && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released())
+    ctx.data(|d| d.get_temp::<ViewDrag>(strip.with("view_drag")).is_some_and(|drag| !drag.cancelled))
+        && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released())
 }
 
 /// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
@@ -1922,7 +2000,10 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
         rename: strip.view_rename.take(),
         actions: Vec::new(),
         popup: ui.ctx().data(|d| d.get_temp::<PopupState>(popup_id)).flatten(),
-        drag: ui.ctx().data(|d| d.get_temp::<ViewDrag>(vdrag_id)).filter(|_| (held_down || released) && !escape),
+        drag: ui.ctx().data(|d| d.get_temp::<ViewDrag>(vdrag_id)).filter(|_| held_down || released).map(|mut drag| {
+            drag.cancelled |= escape;
+            drag
+        }),
         close_design: false,
         below: r.bottom(),
         view_centres: Vec::new(),

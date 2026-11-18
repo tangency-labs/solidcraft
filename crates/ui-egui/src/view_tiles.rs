@@ -18,7 +18,7 @@
 
 use egui::{CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, UiBuilder, pos2, vec2};
 use solidcraft_theme::Tokens;
-use solidcraft_views::{Axis, Edge, Placement, Rect as TileRect, Tiles, ViewKind};
+use solidcraft_views::{Axis, Edge, Placement, Rect as TileRect, Tiles, ViewKind, ViewSet};
 
 use crate::SolveApp;
 use crate::ui_kit::BackingTooltipExt as _;
@@ -108,14 +108,14 @@ fn lay_under(ctx: &egui::Context, layer: egui::LayerId, slots: &[egui::layers::S
     });
 }
 
-fn free_area(app: &SolveApp, area: Rect) -> Rect {
+fn layout_bounds(app: &SolveApp, area: Rect) -> (Rect, Rect) {
     // Below the ribbon and above the bottom strip: they float over the ground, but a card is never put under them.
-    let free = crate::shell::bottom_readout_rect(
+    let ground = crate::shell::bottom_readout_rect(
         app,
         crate::shell::panel_bounds(app, crate::shell::workspace_content(app, crate::shell::content_rect(app, area))),
-    )
-    .shrink(MARGIN);
-    if free.is_positive() { free } else { area }
+    );
+    let cells = ground.shrink(MARGIN);
+    (if cells.is_positive() { cells } else { area }, if ground.is_positive() { ground } else { area })
 }
 
 pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -123,7 +123,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let Some(tiles) = app.docs.views.tiles().cloned() else { return };
     let focus = app.docs.views.active().id;
     let render_ground = app.docs.views.active().kind == ViewKind::Render;
-    let free = free_area(app, area);
+    let (free, _) = layout_bounds(app, area);
     let mut places: Vec<(u64, Rect)> = tiles.rects(to_tile(free), GUTTER).into_iter().map(|(id, r)| (id, from_tile(r))).collect();
     // The focused view is drawn last: what it leaves in the app (the viewport's rectangle, its
     // projection for the panels) is what the rest of the frame reads.
@@ -247,77 +247,92 @@ pub(crate) fn focus_pressed(app: &mut SolveApp) -> bool {
     true
 }
 
-#[derive(Clone, Copy)]
-struct TabDrag {
-    frame: u64,
-    view: u64,
-    pointer: Pos2,
-    released: bool,
-}
-
-fn drag_key(ctx: &egui::Context) -> egui::Id {
-    egui::Id::unique(("view_tile_drag", ctx.viewport_id()))
-}
-
 pub(crate) fn cancel_placement_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool {
-    if !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        return false;
+    ctx.input(|i| i.key_pressed(egui::Key::Escape)) && app.docs.view_placement.take().is_some()
+}
+
+/// A candidate shared by pointer, keyboard and the explicit Place in layout controls.
+#[derive(Clone)]
+pub(crate) struct DockTarget {
+    pub placement: Placement,
+    pub zone: Rect,
+    button_zone: Option<Rect>,
+    pub rect: Rect,
+    pub neighbors: Vec<Rect>,
+    pub displaced: Option<(u64, Rect)>,
+    pub focused: bool,
+    pub label: String,
+    pub blocked: bool,
+}
+
+const EDGE_FRACTION: f32 = 0.28;
+const ATTRACTION: f32 = 24.0;
+const HYSTERESIS: f32 = 6.0;
+const MIN_CELL: egui::Vec2 = vec2(200.0, 140.0);
+
+/// Targets are ordered by view, then left, right, top, bottom and middle, then empty cells.
+pub(crate) fn dock_targets(app: &SolveApp, view: u64) -> Vec<DockTarget> {
+    let Some(area) = app.shell.content.filter(|r| r.is_finite() && r.is_positive()) else { return Vec::new() };
+    let (cells, ground) = layout_bounds(app, area);
+    zones(&app.docs.views, view, cells, ground, &crate::shell::covered_rects(app))
+}
+
+/// Keep an entered target until the pointer is six points beyond it. A value under one
+/// is attraction from a nearby zone; it never commits a drop on its own.
+pub(crate) fn dock_at(targets: &[DockTarget], pointer: Pos2, previous: Option<Placement>) -> Option<(&DockTarget, f32)> {
+    if !pointer.is_finite() {
+        return None;
     }
-    // Leave the key available to the app bar so it also cancels the drag held by its tab strip.
-    let key = drag_key(ctx);
-    let drag = ctx.data_mut(|data| {
-        let drag = data.get_temp::<TabDrag>(key);
-        data.remove::<TabDrag>(key);
-        drag
-    });
-    let dragging = drag.is_some_and(|drag| ctx.cumulative_frame_nr().saturating_sub(drag.frame) <= 1)
-        && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released());
-    app.docs.view_placement.take().is_some() || dragging || crate::app_bar::view_drag_active(ctx, crate::documents::tab_strip_id(ctx.viewport_id()))
+    if let Some(target) = targets
+        .iter()
+        .find(|target| Some(target.placement) == previous && target.zone.expand(HYSTERESIS).contains(pointer))
+        .or_else(|| targets.iter().find(|target| target.zone.contains(pointer)))
+    {
+        return Some((target, 1.0));
+    }
+    targets
+        .iter()
+        .filter(|target| !target.blocked)
+        .map(|target| (target, target.zone.distance_to_pos(pointer)))
+        .filter(|(_, distance)| *distance < ATTRACTION)
+        .min_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map(|(target, distance)| (target, 1.0 - distance / ATTRACTION))
 }
 
-pub(crate) fn tab_drag(app: &mut SolveApp, ctx: &egui::Context, view: u64, pointer: Pos2, released: bool) {
-    app.docs.view_placement = None;
-    let drag = TabDrag { frame: ctx.cumulative_frame_nr(), view, pointer, released };
-    let key = drag_key(ctx);
-    ctx.data_mut(|data| data.insert_temp(key, drag));
-}
-
-struct Zone {
-    placement: Placement,
-    rect: Rect,
-    preview: Rect,
-    neighbors: Vec<Rect>,
-    focused: bool,
-}
-
-fn zones(app: &SolveApp, view: u64, area: Rect, covers: &[Rect]) -> Vec<Zone> {
-    let single = Tiles::Leaf(app.docs.views.active().id);
-    let tiles = app.docs.views.tiles().filter(|_| app.docs.views.is_tiled()).unwrap_or(&single);
+fn zones(views: &ViewSet, view: u64, area: Rect, ground: Rect, covers: &[Rect]) -> Vec<DockTarget> {
+    let active = views.active().id;
+    let single = Tiles::Leaf(active);
+    let tiled = views.tiles().filter(|_| views.is_tiled());
+    let tiles = tiled.unwrap_or(&single);
+    let shown = tiles.contains(view);
     let mut zones = Vec::new();
-    let mut add = |placement: Placement, rect: Rect| {
-        let Some(tiles) = app.docs.views.preview_placement(view, placement) else { return };
-        let result = tiles.rects(to_tile(area), GUTTER);
-        if let Some((_, destination)) = result.iter().find(|(id, _)| *id == view) {
-            let neighbors = result.iter().filter(|(id, _)| *id != view).map(|(_, rect)| from_tile(*rect)).collect();
-            let active = app.docs.views.active().id;
-            let focused = active == view || !tiles.contains(active);
-            zones.push(Zone { placement, rect, preview: from_tile(*destination), neighbors, focused });
-        }
+    let mut add = |placement: Placement, zone: Rect| {
+        let button_zone = target_area(zone, covers);
+        let Some(next) = views.preview_placement(view, placement) else { return };
+        let cells = next.rects(to_tile(area), GUTTER);
+        let cell = |view| cells.iter().find(|(id, _)| *id == view).map(|(_, rect)| from_tile(*rect));
+        let Some(rect) = cell(view) else { return };
+        let rect = if tiled.is_none() && matches!(placement, Placement::Replace(_)) { ground } else { rect };
+        let fits = |rect: Rect| rect.width() >= MIN_CELL.x && rect.height() >= MIN_CELL.y;
+        let blocked = matches!(placement, Placement::Split { target, .. } if !fits(rect) || !cell(target).is_some_and(fits));
+        let label = dock_label(views, placement, shown, blocked);
+        let displaced = match placement {
+            Placement::Replace(target) if shown => cell(target).map(|rect| (target, rect)),
+            _ => None,
+        };
+        let neighbors = cells.iter().filter(|(id, _)| *id != view).map(|(_, rect)| from_tile(*rect)).collect();
+        let focused = active == view || !next.contains(active);
+        zones.push(DockTarget { placement, zone, button_zone, rect, neighbors, displaced, focused, label, blocked });
     };
-    let mut empty = 0;
-    for (id, rect) in tiles.rects(to_tile(area), GUTTER) {
+    let mut empty_cells = Vec::new();
+    let zone_extent = if tiled.is_none() { ground } else { area };
+    for (id, rect) in tiles.rects(to_tile(zone_extent), GUTTER) {
         let cell = from_tile(rect);
         if id == solidcraft_views::EMPTY {
-            if let Some(cell) = target_area(cell, covers) {
-                add(Placement::Empty(empty), cell);
-            }
-            empty += 1;
+            empty_cells.push(cell);
             continue;
         }
-        let Some(cell) = target_area(cell, covers) else { continue };
-        let dx = cell.width() * 0.24;
-        let dy = cell.height() * 0.24;
-        let middle = cell.shrink2(vec2(dx, dy));
+        let middle = cell.shrink2(cell.size() * EDGE_FRACTION);
         for (edge, rect) in [
             (Edge::Left, Rect::from_min_max(cell.min, pos2(middle.left(), cell.bottom()))),
             (Edge::Right, Rect::from_min_max(pos2(middle.right(), cell.top()), cell.max)),
@@ -328,54 +343,41 @@ fn zones(app: &SolveApp, view: u64, area: Rect, covers: &[Rect]) -> Vec<Zone> {
         }
         add(Placement::Replace(id), middle);
     }
+    for (ordinal, cell) in empty_cells.into_iter().enumerate() {
+        add(Placement::Empty(ordinal), cell);
+    }
     zones
 }
 
-fn place(app: &mut SolveApp, view: u64, placement: Placement) {
-    use solidcraft_engine::schema::tab_views::TabViewPlacement;
-    let window = app.view_windows.current_window();
-    let _ = app.run("tab.view.beside", serde_json::json!({ "id": view, "window": window, "placement": TabViewPlacement::from(placement) }));
+fn dock_label(views: &ViewSet, placement: Placement, shown: bool, blocked: bool) -> String {
+    use solidcraft_ui_text::{format, tr};
+    if blocked {
+        return tr("multi_window.drag_small").to_owned();
+    }
+    let (target, key) = match placement {
+        Placement::Empty(_) => return tr("multi_window.drag_fill").to_owned(),
+        Placement::Replace(target) => (target, if shown { "multi_window.drag_swap" } else { "multi_window.drag_replace" }),
+        Placement::Split { target, edge } => (
+            target,
+            match edge {
+                Edge::Left => "multi_window.drag_left",
+                Edge::Right => "multi_window.drag_right",
+                Edge::Top => "multi_window.drag_top",
+                Edge::Bottom => "multi_window.drag_bottom",
+            },
+        ),
+    };
+    format(key, &[("view", views.get(target).map_or("", |view| view.name.as_str()))])
 }
 
-/// Paint workspace targets for a dragged tab or the view menu's click placement.
+pub(crate) fn commit_dock(app: &mut SolveApp, view: u64, placement: Placement) -> Result<(), String> {
+    use solidcraft_engine::schema::tab_views::TabViewPlacement;
+    let window = app.view_windows.current_window();
+    app.run("tab.view.beside", serde_json::json!({ "id": view, "window": window, "placement": TabViewPlacement::from(placement) })).map(|_| ())
+}
+
+/// Paint the view menu's click-to-place controls. Dragging uses the same targets.
 pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(area) = app.shell.content.filter(|r| r.is_finite() && r.is_positive()) else { return };
-    let drag_key = drag_key(ctx);
-    let drag = ctx.data(|data| data.get_temp::<TabDrag>(drag_key)).filter(|drag| drag.frame == ctx.cumulative_frame_nr());
-    if drag.is_none() && app.docs.view_placement.is_none() {
-        return;
-    }
-    let free = free_area(app, area);
-    let covers = crate::shell::covered_rects(app);
-    if let Some(drag) = drag {
-        if drag.released {
-            ctx.data_mut(|data| data.remove::<TabDrag>(drag_key));
-        }
-        let hit = (!crate::shell::covered(app, drag.pointer))
-            .then(|| zones(app, drag.view, free, &covers).into_iter().find(|zone| zone.rect.contains(drag.pointer)))
-            .flatten();
-        if drag.released {
-            if let Some(zone) = hit {
-                place(app, drag.view, zone.placement);
-            }
-        } else if let Some(view) = app.docs.views.get(drag.view) {
-            use crate::view_window_drag::{Preview, paint_preview};
-            let preview = if let Some(zone) = &hit {
-                ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-                let label = if matches!(zone.placement, Placement::Replace(_)) {
-                    app.tr("multi_window.replace_tile")
-                } else {
-                    app.tr(placement_label(zone.placement))
-                };
-                Preview::Tile { rect: zone.preview, neighbors: &zone.neighbors, label, focused: zone.focused }
-            } else {
-                ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
-                Preview::Held(None)
-            };
-            paint_preview(ctx, view, drag.pointer, preview);
-        }
-        return;
-    }
     let Some((tab, view)) = app.docs.view_placement else { return };
     let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     if escape || tab != app.docs.active_tab() {
@@ -386,8 +388,8 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
     let mut buttons = 0;
     let tokens = Tokens::get();
     let container = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Navigation);
-    for (i, zone) in zones(app, view, free, &covers).into_iter().enumerate() {
-        let button = zone.rect.shrink(2.0);
+    for (i, zone) in dock_targets(app, view).into_iter().filter(|target| !target.blocked).enumerate() {
+        let Some(button) = zone.button_zone.map(|rect| rect.shrink(2.0)) else { continue };
         if button.width() < 58.0 || button.height() < 20.0 {
             continue;
         }
@@ -406,7 +408,7 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
                 let response = ui.add_sized(size, egui::Button::new(solidcraft_ui_text::tr(label)).fill(tokens.dialog_body));
                 if response.hovered() || response.has_focus() {
                     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("view_tile_preview")));
-                    paint_preview(&painter, zone.preview);
+                    paint_preview(&painter, zone.rect);
                 }
                 if response.clicked() {
                     chosen = Some(zone.placement);
@@ -415,7 +417,7 @@ pub(crate) fn placement_overlay(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if let Some(placement) = chosen {
         app.docs.view_placement = None;
-        place(app, view, placement);
+        let _ = commit_dock(app, view, placement);
     } else if buttons == 0 || ctx.input(|i| i.pointer.secondary_clicked()) {
         app.docs.view_placement = None;
     }
@@ -620,12 +622,31 @@ pub(crate) fn controls_ui(ui: &mut egui::Ui, document: u64, id: u64, rect: Rect)
     child
 }
 
+/// Paint the opaque header shared by workspace cards and their drag preview. The caller
+/// owns buttons and icon placement and supplies the title's x coordinate.
+pub(crate) fn paint_card_header(painter: &egui::Painter, rect: Rect, radius: u8, name: &str, name_x: f32) {
+    let t = Tokens::get();
+    painter.rect_filled(rect, CornerRadius { nw: radius, ne: radius, sw: 0, se: 0 }, t.panel_header);
+    painter.with_clip_rect(rect).text(
+        pos2(name_x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        name,
+        crate::ui_kit::type_face::semibold(t.font_body),
+        t.text,
+    );
+}
+
+/// The card shadow, also used when a drag settles into a layout cell.
+pub(crate) fn card_shadow(card: Rect, radius: CornerRadius) -> egui::epaint::RectShape {
+    egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: egui::Color32::from_black_alpha(70) }.as_shape(card, radius)
+}
+
 /// A card lifted off the focused view: a soft shadow around it, its frame, and a header with the
 /// view's name that stays clear of the panels floating over it.
 fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option<CardAction> {
     let t = Tokens::get();
     let radius = CornerRadius::same(CARD_RADIUS);
-    let shadow = egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: egui::Color32::from_black_alpha(70) }.as_shape(card, radius);
+    let shadow = card_shadow(card, radius);
     let out = card.expand(32.0).intersect(ui.clip_rect());
     // The shadow only outside the card, so the view inside is not dimmed.
     for strip in [
@@ -638,10 +659,9 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     }
     let painter = ui.painter().with_clip_rect(card);
     let top = Rect::from_min_size(card.min, vec2(card.width(), HEADER));
-    painter.rect_filled(top, CornerRadius { nw: CARD_RADIUS, ne: CARD_RADIUS, sw: 0, se: 0 }, t.panel_header);
     let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
     let label = clear_of_panels(app, Rect::from_min_size(top.left_top() + vec2(10.0, 0.0), vec2(120.0, HEADER)));
-    painter.text(label.left_center(), egui::Align2::LEFT_CENTER, name, egui::FontId::proportional(t.font_body), t.text);
+    paint_card_header(&painter, top, CARD_RADIUS, name, label.left());
     // The picture is square: the ground's colour fills what the rounded corners leave out.
     let area = ui.max_rect();
     let [top, bottom] =
@@ -861,6 +881,96 @@ mod tests {
         h.app.docs.view_placement = Some((tab, copy));
         h.call("ui.key", json!({"key":"Escape"}));
         assert!(h.app.docs.view_placement.is_none());
+    }
+
+    #[test]
+    fn a_dock_preview_uses_the_committed_cell_and_rounds_odd_splits() {
+        let mut views = ViewSet::new();
+        let ground = views.active().id;
+        let dragged = views.open(ViewKind::Model, None, false);
+        assert!(views.activate(ground));
+        let area = Rect::from_min_size(pos2(8.0, 40.0), vec2(625.0, 419.0));
+        let full_ground = area.expand(MARGIN);
+        let targets = zones(&views, dragged, area, full_ground, &[]);
+        for (edge, expected) in [
+            (Edge::Left, Rect::from_min_size(area.min, vec2(306.0, 419.0))),
+            (Edge::Right, Rect::from_min_size(pos2(326.0, 40.0), vec2(307.0, 419.0))),
+            (Edge::Top, Rect::from_min_size(area.min, vec2(625.0, 203.0))),
+            (Edge::Bottom, Rect::from_min_size(pos2(8.0, 255.0), vec2(625.0, 204.0))),
+        ] {
+            let placement = Placement::Split { target: ground, edge };
+            let target = targets.iter().find(|target| target.placement == placement).unwrap();
+            assert_eq!(target.rect, expected);
+            assert!(!target.blocked);
+            let mut committed = views.clone();
+            assert!(committed.place_tile(dragged, placement));
+            let tiled = committed.tiles().unwrap().rects(to_tile(area), GUTTER);
+            assert_eq!(tiled.into_iter().find(|(id, _)| *id == dragged).map(|(_, rect)| from_tile(rect)), Some(target.rect));
+        }
+        let middle = targets.iter().find(|target| target.placement == Placement::Replace(ground)).unwrap();
+        assert_eq!(middle.rect, full_ground);
+        assert!(middle.displaced.is_none());
+        assert!(middle.focused);
+    }
+
+    #[test]
+    fn dock_at_holds_a_zone_through_jitter_and_nearby_targets_do_not_commit() {
+        let mut views = ViewSet::new();
+        let ground = views.active().id;
+        let dragged = views.open(ViewKind::Model, None, false);
+        assert!(views.activate(ground));
+        let area = Rect::from_min_size(pos2(100.0, 40.0), vec2(600.0, 400.0));
+        let targets = zones(&views, dragged, area, area, &[]);
+        let left = Placement::Split { target: ground, edge: Edge::Left };
+        let border = area.left() + area.width() * 0.28;
+        let near_border = |offset| pos2(border + offset, area.center().y);
+        assert_eq!(dock_at(&targets, near_border(5.0), Some(left)).map(|(target, weight)| (target.placement, weight)), Some((left, 1.0)));
+        assert_eq!(
+            dock_at(&targets, near_border(7.0), Some(left)).map(|(target, weight)| (target.placement, weight)),
+            Some((Placement::Replace(ground), 1.0))
+        );
+        let outside = |offset| pos2(area.left() - offset, area.center().y);
+        assert_eq!(dock_at(&targets, outside(12.0), None).map(|(target, weight)| (target.placement, weight)), Some((left, 0.5)));
+        assert!(dock_at(&targets, outside(24.0), None).is_none());
+    }
+
+    #[test]
+    fn too_small_splits_are_refused_without_removing_the_center_target() {
+        let mut views = ViewSet::new();
+        let ground = views.active().id;
+        let dragged = views.open(ViewKind::Model, None, false);
+        assert!(views.activate(ground));
+        let area = Rect::from_min_size(pos2(0.0, 40.0), vec2(411.0, 291.0));
+        let targets = zones(&views, dragged, area, area, &[]);
+        assert_eq!(targets.iter().filter(|target| target.blocked).count(), 4);
+        let (center, strength) = dock_at(&targets, area.center(), None).unwrap();
+        assert_eq!(center.placement, Placement::Replace(ground));
+        assert_eq!(strength, 1.0);
+        assert!(!center.blocked);
+    }
+
+    #[test]
+    fn a_swap_moves_the_replaced_view_into_the_dragged_views_previous_cell() {
+        let mut views = ViewSet::new();
+        let ground = views.active().id;
+        let dragged = views.open(ViewKind::Model, None, false);
+        assert!(views.activate(ground));
+        views.set_layout_padded(solidcraft_views::Preset::Grid);
+        let area = Rect::from_min_size(pos2(8.0, 40.0), vec2(900.0, 700.0));
+        let cells = views.tiles().unwrap().rects(to_tile(area), GUTTER);
+        let cell = |target| cells.iter().find(|(id, _)| *id == target).map(|(_, rect)| from_tile(*rect)).unwrap();
+        let targets = zones(&views, dragged, area, area, &[]);
+        let middle = targets.iter().find(|target| target.placement == Placement::Replace(ground)).unwrap();
+        assert_eq!(middle.rect, cell(ground));
+        assert_eq!(middle.displaced, Some((ground, cell(dragged))));
+        let from_ground = zones(&views, ground, area, area, &[]);
+        let swap_card = from_ground.iter().find(|target| target.placement == Placement::Replace(dragged)).unwrap();
+        assert_eq!(swap_card.rect, cell(dragged));
+        assert_eq!(swap_card.displaced, Some((dragged, cell(ground))));
+        let empty = targets.last().unwrap();
+        assert_eq!(empty.placement, Placement::Empty(1));
+        assert!(!empty.blocked);
+        assert_eq!(empty.rect, from_tile(cells.last().unwrap().1));
     }
 
     #[test]

@@ -3,25 +3,41 @@
 
 use egui::{Align2, Context, Id, LayerId, Order, Pos2, Rect, Stroke, StrokeKind, pos2, vec2};
 use solidcraft_theme::Tokens;
-use solidcraft_views::{DesignView, ViewKind, WindowId};
+use solidcraft_views::{DesignView, WindowId};
 
 use crate::{SolveApp, app_bar::ViewDropZone};
+
+use crate::view_tiles::DockTarget;
+use crate::view_windows::{DragSource, DragWindow};
+use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 pub(crate) struct State {
     strips: Vec<Strip>,
-    hover: Option<Hover>,
+    drag: Option<Drag>,
+    flight: Option<Flight>,
 }
 
-impl State {
-    fn set_hover(&mut self, ctx: &Context, hover: Option<Hover>) {
-        if self.hover != hover {
-            for target in [self.hover.as_ref(), hover.as_ref()].into_iter().flatten() {
-                ctx.request_repaint_of(target.target);
-            }
-            self.hover = hover;
-        }
-    }
+struct Drag {
+    viewport: egui::ViewportId,
+    tab: u64,
+    window: WindowId,
+    view: DesignView,
+    origin: Rect,
+    source: DragSource,
+    picture: Picture,
+    keyboard: Option<usize>,
+    target: Option<Target>,
+    pointer: Pos2,
+}
+
+struct Flight {
+    view: DesignView,
+    viewport: egui::ViewportId,
+    from: Rect,
+    origin: Rect,
+    start: f64,
+    picture: Picture,
 }
 
 struct Strip {
@@ -31,6 +47,7 @@ struct Strip {
     screen: Screen,
     zone: ViewDropZone,
     count: usize,
+    name: String,
 }
 
 #[derive(Clone, Copy)]
@@ -56,59 +73,456 @@ impl Screen {
     }
 }
 
-#[derive(PartialEq)]
-struct Hover {
-    source: egui::ViewportId,
-    target: egui::ViewportId,
-    tab: u64,
-    pointer: Pos2,
-    name: String,
-    kind: ViewKind,
+#[derive(Clone, Copy, PartialEq)]
+struct Slot {
+    viewport: egui::ViewportId,
+    window: WindowId,
+    index: usize,
+    hit: Rect,
+    center: Pos2,
+}
+
+enum Target {
+    Strip { slot: Slot, label: String, blocked: bool },
+    Dock { dock: DockTarget, attraction: f32 },
+    Window { window: DragWindow, refusal: Option<&'static str> },
+}
+
+impl Target {
+    fn label(&self) -> &str {
+        match self {
+            Self::Strip { label, .. } => label,
+            Self::Dock { dock, .. } => &dock.label,
+            Self::Window { window, refusal } => refusal.unwrap_or(&window.label),
+        }
+    }
+
+    fn viewport(&self, source: egui::ViewportId) -> egui::ViewportId {
+        if let Self::Strip { slot, blocked: false, .. } = self { slot.viewport } else { source }
+    }
 }
 
 impl Strip {
-    fn drop_at(&self, desktop: Pos2) -> Option<(usize, f32)> {
-        let pointer = self.screen.local(desktop);
-        if !self.zone.rect.contains(pointer) {
-            return None;
+    fn slots(&self) -> Vec<Slot> {
+        let mut left = self.zone.rect.left();
+        let band = self.zone.rect.expand2(vec2(0.0, 16.0));
+        let mut slots = Vec::with_capacity(self.zone.view_centres.len() + 1);
+        for (index, right) in self.zone.view_centres.iter().copied().chain([(self.count, self.zone.rect.right())]) {
+            if right >= left {
+                slots.push(Slot {
+                    viewport: self.viewport,
+                    window: self.window,
+                    index,
+                    hit: Rect::from_min_max(pos2(left, band.top()), pos2(right, band.bottom())),
+                    center: pos2((left + right) * 0.5, self.zone.rect.center().y),
+                });
+            }
+            left = right;
         }
-        let centres = &self.zone.view_centres;
-        let index = centres.iter().find(|(_, x)| pointer.x < *x).map_or(self.count, |(index, _)| *index);
-        let left = centres.iter().rev().find(|(i, _)| *i < index).map_or(self.zone.rect.left(), |(_, x)| *x);
-        let right = centres.iter().find(|(i, _)| *i >= index).map_or(self.zone.rect.right(), |(_, x)| *x);
-        Some((index, (left + right) / 2.0))
+        slots
+    }
+
+    fn drop_at(&self, pointer: Pos2, previous: Option<Slot>) -> Option<Slot> {
+        let slots = self.slots();
+        slots
+            .iter()
+            .copied()
+            .find(|slot| {
+                previous.is_some_and(|old| old.viewport == slot.viewport && old.index == slot.index) && slot.hit.expand(6.0).contains(pointer)
+            })
+            .or_else(|| slots.into_iter().find(|slot| slot.hit.contains(pointer)))
+    }
+
+    fn keyboard_slots(&self, skip: Option<usize>) -> Vec<Slot> {
+        let visible = self.slots();
+        (0..=self.count)
+            .filter(|index| Some(*index) != skip)
+            .filter_map(|index| visible.iter().min_by_key(|slot| index.abs_diff(slot.index)).copied().map(|slot| Slot { index, ..slot }))
+            .collect()
+    }
+
+    fn destination(&self, app: &SolveApp, drag: &Drag, slot: Slot) -> Target {
+        let from = app.docs.views.views().iter().position(|view| view.id == drag.view.id);
+        let index = slot.index - usize::from(slot.window == drag.window && from.is_some_and(|from| from < slot.index));
+        let position = (index + 1).to_string();
+        let blocked = slot.window != drag.window && drag.window == 0 && app.docs.views.len() == 1;
+        let label = if blocked {
+            app.tr("multi_window.last_view").to_owned()
+        } else if slot.window == drag.window {
+            solidcraft_ui_text::format("multi_window.drag_reorder", &[("n", &position)])
+        } else {
+            solidcraft_ui_text::format("multi_window.drag_move", &[("window", &self.name), ("n", &position)])
+        };
+        Target::Strip { slot, label, blocked }
     }
 }
 
-/// Paint the destination's insertion marker and cache this frame's visible strips.
+/// Register the current window's strips before resolving any input in the frame.
 pub(crate) fn record(app: &mut SolveApp, ctx: &Context, zones: Vec<(u64, usize, ViewDropZone)>, drag_continues: bool) {
     let viewport = ctx.viewport_id();
+    let native = Screen::current(ctx);
+    let window = app.view_windows.current_window();
+    let name = crate::view_windows::window_choices(app)
+        .iter()
+        .find(|choice| choice.id == window)
+        .map_or_else(|| app.session.doc.name.clone(), |choice| choice.label.clone());
     let state = &mut app.view_window_drag;
-    if !drag_continues && state.hover.as_ref().is_some_and(|hover| hover.source == viewport) {
-        state.set_hover(ctx, None);
-    }
     ctx.input(|input| {
         state
             .strips
             .retain(|strip| strip.viewport != viewport && input.raw.viewports.get(&strip.viewport).is_some_and(|info| info.minimized != Some(true)));
     });
-    let Some(screen) = Screen::current(ctx) else { return };
-    let window = app.view_windows.current_window();
-    for (tab, count, zone) in zones {
-        let strip = Strip { viewport, tab, window, screen, zone, count };
-        if let Some(hover) = state.hover.as_ref().filter(|hover| hover.target == viewport && hover.tab == tab)
-            && let Some((_, mark)) = strip.drop_at(hover.pointer)
-        {
-            let rect = strip.zone.rect;
-            let t = Tokens::get();
-            let painter = painter(ctx);
-            painter.line_segment([pos2(mark, rect.top() + 3.0), pos2(mark, rect.bottom() - 3.0)], Stroke::new(2.0, t.accent));
-            let tab = held_rect(ctx.viewport_rect(), pos2(mark, rect.bottom()), vec2(144.0, 28.0), vec2(72.0, -3.0));
-            painter.rect_filled(tab, 6, t.app_bar_tab_active);
-            painter.rect_stroke(tab, 6, Stroke::new(1.0, t.accent), StrokeKind::Inside);
-            paint_header(&painter, tab, &hover.name, hover.kind.key(), t.app_bar_text);
+    let screen = native.unwrap_or(Screen { origin: Pos2::ZERO, pixels_per_point: 1.0 });
+    state.strips.extend(zones.into_iter().map(|(tab, count, zone)| Strip { viewport, tab, window, screen, zone, count, name: name.clone() }));
+    if state.drag.as_ref().is_some_and(|drag| drag.viewport == viewport && drag.keyboard.is_none() && !drag_continues)
+        && let Some(drag) = state.drag.take()
+    {
+        cancel(state, ctx, drag);
+    }
+    if let Some(drag) = &state.drag
+        && let Some(Target::Strip { slot, label, blocked: false }) = &drag.target
+        && drag.viewport != viewport
+        && slot.viewport == viewport
+    {
+        let pointer = screen.local(
+            state.strips.iter().find(|strip| strip.viewport == drag.viewport).map_or(drag.pointer, |strip| strip.screen.desktop(drag.pointer)),
+        );
+        paint_tab(ctx, &drag.view, drag.origin, *slot, pointer, label);
+    }
+    if let Some(flight) = &state.flight
+        && flight.viewport == viewport
+    {
+        if !paint_flight(ctx, flight) {
+            state.flight = None;
         }
-        state.strips.push(strip);
+    }
+}
+
+type Picture = Arc<Mutex<Option<egui::TextureHandle>>>;
+
+fn capture_picture(app: &SolveApp, ctx: &Context, view: u64) -> Picture {
+    let picture = Picture::default();
+    if cfg!(target_arch = "wasm32") || ctx.embed_viewports() {
+        return picture;
+    }
+    let frame = if app.docs.views.active().id == view {
+        app.viewport.rect
+    } else {
+        app.viewport.cards.iter().find(|(id, _)| *id == view).map(|(_, rect)| *rect)
+    };
+    if let Some(frame) = frame.map(|frame| frame.intersect(ctx.viewport_rect())).filter(|frame| frame.is_positive() && frame.is_finite()) {
+        let output = Arc::downgrade(&picture);
+        let scale = ctx.pixels_per_point();
+        let ctx = ctx.clone();
+        let ui = ctx.clone();
+        let viewport = ctx.viewport_id();
+        ctx.request_screenshot(move |image| {
+            let Some(output) = output.upgrade() else { return };
+            let min = [frame.left(), frame.top()];
+            let max = [frame.right(), frame.bottom()];
+            let left = (min[0] * scale).max(0.0) as usize;
+            let top = (min[1] * scale).max(0.0) as usize;
+            let right = ((max[0] * scale).ceil() as usize).min(image.size[0]);
+            let bottom = ((max[1] * scale).ceil() as usize).min(image.size[1]);
+            if right <= left || bottom <= top {
+                return;
+            }
+            let size = [right - left, bottom - top];
+            let stride = size[0].max(size[1]).div_ceil(512).max(1);
+            let scaled = [size[0].div_ceil(stride), size[1].div_ceil(stride)];
+            let mut pixels = Vec::with_capacity(scaled[0] * scaled[1]);
+            for y in (top..bottom).step_by(stride) {
+                let start = y * image.size[0];
+                let Some(row) = image.pixels.get(start + left..start + right) else { return };
+                pixels.extend(row.iter().step_by(stride).copied());
+            }
+            let texture = ui.load_texture("view drag still", egui::ColorImage::new(scaled, pixels), egui::TextureOptions::LINEAR);
+            if let Ok(mut output) = output.lock() {
+                *output = Some(texture);
+                ui.request_repaint_of(viewport);
+            }
+        });
+    }
+    picture
+}
+
+fn begin(app: &SolveApp, ctx: &Context, view: u64, origin: Rect, keyboard: bool) -> Option<Drag> {
+    let design_view = app.docs.views.get(view)?.clone();
+    Some(Drag {
+        viewport: ctx.viewport_id(),
+        tab: app.docs.current_tab(),
+        window: app.view_windows.current_window(),
+        view: design_view,
+        origin,
+        source: crate::view_windows::drag_source(app, view, ctx.viewport_rect()),
+        picture: capture_picture(app, ctx, view),
+        keyboard: keyboard.then_some(0),
+        target: None,
+        pointer: origin.center(),
+    })
+}
+
+fn take_target(app: &SolveApp, ctx: &Context, drag: &Drag, pointer: Pos2) -> Option<Target> {
+    let client = ctx.viewport_rect();
+    let desktop = Screen::current(ctx).map(|screen| screen.desktop(pointer));
+    let previous = match &drag.target {
+        Some(Target::Strip { slot, .. }) => Some(*slot),
+        _ => None,
+    };
+    let outside = !client.contains(pointer);
+    let strips = &app.view_window_drag.strips;
+    let strip_at = |local: bool| {
+        strips.iter().rev().filter(|strip| strip.tab == drag.tab && (strip.viewport == drag.viewport) == local).find_map(|strip| {
+            let point = if local { pointer } else { strip.screen.local(desktop?) };
+            strip.drop_at(point, previous).map(|slot| strip.destination(app, drag, slot))
+        })
+    };
+    if outside || drag.viewport == egui::ViewportId::ROOT {
+        if let Some(target) = strip_at(false) {
+            return Some(target);
+        }
+    }
+    if let Some(target) = strip_at(true) {
+        return Some(target);
+    }
+    if client.contains(pointer) && !crate::shell::covered(app, pointer) {
+        let previous = match &drag.target {
+            Some(Target::Dock { dock, attraction }) if *attraction == 1.0 => Some(dock.placement),
+            _ => None,
+        };
+        let targets = crate::view_tiles::dock_targets(app, drag.view.id);
+        if let Some((dock, attraction)) = crate::view_tiles::dock_at(&targets, pointer, previous) {
+            return Some(Target::Dock { dock: dock.clone(), attraction });
+        }
+    }
+    let edge = if matches!(drag.target, Some(Target::Window { .. })) { 6.0 } else { 12.0 };
+    if !client.expand(edge).contains(pointer) && crate::view_windows::supports_pop_out(app) {
+        let snap = !ctx.input(|i| i.modifiers.alt);
+        return window_target(app, drag, desktop, None, snap);
+    }
+    None
+}
+
+fn window_target(app: &SolveApp, drag: &Drag, point: Option<Pos2>, display: Option<usize>, snap: bool) -> Option<Target> {
+    let mut window = crate::view_windows::drag_window(app, drag.source, point, display, snap)?;
+    window.label = solidcraft_ui_text::format("multi_window.drag_new", &[("display", &window.label)]);
+    let refusal = if drag.window == 0 && app.docs.views.len() == 1 {
+        Some(app.tr("multi_window.last_view"))
+    } else if !crate::view_windows::can_create(app) {
+        Some(app.tr("multi_window.too_many"))
+    } else {
+        None
+    };
+    Some(Target::Window { window, refusal })
+}
+
+pub(crate) fn route(app: &mut SolveApp, ctx: &Context, view: u64, origin: Rect, pointer: Pos2, released: bool) {
+    if !pointer.is_finite() || !ctx.viewport_rect().is_positive() {
+        return;
+    }
+    let drag = app
+        .view_window_drag
+        .drag
+        .take()
+        .filter(|drag| drag.viewport == ctx.viewport_id() && drag.view.id == view && drag.tab == app.docs.current_tab())
+        .or_else(|| begin(app, ctx, view, origin, false));
+    let Some(mut drag) = drag else { return };
+    app.docs.view_placement = None;
+    app.view_window_drag.flight = None;
+    let next = take_target(app, ctx, &drag, pointer);
+    clear_old_slot(ctx, drag.target.as_ref(), next.as_ref());
+    drag.target = next;
+    drag.pointer = pointer;
+    if released {
+        finish(app, ctx, drag);
+    } else {
+        draw(app, ctx, &drag);
+        app.view_window_drag.drag = Some(drag);
+    }
+}
+
+pub(crate) fn lift(app: &mut SolveApp, ctx: &Context, view: u64, origin: Rect) {
+    if let Some(drag) = begin(app, ctx, view, origin, true) {
+        app.docs.view_placement = None;
+        app.view_window_drag.drag = Some(drag);
+        app.view_window_drag.flight = None;
+    }
+}
+
+pub(crate) fn keyboard_active(app: &SolveApp, ctx: &Context) -> bool {
+    app.view_window_drag.drag.as_ref().is_some_and(|drag| drag.viewport == ctx.viewport_id() && drag.keyboard.is_some())
+}
+
+pub(crate) fn keyboard(app: &mut SolveApp, ctx: &Context) {
+    if !keyboard_active(app, ctx) {
+        return;
+    }
+    let Some(mut drag) = app.view_window_drag.drag.take() else { return };
+    if drag.tab != app.docs.current_tab() || app.docs.views.get(drag.view.id).is_none() {
+        return;
+    }
+    let pressed = |key| ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key));
+    if pressed(egui::Key::Escape) {
+        cancel(&mut app.view_window_drag, ctx, drag);
+        return;
+    }
+    let strips = &app.view_window_drag.strips;
+    let from = app.docs.views.views().iter().position(|view| view.id == drag.view.id);
+    let local = strips
+        .iter()
+        .filter(|strip| strip.tab == drag.tab && strip.viewport == drag.viewport)
+        .flat_map(|strip| strip.keyboard_slots(from.map(|index| index + 1)).into_iter().map(|slot| strip.destination(app, &drag, slot)))
+        .collect::<Vec<_>>();
+    let dock = crate::view_tiles::dock_targets(app, drag.view.id)
+        .into_iter()
+        .filter(|dock| !dock.blocked)
+        .map(|dock| Target::Dock { dock, attraction: 1.0 });
+    let other = strips
+        .iter()
+        .filter(|strip| strip.tab == drag.tab && strip.viewport != drag.viewport)
+        .flat_map(|strip| strip.keyboard_slots(None).into_iter().map(|slot| strip.destination(app, &drag, slot)));
+    let windows = (0..crate::view_windows::drag_display_count(app))
+        .filter(|_| crate::view_windows::supports_pop_out(app))
+        .filter_map(|index| window_target(app, &drag, None, Some(index), true));
+    let local_count = local.len();
+    let mut targets = local.into_iter().chain(dock).chain(other).chain(windows).collect::<Vec<_>>();
+    if targets.is_empty() {
+        return;
+    }
+    let mut index = drag.keyboard.unwrap_or_default().min(targets.len() - 1);
+    if drag.target.is_none() {
+        index = targets
+            .iter()
+            .take(local_count)
+            .position(|target| match target {
+                Target::Strip { slot, .. } => slot.hit.contains(drag.origin.center()),
+                _ => false,
+            })
+            .unwrap_or_default();
+    }
+    if pressed(egui::Key::ArrowLeft) && local_count > 0 {
+        index = index.min(local_count - 1).saturating_sub(1);
+    }
+    if pressed(egui::Key::ArrowRight) && local_count > 0 {
+        index = (index + 1).min(local_count - 1);
+    }
+    if pressed(egui::Key::ArrowUp) {
+        index = (index + targets.len() - 1) % targets.len();
+    }
+    if pressed(egui::Key::ArrowDown) {
+        index = (index + 1) % targets.len();
+    }
+    let target = targets.swap_remove(index);
+    if drag.keyboard != Some(index) || drag.target.is_none() {
+        ctx.output_mut(|output| {
+            output.events.push(egui::output::OutputEvent::ValueChanged(egui::WidgetInfo::labeled(egui::Role::Label, true, target.label())))
+        });
+    }
+    drag.keyboard = Some(index);
+    drag.pointer = match &target {
+        Target::Strip { slot, .. } if slot.viewport == drag.viewport => slot.center,
+        Target::Dock { dock, .. } => dock.zone.center(),
+        _ => drag.origin.center(),
+    };
+    clear_old_slot(ctx, drag.target.as_ref(), Some(&target));
+    drag.target = Some(target);
+    if pressed(egui::Key::Enter) {
+        finish(app, ctx, drag);
+    } else {
+        draw(app, ctx, &drag);
+        app.view_window_drag.drag = Some(drag);
+    }
+}
+
+fn clear_old_slot(ctx: &Context, old: Option<&Target>, next: Option<&Target>) {
+    if let Some(Target::Strip { slot: old_slot, blocked: false, .. }) = old
+        && !matches!(next, Some(Target::Strip {slot, blocked: false, ..}) if slot.viewport == old_slot.viewport)
+    {
+        update_slot(ctx, old, 0.0);
+    }
+}
+
+fn update_slot(ctx: &Context, target: Option<&Target>, width: f32) {
+    if let Some(Target::Strip { slot, blocked: false, .. }) = target {
+        crate::app_bar::set_view_drag_slot(ctx, crate::documents::tab_strip_id(slot.viewport), (width > 0.0).then_some(slot.index), width);
+        if slot.viewport != ctx.viewport_id() {
+            ctx.request_repaint_of(slot.viewport);
+        }
+    }
+}
+
+fn finish(app: &mut SolveApp, ctx: &Context, mut drag: Drag) {
+    update_slot(ctx, drag.target.as_ref(), 0.0);
+    let result = match drag.target.take() {
+        Some(Target::Strip { slot, blocked: false, .. }) => {
+            if slot.window == drag.window {
+                app.docs.views.views().iter().position(|view| view.id == drag.view.id).map_or(Ok(()), |from| {
+                    let to = (slot.index - usize::from(from < slot.index)).min(app.docs.views.len() - 1);
+                    if from == to {
+                        return Ok(());
+                    }
+                    app.run("tab.view.move", serde_json::json!({"from":from,"to":to})).map(|_| ())
+                })
+            } else {
+                ctx.request_repaint_of(slot.viewport);
+                app.run("tab.view.move_to_window", serde_json::json!({"view":drag.view.id,"window":slot.window,"index":slot.index})).map(|_| ())
+            }
+        }
+        Some(Target::Dock { dock, attraction }) if !dock.blocked && attraction == 1.0 => {
+            crate::view_tiles::commit_dock(app, drag.view.id, dock.placement)
+        }
+        Some(Target::Window { window, refusal: None }) => crate::view_windows::drop_new_window(app, drag.view.id, window),
+        _ => {
+            cancel(&mut app.view_window_drag, ctx, drag);
+            return;
+        }
+    };
+    if let Err(reason) = result {
+        crate::design_view_ui::show_move_error(app, reason);
+        cancel(&mut app.view_window_drag, ctx, drag);
+    }
+}
+
+fn cancel(state: &mut State, ctx: &Context, drag: Drag) {
+    update_slot(ctx, drag.target.as_ref(), 0.0);
+    if let Some(target) = &drag.target {
+        ctx.request_repaint_of(target.viewport(drag.viewport));
+    }
+    if ctx.global_style().animation_time > 0.0
+        && let Some(morph) = ctx.data(|data| data.get_temp::<Morph>(morph_id(ctx, drag.view.id)))
+    {
+        state.flight = Some(Flight {
+            view: drag.view,
+            viewport: drag.viewport,
+            from: morph.rect,
+            origin: drag.origin,
+            start: ctx.input(|i| i.time),
+            picture: drag.picture,
+        });
+        ctx.request_repaint();
+    }
+}
+
+fn draw(app: &SolveApp, ctx: &Context, drag: &Drag) {
+    update_slot(ctx, drag.target.as_ref(), drag.origin.width());
+    let picture = drag.picture.lock().ok().and_then(|image| image.clone());
+    if let Some(target) = drag.target.as_ref().filter(|target| target.viewport(drag.viewport) != drag.viewport) {
+        ctx.request_repaint_of(target.viewport(drag.viewport));
+        return;
+    }
+    match &drag.target {
+        Some(Target::Strip { slot, label, blocked: false }) => paint_tab(ctx, &drag.view, drag.origin, *slot, drag.pointer, label),
+        Some(Target::Dock { dock, attraction }) => {
+            let displaced = dock.displaced.and_then(|(id, rect)| app.docs.views.get(id).map(|view| (view, rect)));
+            paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Dock { dock, attraction: *attraction, displaced });
+        }
+        Some(Target::Window { window, refusal }) => {
+            let rect = Screen::current(ctx).map(|screen| Rect::from_min_max(screen.local(window.outline.min), screen.local(window.outline.max)));
+            let label = refusal.unwrap_or(&window.label);
+            paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Window { rect, label, blocked: refusal.is_some() });
+        }
+        Some(Target::Strip { label, .. }) => paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Held(Some(label))),
+        None => paint_preview(ctx, &drag.view, drag.origin, drag.pointer, picture.as_ref(), Preview::Held(None)),
     }
 }
 
@@ -116,166 +530,206 @@ fn painter(ctx: &Context) -> egui::Painter {
     ctx.layer_painter(LayerId::new(Order::Tooltip, Id::unique("view_window_drag")))
 }
 
-pub(crate) fn route(app: &mut SolveApp, ctx: &Context, view: u64, pointer: Pos2, released: bool) -> bool {
-    if !pointer.is_finite() || !crate::view_windows::supports_pop_out(app) {
-        return false;
-    }
-    let viewport = ctx.viewport_id();
-    let client = ctx.viewport_rect();
-    if !client.is_finite() || !client.is_positive() {
-        return false;
-    }
-    let outside = !client.contains(pointer);
-    let tab = app.docs.current_tab();
-    let desktop = Screen::current(ctx).map(|screen| screen.desktop(pointer));
-    // A pop-out can cover part of the main canvas when the main window is maximized.
-    // A drag in a child keeps that child as the destination until the pointer leaves it.
-    let target = desktop.filter(|_| outside || viewport == egui::ViewportId::ROOT).and_then(|point| {
-        app.view_window_drag.strips.iter().rev().find_map(|strip| {
-            if strip.tab == tab && strip.viewport != viewport {
-                strip.drop_at(point).map(|(index, _)| (strip.viewport, strip.window, index))
-            } else {
-                None
-            }
-        })
-    });
-    let view_info = app.docs.views.get(view);
-    let last_main_view = app.view_windows.current_window() == 0 && app.docs.views.len() == 1;
-    let hover = if released || last_main_view {
-        None
-    } else {
-        target.zip(desktop).zip(view_info).map(|(((target, _, _), pointer), view)| Hover {
-            source: viewport,
-            target,
-            tab,
-            pointer,
-            name: view.name.clone(),
-            kind: view.kind,
-        })
-    };
-    app.view_window_drag.set_hover(ctx, hover);
-    if let Some((_, window, index)) = target {
-        if released {
-            move_view(app, view, Some((window, index)), desktop);
-        } else if last_main_view && let Some(view) = view_info {
-            ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
-            paint_preview(ctx, view, pointer, Preview::Held(Some(app.tr("multi_window.last_view"))));
-        }
-        return true;
-    }
-    if outside {
-        if released {
-            move_view(app, view, None, desktop);
-        } else if let Some(view) = view_info {
-            let refusal = if last_main_view {
-                Some(app.tr("multi_window.last_view"))
-            } else if !crate::view_windows::can_create(app) {
-                Some(app.tr("multi_window.too_many"))
-            } else {
-                None
-            };
-            let target = if let Some(reason) = refusal {
-                ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
-                Preview::Held(Some(reason))
-            } else {
-                let rect = crate::view_windows::drag_window_outline(app, view.id, desktop)
-                    .zip(Screen::current(ctx))
-                    .map(|(rect, screen)| Rect::from_min_max(screen.local(rect.min), screen.local(rect.max)));
-                Preview::Window { rect, label: app.tr("multi_window.drop_new") }
-            };
-            paint_preview(ctx, view, pointer, target);
-        }
-    }
-    outside
-}
-
-fn move_view(app: &mut SolveApp, view: u64, target: Option<(WindowId, usize)>, screen: Option<Pos2>) {
-    if let Err(reason) = crate::view_windows::drag_drop(app, view, target, screen) {
-        crate::design_view_ui::show_move_error(app, reason);
-    }
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum Preview<'a> {
+enum Preview<'a> {
     Held(Option<&'a str>),
-    Tile { rect: Rect, neighbors: &'a [Rect], label: &'a str, focused: bool },
-    Window { rect: Option<Rect>, label: &'a str },
+    Dock { dock: &'a DockTarget, attraction: f32, displaced: Option<(&'a DesignView, Rect)> },
+    Window { rect: Option<Rect>, label: &'a str, blocked: bool },
 }
 
-/// The drag stays represented by the same view header. Its body expands into the prospective
-/// cell or turns into a miniature of the independently framed window.
-pub(crate) fn paint_preview(ctx: &Context, view: &DesignView, pointer: Pos2, preview: Preview<'_>) {
+#[derive(Clone, Copy, PartialEq)]
+enum Form {
+    Tab,
+    Card,
+    Window,
+}
+
+fn paint_preview(ctx: &Context, view: &DesignView, origin: Rect, pointer: Pos2, picture: Option<&egui::TextureHandle>, preview: Preview<'_>) {
     let client = ctx.viewport_rect();
-    if !client.is_positive() || !client.is_finite() {
+    let t = Tokens::get();
+    let p = painter(ctx).with_clip_rect(client);
+    let held = held_rect(client, pointer, origin.size() * 1.04, vec2(24.0, 14.0));
+    let focused = matches!(&preview, Preview::Dock { dock, .. } if dock.focused && !dock.blocked);
+    let (goal, form, label, blocked) = match preview {
+        Preview::Held(label) => (held, Form::Tab, label, label.is_some()),
+        Preview::Dock { dock, attraction, displaced } => {
+            if dock.blocked {
+                let hatch = p.with_clip_rect(dock.zone);
+                let step = 13.0;
+                let count = ((dock.zone.width() + dock.zone.height()) / step).ceil().min(512.0) as usize;
+                for index in 0..count {
+                    let start = dock.zone.left() + index as f32 * step;
+                    hatch.line_segment(
+                        [pos2(start, dock.zone.top()), pos2(start - dock.zone.height(), dock.zone.bottom())],
+                        Stroke::new(1.0, t.warning),
+                    );
+                }
+                (held, Form::Tab, Some(dock.label.as_str()), true)
+            } else {
+                for neighbor in &dock.neighbors {
+                    p.rect_stroke(*neighbor, 8, Stroke::new(1.0, t.accent.gamma_multiply(0.45)), StrokeKind::Inside);
+                }
+                if let Some((other, rect)) = displaced {
+                    draw_shape(ctx, &p, other, rect, GhostStyle { form: Form::Card, tilt: 0.0, detail: 1.0, ink: t.border, shadow: false }, None);
+                }
+                let outline = dock.rect.expand(3.0);
+                if attraction >= 1.0 {
+                    p.rect_filled(outline, 11, t.accent_soft);
+                    dashed(&p, outline, t.accent, 2.0);
+                }
+                (lerp_rect(held, dock.rect, attraction), Form::Card, Some(dock.label.as_str()), false)
+            }
+        }
+        Preview::Window { rect, label, blocked } => {
+            if let Some(rect) = rect.filter(|rect| rect.intersect(client).is_positive()) {
+                dashed(&p, rect.expand(3.0), if blocked { t.error } else { t.accent }, 2.0);
+            }
+            let size = rect.map_or(vec2(320.0, 210.0), |rect| rect.size() * 0.5);
+            (held_rect(client, pointer, size, vec2(24.0, 14.0)), Form::Window, Some(label), blocked)
+        }
+    };
+    let params = morph(ctx, view.id, origin, goal, form, pointer);
+    let ink = if blocked { t.error } else { t.accent };
+    draw_shape(ctx, &p, view, params.rect, GhostStyle { form, tilt: params.tilt, detail: params.detail, ink, shadow: true }, picture);
+    if focused && params.rect.width() > 50.0 && params.detail > 0.65 {
+        p.circle_filled(params.rect.right_top() + vec2(-14.0, 14.0), 3.5, t.accent);
+    }
+    paint_hint(&p, client, view, pointer, label, blocked);
+    ctx.set_cursor_icon(if blocked { egui::CursorIcon::NotAllowed } else { egui::CursorIcon::Grabbing });
+}
+
+fn paint_tab(ctx: &Context, view: &DesignView, origin: Rect, slot: Slot, pointer: Pos2, label: &str) {
+    let client = ctx.viewport_rect();
+    let p = painter(ctx).with_clip_rect(client);
+    let t = Tokens::get();
+    let tab = held_rect(client, slot.center, origin.size() * 1.04, origin.size() * 0.5);
+    dashed(&p, tab.expand(2.0), t.accent, 1.0);
+    let morph = morph(ctx, view.id, origin, tab, Form::Tab, pointer);
+    draw_shape(ctx, &p, view, morph.rect, GhostStyle { form: Form::Tab, tilt: 0.0, detail: morph.detail, ink: t.accent, shadow: true }, None);
+    paint_hint(&p, client, view, pointer, Some(label), false);
+}
+
+fn paint_flight(ctx: &Context, flight: &Flight) -> bool {
+    let elapsed = ctx.input(|input| input.time) - flight.start;
+    let linear = (elapsed / 0.2).clamp(0.0, 1.0) as f32;
+    if linear >= 1.0 {
+        return false;
+    }
+    let phase = 1.0 - (1.0 - linear).powi(3);
+    let rect = lerp_rect(flight.from, flight.origin, phase).translate(vec2(0.0, -42.0 * (phase * std::f32::consts::PI).sin()));
+    let painter = painter(ctx).with_clip_rect(ctx.viewport_rect());
+    let picture = flight.picture.lock().ok().and_then(|image| image.clone());
+    let style = GhostStyle { form: Form::Card, tilt: 0.0, detail: 1.0 - phase, ink: Tokens::get().border, shadow: true };
+    draw_shape(ctx, &painter, &flight.view, rect, style, picture.as_ref());
+    ctx.request_repaint();
+    true
+}
+
+fn dashed(painter: &egui::Painter, rect: Rect, ink: egui::Color32, width: f32) {
+    painter.extend(egui::Shape::dashed_line(
+        &[rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()],
+        Stroke::new(width, ink),
+        6.0,
+        4.0,
+    ));
+}
+
+struct GhostStyle {
+    form: Form,
+    tilt: f32,
+    detail: f32,
+    ink: egui::Color32,
+    shadow: bool,
+}
+
+fn draw_shape(ctx: &Context, painter: &egui::Painter, view: &DesignView, rect: Rect, style: GhostStyle, image: Option<&egui::TextureHandle>) {
+    let GhostStyle { form, tilt, detail, ink, shadow } = style;
+    if !rect.is_positive() {
         return;
     }
     let t = Tokens::get();
-    let painter = painter(ctx).with_clip_rect(client);
-    let held = held_rect(client, pointer, vec2(166.0, 30.0), vec2(24.0, 14.0));
-    let (goal, label, window) = match preview {
-        Preview::Held(label) => (if label.is_some() { held_rect(client, pointer, vec2(230.0, 70.0), vec2(24.0, 14.0)) } else { held }, label, false),
-        Preview::Tile { rect, neighbors, label, .. } => {
-            for neighbor in neighbors {
-                painter.rect_stroke(*neighbor, 8, Stroke::new(1.0, t.accent.gamma_multiply(0.45)), StrokeKind::Inside);
-            }
-            painter.rect_stroke(rect, 8, Stroke::new(2.0, t.accent), StrokeKind::Inside);
-            (rect, Some(label), false)
-        }
-        Preview::Window { rect, label } => {
-            if let Some(rect) = rect.filter(|rect| rect.intersect(client).is_positive()) {
-                painter.extend(egui::Shape::dashed_line(
-                    &[rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom(), rect.left_top()],
-                    Stroke::new(2.0, t.accent),
-                    6.0,
-                    4.0,
-                ));
-            }
-            let ratio = rect.map_or(1.55, |rect| (rect.width() / rect.height()).clamp(1.15, 2.5));
-            let size = vec2(230.0, (230.0 / ratio).clamp(100.0, 184.0));
-            (held_rect(client, pointer, size, vec2(24.0, 14.0)), Some(label), true)
-        }
-    };
-    let rect = morph(ctx, view.id, held, goal);
-    let header = Rect::from_min_max(rect.min, pos2(rect.right(), (rect.top() + crate::view_tiles::HEADER).min(rect.bottom())));
-    let tiled = matches!(preview, Preview::Tile { .. });
-    let fill = if tiled { t.accent_soft.gamma_multiply(0.58) } else { t.dialog_body };
-    painter.rect_filled(rect, 8, fill);
-    painter.rect_stroke(rect, 8, Stroke::new(if window { 2.0 } else { 1.0 }, t.accent), StrokeKind::Inside);
-    let header_bg = if window { t.app_bar } else { t.dialog_body };
-    painter.rect_filled(header.shrink(1.0), 7, header_bg);
-    let focused = matches!(preview, Preview::Tile { focused: true, .. });
-    let ink = if window { t.app_bar_text } else { t.text };
-    if focused {
-        let dot = header.right_center() - vec2(13.0, 0.0);
-        painter.circle_filled(dot, 3.5, t.accent);
-        paint_header(&painter, Rect::from_min_max(header.min, pos2(dot.x - 6.0, header.bottom())), &view.name, view.kind.key(), ink);
+    let layer = painter.layer_id();
+    let first = ctx.graphics(|graphics| graphics.get(layer).map_or(0, |list| list.all_entries().count()));
+    let radius = (5.0 + detail * if form == Form::Window { 5.0 } else { 3.0 }).round() as u8;
+    if shadow {
+        let shadow = crate::view_tiles::card_shadow(rect, egui::CornerRadius::same(radius));
+        painter.add(shadow);
+    }
+    let fill = if detail > 0.03 { t.viewport_top } else { t.app_bar_hover_strong };
+    painter.rect_filled(rect, radius, fill);
+    let header_height = (24.0 + 4.0 * detail).min(rect.height());
+    let header = Rect::from_min_size(rect.min, vec2(rect.width(), header_height));
+    if form == Form::Card && detail > 0.65 {
+        crate::view_tiles::paint_card_header(painter, header, radius, &view.name, 30.0);
+        paint_kind(painter, header.left_center() + vec2(16.0, 0.0), view, t.accent, 15.0);
     } else {
-        paint_header(&painter, header, &view.name, view.kind.key(), ink);
+        let bar = if form == Form::Window { t.app_bar } else { t.app_bar_hover_strong };
+        painter.rect_filled(header, egui::CornerRadius { nw: radius, ne: radius, sw: 0, se: 0 }, bar);
+        paint_header(painter, header, &view.name, view.kind.key(), t.app_bar_text);
     }
-
-    if let Some(label) = label.filter(|_| rect.height() >= header.height() + 24.0) {
-        let body = Rect::from_min_max(pos2(rect.left(), header.bottom()), rect.max).shrink(7.0);
-        if body.is_positive() {
-            let content = painter.with_clip_rect(body);
-            let ink = if tiled || window { t.accent } else { t.text_dim };
-            if window && body.height() > 44.0 {
-                let icon = Rect::from_center_size(body.center() - vec2(0.0, 12.0), vec2(20.0, 20.0));
-                crate::ui_kit::icons::paint_ink(&content, icon, "panel_popout", ink);
-            }
-            let offset = if window && body.height() > 44.0 { 13.0 } else { 0.0 };
-            let center = body.center() + vec2(0.0, offset);
-            let font = crate::ui_kit::type_face::semibold(t.font_button);
-            if tiled {
-                let galley = content.layout_no_wrap(label.to_owned(), font, t.text);
-                let pill = Rect::from_center_size(center, (galley.size() + vec2(20.0, 10.0)).min(body.size()));
-                content.rect_filled(pill, 6, t.dialog_body);
-                content.rect_stroke(pill, 6, Stroke::new(1.0, t.border), StrokeKind::Inside);
-                content.galley(center - galley.size() * 0.5, galley, t.text);
-            } else {
-                content.text(center, Align2::CENTER_CENTER, label, font, ink);
+    let picture = Rect::from_min_max(header.left_bottom(), rect.max).shrink(3.0);
+    if picture.is_positive() && detail > 0.03 {
+        solidcraft_viewport_egui::paint_background(painter, picture, t.viewport_top, t.viewport_bottom);
+        if let Some(image) = image {
+            let scaled = image.size_vec2();
+            let size = scaled * (picture.width() / scaled.x).min(picture.height() / scaled.y);
+            let show = Rect::from_center_size(picture.center(), size);
+            painter.image(image.id(), show, Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)), t.app_bar_text.linear_multiply(detail));
+        } else {
+            paint_kind(painter, picture.center(), view, t.text_dim.gamma_multiply(0.4 * detail), 32.0_f32.min(picture.height()));
+        }
+        if form == Form::Window && picture.height() > 65.0 {
+            let name = painter.layout_no_wrap(view.name.clone(), crate::ui_kit::type_face::semibold(t.font_button), t.text);
+            let pill = Rect::from_min_size(picture.left_bottom() + vec2(5.0, -31.0), vec2((name.size().x + 30.0).min(picture.width() - 8.0), 26.0));
+            if pill.is_positive() {
+                painter.rect_filled(pill, 13, t.dialog_body);
+                painter.circle_filled(pill.left_center() + vec2(11.0, 0.0), 3.5, t.accent);
+                painter.with_clip_rect(pill.shrink(4.0)).galley(pill.left_center() + vec2(20.0, -name.size().y * 0.5), name, t.text);
             }
         }
     }
+    painter.rect_stroke(rect, radius, Stroke::new(if form == Form::Tab { 1.0 } else { 2.0 }, ink), StrokeKind::Inside);
+    if tilt != 0.0 {
+        let grab = rect.min + vec2(24.0, 14.0);
+        let rot = egui::emath::Rot2::from_angle(tilt);
+        ctx.graphics_mut(|graphics| {
+            let list = graphics.entry(layer);
+            let shapes: Vec<_> = list.all_entries().skip(first).cloned().collect();
+            for (index, mut entry) in shapes.into_iter().enumerate() {
+                rotate_shape(&mut entry.shape, rot, grab, tilt);
+                list.set(egui::layers::ShapeIdx(first + index), entry.clip_rect, entry.shape);
+            }
+        });
+    }
+}
+
+fn rotate_shape(shape: &mut egui::Shape, rot: egui::emath::Rot2, pivot: Pos2, angle: f32) {
+    let rotate = |point: Pos2| pivot + rot * (point - pivot);
+    match shape {
+        egui::Shape::Vec(shapes) => {
+            for shape in shapes {
+                rotate_shape(shape, rot, pivot, angle);
+            }
+        }
+        egui::Shape::Rect(rect) => *rect = (*rect).clone().with_angle_and_pivot(angle, pivot),
+        egui::Shape::Mesh(mesh) => std::sync::Arc::make_mut(mesh).rotate(rot, pivot),
+        egui::Shape::Text(text) => {
+            text.pos = rotate(text.pos);
+            text.angle += angle;
+        }
+        egui::Shape::Circle(circle) => circle.center = rotate(circle.center),
+        egui::Shape::Ellipse(ellipse) => ellipse.center = rotate(ellipse.center),
+        egui::Shape::LineSegment { points, .. } => *points = points.map(rotate),
+        egui::Shape::Path(path) => {
+            for point in &mut path.points {
+                *point = rotate(*point);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn paint_kind(painter: &egui::Painter, center: Pos2, view: &DesignView, ink: egui::Color32, size: f32) {
+    crate::app_bar::paint_view_glyph(painter, Rect::from_center_size(center, vec2(size, size)), view.kind.key(), ink);
 }
 
 fn paint_header(painter: &egui::Painter, rect: Rect, name: &str, icon: &str, ink: egui::Color32) {
@@ -286,6 +740,22 @@ fn paint_header(painter: &egui::Painter, rect: Rect, name: &str, icon: &str, ink
     painter.text(start + vec2(13.0, 0.0), Align2::LEFT_CENTER, name, crate::ui_kit::type_face::semibold(t.font_button), ink);
 }
 
+fn paint_hint(painter: &egui::Painter, client: Rect, view: &DesignView, pointer: Pos2, label: Option<&str>, blocked: bool) {
+    let t = Tokens::get();
+    let token = held_rect(client, pointer, vec2(20.0, 20.0), vec2(10.0, 10.0));
+    painter.circle_filled(token.center(), 10.0, t.app_bar_hover_strong);
+    painter.circle_stroke(token.center(), 9.5, Stroke::new(1.0, t.app_bar_text.gamma_multiply(0.5)));
+    paint_kind(painter, token.center(), view, t.app_bar_text, 12.0);
+    if let Some(label) = label {
+        let galley = painter.layout_no_wrap(label.to_owned(), crate::ui_kit::type_face::semibold(t.font_button), t.app_bar_text);
+        let size = vec2(galley.size().x + 24.0, 24.0);
+        let y = if pointer.y >= client.bottom() - 40.0 { -39.0 } else { 16.0 };
+        let hint = held_rect(client, token.center() + vec2(0.0, y), size, vec2(size.x * 0.5, 0.0));
+        painter.rect_filled(hint, 12, if blocked { t.error } else { t.app_bar });
+        painter.with_clip_rect(hint.shrink(3.0)).galley(hint.center() - galley.size() * 0.5, galley, t.app_bar_text);
+    }
+}
+
 fn held_rect(client: Rect, pointer: Pos2, size: egui::Vec2, grab: egui::Vec2) -> Rect {
     let size = size.min(client.size());
     let max = client.max - size;
@@ -293,28 +763,86 @@ fn held_rect(client: Rect, pointer: Pos2, size: egui::Vec2, grab: egui::Vec2) ->
     Rect::from_min_size(pos2(position.x.clamp(client.left(), max.x), position.y.clamp(client.top(), max.y)), size)
 }
 
+fn lerp_rect(a: Rect, b: Rect, amount: f32) -> Rect {
+    Rect::from_min_max(a.min.lerp(b.min, amount), a.max.lerp(b.max, amount))
+}
+
 #[derive(Clone, Copy)]
 struct Morph {
     frame: u64,
     rect: Rect,
+    from: Rect,
+    goal: Rect,
+    form: Form,
+    began: f64,
+    detail: f32,
+    from_detail: f32,
+    pointer: Pos2,
+    moved: f64,
+    tilt: f32,
 }
 
-fn morph(ctx: &Context, view: u64, held: Rect, goal: Rect) -> Rect {
+fn morph_id(ctx: &Context, view: u64) -> Id {
+    Id::unique(("view_drag_morph", ctx.viewport_id(), view))
+}
+
+fn morph(ctx: &Context, view: u64, origin: Rect, goal: Rect, form: Form, pointer: Pos2) -> Morph {
     let frame = ctx.cumulative_frame_nr();
-    let id = Id::unique(("view_drag_morph", ctx.viewport_id(), view));
+    let now = ctx.input(|input| input.time);
+    let id = morph_id(ctx, view);
     let old = ctx.data(|data| data.get_temp::<Morph>(id)).filter(|old| frame.saturating_sub(old.frame) <= 1);
-    let duration = ctx.global_style().animation_time.clamp(0.0, 0.11);
-    let dt = ctx.input(|input| input.stable_dt);
-    let fraction = if duration > 0.0 { (dt.max(0.0) * 3.0 / duration).min(1.0) } else { 1.0 };
-    let previous = old.map_or(held, |old| old.rect);
-    let rect = Rect::from_min_max(previous.min.lerp(goal.min, fraction), previous.max.lerp(goal.max, fraction));
-    let settled = rect.min.distance(goal.min) <= 0.5 && rect.max.distance(goal.max) <= 0.5;
-    let rect = if settled { goal } else { rect };
-    if !settled {
+    let mut state = old.unwrap_or(Morph {
+        frame,
+        rect: origin,
+        from: origin,
+        goal,
+        form,
+        began: now,
+        detail: 0.0,
+        from_detail: 0.0,
+        pointer,
+        moved: now - 0.32,
+        tilt: 0.0,
+    });
+    if form != state.form || (form == Form::Card && state.goal.center().distance(goal.center()) > 24.0) {
+        state.from = state.rect;
+        state.from_detail = state.detail;
+        state.began = now;
+    }
+    if pointer.distance(state.pointer) > 0.1 {
+        state.moved = now;
+    }
+    state.pointer = pointer;
+    state.form = form;
+    state.goal = goal;
+    state.frame = frame;
+    let move_enabled = ctx.global_style().animation_time > 0.0;
+    let duration = match form {
+        Form::Tab => {
+            if old.is_none() {
+                0.1
+            } else {
+                0.18
+            }
+        }
+        Form::Card => 0.18,
+        Form::Window => 0.2,
+    };
+    let progress = if move_enabled { ((now - state.began) / duration).clamp(0.0, 1.0) as f32 } else { 1.0 };
+    let spring = if progress >= 1.0 { 1.0 } else { (1.0 - (1.0 + 7.0 * progress) * (-7.0 * progress).exp()) / (1.0 - 8.0 * (-7.0_f32).exp()) };
+    state.rect = lerp_rect(state.from, goal, spring);
+    state.detail = egui::lerp(state.from_detail..=if form == Form::Tab { 0.0 } else { 1.0 }, spring);
+    state.tilt = if move_enabled && form == Form::Window {
+        let rest = ((now - state.moved - 0.16) / 0.16).clamp(0.0, 1.0) as f32;
+        -2.0_f32.to_radians() * (1.0 - rest) * spring
+    } else {
+        0.0
+    };
+    if progress < 1.0 || state.tilt != 0.0 {
         ctx.request_repaint();
     }
-    ctx.data_mut(|data| data.insert_temp(id, Morph { frame, rect }));
-    rect
+    ctx.data_mut(|data| data.insert_temp(id, state));
+    state
 }
 
 #[cfg(test)]
@@ -330,19 +858,68 @@ mod tests {
         let ctx = Context::default();
         ctx.global_style_mut(|style| style.animation_time = 0.0);
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            assert_eq!(morph(ui.ctx(), 2, held, tile), tile);
-            assert_eq!(morph(ui.ctx(), 2, held, held), held);
+            assert_eq!(morph(ui.ctx(), 2, held, tile, Form::Card, tile.center()).rect, tile);
+            assert_eq!(morph(ui.ctx(), 2, held, held, Form::Tab, held.center()).rect, held);
         });
     }
 
     #[test]
-    fn a_drop_resolves_to_the_target_strips_local_slot_at_its_own_scale() {
+    fn keyboard_reorder_uses_a_distinct_slot_and_escape_preserves_the_order() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let first = app.docs.views.active().id;
+        let second = app.docs.views.open(solidcraft_views::ViewKind::Model, None, false);
+        let ctx = Context::default();
+        let origin = Rect::from_min_max(pos2(105.0, 0.0), pos2(175.0, 26.0));
+        let mut frame = |key: Option<egui::Key>, lift_view: bool| {
+            let events = key
+                .into_iter()
+                .map(|key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE })
+                .collect();
+            let _ = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                record(
+                    &mut app,
+                    ui.ctx(),
+                    vec![(
+                        1,
+                        2,
+                        ViewDropZone {
+                            document: 0,
+                            rect: Rect::from_min_max(pos2(85.0, 0.0), pos2(280.0, 32.0)),
+                            view_centres: vec![(0, 140.0), (1, 210.0)],
+                        },
+                    )],
+                    false,
+                );
+                // Use the running design's id rather than an application-global tab number.
+                if let Some(strip) = app.view_window_drag.strips.last_mut() {
+                    strip.tab = app.docs.current_tab();
+                }
+                if lift_view {
+                    lift(&mut app, ui.ctx(), first, origin);
+                }
+                keyboard(&mut app, ui.ctx());
+            });
+        };
+        frame(None, true);
+        frame(Some(egui::Key::ArrowRight), false);
+        frame(Some(egui::Key::Escape), false);
+        frame(None, true);
+        frame(Some(egui::Key::ArrowRight), false);
+        frame(Some(egui::Key::Enter), false);
+        let order: Vec<_> = app.docs.views.views().iter().map(|view| view.id).collect();
+        assert_eq!(order, [second, first]);
+        assert!(!keyboard_active(&app, &ctx));
+    }
+
+    #[test]
+    fn strip_band_and_slot_hysteresis_use_the_destination_scale() {
         let screen = Screen { origin: pos2(-1000.0, 200.0), pixels_per_point: 1.5 };
         let strip = Strip {
             viewport: egui::ViewportId::ROOT,
             tab: 1,
             window: 0,
             screen,
+            name: "Design".into(),
             zone: ViewDropZone {
                 document: 0,
                 rect: Rect::from_min_max(pos2(100.0, 0.0), pos2(300.0, 30.0)),
@@ -350,9 +927,11 @@ mod tests {
             },
             count: 3,
         };
-        assert_eq!(strip.drop_at(screen.desktop(pos2(120.0, 20.0))), Some((0, 120.0)));
-        assert_eq!(strip.drop_at(screen.desktop(pos2(210.0, 20.0))), Some((2, 215.0)));
-        assert_eq!(strip.drop_at(screen.desktop(pos2(270.0, 20.0))), Some((3, 275.0)));
-        assert_eq!(strip.drop_at(screen.desktop(pos2(220.0, 35.0))), None);
+        assert_eq!(strip.drop_at(screen.local(screen.desktop(pos2(210.0, 20.0))), None).unwrap().index, 2);
+        let first = strip.drop_at(pos2(138.0, 45.0), None).unwrap();
+        assert_eq!(first.index, 0);
+        assert_eq!(strip.drop_at(pos2(145.0, 45.0), Some(first)).unwrap().index, 0);
+        assert_eq!(strip.drop_at(pos2(147.0, 45.0), Some(first)).unwrap().index, 1);
+        assert!(strip.drop_at(pos2(147.0, 47.0), None).is_none());
     }
 }

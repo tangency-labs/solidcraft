@@ -2711,8 +2711,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             Some((tab, count, zone))
         })
         .collect();
-    let drag_continues =
-        !app.file_load_holds() && actions.iter().any(|action| matches!(action, crate::app_bar::TabAction::DockView { released: false, .. }));
+    let drag_continues = !app.file_load_holds() && actions.iter().any(|action| matches!(action, crate::app_bar::TabAction::DockView { .. }));
     crate::view_window_drag::record(app, ui.ctx(), drop_zones, drag_continues);
     // The name typed into the selected tab: kept when it changed and isn't blank, given up on
     // Escape, still being edited otherwise.
@@ -2787,12 +2786,15 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             | crate::app_bar::TabAction::RenameCancelled
             | crate::app_bar::TabAction::ViewRenameDone { .. }
             | crate::app_bar::TabAction::ViewRenameCancelled => {}
-            crate::app_bar::TabAction::DockView { view, pointer, released } if idle => {
+            crate::app_bar::TabAction::DockView { view, origin, pointer, released } if idle => {
                 if let Some(id) = strip_view_id(app, view) {
-                    window_drop = crate::view_window_drag::route(app, ui.ctx(), id, pointer, released);
-                    if !window_drop && pointer.y > r.bottom() + 6.0 {
-                        crate::view_tiles::tab_drag(app, ui.ctx(), id, pointer, released);
-                    }
+                    crate::view_window_drag::route(app, ui.ctx(), id, origin, pointer, released);
+                    window_drop = true;
+                }
+            }
+            crate::app_bar::TabAction::LiftView { view, origin } if idle => {
+                if let Some(id) = strip_view_id(app, view) {
+                    crate::view_window_drag::lift(app, ui.ctx(), id, origin);
                 }
             }
             crate::app_bar::TabAction::ReorderView { .. } if window_drop => {}
@@ -2803,6 +2805,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
             }
         }
     }
+    crate::view_window_drag::keyboard(app, ui.ctx());
     match (shut, pick) {
         _ if !idle => {}
         _ if many.is_some() => close_many(app, many.unwrap_or_default()),
