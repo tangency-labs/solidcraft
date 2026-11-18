@@ -13,6 +13,7 @@ use solidcraft_theme::Tokens;
 
 pub(crate) mod browser;
 mod first_sheet;
+pub(crate) mod note;
 mod panels;
 pub(crate) mod placement;
 
@@ -26,6 +27,7 @@ pub struct State {
     sheet_notice: Option<panels::SheetNotice>,
     options: Option<Tool>,
     placement: Option<placement::Placement>,
+    note: Option<note::Draft>,
     add_sheet: Option<panels::AddSheet>,
     rename_sheet: Option<u64>,
     sheet_menu: Option<SheetMenu>,
@@ -72,6 +74,7 @@ pub fn enter(app: &mut SolveApp, drawing: bool) -> Result<(), String> {
         app.ui.tab = app.drawing_workspace.previous_tab.take().unwrap_or_else(|| "MODEL".into());
         app.drawing_workspace.options = None;
         app.drawing_workspace.placement = None;
+        app.drawing_workspace.note = None;
         app.drawing_workspace.add_sheet = None;
         app.drawing_workspace.rename_sheet = None;
         app.drawing_workspace.sheet_menu = None;
@@ -96,6 +99,10 @@ pub(crate) fn placing_view(app: &SolveApp) -> bool {
     app.drawing_workspace.placement.is_some()
 }
 
+pub(crate) fn placing_note(app: &SolveApp) -> bool {
+    app.drawing_workspace.options == Some(Tool::Note(None))
+}
+
 pub fn can_open_options(id: &str) -> bool {
     Tool::for_command(id).is_some() || matches!(id, "drawing.sheet.add" | "drawing.sheet.set")
 }
@@ -111,6 +118,7 @@ pub fn close_panel(app: &mut SolveApp) -> bool {
     app.drawing_workspace.rename_sheet = None;
     app.drawing_workspace.options = None;
     app.drawing_workspace.placement = None;
+    app.drawing_workspace.note = None;
     app.drawing_workspace.add_sheet = None;
     app.drawing_workspace.first_sheet = None;
     app.drawing_workspace.settings = None;
@@ -147,6 +155,7 @@ pub(super) fn edit_object(app: &mut SolveApp, kind: &str, object: u64) {
     let tool = match kind {
         "view" => Tool::Edit(Some(object)),
         "dimension" => Tool::Dimension(Some(object)),
+        "note" => Tool::Note(Some(object)),
         "parts_list" => Tool::PartsList(Some(object)),
         _ => return,
     };
@@ -813,6 +822,8 @@ fn panel_fields(app: &mut SolveApp, ui: &mut egui::Ui) {
         if finished {
             close_panel(app);
         }
+    } else if let Some(Tool::Note(selected)) = app.drawing_workspace.options {
+        note::editor(app, ui, selected);
     } else if let Some(tool) = app.drawing_workspace.options {
         panels::tool_body(app, ui, tool);
         if panels::footer(ui, tool) {

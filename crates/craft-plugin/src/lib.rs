@@ -33,6 +33,20 @@ pub const MAX_MEMORY_MIB: usize = 4096;
 
 pub type Result<T> = std::result::Result<T, HostError>;
 
+mod input;
+pub use input::{check_input, strict_input_schema};
+
+/// The host imports that change something outside the design. A `read` entry is refused every
+/// one of them, whatever folders its plugin was granted, as it is refused edit commands.
+pub const WRITING_IMPORTS: &[&str] = &["write-file"];
+
+/// The refusal of a writing host import to a `read` entry: it names the import.
+pub fn read_entry_refusal(import: &str) -> HostError {
+    HostError::PermissionDenied { permission: format!("{READ_ENTRY_IMPORT}{import}") }
+}
+/// How [`read_entry_refusal`]'s permission starts; the import's name follows it.
+pub const READ_ENTRY_IMPORT: &str = "read entry may not use the host import ";
+
 /// Failures are actionable data at the app boundary, including failures before instantiation.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -54,12 +68,55 @@ pub enum HostError {
     /// The plugin needs a capability, or a version of one, that this host does not serve.
     #[error("{reason}")]
     UnsupportedCapability { capability: String, reason: String },
+    /// The input is valid, but this plugin does not handle it (WIT `plugin-error.unsupported`,
+    /// from API 0.2): a file it can't convert, an option value it doesn't offer.
+    #[error("not supported: {reason}")]
+    Unsupported { reason: String },
+    /// The plugin asks for more of a budget than the app lets plugins have, so it was not run.
+    /// `limit` is the manifest field (`fuel`, `memory_mib`); `requested` and `allowed` are in its
+    /// unit.
+    #[error("{}", over_ceiling(limit, *requested, *allowed))]
+    OverCeiling { limit: String, requested: u64, allowed: u64 },
+    /// The plugin ran into one of its budgets and was stopped. `limit` is `fuel`, `memory_mib`,
+    /// `deadline_ms` or `stack_kib` (the manifest's own budgets) or `design_mib` (the most an
+    /// importer may hand over); `allowed` is that budget, in its unit.
+    #[error("{}", exhausted(limit, *allowed))]
+    Exhausted { limit: String, allowed: u64 },
+}
+
+fn over_ceiling(limit: &str, requested: u64, allowed: u64) -> String {
+    match limit {
+        "memory_mib" => format!(
+            "asks for {requested} MiB of memory, more than the {allowed} MiB plugins may use; allow its memory request when you install it, or raise the memory ceiling for plugins"
+        ),
+        "fuel" => format!("asks for {requested} fuel, more than the {allowed} plugins may use; raise the fuel ceiling for plugins"),
+        _ => format!("asks for {requested} {limit}, more than the {allowed} plugins may use"),
+    }
+}
+
+fn exhausted(limit: &str, allowed: u64) -> String {
+    match limit {
+        "fuel" => format!("used all {allowed} fuel it asks for and was stopped"),
+        "memory_mib" => format!("needed more than the {allowed} MiB of memory it asks for and was stopped"),
+        "deadline_ms" if allowed == 0 => "ran longer than its time limit and was stopped".into(),
+        "deadline_ms" => format!("ran longer than its time limit of {allowed} ms and was stopped"),
+        "stack_kib" => format!("ran out of its {allowed} KiB stack and was stopped"),
+        "design_mib" => format!("made a design larger than {allowed} MiB, the most an importer may hand over"),
+        _ => format!("went over its {limit} limit of {allowed} and was stopped"),
+    }
 }
 
 /// The capabilities this host serves, as name and `major.minor`. Each is a set of WIT interfaces
 /// a plugin names in its manifest's `capabilities` list. While a major version is 0, a minor
 /// version may break the one before it, so 0.x matches only the same minor.
-pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
+pub const CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 2)), ("evaluate", (0, 2)), ("formats", (0, 2))];
+/// Older versions of [`CAPABILITIES`] the host still serves: plugins built against
+/// `craft:plugin@0.1.0` ([`WIT_0_1`]) run unchanged.
+pub const OLDER_CAPABILITIES: &[(&str, (u32, u32))] = &[("commands", (0, 1)), ("evaluate", (0, 1)), ("formats", (0, 1))];
+/// The WIT versions a host runs, newest first: [`API`]'s and the frozen 0.1 one.
+pub const WIT_VERSIONS: &[&str] = &["0.2.0", "0.1.0"];
+/// `craft:plugin@0.1.0`, unchanged, for plugins built before 0.2.
+pub const WIT_0_1: &str = include_str!("../wit-0.1/plugin.wit");
 
 fn capability_version(text: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
@@ -92,6 +149,9 @@ pub fn check_capabilities(requested: &[String], app: &str) -> Result<()> {
             return Err(unsupported(format!("needs {name} {major}.{minor}, which this version of {app} does not have; update {app} or the plugin")));
         };
         let (have_major, have_minor) = (*have_major, *have_minor);
+        if OLDER_CAPABILITIES.iter().any(|(known, version)| *known == name && *version == (major, minor)) {
+            continue;
+        }
         if (major, minor) > (have_major, have_minor) {
             return Err(unsupported(format!("needs {name} {major}.{minor}; update {app} or the plugin")));
         }
@@ -221,10 +281,14 @@ impl HostLimits {
         self.validate()?;
         requested.validate()?;
         if requested.fuel > self.max_fuel {
-            return Err(HostError::LimitExceeded { limit: "fuel exceeds user host limits".into() });
+            return Err(HostError::OverCeiling { limit: "fuel".into(), requested: requested.fuel, allowed: self.max_fuel });
         }
         if requested.memory_mib > self.max_memory_mib {
-            return Err(HostError::LimitExceeded { limit: "memory exceeds user host limits".into() });
+            return Err(HostError::OverCeiling {
+                limit: "memory_mib".into(),
+                requested: requested.memory_mib as u64,
+                allowed: self.max_memory_mib as u64,
+            });
         }
         Ok(())
     }
@@ -630,7 +694,7 @@ pub fn parse_manifest_for(text: &[u8], folder: &str, app: &str) -> Result<Manife
         let api = api.as_str().map(|api| api.chars().take(64).collect::<String>()).unwrap_or_else(|| "an older plugin API".into());
         return Err(HostError::UnsupportedCapability {
             capability: api.clone(),
-            reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.1\"]); update the plugin"),
+            reason: format!("was built for {api}; this version of {app} runs {API} plugins (capabilities [\"commands@0.2\"]); update the plugin"),
         });
     }
     let mut manifest: Manifest = serde_json::from_slice(text).map_err(|error| invalid("manifest", error.to_string()))?;
