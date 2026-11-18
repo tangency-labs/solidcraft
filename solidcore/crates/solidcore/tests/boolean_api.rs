@@ -6,6 +6,9 @@
 //! cut by an exact copy of itself leaves nothing, with STEP-sized tolerances too.
 #![allow(clippy::unwrap_used)] // test helpers
 
+#[path = "support/solidcraft_fixes.rs"]
+mod solidcraft_fixes;
+
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -439,17 +442,10 @@ fn boolean_sources_name_no_smlib_symbol_in_a_string() {
 
 // ---- a body minus an exact copy of itself ----------------------------------------------
 
-/// SolidCraft's fix list (`kernel_cases/fixes.json`).
+/// SolidCraft's fix list (`support/solidcraft_fixes.rs`).
 fn rig_kernel() -> Kernel {
-    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
-    let mut fixes = solidcore::kernel::UpstreamFixes::default();
-    for name in &names {
-        if let Some(f) = fixes.flag_mut(name) {
-            *f = true;
-        }
-    }
     Kernel {
-        fixes,
+        fixes: solidcraft_fixes::solidcraft_fixes(),
         ..Kernel::default()
     }
 }
