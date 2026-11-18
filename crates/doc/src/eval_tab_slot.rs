@@ -431,7 +431,10 @@ pub(crate) fn apply(vals: &BTreeMap<String, Value>, k: &FeatureKind, st: &mut Mo
     // The feature's sheet picks belong to the sheet metal route, not built yet: named, never silent.
     if !sheet_picks.is_empty() {
         let n = sheet_picks.len();
-        let note = format!("tab and slot: {n} sheet metal joint{} skipped: the sheet metal route is not built yet (sheet_route_not_built)", if n == 1 { "" } else { "s" });
+        let note = format!(
+            "tab and slot: {n} sheet metal joint{} skipped: the sheet metal route is not built yet (sheet_route_not_built)",
+            if n == 1 { "" } else { "s" }
+        );
         if specs.is_empty() && unusable.is_empty() {
             return Err(DocError::Invalid(note));
         }
@@ -760,7 +763,10 @@ mod tests {
         st.sheets.push(base_flange("Bottom", "Steel (mm)", &rv, frame, region));
         let mut warning = None;
         let err = apply(&BTreeMap::new(), &kind(serde_json::json!({"clearance": "0.1"})), &mut st, &mut warning).unwrap_err().to_string();
-        assert_eq!(err, "tab and slot: no plate joint to make (Wall → Bottom needs the sheet metal route, not built yet: Bottom is sheet metal) (no_plate_joint)");
+        assert_eq!(
+            err,
+            "tab and slot: no plate joint to make (Wall → Bottom needs the sheet metal route, not built yet: Bottom is sheet metal) (no_plate_joint)"
+        );
         let wall = report_reason(&st);
         assert_eq!(wall.as_deref(), Some("sheet_route_not_built"));
         let volume = |n: &str| kernel::measure_mass(&st.body(n).unwrap().body).unwrap().volume;
