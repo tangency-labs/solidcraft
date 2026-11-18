@@ -685,6 +685,135 @@ fn a_chain_of_placements_on_a_curve_is_held_to_the_tolerance_as_a_whole() {
     }
 }
 
+/// A chain of placements is compared with the tolerance in the model's frame, not in each of its
+/// own. A ball of radius 1e8 placed by `diag(1, 1, 1 + 1e-14)` alone is refused (its bound is
+/// 3.3e-5 mm); scaled by 1e-3 after that, the bound in the model is 3.5e-8 mm, and it is read as
+/// the sphere of radius 1e5. A placement that grows the bound past the tolerance after an inner
+/// one still refuses it: the ball of radius 1e5 placed by 600 after two near ones (as in
+/// [`a_chain_of_placements_is_refused_when_their_rounding_together_is_past_the_tolerance`]).
+/// Inside the scale, the model's extent is taken back through it: a parabola `f t² z + 2 f t x`
+/// placed by the near map three times and then scaled by 1e-3, used out to 5e7 mm in a model, is
+/// used out to 5e10 in the frame inside the scale, where the near maps stretch it by up to
+/// 3e-14 of that along z: 1.5e-6 mm in the model, past the tolerance, so refused. (Bounded over
+/// the model's extent in that frame instead, its near maps would add 5e-8 mm and the scale
+/// 7e-7: read.) Within 20 mm, read.
+#[test]
+fn a_chain_of_placements_is_held_to_the_tolerance_in_the_models_frame() {
+    use cadmpeg_ir::geometry::PlacedSurface;
+    use cadmpeg_ir::geometry::analytic::{ParabolaCurve, SphereSurface};
+    use cadmpeg_ir::geometry::{CurveGeometry, PlacedCurve, SolvedCurveGeometry};
+    let [near, _, _] = nested_placements();
+    let shrink = cadmpeg_ir::transform::Transform::affine([
+        [1e-3, 0.0, 0.0, 0.0],
+        [0.0, 1e-3, 0.0, 0.0],
+        [0.0, 0.0, 1e-3, 0.0],
+    ])
+    .unwrap();
+    let ball = |placements: &[cadmpeg_ir::transform::Transform]| {
+        let ball = SphereSurface::try_new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            1e8,
+        )
+        .unwrap();
+        let mut g = SolvedSurfaceGeometry::Sphere(ball);
+        for t in placements {
+            g = SolvedSurfaceGeometry::Transformed(
+                PlacedSurface::try_new(Box::new(g), *t).unwrap(),
+            );
+        }
+        geometry::surface(&SurfaceGeometry::Solved(g), fit())
+    };
+    match ball(&[near]) {
+        Err(m) => assert!(m.contains("past the tolerance"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    match ball(&[near, shrink]) {
+        Ok(Some((
+            geometry::FaceSurface::Record(solidcore_record::brep::Surface::Sphere {
+                radius, ..
+            }),
+            false,
+        ))) => assert!((radius - 1e5).abs() < 1e-9, "{radius}"),
+        other => panic!("{other:?}"),
+    }
+    let parabola = |extent: f64| {
+        let p = ParabolaCurve::try_new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            1.0,
+        )
+        .unwrap();
+        let mut g = SolvedCurveGeometry::Parabola(p);
+        for t in [near, near, near, shrink] {
+            g = SolvedCurveGeometry::Transformed(PlacedCurve::try_new(Box::new(g), t).unwrap());
+        }
+        let fit = geometry::Fit {
+            tolerance: 1e-6,
+            extent,
+        };
+        geometry::curve(&CurveGeometry::Solved(g), fit)
+    };
+    match parabola(20.0) {
+        Ok(Some(geometry::Carrier::Parabola { focal, .. })) => {
+            assert!((focal - 1e-3).abs() < 1e-15, "{focal}")
+        }
+        other => panic!("{other:?}"),
+    }
+    match parabola(5e7) {
+        Err(m) => assert!(m.contains("past the tolerance"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A placed line's bound counts the rounding of its direction. The line along x through the
+/// origin, turned by 2^-31 about z and moved to (0, 2^23, 0), is `(0, 2^23, 0) + t (1, 2^-31, 0)`;
+/// the record holds it by that start and the end `start + (1, 2^-31, 0)`, whose y rounds to
+/// 2^23, so the line it holds is level and misses the placed one by 2^-31 t: 4.9e-4 mm at
+/// t = 2^20, a point within 1e7 mm of the origin. The map's own rounding is under 3e-7
+/// mm there, but the direction's is past the tolerance: refused. Moved to (0, 1, 0) instead, the
+/// end's rounding is an ulp of 1 and the line is read.
+#[test]
+fn a_placed_lines_bound_counts_the_rounding_of_its_direction() {
+    use cadmpeg_ir::geometry::analytic::LineCurve;
+    use cadmpeg_ir::geometry::{CurveGeometry, PlacedCurve, SolvedCurveGeometry};
+    let placed = |y: f64| {
+        let line =
+            LineCurve::try_new(Point3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0)).unwrap();
+        let (c, s) = (1.0, 2f64.powi(-31));
+        let turn = cadmpeg_ir::transform::Transform::affine([
+            [c, -s, 0.0, 0.0],
+            [s, c, 0.0, y],
+            [0.0, 0.0, 1.0, 0.0],
+        ])
+        .unwrap();
+        let g = SolvedCurveGeometry::Transformed(
+            PlacedCurve::try_new(Box::new(SolvedCurveGeometry::Line(line)), turn).unwrap(),
+        );
+        let fit = geometry::Fit {
+            tolerance: 1e-6,
+            extent: 1e7,
+        };
+        geometry::curve(&CurveGeometry::Solved(g), fit)
+    };
+    match placed(1.0) {
+        Ok(Some(geometry::Carrier::Curve {
+            curve: solidcore_record::brep::Curve::Line { start, end },
+            ..
+        })) => {
+            assert_eq!(start, [0.0, 1.0, 0.0]);
+            assert_eq!(end[0], 1.0);
+        }
+        other => panic!("{other:?}"),
+    }
+    match placed(2f64.powi(23)) {
+        Err(m) => assert!(m.contains("past the tolerance"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}
+
 /// A sheet square 10 mm across bounded by two edges on one periodic spline (the degree-one square
 /// on knots -1..5, period 4), one of them over [3.5, 4.5], past the spline's range and across its
 /// seam at the corner (0, 0, 0): read through the reader, its edges meet their vertices and the
