@@ -1507,3 +1507,34 @@ fn a_waiting_stand_up_offer_follows_the_preferences_when_it_is_made() {
     assert!(w.app.stand_up_later.is_none() && w.app.stand_up.is_none(), "no estimate for an offer that won't be made");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An OBJ file with a line that can't be read opens with a warning. The web's open
+/// (`open_path_with`, which reads the file before it returns) says it on the status line as the
+/// desktop's staged open does: before, only the desktop said it.
+#[test]
+fn an_opened_files_import_warnings_are_said_on_the_web_as_on_the_desktop() {
+    let dir = scratch("open-warnings");
+    let path = dir.join("triangle.obj");
+    std::fs::write(&path, "v 0 0 0\nv 10 0 0\nv 0 10 0\nv 1 nope 2\nf 1 2 3\n").unwrap();
+    let path = path.to_string_lossy().into_owned();
+    let warned = "imported with 1 warning(s): 1 vertex or face line(s) could not be read and were left out";
+
+    let mut web = Win::new();
+    // In millimetres, so the desktop's open asks no unit first.
+    let units = json!({"units": "mm"});
+    web.app.open_path_with(&path, units.as_object().unwrap()).unwrap();
+    assert_eq!(web.app.session.model.state().bodies.len(), 1);
+    assert_eq!(web.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some((warned, false)));
+
+    let mut desktop = Win::new();
+    desktop.app.open_path_async_with_options(&path, units);
+    // Read on another thread; it lands in a later frame.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while desktop.app.file_load.busy() || desktop.app.session.model.state().bodies.is_empty() {
+        desktop.frame(vec![]);
+        assert!(std::time::Instant::now() < deadline, "the open finishes");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(desktop.app.status.as_ref().map(|s| (s.0.as_str(), s.2)), Some((warned, false)));
+    let _ = std::fs::remove_dir_all(&dir);
+}

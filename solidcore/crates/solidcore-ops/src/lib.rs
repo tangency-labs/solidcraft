@@ -52,12 +52,14 @@ pub mod curve_gap;
 pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
+pub mod develop;
 pub mod error;
 pub mod export_geometry;
 pub mod extend;
 pub mod face_surface;
 pub mod file;
 pub mod hatch;
+pub mod heal;
 pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
@@ -70,6 +72,7 @@ pub mod pcurve;
 pub mod pick;
 pub mod prism;
 pub mod provenance;
+pub mod query;
 pub mod record_check;
 pub mod session;
 pub mod shaft_spline;
@@ -107,6 +110,7 @@ pub use measure::{
     point_displacement, point_distance, point_set_summary, points_meet, Distance, EdgeCurve,
     EdgePoint, EdgeRayPoint, FaceCentroid, FaceRayHit, GapSample, MassPropertiesEstimate,
     MembersClosest, Normal, PointClass, PointSetSummary, RayEntity, RayHit, SquareFaceLevel,
+    EDGE_POINTS_MAX,
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
