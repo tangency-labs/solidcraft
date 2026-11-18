@@ -6446,7 +6446,7 @@
   "ui.drawing_ribbon.align": "整列",
   "ui.drawing_ribbon.issue_short": "改訂発行",
   "ui.drawing_ribbon.model_dims_short": "モデル寸法",
-  "ui.drawing_ribbon.planned": "(予定)",
+  "ui.drawing_ribbon.planned": "近日公開",
   "ui.drawing_ribbon.space": "間隔調整",
   "ui.drawing_ribbon.surface_texture_short": "表面性状",
   "ui.drawing_settings.immediate": "シートの変更はすぐに適用されます。編集ごとに元に戻せます。",

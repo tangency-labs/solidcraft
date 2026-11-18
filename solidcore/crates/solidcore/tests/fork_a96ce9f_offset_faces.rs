@@ -13,6 +13,9 @@
 //!   the face beside the round (the wall beside a vertical round, the top beside a top
 //!   round) out by 2, seven faces, on the box as built and on a copy its caller names.
 //!
+//! Beside them, tangency-labs/solidcraft#17598: a block cut from an imported part around
+//! a corner patch whose edges meet at a pole, its bottom moved down.
+//!
 //! Pinned SMLib's face move (`FaceuseOffset` and `SmBrep::LocalOperation`, unchanged)
 //! keeps the round where it was and builds a step on it.
 #![allow(
@@ -28,15 +31,19 @@ use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
-use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::surface::plane::Plane;
+use solidcore::topology::api_files::read_brep_from_file;
+use solidcore::topology::brep::p1 as bp1;
+use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3;
 use solidcore::topology::face::p2 as face2;
+use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId, NamingScheme};
 use solidcore::Kernel;
 
@@ -302,6 +309,97 @@ fn a_face_without_blends_moves_as_the_local_operation_moves_it() {
     assert_eq!(ex.refusal(), OffsetFacesRefusal::None);
     assert!(near(volume(&k, &mut b), 1200.0, 1e-9));
     assert_eq!(b.face_list().len(), 6);
+}
+
+/// A 5 x 4 x 3 block the kernel cut from the part of tangency-labs/solidcraft#17598
+/// (`CADGenBench` task 215, imported from STEP; `data/issue_17598_pole_corner_patch.smb`)
+/// around a three-sided corner patch: a B-spline whose one side closes to a pole, where
+/// two of its edges end, one of them on a plane beside it.
+fn pole_corner_block(k: &mut Kernel) -> Brep {
+    let data = include_bytes!("data/issue_17598_pole_corner_patch.smb").to_vec();
+    let mut attributes = AttributeStore::default();
+    let mut records = NotifyRecords::new();
+    let key = solidcore::topology::loopuse::notify_ref;
+    let mut env = TopologyEnv {
+        all_attributes: &[],
+        attributes: &mut attributes,
+        key_of: &key,
+        records: &mut records,
+        next_key: 1 << 50,
+    };
+    let mut b = read_brep_from_file(k, Some(data), false, false, &mut env).unwrap();
+    b.refresh_cached_topology();
+    b
+}
+
+/// The faces, edges, vertices and shells of `b`.
+fn counts(k: &mut Kernel, b: &Brep) -> (usize, usize, usize, usize) {
+    (
+        bp1::faces(b, None).unwrap().len(),
+        bp1::edges(b, None).unwrap().len(),
+        bp1::vertices(b, None).unwrap().len(),
+        bp1::shells(k, b, None).unwrap().len(),
+    )
+}
+
+/// tangency-labs/solidcraft#17598: every face of the block moved by the local operation
+/// failed with "a kept edge use, nor its mate, has an offset", whichever face it was. The
+/// patch keeps its surface and is rebuilt from its own loops; its edge on the plane runs
+/// into the pole at v = 0, and dropped again from the lifted edge its trim curve ended at
+/// the pole at v = 0.0113, so its middle no longer matched the original's and the kept
+/// edge had no offset. Moving the bottom down 0.2 leaves the patch and every edge as they
+/// were, and the block grows by the bottom's area times 0.2: its walls stand square on
+/// it (measured 7.6e-10 off).
+#[test]
+fn a_face_moved_beside_a_corner_patch_with_a_pole_keeps_the_patchs_edges() {
+    let mut k = Kernel::default();
+    let mut b = pole_corner_block(&mut k);
+    assert_eq!(counts(&mut k, &b), (13, 31, 20, 2));
+    let bottom: Vec<FaceId> = b
+        .face_list()
+        .iter()
+        .copied()
+        .filter(|&f| face_points(&b, f).iter().all(|p| (p.z - 11.0).abs() < 1e-9))
+        .collect();
+    assert_eq!(bottom.len(), 1);
+    assert!(is_plane(&b, bottom[0]));
+    let before = volume(&k, &mut b);
+    let area = face_area(&k, &mut b, bottom[0], 1e-9).unwrap();
+    let mut ex = OffsetFacesExecutive::new();
+    ex.offset_faces(&mut k, &mut b, &bottom, 0.2).unwrap();
+    assert_eq!(ex.refusal(), OffsetFacesRefusal::None);
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    assert_eq!(counts(&mut k, &b), (13, 31, 20, 2));
+    let got = volume(&k, &mut b);
+    let want = before + 0.2 * area;
+    assert!(near(got, want, 1e-8), "volume {got}, want {want}");
+}
+
+/// A 20 x 20 x 5 plate with a hole r 3 through it, its top moved up 1 by the local
+/// operation: the hole's wall keeps its surface and is rebuilt from its own loops, its
+/// seam used twice; each use keeps its own trim curve, not the other side's, and the
+/// plate is 20 x 20 x 6 less the hole.
+#[test]
+fn a_top_moved_beside_a_hole_keeps_the_holes_seam() {
+    let mut k = Kernel::default();
+    let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 5.0).unwrap();
+    let tool = create_cylinder(&mut k, Point3::new(10.0, 10.0, -1.0), 3.0, 7.0).unwrap();
+    let mut b = solidcore::boolean::api_brep::boolean_difference(&mut k, plate, tool).unwrap();
+    let before = counts(&mut k, &b);
+    let top: Vec<FaceId> = b
+        .face_list()
+        .iter()
+        .copied()
+        .filter(|&f| face_points(&b, f).iter().all(|p| (p.z - 5.0).abs() < 1e-9))
+        .collect();
+    assert_eq!(top.len(), 1);
+    let mut ex = OffsetFacesExecutive::new();
+    ex.offset_faces(&mut k, &mut b, &top, 1.0).unwrap();
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    assert_eq!(counts(&mut k, &b), before);
+    let want = 20.0 * 20.0 * 6.0 - PI * 9.0 * 6.0;
+    let got = volume(&k, &mut b);
+    assert!(near(got, want, 1e-9), "volume {got}, want {want}");
 }
 
 #[test]

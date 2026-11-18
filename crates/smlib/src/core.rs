@@ -68,58 +68,16 @@ pub(crate) use solidcore_ops::Body;
 
 /// The fixes this backend runs with: every one of solidcore's opt-in fixes of upstream SMLib
 /// defects (`UpstreamFixes`, each naming its record and issue), whether or not the C++ fork has it,
-/// unless it appears broken. A test checks none is left off but those in `HELD_BACK`, so moving the
-/// solidcore pin to a rev with a new flag fails until it is added here.
+/// unless it appears broken (`HELD_BACK`). A flag new to the solidcore pin is on without an edit
+/// here, and a retired flag drops out of `UpstreamFixes::all` on its own.
 pub(crate) fn fixes() -> UpstreamFixes {
-    let mut f = UpstreamFixes::default();
-    f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_chamfer_cone_on_arc = true;
-    f.keep_operand_uv_trims = true;
-    f.proto_vertex_miss_is_false = true;
-    f.revolve_analytic_profile_faces = true;
-    f.join_touching_loops = true;
-    f.offset_analytic_mate_edges = true;
-    f.uv_trim_corner_end_points_only = true;
-    f.bspline_trim_preserves_uv_spans = true;
-    f.boolean_vertex_by_best_crossing = true;
-    f.classify_edge_interval = true;
-    f.new_edge_vertex_tolerance_covers_gap = true;
-    f.fillet_point_step_per_point = true;
-    f.analytic_copy_keeps_parameterization = true;
-    f.offset_extension_from_base = true;
-    f.fillet_cleanup_keeps_target_faces = true;
-    f.found_torus_sphere_keep_tested_nurb = true;
-    f.shell_edges_on_analytics_exact = true;
-    f.fillet_patch_keeps_fillet_edges = true;
-    f.fillet_refuse_overlapping_bands = true;
-    f.ssi_tangent_curve_tracer = true;
-    f.fillet_knife_edge_rounds = true;
-    f.linear_sweep_arc_is_cylinder = true;
-    f.fillet_trace_reaches_rails = true;
-    // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
-    f.curve_loop_normal_from_area = true;
-    // The fork's commits in `SMLIB_REV` 2fc375f, ported to solidcore since.
-    f.offset_extension_as_itself = true;
-    f.fillet_variable_span_follows_fillet = true;
-    f.simple_coincidence_crossing_is_point = true;
-    f.ssi_proto_topology_statuses_pass_on = true;
-    f.fillet_rail_trim_at_near_knot = true;
-    f.corner_patch_face_side_twist = true;
-    f.fillet_exact_round_classes = true;
-    f.surface_continuity_checks_last_v_knot = true;
-    f.geometric_g2_continuity = true;
-    f.local_surface_intersect_guards_max_boundary_retry = true;
-    f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.point_class_gap_3d_propagates_no_drop_error = true;
-    // Held back: see `HELD_BACK`.
-    f.fillet_refuse_rounds_breaking_through = false;
-    f.keep_exact_pcurves = true;
-    f.closed_smooth_pole_tangent_limit = true;
-    // Held back: see `HELD_BACK`.
-    f.fillet_round_ends_on_outline = false;
-    f.fillet_chamfer_corner = true;
-    f.brep_ray_classifies_current_trims = true;
-    f.seam_vertex_stays_on_seam = true;
+    let mut f = UpstreamFixes::all();
+    for name in HELD_BACK {
+        // A test keeps every name here a flag that exists.
+        if let Some(on) = f.flag_mut(name) {
+            *on = false;
+        }
+    }
     f
 }
 
@@ -147,8 +105,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
 /// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
 /// status 1001), where with it off they build. Measured again at solidcore 9856ffee5: the same.
-#[cfg(test)]
-const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
+///
+/// solidcore's tests, its kernel rig and its diagnostics read this list from
+/// `kernel_cases/held_back.json`; a test keeps the file equal to it.
+pub(crate) const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
 
 /// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
@@ -479,16 +439,17 @@ mod tests {
         }
     }
 
-    /// solidcore's tests and kernel rig read this preset from `kernel_cases/fixes.json`: the file
-    /// names exactly the flags `fixes()` turns on.
+    /// solidcore's tests, kernel rig and diagnostics build this preset as every flag on but those
+    /// `kernel_cases/held_back.json` names: the file names exactly `HELD_BACK`.
     #[test]
-    fn the_kernel_corpus_fix_list_is_this_preset() {
-        let listed: Vec<String> = serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/fixes.json")).unwrap();
+    fn the_kernel_corpus_held_back_list_is_this_one() {
+        let listed: Vec<String> =
+            serde_json::from_str(include_str!("../../../solidcore/crates/solidcore/tests/kernel_cases/held_back.json")).unwrap();
         let mut listed: Vec<&str> = listed.iter().map(String::as_str).collect();
         listed.sort_unstable();
-        let mut on: Vec<&str> = fixes().flags().filter(|(_, on)| *on).map(|(name, _)| name).collect();
-        on.sort_unstable();
-        assert_eq!(listed, on, "kernel_cases/fixes.json must list exactly the flags fixes() turns on");
+        let mut held = HELD_BACK.to_vec();
+        held.sort_unstable();
+        assert_eq!(listed, held, "kernel_cases/held_back.json must list exactly HELD_BACK");
     }
 
     #[test]
