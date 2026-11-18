@@ -40,6 +40,27 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 Bends follow the rule's K-factor, so flat lengths match what a press brake will make. Tests
 check flat lengths against hand-computed bend allowances.
 
+### Unfolding from a press brake chart
+
+Many shops have a chart that gives the bend deduction or the bend allowance for each thickness
+and bend radius, not a K-factor. A rule can take that value instead: in Sheet Metal Rules, set
+**Unfold** to **Bend Deduction** or **Bend Allowance**, and type the chart's value for a 90° bend
+in the row that replaces K Factor. With a command, `unfold_method` is `k_factor` (the default),
+`deduction` or `allowance`, and `unfold_value` is the 90° value, a length or an expression:
+
+```json
+{"command":"sheet.manage_rules","params":{"name":"Steel 2 mm","thickness":"2 mm",
+ "bend_radius":"2 mm","unfold_method":"deduction","unfold_value":"3.5 mm"}}
+```
+
+The rule works the K-factor out from the 90° value, and every bend of the rule unfolds from that
+K-factor, at any angle. At 90°, the bend allowance is BA = π/2 · (R + K·T), and the bend
+deduction is BD = 2·(R + T) − BA, for bend radius R and thickness T. So K = (2·BA/π − R)/T. The
+example above gives BA = 8 − 3.5 = 4.5 mm and K = 0.4324. `sheet.rules` lists the K-factor each
+rule works out to. A value that would make K less than 0 or more than 1 is refused, and the
+message gives the range the value must be in for that thickness and radius. The chart's value
+is for one thickness and radius, so make one rule for each line of the chart you use.
+
 ## Step by step
 
 A tray: a plate with a flange up each long side, and its flat pattern.
@@ -89,10 +110,11 @@ A rule is saved in its design, and a new design starts with only the default ste
 the same rules in every design, keep them as **personal rules**, saved in your profile: open
 **Personal rules** at the top of Sheet Metal Rules.
 
-- **Save new** keeps the rule the manager shows under a name: its thickness, K factor, bend
-  radius, reliefs, gaps, corner relief shape and angle display. A bare number is saved with the
-  design's unit, so the rule makes the same sheet in a millimetre or an inch design. `Thickness`
-  and other expressions are kept as typed, and are worked out in the design the rule is used in.
+- **Save new** keeps the rule the manager shows under a name: its thickness, K factor (or its
+  unfold choice and 90° value), bend radius, reliefs, gaps, corner relief shape and angle
+  display. A bare number is saved with the design's unit, so the rule makes the same sheet in a
+  millimetre or an inch design. `Thickness` and other expressions are kept as typed, and are
+  worked out in the design the rule is used in.
 - Picking a personal rule fills the manager with it: the design's own rule of that name, or else
   a new rule. **OK** adds it to the design (or updates that rule); picking alone changes nothing.
 - The save icon beside the box saves the manager's values over the picked personal rule.
