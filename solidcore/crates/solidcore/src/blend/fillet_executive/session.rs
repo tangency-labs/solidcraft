@@ -6117,6 +6117,39 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                             {
                                 continue; // past the section that ends the band
                             }
+                            // Not the fork's (#18823): the band's section through `r` reaches
+                            // the run at `r`'s own foot there, which is `p`'s where `p` lies in
+                            // the band. On a run of several edges `p`'s foot can lie on another
+                            // edge of it, across the face from the band (a tube's joint), so the
+                            // chord is taken to `r`'s foot.
+                            let mut foot_r: Option<(f64, crate::math::Point3)> = None;
+                            for &(j, _) in &run_ends {
+                                let Some((curve_j, ivl_j, _)) = edge_curves.get(j) else {
+                                    continue;
+                                };
+                                let Ok(on) = curve_j.drop_point(
+                                    k,
+                                    ivl_j,
+                                    r,
+                                    None,
+                                    crate::math::BIG_DOUBLE,
+                                    None,
+                                    SolverOperation::Minimize,
+                                ) else {
+                                    continue;
+                                };
+                                if !on.success {
+                                    continue;
+                                }
+                                let Ok(q) = curve_j.evaluate_point(k, on.parameter) else {
+                                    continue;
+                                };
+                                let dist = (r - q).length();
+                                if foot_r.is_none_or(|(best, _)| dist < best) {
+                                    foot_r = Some((dist, q));
+                                }
+                            }
+                            let e = foot_r.map_or(e, |(_, q)| q);
                             let mut chord = e - r;
                             let width = chord.length();
                             // Not the fork's (#16654): the rail's point nearest `p` is the
