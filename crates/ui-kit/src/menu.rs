@@ -1052,6 +1052,7 @@ mod tests {
             displays: &[],
             card_headers: CardHeaders::Always,
             keep_on_top: false,
+            panels: false,
             ribbon: true,
             ribbon_auto_hide: true,
         };
@@ -1069,6 +1070,7 @@ mod tests {
         frame(vec![], false);
         let area = ctx.memory(|memory| memory.area_rect(id.with("window_options").with("popup"))).unwrap();
         assert!(screen.contains_rect(area), "{area:?} exceeds {screen:?}");
+        frame(key(egui::Key::ArrowDown), false);
         frame(key(egui::Key::ArrowDown), false);
         frame(key(egui::Key::ArrowDown), false);
         assert_eq!(frame(key(egui::Key::ArrowRight), false), Some(Action::CardHeaders(CardHeaders::Hover)));
