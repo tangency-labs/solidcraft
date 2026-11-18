@@ -1236,7 +1236,7 @@ pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
 /// refused.
 pub fn tangent_chain_beyond_points(body: &Body, picks: &[Vec3], per_edge: usize) -> Result<Vec<Vec<Vec3>>> {
     let (rec, chain, picked) = picked_chain(body, picks)?;
-    let n = per_edge.max(1).min(64);
+    let n = if per_edge == 0 { 1 } else { per_edge.min(64) };
     chain
         .into_iter()
         .skip(picked)

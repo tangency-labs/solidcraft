@@ -6486,10 +6486,15 @@ fn left_sharp_note(blended: &Body, beyond: &[Vec<Vec3>], picked: usize, kind: &F
         return None;
     }
     let classes = blended.classify_points(&points).ok()?;
-    let mut classes = classes.into_iter();
+    let mut start = 0;
     let n = beyond
         .iter()
-        .filter(|edge| classes.by_ref().take(edge.len()).fold(false, |sharp, c| sharp || matches!(c, kernel::PointClass::OnBoundary)))
+        .filter(|edge| {
+            let end = start + edge.len();
+            let points = classes.get(start..end).unwrap_or_default();
+            start = end;
+            points.iter().any(|c| matches!(c, kernel::PointClass::OnBoundary))
+        })
         .count();
     if n == 0 {
         return None;
