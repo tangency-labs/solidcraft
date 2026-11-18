@@ -51,6 +51,10 @@ pub struct ModelBody {
     pub feature: u64,
     // Timeline snapshots are cloned before meshes are requested. Share the cell itself so
     // meshing any snapshot also warms every unchanged copy of this body.
+    /// The box of the body's display mesh ([`ModelBody::mesh_bounds`]), worked out once: framing
+    /// the view goes over every body, and a placed copy's box moves every point of its part's
+    /// mesh. Shared by the copies of this body that keep its placement.
+    bounds: Arc<OnceLock<solidcraft_geom::Aabb3>>,
     mesh: Arc<OnceLock<Arc<Mesh>>>,
     /// Joint face measurements use their own tolerance, independent of display quality.
     /// Shared by snapshots of this geometry; the body identity guards direct replacement.
@@ -98,6 +102,8 @@ pub struct ModelBody {
     /// [`Body::outline_bounds`] of `body` (with the body it was measured on), worked out once
     /// and shared by clones.
     outline: Arc<OnceLock<(Body, solidcraft_geom::Aabb3)>>,
+    /// [`ModelBody::volume`] (with the body it was measured on), measured once and shared by clones.
+    volume: Arc<OnceLock<(Body, Option<f64>)>>,
     /// [`kernel::measure`] of `body` (with the body it was measured on), worked out once and
     /// shared by clones: inspecting a design again measures only the bodies that changed.
     measured: Arc<OnceLock<(Body, kernel::Result<kernel::BodyMeasure>)>>,
@@ -110,6 +116,9 @@ pub struct ModelBody {
     /// What cutting it by tools of a recipe gave (see [`ModelBody::cut`]), the latest first;
     /// shared like the mesh, so every unchanged copy of it in later models knows them too.
     cuts: Arc<std::sync::Mutex<Vec<Cut>>>,
+    /// What a section view's plane left of it (see [`ModelBody::section`]), the latest first;
+    /// shared like the mesh.
+    sections: Arc<std::sync::Mutex<Vec<(u64, Option<ModelBody>)>>>,
 }
 
 /// A cut remembered by a body: the recipe of the tools and the body's name (its faces are
@@ -122,6 +131,9 @@ struct Cut {
 
 /// Cuts a body remembers.
 const CUTS_KEPT: usize = 2;
+
+/// Sections a body remembers: a drawing's section views and the one being moved.
+const SECTIONS_KEPT: usize = 2;
 
 impl ModelBody {
     /// This body, an operand of the feature being evaluated, cut (`bop`) by `tools` in turn;
@@ -155,6 +167,40 @@ impl ModelBody {
         Ok(left)
     }
 
+    /// What a section view draws of this body: the side of `plane` its normal points to (`None`
+    /// when nothing is there), named and placed as this body is. A body with a geometry key
+    /// remembers what each plane gave, so every unchanged copy of it is cut once per plane. The
+    /// section has no key of its own, so no other body shares its geometry.
+    pub fn section(&self, plane: &Plane) -> Result<Option<ModelBody>> {
+        let key = self.geometry_key().map(|geometry| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (geometry, &self.name).hash(&mut h);
+            [plane.origin, plane.x, plane.y].iter().flat_map(|v| [v.x, v.y, v.z]).for_each(|v| v.to_bits().hash(&mut h));
+            h.finish()
+        });
+        let known = key.and_then(|k| self.sections.lock().ok().and_then(|s| s.iter().find(|(at, _)| *at == k).map(|(_, kept)| kept.clone())));
+        if let Some(kept) = known {
+            return Ok(kept);
+        }
+        let (kept, _) = kernel::half_space(&self.body, plane, true)?;
+        let section = kept.map(|body| ModelBody {
+            source_name: self.source_name.clone(),
+            source_transform: self.source_transform,
+            component: self.component,
+            transferred: self.transferred,
+            imported: self.imported.clone(),
+            ..ModelBody::new(self.name.clone(), body, self.feature)
+        });
+        if let Some(key) = key
+            && let Ok(mut sections) = self.sections.lock()
+        {
+            sections.retain(|(at, _)| *at != key);
+            sections.insert(0, (key, section.clone()));
+            sections.truncate(SECTIONS_KEPT);
+        }
+        Ok(section)
+    }
+
     pub fn new(name: String, body: Body, feature: u64) -> Self {
         ModelBody {
             name,
@@ -163,6 +209,7 @@ impl ModelBody {
             body,
             feature,
             mesh: Arc::new(OnceLock::new()),
+            bounds: Arc::new(OnceLock::new()),
             joint_faces: Arc::new(OnceLock::new()),
             faces: Default::default(),
             mesh_placement: None,
@@ -181,10 +228,24 @@ impl ModelBody {
             bytes: 0,
             source_key: 0,
             outline: Arc::new(OnceLock::new()),
+            volume: Arc::new(OnceLock::new()),
             measured: Arc::new(OnceLock::new()),
             surface: Arc::new(OnceLock::new()),
             iso: Default::default(),
             cuts: Default::default(),
+            sections: Default::default(),
+        }
+    }
+
+    /// The body's volume in mm³ ([`kernel::measure_mass`]), measured once and shared by clones: a
+    /// body's measure depends on nothing else, so the bill of materials and the physical
+    /// properties weigh it once however often they are asked. `None` when it can't be measured.
+    pub fn volume(&self) -> Option<f64> {
+        let measure = || kernel::measure_mass(&self.body).ok().map(|m| m.volume);
+        match self.volume.get_or_init(|| (self.body.clone(), measure())) {
+            (measured, v) if measured.same(&self.body) => *v,
+            // The body was replaced in this cell's holder since: measure it again.
+            _ => measure(),
         }
     }
 
@@ -437,19 +498,44 @@ impl ModelBody {
     }
 
     /// The box of [`ModelBody::mesh`] without making a placement's moved copy: the shared mesh's
-    /// points, moved.
+    /// points, moved. Worked out once (the background mesher works it out ahead, so framing a
+    /// large design reads it).
     pub fn mesh_bounds(&self) -> solidcraft_geom::Aabb3 {
-        if let Some(mesh) = self.cached_mesh() {
-            return mesh.bounds();
-        }
-        let (mesh, m) = self.mesh_in_place();
-        if crate::is_identity(&m) {
-            return mesh.bounds();
-        }
-        mesh.positions.iter().fold(solidcraft_geom::Aabb3::EMPTY, |mut b, p| {
-            b.add(crate::apply_point(&m, *p));
-            b
+        *self.bounds.get_or_init(|| {
+            if let Some(mesh) = self.cached_mesh() {
+                return mesh.bounds();
+            }
+            let (mesh, m) = self.mesh_in_place();
+            if crate::is_identity(&m) {
+                return mesh.bounds();
+            }
+            mesh.positions.iter().fold(solidcraft_geom::Aabb3::EMPTY, |mut b, p| {
+                b.add(crate::apply_point(&m, *p));
+                b
+            })
         })
+    }
+
+    /// Whether [`ModelBody::mesh_bounds`] is worked out already.
+    pub fn mesh_bounds_made(&self) -> bool {
+        self.bounds.get().is_some()
+    }
+
+    /// The box of [`ModelBody::mesh`] seen on a plane, in the plane's own coordinates
+    /// ([`Plane::to_local`]): a drawing view's extents (W07), again without making a placement's
+    /// moved copy.
+    pub fn mesh_bounds_in(&self, plane: &Plane) -> solidcraft_geom::Aabb2 {
+        let (mesh, m) = match self.cached_mesh() {
+            Some(mesh) => (mesh, crate::IDENTITY),
+            None => self.mesh_in_place(),
+        };
+        // The placement folded into each of the plane's axes: a mesh point p lands at
+        // p · axis + offset, with no moved copy of the point made first.
+        let [c0, c1, c2, t] = m.map(|r| Vec3::new(r[0], r[1], r[2]));
+        let offset = t - plane.origin;
+        let axis = |a: Vec3| (Vec3::new(c0.dot(a), c1.dot(a), c2.dot(a)), offset.dot(a));
+        let ((ax, ox), (ay, oy)) = (axis(plane.x), axis(plane.y));
+        mesh.positions.iter().map(|p| Vec2::new(p.dot(ax) + ox, p.dot(ay) + oy)).collect()
     }
 
     /// Whether [`ModelBody::plan_mesh_in_place_at`] is made already (tried, at least), so asking
@@ -1556,6 +1642,11 @@ pub struct FeatureResult {
 #[derive(Clone, Debug, Default)]
 pub struct Model {
     pub results: Vec<FeatureResult>,
+    /// Imports whose SMLib check found a part to repair after they were shown, not yet taken by
+    /// a window ([`Model::take_import_notices`]), in the order their checks were settled.
+    import_notices: Vec<u64>,
+    /// The import check runs this model has put in `import_notices`, by feature.
+    told_imports: Vec<(u64, kernel::ImportChecks)>,
     pub param_errors: BTreeMap<String, String>,
     empty: Arc<ModelState>,
     /// Features recomputed by the last `evaluate`.
@@ -1655,6 +1746,8 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
 #[derive(Clone, Debug, Default)]
 struct ImportDigests {
     steps: std::collections::HashMap<u64, (Arc<str>, u64)>,
+    /// An import kept as records: its records and their digest, computed once per records.
+    records: std::collections::HashMap<u64, (Arc<kernel::ImportRecords>, u64)>,
     meshes: std::collections::HashMap<u64, Vec<MeshDigest>>,
 }
 
@@ -1679,9 +1772,13 @@ impl ImportDigests {
         let mut out = ImportDigests::default();
         for f in &doc.features {
             match &f.kind {
-                FeatureKind::Import { step, .. } => {
+                FeatureKind::Import { step, records, .. } => {
                     let digest = known.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
                     out.steps.insert(f.id, (step.clone(), digest));
+                    if let Some(r) = records {
+                        let digest = known.records_digest(f.id, r).unwrap_or_else(|| records_digest(r));
+                        out.records.insert(f.id, (r.clone(), digest));
+                    }
                 }
                 FeatureKind::MeshImport { meshes, .. } => {
                     let digests = meshes
@@ -1709,6 +1806,10 @@ impl ImportDigests {
         self.steps.get(&id).filter(|(text, _)| Arc::ptr_eq(text, step)).map(|(_, digest)| *digest)
     }
 
+    fn records_digest(&self, id: u64, records: &Arc<kernel::ImportRecords>) -> Option<u64> {
+        self.records.get(&id).filter(|(r, _)| Arc::ptr_eq(r, records)).map(|(_, digest)| *digest)
+    }
+
     fn mesh(&self, id: u64, index: usize, mesh: &crate::MeshData) -> Option<u64> {
         self.meshes.get(&id)?.get(index).filter(|cached| cached.matches(mesh)).map(|cached| cached.digest)
     }
@@ -1727,6 +1828,12 @@ fn mesh_content_digest(mesh: &crate::MeshData) -> u64 {
         n.to_bits().hash(&mut h);
     }
     h.finish()
+}
+
+/// An import's records digested as their serialised form; records that will not serialise
+/// digest as nothing (their evaluation fails and says why).
+fn records_digest(records: &kernel::ImportRecords) -> u64 {
+    step_text_digest(&kernel::records_text(records).unwrap_or_default())
 }
 
 fn step_text_digest(text: &str) -> u64 {
@@ -1824,11 +1931,17 @@ fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
         // writing the large numeric arrays out again. Equal content in fresh Arcs hashes alike.
         return serde_json::to_string(&(g, digests)).unwrap_or_default();
     }
-    if let FeatureKind::Import { step, .. } = &f.kind {
+    if let FeatureKind::Import { step, records, .. } = &f.kind {
         let mut g = f.clone();
-        if let FeatureKind::Import { step: text, .. } = &mut g.kind {
+        if let FeatureKind::Import { step: text, records: kept, .. } = &mut g.kind {
             let digest = steps.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
-            *text = Arc::from(format!("{digest:016x}:{}", step.len()));
+            // Records stand in by their digest, as the STEP text does.
+            let of_records = records.as_ref().map(|r| steps.records_digest(f.id, r).unwrap_or_else(|| records_digest(r)));
+            *kept = None;
+            *text = match of_records {
+                Some(r) => Arc::from(format!("{digest:016x}:{}:records:{r:016x}", step.len())),
+                None => Arc::from(format!("{digest:016x}:{}", step.len())),
+            };
         }
         return serde_json::to_string(&g).unwrap_or_default();
     }
@@ -2148,23 +2261,74 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
         if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
             continue;
         }
+        // A thread output already checked (only successful checks are recorded) passed.
         if checked_thread_output(&b.body) {
             #[cfg(test)]
             cost_tests::count(|c| c.reused_checks += 1);
             continue;
         }
-        check_feature_body(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
+        check_feature_body(&b.body).map_err(|e| kept_refused(&b.name, &e, &replaced(before, after)))?;
     }
     Ok(())
 }
 
 /// [`check_kept`] of bodies whose checks were detached from them ([`kernel::detach_kept`]), by
-/// body name, in order: the first that fails is the feature's error, as there.
-fn run_kept(checks: Vec<(String, kernel::KeptCheck)>) -> kernel::Result<()> {
+/// body name, in order: the first that fails is the feature's error, as there. `inputs` are the
+/// bodies the feature replaced ([`replaced`]), for that error.
+fn run_kept(checks: Vec<(String, kernel::KeptCheck)>, inputs: Vec<(String, Body, bool)>) -> kernel::Result<()> {
     for (name, check) in checks {
-        check.run().map_err(|e| kernel::KernelError::Failed(format!("body `{name}`: {e}")))?;
+        check.run().map_err(|e| kept_refused(&name, &e, &inputs))?;
     }
     Ok(())
+}
+
+/// The bodies of `before` a feature that made `after` replaced or used up: its inputs, whose own
+/// check says whether a refusal of its result is the feature's doing. Each with whether the
+/// feature used it up (no body of `after` has its name, as a join's tools), so that a refusal of
+/// one result is blamed on its own former self or on bodies it consumed, never on another body
+/// the same feature changed beside it.
+fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body, bool)> {
+    before
+        .bodies
+        .iter()
+        .filter(|old| !after.bodies.iter().any(|b| b.body.same_shape(&old.body)))
+        .map(|old| (old.name.clone(), old.body.clone(), !after.bodies.iter().any(|b| b.name == old.name)))
+        .collect()
+}
+
+/// The feature's error when the check of body `name`, which it keeps, refused it (`e`): naming
+/// the bodies among `inputs` that went into it (its own former self, by name, and the bodies the
+/// feature used up) whose SMLib form, as the feature took them, fails SMLib's check
+/// ([`kernel::failing_check`]), since the result's check reports their defects too. Checked only
+/// here, once the result is refused.
+///
+/// That is a check of each input as it is now, not a replay of the check that kept it at the end
+/// of its own feature, which ran on that step's own result ([`kernel::check_kept`]; for a
+/// boolean, as the separate solids a non-manifold result exports to). The body decoded from a
+/// result is a different SMLib form, which can fail where the result passed, so the message says
+/// what was checked: the body as it was before this feature, not that its own feature let a
+/// failure through.
+fn kept_refused(name: &str, e: &kernel::KernelError, inputs: &[(String, Body, bool)]) -> kernel::KernelError {
+    let failing: Vec<&str> = inputs
+        .iter()
+        .filter(|(n, _, used_up)| *used_up || n == name)
+        .filter(|(_, b, _)| kernel::failing_check(b).is_ok_and(|c| c.is_some()))
+        .map(|(n, _, _)| n.as_str())
+        .collect();
+    let before = match failing.as_slice() {
+        [] => String::new(),
+        [only] if *only == name => " (SMLib's check fails it as it was before this feature)".to_string(),
+        [only] => format!(" (SMLib's check fails body `{only}` as it was before this feature)"),
+        many => format!(
+            " (SMLib's check fails bodies {} as they were before this feature)",
+            many.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
+        ),
+    };
+    match e {
+        // A panic the check caught stays one, so it is not cached as an ordinary refusal.
+        kernel::KernelError::Internal(m) => kernel::KernelError::Internal(format!("body `{name}`{before}: {m}")),
+        _ => kernel::KernelError::Failed(format!("body `{name}`{before}: {e}")),
+    }
 }
 
 /// Whether `after`, a state feature `f` evaluated to from `before` in an earlier evaluation, is
@@ -2303,7 +2467,8 @@ impl PlacementReads {
                 }
                 None => self.all = true,
             },
-            L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => {}
+            // A view edge is refused in a model sketch, whatever the model holds.
+            L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } | L::ViewEdge { .. } => {}
         }
     }
 }
@@ -2415,8 +2580,9 @@ fn link_reads(st: &ModelState, source: &solidcraft_sketch::LinkSource, read: &mu
         }
         // Kept in its own component's frame, which these reads do not follow: key on the whole model.
         L::ConstructionPoint { .. } => None,
-        // In the sketch's own frame (construction axes it names are in its key), or text.
-        L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => Some(()),
+        // In the sketch's own frame (construction axes it names are in its key), or text. A view
+        // edge is refused in a model sketch, whatever the model holds.
+        L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } | L::ViewEdge { .. } => Some(()),
     }
 }
 
@@ -3218,6 +3384,46 @@ impl Model {
         Model::default()
     }
 
+    /// An import's SMLib check of its parts is still running ([`kernel::ImportReport::checks`]).
+    pub fn checking_imports(&self) -> bool {
+        self.results.iter().any(|r| r.import_report.as_ref().is_some_and(|i| i.checking()))
+    }
+
+    /// Fold what the ended checks of each import found into its result: its report's issues and
+    /// its warning, as an import that waited for them has them. An import whose checks found a
+    /// part to repair, that no one was told of yet, joins [`Self::take_import_notices`] (in
+    /// history order). Checks still running are left to a later call.
+    ///
+    /// Which runs were told of is this model's own record ([`Self::import_notices`]), kept with
+    /// its copies, so a copy evaluated beside it (a scratch or look-ahead evaluation) cannot take
+    /// a notice from it, and a result restored from the evaluation cache is not told of twice.
+    pub fn settle_import_checks(&mut self) {
+        let (found, told) = (&mut self.import_notices, &mut self.told_imports);
+        for r in &mut self.results {
+            let Some(report) = r.import_report.as_ref() else { continue };
+            if report.checks.is_empty() || report.checking() {
+                continue;
+            }
+            let run = &report.checks;
+            let fresh = run.issues().is_some_and(|i| !i.is_empty()) && !told.iter().any(|(id, t)| *id == r.id && t == run);
+            if fresh {
+                told.push((r.id, run.clone()));
+            }
+            let settled = report.current().into_owned();
+            r.warning = import_warning(&settled.issues.iter().map(|i| i.detail.as_str()).collect::<Vec<_>>());
+            r.import_report = (!settled.issues.is_empty()).then(|| Arc::new(settled));
+            if fresh {
+                found.push(r.id);
+            }
+        }
+    }
+
+    /// The imports whose checks found a part to repair since the last call
+    /// ([`Self::settle_import_checks`]): a window says so for each, once.
+    pub fn take_import_notices(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.import_notices)
+    }
+
     /// The final model state.
     pub fn state(&self) -> Arc<ModelState> {
         let last = self.evaluated_state();
@@ -3757,7 +3963,7 @@ impl Model {
                 // A parameter with an error fails the features using it, with that error.
                 let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
                 // The bodies whose check runs beside the features after this one.
-                let mut apart: Option<Vec<(String, kernel::KeptCheck)>> = None;
+                let mut apart: Option<(Vec<(String, kernel::KeptCheck)>, Vec<(String, Body, bool)>)> = None;
                 let refused = checks.refused(i);
                 let mut r = match frame_error.or(bad_param) {
                     _ if cached.is_some() => Ok(()),
@@ -3790,7 +3996,7 @@ impl Model {
                         if !deferred {
                             Ok(())
                         } else if let Some(detached) = checks.detach(&state, &next) {
-                            apart = Some(detached);
+                            apart = Some((detached, replaced(&state, &next)));
                             Ok(())
                         } else {
                             check_kept(&state, &next)
@@ -3823,7 +4029,8 @@ impl Model {
                         ms: t0.elapsed().as_secs_f64() * 1000.0,
                     };
                     let name = f.name.clone();
-                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after)));
+                    let (after, inputs) = after;
+                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after, inputs)));
                 }
                 if r.is_ok() && cached.is_none() {
                     // Profiles picked by curves that no longer bound a profile exactly were found
@@ -3956,6 +4163,8 @@ impl Model {
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
         self.poses = poses;
         self.results = out;
+        // A cached import's result is as its check left it, not as the import first showed.
+        self.settle_import_checks();
         self.last_recomputed = recomputed;
         self.recomputed += recomputed;
         self.last_restored = restored;
@@ -6109,8 +6318,15 @@ fn blend_body(
     mb: &ModelBody,
     edges: &[Vec3],
     r: f64,
+    each: Option<&[f64]>,
     warning: &mut Option<String>,
 ) -> Result<(Traced, Option<Vec<f64>>, Tapered)> {
+    // Each edge at its own radius, in one blend (checked by the caller: constant, exact, rolling,
+    // mitred, the picked edges alone).
+    if let (FeatureKind::Fillet { turn, .. }, Some(each)) = (&f.kind, each) {
+        let nb = kernel::fillet_each(&mb.body, edges, each, turn.kernel())?;
+        return Ok((Traced::step(nb.with_preserved_planar_sources(&mb.body)?, &[&mb.traced()]), None, Vec::new()));
+    }
     let (nb, from, used, tapered) = blend_raw(vals, f, mb, edges, r, warning)?;
     // Keeping the input's planar certificates may join faces; their history stays over the same
     // operand.
@@ -9707,6 +9923,13 @@ fn replay(
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
             let r = val(vals, radius, Kind::Length)?;
+            // A fillet's own per-edge radii, in the order of its picks (as it saved its edges).
+            let each_r: Option<Vec<f64>> = match &src.kind {
+                FeatureKind::Fillet { edge_radii, .. } if !edge_radii.is_empty() => {
+                    Some(edge_radii.iter().map(|e| val(vals, e, Kind::Length)).collect::<Result<_>>()?)
+                }
+                _ => None,
+            };
             // The edges the feature blended in this evaluation (found by name), falling back to
             // its picked points.
             let found = st.blend_edges.get(&src.id).cloned().unwrap_or_else(|| crate::plain(edges));
@@ -9731,6 +9954,12 @@ fn replay(
                         // A copy is congruent to the original: the radius it was reduced to first.
                         (FeatureKind::Fillet { turn, .. }, Some(used)) => {
                             let used: Vec<f64> = idx.iter().map(|i| used.get(*i).copied().unwrap_or(r)).collect();
+                            mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
+                        }
+                        // A copy of a fillet with per-edge radii pairs each copied edge with its radius.
+                        (FeatureKind::Fillet { turn, .. }, None) if each_r.is_some() => {
+                            let all = each_r.as_deref().unwrap_or(&[]);
+                            let used: Vec<f64> = idx.iter().map(|i| all.get(*i).copied().unwrap_or(r)).collect();
                             mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
                         }
                         // Otherwise the copy is the same blend, with its type, fit, corners and
@@ -9997,7 +10226,7 @@ fn replay(
 mod model_cache;
 #[path = "eval_more.rs"]
 mod more;
-pub use model_cache::SavedModel;
+pub use model_cache::{PendingChecks, SavedModel};
 #[path = "eval_cell_grid.rs"]
 pub mod cell_grid;
 #[path = "eval_frame.rs"]
@@ -10722,7 +10951,7 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
         }
         PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => PlaneRef::AtAngle {
             base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?),
-            axis_origin: *axis_origin,
+            axis_origin: axis_origin.clone(),
             axis_dir: *axis_dir,
             angle: angle.clone(),
             line: line.clone(),
@@ -10808,7 +11037,27 @@ fn chamfer_with(
         (None, None) => None,
     };
     Ok(match side {
-        Some(s) => kernel::chamfer_sides_carrying_face(b, edges, d, s, flip)?,
+        Some(s) => match kernel::chamfer_sides_carrying_face(b, edges, d, s, flip) {
+            // SMLib can fail a two-sided chamfer too large for the faces beside its edges inside
+            // the blend (status 1001) instead of refusing it as too large (#18545): where a
+            // smaller scale of its sizes builds, it is refused naming that scale.
+            Err(kernel::KernelError::Failed(why)) if why.contains("(status 1001)") && EVAL_VALIDATION.get() != kernel::Validation::Off => {
+                match kernel::chamfer_sides_max_why(b, edges, d, s, flip) {
+                    Ok(kernel::FitSearch { found: Some((scale, _)), .. }) => {
+                        // By an angle only the distance scales: it is named in mm.
+                        let fits = match s {
+                            kernel::ChamferSide::Distance(_) => kernel::scale_fit_note(scale),
+                            kernel::ChamferSide::Angle(_) => kernel::largest_fit_note("distance", d * scale),
+                        };
+                        return Err(
+                            kernel::KernelError::TooLarge(format!("the chamfer is larger than the faces beside its edges allow; {fits}")).into()
+                        );
+                    }
+                    _ => return Err(kernel::KernelError::Failed(why).into()),
+                }
+            }
+            other => other?,
+        },
         None => match kernel::chamfer_carrying_face(b, edges, d) {
             Err(kernel::KernelError::TooLarge(why)) => {
                 let hint = kernel::named_fit(&why);
@@ -11183,6 +11432,14 @@ fn eval_feature_kind(
             };
             // Certifying may join faces; their history stays over the same operands.
             let nb = Traced::step(nb.with_shell_certificate(f.id)?, &operands.iter().collect::<Vec<_>>());
+            // The walls must read back as SMLib reads them for measuring and every step after
+            // (#18373: a 0.06 mm hollow of a tiny lens left a face whose NURBS form isn't its
+            // surface). Refused here, the body stays as it was. The reading is kept on the body.
+            if !nb.body.is_mesh()
+                && let Err(e) = nb.body.smlib()
+            {
+                return Err(DocError::Invalid(format!("the shell made walls that can't be used afterwards ({e})")));
+            }
             if let Some(slot) = st.bodies.get_mut(i) {
                 *slot = mb.remade(nb);
             }
@@ -11521,6 +11778,27 @@ fn eval_feature_kind(
             {
                 return Err(DocError::Invalid("corner setbacks are built for a constant-radius fillet (type: constant, fit: exact) only".into()));
             }
+            // Each picked edge at its own radius: one value per pick, for the blend that supports it.
+            let each_r: Option<Vec<f64>> = match &f.kind {
+                FeatureKind::Fillet { edge_radii, style, fit, corner, setbacks, turn, tangent_chain, .. } if !edge_radii.is_empty() => {
+                    if !style.is_constant() || !fit.is_exact() || !corner.is_rolling() || !setbacks.is_empty() || !turn.is_mitre() || *tangent_chain {
+                        return Err(DocError::Invalid(crate::EDGE_RADII_TAKE.into()));
+                    }
+                    if edge_radii.len() != edges.len() {
+                        return Err(DocError::Invalid(format!(
+                            "`edge_radii` gives {} radii for {} picked edges: one per edge, in the order of `edges`",
+                            edge_radii.len(),
+                            edges.len()
+                        )));
+                    }
+                    let mut v = Vec::with_capacity(edge_radii.len());
+                    for e in edge_radii {
+                        v.push(val(vals, e, Kind::Length)?);
+                    }
+                    Some(v)
+                }
+                _ => None,
+            };
             let on = blend_bodies(st, f, body, &crate::plain(edges))?;
             let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
             for (i, ti) in on.iter().enumerate() {
@@ -11542,10 +11820,26 @@ fn eval_feature_kind(
                 _ => false,
             };
             let mut picks = Vec::with_capacity(groups.len());
+            // Per-edge radii: each resolved edge point keyed (exactly) to its pick and radius. The
+            // smooth-edge filter below only drops picks, so the keys survive it.
+            let key = |p: &Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+            let mut radius_of: BTreeMap<[u64; 3], (usize, f64)> = BTreeMap::new();
+            let mut by_pick: Vec<(usize, Vec3)> = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
-                picks.push((*ti, blend_edges_on(mb, f, edges, idx, &mut w)?));
+                let resolved = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                if let Some(all) = &each_r {
+                    if resolved.len() != idx.len() {
+                        return Err(DocError::Invalid(
+                            "an edge given its own radius (`edge_radii`) no longer resolves to one edge: each radius needs its edge".into(),
+                        ));
+                    }
+                    for (p, i) in resolved.iter().zip(idx) {
+                        radius_of.insert(key(p), (*i, all.get(*i).copied().unwrap_or(r)));
+                    }
+                }
+                picks.push((*ti, resolved));
                 if let Some(w) = w {
                     notes.push(w);
                 }
@@ -11557,14 +11851,20 @@ fn eval_feature_kind(
                 let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 let mut note = None;
                 let propagated = edges.len() > picked;
-                let (nb, used, tapered) =
-                    blend_body(vals, f, mb, &edges, r, &mut note).map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
+                // This body's edges' own radii, found by their resolved points.
+                let each: Option<Vec<f64>> = each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(e)).map_or(r, |(_, x)| *x)).collect());
+                let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
+                    .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
                 if let Some(n) = note {
                     notes.push(n);
                 }
                 reduced |= used.is_some();
                 fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
                 tapered_all.extend(tapered);
+                if each.is_some() {
+                    // Per-edge radii: each blended edge with its pick, so a pattern's copies pair each with its radius.
+                    by_pick.extend(edges.iter().filter_map(|e| radius_of.get(&key(e)).map(|(i, _)| (*i, *e))));
+                }
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
                 // never the pick, which at a vertex two edges share finds either on a copy (#16934).
                 found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
@@ -11572,6 +11872,10 @@ fn eval_feature_kind(
             }
             if !notes.is_empty() {
                 *warning = Some(notes.join("; "));
+            }
+            if each_r.is_some() {
+                by_pick.sort_by_key(|(i, _)| *i);
+                found = by_pick.into_iter().map(|(_, p)| p).collect();
             }
             st.blend_edges.insert(f.id, found);
             if reduced {
@@ -11871,9 +12175,11 @@ fn eval_feature_kind(
             }
             Ok(())
         }
-        FeatureKind::Import { step, skip, .. } => {
-            let imp = kernel::step_import_shared(step)?;
-            let digest = crate::config::payload_digest(step);
+        FeatureKind::Import { step, skip, records, .. } => {
+            let (imp, digest) = match records {
+                Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
+                None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
+            };
             let names = import_body_names(st, &f.body_names, &imp, skip);
             for (k, (b, name)) in imp.bodies.iter().zip(names).enumerate() {
                 let Some(name) = name else { continue };
@@ -11896,16 +12202,26 @@ fn eval_feature_kind(
                 }
                 st.bodies.push(ModelBody::traced_new(name, b, f.id));
             }
-            if !imp.warnings.is_empty() {
-                let n = imp.warnings.len();
-                let shown: Vec<&str> = imp.warnings.iter().take(3).map(String::as_str).collect();
-                let more = if n > 3 { format!(" (+{} more)", n - 3) } else { String::new() };
-                *warning = Some(format!("{}{more}", shown.join("; ")));
+            // SMLib's check of the parts may still be running: the report holds it, and what it
+            // finds joins the warning when it ends ([`Model::settle_import_checks`]).
+            *warning = import_warning(&imp.warnings);
+            if warning.is_some() || !imp.report.checks.is_empty() {
                 *import_report = Some(Arc::new(imp.report.clone()));
             }
             Ok(())
         }
     }
+}
+
+/// An import's warning on its feature: its first three warnings, and how many more.
+pub(crate) fn import_warning<S: AsRef<str>>(warnings: &[S]) -> Option<String> {
+    let n = warnings.len();
+    if n == 0 {
+        return None;
+    }
+    let shown: Vec<&str> = warnings.iter().take(3).map(AsRef::as_ref).collect();
+    let more = if n > 3 { format!(" (+{} more)", n - 3) } else { String::new() };
+    Some(format!("{}{more}", shown.join("; ")))
 }
 
 /// A sketch feature: its links refreshed against the model before it, solved, its profiles
@@ -12618,6 +12934,7 @@ impl PlacedBodies {
         self.reused(b, m).map(|placed| {
             let mut fresh = ModelBody::new(name.to_string(), placed.body.clone(), b.feature);
             fresh.mesh = placed.mesh.clone();
+            fresh.bounds = placed.bounds.clone();
             fresh.measured = placed.measured.clone();
             fresh.joint_faces = placed.joint_faces.clone();
             fresh.faces = placed.faces.clone();
@@ -12966,6 +13283,48 @@ mod display_preparation_tests {
 }
 
 #[cfg(test)]
+mod section_tests {
+    use super::*;
+
+    /// A 10 mm cube from the origin, keyed as an evaluated body is.
+    fn cube() -> ModelBody {
+        let mut cube = ModelBody::new("Cube".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap(), 1);
+        cube.key = 7;
+        cube
+    }
+
+    /// The plane `z` up from the origin, its normal up.
+    fn at(z: f64) -> Plane {
+        Plane { origin: Vec3::new(0.0, 0.0, z), x: Vec3::X, y: Vec3::Y }
+    }
+
+    /// The lowest and highest z of `body`'s exact geometry.
+    fn heights(body: &ModelBody) -> (f64, f64) {
+        let b = body.body.exact_bounds().unwrap();
+        (b.min.z, b.max.z)
+    }
+
+    /// A section keeps the side its plane's normal points to, named as the body and with no key of
+    /// its own. Every copy of the body knows it without cutting again; another plane cuts again, a
+    /// plane past the body keeps nothing, and a body with no key cuts each time.
+    #[test]
+    fn a_bodys_section_is_remembered_by_its_copies() {
+        let cube = cube();
+        let upper = cube.section(&at(4.0)).unwrap().unwrap();
+        let (low, high) = heights(&upper);
+        assert!((low - 4.0).abs() < 1e-9 && (high - 10.0).abs() < 1e-9, "{low} {high}");
+        assert_eq!((upper.name.as_str(), upper.geometry_key()), ("Cube", None));
+        assert!(cube.clone().section(&at(4.0)).unwrap().unwrap().body.same(&upper.body));
+        let higher = cube.section(&at(6.0)).unwrap().unwrap();
+        assert!(!higher.body.same(&upper.body) && (heights(&higher).0 - 6.0).abs() < 1e-9);
+        assert!(cube.section(&at(10.5)).unwrap().is_none());
+        let unkeyed = ModelBody::new("Cube".into(), cube.body.clone(), 1);
+        let first = unkeyed.section(&at(4.0)).unwrap().unwrap();
+        assert!(!unkeyed.section(&at(4.0)).unwrap().unwrap().body.same(&first.body));
+    }
+}
+
+#[cfg(test)]
 mod world_placement_cache_tests {
     use super::*;
 
@@ -13066,13 +13425,15 @@ mod world_placement_cache_tests {
     #[test]
     fn an_imports_body_is_asked_for_its_own_slots_name() {
         let mut doc = Document::new("names");
-        let id =
-            doc.add_feature(FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: vec![0] }, None).unwrap();
+        let id = doc
+            .add_feature(FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: vec![0], records: None }, None)
+            .unwrap();
         doc.feature_mut(id).unwrap().body_names = vec!["A".into(), "B".into()];
         let mut state = ModelState::default();
         state.bodies.push(ModelBody::new("B (2)".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), id));
         assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("B"));
-        doc.feature_mut(id).unwrap().kind = FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new() };
+        doc.feature_mut(id).unwrap().kind =
+            FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: None };
         assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("A"));
     }
 
@@ -13213,6 +13574,7 @@ mod chain_tests {
                 setbacks: Vec::new(),
                 turn: Default::default(),
                 tangent_chain: true,
+                edge_radii: Vec::new(),
             },
             None,
         )
@@ -13273,6 +13635,7 @@ mod chain_tests {
             setbacks: Vec::new(),
             turn: Default::default(),
             tangent_chain,
+            edge_radii: Vec::new(),
         }
     }
 
@@ -13554,5 +13917,47 @@ mod named_face_lookup_tests {
         let st = parts(3);
         let hit = body_at(&st, &None, &[Vec3::new(22.0, 5.0, 5.0)]).unwrap();
         assert_eq!(st.bodies[hit].name, "Part1");
+    }
+}
+
+#[cfg(test)]
+mod kept_refused_tests {
+    use super::*;
+
+    /// #17689: a refused result names the inputs that already failed SMLib's check: its own
+    /// former self and the bodies the feature used up, never another body the same feature
+    /// changed beside it.
+    #[test]
+    fn a_refusal_names_only_the_results_own_inputs_that_failed_the_check() {
+        let text = include_str!("../../../tests/step-regressions/block_edge_off_its_face.step");
+        let bad = kernel::step_import(text).unwrap().bodies.remove(0).body;
+        assert!(kernel::failing_check(&bad).unwrap().is_some(), "the block fails the check");
+        let good = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        assert!(kernel::failing_check(&good).unwrap().is_none(), "the box passes it");
+        let e = kernel::KernelError::Failed("refused".into());
+        let msg = |name: &str, inputs: &[(String, Body, bool)]| kept_refused(name, &e, inputs).to_string();
+        // Both moved by one feature: the box's result is not blamed on the block.
+        let both = [("Bloco".to_string(), bad.clone(), false), ("Box1".to_string(), good.clone(), false)];
+        assert!(!msg("Box1", &both).contains("before this feature"), "{}", msg("Box1", &both));
+        assert!(msg("Bloco", &both).contains("body `Bloco` (SMLib's check fails it as it was before this feature)"), "{}", msg("Bloco", &both));
+        // The block used up by a join into the box: named.
+        let joined = [("Bloco".to_string(), bad, true), ("Box1".to_string(), good, false)];
+        assert!(
+            msg("Box1", &joined).contains("body `Box1` (SMLib's check fails body `Bloco` as it was before this feature)"),
+            "{}",
+            msg("Box1", &joined)
+        );
+    }
+
+    /// A panic caught while checking a kept body stays an internal error with the body named, so
+    /// the evaluation does not cache it as an ordinary refusal.
+    #[test]
+    fn a_panic_in_the_check_stays_internal() {
+        let good = kernel::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let inputs = [("Box1".to_string(), good, false)];
+        let internal = kept_refused("Box1", &kernel::KernelError::Internal("SMLib copy: boom".into()), &inputs);
+        assert!(matches!(&internal, kernel::KernelError::Internal(m) if m == "body `Box1`: SMLib copy: boom"), "{internal:?}");
+        let refused = kept_refused("Box1", &kernel::KernelError::Failed("refused".into()), &inputs);
+        assert!(matches!(refused, kernel::KernelError::Failed(_)), "{refused:?}");
     }
 }

@@ -77,7 +77,7 @@ impl Meshing {
                             return;
                         }
                         if let Some(b) = world.bodies.get(i) {
-                            warm(b, plans, shared, &repeated);
+                            warm(b, plans, shared, &repeated, solidcraft_engine::doc::display_quality::current());
                         }
                         if let Ok(mut r) = ready.lock() {
                             r.push(i);
@@ -298,14 +298,23 @@ pub(crate) fn repeated_parts(world: &ModelState) -> std::collections::HashSet<us
 /// (`plans`) has its GPU plan made too, unless it is a placement of a part placed more than once
 /// (`repeated`): those are drawn as instances of the part's triangles, never from plans of their
 /// own, and each such plan is a moved copy of the part's (a large assembly placed a hundred times
-/// took tens of gigabytes while it opened).
-pub(crate) fn warm(b: &ModelBody, plans: bool, shared: bool, repeated: &std::collections::HashSet<usize>) {
-    use solidcraft_engine::doc::display_quality::{DisplayQuality, current};
+/// took tens of gigabytes while it opened). `q` is the display quality the viewport draws at.
+pub(crate) fn warm(
+    b: &ModelBody,
+    plans: bool,
+    shared: bool,
+    repeated: &std::collections::HashSet<usize>,
+    q: solidcraft_engine::doc::display_quality::DisplayQuality,
+) {
+    use solidcraft_engine::doc::display_quality::DisplayQuality;
     let (mesh, _) = b.mesh_in_place();
     if shared {
         crate::viewport::warm_shared_tris(&mesh);
     }
-    let q = current();
+    // Its box, which framing the view reads for every body once they are all shown: worked out
+    // there, on the window thread, it moved every point of every placement (a second for a
+    // hundred copies of a large assembly).
+    let _ = b.mesh_bounds();
     if plans && b.placed_definition().is_none_or(|id| !repeated.contains(&id)) {
         let _ = b.gpu_plan_at(q);
     }
@@ -327,6 +336,16 @@ fn threads() -> bool {
 #[cfg(test)]
 thread_local! {
     static NO_THREADS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Show only the bodies `shown` of the world being opened (by their index in it), as the picture
+/// made while the others are still being meshed.
+#[cfg(test)]
+pub(crate) fn show_only(app: &mut SolveApp, shown: &[usize]) {
+    let Some(m) = app.open_meshing.as_mut() else { return };
+    let mut st = (*m.world).clone();
+    st.bodies = shown.iter().filter_map(|&i| m.world.bodies.get(i).cloned()).collect();
+    m.shown = Some((shown.len(), Arc::new(st)));
 }
 
 /// Run `f` as the web build runs: meshing cannot start a thread.

@@ -855,7 +855,7 @@ pub(crate) fn fits(a: Accept, s: &Sel) -> bool {
         // box selection and a pre-selection reach them the way a click already does.
         Sel::SketchPoint { .. } => a & (selection::POINTS | selection::SKETCH_POINTS) != 0,
         Sel::ExternalSketchPoint { .. } => a & selection::EXTERNAL_POINTS != 0,
-        Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
+        Sel::Drawing { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
     }
 }
 
@@ -3378,6 +3378,7 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         // stands for. Where it is tells two picks on one body apart.
         Sel::Vertex { body, point } if !body.is_empty() => format!("{body} · {}", crate::snap_wake::label(*point)),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
+        Sel::Drawing { object, .. } => format!("Drawing object {object}"),
         Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
         Sel::Occurrence { path } => s.occurrence_placement(path).map(|p| p.name).unwrap_or_else(|_| "Component".into()),
         Sel::Vertex { point, .. } => {
@@ -5079,8 +5080,11 @@ pub(crate) fn preset_to_object(d: &mut Dialog, on: bool) {
     }
 }
 
+/// A To or From Object input takes a face, a body vertex or a snap point: the end or middle of a
+/// sketch line or an edge, or a hole's centre, as Move's points do (#17394). The command takes
+/// any point there.
 fn set_object(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
-    set_object_accepting(inputs, active, label, FACES | selection::VERTICES, on);
+    set_object_accepting(inputs, active, label, FACES | selection::VERTICES | selection::SNAP_POINTS, on);
 }
 
 /// Add or remove the pick input `label` accepting `accept`; the active input moves to it when it
@@ -8782,9 +8786,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = plane_sel(s, base).into_iter().collect();
             }
+            // The line's origin goes back as stored: numbers, or the length expressions it follows.
+            let at_zero = axis_origin.iter().all(|e| e.trim().parse::<f64>().is_ok_and(|v| v.abs() < 1e-9));
+            let origin: Vec<Value> =
+                axis_origin.iter().map(|e| e.trim().parse::<f64>().map_or_else(|_| json!(e.to_string()), |v| json!(v))).collect();
             let pick = match line {
                 Some(g) => model_axis_sel(s, g),
-                None => world_axis(*axis_dir).filter(|_| axis_origin.len() < 1e-9).map(|name| Sel::Axis { name }),
+                None => world_axis(*axis_dir).filter(|_| at_zero).map(|name| Sel::Axis { name }),
             };
             match (pick, line) {
                 (Some(pick), _) => {
@@ -8796,7 +8804,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     d.extra.insert("axis".into(), serde_json::to_value(g).unwrap_or(Value::Null));
                 }
                 (None, None) => {
-                    d.extra.insert("axis".into(), json!({"origin": pt3(*axis_origin), "dir": pt3(*axis_dir)}));
+                    d.extra.insert("axis".into(), json!({"origin": origin, "dir": pt3(*axis_dir)}));
                 }
             }
             if *direction_only {

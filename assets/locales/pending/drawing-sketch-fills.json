@@ -1,0 +1,82 @@
+{
+  "en": {
+    "cmd.drawing_fill_delete": "Delete Sheet Fill",
+    "cmd.drawing_fill_edit": "Edit Sheet Fill",
+    "cmd.drawing_fill_inspect": "Inspect Sheet Fill",
+    "cmd.drawing_fill_profiles": "List Fill Profiles",
+    "cmd.drawing_pattern_delete": "Delete Fill Pattern",
+    "cmd.drawing_pattern_import": "Import Fill Pattern",
+    "cmd.drawing_pattern_inspect": "Inspect Fill Pattern",
+    "cmd.drawing_sketch_fill": "Fill Sheet Sketch"
+  },
+  "de": {
+    "cmd.drawing_fill_delete": "Blattfüllung löschen",
+    "cmd.drawing_fill_edit": "Blattfüllung bearbeiten",
+    "cmd.drawing_fill_inspect": "Blattfüllung prüfen",
+    "cmd.drawing_fill_profiles": "Füllprofile auflisten",
+    "cmd.drawing_pattern_delete": "Füllmuster löschen",
+    "cmd.drawing_pattern_import": "Füllmuster importieren",
+    "cmd.drawing_pattern_inspect": "Füllmuster prüfen",
+    "cmd.drawing_sketch_fill": "Blattskizze füllen"
+  },
+  "ja": {
+    "cmd.drawing_fill_delete": "シートの塗りつぶしを削除",
+    "cmd.drawing_fill_edit": "シートの塗りつぶしを編集",
+    "cmd.drawing_fill_inspect": "シートの塗りつぶしを検査",
+    "cmd.drawing_fill_profiles": "塗りつぶしプロファイルを一覧表示",
+    "cmd.drawing_pattern_delete": "塗りつぶしパターンを削除",
+    "cmd.drawing_pattern_import": "塗りつぶしパターンをインポート",
+    "cmd.drawing_pattern_inspect": "塗りつぶしパターンを検査",
+    "cmd.drawing_sketch_fill": "シートスケッチを塗りつぶす"
+  },
+  "zh": {
+    "cmd.drawing_fill_delete": "删除图纸填充",
+    "cmd.drawing_fill_edit": "编辑图纸填充",
+    "cmd.drawing_fill_inspect": "检查图纸填充",
+    "cmd.drawing_fill_profiles": "列出填充轮廓",
+    "cmd.drawing_pattern_delete": "删除填充图案",
+    "cmd.drawing_pattern_import": "导入填充图案",
+    "cmd.drawing_pattern_inspect": "检查填充图案",
+    "cmd.drawing_sketch_fill": "填充图纸草图"
+  },
+  "ko": {
+    "cmd.drawing_fill_delete": "시트 채우기 삭제",
+    "cmd.drawing_fill_edit": "시트 채우기 편집",
+    "cmd.drawing_fill_inspect": "시트 채우기 검사",
+    "cmd.drawing_fill_profiles": "채우기 프로파일 목록",
+    "cmd.drawing_pattern_delete": "채우기 패턴 삭제",
+    "cmd.drawing_pattern_import": "채우기 패턴 가져오기",
+    "cmd.drawing_pattern_inspect": "채우기 패턴 검사",
+    "cmd.drawing_sketch_fill": "시트 스케치 채우기"
+  },
+  "ar": {
+    "cmd.drawing_fill_delete": "حذف تعبئة الورقة",
+    "cmd.drawing_fill_edit": "تعديل تعبئة الورقة",
+    "cmd.drawing_fill_inspect": "فحص تعبئة الورقة",
+    "cmd.drawing_fill_profiles": "عرض مقاطع التعبئة",
+    "cmd.drawing_pattern_delete": "حذف نمط التعبئة",
+    "cmd.drawing_pattern_import": "استيراد نمط التعبئة",
+    "cmd.drawing_pattern_inspect": "فحص نمط التعبئة",
+    "cmd.drawing_sketch_fill": "تعبئة رسم الورقة"
+  },
+  "he": {
+    "cmd.drawing_fill_delete": "מחיקת מילוי בגיליון",
+    "cmd.drawing_fill_edit": "עריכת מילוי בגיליון",
+    "cmd.drawing_fill_inspect": "בדיקת מילוי בגיליון",
+    "cmd.drawing_fill_profiles": "הצגת פרופילי מילוי",
+    "cmd.drawing_pattern_delete": "מחיקת תבנית מילוי",
+    "cmd.drawing_pattern_import": "ייבוא תבנית מילוי",
+    "cmd.drawing_pattern_inspect": "בדיקת תבנית מילוי",
+    "cmd.drawing_sketch_fill": "מילוי סקיצה בגיליון"
+  },
+  "vi": {
+    "cmd.drawing_fill_delete": "Xoá vùng tô trên tờ",
+    "cmd.drawing_fill_edit": "Sửa vùng tô trên tờ",
+    "cmd.drawing_fill_inspect": "Kiểm tra vùng tô trên tờ",
+    "cmd.drawing_fill_profiles": "Liệt kê biên dạng tô",
+    "cmd.drawing_pattern_delete": "Xoá mẫu tô",
+    "cmd.drawing_pattern_import": "Nhập mẫu tô",
+    "cmd.drawing_pattern_inspect": "Kiểm tra mẫu tô",
+    "cmd.drawing_sketch_fill": "Tô bản phác thảo trên tờ"
+  }
+}

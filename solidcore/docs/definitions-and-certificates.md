@@ -271,6 +271,7 @@ written as the operations it counts:
 | where | count | what it bounds |
 |---|---|---|
 | `eval::collapse` (private `de_boor`) | γ_(12p+4) of the largest coordinate | de Boor's p levels, three operations for each coefficient and four for each convex combination |
+| `eval::collapse` (private `bezier_piece`, `rational_partial_bound`) | G γ_(12p+4) of the largest coordinate, G the levels' growth (\|1 − α\| + \|α\| past a span); γ_6, γ_3 and γ_2 on lengths, weight products and weights; the bound × (1 + γ_32); the moved net's gap √3 γ_2 (\|c₀\| w + \|h\|) / w | a rational net's rows in Bézier form over a piece, blossomed past their span, and its partial bound, taken on the net moved by minus its box's middle c₀ |
 | `eval::sphere` (`Coefficient::finish`) | γ_(8 + 8·degree + terms) | a Bernstein coefficient of \|H − CW\|² − R²W² |
 | `blend::fillet_section::recertify::precision_floor` | G (D + γ_K M), K = 2(n + 1) + 6 | the net's rows from the stations |
 | `surface::procedural_sweep::ProceduralSweep::floor` | G γ_(2(p+3)+24) (A + (R + λ)Θ + R) | the sweep's net and evaluation |

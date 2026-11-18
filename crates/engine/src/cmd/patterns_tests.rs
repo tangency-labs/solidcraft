@@ -365,18 +365,17 @@ fn circular_axis_origin_rejects_invalid_values_atomically() {
     let before = s.doc.to_json();
     let undo = s.undo.len();
     let invalid = [json!([0, 0]), json!([0, 0, 0, 0]), json!(null), json!(false), json!({"x":0,"y":0}), json!([1e9, 0, 0]), json!([0, 1e100, 0])];
-    // A circular pattern's origin takes length expressions (#10852); an angled plane's doesn't.
+    // A circular pattern's origin and an angled plane's both take length expressions (#10852),
+    // so both refuse the same values.
     for origin in invalid.iter().chain(&[json!(["nope", 0, 0]), json!(["2 deg", 0, 0])]) {
         let params = json!({"features":["Hole1"],"axis":{"origin":origin,"dir":[0,0,1]},"count":4});
         let error = s.execute("solid.pattern.circular", &params).unwrap_err().to_string();
         assert!(error.contains("axis.origin"), "{origin}: {error}");
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(s.undo.len(), undo);
-    }
-    for origin in invalid.iter().chain(&[json!(["cx", "cy", 0]), json!(["50", 25, 0])]) {
         let params = json!({"base":"XY","axis":{"origin":origin,"dir":[1,0,0]},"angle":45});
         let error = s.execute("construct.plane.at_angle", &params).unwrap_err().to_string();
-        assert!(error.contains("axis.origin") && error.contains("expressions are not supported"), "{error}");
+        assert!(error.contains("axis.origin"), "{origin}: {error}");
         assert_eq!(s.doc.to_json(), before);
         assert_eq!(s.undo.len(), undo);
     }
