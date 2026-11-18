@@ -343,6 +343,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
                     "velocity": {"type": "number", "description": "urdf: joint velocity limit, m/s or rad/s (default 10)"},
+                    "images": {"type": "boolean", "description": "urdf: also write each picture shown on the model as a textured visual (default false)"},
                     "name": string("sdf: the model's name (default: the folder's name)"),
                     "static": {"type": "boolean", "description": "sdf: scenery Gazebo never moves (default true); false gives it the bodies' mass"},
                     "model_uris": {"type": "boolean", "description": "sdf: name files as model://<folder>/<file> (default false: relative to model.sdf)"},
@@ -995,9 +996,11 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             p["expression"] = parameter_value(a)?;
             exec(b, "parameters.change", p)
         }
-        "export" => {
-            exec(b, "file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "name", "static", "model_uris"]))
-        }
+        "export" => exec(
+            b,
+            "file.export",
+            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "images", "name", "static", "model_uris"]),
+        ),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
             None => exec(b, "diagnostics.crash_reports", pick(a, &["limit"])),
@@ -1209,9 +1212,10 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         }
         "undo" => mapped("edit.undo", json!({})),
         "redo" => mapped("edit.redo", json!({})),
-        "export" => {
-            mapped("file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "name", "static", "model_uris"]))
-        }
+        "export" => mapped(
+            "file.export",
+            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "images", "name", "static", "model_uris"]),
+        ),
         "save" => mapped("file.save", pick(a, &["path", "format"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names"])),
         "new_design" => mapped("file.new", pick(a, &["name"])),

@@ -136,9 +136,15 @@ fn urdf_writes_decals_as_textured_visuals() {
     run(&mut s, "canvas.insert", json!({"data": png, "plane": "XY", "width": 8, "name": "Tag"}));
     run(&mut s, "canvas.insert", json!({"data": png, "plane": "XY", "width": 8, "name": "Hidden"}));
     run(&mut s, "canvas.edit", json!({"canvas": "Hidden", "visible": false}));
+    // Asked for the usual way, the export writes no picture, as before.
+    let plain = temp("decal-plain");
+    run(&mut s, "file.export", json!({"path": plain.join("t.urdf").to_string_lossy()}));
+    let mut files: Vec<String> = std::fs::read_dir(&plain).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    files.sort();
+    assert_eq!(files, ["t-A.stl", "t-B.stl", "t.urdf"]);
     let d = temp("decal");
     let path = d.join("t.urdf");
-    let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy()}));
+    let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "images": true}));
     let mut files: Vec<String> = std::fs::read_dir(&d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
     files.sort();
     assert_eq!(files, ["t-A.stl", "t-B-Logo.dae", "t-B-Logo.png", "t-B-Tag.dae", "t-B-Tag.png", "t-B.stl", "t.urdf"], "{r}");
@@ -156,21 +162,19 @@ fn urdf_writes_decals_as_textured_visuals() {
         .map(|x| x.split_whitespace().filter_map(|v| v.parse().ok()).collect())
         .unwrap_or_default();
     assert_eq!(positions.len(), 24);
-    let (vals, _) = s.doc.param_values();
-    let c = s.doc.canvases.iter().find(|c| c.name == "Logo").unwrap();
-    let to_b = solidcraft_doc::mat_inverse(&s.doc.component_transform(c.component)).unwrap();
-    let shown = s.doc.canvas_corners(&vals, c, &s.model.state()).unwrap().map(|p| solidcraft_doc::apply_point(&to_b, p));
-    let (bl, br, tl) = (shown[0], shown[1], shown[3]);
-    assert!(((br - bl).len() - 8.0).abs() < 1e-9 && ((tl - bl).len() - 4.0).abs() < 1e-9, "8 x 4 mm: {shown:?}");
-    let n = (br - bl).cross(tl - bl).normalized().unwrap();
-    for (k, corner) in positions.chunks(3).enumerate() {
-        let side = if k < 4 { 0.2 } else { -0.2 };
-        let want = (shown[k % 4] + n * side) * 1e-3;
-        assert!(
-            (corner[0] - want.x).abs() < 1e-12 && (corner[1] - want.y).abs() < 1e-12 && (corner[2] - want.z).abs() < 1e-12,
-            "{k}: {corner:?} vs {want:?}"
-        );
-    }
+    // Worked out by hand: B is placed where it was built, so its frame is the world's. The decal
+    // is 8 x 4 mm (the image is 2:1) about (25, 5) on B's top face at z = 10, along the face's
+    // axes either way round; the front quad 0.2 mm above the face, the back quad 0.2 mm below.
+    let corners: Vec<[f64; 3]> = positions.chunks(3).map(|p| [p[0] * 1e3, p[1] * 1e3, p[2] * 1e3]).collect();
+    let mut front: Vec<(i64, i64)> = corners[..4].iter().map(|p| ((p[0] * 1e3).round() as i64, (p[1] * 1e3).round() as i64)).collect();
+    front.sort();
+    let along_x = [(21000, 3000), (21000, 7000), (29000, 3000), (29000, 7000)];
+    let along_y = [(23000, 1000), (23000, 9000), (27000, 1000), (27000, 9000)];
+    assert!(front == along_x || front == along_y, "{corners:?}");
+    let mut back: Vec<(i64, i64)> = corners[4..].iter().map(|p| ((p[0] * 1e3).round() as i64, (p[1] * 1e3).round() as i64)).collect();
+    back.sort();
+    assert_eq!(back, front, "the back quad has the front's corners");
+    assert!(corners[..4].iter().all(|p| (p[2] - 10.2).abs() < 1e-9) && corners[4..].iter().all(|p| (p[2] - 9.8).abs() < 1e-9), "{corners:?}");
 }
 
 fn names(m: &UrdfModel) -> (Vec<&str>, Vec<&str>) {

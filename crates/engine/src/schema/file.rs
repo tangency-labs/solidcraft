@@ -125,6 +125,10 @@ pub struct ExportUrdfParams {
     /// Each joint's velocity limit, a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// Also write each picture shown on the model (Canvas or Decal) as a textured COLLADA quad
+    /// and its image, in one more `<visual>` of its part's link. Default: false.
+    #[serde(default)]
+    pub images: Option<bool>,
 }
 
 /// Export the design as a Gazebo model folder (docs/sdf.md): `model.config`, `model.sdf`, an STL
@@ -193,6 +197,9 @@ pub struct ExportParams {
     /// URDF only: each joint's velocity limit, a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
+    /// URDF only: also write each picture shown on the model as a textured visual. Default: false.
+    #[serde(default)]
+    pub images: Option<bool>,
     /// STL and 3MF only: true writes each body with a print face laid on it, as
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
@@ -276,6 +283,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             mesh_prefix: None,
             effort: None,
             velocity: None,
+            images: None,
             lay_on_print_faces: None,
             name: None,
             is_static: None,
@@ -309,6 +317,10 @@ impl<'de> Deserialize<'de> for ExportParams {
             };
             out.effort = positive("effort")?;
             out.velocity = positive("velocity")?;
+            out.images = match m.get("images") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(v.as_bool().ok_or_else(|| refuse::<D::Error>("`images` must be true or false"))?),
+            };
             return Ok(out);
         }
         out.quality = quality::<D::Error>(&m)?;
