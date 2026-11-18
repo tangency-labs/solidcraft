@@ -2154,7 +2154,7 @@ impl FilletSession<'_> {
         // one it rolls on, and its extension would not close on that face. (A face of
         // another surface the rail lies on, as a crease along an edge lies on both its
         // faces, keeps it.)
-        let mut on_faces: Vec<Vec<FaceId>> = Vec::with_capacity(lamina_edges.len());
+        let mut on_faces: Vec<Vec<FaceId>> = Vec::new();
         for &e in &lamina_edges {
             let mut on = Vec::new();
             for &f in &target_faces {
@@ -2173,7 +2173,7 @@ impl FilletSession<'_> {
                     }
                 }
             }
-            let mut kept = Vec::with_capacity(on.len());
+            let mut kept = Vec::new();
             for &f in &on {
                 let mut beside = false;
                 if !own.contains(&f) {
