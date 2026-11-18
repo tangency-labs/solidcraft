@@ -1272,7 +1272,6 @@ mod tests {
         }
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
-        h.app.preferences.drawings_preview = true;
         h.call("ui.workspace", json!({"workspace":"drawing"}));
         h.frames(3);
         let model = h.app.session.doc.clone();
