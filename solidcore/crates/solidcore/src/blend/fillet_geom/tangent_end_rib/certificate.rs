@@ -52,6 +52,7 @@ use crate::geom::krawczyk::{
     contraction, inverse_of_columns3, krawczyk, newton, plus_c_times, Linearised,
 };
 use crate::kernel::Kernel;
+use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 /// The continuity a face needs across a knot line inside a box for its second partials:
@@ -85,16 +86,17 @@ pub(super) type Solve<'a> = dyn Fn(f64, [f64; 3]) -> Result<Option<[f64; 3]>> + 
 pub(super) enum Bound {
     /// Certified: the largest distance of the curves from the rib, within the tolerance.
     Within(f64),
-    /// The curves are off: a piece end farther from the rib than the tolerance, or a piece
-    /// bounded only over it after the last halving. More stations move the curves.
+    /// A piece end farther from the rib than the tolerance, or a piece bounded only over it
+    /// after the last halving: the curves are off, and more stations move them.
     Over,
-    /// The rib is not enclosed over a piece (its root, path or derivatives: Krawczyk's
-    /// test does not contract there), a property of the faces that more stations do not
-    /// change.
+    /// A piece not bounded at all: the rib's root, its path or a derivative not enclosed
+    /// (Krawczyk's test does not contract), or an error not enclosed over the box the
+    /// curves' errors widen.
     Unenclosed,
-    /// The first span only: its graded pieces are certified down to `t*`, where they stop
-    /// unenclosed, and `[0, t*]` is not bounded within the tolerance. `[0, t*]` carries no
-    /// claim (the maintainer's answer on #18674).
+    /// The first span only: at least one graded piece is certified, the pieces stop at
+    /// `t*` (a piece not bounded at all, no Newton root, or the last of [`GRADES`]), and
+    /// `[0, t*]` is not bounded within the tolerance. `[0, t*]` carries no claim (the
+    /// maintainer's answer on #18674).
     Open,
 }
 
@@ -114,16 +116,21 @@ pub(super) enum Face<'f> {
 
 impl<'f> Face<'f> {
     /// The face `s` as the certificate encloses it, or `None` where it is not enclosed (a
-    /// STEP, offset, curve-bounded or in-volume face; a blend by its definition that
-    /// [`definition_enclosable`] does not take, such as one of contact order 2): the rib
-    /// is then built without a bound (the maintainer's design on #18674).
+    /// STEP, offset, curve-bounded or in-volume face; a B-spline face in power-basis form;
+    /// a blend by its definition that [`definition_enclosable`] does not take, such as one
+    /// of contact order 2): the rib is then built without a bound (the maintainer's design on #18674).
     ///
     /// # Errors
     ///
     /// Those of the face's NURBS data ([`as_b_spline`]); a cancellation.
     pub(super) fn of(k: &'f Kernel, s: &'f Surface) -> Result<Option<Self>> {
-        let net =
-            || -> Result<Option<Nurbs>> { Ok(as_b_spline(k, s)?.and_then(|b| Nurbs::of(&b).ok())) };
+        // a face in power-basis form is evaluated from its coefficients, not as a B-spline
+        // net: not enclosed
+        let net = || -> Result<Option<Nurbs>> {
+            Ok(as_b_spline(k, s)?
+                .filter(|b| b.form() != BSplineSurfaceForm::Polynomial)
+                .and_then(|b| Nurbs::of(&b).ok()))
+        };
         let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
             return Ok(net()?.map(Face::Nurbs));
         };
@@ -581,7 +588,9 @@ impl Rib<'_, '_> {
         if let Some(e2) = self.second_over(t, y) {
             let rem = w * w / Ivl::from(8.0);
             for (((ci, &ea), &eb), &d2) in c.iter_mut().zip(&a.e).zip(&b.e).zip(&e2) {
-                *ci = (Ivl::from(ea.max(eb)) + rem * Ivl::from(d2)).hi;
+                // (a NaN end error stays NaN, so `distance` refuses it)
+                *ci =
+                    (Ivl::from(if ea.is_nan() { ea } else { ea.max(eb) }) + rem * Ivl::from(d2)).hi;
             }
         }
         let first = self.distance(t, y, c);
@@ -624,8 +633,11 @@ impl Rib<'_, '_> {
         let d_end = (Ivl::from(norm(e.at(1, 0))) * Ivl::from(cu)
             + Ivl::from(norm(e.at(0, 1))) * Ivl::from(cv))
         .hi;
-        let d = d3.max(d_fil).max(d_end);
-        d.is_finite().then_some(d)
+        // every term finite (`f64::max` drops a NaN)
+        let ds = [d3, d_fil, d_end];
+        ds.iter()
+            .all(|d| d.is_finite())
+            .then(|| ds.into_iter().fold(0.0, f64::max))
     }
 
     /// The certified bound of the span `[t0, t1]` (the roots `y0`, `y1` at its stations)
@@ -684,12 +696,13 @@ impl Rib<'_, '_> {
     /// tangent end) (#17744). Its pieces are graded geometrically toward the tangent end,
     /// `[t/2, t]`, each bounded as a span ([`Self::span_bound`]): the Jacobian is singular
     /// at the tangent end, and over `[t/2, t]` its least singular value changes by the
-    /// same factor at every depth, so a piece needs as many halvings at every depth. A
-    /// piece over the tolerance ends the span as [`Bound::Over`], to be refined. The pieces
-    /// go on while they are certified, down to `t*`, the lower end of the last one, where
-    /// the rib stops being enclosed (more stations do not move `t*`); `[0, t*]` is bounded
-    /// without the Jacobian ([`Self::near_bound`]), and where that bound is not within the
-    /// tolerance the span is [`Bound::Open`]: `[0, t*]` carries no claim.
+    /// same factor at every depth, so a piece needs as many halvings at every depth. The
+    /// pieces go on while they are certified, down to `t*`, the lower end of the last one;
+    /// `[0, t*]` is bounded without the Jacobian ([`Self::near_bound`]). Where that bound
+    /// is not within the tolerance, the span is [`Bound::Over`] if the piece that stopped
+    /// the grading was over it, [`Bound::Unenclosed`] if no piece was certified (`t* =
+    /// t1`; more stations shorten the span), else [`Bound::Open`]: `[0, t*]` carries no
+    /// claim.
     pub(super) fn first_span_bound(
         &self,
         solve: &Solve<'_>,
@@ -701,6 +714,7 @@ impl Rib<'_, '_> {
         let m = if self.odd { self.order } else { self.order / 2 }.max(1);
         let mut worst = 0.0_f64;
         let (mut hi_t, mut hi_y) = (t1, y1);
+        let mut stop = Bound::Open;
         for _ in 0..GRADES {
             self.kernel.check_cancelled(OP)?;
             let lo_t = 0.5 * hi_t;
@@ -717,12 +731,20 @@ impl Rib<'_, '_> {
                     hi_t = lo_t;
                     hi_y = lo_y;
                 }
-                Bound::Over => return Ok(Bound::Over),
-                Bound::Unenclosed | Bound::Open => break,
+                other => {
+                    stop = other;
+                    break;
+                }
             }
         }
-        Ok(match self.near_bound(p, (hi_t, hi_y), tol)? {
-            Some(near) if near <= tol => Bound::Within(worst.max(near)),
+        if let Some(near) = self.near_bound(p, (hi_t, hi_y), tol)? {
+            if near <= tol {
+                return Ok(Bound::Within(worst.max(near)));
+            }
+        }
+        Ok(match stop {
+            Bound::Over => Bound::Over,
+            _ if hi_t >= t1 => Bound::Unenclosed,
             _ => Bound::Open,
         })
     }
@@ -877,7 +899,9 @@ impl Rib<'_, '_> {
     ///   within `A/2` at `t*` and has `lambda = 0`, so it never crosses that ring: `|alpha −
     ///   alpha0| < A` over `[0, t*]`. ARGUED, not checked: on the ring the rib's end UV is
     ///   the separation's root in its box (the one root there), that is the end surface
-    ///   meets the section only once near the tangent end (it is one-to-one there). Where the ring holds a sign change, `A` is doubled
+    ///   meets the section only once near the tangent end (it is one-to-one there), and the
+    ///   rib is one continuous branch from the tangent end to `t*` (the ring bounds a branch
+    ///   that exists; it does not prove that one does). Where the ring holds a sign change, `A` is doubled
     ///   (the gap `½ Δκ (A² − a(t*)²) − θ A` grows with it), at most [`WIDENINGS`] times,
     ///   while `|S_alpha| A` is within `tol`; where `Δκ` vanishes it never clears, and
     ///   `[0, t*]` is not bounded ([`Bound::Open`]).
@@ -971,7 +995,12 @@ impl Rib<'_, '_> {
                 v_add(v_sub(x0, s_p(0, 0)), v_scale(v_sub(x1, known), t)),
                 off,
             );
-            worst = worst.max(norm(e));
+            let d = norm(e);
+            // (`f64::max` drops a NaN)
+            if !d.is_finite() {
+                return None;
+            }
+            worst = worst.max(d);
         }
         worst.is_finite().then_some(worst)
     }

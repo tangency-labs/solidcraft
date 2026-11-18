@@ -214,13 +214,13 @@ pub struct TangentEndRib {
     /// inside a scope that answers by its net is that net; one evaluated by its definition
     /// is the definition. `None` where the rib makes no claim:
     ///
-    /// - a face is not enclosed (a STEP, offset, curve-bounded or in-volume face, or a
-    ///   definition of contact order 2): the rib is built as upstream builds it, on its
+    /// - a face is not enclosed (a STEP, offset, curve-bounded or in-volume face, a face in
+    ///   power-basis form, or a definition of contact order 2): the rib is built as upstream builds it, on its
     ///   spans' midpoints;
     /// - the faces are enclosed, but near the tangent end, `[0, t*]`, the rib is not bounded
-    ///   within the tolerance (the certificate's graded pieces stop being enclosed at `t*`):
-    ///   every other part of the rib is certified within the tolerance as for `Some`, and
-    ///   `[0, t*]` carries no claim.
+    ///   within the tolerance (`t*` where the certificate's graded pieces stop): every other
+    ///   part of the rib is certified within the tolerance as for `Some`, the first span is
+    ///   compared at its midpoint as upstream, and `[0, t*]` carries no claim.
     pub bound: Option<f64>,
 }
 
@@ -666,9 +666,9 @@ pub fn tangent_end_rib(
                         bound = bound.max(d);
                         continue;
                     }
-                    // certified down to t*; more stations do not move t*: the span is
-                    // compared at its midpoint as upstream compares it (inside the
-                    // certified part), and the rib makes no claim
+                    // certified down to t* below t1, [0, t*] not bounded: the span is
+                    // compared at its midpoint as upstream compares it, and the rib makes
+                    // no claim
                     certificate::Bound::Open => {
                         open = true;
                         upstream_check = true;
@@ -856,6 +856,44 @@ mod tests {
         let bound = rib.bound.unwrap();
         assert!(bound <= tol, "{bound:e}");
         assert!(worst <= bound + 1e-12, "{worst:e} > {bound:e}");
+        let same = same_parameter_off(&k, &rib, &fillet, &end, &|t| on_bumped_rib(&k, &end, t));
+        assert!(same <= bound + 1e-12, "{same:e} > {bound:e}");
+    }
+
+    /// The bumped surfaces' rib point at `t`: the section is `y = t` (the fillet surface's
+    /// u), on the end surface at `(t, 1/2)` (its `y` is `u`, its `z` is `2v − 1`).
+    fn on_bumped_rib(k: &Kernel, end: &Surface, t: f64) -> Point3 {
+        end.evaluate_point(k, Point2::new(t, 0.5)).unwrap()
+    }
+
+    /// The farthest each of the rib's curves is from the rib point `exact(t)` at the same
+    /// parameter, at 1001 parameters: the 3D curve's point, and each UV curve's point on its
+    /// surface. The bound claims this distance.
+    fn same_parameter_off(
+        k: &Kernel,
+        rib: &TangentEndRib,
+        fillet: &Surface,
+        end: &Surface,
+        exact: &dyn Fn(f64) -> Point3,
+    ) -> f64 {
+        let ivl = rib.curve_3d.natural_interval();
+        let on = |c: &BSplineCurve, s: &Surface, t: f64| {
+            let p = c.evaluate_point(t).unwrap();
+            s.evaluate_point(k, Point2::new(p.x, p.y)).unwrap()
+        };
+        let mut worst: f64 = 0.0;
+        for i in 0..=1000 {
+            let t = ivl.min() + (ivl.max() - ivl.min()) * f64::from(i) / 1000.0;
+            let x = exact(t);
+            for y in [
+                rib.curve_3d.evaluate_point(t).unwrap(),
+                on(&rib.fillet_uv, fillet, t),
+                on(&rib.end_uv, end, t),
+            ] {
+                worst = worst.max(y.distance(x));
+            }
+        }
+        worst
     }
 
     /// The farthest the rib's curves are from the surfaces, at 1001 parameters: the 3D
@@ -943,6 +981,8 @@ mod tests {
         assert!(bound <= tol, "{bound:e}");
         let worst = farthest_off(&k, &rib, &fillet, &end);
         assert!(worst <= bound + 1e-12, "{worst:e} > {bound:e}");
+        let same = same_parameter_off(&k, &rib, &fillet, &end, &|t| on_bumped_rib(&k, &end, t));
+        assert!(same <= bound + 1e-12, "{same:e} > {bound:e}");
     }
 
     /// A quarter cylinder of radius `r` round the y axis lifted by `r`, its section along u
@@ -1023,5 +1063,121 @@ mod tests {
         assert_eq!(rib.bound, None);
         let worst = farthest_off(&k, &rib, &fillet, &end);
         assert!(worst <= tol, "{worst:e}");
+    }
+
+    /// The rib point at `t` of [`tangent_end_surfaces`]: the section `sigma = t` gives the
+    /// cylinder's `x` and `z`, and the end surface `y = sqrt(r z − x² / 4)`.
+    fn on_tangent_rib(k: &Kernel, fillet: &Surface, r: f64, t: f64) -> Point3 {
+        let q = fillet.evaluate_point(k, Point2::new(t, 0.5)).unwrap();
+        Point3::new(q.x, (r * q.z - q.x * q.x / 4.0).max(0.0).sqrt(), q.z)
+    }
+
+    /// A true tangent end of contact order 2 on a small round (radius 1, the surfaces of
+    /// [`tangent_end_surfaces`]): the first span is certified to the tangent end, its
+    /// `[0, t*]` bounded without the Jacobian, and the bound holds each curve's distance
+    /// from the closed-form rib at the same parameter.
+    #[test]
+    fn a_rib_at_a_true_tangent_end_is_certified_within_the_tolerance() {
+        let k = Kernel::default();
+        let tol = 1e-5;
+        let r = 1.0;
+        let (fillet, end, other) = tangent_end_surfaces(r);
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol).unwrap();
+        let bound = rib.bound.unwrap();
+        assert!(bound <= tol, "{bound:e}");
+        let same = same_parameter_off(&k, &rib, &fillet, &end, &|t| {
+            on_tangent_rib(&k, &fillet, r, t)
+        });
+        assert!(same <= bound + 1e-12, "{same:e} > {bound:e}");
+    }
+
+    /// An end surface with a kink: `x = y − 1/2 + d(y)`, `d` the tent of height 0.1 at
+    /// `y = 0.4`, degree 1, so the rib bends there by a slope step of 0.42 and 0.4 is never
+    /// a station (the stations are dyadic). No station count bounds the cubic curves
+    /// within 1e-6 across the kink, and the rib is refused as not certified.
+    #[test]
+    fn a_rib_no_station_count_certifies_is_refused() {
+        let k = Kernel::default();
+        let p = Point3::new;
+        let fillet = BSplineSurface::create_bilinear_surface(
+            p(-1.0, 0.0, 0.0),
+            p(-1.0, 1.0, 0.0),
+            p(1.0, 0.0, 0.0),
+            p(1.0, 1.0, 0.0),
+        )
+        .unwrap();
+        let mut pts = Vec::new();
+        for (x, y) in [(-0.5, 0.0), (0.0, 0.4), (0.5, 1.0)] {
+            pts.push(p(x, y, -1.0));
+            pts.push(p(x, y, 1.0));
+        }
+        let end = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 1,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[2, 1, 2],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 0.4, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let (fillet, end) = (Surface::from(fillet), Surface::from(end));
+        let e = tangent_end_rib(
+            &k,
+            &fillet,
+            &end,
+            2,
+            p(-0.5, 0.0, 0.0),
+            p(0.5, 1.0, 0.0),
+            None,
+            false,
+            1e-6,
+        )
+        .unwrap_err();
+        assert_eq!(e.operation(), OP_RIB);
+        assert!(
+            matches!(e.blend_failure(), Some(BlendFailure::NotCertified { .. })),
+            "{e:?}"
+        );
+    }
+
+    /// The certificate's loops poll the kernel's cancellation: the clean rib cancelled at
+    /// its first poll, half way and at its last returns cancelled every time.
+    #[test]
+    fn a_rib_cancelled_while_it_is_certified_returns_cancelled() {
+        use crate::kernel::CancelToken;
+        let (fillet, end) = bumped_rib_surfaces(0.0);
+        let run = |n: u64| {
+            let mut k = Kernel::default();
+            let token = CancelToken::after_polls(n);
+            k.set_cancel_token(token.clone());
+            let r = tangent_end_rib(
+                &k,
+                &fillet,
+                &end,
+                2,
+                Point3::new(-0.5, 0.0, 0.0),
+                Point3::new(0.5, 1.0, 0.0),
+                None,
+                false,
+                1e-5,
+            );
+            (token.polls().unwrap(), r)
+        };
+        let (all, r) = run(u64::MAX);
+        assert!(r.is_ok());
+        assert!(all > 2, "the certificate polls {all} times");
+        for n in [1, all / 2, all] {
+            let (_, r) = run(n);
+            assert!(
+                r.is_err_and(|e| e.is_cancelled()),
+                "cancelled at poll {n} of {all}"
+            );
+        }
     }
 }
