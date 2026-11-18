@@ -1706,7 +1706,9 @@ impl SolveApp {
             Some(layout) if layout.starts_with("tab.layout.") => r.and_then(|v| view_setups::command(self, layout, v)),
             Some("view.set_compass") => r.and_then(|v| documents::set_compass(self, v)),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
-            Some(window) if window.starts_with("tab.window.") => r.and_then(|v| view_windows::command(self, window, v)),
+            Some(window) if window.starts_with("tab.window.") || window == "window.options.use_as_default" => {
+                r.and_then(|v| view_windows::command(self, window, v))
+            }
             _ => r,
         };
         // A grant taken back here that the shared store still holds is not taken back: say so.

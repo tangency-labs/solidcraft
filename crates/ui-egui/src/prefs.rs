@@ -1515,6 +1515,8 @@ preference_settings! {
     design_reuse_views: bool = true, PAGE_LAYOUT;
     /// A design opens with the views it had when it was last closed.
     design_reopen_views: bool = false, PAGE_LAYOUT;
+    /// Display defaults copied into a newly detached design window.
+    pop_out_window_defaults: solidcraft_views::WindowOptions = solidcraft_views::WindowOptions::default(), PAGE_LAYOUT;
     /// Named, app-wide arrangements of design windows.
     view_window_setups: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     /// Windows only: while the window is dragged by its title bar, nothing is drawn, so the window

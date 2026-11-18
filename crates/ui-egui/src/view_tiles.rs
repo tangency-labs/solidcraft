@@ -152,6 +152,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let area = ui.max_rect();
     let Some(tiles) = app.docs.views.tiles().cloned() else { return };
     let focus = app.docs.views.active().id;
+    let headers = crate::view_windows::child_options(app).card_headers;
     let render_ground = app.docs.views.active().kind == ViewKind::Render;
     let (free, _) = layout_bounds(app, area);
     let mut places: Vec<(u64, Rect)> = tiles.rects(to_tile(free), GUTTER).into_iter().map(|(id, r)| (id, from_tile(r))).collect();
@@ -181,7 +182,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let Some(kind) = app.docs.views.get(id).map(|view| view.kind) else { continue };
         // A press on a header button is the button's: focusing the card first would take its buttons away before the click ends.
         let header_slots = 4;
-        let on_button = press.is_some_and(|p| !is_ground && (0..header_slots).any(|slot| button_rect(cell, slot as f32).contains(p)));
+        let on_button = press.is_some_and(|p| {
+            !is_ground && card_header_visible(ui, cell, id, headers) && (0..header_slots).any(|slot| button_rect(cell, slot as f32).contains(p))
+        });
         let mut tile = ui.new_child(UiBuilder::new().id_salt(("view_tile", app.session.uid, id)).max_rect(frame));
         tile.set_clip_rect(ui.clip_rect().intersect(if is_ground && !render_ground { area } else { frame }));
         app.viewport.tile = Some(slot(id));
@@ -218,7 +221,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut chosen = None;
     for (id, body) in cards.iter().filter(|_| !clean) {
         let card = Rect::from_min_max(body.min - vec2(0.0, HEADER), body.max);
-        if let Some(action) = card_chrome(app, ui, *id, card) {
+        if let Some(action) = card_chrome(app, ui, *id, card, headers) {
             chosen = Some((*id, action));
         }
     }
@@ -678,9 +681,26 @@ pub(crate) fn card_shadow(card: Rect, radius: CornerRadius) -> egui::epaint::Rec
     egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: egui::Color32::from_black_alpha(70) }.as_shape(card, radius)
 }
 
-/// A card lifted off the focused view: a soft shadow around it, its frame, and a header with the
-/// view's name that stays clear of the panels floating over it.
-fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option<CardAction> {
+fn card_header_visible(ui: &egui::Ui, card: Rect, id: u64, headers: solidcraft_views::CardHeaders) -> bool {
+    use solidcraft_views::CardHeaders;
+    match headers {
+        CardHeaders::Always => true,
+        CardHeaders::Hidden => false,
+        CardHeaders::Hover => {
+            let scope = ui.scope_id();
+            ui.rect_contains_pointer(card)
+                || ui.memory(|memory| {
+                    memory.has_focus(scope.with(("card_view_menu", id))) || (0..3).any(|slot| memory.has_focus(scope.with(("card_button", id, slot))))
+                })
+        }
+    }
+}
+
+/// A card lifted off the focused view: its soft shadow, frame, and optional header.
+fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, cell: Rect, headers: solidcraft_views::CardHeaders) -> Option<CardAction> {
+    let visible = card_header_visible(ui, cell, id, headers);
+    // View framing is independent of whether the title and controls are drawn.
+    let card = if visible { cell } else { frame_of(cell) };
     let t = Tokens::get();
     let radius = CornerRadius::same(CARD_RADIUS);
     let shadow = card_shadow(card, radius);
@@ -695,10 +715,12 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
         ui.painter().with_clip_rect(strip).add(shadow.clone());
     }
     let painter = ui.painter().with_clip_rect(card);
-    let top = Rect::from_min_size(card.min, vec2(card.width(), HEADER));
-    let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
-    let label = clear_of_panels(app, Rect::from_min_size(top.left_top() + vec2(10.0, 0.0), vec2(120.0, HEADER)));
-    paint_card_header(&painter, top, CARD_RADIUS, name, label.left());
+    if visible {
+        let top = Rect::from_min_size(cell.min, vec2(cell.width(), HEADER));
+        let name = app.docs.views.get(id).map_or("", |view| view.name.as_str());
+        let label = clear_of_panels(app, Rect::from_min_size(top.left_top() + vec2(10.0, 0.0), vec2(120.0, HEADER)));
+        paint_card_header(&painter, top, CARD_RADIUS, name, label.left());
+    }
     // The picture is square: the ground's colour fills what the rounded corners leave out.
     let area = ui.max_rect();
     let [top, bottom] =
@@ -710,9 +732,17 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     corner_mask(&painter, card.left_bottom(), [1.0, -1.0], backdrop(card.bottom()));
     corner_mask(&painter, card.right_bottom(), [-1.0, -1.0], backdrop(card.bottom()));
     painter.rect_stroke(card.shrink(0.5), radius, Stroke::new(1.0, t.border), StrokeKind::Inside);
+    if headers == solidcraft_views::CardHeaders::Hidden {
+        return None;
+    }
+    // Hover mode leaves the controls reachable with Tab. Focus reveals the header.
+    let mut painter = ui.painter().with_clip_rect(cell);
+    if !visible {
+        painter.set_invisible();
+    }
     let mut action = None;
     let mut button = |slot: f32, kind: CardAction| {
-        let rect = button_rect(card, slot);
+        let rect = button_rect(cell, slot);
         let resp = ui.interact(rect, ui.scope_id().with(("card_button", id, slot as i32)), Sense::click());
         let tip = match kind {
             CardAction::Maximise => solidcraft_ui_text::tr_label("Maximise this view"),
@@ -749,7 +779,7 @@ fn card_chrome(app: &SolveApp, ui: &mut egui::Ui, id: u64, card: Rect) -> Option
     button(0.0, CardAction::Close);
     button(1.0, CardAction::Maximise);
     button(2.0, CardAction::Remove);
-    let rect = button_rect(card, 3.0);
+    let rect = button_rect(cell, 3.0);
     let response = ui.interact(rect, ui.scope_id().with(("card_view_menu", id)), Sense::click());
     let tip = app.tr("view_menu.open");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
