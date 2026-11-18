@@ -857,7 +857,7 @@ fn verify_openpgp(key: &[u8], signature: &[u8], message: &[u8]) -> std::result::
     // The key's own paperwork: how long it is good for, and whether it was revoked. Read
     // BEFORE the bindings: a key that was revoked does not get to be valid because its
     // bindings verify.
-    // check_key_state(&key)?;
+    check_key_state(&key)?;
     // The embedded key must be internally coherent: its self-signatures, and a signing subkey's
     // binding to the primary key (and back-signature), have to verify. A signature is reported
     // under the primary key's fingerprint, so trusting the primary covers its bound subkeys.
@@ -878,6 +878,43 @@ fn verify_openpgp(key: &[u8], signature: &[u8], message: &[u8]) -> std::result::
     let fingerprint = format!("{:X}", key.fingerprint());
     let user_id = key.details.users.first().and_then(|user| user.id.as_str()).map(str::to_owned);
     Ok((fingerprint, user_id))
+}
+
+/// Whether the key that signed is good for: not expired, not revoked (#15722).
+///
+/// The key's self-signature says how long the key is good for (the expiry is the day it
+/// was signed plus the time it carries), and a revocation signature says the key is not
+/// good any more. Neither was read before: a signature made by a key that had expired, or
+/// that had been revoked, was still reported as valid.
+fn check_key_state(key: &SignedPublicKey) -> std::result::Result<(), String> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|since| since.as_secs()).unwrap_or_default();
+    // The primary key's revocation: the parser puts the revocation signatures (the 0x20
+    // ones) there and nothing else.
+    if !key.details.revocation_signatures.is_empty() {
+        return Err("the signing key was revoked".into());
+    }
+    // The primary key's expiry: the self-signature says when the key stops being good.
+    let self_signatures: Vec<&pgp::packet::Signature> = key.details.users.iter().flat_map(|user| user.signatures.iter()).collect();
+    if let Some(expiry) = expiry_at(&self_signatures)
+        && expiry <= now
+    {
+        return Err(format!("the signing key expired on {}", day(expiry)));
+    }
+    // The signing subkey: its own revocation and its own expiry. A subkey that is bound to
+    // a live primary key can still be revoked on its own.
+    for subkey in &key.public_subkeys {
+        if subkey.signatures.iter().any(|signature| signature.typ() == Some(pgp::packet::SignatureType::SubkeyRevocation)) {
+            return Err("the signing key's subkey was revoked".into());
+        }
+        let bindings: Vec<&pgp::packet::Signature> =
+            subkey.signatures.iter().filter(|signature| signature.typ() == Some(pgp::packet::SignatureType::SubkeyBinding)).collect();
+        if let Some(expiry) = expiry_at(&bindings)
+            && expiry <= now
+        {
+            return Err(format!("the signing key's subkey expired on {}", day(expiry)));
+        }
+    }
+    Ok(())
 }
 
 /// The day the key stops being good for, in seconds since the epoch.
