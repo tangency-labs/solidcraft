@@ -9823,7 +9823,16 @@ fn replay(
                         }
                         // A copy of a fillet with per-edge radii pairs each copied edge with its radius.
                         (FeatureKind::Fillet { turn, .. }, None) if each_r.is_some() => {
+                            // Before its fillet has run (a pattern placed ahead of it): the radii
+                            // pair with the picks, so their count is checked as the fillet checks it.
                             let all = each_r.as_deref().unwrap_or(&[]);
+                            if all.len() != edges.len() {
+                                return Err(DocError::Invalid(format!(
+                                    "`edge_radii` gives {} radii for {} picked edges: one per edge, in the order of `edges`",
+                                    all.len(),
+                                    edges.len()
+                                )));
+                            }
                             let used: Vec<f64> = idx.iter().map(|i| all.get(*i).copied().unwrap_or(r)).collect();
                             mb.traced().then(kernel::fillet_each(&mb.body, &moved, &used, turn.kernel())?)
                         }
@@ -11685,11 +11694,12 @@ fn eval_feature_kind(
                 _ => false,
             };
             let mut picks = Vec::with_capacity(groups.len());
-            // Per-edge radii: each resolved edge point keyed (exactly) to its pick and radius. The
-            // smooth-edge filter below only drops picks, so the keys survive it.
-            let key = |p: &Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
-            let mut radius_of: BTreeMap<[u64; 3], (usize, f64)> = BTreeMap::new();
-            let mut by_pick: Vec<(usize, Vec3)> = Vec::new();
+            // Per-edge radii: each resolved edge point, on its body, keyed (exactly) to its pick and
+            // radius. The smooth-edge filter below only drops picks, so the keys survive it.
+            let key = |ti: usize, p: &Vec3| (ti, [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+            let mut radius_of: BTreeMap<(usize, [u64; 3]), (usize, f64)> = BTreeMap::new();
+            // (pick, the blended edge's middle, its radius), for pattern and mirror copies.
+            let mut by_pick: Vec<(usize, Vec3, f64)> = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
@@ -11701,7 +11711,7 @@ fn eval_feature_kind(
                         ));
                     }
                     for (p, i) in resolved.iter().zip(idx) {
-                        radius_of.insert(key(p), (*i, all.get(*i).copied().unwrap_or(r)));
+                        radius_of.insert(key(*ti, p), (*i, all.get(*i).copied().unwrap_or(r)));
                     }
                 }
                 picks.push((*ti, resolved));
@@ -11717,7 +11727,8 @@ fn eval_feature_kind(
                 let mut note = None;
                 let propagated = edges.len() > picked;
                 // This body's edges' own radii, found by their resolved points.
-                let each: Option<Vec<f64>> = each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(e)).map_or(r, |(_, x)| *x)).collect());
+                let each: Option<Vec<f64>> =
+                    each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(ti, e)).map_or(r, |(_, x)| *x)).collect());
                 let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
                     .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
                 if let Some(n) = note {
@@ -11726,21 +11737,26 @@ fn eval_feature_kind(
                 reduced |= used.is_some();
                 fitted.extend(used.unwrap_or_else(|| vec![r; edges.len()]));
                 tapered_all.extend(tapered);
-                if each.is_some() {
-                    // Per-edge radii: each blended edge with its pick, so a pattern's copies pair each with its radius.
-                    by_pick.extend(edges.iter().filter_map(|e| radius_of.get(&key(e)).map(|(i, _)| (*i, *e))));
-                }
                 // A pattern repeats each edge at a moved copy of a point on it: the edge's middle,
                 // never the pick, which at a vertex two edges share finds either on a copy (#16934).
-                found.extend(kernel::blend_edge_middles(&mb.body, &edges)?);
+                let middles = kernel::blend_edge_middles(&mb.body, &edges)?;
+                if each.is_some() {
+                    // Per-edge radii: each blended edge's middle with its pick and radius.
+                    by_pick.extend(edges.iter().zip(&middles).filter_map(|(e, m)| radius_of.get(&key(ti, e)).map(|(i, x)| (*i, *m, *x))));
+                }
+                found.extend(middles);
                 blended.push((ti, nb));
             }
             if !notes.is_empty() {
                 *warning = Some(notes.join("; "));
             }
             if each_r.is_some() {
-                by_pick.sort_by_key(|(i, _)| *i);
-                found = by_pick.into_iter().map(|(_, p)| p).collect();
+                // The blended edges in pick order, each with its own radius: pattern and mirror
+                // copies read the radius at the same index as the edge (as a fitted fillet's).
+                by_pick.sort_by_key(|(i, _, _)| *i);
+                found = by_pick.iter().map(|(_, m, _)| *m).collect();
+                fitted = by_pick.iter().map(|(_, _, x)| *x).collect();
+                reduced = true;
             }
             st.blend_edges.insert(f.id, found);
             if reduced {

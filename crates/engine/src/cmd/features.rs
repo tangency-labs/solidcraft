@@ -4839,7 +4839,6 @@ mod corner_tests {
     /// the same body, and are refused with another option, the wrong count or chained edges.
     #[test]
     fn each_picked_edge_takes_its_own_radius_in_one_fillet() {
-        use std::f64::consts::PI;
         let plate = || {
             let mut s = Session::default();
             run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"}));
@@ -4850,7 +4849,6 @@ mod corner_tests {
             assert!(body.validity().is_empty(), "{:?}", body.validity());
             solidcraft_kernel::measure(&body).unwrap()
         };
-        let spandrel = |r: f64| (1.0 - PI / 4.0) * r * r;
         let near = |v: f64, want: f64| (v - want).abs() < 1e-6 * want;
         // Two parallel edges, two radii, one call.
         let mut both = plate();
@@ -4861,7 +4859,9 @@ mod corner_tests {
         );
         assert_eq!(reply["warning"], json!(null), "{reply}");
         let one_call = measured(&both).volume;
-        assert!(near(one_call, 12000.0 - 40.0 * (spandrel(1.0) + spandrel(3.0))), "{one_call}");
+        // each round of radius r on a 90 deg edge of length L removes (1 - pi/4) r^2 L:
+        // 12000 - 40 (1 - pi/4) (1 + 9)
+        assert!(near(one_call, 11914.15926535898), "{one_call}");
         // The same as two single fillets.
         let mut twice = plate();
         run(&mut twice, "solid.fillet", &json!({"edges": [[20, 0, 10]], "radius": 1}));
@@ -4883,7 +4883,9 @@ mod corner_tests {
         assert_eq!(reply["warning"], json!(null), "{reply}");
         let v = measured(&corner).volume;
         eprintln!("corner at 1 and 3: volume {v:.6}");
-        assert!(v < 12000.0 - 30.0 * spandrel(3.0) && v > 12000.0 - 40.0 * spandrel(1.0) - 30.0 * spandrel(3.0), "{v}");
+        // between the r 3 round alone, 12000 - 30 (1 - pi/4) 9, and both rounds whole,
+        // 12000 - 40 (1 - pi/4) - 30 (1 - pi/4) 9
+        assert!(v < 11942.05750411731 && v > 11933.473430653208, "{v}");
         // Refusals: another style or option, the wrong count, chained edges, a non-length.
         let picks = json!([[20, 0, 10], [20, 30, 10]]);
         let mut s = plate();
