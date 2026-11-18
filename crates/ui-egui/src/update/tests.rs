@@ -1197,7 +1197,9 @@ fn verified_macos_update_waits_for_quit_and_retries_after_cancel() {
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
     assert!(h.app.session.is_dirty());
 
-    let dmg = PathBuf::from("/tmp/SolidCraft update '0.45'.dmg");
+    let staging = scratch();
+    let dmg = staging.0.join("SolidCraft update '0.45'.dmg");
+    std::fs::write(&dmg, b"test image already verified by the download job").unwrap();
     let (tx, rx) = std::sync::mpsc::channel();
     h.app.updater.job = Some((rx, Arc::new(install::Progress::default())));
     tx.send(Ok(install::Outcome::DmgReady(dmg.clone()))).unwrap();
@@ -1231,6 +1233,57 @@ fn verified_macos_update_waits_for_quit_and_retries_after_cancel() {
     assert!(h.app.quit_requested, "a clean design can quit normally");
     assert_eq!(take_launch(&mut h.app), Some(helper));
     assert!(take_launch(&mut h.app).is_none(), "the DMG is only opened once");
+}
+
+/// A later release check must not replace the version/notes shown beside a prepared
+/// DMG, even when a newer release is found (#18844).
+#[test]
+fn prepared_dmg_keeps_release_details_during_subsequent_checks() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    let mut prepared = release();
+    prepared.notes = "The prepared disk image".into();
+    let tag = prepared.tag.clone();
+    let notes = prepared.notes.clone();
+    h.app.updater.release = Some(prepared);
+    h.app.updater.installed = Some(Ok(install::Outcome::DmgReady(PathBuf::from("/tmp/prepared-image.dmg"))));
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.updater.rx = Some((rx, false));
+    let mut newer = release();
+    newer.tag = "v999.0.0".into();
+    newer.notes = "A different disk image".into();
+    tx.send(Ok(newer)).unwrap();
+    poll(&mut h.app);
+
+    assert_eq!(h.app.updater.release.as_ref().map(|r| r.tag.as_str()), Some(tag.as_str()));
+    assert_eq!(h.app.updater.release.as_ref().map(|r| r.notes.as_str()), Some(notes.as_str()));
+    assert!(matches!(h.app.updater.installed, Some(Ok(install::Outcome::DmgReady(_)))));
+}
+
+/// When another app instance removes a staged DMG, neither the window nor the
+/// direct Quit and update action may promise an unusable installer.
+#[test]
+fn missing_prepared_dmg_returns_to_offer_without_quitting() {
+    let staging = scratch();
+    let missing = staging.0.join("already-removed.dmg");
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.check_updates = false;
+    h.app.updater.started = true;
+    h.app.updater.open = true;
+    h.app.updater.release = Some(release());
+    h.app.updater.installed = Some(Ok(install::Outcome::DmgReady(missing.clone())));
+    quit_and_open_dmg(&mut h.app);
+    assert!(h.app.updater.installed.is_none());
+    assert!(h.app.updater.launch.is_none() && !h.app.quit_requested);
+
+    // A separate check before drawing the Update window catches a removal
+    // between a completed download and the next frame.
+    h.app.updater.installed = Some(Ok(install::Outcome::DmgReady(missing)));
+    h.frames(2);
+    assert!(h.app.updater.installed.is_none());
+    assert!(h.widget("Quit and update").is_none());
+    assert!(h.app.updater.launch.is_none() && !h.app.quit_requested);
 }
 
 #[test]

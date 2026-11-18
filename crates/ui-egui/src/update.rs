@@ -836,7 +836,13 @@ fn poll(app: &mut SolveApp) {
                 app.preferences.update.skipped.clear();
                 app.preferences.update.remind_after = 0.0;
             }
-            if app.updater.job.is_none() && app.updater.release.as_ref().is_none_or(|known| !is_newer(&known.tag, &release.tag)) {
+            // The verified DMG belongs to the release selected when it was downloaded.
+            // A later automatic check must not replace its version or notes while the
+            // Quit and update action still opens that older prepared image (#18844).
+            if app.updater.job.is_none()
+                && !matches!(&app.updater.installed, Some(Ok(install::Outcome::DmgReady(_))))
+                && app.updater.release.as_ref().is_none_or(|known| !is_newer(&known.tag, &release.tag))
+            {
                 app.updater.release = Some(release);
             }
         }
@@ -951,6 +957,12 @@ fn poll_install(app: &mut SolveApp) {
 /// pending launch, while the verified DMG remains available for a later attempt.
 pub fn quit_and_open_dmg(app: &mut SolveApp) {
     if let Some(Ok(install::Outcome::DmgReady(dmg))) = &app.updater.installed {
+        if !dmg.is_file() {
+            // The staged image can disappear while the Update window is open.
+            // Never quit the app for an installer that is no longer available.
+            app.updater.installed = None;
+            return;
+        }
         app.updater.launch = Some(install::open_dmg_after_exit(dmg, std::process::id()));
         app.updater.graphics_restart = false;
         crate::documents::request_quit(app);
@@ -1007,6 +1019,12 @@ pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.updater.open {
         return;
+    }
+    // Two app instances may share a staging directory. A different instance's
+    // cleanup can remove our verified DMG; offer a fresh download instead of
+    // promising a Quit and update action that cannot open anything (#18844).
+    if matches!(&app.updater.installed, Some(Ok(install::Outcome::DmgReady(path))) if !path.is_file()) {
+        app.updater.installed = None;
     }
     if app.updater.job.is_none()
         && !app.updater.installed.as_ref().is_some_and(Result::is_ok)
