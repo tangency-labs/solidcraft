@@ -441,7 +441,8 @@ construction's bound, §8 there). After the imprint each vertex a definition mad
 tolerance (`certified_vertex_gaps`, `topology_intersector/p1.rs`), and only while its ball stays
 clear of the far vertex of each of its edges, that vertex taken at its own grown tolerance (or at
 the tolerance a growing edge of it passes on to its ends, whichever is larger): a vertex cannot
-stand for both ends of an edge. The two operands' vertices of one definition become one, which
+stand for both ends of an edge. The tolerance a growing edge passes on is judged the same way at
+each end it raises and at every vertex that end becomes one with. The two operands' vertices of one definition become one, which
 takes the larger tolerance of the two, so each ball is judged at that one, about its own point,
 and the two are covered together or not at all. For a definition placed exactly (each source a
 vertex, a line edge or a plane face) the gap is all there is to cover, so its edges grow to their
