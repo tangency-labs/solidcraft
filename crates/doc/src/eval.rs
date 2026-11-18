@@ -10178,6 +10178,9 @@ fn count_copy_misses(
 /// axis of a straight hole through a plate), within that box. `target_box` is `target`'s exact
 /// box and `tool_box` `tool`'s ([`more::exact_box`]), each worked out once by the caller; none,
 /// as when it can't be worked out, is no answer. `false` says nothing.
+/// The points of a line are classified in one call for the tool and one for the target
+/// ([`classified_inside`]), not one call a point: the kernel makes the body's copy and its
+/// search structures once for all the points of a call.
 fn shares_material(
     target: &Body,
     target_box: Option<&solidcraft_geom::Aabb3>,
@@ -10197,18 +10200,39 @@ fn shares_material(
     let mut all = lines.to_vec();
     all.extend(round_face_axes(tool, MAX_PROBED_FACES));
     all.extend([(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)]);
-    let inside = |b: &Body, p: Vec3| {
-        #[cfg(test)]
-        cost_tests::count(|c| c.classifications += 1);
-        matches!(b.classify_point(p), Ok(kernel::PointClass::Inside))
-    };
     all.iter().any(|&(o, d)| {
         let Some((lo, hi)) = line_in_box(&both, o, d) else { return false };
-        (0..SAMPLES_PER_LINE).any(|k| {
-            let p = o + d * (lo + (hi - lo) * (k as f64 + 0.5) / SAMPLES_PER_LINE as f64);
-            inside(tool, p) && inside(target, p)
-        })
+        let points: Vec<Vec3> = (0..SAMPLES_PER_LINE).map(|k| o + d * (lo + (hi - lo) * (k as f64 + 0.5) / SAMPLES_PER_LINE as f64)).collect();
+        // The points of the line are classified in one call for the tool and one for the
+        // target: the kernel makes the body's copy and its search structures once for all
+        // the points of a call, and again for every call a point makes on its own (#11257:
+        // the six copies of the pattern of the report asked for 130 classifications, against
+        // ten).
+        let in_tool = classified_inside(tool, &points);
+        let wanted: Vec<Vec3> = points.iter().zip(&in_tool).filter(|&(_, &b)| b).map(|(p, _)| *p).collect();
+        if wanted.is_empty() {
+            return false;
+        }
+        classified_inside(target, &wanted).iter().any(|&b| b)
     })
+}
+
+/// Which of `points` lie in the material of `body`: the kernel classifies them all in one
+/// call, which makes the body's copy and its search structures once for all of them. The
+/// points are classified one by one when the kernel refuses them all together, as before.
+fn classified_inside(body: &Body, points: &[Vec3]) -> Vec<bool> {
+    match body.classify_points(points) {
+        Ok(classes) => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.classifications += 1);
+            classes.into_iter().map(|c| c == kernel::PointClass::Inside).collect()
+        }
+        Err(_) => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.classifications += points.len());
+            points.iter().map(|p| matches!(body.classify_point(*p), Ok(kernel::PointClass::Inside))).collect()
+        }
+    }
 }
 
 /// Points tried on each line by [`shares_material`].
