@@ -582,6 +582,18 @@ mod tests {
     /// Files sort by their bytes within a folder, whatever order the system lists them in; a
     /// folder's files come before its subfolders', and `dirs`' order stands.
     /// A list's known files come row by row, each row's in its order: the order they are tried in.
+    /// The Last Resort font maps every code point to a box naming its block, so the search for a
+    /// font that has a character never takes it: on macOS it would "set" unassigned characters.
+    #[test]
+    fn the_last_resort_font_is_never_a_fallback() {
+        for path in ["/System/Library/Fonts/LastResort.otf", "/usr/share/fonts/LastResort-Regular.ttf", "C:\\Fonts\\LastResortHE-Regular.ttf"] {
+            assert!(fallback::placeholder(Path::new(path)), "{path}");
+        }
+        for path in ["/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/usr/share/fonts/NotoSans-Regular.ttf", "/fonts/Resort.ttf"] {
+            assert!(!fallback::placeholder(Path::new(path)), "{path}");
+        }
+    }
+
     #[test]
     fn candidate_files_keep_their_rows_and_their_order() {
         const ROWS: fallback::Candidates = &[("A", &["a1", "a2"]), ("B", &["b1"]), ("A", &["a3"])];
