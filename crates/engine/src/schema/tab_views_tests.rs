@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    TabViewActivateParams, TabViewBesideParams, TabViewIdParams, TabViewLayoutParams, TabViewLinkParams, TabViewMoveParams, TabViewNoParams,
-    TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
+    TabViewActivateParams, TabViewBesideParams, TabViewCloseGroupParams, TabViewIdParams, TabViewLayoutParams, TabViewLinkParams, TabViewMoveParams,
+    TabViewNoParams, TabViewOpenParams, TabViewRenameParams, TabViewReply, TabViewWindowParams,
 };
 use crate::Session;
 use crate::schema::tab_windows::{
@@ -18,6 +18,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<TabViewLayoutParams>(), &["layout", "window"]);
     assert_keys(input_schema_for::<TabViewBesideParams>(), &["edge", "id", "placement", "window"]);
     assert_keys(input_schema_for::<TabViewIdParams>(), &["id"]);
+    assert_keys(input_schema_for::<TabViewCloseGroupParams>(), &["id", "window"]);
     assert_keys(input_schema_for::<TabViewActivateParams>(), &["id", "index", "window"]);
     assert_keys(input_schema_for::<TabViewRenameParams>(), &["id", "name"]);
     assert_keys(input_schema_for::<TabViewMoveParams>(), &["from", "to"]);
@@ -39,6 +40,10 @@ fn the_view_commands_check_and_echo_without_editing_the_design() {
         ("tab.view.open", json!({"window": null}), json!({"reuse": false})),
         ("tab.view.close", json!({}), json!({})),
         ("tab.view.close", json!({"id": 3}), json!({"id": 3})),
+        ("tab.view.close_others", Value::Null, json!({})),
+        ("tab.view.close_others", json!({"id": 3}), json!({"id": 3})),
+        ("tab.view.close_right", json!({"id": 3, "window": 1}), json!({"id": 3, "window": 1})),
+        ("tab.view.close_right", json!({"window": 0}), json!({"window": 0})),
         ("tab.view.reopen", json!({}), json!({})),
         ("tab.view.activate", json!({"id": 2}), json!({"id": 2})),
         ("tab.view.activate", json!({"index": 0}), json!({"index": 0})),
@@ -82,6 +87,10 @@ fn bad_view_requests_are_refused() {
         ("tab.view.open", json!({"unknown": 1})),
         ("tab.view.close", json!({"id": "1"})),
         ("tab.view.close", json!({"id": -1})),
+        ("tab.view.close_others", json!({"id": "1"})),
+        ("tab.view.close_others", json!({"window": -1})),
+        ("tab.view.close_right", json!({"window": 4_294_967_296_u64})),
+        ("tab.view.close_right", json!({"index": 1})),
         ("tab.view.reopen", json!({"id": 1})),
         ("tab.view.activate", json!({})),
         ("tab.view.activate", json!({"id": 1, "index": 0})),
