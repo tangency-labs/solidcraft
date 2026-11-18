@@ -360,7 +360,7 @@ impl JsonSchema for AxisDirExpr {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let c = generator.subschema_for::<NumberExpr>();
         json_schema!({
-            "description": "An axis: X, Y or Z (any case), or a direction [x, y, z] that isn't zero, each a number or an expression with no unit such as \"-sin(t)\".",
+            "description": "An axis: X, Y or Z (any case), or a direction [x, y, z] that isn't zero, each a number or an expression with no unit such as \"-sin(t)\" (a parameter added as a plain number is a length: \"n / 1 mm\").",
             "anyOf": [
                 {"type": "string", "pattern": format!("^[{ws}]*[XYZxyz][{ws}]*$", ws = whitespace_class())},
                 {"type": "array", "items": c, "minItems": 3, "maxItems": 3},

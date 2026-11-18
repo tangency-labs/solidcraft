@@ -79,6 +79,62 @@ fn cylinder_axis_expressions_follow_parameters() {
     assert_eq!(s.doc.features.len(), before);
 }
 
+/// Inside a component turned a quarter turn about Z, an axis is turned into the component's
+/// frame in every form the command reads (#18822): expressions as `[x, y, z]` or `{x, y, z}`,
+/// and X, Y or Z by name, each landing where the same direction given as numbers lands.
+#[test]
+fn cylinder_axis_forms_turn_with_a_turned_component() {
+    let world_box = |axis: Value| {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "t", "expression": "45 deg"}));
+        let c = run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
+        let (cid, occ) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(&mut s, "occurrence.move", json!({"occurrence": occ, "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": cid}));
+        run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 10, "axis": axis, "body_name": "C"}));
+        let b = s.world_state().unwrap().body("C").unwrap().mesh().bounds();
+        ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z])
+    };
+    let same = |a: ([f64; 3], [f64; 3]), b: ([f64; 3], [f64; 3])| near(a.0, b.0) && near(a.1, b.1);
+    let slant = world_box(json!([0, -1, -1]));
+    assert!(slant.0[1] < -6.0 && slant.0[2] < -6.0, "{slant:?}");
+    for axis in [json!(["0", "-sin(t)", "-cos(t)"]), json!({"x": "0", "y": "-sin(t)", "z": "-cos(t)"}), json!([0, "-sin(t) * sqrt(2)", -1])] {
+        assert!(same(world_box(axis.clone()), slant), "{axis}: {:?} vs {slant:?}", world_box(axis.clone()));
+    }
+    let along_x = world_box(json!([1, 0, 0]));
+    assert!(along_x.1[0] > 9.0 && along_x.1[1] < 1.5, "{along_x:?}");
+    for axis in [json!("X"), json!(" x ")] {
+        assert!(same(world_box(axis.clone()), along_x), "{axis}: {:?} vs {along_x:?}", world_box(axis.clone()));
+    }
+}
+
+/// An axis that uses no parameter is saved normalized, as numbers, whatever form it was given
+/// in; a short axis keeps its direction; the parameters it uses are named as its Axis.
+#[test]
+fn cylinder_axis_constants_short_axes_and_users() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 2, "axis": [0, "0", "2"], "body_name": "A"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 2, "axis": [0, 0, 1e-11], "base": [10, 0, 0], "body_name": "B"}));
+    let v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert_eq!(v["features"][0]["axis"], json!([0.0, 0.0, 1.0]), "{v}");
+    assert_eq!(v["features"][1]["axis"], json!([0.0, 0.0, 1.0]), "{v}");
+    run(&mut s, "parameters.add", json!({"name": "t", "expression": "45 deg"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 10, "axis": ["0", "0", "sin(t)"], "base": [20, 0, 0], "body_name": "C"}));
+    for tiny in ["1e-9 deg", "1e-300 deg"] {
+        run(&mut s, "parameters.change", json!({"name": "t", "expression": tiny}));
+        let (lo, hi) = bbox(&s, "C");
+        assert!(near(lo, [19.0, -1.0, 0.0]) && near(hi, [21.0, 1.0, 10.0]), "{tiny}: {lo:?} {hi:?}");
+    }
+    // A parameter added as a plain number is a length: refused as it is, with the way out.
+    run(&mut s, "parameters.add", json!({"name": "n", "expression": "2"}));
+    let length = s.execute("solid.cylinder", &json!({"radius": 1, "height": 2, "axis": ["n", 0, 0]})).unwrap_err().to_string();
+    assert!(length.contains("n / 1 mm"), "{length}");
+    run(&mut s, "solid.cylinder", json!({"radius": 1, "height": 2, "axis": ["n / 1 mm", 0, 0], "base": [30, 0, 0], "body_name": "D"}));
+    let refused = s.execute("parameters.delete", &json!({"name": "t"})).unwrap_err().to_string();
+    assert!(refused.contains("Axis") && !refused.contains("Position"), "{refused}");
+}
+
 #[test]
 fn primitive_points_take_expressions() {
     let mut s = Session::default();
