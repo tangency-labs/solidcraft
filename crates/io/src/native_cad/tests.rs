@@ -701,6 +701,42 @@ fn a_part_whose_body_was_not_imported_is_said_not_checked() {
     assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("was not checked")), "{notes:?}");
 }
 
+/// A part of two bodies, one imported and one whose region the reader refused, is said not
+/// checked against the figures its file states for both: the imported body alone measures what
+/// the file states here, so a comparison without the other would pass, unsaid.
+#[test]
+fn a_part_with_one_body_imported_and_one_not_is_said_not_checked() {
+    use cadmpeg_ir::declared_measures::DeclaredTarget;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
+    let ours = solidcraft_kernel::step_import(&std::fs::read_to_string(dir.join("washer.step")).unwrap()).unwrap();
+    let m = solidcraft_kernel::measure(&ours.bodies[0].body).unwrap();
+    let text = washer_stating(m.volume, [m.centroid.x, m.centroid.y, m.centroid.z]);
+    let mut ir = neutral(text.as_bytes(), "washer.step");
+    assert!(!ir.model.declared_measures.is_empty());
+    // A second body of the part, on a region the model does not have: refused.
+    let mut refused = ir.model.bodies[0].clone();
+    refused.id = cadmpeg_ir::ids::BodyId::try_from("test:refused:body#0".to_string()).unwrap();
+    refused.regions = vec![cadmpeg_ir::ids::RegionId::try_from("test:refused:region#0".to_string()).unwrap()];
+    let model = &mut ir.model;
+    for stated in &mut model.declared_measures {
+        match &mut stated.target {
+            DeclaredTarget::Definition { definition } => {
+                if let Some(d) = model.product_definitions.iter_mut().find(|d| d.id == *definition) {
+                    d.bodies.push(refused.id.clone());
+                }
+            }
+            DeclaredTarget::Bodies { bodies } => bodies.push(refused.id.clone()),
+            DeclaredTarget::Unresolved {} => {}
+        }
+    }
+    model.bodies.push(refused);
+    let (records, origins) = traced_records(&ir, "washer", "", true);
+    assert!(!records.bodies.is_empty(), "the washer itself comes in: {:?}", records.warnings);
+    let imp = solidcraft_kernel::records_import(&records).unwrap();
+    let notes = validation::check(&ir, &records, &origins, &imp);
+    assert!(!notes.is_empty() && notes.iter().all(|n| n.contains("was not checked")), "{notes:?}");
+}
+
 /// The washer with the CAx-IF validation properties a CAD system writes for it: its volume and its
 /// centre, as `volume` and `centre` give them.
 fn washer_stating(volume: f64, centre: [f64; 3]) -> String {
