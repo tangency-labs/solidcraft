@@ -191,21 +191,21 @@ impl ObjectKind {
     /// The band this kind's groups paint in on a sheet, drawn `of` a view or the sheet itself: the
     /// sheet paints its groups band by band from 0, each band over the ones below it. Borders,
     /// images, views, the views' annotations, tables, the sheet's own annotations, then the title
-    /// block over them all, so a note on the sheet stays readable over a table. Only a note is drawn
-    /// for either.
+    /// block over them all, so a note on the sheet stays readable over a table. Only a note or a
+    /// sketch is drawn for either.
     pub fn band(self, of: DrawnFor) -> u8 {
         match self {
             ObjectKind::SheetBorder | ObjectKind::DrawingBorder => 0,
             ObjectKind::SheetImage => 1,
             ObjectKind::View => 2,
             ObjectKind::Dimension | ObjectKind::ViewLabel | ObjectKind::Balloon => 3,
-            ObjectKind::Note => match of {
+            ObjectKind::Note | ObjectKind::Sketch => match of {
                 DrawnFor::View => 3,
                 DrawnFor::Sheet => 5,
             },
             ObjectKind::PartsList | ObjectKind::RevisionTable => 4,
             ObjectKind::Fill => 4,
-            ObjectKind::Sketch | ObjectKind::RevisionTag => 5,
+            ObjectKind::RevisionTag => 5,
             ObjectKind::TitleBlock => 6,
         }
     }

@@ -67,6 +67,7 @@ pub use construct::picked_plane_refs;
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, picked_plane};
 pub use construct_auto::{construct_method, construct_methods, is_construct_tool};
 pub use design_link::{LinkProblem, LinkState};
+pub(crate) use drawing_sketch::follow_view_links;
 pub use drawing_ui::pending_icon as drawing_pending_icon;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::move_matrix_params;

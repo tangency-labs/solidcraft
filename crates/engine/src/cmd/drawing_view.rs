@@ -55,6 +55,7 @@ use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_si
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
 use solidcraft_doc::drawing::view::{Beside, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose};
+use solidcraft_doc::drawing::{Owner, SheetSketch};
 use solidcraft_doc::drawing_view::{
     Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
 };
@@ -412,11 +413,11 @@ fn measurements(s: &Session, request: &SnapshotParams, basis: &Plane, scale: Sca
 
 /// Refused when saved view `view` of `record` doesn't draw a part that one of the occurrence paths
 /// `paths` places: an annotation attaches only to what its view draws. With any path, refused too on
-/// a view that draws none of the model's edges ([`crate::drawing_view::no_model_edges`]).
+/// a view that draws none of the model's edges ([`ViewKind::no_model_edges`]).
 pub(super) fn check_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>, cmd: &str) -> Result<()> {
     let mut paths = paths.into_iter().peekable();
     if paths.peek().is_some()
-        && let Some(why) = record.view(view).and_then(crate::drawing_view::no_model_edges)
+        && let Some(why) = record.view(view).and_then(|view| view.kind.no_model_edges())
     {
         return Err(bad(cmd, why));
     }
@@ -1089,17 +1090,19 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let originals: Vec<u64> = std::iter::once(id).chain(linked.into_iter().filter(|_| with_linked)).collect();
-    // Each view's dimensions, balloons and notes are part of what it shows, so they are copied with it.
+    // Each view's dimensions, balloons, notes and sketches are part of what it shows, so they are copied with it.
     let measured: Vec<u64> = record.dimensions.iter().filter(|d| originals.contains(&d.view)).map(|d| d.id).collect();
     let ballooned: Vec<u64> = record.balloons.iter().filter(|b| originals.contains(&b.view)).map(|b| b.id).collect();
     let noted: Vec<u64> = record.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| originals.contains(&v))).map(|n| n.id).collect();
-    let mut copies = (0..originals.len() + measured.len() + ballooned.len() + noted.len())
+    let sketched: Vec<u64> = record.sketches.iter().filter(|k| k.owner.view().is_some_and(|v| originals.contains(&v))).map(|k| k.id).collect();
+    let mut copies = (0..originals.len() + measured.len() + ballooned.len() + noted.len() + sketched.len())
         .map(|_| record.allocate_id(&mut s.ids))
         .collect::<solidcraft_doc::Result<Vec<u64>>>()
         .map_err(|e| bad(COPY, e.to_string()))?;
     let mut dimension_copies = copies.split_off(originals.len());
     let mut balloon_copies = dimension_copies.split_off(measured.len());
-    let note_copies = balloon_copies.split_off(ballooned.len());
+    let mut note_copies = balloon_copies.split_off(ballooned.len());
+    let sketch_copies = note_copies.split_off(noted.len());
     let copy_of = |old: u64| originals.iter().position(|o| *o == old).and_then(|i| copies.get(i)).copied();
     let sheet = s.edit_drawing(COPY, |d| {
         let (sheet, middle) = sheet_named(d, &request.sheet, COPY)?;
@@ -1182,6 +1185,15 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect();
         d.notes.add(copied);
+        let copied: Vec<Arc<SheetSketch>> = sketched
+            .iter()
+            .zip(&sketch_copies)
+            .filter_map(|(old, new)| {
+                let original = d.sheet_sketch(*old)?;
+                Some(Arc::new(SheetSketch { id: *new, owner: Owner::View(copy_of(original.owner.view()?)?), ..(**original).clone() }))
+            })
+            .collect();
+        d.sketches.extend(copied);
         Ok(sheet)
     })?;
     let first = copies.first().copied().unwrap_or_default();

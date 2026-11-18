@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Create {
-    /// Exact sheet id in the open drawing, as returned by drawing.inspect.
+    /// Exact sheet or view id in the open drawing, as returned by drawing.inspect.
     pub owner: String,
     pub name: Option<String>,
 }
@@ -30,10 +30,26 @@ pub struct Point {
     pub at: [f64; 2],
     pub fixed: bool,
 }
+/// A view sketch's link to a model edge, as the model has the edge now, in the words a drawing
+/// dimension's reference uses: its status, why it is lost or can't be read, and the candidates when
+/// several edges answer to its name (a split edge's pieces) or the leads when it is lost.
+#[derive(Serialize, JsonSchema)]
+pub struct LinkReading {
+    pub link: String,
+    /// `ok`, `ambiguous`, `suppressed`, `failed`, `lost` or `unmeasurable`.
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<super::drawing_dimension::CandidateResult>,
+}
 #[derive(Serialize, JsonSchema)]
 pub struct Reading {
     pub drawing: String,
     pub sheet: String,
+    /// The view it belongs to; left out for a sheet's own sketch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
     pub sketch: String,
     pub name: String,
     pub editing: bool,
@@ -42,12 +58,18 @@ pub struct Reading {
     pub points: Vec<Point>,
     pub curves: Vec<String>,
     pub constraints: Vec<String>,
+    /// A view sketch's links to its view's edges (left out when it has none).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<LinkReading>,
 }
-/// The sheet Cancel reply names its exact drawing, sheet and sketch by encoded ids.
+/// The sheet Cancel reply names its exact drawing, sheet, view (a view's sketch only) and sketch
+/// by encoded ids.
 #[derive(Serialize, JsonSchema)]
 pub struct Cancelled {
     pub drawing: String,
     pub sheet: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
     pub sketch: String,
     pub removed: bool,
 }
@@ -111,6 +133,7 @@ mod tests {
             let mut sheet = Session { param_check: level, ..Session::default() };
             run(&mut sheet, "sketch.create", json!({"plane":"XY"}));
             run(&mut sheet, "sketch.finish", json!({}));
+            run(&mut sheet, "solid.box", json!({"length":10,"width":10,"height":10}));
             let drawing = run(&mut sheet, "drawing.create", json!({}));
             let made = run(&mut sheet, "drawing.sketch.create", json!({"owner":drawing["sheets"][0]["id"]}));
             let reply = run(&mut sheet, "sketch.cancel", json!({}));
@@ -118,6 +141,13 @@ mod tests {
             assert_eq!(reply["sheet"], made["sheet"]);
             assert_eq!(reply["sketch"], made["sketch"]);
             assert!(reply["sketch"].is_string() && reply["removed"] == true, "{reply}");
+            assert!(conforms(schema, schema, &reply), "{level:?}: {reply} does not match {schema}");
+
+            // A view's sketch: the reply names its view as well as its view's sheet.
+            let view = run(&mut sheet, "drawing.view.base", json!({"sheet":drawing["sheets"][0]["id"],"scale":"1:1"}))["view"].clone();
+            let made = run(&mut sheet, "drawing.sketch.create", json!({"owner":view}));
+            let reply = run(&mut sheet, "sketch.cancel", json!({}));
+            assert_eq!((&reply["sheet"], &reply["view"], &reply["removed"]), (&made["sheet"], &view, &json!(true)));
             assert!(conforms(schema, schema, &reply), "{level:?}: {reply} does not match {schema}");
         }
     }

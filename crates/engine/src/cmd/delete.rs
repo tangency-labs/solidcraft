@@ -25,7 +25,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "De
     .contract(&DELETE_CONTRACT)
     .output(output_schema_for::<SelectionDeleteResult>)
     .params(
-        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons: [the ids that went]",
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step). With a drawing open, items are its views, dimensions and balloons ({type: drawing, drawing, object}); each view takes its dimensions and balloons with it; a view with views projected or cut from it is refused, naming them, unless they are in items or contents: delete takes them too → views, dimensions, balloons, notes, sketches, fills: [the ids that went]",
     )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -59,7 +59,8 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Deletes the views, dimensions, balloons and notes `items` name in the drawing open, as one change: the
-/// record's removal ([`solidcraft_doc::drawing::Drawing::remove_objects`]), with no model evaluated.
+/// record's removal ([`solidcraft_doc::drawing::Drawing::remove_objects`]), with no model evaluated. A
+/// view takes its sketches and their fills with it; the reply lists them too.
 fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value> {
     let cmd = "selection.delete";
     let model = || bad(cmd, "a drawing is open: close it to change the model (drawing.close)");
@@ -108,15 +109,20 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     gone.notes.extend(notes);
     gone.notes.sort_unstable();
     gone.notes.dedup();
+    if s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.goes_with(open.id, &gone)) {
+        return Err(bad(cmd, "finish or cancel the sketch being edited before deleting its view"));
+    }
     s.edit_drawing(cmd, |d| {
         d.remove_objects(&gone);
         Ok(())
     })?;
     let listed = |objects: &[u64]| objects.iter().map(|id| ids::encode(*id)).collect::<Vec<_>>();
     let (views, dimensions, balloons) = (listed(&gone.views), listed(&gone.dimensions), listed(&gone.balloons));
-    Ok(
-        json!({ "deleted": [], "deleted_joints": [], "would_fail": [], "skipped": [], "views": views, "dimensions": dimensions, "balloons": balloons, "notes": listed(&gone.notes) }),
-    )
+    let (notes, sketches, fills) = (listed(&gone.notes), listed(&gone.sketches), listed(&gone.fills));
+    Ok(json!({
+        "deleted": [], "deleted_joints": [], "would_fail": [], "skipped": [],
+        "views": views, "dimensions": dimensions, "balloons": balloons, "notes": notes, "sketches": sketches, "fills": fills,
+    }))
 }
 
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {

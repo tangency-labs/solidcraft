@@ -61,6 +61,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore_record::Vec3;
+use solidcraft_doc::drawing::Owner;
 use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
@@ -349,14 +350,22 @@ impl ForeignCopy {
     }
 }
 
-/// A sheet-sketch editing entry. Its owner is never a model feature id.
-/// Original geometry is only the cancel boundary; Session keeps the one undo history.
+/// A drawing-sketch editing entry. Its owner, a sheet or a view of the drawing, is never a model
+/// feature id. Original geometry is only the cancel boundary; Session keeps the one undo history.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SheetSketchEdit {
     pub drawing: u64,
-    pub sheet: u64,
+    pub owner: Owner,
     pub sketch: u64,
     pub(crate) original: Option<Arc<solidcraft_doc::drawing::SheetSketch>>,
+}
+
+impl SheetSketchEdit {
+    /// Whether the sketch being edited is among `gone`, taken out of drawing `drawing`: a delete
+    /// that would take it waits until it is finished or cancelled.
+    pub(crate) fn goes_with(&self, drawing: u64, gone: &solidcraft_doc::drawing::OnSheet) -> bool {
+        self.drawing == drawing && gone.sketches.binary_search(&self.sketch).is_ok()
+    }
 }
 
 /// One undo step.
@@ -1266,7 +1275,7 @@ impl Session {
                     .doc
                     .drawing(entry.drawing)
                     .and_then(|drawing| drawing.sheet_sketch(entry.sketch))
-                    .is_none_or(|record| record.sheet != entry.sheet)
+                    .is_none_or(|record| record.owner != entry.owner)
         }) {
             self.active_sheet_sketch = None;
         }
@@ -1413,6 +1422,23 @@ impl Session {
             self.doc_mut().put_drawing(Arc::new(d));
         }
         Ok(out)
+    }
+
+    /// The model, or a drawing, changed from `previous`: view sketches' links follow it in the same
+    /// step ([`cmd::follow_view_links`]; `model` when the model may have changed). Only the drawings
+    /// and the world cache's document key change; nothing is evaluated.
+    fn follow_view_links(&mut self, previous: &Arc<Document>, model: bool) {
+        let changed = cmd::follow_view_links(self, previous, model);
+        if changed.is_empty() {
+            return;
+        }
+        let before = self.doc.clone();
+        let mut doc = (*self.doc).clone();
+        for drawing in changed {
+            doc.put_drawing(drawing);
+        }
+        self.doc = Arc::new(doc);
+        self.refresh_render(&before);
     }
 
     /// Source parameters can change a paper sketch without editing its record.
@@ -2193,6 +2219,7 @@ impl Session {
                         self.redo.retain(|step| step.part != part);
                     }
                     let pin = outermost && live_edit.is_none() && !render_only;
+                    let follow = outermost && live.is_none() && live_edit.is_none() && self.replacements == replacements;
                     match live_edit {
                         Some(edit) => {
                             let sketch = edit.sketch;
@@ -2202,6 +2229,9 @@ impl Session {
                         None if render_only => self.refresh_render(&previous_doc),
                         None if display_only => self.refresh_display(),
                         None => self.refresh_from(&previous_doc, matches!(spec.id, "edit.undo" | "edit.redo")),
+                    }
+                    if follow && !display_only {
+                        self.follow_view_links(&previous_doc, !render_only);
                     }
                     // A row the change added takes its item number in the same undo step; numbers
                     // draw nothing, so the model and the placed world stay.
@@ -2297,7 +2327,7 @@ impl Session {
                 self.active_sheet_sketch.as_ref().or(before.active_sheet_sketch.as_ref()).filter(|entry| self.open_drawing == Some(entry.drawing))
             {
                 let current = self.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
-                if let Some(after) = current.filter(|record| record.sheet == entry.sheet) {
+                if let Some(after) = current.filter(|record| record.owner == entry.owner) {
                     let previous = before.doc.drawing(entry.drawing).and_then(|drawing| drawing.sheet_sketch(entry.sketch));
                     out.insert("created".into(), cmd::sketch_created(previous.map(|record| &record.sketch), &after.sketch));
                 }

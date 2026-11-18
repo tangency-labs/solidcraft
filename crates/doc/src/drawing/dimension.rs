@@ -83,6 +83,7 @@ use crate::construct::{MAX_VERTEX_EDGES, as_circle, as_line, point_tolerance, sh
 use crate::display_units::length_number;
 use crate::format::MAX_REAL;
 use solidcraft_kernel::{FaceSurface, PointClass, edge_circle, face_surface};
+use solidcraft_sketch::LinkGeom;
 
 use crate::appearance::face_index_at;
 use crate::name_lookup::{BodyEdges, EdgeMatch, face_has_name, faces_with_stem};
@@ -280,6 +281,20 @@ pub struct ModelEdge {
     /// The occurrences the body is placed through, from the top; empty for the design's own body.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path: Vec<u64>,
+}
+
+impl ModelEdge {
+    /// The link source a view sketch keeps for this edge: the same four fields.
+    pub fn to_source(&self) -> solidcraft_sketch::LinkSource {
+        let ModelEdge { body, origin_feature, name, path } = self.clone();
+        solidcraft_sketch::LinkSource::ViewEdge { body, origin_feature, name, path }
+    }
+
+    /// The edge a view-edge link source names; `None` for any other source.
+    pub fn from_source(source: &solidcraft_sketch::LinkSource) -> Option<ModelEdge> {
+        let solidcraft_sketch::LinkSource::ViewEdge { body, origin_feature, name, path } = source else { return None };
+        Some(ModelEdge { body: body.clone(), origin_feature: *origin_feature, name: name.clone(), path: path.clone() })
+    }
 }
 
 /// A face of a body, by its persistent name, as [`ModelEdge`] names an edge.
@@ -926,6 +941,14 @@ pub(super) struct Edges {
     frame: Mat,
 }
 
+impl Edges {
+    /// `plane` in the frame its body is placed in: what the kernel reads the body's edges against.
+    /// `None` when the placement flattens it.
+    fn in_body(&self, plane: &Plane) -> Option<Plane> {
+        mat_inverse(&self.frame).and_then(|back| map_plane(&back, plane))
+    }
+}
+
 /// One body's face names, read once for the leads a lost reference lists: the edge each blend face
 /// rounds (without its `~k`), by face, and the feature that made each face.
 struct Leads {
@@ -1196,7 +1219,7 @@ impl<'a> Lookup<'a> {
         let face_on = || Status::Unmeasurable(format!("edge `{}` isn't a circle in this view (it isn't parallel to it)", edge.name));
         let (index, line) = piece;
         let through = Plane { origin: *line.first().ok_or_else(face_on)?, ..*basis };
-        let local = mat_inverse(&found.frame).and_then(|back| map_plane(&back, &through)).ok_or_else(face_on)?;
+        let local = found.in_body(&through).ok_or_else(face_on)?;
         let body = self.state.bodies.get(found.body).ok_or_else(|| Status::lost("its body no longer exists"))?;
         let pieces = body.body.planar_edges(&local, &[*index]).pop().flatten().ok_or_else(face_on)?;
         let not_round = || Status::Unmeasurable(format!("edge `{}` isn't a circle or an arc", edge.name));
@@ -1210,6 +1233,26 @@ impl<'a> Lookup<'a> {
             .collect();
         let (radius, points) = segs.as_deref().and_then(one_arc).ok_or_else(not_round)?;
         Ok((radius, points.map(|p| apply_point(&found.frame, local.to_world(p)))))
+    }
+
+    /// The edge a view sketch's link names, as the view through `basis` sees it face on, in the
+    /// view plane's own coordinates: read exactly from the body, never from its mesh. An edge the
+    /// view doesn't see face on (end on, or slanting) can't be held, nor can a split one's pieces.
+    pub(super) fn view_edge(&mut self, edge: &ModelEdge, basis: &Plane) -> std::result::Result<Vec<LinkGeom>, Status> {
+        let found = self.edges(edge)?;
+        if !found.whole {
+            return Err(Status::Ambiguous(edge_candidates(&edge.body, &found)));
+        }
+        let index = found.pieces.first().map(|(index, _)| *index).ok_or_else(|| Status::lost(format!("edge `{}` no longer exists", edge.name)))?;
+        let body = self.state.bodies.get(found.body).ok_or_else(|| Status::lost("its body no longer exists"))?;
+        if body.body.is_mesh() {
+            return Err(Status::Unmeasurable(format!("body `{}` is a mesh: its edges aren't read exactly", edge.body)));
+        }
+        let slanting = || Status::Unmeasurable(format!("edge `{}` isn't parallel to this view", edge.name));
+        // A placement is rigid, so the plane's coordinates are the same in the body's frame.
+        let local = found.in_body(basis).ok_or_else(slanting)?;
+        let pieces = body.body.planar_edges(&local, &[index]).pop().flatten().ok_or_else(slanting)?;
+        crate::project::planar_link(&pieces).ok_or_else(|| Status::Unmeasurable(format!("edge `{}` is a curve a sketch can't hold", edge.name)))
     }
 
     /// The straight line `edge` names, from end to end, in the design's frame. The pieces of a

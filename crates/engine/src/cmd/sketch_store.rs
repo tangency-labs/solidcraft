@@ -49,7 +49,7 @@ pub(super) fn read(doc: &Document, id: u64) -> Result<&Sketch> {
 pub(super) fn read_for_command(s: &Session, p: &Value, cmd: &str) -> Result<Sketch> {
     if s.open_drawing.is_some() {
         let entry = sheet_target(s, p, cmd)?;
-        return Ok(s.drawing(cmd)?.solve_sheet_sketch(&s.doc, entry.sketch)?.sketch);
+        return Ok(s.drawing(cmd)?.solve_sheet_sketch(&s.doc, None, entry.sketch)?.sketch);
     }
     Ok(read(&s.doc, target(s, p, cmd)?)?.clone())
 }
@@ -91,14 +91,12 @@ pub(super) fn sheet_target(s: &Session, p: &Value, cmd: &str) -> Result<std::syn
     }
     // Target selection checks identity, not every payload. Staging checks the
     // candidate before solving; edit_drawing validates the whole publication.
-    if owner.sketches.iter().filter(|record| record.id == entry.sketch).count() != 1
-        || owner.sheets.iter().filter(|sheet| sheet.id == entry.sheet).count() != 1
-    {
-        return Err(bad(cmd, "the edited sketch or sheet id is missing or ambiguous"));
+    if owner.sketches.iter().filter(|record| record.id == entry.sketch).count() != 1 {
+        return Err(bad(cmd, "the edited sketch id is missing or ambiguous"));
     }
     let record = owner.sheet_sketch(entry.sketch).ok_or_else(|| bad(cmd, "the edited sheet sketch no longer exists"))?;
-    if record.sheet != entry.sheet {
-        return Err(bad(cmd, "the edited sketch's owning sheet changed"));
+    if record.owner != entry.owner || owner.sketch_sheet(record).is_none() {
+        return Err(bad(cmd, "the edited sketch's owner changed or is gone"));
     }
     if let Some(given) = p.get("sketch").filter(|value| !value.is_null()) {
         let target = match given {
@@ -125,19 +123,19 @@ pub(super) fn edit_sheet<T>(
 ) -> Result<(T, Option<crate::schema::frame::SketchSolve>)> {
     let entry = sheet_target(s, p, cmd)?;
     let design = s.doc.clone();
-    let mut candidate = s.drawing(cmd)?.solve_sheet_sketch(&design, entry.sketch)?.sketch;
+    let mut candidate = s.drawing(cmd)?.solve_sheet_sketch(&design, None, entry.sketch)?.sketch;
     let mut source = (*design).clone();
     let out = change(&mut candidate, &mut source)?;
     if source != *design {
         return Err(bad(cmd, "a sheet sketch cannot change the source design or its parameters"));
     }
     let solved = s.edit_drawing(cmd, |drawing| {
-        let (_, solved) = drawing.edit_sheet_sketch(&design, entry.sketch, |sketch| {
+        let (_, solved) = drawing.edit_sheet_sketch(&design, None, entry.sketch, |sketch| {
             *sketch = candidate;
             Ok(())
         })?;
-        if solved.sheet != entry.sheet {
-            return Err(bad(cmd, "the edited sketch's owning sheet changed"));
+        if drawing.sheet_sketch(entry.sketch).is_none_or(|record| record.owner != entry.owner) {
+            return Err(bad(cmd, "the edited sketch's owner changed"));
         }
         Ok(solved)
     })?;
