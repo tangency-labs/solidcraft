@@ -1237,16 +1237,33 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
         face: FaceId,
         other_face: FaceId,
     ) -> Result<(Vec<FaceId>, Vec<FaceId>, bool)> {
-        let mates = &self.merge.intersector.edges;
-        let check = p1::check_face_coincidence(
-            primary,
-            other,
-            face,
-            other_face,
-            mates.primary_to_other(),
-            mates.other_to_primary(),
-        )?;
-        let p1::FaceCoincidenceCheck::NeedsMerge { edge_counts } = check else {
+        let check = |relations: &Relations, primary: &Brep, other: &Brep| {
+            p1::check_face_coincidence(
+                primary,
+                other,
+                face,
+                other_face,
+                relations.edges.primary_to_other(),
+                relations.edges.other_to_primary(),
+            )
+        };
+        let mut status = check(&self.merge.intersector, primary, other)?;
+        // Not upstream (coincident_edges): edges of the two faces that join the same related vertices
+        // within a certified tolerance of each other are one edge; related first, the imprint
+        // below does not copy each onto the other face as a second edge between the two
+        // vertices (coincident_edges).
+        if matches!(status, p1::FaceCoincidenceCheck::NeedsMerge { .. })
+            && crate::boolean::merge::coincident_edges::relate_coincident_edges(
+                primary,
+                other,
+                face,
+                other_face,
+                &mut self.merge.intersector,
+            )? > 0
+        {
+            status = check(&self.merge.intersector, primary, other)?;
+        }
+        let p1::FaceCoincidenceCheck::NeedsMerge { edge_counts } = status else {
             return Ok((vec![face], vec![other_face], false));
         };
         // `m_vTI.MergeCoincidentSurfaces(pBrepFace->GetSurface(), pOtherFace->GetSurface(),
