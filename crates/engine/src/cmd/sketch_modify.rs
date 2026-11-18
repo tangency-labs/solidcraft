@@ -2932,10 +2932,9 @@ impl Walked {
 
 /// Whether `q` is on the left of a chain of lines and arcs, as it is walked, or `None` when
 /// the chain has another kind of curve. A closed chain is a loop, so the side is inside or
-/// outside it: the loop's winding number round `q`, taken on the polygon of its pieces' chords
-/// and corrected by each arc's segment (the region between an arc and its chord, which the arc
-/// winds round once its own way), is positive inside an anticlockwise loop and negative inside a
-/// clockwise one; outside, the loop's signed area gives its way round. An open chain has no
+/// outside it: the loop's winding number round `q`, counted on its own lines and arcs, is
+/// positive inside an anticlockwise loop and negative inside a clockwise one; outside, the
+/// loop's signed area (its chord polygon and each arc's segment) gives its way round. An open chain has no
 /// inside: `q` is on the side of the piece whose nearest point to it is nearest, read off the
 /// way the chain runs at that point. Two pieces as near meet there, tangent on a smooth chain,
 /// so either gives the same side.
@@ -2952,31 +2951,61 @@ fn chain_side(sk: &Sketch, order: &[(usize, bool)], closed: bool, q: Vec2) -> Op
         }
         return left;
     }
-    // The chord polygon, each piece's start joined to its end and its end to the next start.
-    let mut corners = Vec::with_capacity(pieces.len() * 2);
-    for piece in &pieces {
-        let (from, to) = piece.ends();
-        corners.extend([from, to]);
-    }
+    // The winding number counts the loop's crossings of the ray from `q` toward +x, up +1 and
+    // down -1, each crossing taken on a stretch of the loop that only rises or only falls, with
+    // its lower end counted and its upper end not, so a joint on the ray counts once. The gaps
+    // between pieces' ends (where a chain joins ends that are merely close) are stretches too.
     let (mut winding, mut area2) = (0i64, 0.0);
-    for (k, p0) in corners.iter().enumerate() {
-        let p1 = corners.get((k + 1) % corners.len()).copied().unwrap_or(*p0);
-        area2 += cross2(*p0, p1);
-        let turn = cross2(p1 - *p0, q - *p0);
-        if p0.y <= q.y && p1.y > q.y && turn > 0.0 {
-            winding += 1;
-        } else if p0.y > q.y && p1.y <= q.y && turn < 0.0 {
-            winding -= 1;
+    let cross_line = |p0: Vec2, p1: Vec2| {
+        let turn = cross2(p1 - p0, q - p0);
+        if p0.y <= q.y && q.y < p1.y && turn > 0.0 {
+            1
+        } else if p1.y <= q.y && q.y < p0.y && turn < 0.0 {
+            -1
+        } else {
+            0
         }
-    }
-    for piece in &pieces {
-        let (Walked::Arc { from, to, ccw, .. }, Some((c, r, _, sweep))) = (*piece, piece.circle()) else { continue };
-        let way = if ccw { 1.0 } else { -1.0 };
-        area2 += way * r * r * (sweep - sweep.sin());
-        // Walked anticlockwise an arc bulges to the right of its chord, clockwise to the left.
-        let beyond_chord = cross2(to - from, q - from) * way < 0.0;
-        if q.dist(c) < r && beyond_chord {
-            winding += if ccw { 1 } else { -1 };
+    };
+    for (k, piece) in pieces.iter().enumerate() {
+        let (from, to) = piece.ends();
+        let next = pieces.get((k + 1) % pieces.len()).map_or(from, |n| n.ends().0);
+        area2 += cross2(from, to) + cross2(to, next);
+        winding += cross_line(to, next);
+        match (*piece, piece.circle()) {
+            (Walked::Line { .. }, _) => winding += cross_line(from, to),
+            (Walked::Arc { ccw, .. }, Some((c, r, a, sweep))) => {
+                let way = if ccw { 1.0 } else { -1.0 };
+                // The region between the arc and its chord, its own way round.
+                area2 += way * r * r * (sweep - sweep.sin());
+                // Split at the top and bottom of the circle, where it stops rising or falling;
+                // the arc's own ends stay its points, so they meet the next pieces exactly.
+                let start = (a - c).angle();
+                let mut cuts = vec![(start, a)];
+                let mut turn = ((start - FRAC_PI_2) / PI).floor() + 1.0;
+                while FRAC_PI_2 + turn * PI < start + sweep {
+                    let t = FRAC_PI_2 + turn * PI;
+                    cuts.push((t, c + Vec2::new(r * t.cos(), r * t.sin())));
+                    turn += 1.0;
+                }
+                let end = if ccw { to } else { from };
+                cuts.push((start + sweep, end));
+                for w in cuts.windows(2) {
+                    let &[(t0, p0), (t1, p1)] = w else { continue };
+                    let (lo, hi) = if p0.y <= p1.y { (p0.y, p1.y) } else { (p1.y, p0.y) };
+                    if lo > q.y || q.y >= hi {
+                        continue;
+                    }
+                    // Right or left half of the circle, by the stretch's middle.
+                    let half = if ((t0 + t1) * 0.5).cos() >= 0.0 { 1.0 } else { -1.0 };
+                    let x = c.x + half * (r * r - (q.y - c.y) * (q.y - c.y)).max(0.0).sqrt();
+                    if x > q.x {
+                        // Rising anticlockwise, walked the arc's own way.
+                        let rises = (p1.y > p0.y) == ccw;
+                        winding += if rises { 1 } else { -1 };
+                    }
+                }
+            }
+            _ => {}
         }
     }
     Some(if winding != 0 { winding > 0 } else { area2 < 0.0 })
