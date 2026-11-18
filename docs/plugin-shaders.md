@@ -118,6 +118,7 @@ most 8192 pixels on a side (or the graphics card's limit), and builds its mipmap
 | `source` | yes | A `.wgsl` file name in the plugin's folder (lowercase, no folders). |
 | `textures` | no | Up to 4 pictures: `{"name": "<wgsl name>", "file": "<file>.png"}` or `.jpg`. |
 | `animated` | no | `true`: redrawn about 30 times a second while shown (10 behind another window), with `sc.time` running. `false` (the default): drawn again only when the view turns or resizes or the theme changes; `sc.time` is 0. |
+| `state` | no | `{"width": w, "height": h}`, 1 to 1024 texels a side: a grid the shader keeps from frame to frame. Needs `animated: true`, and then a `fn state` (below). |
 
 A plugin declares at most 8 shaders. A plugin with shaders and no `runtime` is fine.
 
@@ -199,6 +200,39 @@ the status bar ("Couldn't draw the background effect dusk/dusk: ...") and is not
 the choice changes, the app restarts, or (when it was turned off) its plugin is turned on again.
 Nothing is drawn halfway.
 
+## A grid that remembers: `state`
+
+A background that needs memory (drops that slide, trails that fade, anything that depends on the
+last frame) asks for a grid with `"state"`. The host keeps two copies of the grid, both starting
+zeroed, and every frame it runs your `fn state` over every texel:
+
+```wgsl
+fn state(px: ScStatePixel) -> vec4<f32>
+```
+
+`px.texel` is the texel's integer position (`vec2<u32>`, from the top left) and `px.uv` its centre,
+0..1 across the grid. Read last frame's grid with `textureLoad(sc_state_prev, vec2<i32>(px.texel), 0)`
+and return this frame's value (four floats, stored as half floats, not converted). `sc.frame` is
+the step: 0 on the first frame and after a reset, counting up after that. `sc.state_size` is the
+grid's size.
+
+Then `background` reads the new grid with `textureLoad(sc_state, ...)`, the same way, and draws
+from it. The order each frame is: step, then background, then the grids swap. Both grids are
+cleared when the shader is chosen again or turned off and on, or when the graphics device is lost;
+a resize of the view keeps them, since they are in grid coordinates.
+
+`fn state` is budgeted like `background`: every loop and call
+spends the same 1024 per pixel. With a grid, the names `sc_state` and `sc_state_prev` belong to the host, and a `"state"` without
+`fn state` is refused. A shader with no `"state"` is unchanged: `fn state` and `sc_` names are its
+own, and using `ScStatePixel` or `sc_state` without declaring them is refused with a note to add `"state"`.
+
+The step runs once per frame the shader is drawn, so its speed depends on the frame rate (30 a
+second in focus, 10 behind another window). Write the rules per frame, not per second, and use
+`sc.time` for anything that must keep pace with the clock.
+
+[`plugin-examples/trails/`](plugin-examples/trails/) is the smallest state shader: a spot circles
+the view and leaves a trail that fades.
+
 ## Testing a shader
 
 - `plugin.install {"path": "dusk.zip", "dry_run": true}` checks the package and compiles the
@@ -214,5 +248,4 @@ Nothing is drawn halfway.
 
 `shaders@0.1` is version 0.1 of the capability. While it is 0.x, a later minor version may change
 it, and SolidCraft then asks you to update the plugin rather than drawing it wrongly. The amendment
-in RFC 0015 lists what is planned next (glass panel materials, a previous-frame texture for effects
-with memory).
+in RFC 0015 lists what is planned next (glass panel materials). The `state` grid is part of 0.1.

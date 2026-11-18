@@ -25,6 +25,8 @@ pub const MAX_TEXTURES: usize = 4;
 pub const MAX_TEXTURE_BYTES: usize = 16 * 1024 * 1024;
 /// The longest side of a texture after the host loads it; larger pictures are scaled down.
 pub const MAX_TEXTURE_SIDE: u32 = 8192;
+/// The largest side of a `state` grid, in texels.
+pub const MAX_STATE_SIDE: u32 = 1024;
 /// Loop iterations and calls of the plugin's own functions one pixel may make, all together. A
 /// loop that reaches the cap ends as if its condition had failed, and a call returns zero at once,
 /// so the work per pixel is bounded by the budget times the size of the source.
@@ -36,6 +38,16 @@ pub const LOOP_BUDGET: u32 = 1024;
 pub enum ShaderKind {
     /// Behind the model in the 3D view, over the theme's background.
     Background,
+}
+
+/// A grid kept between frames: `fn state` writes it from `sc_state_prev`, the background reads `sc_state`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShaderState {
+    /// Texels across, 1 to [`MAX_STATE_SIDE`].
+    pub width: u32,
+    /// Texels down, 1 to [`MAX_STATE_SIDE`].
+    pub height: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -62,6 +74,9 @@ pub struct Shader {
     /// view changes, and `sc.time` stays at 0.
     #[serde(default)]
     pub animated: bool,
+    /// A grid stepped by `fn state` every frame; needs `animated`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<ShaderState>,
 }
 
 fn plain_file(name: &str, extensions: &[&str]) -> bool {
@@ -98,6 +113,14 @@ pub fn validate(shaders: &[Shader]) -> Result<()> {
         }
         if !plain_file(&shader.source, &["wgsl"]) {
             return Err(invalid(format!("{field}.source"), "must be one lowercase .wgsl file name in the plugin's folder"));
+        }
+        if let Some(state) = shader.state {
+            if !shader.animated {
+                return Err(invalid(format!("{field}.state"), "needs \"animated\": true, the state is stepped every frame"));
+            }
+            if !(1..=MAX_STATE_SIDE).contains(&state.width) || !(1..=MAX_STATE_SIDE).contains(&state.height) {
+                return Err(invalid(format!("{field}.state"), format!("width and height 1 to {MAX_STATE_SIDE} texels")));
+            }
         }
         if shader.textures.len() > MAX_TEXTURES {
             return Err(invalid(format!("{field}.textures"), format!("at most {MAX_TEXTURES} textures")));
@@ -143,9 +166,10 @@ struct ScHost {
     text: vec4<f32>,
     // 1 for a dark theme, 0 for a light one.
     dark: f32,
-    sc_pad0: f32,
-    sc_pad1: f32,
-    sc_pad2: f32,
+    // The step of a shader's `state` this frame: 0 on the first and after a reset.
+    frame: f32,
+    // The `state` grid's size in texels; 0 for a shader without one.
+    state_size: vec2<f32>,
 }
 
 struct ScPixel {
@@ -188,7 +212,29 @@ fn sc_fragment(v: ScVarying) -> @location(0) vec4<f32> {
     let colour = clamp(background(ScPixel(v.uv, v.uv * sc.size, normalize(v.ray))), vec4<f32>(0.0), vec4<f32>(1.0));
     return vec4<f32>(sc_encode(colour.rgb) * colour.a, colour.a);
 }
+{state}";
+
+/// Added with a `state` grid: `sc_state` and `sc_state_prev` (bound per pass by the app) and `sc_state_fragment`.
+pub const STATE_PRELUDE: &str = r"
+@group(0) @binding(7) var sc_state: texture_2d<f32>;
+@group(0) @binding(8) var sc_state_prev: texture_2d<f32>;
+
+struct ScStatePixel {
+    // The texel's position in the grid, from its top left.
+    texel: vec2<u32>,
+    // The texel's centre, 0..1 across the grid.
+    uv: vec2<f32>,
+}
+
+@fragment
+fn sc_state_fragment(v: ScVarying) -> @location(0) vec4<f32> {
+    let texel = vec2<u32>(v.clip.xy);
+    return state(ScStatePixel(texel, (vec2<f32>(texel) + 0.5) / sc.state_size));
+}
 ";
+
+/// The binding of a shader's `sc_state` grid (`sc_state_prev` is the next one).
+pub const STATE_BINDING: u32 = FIRST_TEXTURE_BINDING + MAX_TEXTURES as u32;
 
 /// The first texture's binding; the textures follow in manifest order.
 pub const FIRST_TEXTURE_BINDING: u32 = 3;
@@ -208,6 +254,8 @@ pub struct Compiled {
 const HOST_FUNCTIONS: [&str; 1] = ["sc_encode"];
 
 const NEEDS_BACKGROUND: &str = "needs fn background(px: ScPixel) -> vec4<f32>";
+const NO_STATE_GRID: &str = "uses the state (ScStatePixel, sc_state), but its manifest has no state grid: add \"state\" to the shader";
+const NEEDS_STATE: &str = "needs fn state(px: ScStatePixel) -> vec4<f32>, since its manifest has a state grid";
 
 fn refuse(shader: &Shader, reason: impl Into<String>) -> HostError {
     invalid(format!("shaders.{}", shader.id), format!("{}: {}", shader.source, reason.into()))
@@ -225,18 +273,23 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
         .enumerate()
         .map(|(i, t)| format!("@group(0) @binding({}) var {}: texture_2d<f32>;\n", FIRST_TEXTURE_BINDING as usize + i, t.name))
         .collect();
+    let state = if shader.state.is_some() { STATE_PRELUDE } else { "" };
     let lines = source.lines().count();
-    let full = format!("{source}\n{}", PRELUDE.replace("{textures}", &textures));
+    let full = format!("{source}\n{}", PRELUDE.replace("{textures}", &textures).replace("{state}", state));
     let at = |location: Option<naga::SourceLocation>| match location {
         Some(l) if l.line_number as usize <= lines => format!("line {}: ", l.line_number),
         Some(_) => "where it meets the host's declarations (a name starting sc or ScHost?): ".to_string(),
         None => String::new(),
     };
     let mut module = naga::front::wgsl::parse_str(&full).map_err(|e| {
-        // With no `background` of the plugin's own, the host's call to it is what fails to parse.
+        // With no `background` or `state` of the plugin's own, the host's call to it is what fails to parse.
         let in_host = e.location(&full).is_some_and(|l| l.line_number as usize > lines);
         if in_host && e.message().contains("background") {
             refuse(shader, NEEDS_BACKGROUND)
+        } else if in_host && shader.state.is_some() && e.message().contains("state") {
+            refuse(shader, NEEDS_STATE)
+        } else if shader.state.is_none() && (e.message().contains("ScStatePixel") || e.message().contains("sc_state")) {
+            refuse(shader, NO_STATE_GRID)
         } else {
             refuse(shader, format!("{}{}", at(e.location(&full)), e.message()))
         }
@@ -244,15 +297,25 @@ pub fn compile(shader: &Shader, source: &str) -> Result<Compiled> {
     if !module.functions.iter().any(|(_, f)| f.name.as_deref() == Some("background")) {
         return Err(refuse(shader, NEEDS_BACKGROUND));
     }
-    let host: BTreeSet<&str> = ["sc", "sc_clamp", "sc_repeat"].into_iter().chain(shader.textures.iter().map(|t| t.name.as_str())).collect();
-    if module.entry_points.iter().any(|e| !matches!(e.name.as_str(), "sc_vertex" | "sc_fragment")) {
+    if shader.state.is_some() && !module.functions.iter().any(|(_, f)| f.name.as_deref() == Some("state")) {
+        return Err(refuse(shader, NEEDS_STATE));
+    }
+    let mut host: BTreeSet<&str> = ["sc", "sc_clamp", "sc_repeat"].into_iter().chain(shader.textures.iter().map(|t| t.name.as_str())).collect();
+    let mut entries = vec!["sc_vertex", "sc_fragment"];
+    if shader.state.is_some() {
+        host.extend(["sc_state", "sc_state_prev"]);
+        entries.push("sc_state_fragment");
+    }
+    if module.entry_points.iter().any(|e| !entries.contains(&e.name.as_str())) {
         return Err(refuse(shader, "declares an entry point (@vertex, @fragment or @compute); the host supplies them"));
     }
-    if let Some((_, global)) = module
-        .global_variables
-        .iter()
-        .find(|(_, g)| !(g.space == naga::AddressSpace::Private && g.binding.is_none()) && !host.contains(g.name.as_deref().unwrap_or("")))
-    {
+    // A global the host does not bind is refused; with a state grid, so is a private one named sc_.
+    let grid = shader.state.is_some();
+    if let Some((_, global)) = module.global_variables.iter().find(|(_, g)| {
+        let name = g.name.as_deref().unwrap_or("");
+        let private = g.space == naga::AddressSpace::Private && g.binding.is_none();
+        (!private || (grid && name.starts_with("sc_"))) && !host.contains(name)
+    }) {
         return Err(refuse(
             shader,
             format!(
